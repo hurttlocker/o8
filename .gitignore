@@ -7,3 +7,4 @@ build/
 .env.*
 coverage/
 *.log
+*.tsbuildinfo
