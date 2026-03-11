@@ -1,91 +1,162 @@
 # Issue Map — Cortex IDE v1
 
-## Structure
+Repo: `hurttlocker/cortex-ide`
 
-We will use:
+## How the issue system is structured
+
+We are using:
 - **epics** for major product lanes
-- **issues** for bounded execution slices
+- **issues** for bounded implementation slices
 
-## Epic lanes
+The issue tree is intentionally organized around the real product wedge:
+- command center first
+- runtime / workflow surfaces second
+- mobile in v1
+- Cortex under the hood where it creates real leverage
+- topology / Hoberman as optional, not sacred
 
-### Epic A — Command center core
-Purpose: deliver Karpathy’s “bigger IDE / agent command center” baseline.
+---
 
-Child slices:
-- desktop shell
-- fleet state model
-- live agent roster and status
-- inspector + tool drawers
-- timeline / event rail
-- saved views and focus modes
+## Epic A — Command center core
+- **#1** — [Epic] v1 command center core
 
-### Epic B — Runtime adapters and software-workflow surfaces
-Purpose: make the control plane manage real work.
+Child issues:
+- **#7** — Bootstrap desktop shell (white placeholder shell + command-center layout)
+- **#8** — Define fleet state model and agent/squad status taxonomy
+- **#9** — Build agent inspector with inline tool drawers (terminal, diff, artifacts, memory)
+- **#10** — Build timeline / event rail and saved focus views
 
-Child slices:
-- runtime adapter contract
-- OpenClaw / ACP session adapter
-- terminal/log stream surface
-- Git / worktree surface
-- GitHub PR / issue linkage
-- review / approval actions
+Why it exists:
+- this is the Karpathy baseline
+- the unit is the **agent**, not the file
+- the UI must already feel like a command center before it feels like an editor
 
-### Epic C — Cortex memory-native layer
-Purpose: make memory operational inside the IDE.
+---
 
-Child slices:
-- recall panel
-- provenance surfaces
-- memory health indicators
-- run replay context
-- org learning hooks
+## Epic B — Runtime adapters + software workflow surfaces
+- **#2** — [Epic] runtime adapters + software workflow surfaces
 
-### Epic D — Mobile remote control (Remodex/Phodex-derived lane)
-Purpose: ship day-one mobile control without pretending a phone is a full IDE.
+Child issues:
+- **#11** — Define runtime adapter contract for Cortex IDE
+- **#12** — Implement OpenClaw / ACP adapter MVP
+- **#13** — Ship Git / GitHub / worktree review surface
 
-Child slices:
-- audit Remodex architecture / license / reuse path
-- pairing and trust model
-- provider-agnostic mobile bridge
-- notification + approval inbox
-- steer / pause / resume actions
-- mobile Cortex recall
+Why it exists:
+- the product is fake if it cannot supervise real work
+- runtime abstraction is part of the moat
+- review, worktree, and GitHub surfaces are part of the operator loop
 
-### Epic E — Org code and templates
-Purpose: implement Karpathy’s “org code” idea in a bounded way.
+---
 
-Child slices:
-- squad templates
-- policy packs
-- assignment rules
-- review chains
-- reusable layouts
+## Epic C — Cortex memory-native operator layer
+- **#3** — [Epic] Cortex memory-native operator layer
 
-### Epic F — Optional topology / spatial UX
-Purpose: explore spatial views only after the product is already useful.
+Child issues:
+- **#14** — Build Cortex recall + provenance panel
+- **#15** — Add memory health indicators and run replay context
 
-Child slices:
-- pragmatic topology map
-- evaluate Hoberman-sphere interaction
-- keep or reject based on usability
+Why it exists:
+- Cortex is not just a backend detail
+- memory, provenance, and replay context are part of the product advantage
 
-## Prioritization
+---
+
+## Epic D — Mobile remote control via Remodex/Phodex-derived lane
+- **#4** — [Epic] mobile remote control via Remodex/Phodex-derived lane
+
+Child issues:
+- **#16** — Audit Remodex repo, license, architecture, and adoption mode
+- **#17** — Generalize mobile bridge contract beyond Codex
+- **#18** — Build mobile inbox for alerts, approvals, steering, and run watch
+
+Why it exists:
+- Karpathy explicitly called out mobile control
+- Remodex is the strongest current open-source architecture clue
+- but the bridge must become **Cortex IDE’s** control layer, not stay Codex-specific
+
+---
+
+## Epic E — Org code templates, policy packs, and reusable operating patterns
+- **#5** — [Epic] org code templates, policy packs, and reusable operating patterns
+
+Child issues:
+- **#19** — Add squad templates and saved operating layouts
+- **#20** — Add policy packs for assignment, review chains, and approval rules
+
+Why it exists:
+- this is the bounded product form of Karpathy’s “org code” idea
+- agent orgs should become reusable, not reassembled from scratch every time
+
+---
+
+## Epic F — Optional topology and Hoberman evaluation
+- **#6** — [Epic] optional topology and Hoberman evaluation
+
+Child issues:
+- **#21** — Run pragmatic topology spike and Hoberman keep-or-kill evaluation
+
+Why it exists:
+- topology is optional
+- Hoberman is a hypothesis, not a religion
+- if simpler views are better, simpler views win
+
+---
+
+## Priority summary
 
 ### P0
-- Epic A
-- Epic B
-- Epic D (mobile foundation)
+- **#1** Command center core
+- **#2** Runtime adapters + workflow surfaces
+- **#4** Mobile remote control via Remodex/Phodex-derived lane
+- plus child issues **#7–#13**, **#16–#18**
 
 ### P1
-- Epic C
-- Epic E
+- **#3** Cortex memory-native layer
+- **#5** Org code templates / policy packs
+- plus child issues **#14–#15**, **#19–#20**
 
 ### P2
-- Epic F
+- **#6** Optional topology / Hoberman evaluation
+- child issue **#21**
+
+---
+
+## Recommended execution order
+
+### Sequence 1 — Make the shell real
+- #7
+- #8
+- #9
+- #10
+
+### Sequence 2 — Make it operate real runs
+- #11
+- #12
+- #13
+
+### Sequence 3 — Make mobile real early
+- #16
+- #17
+- #18
+
+### Sequence 4 — Turn memory into a visible moat
+- #14
+- #15
+
+### Sequence 5 — Add org-code leverage
+- #19
+- #20
+
+### Sequence 6 — Evaluate topology only after the system is already useful
+- #21
+
+---
 
 ## Principle
 
-If the Hoberman sphere helps, keep it.
-If simple boards, lists, filters, and inspectors are better, choose the simple thing.
+The product requirement is **legibility, control, and reusable agent operations**.
 
-The product requirement is **legibility and control**, not a specific geometric gimmick.
+Not:
+- a particular geometry
+- a pretty graph
+- a VS Code fork for its own sake
