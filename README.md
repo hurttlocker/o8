@@ -11,7 +11,7 @@ Cortex IDE is a thesis for an **agent-native development environment**:
 - memory is not an afterthought, but a first-class **operating system primitive**
 - mobile is not a bolt-on viewer, but a **remote control surface** for approval, monitoring, and steering
 
-This repo captures the initial company thesis, v0 product spec, system architecture, mobile strategy, and research notes from the first design sprint.
+This repo captures the initial company thesis, v0 product spec, system architecture, mobile strategy, research notes, and the first live shell prototype.
 
 ## Current position
 
@@ -47,7 +47,10 @@ The right model is:
 - `docs/issue-map.md` — epic lanes and issue structure
 - `docs/remodex-integration-plan.md` — how to use the Remodex/Phodex lane without letting it define the whole product
 - `docs/research/x-thread-notes.md` — notes from the Karpathy + Remodex threads
+- `docs/fleet-state-model.md` — first state taxonomy for agents and squads
+- `docs/runtime-adapter-contract.md` — first runtime abstraction contract
 - `assets/mockups/` — early visual directions
+- `src/app/` — initial Next.js desktop + mobile remote shell prototype
 
 ## Initial product stance
 
@@ -69,7 +72,20 @@ The right model is:
 3. Integrate Cortex deeply as the memory and audit substrate
 4. Consider VS Code distribution later only if the control plane is already clearly valuable
 
+## Local preview
+
+```bash
+cd /Users/marquisehurtt/clawd/repos/cortex-ide
+npm install
+npm run dev
+```
+
+Routes:
+- Desktop shell: `http://localhost:3001/` (or `:3000` if free)
+- Mobile remote preview: `http://localhost:3001/mobile`
+
 ## Status
 
 Drafted on 2026-03-11.
+Execution started on 2026-03-11 with a real desktop shell, mobile remote preview, fleet state model, and runtime adapter contract.
 Private repo only for now.
