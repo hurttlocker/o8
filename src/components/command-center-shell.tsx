@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { demoFleet } from '@/lib/demo/fleet';
-import type { AgentSummary, EventItem, SquadSummary } from '@/lib/fleet/types';
+import type { EventItem, SquadSummary } from '@/lib/fleet/types';
 import { openClawAdapterContract } from '@/lib/runtime/adapter';
 
 const money = new Intl.NumberFormat('en-US', {
@@ -10,6 +10,28 @@ const money = new Intl.NumberFormat('en-US', {
   currency: 'USD',
   maximumFractionDigits: 2,
 });
+
+const githubPulse = {
+  repo: 'hurttlocker/cortex-ide',
+  branch: 'feat/shell-contract-mvp',
+  pullRequest: '#22 — bootstrap command center shell and runtime contracts',
+  milestone: 'Phase 1 — Command center shell',
+  checks: [
+    '#7 Desktop shell',
+    '#8 Fleet state model',
+    '#11 Runtime adapter contract',
+    '#12 OpenClaw / ACP adapter MVP',
+  ],
+};
+
+const karpathyGuardrails = [
+  'Primary object stays the agent / run / squad, not the file tree.',
+  'Idle / blocked / reviewing visibility must stay obvious at a glance.',
+  'Inline tools and review surfaces must feel native to supervision.',
+  'Usage, cost, and context pressure stay first-class, not hidden settings.',
+  'Mobile remains a real remote-operator lane, not an afterthought.',
+  'Topology only survives if it improves legibility faster than lists and boards.',
+];
 
 function statusClass(status: string) {
   return `status-pill status-${status}`;
@@ -67,13 +89,22 @@ export function CommandCenterShell() {
     [selectedId],
   );
 
+  const desktopInfo =
+    typeof window !== 'undefined'
+      ? (window as Window & {
+          cortexDesktop?: { isDesktop: boolean; platform: string; version: string };
+        }).cortexDesktop
+      : undefined;
+
   const selectedSquad = demoFleet.squads.find((squad) => squad.id === selectedAgent?.squadId);
 
   return (
     <div className="page-wrap">
       <div className="announcement-bar">
-        <span>v0 execution is live.</span>
-        <span className="muted">This shell is built to prove desktop + mobile productivity, not to win design awards first.</span>
+        <span>Option B + touch of A is active.</span>
+        <span className="muted">
+          Control plane first, native desktop shell added early, Code-OSS fork deferred until the wedge is proven.
+        </span>
       </div>
 
       <header className="surface-card hero-header">
@@ -87,15 +118,20 @@ export function CommandCenterShell() {
           </div>
           <p className="hero-copy">
             A bigger IDE for the agent era: fleet visibility, inline tools, runtime control, review,
-            memory, and mobile supervision.
+            memory, GitHub pulse, and mobile supervision.
           </p>
         </div>
         <div className="command-strip">
-          <button>Spawn</button>
+          <a href="https://github.com/hurttlocker/cortex-ide/pull/22" target="_blank" rel="noreferrer">
+            <button>PR #22</button>
+          </a>
+          <a href="https://github.com/hurttlocker/cortex-ide/issues" target="_blank" rel="noreferrer">
+            <button>Issues</button>
+          </a>
           <button>Steer</button>
-          <button>Pause fleet</button>
-          <button>Review queue</button>
-          <button className="button-primary">Mobile pairing</button>
+          <a href="/mobile" rel="noreferrer">
+            <button className="button-primary">Mobile remote</button>
+          </a>
         </div>
       </header>
 
@@ -148,9 +184,66 @@ export function CommandCenterShell() {
               <p>Budget visibility stays first-class.</p>
             </div>
             <div className="surface-card metric-card">
-              <span>Context pressure</span>
-              <strong>41%</strong>
-              <p>Healthy enough to move, high enough to watch.</p>
+              <span>Desktop shell</span>
+              <strong>{desktopInfo?.isDesktop ? 'Attached' : 'Browser preview'}</strong>
+              <p>
+                {desktopInfo?.isDesktop
+                  ? `Electron ${desktopInfo.version} on ${desktopInfo.platform}`
+                  : 'Browser remains the fast iteration surface.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="signal-grid">
+            <div className="surface-card">
+              <div className="section-head">
+                <div>
+                  <div className="eyebrow">GitHub pulse</div>
+                  <h2>Execution truth</h2>
+                </div>
+                <span className="status-pill status-reviewing">Live repo lane</span>
+              </div>
+              <div className="signal-stack">
+                <div className="signal-row">
+                  <span>Repo</span>
+                  <strong>{githubPulse.repo}</strong>
+                </div>
+                <div className="signal-row">
+                  <span>Branch</span>
+                  <strong className="mono">{githubPulse.branch}</strong>
+                </div>
+                <div className="signal-row">
+                  <span>PR</span>
+                  <strong>{githubPulse.pullRequest}</strong>
+                </div>
+                <div className="signal-row">
+                  <span>Milestone</span>
+                  <strong>{githubPulse.milestone}</strong>
+                </div>
+              </div>
+              <ul className="bullet-list muted top-gap">
+                {githubPulse.checks.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="surface-card">
+              <div className="section-head">
+                <div>
+                  <div className="eyebrow">Karpathy guardrail</div>
+                  <h2>Are we still on the right product?</h2>
+                </div>
+                <span className="status-pill status-healthy">checked</span>
+              </div>
+              <div className="guardrail-list">
+                {karpathyGuardrails.map((item) => (
+                  <div key={item} className="guardrail-item">
+                    <div className="guardrail-dot" />
+                    <span>{item}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 

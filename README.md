@@ -49,8 +49,10 @@ The right model is:
 - `docs/research/x-thread-notes.md` — notes from the Karpathy + Remodex threads
 - `docs/fleet-state-model.md` — first state taxonomy for agents and squads
 - `docs/runtime-adapter-contract.md` — first runtime abstraction contract
+- `docs/desktop-app-strategy.md` — Option B + touch of A desktop packaging path
 - `assets/mockups/` — early visual directions
 - `src/app/` — initial Next.js desktop + mobile remote shell prototype
+- `electron/` — native desktop shell wrapper for the control plane
 
 ## Initial product stance
 
@@ -81,11 +83,21 @@ npm run dev
 ```
 
 Routes:
-- Desktop shell: `http://localhost:3001/` (or `:3000` if free)
+- Desktop shell: `http://localhost:3001/`
 - Mobile remote preview: `http://localhost:3001/mobile`
+
+## Native desktop shell (current dev path)
+
+```bash
+cd /Users/marquisehurtt/clawd/repos/cortex-ide
+npm install
+npm run desktop:dev
+```
+
+This keeps the current control-plane architecture intact while giving the product a real desktop-app shell early.
 
 ## Status
 
 Drafted on 2026-03-11.
-Execution started on 2026-03-11 with a real desktop shell, mobile remote preview, fleet state model, and runtime adapter contract.
+Execution started on 2026-03-11 with a real desktop shell, mobile remote preview, fleet state model, runtime adapter contract, and an Electron desktop wrapper for the control plane.
 Private repo only for now.
