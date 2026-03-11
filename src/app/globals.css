@@ -284,6 +284,57 @@ button:hover {
   color: var(--muted);
 }
 
+.signal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.signal-stack,
+.guardrail-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.signal-row,
+.guardrail-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.signal-row span {
+  color: #64748b;
+  font-size: 0.82rem;
+}
+
+.signal-row strong {
+  text-align: right;
+}
+
+.guardrail-item {
+  justify-content: flex-start;
+}
+
+.guardrail-dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  margin-top: 0.28rem;
+  background: linear-gradient(135deg, #2563eb 0%, #059669 100%);
+}
+
+.top-gap {
+  margin-top: 14px;
+}
+
 .canvas-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
@@ -448,7 +499,8 @@ button:hover {
 
   .canvas-grid,
   .topology-board,
-  .summary-grid {
+  .summary-grid,
+  .signal-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -466,6 +518,7 @@ button:hover {
   .canvas-grid,
   .topology-board,
   .summary-grid,
+  .signal-grid,
   .mobile-grid,
   .artifact-grid,
   .tool-drawer-list-mobile {

@@ -2,12 +2,16 @@
   "name": "cortex-ide",
   "version": "0.0.1",
   "private": true,
+  "main": "electron/main.cjs",
   "scripts": {
-    "dev": "next dev -p 3000",
+    "dev": "next dev -p 3001",
     "build": "next build",
-    "start": "next start -p 3000",
+    "start": "next start -p 3001",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "electron:dev": "wait-on tcp:3001 && cross-env CORTEX_IDE_DEV_URL=http://localhost:3001 electron electron/main.cjs",
+    "desktop:open": "cross-env CORTEX_IDE_DEV_URL=http://localhost:3001 electron electron/main.cjs",
+    "desktop:dev": "concurrently -k -s first \"npm run dev\" \"npm run electron:dev\""
   },
   "dependencies": {
     "next": "^16.1.6",
@@ -18,8 +22,12 @@
     "@types/node": "22.13.10",
     "@types/react": "19.0.10",
     "@types/react-dom": "19.0.4",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^37.6.0",
     "eslint": "9.22.0",
     "eslint-config-next": "^16.1.6",
-    "typescript": "5.8.2"
+    "typescript": "5.8.2",
+    "wait-on": "^8.0.5"
   }
 }
