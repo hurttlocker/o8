@@ -40,8 +40,12 @@ The right model is:
 
 - `docs/company-thesis.md` — why this company should exist
 - `docs/v0-product-spec.md` — first shipping surface and user flows
+- `docs/v1-build-plan.md` — v1 plan grounded in Karpathy’s command-center requirements
 - `docs/system-architecture.md` — system map and where Cortex / OpenClaw / Paperclip fit
 - `docs/mobile-strategy.md` — day-one mobile thesis and architecture
+- `docs/roadmap.md` — phased build sequence
+- `docs/issue-map.md` — epic lanes and issue structure
+- `docs/remodex-integration-plan.md` — how to use the Remodex/Phodex lane without letting it define the whole product
 - `docs/research/x-thread-notes.md` — notes from the Karpathy + Remodex threads
 - `assets/mockups/` — early visual directions
 
