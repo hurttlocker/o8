@@ -498,7 +498,7 @@ button:hover {
   margin-top: 14px;
 }
 
-.mobile-wrap .surface-card,
+.mobile-wrap .surface-card:not(.mobile-header),
 .mobile-action-card,
 .mobile-memory-card,
 .mobile-wrap .inset-card,
@@ -511,16 +511,43 @@ button:hover {
   backdrop-filter: blur(24px) saturate(180%);
 }
 
-.mobile-header {
-  background: linear-gradient(135deg, rgba(15, 23, 42, 0.82), rgba(37, 99, 235, 0.58));
+.mobile-wrap .surface-card.mobile-header {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(37, 99, 235, 0.76) 58%, rgba(99, 102, 241, 0.72));
   border-color: rgba(255, 255, 255, 0.18);
+  box-shadow:
+    0 28px 80px rgba(37, 99, 235, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
   color: white;
 }
 
-.mobile-header .eyebrow,
-.mobile-header .muted,
-.mobile-header .inline-link {
-  color: rgba(255, 255, 255, 0.82);
+.mobile-wrap .surface-card.mobile-header::before {
+  content: '';
+  position: absolute;
+  inset: -20% auto auto 55%;
+  width: 220px;
+  height: 220px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.3), transparent 68%);
+  filter: blur(10px);
+  pointer-events: none;
+}
+
+.mobile-wrap .surface-card.mobile-header h1,
+.mobile-wrap .surface-card.mobile-header p,
+.mobile-wrap .surface-card.mobile-header .eyebrow,
+.mobile-wrap .surface-card.mobile-header .inline-link {
+  position: relative;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.mobile-wrap .surface-card.mobile-header .eyebrow {
+  color: rgba(219, 234, 254, 0.84);
+}
+
+.mobile-wrap .surface-card.mobile-header .inline-link {
+  color: white;
 }
 
 .mobile-action-card,
