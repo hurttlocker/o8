@@ -11,6 +11,25 @@ v1 should prove that one operator can manage an agent organization better than t
 - separate mobile notification apps
 - stateless coding agents
 
+## Front-door doctrine
+
+v1 still needs a **beautiful, fluent chat front door**.
+
+That is not in tension with the command-center thesis.
+It is the onboarding layer that makes the deeper product approachable.
+
+### Rule
+The product should:
+- feel like a familiar AI chat product on first contact
+- progressively reveal review, runtime, and org-control depth
+- keep runtime/operator surfaces inside the same product language instead of replacing the chat page too early
+
+### Product hierarchy
+1. Chat
+2. Review / evidence
+3. Runtime surfaces
+4. Org control
+
 ## Karpathy thread -> exact product requirements
 
 We are treating Karpathy’s thread as a concrete product spec input, not just inspiration.

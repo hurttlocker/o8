@@ -14,6 +14,11 @@ This is the key lesson from the Remodex thread and repo architecture.
 
 ## Why mobile matters early
 
+Mobile still needs a **chat-first front door**.
+
+A new user is more likely to understand a beautiful, fluent conversation surface first than a fleet dashboard.
+So the mobile product should progressively reveal operator depth instead of leading with org complexity on first contact.
+
 Multi-agent operation naturally creates moments where the operator is away from the desk but still needs to:
 
 - approve a risky action

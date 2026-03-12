@@ -14,6 +14,13 @@ The control plane needs one stable contract for:
 - approvals
 - artifacts
 
+That runtime contract should now be thought of as feeding a higher-level product object:
+- **RuntimeSurface / TerminalSession**
+
+Why:
+- adapters are backend integration details
+- RuntimeSurface is what the UI should actually reason about when opening terminal depth, runtime watch, interrupt controls, and linked review context
+
 ## Current implementation surface
 
 The draft TypeScript contract lives in:
@@ -51,6 +58,15 @@ Different runtimes mean different semantics. If pause is not real yet, the adapt
 - approvals
 - memory context
 - cost telemetry
+
+### Product-facing outcome
+The adapter layer should be able to populate a truthful RuntimeSurface that includes:
+- identity (`id`, `runtime`, `title`, `cwd`, `branch` when available)
+- state (`running`, `idle`, `blocked`, `exited`, `unknown`)
+- explicit capabilities (`attach`, `readTail`, `sendInput`, `interrupt`, `resize`, `diffContext`, `reviewContext`)
+- linked review context (repo / PR / branch / artifacts)
+
+The UI should present runtime depth from this product-facing surface rather than hard-coding vendor-specific assumptions into every view.
 
 ## First target
 
