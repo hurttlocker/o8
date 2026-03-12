@@ -5,10 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
+import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
 import type {
   AgentSummary,
   EventItem,
   ReviewArtifact,
+  RuntimeReviewCommandEvidence,
+  RuntimeReviewPacket,
   RuntimeSurfaceLifecycle,
   RuntimeSurfaceSummary,
   SquadSummary,
@@ -96,6 +99,11 @@ type ParsedRunLog = {
   completedTurn: boolean;
 };
 
+type ParsedRunEvidence = {
+  assistantSummary?: string;
+  commands: RuntimeReviewCommandEvidence[];
+};
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -104,6 +112,11 @@ function compactText(value: string | null | undefined, max = 120) {
   const collapsed = (value ?? '').replace(/\s+/g, ' ').trim();
   if (!collapsed) return '';
   return collapsed.length > max ? `${collapsed.slice(0, max - 1).trimEnd()}…` : collapsed;
+}
+
+function previewText(value: string | null | undefined, max = 260) {
+  const compact = compactText(value, max);
+  return compact || undefined;
 }
 
 function relativeAge(timestampIso?: string) {
@@ -338,6 +351,71 @@ function parseOwnedRunLog(raw: string, run: OwnedCodexRunRecord): ParsedRunLog {
     entries,
     outcome,
     completedTurn,
+  };
+}
+
+function parseOwnedRunEvidence(raw: string, run: OwnedCodexRunRecord): ParsedRunEvidence {
+  let assistantSummary: string | undefined;
+  const commands = [] as RuntimeReviewCommandEvidence[];
+
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{')) continue;
+
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      if (parsed.type !== 'item.started' && parsed.type !== 'item.completed') {
+        continue;
+      }
+
+      const item = (parsed.item ?? {}) as Record<string, unknown>;
+      if (item.type === 'agent_message' && parsed.type === 'item.completed') {
+        assistantSummary = previewText(String(item.text ?? ''), 220) ?? assistantSummary;
+        continue;
+      }
+
+      if (item.type !== 'command_execution') {
+        continue;
+      }
+
+      const itemId = String(item.id ?? `${run.id}:${commands.length}`);
+      const current = commands.find((entry) => entry.id === itemId);
+      const baseStatus = parsed.type === 'item.started' ? 'running' : 'completed';
+      const exitCode = item.exit_code == null ? null : Number(item.exit_code);
+      const nextStatus = run.outcome === 'interrupted'
+        ? 'interrupted'
+        : parsed.type === 'item.completed' && exitCode && exitCode !== 0
+          ? 'failed'
+          : baseStatus;
+      const nextEntry: RuntimeReviewCommandEvidence = {
+        id: itemId,
+        command: previewText(String(item.command ?? ''), 180) ?? 'command',
+        status: nextStatus,
+        exitCode,
+        outputPreview: previewText(String(item.aggregated_output ?? ''), 260),
+      };
+
+      if (current) {
+        Object.assign(current, nextEntry);
+      } else {
+        commands.push(nextEntry);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  if (run.outcome === 'interrupted') {
+    for (const command of commands) {
+      if (command.status === 'running') {
+        command.status = 'interrupted';
+      }
+    }
+  }
+
+  return {
+    assistantSummary,
+    commands,
   };
 }
 
@@ -748,6 +826,49 @@ async function collectOwnedTailEntries(session: OwnedCodexSessionRecord) {
   };
 }
 
+function buildReviewActions(packet: Pick<RuntimeReviewPacket, 'dirty' | 'changedFiles' | 'lastRun'>) {
+  const actions = [] as string[];
+
+  if (packet.lastRun?.outcome === 'running') {
+    actions.push('Watch the active run', 'Interrupt if it drifts');
+    return actions;
+  }
+
+  if (packet.dirty) {
+    actions.push('Review current repo delta', 'Open desktop diff context');
+  }
+
+  if (packet.lastRun?.outcome === 'failed') {
+    actions.push('Resume with correction context', 'Inspect failing command evidence');
+  } else if (packet.lastRun?.outcome === 'interrupted') {
+    actions.push('Resume from the interrupted state');
+  } else if (packet.lastRun?.outcome === 'finished') {
+    actions.push('Decide whether the result is good enough', 'Resume with a bounded follow-up if needed');
+  }
+
+  if (!actions.length) {
+    actions.push('Review the latest run evidence');
+  }
+
+  return actions.slice(0, 4);
+}
+
+function buildReviewNotes(session: OwnedCodexSessionRecord, dirty: boolean) {
+  const notes = [
+    'Current repo delta is shown live from git and is not yet isolated per run when multiple sessions touch the same repo.',
+  ];
+
+  if (!dirty) {
+    notes.push('The repo is currently clean, so this run may have been exploratory, purely read-only, or already reconciled.');
+  }
+
+  if (!session.threadId) {
+    notes.push('This owned surface is still waiting for its first persistent thread id before resume becomes available.');
+  }
+
+  return notes;
+}
+
 export async function getOwnedCodexRuntimeTail(surfaceId: string) {
   const session = await findOwnedSession(surfaceId);
   if (!session) {
@@ -766,6 +887,57 @@ export async function getOwnedCodexRuntimeTail(surfaceId: string) {
     entries: tail.entries,
     groups: tail.groups,
   };
+}
+
+export async function getOwnedCodexReviewPacket(surfaceId: string): Promise<RuntimeReviewPacket> {
+  const session = await findOwnedSession(surfaceId);
+  if (!session) {
+    throw new Error('Owned Codex review packet was not found.');
+  }
+
+  await refreshOwnedSession(session);
+  const repoReview = await getRuntimeRepoReview(session.repoPath);
+  const lastRun = latestRun(session);
+  const lastRunArtifacts = lastRun ? await readRunArtifacts(lastRun) : null;
+  const lastRunEvidence = lastRunArtifacts ? parseOwnedRunEvidence(lastRunArtifacts.stdoutRaw, lastRun) : null;
+  const lastRunOutcome = lastRun && lastRunArtifacts
+    ? deriveRunOutcome(lastRun, lastRunArtifacts.parsed, lastRunArtifacts.stderrRaw)
+    : undefined;
+  const runtimeSurface = buildOwnedRuntimeSurface(session, Boolean(session.activeRun && isPidAlive(session.activeRun.pid)));
+
+  const packet: RuntimeReviewPacket = {
+    surfaceId: session.surfaceId,
+    runtime: 'codex',
+    title: session.title,
+    summary: runtimeSurface.lifecycle?.summary ?? session.latestSummary,
+    repoPath: shortHome(session.repoPath),
+    repoSlug: session.repoSlug,
+    branch: repoReview.branch ?? session.branch,
+    head: repoReview.head ?? session.head,
+    dirty: repoReview.dirty,
+    diffStat: repoReview.diffStat,
+    changedFiles: repoReview.changedFiles,
+    recentCommits: repoReview.recentCommits,
+    lastRun: lastRun
+      ? {
+          id: lastRun.id,
+          mode: lastRun.mode,
+          outcome: lastRunOutcome ?? lastRun.outcome,
+          prompt: compactText(lastRun.prompt, 260),
+          startedAt: lastRun.startedAt,
+          finishedAt: lastRun.finishedAt,
+          startedAtLabel: formatClock(lastRun.startedAt),
+          finishedAtLabel: formatClock(lastRun.finishedAt),
+          assistantSummary: lastRunEvidence?.assistantSummary,
+          commands: lastRunEvidence?.commands ?? [],
+        }
+      : undefined,
+    nextActions: [],
+    notes: buildReviewNotes(session, repoReview.dirty),
+  };
+
+  packet.nextActions = buildReviewActions(packet);
+  return packet;
 }
 
 export async function getOwnedCodexFleetAdditions(): Promise<{
