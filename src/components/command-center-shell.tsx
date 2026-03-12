@@ -108,7 +108,7 @@ export function CommandCenterShell({
 
     async function refreshLiveFleet() {
       try {
-        const response = await fetch('/api/openclaw/fleet', { cache: 'no-store' });
+        const response = await fetch('/api/runtime/inventory', { cache: 'no-store' });
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`);
         }
@@ -206,7 +206,7 @@ export function CommandCenterShell({
     <div className="page-wrap">
       <div className="announcement-bar">
         <span className={statusClass(fleet.meta.mode === 'live' ? 'healthy' : 'warning')}>
-          {fleet.meta.mode === 'live' ? 'live OpenClaw' : 'demo fallback'}
+          {fleet.meta.mode === 'live' ? 'live runtime inventory' : 'demo fallback'}
         </span>
         <span className="muted">
           {fleet.meta.note}
@@ -542,9 +542,9 @@ export function CommandCenterShell({
                   </>
                 ) : (
                   <>
-                    <li>Recent local Codex sessions are discovered from persisted runtime metadata.</li>
+                    <li>Codex surfaces now distinguish live pid-backed terminals from recent session history.</li>
                     <li>Attach/read-tail are surfaced first because they are truthful right now.</li>
-                    <li>Send-input, interrupt, and resize stay disabled until session ownership semantics are cleaner.</li>
+                    <li>Send-input, interrupt, and resize stay disabled until a supported write/interrupt seam exists.</li>
                     <li>Runtime depth should feel inside the product, not like a hostile terminal takeover.</li>
                   </>
                 )}
