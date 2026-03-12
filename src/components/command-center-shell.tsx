@@ -583,6 +583,18 @@ export function CommandCenterShell({
                 <span>Tokens</span>
                 <strong>{inspectorTokenLabel}</strong>
               </div>
+              {selectedRuntimeSurface?.ownership === 'owned' ? (
+                <>
+                  <div>
+                    <span>Lifecycle</span>
+                    <strong>{selectedRuntimeSurface.lifecycle?.availability ?? 'unknown'}</strong>
+                  </div>
+                  <div>
+                    <span>Last outcome</span>
+                    <strong>{selectedRuntimeSurface.lifecycle?.lastOutcome ?? 'none yet'}</strong>
+                  </div>
+                </>
+              ) : null}
             </div>
 
             <div className="inspector-block">
@@ -622,9 +634,9 @@ export function CommandCenterShell({
                 ) : selectedRuntimeSurface?.ownership === 'owned' ? (
                   <>
                     <li>This Codex surface was launched by Cortex IDE and is tracked in the owned-session registry.</li>
+                    <li>Lifecycle now preserves current availability separately from last outcome.</li>
                     <li>Input is truthful only between runs via resume; interrupt is truthful only while the run is active.</li>
                     <li>The transport is JSON exec/resume, not fake keystroke injection into an arbitrary terminal.</li>
-                    <li>Runtime depth should feel inside the product, not like a hostile terminal takeover.</li>
                   </>
                 ) : (
                   <>
@@ -637,7 +649,7 @@ export function CommandCenterShell({
               </ul>
             </div>
 
-            <SessionOperatorPanel agent={selectedAgent} />
+            <SessionOperatorPanel agent={selectedAgent} onRuntimeRefresh={refreshLiveFleet} />
 
             <div className="inset-card inspector-block">
               <span>Runtime trace</span>
