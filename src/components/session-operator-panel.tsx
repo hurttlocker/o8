@@ -18,6 +18,18 @@ type RuntimeLogEntry = {
   timestampLabel?: string;
 };
 
+type OwnedRuntimeTailGroup = {
+  id: string;
+  title: string;
+  mode: 'launch' | 'resume';
+  outcome: 'running' | 'finished' | 'interrupted' | 'failed';
+  prompt: string;
+  startedAtLabel?: string;
+  finishedAtLabel?: string;
+  summary: string;
+  entries: RuntimeLogEntry[];
+};
+
 function roleLabel(role: SessionTranscriptEntry['role']) {
   switch (role) {
     case 'assistant':
@@ -44,6 +56,20 @@ async function readJson<T>(response: Response) {
   }
 
   return payload as T;
+}
+
+function lifecycleLabel(agent: AgentSummary) {
+  const lifecycle = agent.runtimeSurface?.lifecycle;
+  if (!lifecycle) return agent.status;
+
+  if (lifecycle.availability === 'running') return 'running';
+  if (lifecycle.availability === 'awaiting-thread') return 'awaiting thread';
+  if (lifecycle.availability === 'ready-for-resume') return 'ready for resume';
+  return agent.status;
+}
+
+function lastOutcomeLabel(agent: AgentSummary) {
+  return agent.runtimeSurface?.lifecycle?.lastOutcome ?? 'none yet';
 }
 
 function activeRunHint(agent: AgentSummary) {
@@ -76,12 +102,15 @@ function activeRunHint(agent: AgentSummary) {
 export function SessionOperatorPanel({
   agent,
   compact = false,
+  onRuntimeRefresh,
 }: {
   agent: AgentSummary;
   compact?: boolean;
+  onRuntimeRefresh?: (preferredId?: string) => Promise<unknown> | unknown;
 }) {
   const [draft, setDraft] = useState('');
   const [history, setHistory] = useState<RuntimeLogEntry[]>([]);
+  const [ownedGroups, setOwnedGroups] = useState<OwnedRuntimeTailGroup[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [actionState, setActionState] = useState<'idle' | 'sending' | 'stopping'>('idle');
@@ -94,6 +123,8 @@ export function SessionOperatorPanel({
   const hasActionLane = isOpenClaw || isOwnedCodex;
   const canSendInput = Boolean(runtimeSurface?.capabilities.sendInput);
   const canInterrupt = Boolean(runtimeSurface?.capabilities.interrupt);
+  const ownedLifecycleLabel = lifecycleLabel(agent);
+  const ownedLastOutcomeLabel = lastOutcomeLabel(agent);
 
   const loadTranscript = useCallback(async () => {
     setHistoryLoading(true);
@@ -114,14 +145,17 @@ export function SessionOperatorPanel({
             timestampLabel: entry.timestampLabel,
           })),
         );
+        setOwnedGroups([]);
       } else if (runtimeSurface?.capabilities.readTail) {
         const response = await fetch(`/api/runtime/tail?surfaceId=${encodeURIComponent(runtimeSurface.id)}`, {
           cache: 'no-store',
         });
-        const payload = await readJson<{ entries?: RuntimeLogEntry[] }>(response);
+        const payload = await readJson<{ entries?: RuntimeLogEntry[]; groups?: OwnedRuntimeTailGroup[] }>(response);
         setHistory(payload.entries ?? []);
+        setOwnedGroups(payload.groups ?? []);
       } else {
         setHistory([]);
+        setOwnedGroups([]);
       }
       setHistoryError(null);
     } catch (error) {
@@ -161,8 +195,10 @@ export function SessionOperatorPanel({
       setDraft('');
       setActionNote(result.note ?? 'Steer request queued on the live session. External delivery stays off by default.');
       await loadTranscript();
+      await onRuntimeRefresh?.(agent.id);
       window.setTimeout(() => {
         void loadTranscript();
+        void onRuntimeRefresh?.(agent.id);
       }, 1200);
     } catch (error) {
       setActionNote(error instanceof Error ? error.message : 'Unable to steer the session');
@@ -196,6 +232,11 @@ export function SessionOperatorPanel({
             : 'No active run was in flight for this session.'),
       );
       await loadTranscript();
+      await onRuntimeRefresh?.(agent.id);
+      window.setTimeout(() => {
+        void loadTranscript();
+        void onRuntimeRefresh?.(agent.id);
+      }, 1200);
     } catch (error) {
       setActionNote(error instanceof Error ? error.message : 'Unable to stop the session');
     } finally {
@@ -230,35 +271,35 @@ export function SessionOperatorPanel({
         </p>
         <div className="operator-state-grid">
           <div className="operator-state-card">
-            <span>Visible run state</span>
-            <strong>{agent.status}</strong>
+            <span>{isOwnedCodex ? 'Lifecycle state' : 'Visible run state'}</span>
+            <strong>{isOwnedCodex ? ownedLifecycleLabel : agent.status}</strong>
             <p className="muted">{activeRunHint(agent)}</p>
           </div>
           <div className="operator-state-card">
-            <span>{isOpenClaw ? 'Abort lane' : isOwnedCodex ? 'Resume / interrupt lane' : 'Attach lane'}</span>
+            <span>{isOpenClaw ? 'Abort lane' : isOwnedCodex ? 'Last outcome / action lane' : 'Attach lane'}</span>
             <strong>
               {isOpenClaw
                 ? (liveRunVisible ? 'armed' : 'idle-ish')
                 : isOwnedCodex
-                  ? (canInterrupt ? 'interruptable' : canSendInput ? 'ready for resume' : 'warming up')
+                  ? `${ownedLastOutcomeLabel} • ${canInterrupt ? 'interruptable' : canSendInput ? 'ready' : 'warming'}`
                   : runtimeSurface?.capabilities.attach ? 'readable' : 'unavailable'}
             </strong>
             <p className="muted">
               {isOpenClaw
                 ? 'Fleet state is heuristic-driven, so abort can still no-op even when the surface looks warm.'
                 : isOwnedCodex
-                  ? 'Owned Codex sessions can accept the next input only between runs. While a run is active, interrupt is the truthful control.'
+                  ? 'Owned Codex now preserves the last outcome separately from current availability, so interrupted / finished / failed runs do not collapse into the same vague state.'
                   : 'This is a truthful first pass: runtime watch is available, but only IDE-owned surfaces may eventually become mutable.'}
             </p>
           </div>
           <div className="operator-state-card">
             <span>Readable log</span>
-            <strong>{historyLoading ? 'loading' : `${history.length} entries`}</strong>
+            <strong>{historyLoading ? 'loading' : isOwnedCodex ? `${ownedGroups.length || history.length} grouped turns` : `${history.length} entries`}</strong>
             <p className="muted">
               {isOpenClaw
                 ? 'Only user/assistant/system text survives here. Hidden thinking and tool blobs stay out.'
                 : isOwnedCodex
-                  ? `Recovered from ${runtimeSurface?.tailSourceLabel ?? 'owned runtime logs'} and summarized across launch/resume turns.`
+                  ? `Recovered from ${runtimeSurface?.tailSourceLabel ?? 'owned runtime logs'} and grouped into launch/resume turns with explicit outcomes.`
                   : `Recovered from ${runtimeSurface?.tailSourceLabel ?? 'runtime metadata'} and summarized into a bounded readable tail.`}
             </p>
           </div>
@@ -326,7 +367,47 @@ export function SessionOperatorPanel({
           )}
         </p>
         {historyError ? <p className="muted operator-note">{historyError}</p> : null}
-        {history.length ? (
+        {isOwnedCodex && ownedGroups.length ? (
+          <div className="transcript-list terminal-stack">
+            {ownedGroups.map((group) => (
+              <div key={group.id} className="transcript-entry terminal-entry">
+                <div className="row space-between compact-row">
+                  <strong>{group.title}</strong>
+                  <span className="muted mono">{group.finishedAtLabel ?? group.startedAtLabel ?? 'now'}</span>
+                </div>
+                <p>{group.summary}</p>
+                <div className="operator-state-grid">
+                  <div className="operator-state-card">
+                    <span>Turn type</span>
+                    <strong>{group.mode}</strong>
+                    <p className="muted">{group.startedAtLabel ? `Started ${group.startedAtLabel}` : 'Start time unavailable'}</p>
+                  </div>
+                  <div className="operator-state-card">
+                    <span>Outcome</span>
+                    <strong>{group.outcome}</strong>
+                    <p className="muted">{group.finishedAtLabel ? `Finished ${group.finishedAtLabel}` : 'Still in flight or waiting for completion.'}</p>
+                  </div>
+                  <div className="operator-state-card">
+                    <span>Prompt</span>
+                    <strong>{group.mode === 'launch' ? 'launch' : 'resume'}</strong>
+                    <p className="muted">{group.prompt}</p>
+                  </div>
+                </div>
+                <div className="transcript-list terminal-stack">
+                  {group.entries.map((entry) => (
+                    <div key={entry.id} className="transcript-entry terminal-entry">
+                      <div className="row space-between compact-row">
+                        <strong>{entry.label}</strong>
+                        <span className="muted mono">{entry.timestampLabel ?? 'now'}</span>
+                      </div>
+                      <p>{entry.text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : history.length ? (
           <div className="transcript-list terminal-stack">
             {history.map((entry) => (
               <div key={entry.id} className="transcript-entry terminal-entry">
