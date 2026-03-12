@@ -1,4 +1,5 @@
 import type { AgentSummary } from '@/lib/fleet/types';
+import { continueOwnedCodexSession, interruptOwnedCodexSession } from '@/lib/codex/owned';
 import { abortOpenClawSession, steerOpenClawSession } from '@/lib/openclaw/chat';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 
@@ -114,10 +115,53 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
         );
       }
 
+      if (payload.action === 'steer' || payload.action === 'send_input') {
+        const message = payload.message?.trim();
+        if (!message) {
+          throw new Error('message is required to resume an owned Codex session');
+        }
+        if (!runtimeSurface.capabilities.sendInput) {
+          return unavailable(
+            agent,
+            payload.action,
+            'This IDE-owned Codex surface cannot accept the next input yet. Wait for the active run to settle or for the session thread id to be discovered first.',
+          );
+        }
+        const result = await continueOwnedCodexSession(runtimeSurface.id, message);
+        return {
+          ok: true,
+          action: payload.action,
+          surfaceId: runtimeSurface.id,
+          runtime: agent.runtime,
+          status: 'queued',
+          note: result.note,
+        };
+      }
+
+      if (payload.action === 'stop' || payload.action === 'interrupt') {
+        if (!runtimeSurface.capabilities.interrupt) {
+          return unavailable(
+            agent,
+            payload.action,
+            'No active IDE-owned Codex run is currently in flight, so there is nothing to interrupt.',
+          );
+        }
+        const result = await interruptOwnedCodexSession(runtimeSurface.id);
+        return {
+          ok: result.interrupted,
+          action: payload.action,
+          surfaceId: runtimeSurface.id,
+          runtime: agent.runtime,
+          status: 'completed',
+          note: result.note,
+          aborted: result.interrupted,
+        };
+      }
+
       return unavailable(
         agent,
         payload.action,
-        'This Codex surface is marked as IDE-owned, but write/interrupt plumbing is not wired yet. The ownership seam exists; mutation remains intentionally disabled until the transport is real.',
+        'This IDE-owned Codex surface supports launch/resume/interrupt only in the bounded owned-session lane for now.',
       );
     }
     default:
