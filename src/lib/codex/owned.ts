@@ -358,9 +358,10 @@ function parseOwnedRunLog(raw: string, run: OwnedCodexRunRecord): ParsedRunLog {
   };
 }
 
-function parseOwnedRunEvidence(raw: string, run: OwnedCodexRunRecord): ParsedRunEvidence {
+function parseOwnedRunEvidence(raw: string, run: OwnedCodexRunRecord, resolvedOutcome?: OwnedRunOutcome): ParsedRunEvidence {
   let assistantSummary: string | undefined;
   const commands = [] as RuntimeReviewCommandEvidence[];
+  const finalOutcome = resolvedOutcome ?? run.outcome;
 
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
@@ -386,11 +387,13 @@ function parseOwnedRunEvidence(raw: string, run: OwnedCodexRunRecord): ParsedRun
       const current = commands.find((entry) => entry.id === itemId);
       const baseStatus = parsed.type === 'item.started' ? 'running' : 'completed';
       const exitCode = item.exit_code == null ? null : Number(item.exit_code);
-      const nextStatus = run.outcome === 'interrupted'
+      const nextStatus = finalOutcome === 'interrupted'
         ? 'interrupted'
         : parsed.type === 'item.completed' && exitCode && exitCode !== 0
           ? 'failed'
-          : baseStatus;
+          : finalOutcome === 'failed' && parsed.type !== 'item.completed'
+            ? 'failed'
+            : baseStatus;
       const nextEntry: RuntimeReviewCommandEvidence = {
         id: itemId,
         command: previewText(String(item.command ?? ''), 180) ?? 'command',
@@ -409,11 +412,14 @@ function parseOwnedRunEvidence(raw: string, run: OwnedCodexRunRecord): ParsedRun
     }
   }
 
-  if (run.outcome === 'interrupted') {
+  if (finalOutcome !== 'running') {
     for (const command of commands) {
-      if (command.status === 'running') {
-        command.status = 'interrupted';
-      }
+      if (command.status !== 'running') continue;
+      command.status = finalOutcome === 'finished'
+        ? 'completed'
+        : finalOutcome === 'interrupted'
+          ? 'interrupted'
+          : 'failed';
     }
   }
 
@@ -936,10 +942,12 @@ export async function getOwnedCodexReviewPacket(surfaceId: string): Promise<Runt
   const repoReview = await getRuntimeRepoReview(session.repoPath);
   const lastRun = latestRun(session);
   const lastRunArtifacts = lastRun ? await readRunArtifacts(lastRun) : null;
-  const lastRunEvidence = lastRunArtifacts ? parseOwnedRunEvidence(lastRunArtifacts.stdoutRaw, lastRun) : null;
   const lastRunOutcome = lastRun && lastRunArtifacts
     ? deriveRunOutcome(lastRun, lastRunArtifacts.parsed, lastRunArtifacts.stderrRaw)
     : undefined;
+  const lastRunEvidence = lastRunArtifacts && lastRun
+    ? parseOwnedRunEvidence(lastRunArtifacts.stdoutRaw, lastRun, lastRunOutcome)
+    : null;
   const runtimeSurface = buildOwnedRuntimeSurface(session, Boolean(session.activeRun && isPidAlive(session.activeRun.pid)));
 
   const packet: RuntimeReviewPacket = {
