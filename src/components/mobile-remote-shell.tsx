@@ -48,6 +48,11 @@ function roleLabel(role: MobileTranscriptEntry['role']) {
   }
 }
 
+function compactLine(text: string | null | undefined, fallback: string, max = 84) {
+  const value = text?.trim() || fallback;
+  return value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
+}
+
 async function readJson<T>(response: Response) {
   const payload = (await response.json().catch(() => null)) as T | { error?: string } | null;
   if (!response.ok) {
@@ -66,7 +71,7 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
   const [selectedId, setSelectedId] = useState(() => pickCurrentSession(initialSnapshot)?.id ?? '');
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [actionHint, setActionHint] = useState<string | null>(null);
-  const [expandedSessionKey, setExpandedSessionKey] = useState<string | null>(initialSnapshot.primarySessionKey ?? null);
+  const [expandedSessionKey, setExpandedSessionKey] = useState<string | null>(null);
   const [composeSessionKey, setComposeSessionKey] = useState<string | null>(null);
   const [historyBySession, setHistoryBySession] = useState<Record<string, MobileTranscriptEntry[]>>({});
   const [historyLoading, setHistoryLoading] = useState<Record<string, boolean>>({});
@@ -78,6 +83,9 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
   const [reviewFileByPath, setReviewFileByPath] = useState<Record<string, MobileReviewFileResponse['file']>>({});
   const [reviewFileLoadingPath, setReviewFileLoadingPath] = useState<string | null>(null);
   const [reviewFileError, setReviewFileError] = useState<string | null>(null);
+  const [queueExpanded, setQueueExpanded] = useState(false);
+  const [reviewExpanded, setReviewExpanded] = useState(false);
+  const [operatorOpen, setOperatorOpen] = useState(false);
 
   async function refreshInbox() {
     const response = await fetch('/api/mobile/inbox', { cache: 'no-store' });
@@ -135,6 +143,18 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
     () => snapshot.sessions.find((session) => session.id === selectedId) ?? pickCurrentSession(snapshot),
     [selectedId, snapshot],
   );
+
+  const visibleQueueItems = useMemo(
+    () => (queueExpanded ? snapshot.items : snapshot.items.slice(0, 3)),
+    [queueExpanded, snapshot.items],
+  );
+
+  const hiddenQueueCount = Math.max(snapshot.items.length - visibleQueueItems.length, 0);
+  const visibleReviewFiles = useMemo(
+    () => (reviewExpanded ? snapshot.review?.changedFiles ?? [] : (snapshot.review?.changedFiles ?? []).slice(0, 3)),
+    [reviewExpanded, snapshot.review?.changedFiles],
+  );
+  const hiddenReviewCount = Math.max((snapshot.review?.changedFiles.length ?? 0) - visibleReviewFiles.length, 0);
 
   useEffect(() => {
     if (!selectedReviewFilePath) {
@@ -348,108 +368,97 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
         </Link>
       </header>
 
-      <section className="surface-card mobile-panel-surface">
+      <section className="surface-card mobile-panel-surface mobile-panel-compact">
         <div className="section-head">
           <div>
-            <div className="eyebrow">Panel + toolbar</div>
+            <div className="eyebrow">At a glance</div>
             <h2>Remote tasking queue</h2>
           </div>
           <span className={`status-pill ${statusClass(refreshError ? 'warning' : snapshot.mode === 'live' ? 'success' : 'warning')}`}>
-            {refreshError ? 'refresh warning' : snapshot.mode === 'live' ? 'live adapter' : 'demo lane'}
+            {refreshError ? 'warning' : snapshot.mode === 'live' ? 'live' : 'demo'}
           </span>
         </div>
-        <p className="muted operator-note">
-          This pass starts folding in the next donor language: panel framing, toolbar chips, queue cards,
-          and tool / terminal surfaces that still stay truthful to the current OpenClaw-backed lane.
+        <p className="muted section-caption">
+          Compact mobile pass: less narration, stronger hierarchy, same truthful control lane.
         </p>
-        <div className="toolbar-strip">
-          <div className="toolbar-chip">
-            <span>Mode</span>
-            <strong>{snapshot.mode === 'live' ? 'Live control' : 'Demo fallback'}</strong>
-            <p>{snapshot.note ?? 'Mobile is reading a control snapshot, not talking to one vendor runtime directly.'}</p>
+        <div className="toolbar-strip toolbar-strip-primary">
+          <div className="toolbar-chip toolbar-chip-strong">
+            <span>Now</span>
+            <strong>{selectedSession?.isCurrentSession ? 'This chat' : selectedSession?.name ?? 'Queue mirror'}</strong>
+            <p>{selectedSession?.isCurrentSession ? 'Q ↔ Mister live' : compactLine(selectedSession?.name, 'Freshest live session', 38)}</p>
           </div>
-          <div className="toolbar-chip">
-            <span>Primary session</span>
-            <strong>{selectedSession?.name ?? 'Unknown'}</strong>
-            <p className="mono">{selectedSession?.sessionKey ?? snapshot.primarySessionKey ?? 'No live session visible.'}</p>
-          </div>
-          <div className="toolbar-chip">
-            <span>Review lane</span>
+          <div className="toolbar-chip toolbar-chip-strong">
+            <span>Review</span>
             <strong>
               {snapshot.review?.pullRequest
                 ? `PR #${snapshot.review.pullRequest.number}`
-                : snapshot.review?.branch ?? 'No review lane'}
+                : snapshot.review?.branch ?? 'No lane'}
             </strong>
-            <p>{snapshot.review?.pullRequest?.title ?? snapshot.review?.branch ?? 'No linked PR is visible yet.'}</p>
-          </div>
-          <div className="toolbar-chip">
-            <span>Current focus</span>
-            <strong>{selectedSession?.isCurrentSession ? 'This chat' : selectedSession?.name ?? 'Queue mirror'}</strong>
-            <p>{selectedSession?.isCurrentSession ? 'You are steering the same live Q ↔ Mister thread.' : 'Phone is watching the freshest visible live surface.'}</p>
+            <p>{compactLine(snapshot.review?.pullRequest?.title ?? snapshot.review?.branch, 'No review lane yet', 42)}</p>
           </div>
         </div>
-        <div className="toolbar-strip toolbar-strip-secondary">
-          <div className="toolbar-chip">
-            <span>Active runs</span>
+        <div className="toolbar-strip toolbar-strip-secondary toolbar-strip-metrics">
+          <div className="toolbar-chip toolbar-chip-stat">
+            <span>Hot</span>
             <strong>{snapshot.summary.activeRuns}</strong>
-            <p>Running, blocked, and review-warm sessions that may need attention tonight.</p>
+            <p>runs</p>
           </div>
-          <div className="toolbar-chip">
+          <div className="toolbar-chip toolbar-chip-stat">
             <span>Alerts</span>
             <strong>{snapshot.summary.alerts}</strong>
-            <p>Critical or warning items surfaced into the phone inbox instead of hiding in the desktop shell.</p>
+            <p>need eyes</p>
           </div>
-          <div className="toolbar-chip">
+          <div className="toolbar-chip toolbar-chip-stat">
+            <span>Review</span>
+            <strong>{snapshot.summary.reviewItems}</strong>
+            <p>ready</p>
+          </div>
+          <div className="toolbar-chip toolbar-chip-stat">
             <span>Approvals</span>
             <strong>{snapshot.summary.approvals}</strong>
-            <p>Contract supports them; OpenClaw-backed approval handling is still a truthful future lane.</p>
-          </div>
-          <div className="toolbar-chip">
-            <span>Review items</span>
-            <strong>{snapshot.summary.reviewItems}</strong>
-            <p>Desktop review stays heavy, but phone now knows when review-ready work exists.</p>
+            <p>pending</p>
           </div>
         </div>
-        <div className="queue-toolbar toolbar-link-row">
+        <div className="queue-toolbar toolbar-link-row compact-link-row">
           <Link href="/" className="mobile-action-link">
-            Desktop surface ↗
+            Desktop ↗
           </Link>
           {snapshot.review ? (
             <Link href={snapshot.review.desktopHref} className="mobile-action-link">
-              Review stack ↗
+              Review ↗
             </Link>
           ) : (
-            <div className="mobile-action-link mobile-action-link-disabled">Review stack soon</div>
+            <div className="mobile-action-link mobile-action-link-disabled">Review soon</div>
           )}
           {snapshot.review?.pullRequest ? (
             <a href={snapshot.review.pullRequest.url} target="_blank" rel="noreferrer" className="mobile-action-link">
-              GitHub PR ↗
+              GitHub ↗
             </a>
           ) : (
-            <div className="mobile-action-link mobile-action-link-disabled">No PR linked</div>
+            <div className="mobile-action-link mobile-action-link-disabled">No PR</div>
           )}
           <button type="button" onClick={() => window.location.reload()}>
-            Refresh lane
+            Refresh
           </button>
         </div>
       </section>
 
-      <section className="surface-card mobile-panel-surface">
+      <section className="surface-card mobile-panel-surface mobile-panel-compact">
         <div className="section-head">
           <div>
-            <div className="eyebrow">Task queue</div>
+            <div className="eyebrow">Now + queue</div>
             <h2>Live operator queue</h2>
           </div>
           <span className={`status-pill ${refreshError ? 'status-warning' : 'status-success'}`}>
-            {refreshError ? 'refresh warning' : 'live queue'}
+            {refreshError ? 'warning' : `${snapshot.items.length} live`}
           </span>
         </div>
-        <p className="muted operator-note">
-          Each card now behaves like a real queue item: summary up top, action toolbar in the middle, and tool / terminal drilldown only when you open it.
+        <p className="muted section-caption">
+          Lead with what matters now. Keep the rest available without turning the screen into a dump.
         </p>
-        {actionHint ? <p className="muted operator-note">{actionHint}</p> : null}
-        <div className="mobile-stack">
-          {snapshot.items.map((item) => {
+        {actionHint ? <p className="muted operator-note compact-note">{actionHint}</p> : null}
+        <div className="mobile-stack mobile-stack-tight">
+          {visibleQueueItems.map((item, index) => {
             const sessionKey = item.sessionKey;
             const inlineHistory = sessionKey ? historyBySession[sessionKey] ?? [] : [];
             const inlineHistoryError = sessionKey ? historyError[sessionKey] : null;
@@ -459,22 +468,24 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
             const inlineDraft = sessionKey ? draftBySession[sessionKey] ?? '' : '';
             const historyOpen = Boolean(sessionKey && expandedSessionKey === sessionKey);
             const composeOpen = Boolean(sessionKey && composeSessionKey === sessionKey);
+            const visibleActions = index === 0 ? item.actions.slice(0, 3) : item.actions.slice(0, 2);
 
             return (
-              <div key={item.id} className="mobile-action-card queue-card">
-                <div className="row space-between compact-row">
+              <div key={item.id} className={`mobile-action-card queue-card ${index === 0 ? 'queue-card-featured' : 'queue-card-secondary'}`}>
+                <div className="row space-between compact-row queue-card-head">
                   <div>
-                    <h3>{item.title}</h3>
-                    <p>{item.detail}</p>
+                    <div className="queue-kicker">{index === 0 ? 'Now' : 'Queued'}</div>
+                    <h3>{compactLine(item.title, 'Queue item', 46)}</h3>
+                    <p>{compactLine(item.detail, 'Open the live session for more detail.', index === 0 ? 82 : 76)}</p>
                   </div>
                   <span className={`status-pill ${statusClass(item.severity)}`}>{item.kind.replace('_', ' ')}</span>
                 </div>
                 <div className="queue-meta-row">
-                  <span className="muted mono">{item.timestampLabel ?? 'now'}</span>
-                  {sessionKey ? <span className="muted mono">{sessionKey}</span> : null}
+                  <span className="muted mono queue-meta-pill">{item.timestampLabel ?? 'now'}</span>
+                  {sessionKey ? <span className="muted mono queue-meta-pill">{compactLine(sessionKey, sessionKey, 30)}</span> : null}
                 </div>
                 <div className="tool-drawer-list tool-drawer-list-mobile queue-toolbar">
-                  {item.actions.map((action) => (
+                  {visibleActions.map((action) => (
                     action.href ? (
                       action.href.startsWith('http') ? (
                         <a
@@ -511,6 +522,9 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
                     )
                   ))}
                 </div>
+                {item.actions.length > visibleActions.length ? (
+                  <span className="queue-action-caption">+{item.actions.length - visibleActions.length} more actions inside the full operator view</span>
+                ) : null}
 
                 {composeOpen && sessionKey ? (
                   <div className="inset-card tool-shell">
@@ -602,47 +616,56 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
             );
           })}
         </div>
+        {hiddenQueueCount > 0 ? (
+          <button
+            type="button"
+            className="queue-toggle"
+            onClick={() => setQueueExpanded((current) => !current)}
+          >
+            {queueExpanded ? 'Show less queue' : `Show ${hiddenQueueCount} more queue item${hiddenQueueCount === 1 ? '' : 's'}`}
+          </button>
+        ) : null}
       </section>
 
       {snapshot.review ? (
-        <section className="surface-card mobile-review-focus mobile-panel-surface">
+        <section className="surface-card mobile-review-focus mobile-panel-surface mobile-panel-compact">
           <div className="section-head">
             <div>
-              <div className="eyebrow">Review focus</div>
-              <h2>Deeper than a desktop link</h2>
+              <div className="eyebrow">Review</div>
+              <h2>Desktop lane, mobile triage</h2>
             </div>
             <span className={`status-pill ${statusClass(snapshot.review.changedFiles.length ? 'reviewing' : 'healthy')}`}>
-              {snapshot.review.changedFiles.length ? `${snapshot.review.changedFiles.length} files` : 'review clean'}
+              {snapshot.review.changedFiles.length ? `${snapshot.review.changedFiles.length} files` : 'clean'}
             </span>
           </div>
 
-          <div className="mobile-review-headline">
+          <div className="mobile-review-headline compact-review-headline">
             <div>
               <span>Current lane</span>
               <strong>
                 {snapshot.review.pullRequest
-                  ? `PR #${snapshot.review.pullRequest.number} — ${snapshot.review.pullRequest.title}`
+                  ? `PR #${snapshot.review.pullRequest.number} — ${compactLine(snapshot.review.pullRequest.title, snapshot.review.branch, 46)}`
                   : snapshot.review.branch}
               </strong>
               <p className="muted mono">{snapshot.review.branch}</p>
             </div>
-            <div className="glass-link-row">
+            <div className="glass-link-row compact-link-row">
               <Link href={snapshot.review.desktopHref} className="mobile-action-link">
-                Review stack ↗
+                Review ↗
               </Link>
               {snapshot.review.pullRequest ? (
                 <a href={snapshot.review.pullRequest.url} target="_blank" rel="noreferrer" className="mobile-action-link">
-                  GitHub PR ↗
+                  GitHub ↗
                 </a>
               ) : null}
             </div>
           </div>
 
           {snapshot.review.issues.length ? (
-            <div className="glass-chip-grid">
+            <div className="glass-chip-grid compact-chip-grid">
               {snapshot.review.issues.map((issue) => (
-                <a key={issue.number} href={issue.url} target="_blank" rel="noreferrer" className="glass-chip">
-                  {`#${issue.number} • ${issue.title}`}
+                <a key={issue.number} href={issue.url} target="_blank" rel="noreferrer" className="glass-chip compact-chip">
+                  {`#${issue.number}`}
                 </a>
               ))}
             </div>
@@ -650,11 +673,11 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
 
           {snapshot.review.changedFiles.length ? (
             <>
-              <p className="muted operator-note">
-                Tap a file to inspect the live review patch inline before you drop into the heavier desktop review surface.
+              <p className="muted section-caption">
+                Only the first few files stay open on mobile by default. The heavy review still belongs on desktop.
               </p>
-              <div className="glass-file-list">
-                {snapshot.review.changedFiles.map((file) => {
+              <div className="glass-file-list compact-file-list">
+                {visibleReviewFiles.map((file) => {
                   const fileTone = file.status === 'deleted'
                     ? 'critical'
                     : file.status === 'untracked'
@@ -670,13 +693,13 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
                     <button
                       key={`${file.status}:${file.path}`}
                       type="button"
-                      className={`glass-file-row glass-file-button ${isSelected ? 'glass-file-row-active' : ''}`}
+                      className={`glass-file-row glass-file-button compact-file-row ${isSelected ? 'glass-file-row-active' : ''}`}
                       onClick={() => {
                         void handleReviewFileSelect(file.path);
                       }}
                     >
                       <div className="row space-between compact-row">
-                        <strong className="mono">{file.path}</strong>
+                        <strong className="mono">{compactLine(file.path, file.path, 42)}</strong>
                         <span className={`status-pill ${statusClass(fileTone)}`}>
                           {file.status}
                         </span>
@@ -685,12 +708,21 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
                         +{file.additions ?? 0} / -{file.deletions ?? 0}
                       </p>
                       <span className="glass-file-caption">
-                        {isSelected ? 'Hide preview' : 'Open file preview'}
+                        {isSelected ? 'Hide preview' : 'Open preview'}
                       </span>
                     </button>
                   );
                 })}
               </div>
+              {hiddenReviewCount > 0 ? (
+                <button
+                  type="button"
+                  className="queue-toggle"
+                  onClick={() => setReviewExpanded((current) => !current)}
+                >
+                  {reviewExpanded ? 'Show fewer files' : `Show ${hiddenReviewCount} more file${hiddenReviewCount === 1 ? '' : 's'}`}
+                </button>
+              ) : null}
             </>
           ) : null}
 
@@ -714,7 +746,7 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
               {reviewFileError ? <p className="muted operator-note">{reviewFileError}</p> : null}
               {reviewFileByPath[selectedReviewFilePath] ? (
                 <>
-                  <p className="muted operator-note">{reviewFileByPath[selectedReviewFilePath].note}</p>
+                  <p className="muted operator-note compact-note">{compactLine(reviewFileByPath[selectedReviewFilePath].note, 'Inline review preview.', 120)}</p>
                   <pre className="glass-diff-preview terminal-output">{reviewFileByPath[selectedReviewFilePath].preview}</pre>
                 </>
               ) : reviewFileLoadingPath === selectedReviewFilePath ? (
@@ -724,39 +756,39 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
               )}
             </div>
           ) : null}
-
-          {snapshot.review.diffStat ? (
-            <pre className="glass-diff-preview terminal-output">
-              {snapshot.review.diffStat.split('\n').filter(Boolean).slice(0, 6).join('\n')}
-            </pre>
-          ) : null}
         </section>
       ) : null}
 
-      <section className="surface-card mobile-panel-surface">
+      <section className="surface-card mobile-panel-surface mobile-panel-compact">
         <div className="section-head">
           <div>
-            <div className="eyebrow">Current session truth</div>
-            <h2>Mirrored session first</h2>
+            <div className="eyebrow">Operator</div>
+            <h2>Open tools only when you need them</h2>
           </div>
+          <span className="status-pill status-info">{operatorOpen ? 'open' : 'collapsed'}</span>
         </div>
-        <div className="mobile-memory-card queue-card">
+        <div className="mobile-memory-card queue-card compact-launcher-card">
           <div>
             <strong>{selectedSession?.name ?? 'No current session'}</strong>
             <p className="muted">
               {selectedSession?.isCurrentSession
-                ? 'This is the same Q ↔ Mister session you are actively talking in right now.'
-                : 'The phone fell back to the freshest visible session from the live control snapshot.'}
+                ? 'Same live Q ↔ Mister session.'
+                : 'Fallback to the freshest visible live session.'}
             </p>
             <p className="muted mono">{selectedSession?.sessionKey ?? snapshot.primarySessionKey ?? 'unknown'}</p>
           </div>
-          <button className="button-primary" type="button" onClick={() => setSelectedId(selectedSession?.id ?? '')}>
-            Operate this session
-          </button>
+          <div className="queue-toolbar compact-launcher-actions">
+            <button className="button-primary" type="button" onClick={() => setSelectedId(selectedSession?.id ?? '')}>
+              Focus session
+            </button>
+            <button type="button" onClick={() => setOperatorOpen((current) => !current)}>
+              {operatorOpen ? 'Hide tools' : 'Open tools'}
+            </button>
+          </div>
         </div>
       </section>
 
-      {selectedSession ? <SessionOperatorPanel agent={selectedSession} compact /> : null}
+      {selectedSession && operatorOpen ? <SessionOperatorPanel agent={selectedSession} compact /> : null}
     </div>
   );
 }
