@@ -98,6 +98,8 @@ export interface ReviewPullRequestSummary {
   state: string;
   isDraft?: boolean;
   reviewDecision?: string | null;
+  body?: string;
+  linkedIssueNumbers?: number[];
 }
 
 export interface ReviewIssueSummary {
@@ -122,6 +124,7 @@ export interface WorkflowReviewSnapshot {
   worktrees: ReviewWorktreeSummary[];
   pullRequests: ReviewPullRequestSummary[];
   activeIssue?: ReviewIssueSummary;
+  activeIssues: ReviewIssueSummary[];
   warnings?: string[];
 }
 
