@@ -51,3 +51,33 @@ export interface MobileInboxSnapshot {
   items: MobileInboxItem[];
   summary: MobileInboxSummary;
 }
+
+export interface MobileTranscriptEntry {
+  id: string;
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  text: string;
+  timestamp?: number;
+  timestampLabel?: string;
+}
+
+export interface MobileHistoryResponse {
+  sessionKey: string;
+  transcript: MobileTranscriptEntry[];
+}
+
+export interface MobileActionRequest {
+  action: Extract<MobileControlActionKind, 'steer' | 'stop' | 'approve' | 'deny' | 'pause' | 'resume'>;
+  sessionKey: string;
+  message?: string;
+  runId?: string;
+}
+
+export interface MobileActionResponse {
+  ok: boolean;
+  action: MobileActionRequest['action'];
+  sessionKey: string;
+  status: 'queued' | 'completed' | 'unavailable';
+  note: string;
+  runId?: string;
+  aborted?: boolean;
+}
