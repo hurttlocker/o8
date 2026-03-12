@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { AgentSummary } from '@/lib/fleet/types';
-import { openClawAdapterContract } from '@/lib/runtime/adapter';
 
 type SessionTranscriptEntry = {
   id: string;
@@ -49,7 +48,9 @@ async function readJson<T>(response: Response) {
 
 function activeRunHint(agent: AgentSummary) {
   if (agent.runtime !== 'openclaw') {
-    return 'This surface is currently read-only. The first truthful lane is attach/read-tail; input and interrupt stay disabled until runtime semantics are cleaner.';
+    return agent.runtimeSurface?.ownership === 'owned'
+      ? 'This surface is marked as IDE-owned, but mutation is still intentionally disabled until the write/interrupt transport is real.'
+      : 'This surface is currently read-only. The first truthful lane is attach/read-tail; input and interrupt stay disabled until we can prove an owned-session seam.';
   }
 
   switch (agent.status) {
@@ -139,9 +140,20 @@ export function SessionOperatorPanel({
     setActionNote(null);
 
     try {
-      await openClawAdapterContract.steer(agent.sessionKey, instruction);
+      const response = await fetch('/api/runtime/action', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'steer',
+          surfaceId: runtimeSurface?.id ?? agent.sessionKey,
+          message: instruction,
+        }),
+      });
+      const result = await readJson<{ note: string }>(response);
       setDraft('');
-      setActionNote('Steer request queued on the live session. External delivery stays off by default.');
+      setActionNote(result.note ?? 'Steer request queued on the live session. External delivery stays off by default.');
       await loadTranscript();
       window.setTimeout(() => {
         void loadTranscript();
@@ -160,20 +172,22 @@ export function SessionOperatorPanel({
     setActionNote(null);
 
     try {
-      const response = await fetch('/api/openclaw/abort', {
+      const response = await fetch('/api/runtime/action', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          sessionKey: agent.sessionKey,
+          action: 'stop',
+          surfaceId: runtimeSurface?.id ?? agent.sessionKey,
         }),
       });
-      const payload = await readJson<{ aborted?: boolean }>(response);
+      const payload = await readJson<{ aborted?: boolean; note?: string }>(response);
       setActionNote(
-        payload.aborted
-          ? 'Stop request sent to the active run for this session.'
-          : 'No active run was in flight for this session.',
+        payload.note
+          ?? (payload.aborted
+            ? 'Stop request sent to the active run for this session.'
+            : 'No active run was in flight for this session.'),
       );
       await loadTranscript();
     } catch (error) {
@@ -198,7 +212,9 @@ export function SessionOperatorPanel({
         <p className="muted operator-note">
           {isOpenClaw
             ? 'This is the first truthful control lane: explicit steer and stop only. Opening the UI still does not create a ghost session or auto-deliver anything back to Telegram.'
-            : `${runtimeSurface?.sourceLabel ?? 'Runtime surface'} is visible inside the same product, but mutation stays disabled until input/interrupt semantics are proven truthful.`}
+            : runtimeSurface?.ownership === 'owned'
+              ? `${runtimeSurface?.sourceLabel ?? 'Runtime surface'} is marked as IDE-owned, but mutation stays disabled until the write/interrupt transport is real.`
+              : `${runtimeSurface?.sourceLabel ?? 'Runtime surface'} is visible inside the same product, but mutation stays disabled until we can prove an owned-session seam.`}
         </p>
         <div className="operator-state-grid">
           <div className="operator-state-card">
@@ -214,7 +230,9 @@ export function SessionOperatorPanel({
             <p className="muted">
               {isOpenClaw
                 ? 'Fleet state is heuristic-driven, so abort can still no-op even when the surface looks warm.'
-                : 'This is a truthful first pass: runtime watch is available, but send-input and interrupt remain off.'}
+                : runtimeSurface?.ownership === 'owned'
+                  ? 'Ownership is now explicit, but mutation remains intentionally disabled until the transport is real.'
+                  : 'This is a truthful first pass: runtime watch is available, but only IDE-owned surfaces may eventually become mutable.'}
             </p>
           </div>
           <div className="operator-state-card">
@@ -254,10 +272,10 @@ export function SessionOperatorPanel({
               {historyLoading ? 'Refreshing…' : 'Refresh tail'}
             </button>
             <button type="button" disabled>
-              Send input (later)
+              Send input (owned only)
             </button>
             <button type="button" disabled>
-              Interrupt (later)
+              Interrupt (owned only)
             </button>
           </div>
         )}

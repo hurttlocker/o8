@@ -544,7 +544,7 @@ export function CommandCenterShell({
                   <>
                     <li>Codex surfaces now distinguish live pid-backed terminals from recent session history.</li>
                     <li>Attach/read-tail are surfaced first because they are truthful right now.</li>
-                    <li>Send-input, interrupt, and resize stay disabled until a supported write/interrupt seam exists.</li>
+                    <li>Only IDE-owned Codex surfaces may eventually become mutable; discovered terminals stay watch-only.</li>
                     <li>Runtime depth should feel inside the product, not like a hostile terminal takeover.</li>
                   </>
                 )}
@@ -561,6 +561,7 @@ export function CommandCenterShell({
 > source=${fleet.meta.sourceLabel}
 > primary_session=${fleet.meta.primarySessionKey ?? 'unknown'}
 > selected_session=${selectedAgent.sessionKey}
+> ownership=${selectedRuntimeSurface?.ownership ?? 'provider'}
 > percent_used=${formatPercent(selectedAgent.context.usedPercent)}
 > tokens=${formatTokens(selectedAgent.tokenUsage?.totalTokens)}
 
@@ -581,6 +582,7 @@ $ openclaw gateway call chat.abort --json --params '${JSON.stringify({
 > source=${selectedRuntimeSurface?.sourceLabel ?? 'Local Codex discovery'}
 > cwd=${selectedRuntimeSurface?.cwd ?? selectedAgent.workspace}
 > branch=${selectedRuntimeSurface?.branch ?? selectedAgent.branch}
+> ownership=${selectedRuntimeSurface?.ownership ?? 'discovered'}
 > tail_source=${selectedRuntimeSurface?.tailSourceLabel ?? '~/.codex/sessions/*.jsonl'}
 
 $ GET /api/runtime/tail?surfaceId=${encodeURIComponent(selectedRuntimeSurface?.id ?? selectedAgent.sessionKey)}
