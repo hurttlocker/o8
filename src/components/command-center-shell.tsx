@@ -167,6 +167,7 @@ export function CommandCenterShell({
     () => fleet.agents.find((agent) => agent.id === selectedId) ?? fleet.agents[0],
     [fleet, selectedId],
   );
+  const selectedRuntimeSurface = selectedAgent?.runtimeSurface;
 
   const desktopInfo =
     typeof window !== 'undefined'
@@ -219,13 +220,14 @@ export function CommandCenterShell({
             <div className="brand-orb">C</div>
             <div>
               <div className="eyebrow">Cortex IDE</div>
-              <h1>Live OpenClaw command center</h1>
+              <h1>Live runtime command center</h1>
             </div>
           </div>
           <p className="hero-copy">
             First live bridge mode: mirror existing OpenClaw sessions into the control plane, starting
-            with this Q ↔ Mister chat. New sessions belong behind explicit spawn actions, not silent UI
-            side effects.
+            with this Q ↔ Mister chat, while also surfacing recent local Codex terminals as truthful
+            read-only runtime depth. New sessions belong behind explicit spawn actions, not silent UI side
+            effects.
           </p>
         </div>
         <div className="command-strip">
@@ -383,7 +385,7 @@ export function CommandCenterShell({
               <div className="section-head">
                 <div>
                   <div className="eyebrow">Overview</div>
-                  <h2>Live OpenClaw inventory</h2>
+                  <h2>Live runtime inventory</h2>
                 </div>
                 <a href="/mobile" className="inline-link">
                   View mobile remote ↗
@@ -505,8 +507,8 @@ export function CommandCenterShell({
             </div>
 
             <div className="inspector-block">
-              <span>Session key</span>
-              <strong className="mono">{selectedAgent.sessionKey}</strong>
+              <span>{selectedAgent.runtime === 'openclaw' ? 'Session key' : 'Runtime surface id'}</span>
+              <strong className="mono">{selectedRuntimeSurface?.id ?? selectedAgent.sessionKey}</strong>
               <p className="muted">Session id: {selectedAgent.sessionId ?? 'unknown'}</p>
             </div>
 
@@ -519,16 +521,33 @@ export function CommandCenterShell({
             <div className="inset-card inspector-block">
               <div className="row space-between compact-row">
                 <div>
-                  <span>Adapter contract</span>
-                  <strong>{openClawAdapterContract.displayName}</strong>
+                  <span>Runtime surface</span>
+                  <strong>
+                    {selectedAgent.runtime === 'openclaw'
+                      ? openClawAdapterContract.displayName
+                      : selectedRuntimeSurface?.sourceLabel ?? 'Runtime discovery'}
+                  </strong>
                 </div>
-                <span className="status-pill status-healthy">live bridge v1</span>
+                <span className={`status-pill ${selectedAgent.runtime === 'openclaw' ? 'status-healthy' : 'status-warning'}`}>
+                  {selectedAgent.runtime === 'openclaw' ? 'live bridge v1' : 'read-tail spike'}
+                </span>
               </div>
               <ul className="bullet-list muted">
-                <li>Current mode mirrors existing sessions, starting with this one.</li>
-                <li>Steer + stop are now wired through the real OpenClaw gateway on explicit click only.</li>
-                <li>Spawn remains an explicit future action, not an automatic side effect.</li>
-                <li>Pause remains unsupported until runtime semantics are clean across providers.</li>
+                {selectedAgent.runtime === 'openclaw' ? (
+                  <>
+                    <li>Current mode mirrors existing sessions, starting with this one.</li>
+                    <li>Steer + stop are now wired through the real OpenClaw gateway on explicit click only.</li>
+                    <li>Spawn remains an explicit future action, not an automatic side effect.</li>
+                    <li>Pause remains unsupported until runtime semantics are clean across providers.</li>
+                  </>
+                ) : (
+                  <>
+                    <li>Recent local Codex sessions are discovered from persisted runtime metadata.</li>
+                    <li>Attach/read-tail are surfaced first because they are truthful right now.</li>
+                    <li>Send-input, interrupt, and resize stay disabled until session ownership semantics are cleaner.</li>
+                    <li>Runtime depth should feel inside the product, not like a hostile terminal takeover.</li>
+                  </>
+                )}
               </ul>
             </div>
 
@@ -537,7 +556,8 @@ export function CommandCenterShell({
             <div className="inset-card inspector-block">
               <span>Runtime trace</span>
               <pre className="terminal-preview">
-                {`$ openclaw status --json
+                {selectedAgent.runtime === 'openclaw'
+                  ? `$ openclaw status --json
 > source=${fleet.meta.sourceLabel}
 > primary_session=${fleet.meta.primarySessionKey ?? 'unknown'}
 > selected_session=${selectedAgent.sessionKey}
@@ -545,17 +565,29 @@ export function CommandCenterShell({
 > tokens=${formatTokens(selectedAgent.tokenUsage?.totalTokens)}
 
 $ openclaw gateway call chat.history --json --params '${JSON.stringify({
-                  sessionKey: selectedAgent.sessionKey,
-                  limit: 10,
-                })}'
+                      sessionKey: selectedAgent.sessionKey,
+                      limit: 10,
+                    })}'
 $ openclaw gateway call chat.send --json --params '${JSON.stringify({
-                  sessionKey: selectedAgent.sessionKey,
-                  message: '...',
-                  idempotencyKey: '<uuid>',
-                })}'
+                      sessionKey: selectedAgent.sessionKey,
+                      message: '...',
+                      idempotencyKey: '<uuid>',
+                    })}'
 $ openclaw gateway call chat.abort --json --params '${JSON.stringify({
-                  sessionKey: selectedAgent.sessionKey,
-                })}'`}
+                      sessionKey: selectedAgent.sessionKey,
+                    })}'`
+                  : `$ sqlite3 -json ~/.codex/state_5.sqlite "select id,title,cwd,updated_at,rollout_path,git_branch,git_sha from threads order by updated_at desc limit 1;"
+> selected_surface=${selectedRuntimeSurface?.id ?? selectedAgent.sessionKey}
+> source=${selectedRuntimeSurface?.sourceLabel ?? 'Local Codex discovery'}
+> cwd=${selectedRuntimeSurface?.cwd ?? selectedAgent.workspace}
+> branch=${selectedRuntimeSurface?.branch ?? selectedAgent.branch}
+> tail_source=${selectedRuntimeSurface?.tailSourceLabel ?? '~/.codex/sessions/*.jsonl'}
+
+$ GET /api/runtime/tail?surfaceId=${encodeURIComponent(selectedRuntimeSurface?.id ?? selectedAgent.sessionKey)}
+> attach=${selectedRuntimeSurface?.capabilities.attach ? 'true' : 'false'}
+> read_tail=${selectedRuntimeSurface?.capabilities.readTail ? 'true' : 'false'}
+> send_input=${selectedRuntimeSurface?.capabilities.sendInput ? 'true' : 'false'}
+> interrupt=${selectedRuntimeSurface?.capabilities.interrupt ? 'true' : 'false'}`}
               </pre>
             </div>
           </aside>
