@@ -368,9 +368,21 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
                 <div className="tool-drawer-list tool-drawer-list-mobile">
                   {item.actions.map((action) => (
                     action.href ? (
-                      <Link key={`${item.id}:${action.kind}`} href={action.href} className="mobile-action-link">
-                        {action.label}
-                      </Link>
+                      action.href.startsWith('http') ? (
+                        <a
+                          key={`${item.id}:${action.kind}`}
+                          href={action.href}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mobile-action-link"
+                        >
+                          {action.label}
+                        </a>
+                      ) : (
+                        <Link key={`${item.id}:${action.kind}`} href={action.href} className="mobile-action-link">
+                          {action.label}
+                        </Link>
+                      )
                     ) : (
                       <button
                         key={`${item.id}:${action.kind}`}
@@ -483,6 +495,76 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
           })}
         </div>
       </section>
+
+      {snapshot.review ? (
+        <section className="surface-card mobile-review-focus">
+          <div className="section-head">
+            <div>
+              <div className="eyebrow">Review focus</div>
+              <h2>Deeper than a desktop link</h2>
+            </div>
+            <span className={`status-pill ${statusClass(snapshot.review.changedFiles.length ? 'reviewing' : 'healthy')}`}>
+              {snapshot.review.changedFiles.length ? `${snapshot.review.changedFiles.length} files` : 'review clean'}
+            </span>
+          </div>
+
+          <div className="mobile-review-headline">
+            <div>
+              <span>Current lane</span>
+              <strong>
+                {snapshot.review.pullRequest
+                  ? `PR #${snapshot.review.pullRequest.number} — ${snapshot.review.pullRequest.title}`
+                  : snapshot.review.branch}
+              </strong>
+              <p className="muted mono">{snapshot.review.branch}</p>
+            </div>
+            <div className="glass-link-row">
+              <Link href={snapshot.review.desktopHref} className="mobile-action-link">
+                Review stack ↗
+              </Link>
+              {snapshot.review.pullRequest ? (
+                <a href={snapshot.review.pullRequest.url} target="_blank" rel="noreferrer" className="mobile-action-link">
+                  GitHub PR ↗
+                </a>
+              ) : null}
+            </div>
+          </div>
+
+          {snapshot.review.issues.length ? (
+            <div className="glass-chip-grid">
+              {snapshot.review.issues.map((issue) => (
+                <a key={issue.number} href={issue.url} target="_blank" rel="noreferrer" className="glass-chip">
+                  {`#${issue.number} • ${issue.title}`}
+                </a>
+              ))}
+            </div>
+          ) : null}
+
+          {snapshot.review.changedFiles.length ? (
+            <div className="glass-file-list">
+              {snapshot.review.changedFiles.map((file) => (
+                <div key={`${file.status}:${file.path}`} className="glass-file-row">
+                  <div className="row space-between compact-row">
+                    <strong className="mono">{file.path}</strong>
+                    <span className={`status-pill ${statusClass(file.status === 'deleted' ? 'critical' : file.status === 'untracked' ? 'warning' : file.status === 'renamed' ? 'reviewing' : file.status === 'added' ? 'healthy' : 'running')}`}>
+                      {file.status}
+                    </span>
+                  </div>
+                  <p className="muted mono">
+                    +{file.additions ?? 0} / -{file.deletions ?? 0}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {snapshot.review.diffStat ? (
+            <pre className="glass-diff-preview">
+              {snapshot.review.diffStat.split('\n').filter(Boolean).slice(0, 6).join('\n')}
+            </pre>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="surface-card">
         <div className="section-head">

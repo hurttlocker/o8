@@ -1,4 +1,10 @@
-import type { AgentSummary, EventSeverity } from '@/lib/fleet/types';
+import type {
+  AgentSummary,
+  EventSeverity,
+  ReviewChangedFile,
+  ReviewIssueSummary,
+  ReviewPullRequestSummary,
+} from '@/lib/fleet/types';
 
 export type MobileInboxItemKind = 'alert' | 'approval' | 'review' | 'run_watch';
 
@@ -41,6 +47,16 @@ export interface MobileInboxSummary {
   activeRuns: number;
 }
 
+export interface MobileReviewFocus {
+  repoSlug: string;
+  branch: string;
+  desktopHref: string;
+  pullRequest?: ReviewPullRequestSummary;
+  issues: ReviewIssueSummary[];
+  changedFiles: ReviewChangedFile[];
+  diffStat?: string;
+}
+
 export interface MobileInboxSnapshot {
   generatedAt: string;
   mode: 'live' | 'demo';
@@ -50,6 +66,7 @@ export interface MobileInboxSnapshot {
   sessions: AgentSummary[];
   items: MobileInboxItem[];
   summary: MobileInboxSummary;
+  review?: MobileReviewFocus;
 }
 
 export interface MobileTranscriptEntry {

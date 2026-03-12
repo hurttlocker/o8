@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 const REVIEW_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
 const REVIEW_REPO_SLUG = process.env.CORTEX_IDE_REVIEW_REPO || 'hurttlocker/cortex-ide';
 const FALLBACK_ACTIVE_ISSUE_NUMBER = Number.parseInt(process.env.CORTEX_IDE_ACTIVE_REVIEW_ISSUE || '18', 10);
+const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
 
 function shortenPath(path: string) {
   return path.replace('/Users/marquisehurtt/', '~/');
@@ -120,6 +121,10 @@ function parseBranchStatus(raw: string) {
   return { branch, upstream, ahead, behind };
 }
 
+function isReviewNoisePath(path: string) {
+  return REVIEW_NOISE_PATHS.has(path.trim());
+}
+
 function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedRaw: string) {
   const changed = new Map<string, ReviewChangedFile>();
 
@@ -129,6 +134,9 @@ function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedR
 
     const status = statusToken[0];
     const path = status === 'R' && secondPath ? `${firstPath} → ${secondPath}` : secondPath ?? firstPath;
+    if (isReviewNoisePath(firstPath) || (secondPath && isReviewNoisePath(secondPath)) || isReviewNoisePath(path)) {
+      continue;
+    }
 
     changed.set(path, {
       path,
@@ -147,7 +155,7 @@ function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedR
 
   for (const line of numStatRaw.split('\n').filter(Boolean)) {
     const [additionsRaw, deletionsRaw, path] = line.split('\t');
-    if (!path) continue;
+    if (!path || isReviewNoisePath(path)) continue;
 
     const entry = changed.get(path) ?? {
       path,
@@ -162,6 +170,8 @@ function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedR
   }
 
   for (const path of untrackedRaw.split('\n').map((value) => value.trim()).filter(Boolean)) {
+    if (isReviewNoisePath(path)) continue;
+
     changed.set(path, {
       path,
       status: 'untracked',
