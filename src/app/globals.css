@@ -487,6 +487,152 @@ button:hover {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.operator-header-row {
+  align-items: flex-start;
+}
+
+.operator-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.operator-textarea {
+  width: 100%;
+  min-height: 88px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.85rem 0.95rem;
+  font: inherit;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.92);
+  resize: vertical;
+}
+
+.operator-textarea:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.16);
+  border-color: rgba(37, 99, 235, 0.28);
+}
+
+.operator-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.operator-note {
+  margin: 0;
+}
+
+.transcript-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.transcript-entry {
+  display: grid;
+  gap: 0.5rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.transcript-entry p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.operator-state-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 0.9rem;
+}
+
+.operator-state-card {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.operator-state-card p,
+.artifact-chip p {
+  margin: 0;
+}
+
+.workflow-review-surface {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.workflow-review-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.workflow-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.workflow-warning-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.workflow-note {
+  margin: 0;
+}
+
+.workflow-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+}
+
+.workflow-file-list,
+.workflow-pr-list,
+.workflow-worktree-list,
+.workflow-commit-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.workflow-file-item,
+.workflow-pr-item,
+.workflow-worktree-item,
+.workflow-issue-card,
+.workflow-commit-item {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.workflow-file-item p,
+.workflow-pr-item p,
+.workflow-worktree-item p,
+.workflow-issue-card p {
+  margin: 0;
+}
+
+.mobile-action-link {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.75rem 0.95rem;
+  background: var(--panel-strong);
+  color: var(--text);
+  font-weight: 600;
+}
+
 @media (max-width: 1200px) {
   .desktop-shell {
     grid-template-columns: 280px minmax(0, 1fr);
@@ -541,7 +687,11 @@ button:hover {
   }
 
   .artifact-grid,
-  .tool-drawer-list-mobile {
+  .tool-drawer-list-mobile,
+  .operator-actions,
+  .operator-state-grid,
+  .workflow-summary-grid,
+  .workflow-grid {
     grid-template-columns: 1fr;
   }
 

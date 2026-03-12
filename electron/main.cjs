@@ -1,7 +1,14 @@
-const { app, BrowserWindow, Menu, shell } = require('electron');
+const { app, BrowserWindow, Menu, shell, nativeImage } = require('electron');
 const path = require('path');
 
+const APP_NAME = 'Cortex IDE';
 const DEV_URL = process.env.CORTEX_IDE_DEV_URL || 'http://localhost:3001';
+const ICON_PATH = path.join(__dirname, '..', 'assets', 'icons', 'cortex-ide-dev.png');
+
+app.setName(APP_NAME);
+app.setAboutPanelOptions({
+  applicationName: APP_NAME,
+});
 
 function createWindow(route = '/') {
   const window = new BrowserWindow({
@@ -10,7 +17,8 @@ function createWindow(route = '/') {
     minWidth: 1180,
     minHeight: 760,
     backgroundColor: '#f5f7fb',
-    title: 'Cortex IDE',
+    title: APP_NAME,
+    icon: ICON_PATH,
     titleBarStyle: 'hiddenInset',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -34,7 +42,7 @@ function createWindow(route = '/') {
 function buildMenu() {
   const template = [
     {
-      label: 'Cortex IDE',
+      label: APP_NAME,
       submenu: [
         {
           label: 'Command Center',
@@ -81,6 +89,13 @@ function buildMenu() {
 }
 
 app.whenReady().then(() => {
+  const icon = nativeImage.createFromPath(ICON_PATH);
+  if (!icon.isEmpty()) {
+    if (process.platform === 'darwin' && app.dock) {
+      app.dock.setIcon(icon);
+    }
+  }
+
   buildMenu();
   createWindow('/');
 

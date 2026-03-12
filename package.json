@@ -1,13 +1,14 @@
 {
   "name": "cortex-ide",
   "version": "0.0.1",
+  "productName": "Cortex IDE",
   "private": true,
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "next dev -p 3001",
     "build": "next build",
     "start": "next start -p 3001",
-    "lint": "next lint",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "electron:dev": "wait-on tcp:3001 && cross-env CORTEX_IDE_DEV_URL=http://localhost:3001 electron electron/main.cjs",
     "desktop:open": "cross-env CORTEX_IDE_DEV_URL=http://localhost:3001 electron electron/main.cjs",
