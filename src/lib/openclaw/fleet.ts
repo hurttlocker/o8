@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { demoFleet } from '@/lib/demo/fleet';
+import { getOwnedCodexFleetAdditions } from '@/lib/codex/owned';
 import { getCodexDiscoveredFleetAdditions } from '@/lib/codex/sessions';
 import type {
   AgentStatus,
@@ -291,18 +292,44 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
       timestamp: agent.lastEventAt,
     }));
 
-    const codexDiscovery = await getCodexDiscoveredFleetAdditions();
-    const allAgents = [...agents, ...codexDiscovery.agents];
-    const allSquads = [...openClawSquads, ...codexDiscovery.squads];
-    const allEvents = [...openClawEvents, ...codexDiscovery.events];
+    const [ownedCodex, codexDiscovery] = await Promise.all([
+      getOwnedCodexFleetAdditions(),
+      getCodexDiscoveredFleetAdditions(),
+    ]);
+
+    const ownedThreadIds = new Set(ownedCodex.ownedThreadIds);
+    const filteredDiscoveredAgents = codexDiscovery.agents.filter((agent) => !ownedThreadIds.has(agent.sessionId ?? ''));
+    const filteredDiscoveredAgentIds = new Set(filteredDiscoveredAgents.map((agent) => agent.id));
+    const filteredDiscoveredEvents = codexDiscovery.events.filter((event) => filteredDiscoveredAgentIds.has(event.agentId ?? ''));
+    const filteredDiscoveredArtifacts = codexDiscovery.artifacts.filter(
+      (artifact) => !artifact.agentId || filteredDiscoveredAgentIds.has(artifact.agentId),
+    );
+    const filteredDiscoveredSquads = filteredDiscoveredAgents.length
+      ? [{
+          id: 'squad-codex-local',
+          name: 'Codex Local',
+          status: filteredDiscoveredAgents.some((agent) => agent.status === 'running') ? 'healthy' : 'watching',
+          throughputLabel: `${filteredDiscoveredAgents.length} local terminal surface${filteredDiscoveredAgents.length === 1 ? '' : 's'}`,
+          blockers: 0,
+          alerts: filteredDiscoveredAgents.reduce((sum, agent) => sum + agent.alerts, 0),
+          liveSessions: filteredDiscoveredAgents.length,
+          members: filteredDiscoveredAgents.map((agent) => agent.id),
+        } satisfies SquadSummary]
+      : [];
+
+    const allAgents = [...agents, ...ownedCodex.agents, ...filteredDiscoveredAgents];
+    const allSquads = [...openClawSquads, ...ownedCodex.squads, ...filteredDiscoveredSquads];
+    const allEvents = [...openClawEvents, ...ownedCodex.events, ...filteredDiscoveredEvents];
 
     return {
       generatedAt: new Date().toISOString(),
       meta: {
         mode: 'live',
-        sourceLabel: codexDiscovery.sourceLabel
-          ? `runtime inventory • openclaw status --json + ${codexDiscovery.sourceLabel}`
-          : 'runtime inventory • openclaw status --json',
+        sourceLabel: [
+          'runtime inventory • openclaw status --json',
+          ownedCodex.sourceLabel,
+          codexDiscovery.sourceLabel,
+        ].filter(Boolean).join(' + '),
         gatewayLabel: parsed.gateway?.reachable
           ? `OpenClaw ${parsed.gateway?.self?.version ?? 'unknown'} • ${parsed.gateway?.mode ?? 'local'} gateway`
           : 'Gateway unreachable',
@@ -312,6 +339,7 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
           primarySession.key === 'agent:main:main'
             ? 'Mirroring this live Q ↔ Mister session first. New sessions should only appear when you explicitly spawn them.'
             : 'Mirroring existing OpenClaw sessions first. New sessions should only appear when you explicitly spawn them.',
+          ownedCodex.note,
           codexDiscovery.note,
         ].filter(Boolean).join(' '),
       },
@@ -340,7 +368,8 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
           state: 'reviewing',
           detail: 'Active code lane that turned the shell into a truthful live bridge.',
         },
-        ...codexDiscovery.artifacts,
+        ...ownedCodex.artifacts,
+        ...filteredDiscoveredArtifacts,
       ],
     };
   } catch (error) {
