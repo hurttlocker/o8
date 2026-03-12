@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import type { AgentSummary } from '@/lib/fleet/types';
+import type { AgentSummary, RuntimeReviewPacket } from '@/lib/fleet/types';
 
 type SessionTranscriptEntry = {
   id: string;
@@ -111,6 +111,9 @@ export function SessionOperatorPanel({
   const [draft, setDraft] = useState('');
   const [history, setHistory] = useState<RuntimeLogEntry[]>([]);
   const [ownedGroups, setOwnedGroups] = useState<OwnedRuntimeTailGroup[]>([]);
+  const [reviewPacket, setReviewPacket] = useState<RuntimeReviewPacket | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [actionState, setActionState] = useState<'idle' | 'sending' | 'stopping'>('idle');
@@ -165,11 +168,34 @@ export function SessionOperatorPanel({
     }
   }, [agent.sessionKey, isOpenClaw, runtimeSurface, transcriptLimit]);
 
+  const loadReviewPacket = useCallback(async () => {
+    if (!isOwnedCodex || !runtimeSurface?.id) {
+      setReviewPacket(null);
+      setReviewError(null);
+      return;
+    }
+
+    setReviewLoading(true);
+    try {
+      const response = await fetch(`/api/runtime/review?surfaceId=${encodeURIComponent(runtimeSurface.id)}`, {
+        cache: 'no-store',
+      });
+      const payload = await readJson<RuntimeReviewPacket>(response);
+      setReviewPacket(payload);
+      setReviewError(null);
+    } catch (error) {
+      setReviewError(error instanceof Error ? error.message : 'Unable to load runtime review packet');
+    } finally {
+      setReviewLoading(false);
+    }
+  }, [isOwnedCodex, runtimeSurface]);
+
   useEffect(() => {
     setDraft('');
     setActionNote(null);
     void loadTranscript();
-  }, [agent.sessionKey, loadTranscript]);
+    void loadReviewPacket();
+  }, [agent.sessionKey, loadTranscript, loadReviewPacket]);
 
   async function handleSteerSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -195,9 +221,11 @@ export function SessionOperatorPanel({
       setDraft('');
       setActionNote(result.note ?? 'Steer request queued on the live session. External delivery stays off by default.');
       await loadTranscript();
+      await loadReviewPacket();
       await onRuntimeRefresh?.(agent.id);
       window.setTimeout(() => {
         void loadTranscript();
+        void loadReviewPacket();
         void onRuntimeRefresh?.(agent.id);
       }, 1200);
     } catch (error) {
@@ -232,9 +260,11 @@ export function SessionOperatorPanel({
             : 'No active run was in flight for this session.'),
       );
       await loadTranscript();
+      await loadReviewPacket();
       await onRuntimeRefresh?.(agent.id);
       window.setTimeout(() => {
         void loadTranscript();
+        void loadReviewPacket();
         void onRuntimeRefresh?.(agent.id);
       }, 1200);
     } catch (error) {
@@ -342,6 +372,131 @@ export function SessionOperatorPanel({
         )}
         {actionNote ? <p className="muted operator-note">{actionNote}</p> : null}
       </div>
+
+      {isOwnedCodex ? (
+        <div className="inset-card inspector-block tool-shell">
+          <div className="row space-between compact-row operator-header-row">
+            <div>
+              <span>Review packet</span>
+              <strong>Decision-ready evidence</strong>
+            </div>
+            <span className={`status-pill ${reviewPacket?.dirty ? 'status-warning' : 'status-healthy'}`}>
+              {reviewLoading ? 'loading' : reviewPacket?.dirty ? `${reviewPacket.changedFiles.length} review files` : 'clean repo'}
+            </span>
+          </div>
+          <p className="muted operator-note">
+            The first packet is intentionally honest: latest run evidence + current repo delta. It is useful now, even though per-run file attribution is not yet isolated when multiple sessions touch the same repo.
+          </p>
+          {reviewError ? <p className="muted operator-note">{reviewError}</p> : null}
+          {reviewPacket ? (
+            <>
+              <div className="operator-state-grid">
+                <div className="operator-state-card">
+                  <span>Repo</span>
+                  <strong>{reviewPacket.repoSlug ?? reviewPacket.title}</strong>
+                  <p className="muted mono">{reviewPacket.repoPath}</p>
+                </div>
+                <div className="operator-state-card">
+                  <span>Branch / head</span>
+                  <strong>{reviewPacket.branch ?? 'detached'}</strong>
+                  <p className="muted mono">{reviewPacket.head ?? 'unknown head'}</p>
+                </div>
+                <div className="operator-state-card">
+                  <span>Next actions</span>
+                  <strong>{reviewPacket.nextActions[0] ?? 'Review evidence'}</strong>
+                  <p className="muted">{reviewPacket.nextActions.slice(1).join(' • ') || 'No extra guidance yet.'}</p>
+                </div>
+              </div>
+
+              <div className="workflow-warning-list">
+                <p className="muted workflow-note">{reviewPacket.summary}</p>
+                {reviewPacket.notes.map((note) => (
+                  <p key={note} className="muted workflow-note">{note}</p>
+                ))}
+              </div>
+
+              {reviewPacket.lastRun ? (
+                <div className="workflow-file-item top-gap">
+                  <div className="row space-between compact-row">
+                    <strong>{`${reviewPacket.lastRun.mode === 'launch' ? 'Launch' : 'Resume'} run • ${reviewPacket.lastRun.outcome}`}</strong>
+                    <span className="muted mono">{reviewPacket.lastRun.finishedAtLabel ?? reviewPacket.lastRun.startedAtLabel ?? 'now'}</span>
+                  </div>
+                  <p className="muted">{reviewPacket.lastRun.assistantSummary ?? reviewPacket.lastRun.prompt}</p>
+                  {reviewPacket.lastRun.commands.length ? (
+                    <div className="workflow-file-list">
+                      {reviewPacket.lastRun.commands.slice(0, 4).map((command) => (
+                        <div key={command.id} className="workflow-file-item">
+                          <div className="row space-between compact-row">
+                            <strong className="mono">{command.command}</strong>
+                            <span className={`status-pill status-${command.status === 'completed' ? 'healthy' : command.status === 'running' ? 'running' : command.status === 'interrupted' ? 'warning' : 'critical'}`}>
+                              {command.status}{command.exitCode != null ? ` • exit ${command.exitCode}` : ''}
+                            </span>
+                          </div>
+                          <p className="muted mono">{command.outputPreview ?? 'No aggregated command output was captured for this step.'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="muted workflow-note">No command evidence was captured for the latest owned run.</p>
+                  )}
+                </div>
+              ) : null}
+
+              <div className="workflow-grid top-gap">
+                <div className="inset-card inspector-block tool-shell">
+                  <div className="row space-between compact-row operator-header-row">
+                    <div>
+                      <span>Current repo delta</span>
+                      <strong>{reviewPacket.dirty ? 'Review this result now' : 'No local file delta'}</strong>
+                    </div>
+                    <span className={`status-pill ${reviewPacket.dirty ? 'status-reviewing' : 'status-healthy'}`}>
+                      {reviewPacket.changedFiles.length} files
+                    </span>
+                  </div>
+                  <p className="muted workflow-note mono">{reviewPacket.diffStat}</p>
+                  {reviewPacket.changedFiles.length ? (
+                    <div className="workflow-file-list">
+                      {reviewPacket.changedFiles.slice(0, 8).map((file) => (
+                        <div key={`${file.status}:${file.path}`} className="workflow-file-item">
+                          <div className="row space-between compact-row">
+                            <strong className="mono">{file.path}</strong>
+                            <span className="status-pill status-reviewing">{file.status}</span>
+                          </div>
+                          <p className="muted mono">+{file.additions ?? '—'} / -{file.deletions ?? '—'}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+                <div className="inset-card inspector-block tool-shell">
+                  <div className="row space-between compact-row operator-header-row">
+                    <div>
+                      <span>Recent commits</span>
+                      <strong>Repo truth</strong>
+                    </div>
+                    <span className="status-pill status-healthy">{reviewPacket.recentCommits.length}</span>
+                  </div>
+                  {reviewPacket.recentCommits.length ? (
+                    <div className="workflow-file-list">
+                      {reviewPacket.recentCommits.map((commit) => (
+                        <div key={commit} className="workflow-file-item">
+                          <p className="muted mono">{commit}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="muted workflow-note">Recent commit history is unavailable for this repo.</p>
+                  )}
+                </div>
+              </div>
+            </>
+          ) : reviewLoading ? (
+            <p className="muted operator-note">Loading review packet…</p>
+          ) : (
+            <p className="muted operator-note">No review packet is available for this owned surface yet.</p>
+          )}
+        </div>
+      ) : null}
 
       <div className="inset-card inspector-block tool-shell terminal-shell">
         <div className="row space-between compact-row operator-header-row">
