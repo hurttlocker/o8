@@ -110,6 +110,43 @@ export interface ReviewArtifact {
   detail?: string;
 }
 
+export interface RuntimeReviewCommandEvidence {
+  id: string;
+  command: string;
+  status: 'running' | 'completed' | 'interrupted' | 'failed';
+  exitCode?: number | null;
+  outputPreview?: string;
+}
+
+export interface RuntimeReviewPacket {
+  surfaceId: string;
+  runtime: string;
+  title: string;
+  summary: string;
+  repoPath: string;
+  repoSlug?: string;
+  branch?: string;
+  head?: string;
+  dirty: boolean;
+  diffStat: string;
+  changedFiles: ReviewChangedFile[];
+  recentCommits: string[];
+  lastRun?: {
+    id: string;
+    mode: 'launch' | 'resume';
+    outcome: 'running' | 'finished' | 'interrupted' | 'failed';
+    prompt: string;
+    startedAt?: string;
+    finishedAt?: string;
+    startedAtLabel?: string;
+    finishedAtLabel?: string;
+    assistantSummary?: string;
+    commands: RuntimeReviewCommandEvidence[];
+  };
+  nextActions: string[];
+  notes: string[];
+}
+
 export interface ReviewChangedFile {
   path: string;
   status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
