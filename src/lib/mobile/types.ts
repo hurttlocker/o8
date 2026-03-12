@@ -57,6 +57,17 @@ export interface MobileReviewFocus {
   diffStat?: string;
 }
 
+export interface MobileReviewFileDetail {
+  path: string;
+  status: ReviewChangedFile['status'];
+  additions?: number | null;
+  deletions?: number | null;
+  originalPath?: string;
+  currentPath?: string;
+  note: string;
+  preview: string;
+}
+
 export interface MobileInboxSnapshot {
   generatedAt: string;
   mode: 'live' | 'demo';
@@ -80,6 +91,10 @@ export interface MobileTranscriptEntry {
 export interface MobileHistoryResponse {
   sessionKey: string;
   transcript: MobileTranscriptEntry[];
+}
+
+export interface MobileReviewFileResponse {
+  file: MobileReviewFileDetail;
 }
 
 export interface MobileActionRequest {
