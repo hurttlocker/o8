@@ -5,7 +5,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
-import type { AgentSummary, EventItem, ReviewArtifact, RuntimeSurfaceSummary, SquadSummary } from '@/lib/fleet/types';
+import type {
+  AgentSummary,
+  EventItem,
+  ReviewArtifact,
+  RuntimeSurfaceLifecycle,
+  RuntimeSurfaceSummary,
+  SquadSummary,
+} from '@/lib/fleet/types';
 
 const execFileAsync = promisify(execFile);
 const OWNED_CODEX_ROOT = process.env.CORTEX_IDE_OWNED_CODEX_ROOT || path.join(os.homedir(), '.cortex-ide', 'owned-codex');
@@ -15,6 +22,7 @@ const ACTIVE_WINDOW_MS = 10 * 60_000;
 const RECENT_WINDOW_MS = 6 * 60 * 60_000;
 
 type OwnedRunMode = 'launch' | 'resume';
+type OwnedRunOutcome = 'running' | 'finished' | 'interrupted' | 'failed';
 
 export type OwnedCodexLaunchRequest = {
   cwd: string;
@@ -37,6 +45,8 @@ type OwnedCodexRunRecord = {
   pid: number;
   stdoutPath: string;
   stderrPath: string;
+  outcome: OwnedRunOutcome;
+  interruptRequestedAt?: string;
 };
 
 type OwnedCodexSessionRecord = {
@@ -65,9 +75,25 @@ type OwnedTailEntry = {
   timestampLabel?: string;
 };
 
+type OwnedTailGroup = {
+  id: string;
+  title: string;
+  mode: OwnedRunMode;
+  outcome: OwnedRunOutcome;
+  prompt: string;
+  startedAt: string;
+  finishedAt?: string;
+  startedAtLabel?: string;
+  finishedAtLabel?: string;
+  summary: string;
+  entries: OwnedTailEntry[];
+};
+
 type ParsedRunLog = {
   threadId?: string;
   entries: OwnedTailEntry[];
+  outcome: OwnedRunOutcome;
+  completedTurn: boolean;
 };
 
 function nowIso() {
@@ -228,6 +254,7 @@ function parseOwnedRunLog(raw: string, run: OwnedCodexRunRecord): ParsedRunLog {
   ];
   let threadId: string | undefined;
   let noiseIndex = 0;
+  let completedTurn = false;
 
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
@@ -271,6 +298,7 @@ function parseOwnedRunLog(raw: string, run: OwnedCodexRunRecord): ParsedRunLog {
       }
 
       if (type === 'turn.completed') {
+        completedTurn = true;
         const usage = (parsed.usage ?? {}) as Record<string, unknown>;
         const usageBits = [
           usage.input_tokens ? `${usage.input_tokens} in` : null,
@@ -297,40 +325,148 @@ function parseOwnedRunLog(raw: string, run: OwnedCodexRunRecord): ParsedRunLog {
     }
   }
 
-  return { threadId, entries };
+  const outcome = run.outcome === 'running'
+    ? completedTurn
+      ? 'finished'
+      : run.interruptRequestedAt
+        ? 'interrupted'
+        : 'running'
+    : run.outcome;
+
+  return {
+    threadId,
+    entries,
+    outcome,
+    completedTurn,
+  };
+}
+
+async function readRunArtifacts(run: OwnedCodexRunRecord) {
+  const [stdoutRaw, stderrRaw] = await Promise.all([
+    pathExists(run.stdoutPath).then((exists) => (exists ? readFile(run.stdoutPath, 'utf8').catch(() => '') : '')),
+    pathExists(run.stderrPath).then((exists) => (exists ? readFile(run.stderrPath, 'utf8').catch(() => '') : '')),
+  ]);
+
+  return {
+    stdoutRaw,
+    stderrRaw,
+    parsed: parseOwnedRunLog(stdoutRaw, run),
+  };
+}
+
+function deriveRunOutcome(run: OwnedCodexRunRecord, parsed: ParsedRunLog, stderrRaw: string): OwnedRunOutcome {
+  if (run.outcome === 'interrupted' || run.interruptRequestedAt) {
+    return 'interrupted';
+  }
+  if (parsed.completedTurn) {
+    return 'finished';
+  }
+  const stderrText = stderrRaw.toLowerCase();
+  if (stderrText.includes('panic') || stderrText.includes('fatal') || stderrText.includes('error')) {
+    return 'failed';
+  }
+  return run.outcome === 'running' ? 'failed' : run.outcome;
+}
+
+function latestFinishedRun(session: OwnedCodexSessionRecord) {
+  return [...session.recentRuns]
+    .filter((run) => run.outcome !== 'running')
+    .sort((a, b) => (b.finishedAt ?? b.startedAt).localeCompare(a.finishedAt ?? a.startedAt))[0];
+}
+
+function deriveLifecycle(session: OwnedCodexSessionRecord): RuntimeSurfaceLifecycle {
+  const activeRun = session.activeRun && isPidAlive(session.activeRun.pid) ? session.activeRun : undefined;
+  const latest = latestFinishedRun(session);
+
+  if (activeRun) {
+    return {
+      availability: 'running',
+      lastOutcome: latest?.outcome === 'finished' || latest?.outcome === 'interrupted' || latest?.outcome === 'failed'
+        ? latest.outcome
+        : undefined,
+      lastRunMode: activeRun.mode,
+      lastRunStartedAt: activeRun.startedAt,
+      lastRunFinishedAt: latest?.finishedAt,
+      summary: 'Active owned run in flight.',
+    };
+  }
+
+  if (!session.threadId) {
+    return {
+      availability: 'awaiting-thread',
+      lastOutcome: latest?.outcome === 'finished' || latest?.outcome === 'interrupted' || latest?.outcome === 'failed'
+        ? latest.outcome
+        : undefined,
+      lastRunMode: latest?.mode,
+      lastRunStartedAt: latest?.startedAt,
+      lastRunFinishedAt: latest?.finishedAt,
+      summary: 'Waiting for the first persistent Codex thread id before resume is available.',
+    };
+  }
+
+  return {
+    availability: 'ready-for-resume',
+    lastOutcome: latest?.outcome === 'finished' || latest?.outcome === 'interrupted' || latest?.outcome === 'failed'
+      ? latest.outcome
+      : undefined,
+    lastRunMode: latest?.mode,
+    lastRunStartedAt: latest?.startedAt,
+    lastRunFinishedAt: latest?.finishedAt,
+    summary: latest?.outcome === 'interrupted'
+      ? 'Previous run was interrupted. This owned session is ready for the next bounded input.'
+      : latest?.outcome === 'failed'
+        ? 'Previous run failed. This owned session is ready for a corrective follow-up.'
+        : 'Owned session is idle between runs and ready for the next bounded input.',
+  };
+}
+
+function lifecycleAvailabilityLabel(availability?: RuntimeSurfaceLifecycle['availability']) {
+  switch (availability) {
+    case 'running':
+      return 'running';
+    case 'awaiting-thread':
+      return 'awaiting thread';
+    case 'ready-for-resume':
+      return 'ready for resume';
+    default:
+      return 'unknown';
+  }
 }
 
 async function refreshOwnedSession(session: OwnedCodexSessionRecord) {
   let dirty = false;
-  const activeRun = session.activeRun;
-
-  if (activeRun && !isPidAlive(activeRun.pid)) {
-    const finishedAt = nowIso();
-    session.activeRun = undefined;
-    session.recentRuns = session.recentRuns.map((run) =>
-      run.id === activeRun.id && !run.finishedAt
-        ? {
-            ...run,
-            finishedAt,
-          }
-        : run,
-    );
-    dirty = true;
-  }
 
   for (const run of session.recentRuns) {
-    const stdoutExists = await pathExists(run.stdoutPath);
-    if (!stdoutExists) continue;
-    const raw = await readFile(run.stdoutPath, 'utf8').catch(() => '');
-    const parsed = parseOwnedRunLog(raw, run);
+    const { stderrRaw, parsed } = await readRunArtifacts(run);
+
     if (!session.threadId && parsed.threadId) {
       session.threadId = parsed.threadId;
       dirty = true;
     }
-    if (!run.finishedAt && session.activeRun?.id !== run.id && raw.includes('"turn.completed"')) {
+
+    const runAlive = isPidAlive(run.pid);
+    if (runAlive) {
+      if (run.outcome !== 'running') {
+        run.outcome = 'running';
+        dirty = true;
+      }
+      continue;
+    }
+
+    const nextOutcome = deriveRunOutcome(run, parsed, stderrRaw);
+    if (run.outcome !== nextOutcome) {
+      run.outcome = nextOutcome;
+      dirty = true;
+    }
+    if (!run.finishedAt) {
       run.finishedAt = nowIso();
       dirty = true;
     }
+  }
+
+  if (session.activeRun && !isPidAlive(session.activeRun.pid)) {
+    session.activeRun = undefined;
+    dirty = true;
   }
 
   if (dirty) {
@@ -341,6 +477,9 @@ async function refreshOwnedSession(session: OwnedCodexSessionRecord) {
 }
 
 function buildOwnedRuntimeSurface(session: OwnedCodexSessionRecord, running: boolean): RuntimeSurfaceSummary {
+  const lifecycle = deriveLifecycle(session);
+  const lastOutcomeLabel = lifecycle.lastOutcome ? ` • last ${lifecycle.lastOutcome}` : '';
+
   return {
     id: session.surfaceId,
     runtime: 'codex',
@@ -350,20 +489,19 @@ function buildOwnedRuntimeSurface(session: OwnedCodexSessionRecord, running: boo
     cwd: shortHome(session.repoPath),
     branch: session.branch,
     sourceLabel: running
-      ? `IDE-owned Codex registry • active pid ${session.activeRun?.pid ?? 'unknown'}`
-      : session.threadId
-        ? 'IDE-owned Codex registry • ready for resume'
-        : 'IDE-owned Codex registry • awaiting thread id',
+      ? `IDE-owned Codex registry • active pid ${session.activeRun?.pid ?? 'unknown'}${lastOutcomeLabel}`
+      : `IDE-owned Codex registry • ${lifecycleAvailabilityLabel(lifecycle.availability)}${lastOutcomeLabel}`,
     tailSourceLabel: `${shortHome(session.sessionDir)}/${RUNS_DIR}/*.jsonl`,
     capabilities: {
       attach: true,
       readTail: true,
-      sendInput: !running && Boolean(session.threadId),
-      interrupt: running,
+      sendInput: lifecycle.availability === 'ready-for-resume',
+      interrupt: lifecycle.availability === 'running',
       resize: false,
       diffContext: Boolean(session.branch || session.repoSlug),
       reviewContext: Boolean(session.branch || session.repoSlug),
     },
+    lifecycle,
     reviewContext: {
       repoSlug: session.repoSlug,
       branch: session.branch,
@@ -377,7 +515,13 @@ function latestRun(session: OwnedCodexSessionRecord) {
 }
 
 function deriveOwnedStatus(session: OwnedCodexSessionRecord): AgentSummary['status'] {
-  if (session.activeRun && isPidAlive(session.activeRun.pid)) return 'running';
+  const lifecycle = deriveLifecycle(session);
+  if (lifecycle.availability === 'running') return 'running';
+  if (lifecycle.lastOutcome === 'failed') return 'failed';
+  if (lifecycle.availability === 'awaiting-thread') return 'waiting';
+  if (lifecycle.lastOutcome === 'interrupted') return 'waiting';
+  if (lifecycle.availability === 'ready-for-resume') return 'reviewing';
+
   const latest = latestRun(session);
   if (!latest) return 'idle';
   const ageMs = Math.max(0, Date.now() - new Date(latest.finishedAt ?? latest.startedAt).getTime());
@@ -387,13 +531,23 @@ function deriveOwnedStatus(session: OwnedCodexSessionRecord): AgentSummary['stat
 }
 
 function buildOwnedCurrentTask(session: OwnedCodexSessionRecord, running: boolean) {
+  const lifecycle = deriveLifecycle(session);
   if (running) {
     return `IDE-launched Codex run active. ${session.latestSummary}`;
+  }
+  if (lifecycle.availability === 'awaiting-thread') {
+    return `IDE-owned Codex session launched and waiting for its first thread id. ${session.latestSummary}`;
+  }
+  if (lifecycle.lastOutcome === 'interrupted') {
+    return `IDE-owned Codex session is ready for resume after an interrupted run. ${session.latestSummary}`;
+  }
+  if (lifecycle.lastOutcome === 'failed') {
+    return `IDE-owned Codex session is ready for a corrective follow-up after a failed run. ${session.latestSummary}`;
   }
   if (session.threadId) {
     return `IDE-owned Codex session ready for the next input via resume. ${session.latestSummary}`;
   }
-  return `IDE-owned Codex session launched and waiting for its first thread id. ${session.latestSummary}`;
+  return `IDE-owned Codex session is idle. ${session.latestSummary}`;
 }
 
 async function listOwnedSessionDirs() {
@@ -432,6 +586,7 @@ async function spawnOwnedRun(session: OwnedCodexSessionRecord, prompt: string, m
       pid: child.pid ?? 0,
       stdoutPath,
       stderrPath,
+      outcome: 'running',
     };
 
     session.latestPrompt = prompt;
@@ -519,6 +674,21 @@ export async function interruptOwnedCodexSession(surfaceId: string) {
 
   try {
     process.kill(-session.activeRun.pid, 'SIGINT');
+    session.activeRun = {
+      ...session.activeRun,
+      outcome: 'interrupted',
+      interruptRequestedAt: nowIso(),
+    };
+    session.recentRuns = session.recentRuns.map((run) =>
+      run.id === session.activeRun?.id
+        ? {
+            ...run,
+            outcome: 'interrupted',
+            interruptRequestedAt: session.activeRun?.interruptRequestedAt,
+          }
+        : run,
+    );
+    await saveOwnedSession(session);
     return { interrupted: true, note: 'Interrupt sent to the active IDE-owned Codex run.' };
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : 'Unable to interrupt the owned Codex run.');
@@ -540,18 +710,40 @@ async function findOwnedSession(surfaceId: string) {
 async function collectOwnedTailEntries(session: OwnedCodexSessionRecord) {
   const runs = [...session.recentRuns].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
   const entries: OwnedTailEntry[] = [];
+  const groups: OwnedTailGroup[] = [];
   let discoveredThreadId = session.threadId;
 
   for (const run of runs) {
-    if (!(await pathExists(run.stdoutPath))) continue;
-    const raw = await readFile(run.stdoutPath, 'utf8').catch(() => '');
-    const parsed = parseOwnedRunLog(raw, run);
+    const { parsed, stderrRaw } = await readRunArtifacts(run);
+    if (!parsed.entries.length) continue;
+
+    const outcome = deriveRunOutcome(run, parsed, stderrRaw);
     discoveredThreadId = discoveredThreadId ?? parsed.threadId;
     entries.push(...parsed.entries);
+    groups.push({
+      id: run.id,
+      title: `${run.mode === 'launch' ? 'Launch turn' : 'Resume turn'} • ${outcome}`,
+      mode: run.mode,
+      outcome,
+      prompt: compactText(run.prompt, 260),
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      startedAtLabel: formatClock(run.startedAt),
+      finishedAtLabel: formatClock(run.finishedAt),
+      summary: outcome === 'interrupted'
+        ? 'Interrupted before Codex completed the turn.'
+        : outcome === 'failed'
+          ? 'Run ended without a clean turn completion.'
+          : outcome === 'running'
+            ? 'Run is still in flight.'
+            : 'Run completed and the session can continue from here.',
+      entries: parsed.entries,
+    });
   }
 
   return {
     entries: entries.slice(-24),
+    groups: groups.slice(-8),
     threadId: discoveredThreadId,
   };
 }
@@ -572,6 +764,7 @@ export async function getOwnedCodexRuntimeTail(surfaceId: string) {
   return {
     surface: buildOwnedRuntimeSurface(session, Boolean(session.activeRun && isPidAlive(session.activeRun.pid))),
     entries: tail.entries,
+    groups: tail.groups,
   };
 }
 
@@ -610,7 +803,17 @@ export async function getOwnedCodexFleetAdditions(): Promise<{
       const running = Boolean(session.activeRun && isPidAlive(session.activeRun.pid));
       const status = deriveOwnedStatus(session);
       const runtimeSurface = buildOwnedRuntimeSurface(session, running);
+      const lifecycle = runtimeSurface.lifecycle;
       const lastRun = latestRun(session);
+      const lifecycleLabel = lifecycle?.availability === 'running'
+        ? 'owned active'
+        : lifecycle?.lastOutcome === 'failed'
+          ? 'owned failed'
+          : lifecycle?.lastOutcome === 'interrupted'
+            ? 'owned interrupted'
+            : lifecycle?.availability === 'awaiting-thread'
+              ? 'owned warming'
+              : 'owned ready';
       return {
         id: session.surfaceId,
         name: session.title,
@@ -628,10 +831,10 @@ export async function getOwnedCodexFleetAdditions(): Promise<{
           usedPercent: 0,
           trend: running ? 'rising' : 'stable',
         },
-        alerts: 0,
+        alerts: lifecycle?.lastOutcome === 'failed' ? 1 : 0,
         sessionId: session.threadId ?? session.surfaceId,
         sessionKind: 'owned-runtime',
-        surfaceLabel: running ? 'Codex terminal • owned active' : 'Codex terminal • owned',
+        surfaceLabel: `Codex terminal • ${lifecycleLabel}`,
         runtimeSurface,
       } satisfies AgentSummary;
     });
@@ -653,18 +856,20 @@ export async function getOwnedCodexFleetAdditions(): Promise<{
     id: `evt-${agent.id}`,
     agentId: agent.id,
     squadId: agent.squadId,
-    severity: agent.status === 'running' ? 'info' : 'success',
+    severity: agent.status === 'running' ? 'info' : agent.status === 'failed' ? 'critical' : agent.status === 'waiting' ? 'warning' : 'success',
     title: `${agent.name} • ${agent.surfaceLabel}`,
-    detail: `${agent.currentTask}${agent.runtimeSurface?.reviewContext?.repoSlug ? ` • ${agent.runtimeSurface.reviewContext.repoSlug}` : ''}`,
+    detail: `${agent.currentTask}${agent.runtimeSurface?.lifecycle?.lastOutcome ? ` • last ${agent.runtimeSurface.lifecycle.lastOutcome}` : ''}${agent.runtimeSurface?.reviewContext?.repoSlug ? ` • ${agent.runtimeSurface.reviewContext.repoSlug}` : ''}`,
     timestamp: agent.lastEventAt,
   }));
 
   const artifacts: ReviewArtifact[] = agents.slice(0, 3).map((agent) => ({
     kind: 'run_log',
     title: `${agent.name} owned tail`,
-    state: 'reviewing',
+    state: agent.runtimeSurface?.lifecycle?.lastOutcome === 'failed' ? 'new' : 'reviewing',
     agentId: agent.id,
-    detail: 'Readable JSON tail recovered from an IDE-owned Codex exec/resume run.',
+    detail: agent.runtimeSurface?.lifecycle?.lastOutcome
+      ? `Readable JSON tail recovered from an IDE-owned Codex exec/resume run. Last outcome: ${agent.runtimeSurface.lifecycle.lastOutcome}.`
+      : 'Readable JSON tail recovered from an IDE-owned Codex exec/resume run.',
   }));
 
   return {

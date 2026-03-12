@@ -38,6 +38,15 @@ export interface RuntimeSurfaceCapabilities {
   reviewContext: boolean;
 }
 
+export interface RuntimeSurfaceLifecycle {
+  availability?: 'awaiting-thread' | 'running' | 'ready-for-resume';
+  lastOutcome?: 'finished' | 'interrupted' | 'failed';
+  lastRunMode?: 'launch' | 'resume';
+  lastRunStartedAt?: string;
+  lastRunFinishedAt?: string;
+  summary?: string;
+}
+
 export interface RuntimeSurfaceSummary {
   id: string;
   runtime: string;
@@ -49,6 +58,7 @@ export interface RuntimeSurfaceSummary {
   sourceLabel: string;
   tailSourceLabel?: string;
   capabilities: RuntimeSurfaceCapabilities;
+  lifecycle?: RuntimeSurfaceLifecycle;
   reviewContext?: {
     repoSlug?: string;
     branch?: string;
