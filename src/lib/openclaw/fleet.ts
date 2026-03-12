@@ -185,9 +185,9 @@ function buildDemoFallback(reason: string): FleetSnapshot {
     generatedAt: new Date().toISOString(),
     meta: {
       mode: 'demo',
-      sourceLabel: 'Demo fleet snapshot',
+      sourceLabel: 'Demo runtime inventory snapshot',
       mirrorMode: 'demo-only',
-      note: `Live OpenClaw bridge unavailable: ${reason}`,
+      note: `Live runtime inventory unavailable: ${reason}`,
     },
   };
 }
@@ -205,7 +205,7 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
       .slice(0, 10);
 
     if (!recent.length) {
-      return buildDemoFallback('OpenClaw returned no recent sessions.');
+      return buildDemoFallback('OpenClaw returned no recent mirrored sessions.');
     }
 
     const agentMeta = Object.fromEntries(
@@ -300,8 +300,8 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
       meta: {
         mode: 'live',
         sourceLabel: codexDiscovery.sourceLabel
-          ? `openclaw status --json + ${codexDiscovery.sourceLabel}`
-          : 'openclaw status --json',
+          ? `runtime inventory • openclaw status --json + ${codexDiscovery.sourceLabel}`
+          : 'runtime inventory • openclaw status --json',
         gatewayLabel: parsed.gateway?.reachable
           ? `OpenClaw ${parsed.gateway?.self?.version ?? 'unknown'} • ${parsed.gateway?.mode ?? 'local'} gateway`
           : 'Gateway unreachable',
