@@ -6,10 +6,11 @@ import type { MobileControlAction, MobileInboxItem, MobileInboxSnapshot, MobileR
 
 function sessionActions(agent: AgentSummary): MobileControlAction[] {
   const runtimeSurface = agent.runtimeSurface;
-  const canSteer = Boolean(runtimeSurface?.capabilities.sendInput);
-  const canStop = Boolean(runtimeSurface?.capabilities.interrupt);
-  const ownershipNote = runtimeSurface?.runtime === 'codex'
-    ? 'Mobile mutation stays off for discovered Codex terminals. Only IDE-owned Codex surfaces may become mutable later.'
+  const isOpenClaw = agent.runtime === 'openclaw';
+  const canSteer = isOpenClaw && Boolean(runtimeSurface?.capabilities.sendInput);
+  const canStop = isOpenClaw && Boolean(runtimeSurface?.capabilities.interrupt);
+  const ownershipNote = agent.runtime === 'codex'
+    ? 'Owned Codex is watch-first on phone right now. Lifecycle and grouped tail are live, but resume/interrupt stay on desktop until mobile control semantics are cleaner.'
     : 'This action is not wired truthfully on the current runtime surface.';
 
   return [
@@ -56,6 +57,23 @@ function buildSessionLine(agent: AgentSummary, transcriptSnippet?: string) {
   return parts.join(' • ');
 }
 
+function mobileSessionPriority(agent: AgentSummary) {
+  const isOwnedCodex = agent.runtime === 'codex' && agent.runtimeSurface?.ownership === 'owned';
+  if (agent.isCurrentSession) return 100;
+  if (isOwnedCodex && agent.status === 'running') return 96;
+  if (isOwnedCodex && agent.status === 'failed') return 94;
+  if (isOwnedCodex && agent.status === 'waiting') return 92;
+  if (isOwnedCodex && agent.status === 'reviewing') return 90;
+  if (isOwnedCodex) return 88;
+  if (agent.approvalStatus === 'pending') return 82;
+  if (agent.status === 'running') return 76;
+  if (agent.status === 'blocked') return 72;
+  if (agent.status === 'failed') return 70;
+  if (agent.status === 'reviewing') return 64;
+  if (agent.status === 'waiting') return 56;
+  return 40;
+}
+
 function summarizeTranscript(text: string) {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
@@ -64,8 +82,21 @@ function summarizeTranscript(text: string) {
 
 export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
   const fleet = await getRuntimeInventorySnapshot();
-  const sessions = fleet.agents.filter((agent) => agent.runtime === 'openclaw');
-  const primarySession = sessions.find((session) => session.sessionKey === fleet.meta.primarySessionKey) ?? sessions[0];
+  const sessions = fleet.agents
+    .filter((agent) => (
+      agent.runtime === 'openclaw'
+        || (agent.runtime === 'codex' && agent.runtimeSurface?.ownership === 'owned')
+    ))
+    .map((agent, index) => ({ agent, index }))
+    .sort((left, right) => {
+      const priorityDiff = mobileSessionPriority(right.agent) - mobileSessionPriority(left.agent);
+      return priorityDiff !== 0 ? priorityDiff : left.index - right.index;
+    })
+    .map(({ agent }) => agent);
+  const primarySession = sessions.find((session) => session.sessionKey === fleet.meta.primarySessionKey)
+    ?? sessions.find((session) => session.runtime === 'openclaw' && session.isCurrentSession)
+    ?? sessions.find((session) => session.runtime === 'openclaw')
+    ?? sessions[0];
 
   const [reviewSnapshot, primaryTranscript] = await Promise.all([
     getWorkspaceReviewSnapshot().catch(() => null),
@@ -162,7 +193,7 @@ export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
   const alerts = items.filter((item) => item.kind === 'alert' && item.severity !== 'info').length;
   const approvals = items.filter((item) => item.kind === 'approval').length;
   const reviewItems = items.filter((item) => item.kind === 'review').length;
-  const activeRuns = sessions.filter((agent) => ['running', 'reviewing', 'blocked'].includes(agent.status)).length;
+  const activeRuns = sessions.filter((agent) => ['running', 'reviewing', 'blocked', 'waiting', 'failed'].includes(agent.status)).length;
 
   return {
     generatedAt: new Date().toISOString(),
@@ -171,7 +202,7 @@ export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
     primarySessionKey: fleet.meta.primarySessionKey,
     note:
       fleet.meta.mode === 'live'
-        ? 'Mobile now speaks to a Cortex IDE control snapshot, not a Codex-specific remote. OpenClaw remains the first actionable backing adapter while discovered Codex terminals stay on desktop until the owned-session lane is truthful.'
+        ? 'Mobile now speaks to a Cortex IDE control snapshot. OpenClaw remains the first actionable backing adapter, while IDE-owned Codex surfaces are watch-first on phone with lifecycle + grouped tail. Resume/interrupt stay on desktop until the mobile control semantics are cleaner.'
         : fleet.meta.note,
     sessions,
     items,
