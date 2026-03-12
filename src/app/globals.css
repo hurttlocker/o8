@@ -754,6 +754,29 @@ button:hover {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.64), rgba(255, 255, 255, 0.34));
 }
 
+.glass-file-button {
+  width: 100%;
+  text-align: left;
+}
+
+.glass-file-row-active {
+  border-color: rgba(37, 99, 235, 0.3);
+  box-shadow:
+    0 12px 36px rgba(37, 99, 235, 0.12),
+    inset 0 0 0 1px rgba(37, 99, 235, 0.16);
+}
+
+.glass-file-caption {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.glass-review-preview {
+  display: grid;
+  gap: 0.75rem;
+}
+
 .glass-file-row p,
 .mobile-review-headline p {
   margin: 0;

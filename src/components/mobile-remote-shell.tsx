@@ -9,6 +9,7 @@ import type {
   MobileControlAction,
   MobileHistoryResponse,
   MobileInboxSnapshot,
+  MobileReviewFileResponse,
   MobileTranscriptEntry,
 } from '@/lib/mobile/types';
 
@@ -73,6 +74,10 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
   const [draftBySession, setDraftBySession] = useState<Record<string, string>>({});
   const [actionStateBySession, setActionStateBySession] = useState<Record<string, 'idle' | 'steering' | 'stopping'>>({});
   const [actionNoteBySession, setActionNoteBySession] = useState<Record<string, string | null>>({});
+  const [selectedReviewFilePath, setSelectedReviewFilePath] = useState<string | null>(null);
+  const [reviewFileByPath, setReviewFileByPath] = useState<Record<string, MobileReviewFileResponse['file']>>({});
+  const [reviewFileLoadingPath, setReviewFileLoadingPath] = useState<string | null>(null);
+  const [reviewFileError, setReviewFileError] = useState<string | null>(null);
 
   async function refreshInbox() {
     const response = await fetch('/api/mobile/inbox', { cache: 'no-store' });
@@ -131,6 +136,17 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
     [selectedId, snapshot],
   );
 
+  useEffect(() => {
+    if (!selectedReviewFilePath) {
+      return;
+    }
+
+    if (!snapshot.review?.changedFiles.some((file) => file.path === selectedReviewFilePath)) {
+      setSelectedReviewFilePath(null);
+      setReviewFileError(null);
+    }
+  }, [selectedReviewFilePath, snapshot.review]);
+
   function syncSelection(sessionKey: string) {
     const matchingSession = snapshot.sessions.find((session) => session.sessionKey === sessionKey);
     if (!matchingSession) {
@@ -161,6 +177,45 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
       throw error;
     } finally {
       setHistoryLoading((current) => ({ ...current, [sessionKey]: false }));
+    }
+  }
+
+  async function loadReviewFile(reviewPath: string, force = false) {
+    if (!force && reviewFileByPath[reviewPath]) {
+      setReviewFileError(null);
+      return reviewFileByPath[reviewPath];
+    }
+
+    setReviewFileLoadingPath(reviewPath);
+    setReviewFileError(null);
+    try {
+      const response = await fetch(`/api/mobile/review-file?path=${encodeURIComponent(reviewPath)}`, {
+        cache: 'no-store',
+      });
+      const payload = await readJson<MobileReviewFileResponse>(response);
+      setReviewFileByPath((current) => ({ ...current, [reviewPath]: payload.file }));
+      return payload.file;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load the per-file review preview.';
+      setReviewFileError(message);
+      throw error;
+    } finally {
+      setReviewFileLoadingPath((current) => (current === reviewPath ? null : current));
+    }
+  }
+
+  async function handleReviewFileSelect(reviewPath: string) {
+    if (selectedReviewFilePath === reviewPath) {
+      setSelectedReviewFilePath(null);
+      setReviewFileError(null);
+      return;
+    }
+
+    setSelectedReviewFilePath(reviewPath);
+    try {
+      await loadReviewFile(reviewPath);
+    } catch {
+      // reviewFileError already captures the route failure for the inline surface
     }
   }
 
@@ -541,20 +596,79 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
           ) : null}
 
           {snapshot.review.changedFiles.length ? (
-            <div className="glass-file-list">
-              {snapshot.review.changedFiles.map((file) => (
-                <div key={`${file.status}:${file.path}`} className="glass-file-row">
-                  <div className="row space-between compact-row">
-                    <strong className="mono">{file.path}</strong>
-                    <span className={`status-pill ${statusClass(file.status === 'deleted' ? 'critical' : file.status === 'untracked' ? 'warning' : file.status === 'renamed' ? 'reviewing' : file.status === 'added' ? 'healthy' : 'running')}`}>
-                      {file.status}
-                    </span>
-                  </div>
-                  <p className="muted mono">
-                    +{file.additions ?? 0} / -{file.deletions ?? 0}
-                  </p>
+            <>
+              <p className="muted operator-note">
+                Tap a file to inspect the local diff inline before you drop into the heavier desktop review surface.
+              </p>
+              <div className="glass-file-list">
+                {snapshot.review.changedFiles.map((file) => {
+                  const fileTone = file.status === 'deleted'
+                    ? 'critical'
+                    : file.status === 'untracked'
+                      ? 'warning'
+                      : file.status === 'renamed'
+                        ? 'reviewing'
+                        : file.status === 'added'
+                          ? 'healthy'
+                          : 'running';
+                  const isSelected = selectedReviewFilePath === file.path;
+
+                  return (
+                    <button
+                      key={`${file.status}:${file.path}`}
+                      type="button"
+                      className={`glass-file-row glass-file-button ${isSelected ? 'glass-file-row-active' : ''}`}
+                      onClick={() => {
+                        void handleReviewFileSelect(file.path);
+                      }}
+                    >
+                      <div className="row space-between compact-row">
+                        <strong className="mono">{file.path}</strong>
+                        <span className={`status-pill ${statusClass(fileTone)}`}>
+                          {file.status}
+                        </span>
+                      </div>
+                      <p className="muted mono">
+                        +{file.additions ?? 0} / -{file.deletions ?? 0}
+                      </p>
+                      <span className="glass-file-caption">
+                        {isSelected ? 'Hide preview' : 'Open file preview'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : null}
+
+          {selectedReviewFilePath ? (
+            <div className="glass-review-preview inset-card">
+              <div className="row space-between compact-row operator-header-row">
+                <div>
+                  <span>Per-file drilldown</span>
+                  <strong className="mono">{selectedReviewFilePath}</strong>
                 </div>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    void loadReviewFile(selectedReviewFilePath, true);
+                  }}
+                  disabled={reviewFileLoadingPath === selectedReviewFilePath}
+                >
+                  {reviewFileLoadingPath === selectedReviewFilePath ? 'Refreshing…' : 'Refresh preview'}
+                </button>
+              </div>
+              {reviewFileError ? <p className="muted operator-note">{reviewFileError}</p> : null}
+              {reviewFileByPath[selectedReviewFilePath] ? (
+                <>
+                  <p className="muted operator-note">{reviewFileByPath[selectedReviewFilePath].note}</p>
+                  <pre className="glass-diff-preview">{reviewFileByPath[selectedReviewFilePath].preview}</pre>
+                </>
+              ) : reviewFileLoadingPath === selectedReviewFilePath ? (
+                <p className="muted operator-note">Loading per-file review preview…</p>
+              ) : (
+                <p className="muted operator-note">No inline review preview is cached for this file yet.</p>
+              )}
             </div>
           ) : null}
 
