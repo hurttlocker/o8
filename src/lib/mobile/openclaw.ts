@@ -145,7 +145,7 @@ export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
       desktopHref: '/#workflow-review-panel',
       pullRequest: leadPr,
       issues: reviewSnapshot.activeIssues,
-      changedFiles: reviewSnapshot.changedFiles.slice(0, 6),
+      changedFiles: reviewSnapshot.changedFiles,
       diffStat: reviewSnapshot.diffStat,
     };
   }

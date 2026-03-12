@@ -30,11 +30,14 @@ export async function POST(request: NextRequest) {
     switch (action) {
       case 'steer': {
         const message = payload?.message?.trim();
-        if (!message) {
-          return NextResponse.json({ error: 'message is required for steer' }, { status: 400 });
+        const attachments = Array.isArray(payload?.attachments)
+          ? payload.attachments.filter((item) => item?.content && item?.mimeType && item?.fileName)
+          : [];
+        if (!message && attachments.length === 0) {
+          return NextResponse.json({ error: 'message or image attachment is required for steer' }, { status: 400 });
         }
 
-        const result = await steerOpenClawSession(sessionKey, message);
+        const result = await steerOpenClawSession(sessionKey, message, attachments);
         const response: MobileActionResponse = {
           ok: true,
           action,
