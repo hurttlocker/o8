@@ -42,6 +42,7 @@ export interface RuntimeSurfaceSummary {
   id: string;
   runtime: string;
   kind: 'chat-session' | 'terminal-session' | 'runtime-session';
+  ownership: 'provider' | 'discovered' | 'owned';
   title: string;
   cwd?: string;
   branch?: string;

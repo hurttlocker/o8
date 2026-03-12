@@ -5,6 +5,13 @@ import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
 import type { MobileControlAction, MobileInboxItem, MobileInboxSnapshot, MobileReviewFocus } from '@/lib/mobile/types';
 
 function sessionActions(agent: AgentSummary): MobileControlAction[] {
+  const runtimeSurface = agent.runtimeSurface;
+  const canSteer = Boolean(runtimeSurface?.capabilities.sendInput);
+  const canStop = Boolean(runtimeSurface?.capabilities.interrupt);
+  const ownershipNote = runtimeSurface?.runtime === 'codex'
+    ? 'Mobile mutation stays off for discovered Codex terminals. Only IDE-owned Codex surfaces may become mutable later.'
+    : 'This action is not wired truthfully on the current runtime surface.';
+
   return [
     {
       kind: 'inspect',
@@ -16,14 +23,16 @@ function sessionActions(agent: AgentSummary): MobileControlAction[] {
       kind: 'steer',
       label: 'Steer',
       sessionKey: agent.sessionKey,
-      available: true,
+      available: canSteer,
+      reasonUnavailable: canSteer ? undefined : ownershipNote,
     },
     {
       kind: 'stop',
       label: 'Stop run',
       sessionKey: agent.sessionKey,
       destructive: true,
-      available: true,
+      available: canStop,
+      reasonUnavailable: canStop ? undefined : ownershipNote,
     },
     {
       kind: 'open_desktop',
@@ -55,7 +64,7 @@ function summarizeTranscript(text: string) {
 
 export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
   const fleet = await getRuntimeInventorySnapshot();
-  const sessions = fleet.agents;
+  const sessions = fleet.agents.filter((agent) => agent.runtime === 'openclaw');
   const primarySession = sessions.find((session) => session.sessionKey === fleet.meta.primarySessionKey) ?? sessions[0];
 
   const [reviewSnapshot, primaryTranscript] = await Promise.all([
@@ -162,7 +171,7 @@ export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
     primarySessionKey: fleet.meta.primarySessionKey,
     note:
       fleet.meta.mode === 'live'
-        ? 'Mobile now speaks to a Cortex IDE control snapshot, not a Codex-specific remote. OpenClaw is simply the first live backing adapter.'
+        ? 'Mobile now speaks to a Cortex IDE control snapshot, not a Codex-specific remote. OpenClaw remains the first actionable backing adapter while discovered Codex terminals stay on desktop until the owned-session lane is truthful.'
         : fleet.meta.note,
     sessions,
     items,

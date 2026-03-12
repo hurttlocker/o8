@@ -144,6 +144,7 @@ function buildOpenClawRuntimeSurface(title: string, session: OpenClawRecentSessi
     id: session.key,
     runtime: 'openclaw',
     kind: 'chat-session' as const,
+    ownership: 'provider' as const,
     title,
     cwd: workspace,
     branch,

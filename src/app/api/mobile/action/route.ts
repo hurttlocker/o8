@@ -1,21 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { MobileActionRequest, MobileActionResponse } from '@/lib/mobile/types';
-import { abortOpenClawSession, steerOpenClawSession } from '@/lib/openclaw/chat';
+import { performRuntimeAction } from '@/lib/runtime/actions';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-function unavailable(sessionKey: string, action: MobileActionRequest['action'], note: string) {
-  const payload: MobileActionResponse = {
-    ok: false,
-    action,
-    sessionKey,
-    status: 'unavailable',
-    note,
-  };
-
-  return NextResponse.json(payload, { status: 501 });
-}
 
 export async function POST(request: NextRequest) {
   const payload = (await request.json().catch(() => null)) as MobileActionRequest | null;
@@ -27,57 +15,46 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    switch (action) {
-      case 'steer': {
-        const message = payload?.message?.trim();
-        const attachments = Array.isArray(payload?.attachments)
-          ? payload.attachments.filter((item) => item?.content && item?.mimeType && item?.fileName)
-          : [];
-        if (!message && attachments.length === 0) {
-          return NextResponse.json({ error: 'message or image attachment is required for steer' }, { status: 400 });
-        }
-
-        const result = await steerOpenClawSession(sessionKey, message, attachments);
-        const response: MobileActionResponse = {
-          ok: true,
-          action,
-          sessionKey,
-          status: 'queued',
-          note: 'Steer request queued on the live session.',
-          runId: result.runId,
-        };
-        return NextResponse.json(response, {
-          headers: {
-            'Cache-Control': 'no-store, max-age=0',
-          },
-        });
-      }
-      case 'stop': {
-        const result = await abortOpenClawSession(sessionKey, payload?.runId?.trim());
-        const response: MobileActionResponse = {
-          ok: true,
-          action,
-          sessionKey,
-          status: 'completed',
-          note: result.aborted
-            ? 'Stop request sent to the active run for this session.'
-            : 'No active run was in flight for this session.',
-          aborted: result.aborted,
-        };
-        return NextResponse.json(response, {
-          headers: {
-            'Cache-Control': 'no-store, max-age=0',
-          },
-        });
-      }
-      case 'approve':
-      case 'deny':
-      case 'pause':
-      case 'resume':
-        return unavailable(sessionKey, action, `${action} is part of the mobile control contract, but it is not wired truthfully on the OpenClaw-backed lane yet.`);
-      default:
-        return NextResponse.json({ error: 'Unsupported mobile action' }, { status: 400 });
+    if (action !== 'steer' && action !== 'stop') {
+      const response: MobileActionResponse = {
+        ok: false,
+        action,
+        sessionKey,
+        status: 'unavailable',
+        note: `${action} is part of the mobile control contract, but it is not wired truthfully on the current runtime lane yet.`,
+      };
+      return NextResponse.json(response, {
+        status: 501,
+        headers: {
+          'Cache-Control': 'no-store, max-age=0',
+        },
+      });
     }
+
+    const result = await performRuntimeAction({
+      action,
+      surfaceId: sessionKey,
+      message: payload?.message,
+      attachments: payload?.attachments,
+      runId: payload?.runId,
+    });
+
+    const response: MobileActionResponse = {
+      ok: result.ok,
+      action,
+      sessionKey,
+      status: result.status,
+      note: result.note,
+      runId: result.runId,
+      aborted: result.aborted,
+    };
+
+    return NextResponse.json(response, {
+      status: result.status === 'unavailable' ? 501 : 200,
+      headers: {
+        'Cache-Control': 'no-store, max-age=0',
+      },
+    });
   } catch (error) {
     return NextResponse.json(
       {
