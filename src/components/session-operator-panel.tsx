@@ -151,7 +151,7 @@ export function SessionOperatorPanel({
 
   return (
     <>
-      <div className="inset-card inspector-block">
+      <div className="inset-card inspector-block tool-shell">
         <div className="row space-between compact-row operator-header-row">
           <div>
             <span>Operator actions</span>
@@ -188,7 +188,7 @@ export function SessionOperatorPanel({
             rows={compact ? 3 : 4}
             placeholder={`Steer ${agent.name} without creating a new session…`}
           />
-          <div className="operator-actions">
+          <div className="operator-actions queue-toolbar">
             <button className="button-primary" type="submit" disabled={actionState !== 'idle' || !draft.trim()}>
               {actionState === 'sending' ? 'Steering…' : 'Steer session'}
             </button>
@@ -203,7 +203,7 @@ export function SessionOperatorPanel({
         {actionNote ? <p className="muted operator-note">{actionNote}</p> : null}
       </div>
 
-      <div className="inset-card inspector-block">
+      <div className="inset-card inspector-block tool-shell terminal-shell">
         <div className="row space-between compact-row operator-header-row">
           <div>
             <span>Session log</span>
@@ -217,9 +217,9 @@ export function SessionOperatorPanel({
         </p>
         {historyError ? <p className="muted operator-note">{historyError}</p> : null}
         {history.length ? (
-          <div className="transcript-list">
+          <div className="transcript-list terminal-stack">
             {history.map((entry) => (
-              <div key={entry.id} className="transcript-entry">
+              <div key={entry.id} className="transcript-entry terminal-entry">
                 <div className="row space-between compact-row">
                   <strong>{roleLabel(entry.role)}</strong>
                   <span className="muted mono">{entry.timestampLabel ?? 'now'}</span>
