@@ -1,6 +1,6 @@
 import type { AgentSummary, EventSeverity } from '@/lib/fleet/types';
 import { getSessionTranscript } from '@/lib/openclaw/chat';
-import { getOpenClawFleetSnapshot } from '@/lib/openclaw/fleet';
+import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
 import type { MobileControlAction, MobileInboxItem, MobileInboxSnapshot, MobileReviewFocus } from '@/lib/mobile/types';
 
@@ -54,7 +54,7 @@ function summarizeTranscript(text: string) {
 }
 
 export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
-  const fleet = await getOpenClawFleetSnapshot();
+  const fleet = await getRuntimeInventorySnapshot();
   const sessions = fleet.agents;
   const primarySession = sessions.find((session) => session.sessionKey === fleet.meta.primarySessionKey) ?? sessions[0];
 
