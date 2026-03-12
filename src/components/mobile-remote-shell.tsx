@@ -598,7 +598,7 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
           {snapshot.review.changedFiles.length ? (
             <>
               <p className="muted operator-note">
-                Tap a file to inspect the local diff inline before you drop into the heavier desktop review surface.
+                Tap a file to inspect the live review patch inline before you drop into the heavier desktop review surface.
               </p>
               <div className="glass-file-list">
                 {snapshot.review.changedFiles.map((file) => {
