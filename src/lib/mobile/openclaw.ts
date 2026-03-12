@@ -8,7 +8,7 @@ function sessionActions(agent: AgentSummary): MobileControlAction[] {
   return [
     {
       kind: 'inspect',
-      label: 'Open controls',
+      label: 'Inspect',
       sessionKey: agent.sessionKey,
       available: true,
     },
