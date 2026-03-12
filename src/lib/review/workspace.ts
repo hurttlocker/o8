@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
   ReviewChangedFile,
@@ -7,6 +9,7 @@ import type {
   ReviewWorktreeSummary,
   WorkflowReviewSnapshot,
 } from '@/lib/fleet/types';
+import type { MobileReviewFileDetail } from '@/lib/mobile/types';
 
 const execFileAsync = promisify(execFile);
 const REVIEW_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
@@ -183,6 +186,90 @@ function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedR
   return Array.from(changed.values());
 }
 
+function parseReviewPath(reviewPath: string) {
+  const [originalPath, currentPath] = reviewPath.includes(' → ')
+    ? reviewPath.split(' → ')
+    : [undefined, reviewPath];
+
+  return {
+    originalPath,
+    currentPath,
+  };
+}
+
+function resolveRepoFile(relativePath: string) {
+  const repoRoot = path.resolve(REVIEW_REPO_ROOT);
+  const nextPath = path.resolve(repoRoot, relativePath);
+
+  if (nextPath !== repoRoot && !nextPath.startsWith(`${repoRoot}${path.sep}`)) {
+    throw new Error('Requested review file path escapes the repo root.');
+  }
+
+  return nextPath;
+}
+
+function trimPreview(text: string, maxLines = 120, maxChars = 6000) {
+  const lines = text.split('\n').slice(0, maxLines).join('\n').trim();
+  if (!lines) return '';
+  return lines.length > maxChars ? `${lines.slice(0, maxChars - 1)}…` : lines;
+}
+
+function buildReviewFileNote(file: ReviewChangedFile, originalPath?: string, currentPath?: string) {
+  switch (file.status) {
+    case 'added':
+      return 'Added file • preview shows the current local patch against HEAD.';
+    case 'deleted':
+      return 'Deleted file • preview shows the removal diff still waiting in the working tree.';
+    case 'renamed':
+      return originalPath && currentPath
+        ? `Renamed ${originalPath} → ${currentPath} • preview keeps the rename visible on phone.`
+        : 'Renamed file • preview keeps the rename visible on phone.';
+    case 'untracked':
+      return 'Untracked file • git has no HEAD baseline yet, so the phone shows the current file contents instead of a patch.';
+    case 'modified':
+    default:
+      return 'Modified file • preview shows the current local diff so you can triage without dropping to desktop first.';
+  }
+}
+
+async function loadReviewChangedFiles() {
+  const [nameStatusRaw, numStatRaw, untrackedRaw] = await Promise.all([
+    tryRunFile('git', ['diff', '--name-status', '--relative', '-M', 'HEAD']),
+    tryRunFile('git', ['diff', '--numstat', '--relative', '-M', 'HEAD']),
+    tryRunFile('git', ['ls-files', '--others', '--exclude-standard']),
+  ]);
+
+  return parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw);
+}
+
+async function loadReviewFilePreview(file: ReviewChangedFile, originalPath?: string, currentPath?: string) {
+  if (file.status === 'untracked' && currentPath) {
+    const raw = await readFile(resolveRepoFile(currentPath), 'utf8').catch(() => '');
+    return trimPreview(raw)
+      ? trimPreview(raw)
+      : 'No readable file preview is available for this untracked path yet.';
+  }
+
+  const diffTargets = [originalPath, currentPath].filter((value): value is string => Boolean(value));
+  const diffPreview = trimPreview(
+    await tryRunFile('git', ['diff', '--no-ext-diff', '--unified=16', '--relative', '-M', 'HEAD', '--', ...diffTargets]),
+  );
+
+  if (diffPreview) {
+    return diffPreview;
+  }
+
+  if (currentPath && file.status !== 'deleted') {
+    const raw = await readFile(resolveRepoFile(currentPath), 'utf8').catch(() => '');
+    const filePreview = trimPreview(raw);
+    if (filePreview) {
+      return filePreview;
+    }
+  }
+
+  return 'No inline diff preview is available for this file yet.';
+}
+
 function parseWorktrees(raw: string) {
   const worktrees: ReviewWorktreeSummary[] = [];
   const records = raw
@@ -224,6 +311,29 @@ function parseWorktrees(raw: string) {
   }
 
   return worktrees;
+}
+
+export async function getReviewFileDetail(reviewPath: string): Promise<MobileReviewFileDetail> {
+  const changedFiles = await loadReviewChangedFiles();
+  const file = changedFiles.find((entry) => entry.path === reviewPath);
+
+  if (!file) {
+    throw new Error('Requested file is no longer part of the live review surface.');
+  }
+
+  const { originalPath, currentPath } = parseReviewPath(file.path);
+  const preview = await loadReviewFilePreview(file, originalPath, currentPath);
+
+  return {
+    path: file.path,
+    status: file.status,
+    additions: file.additions,
+    deletions: file.deletions,
+    originalPath,
+    currentPath,
+    note: buildReviewFileNote(file, originalPath, currentPath),
+    preview,
+  };
 }
 
 export async function getWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapshot> {
