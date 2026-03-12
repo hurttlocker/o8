@@ -105,7 +105,7 @@ export function WorkflowReviewPanel({ initialSnapshot }: { initialSnapshot?: Wor
   const activeIssues = snapshot?.activeIssues ?? [];
 
   return (
-    <section className="surface-card workflow-review-surface">
+    <section id="workflow-review-panel" className="surface-card workflow-review-surface">
       <div className="section-head">
         <div>
           <div className="eyebrow">Workflow surface</div>

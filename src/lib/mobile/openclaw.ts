@@ -2,7 +2,7 @@ import type { AgentSummary, EventSeverity } from '@/lib/fleet/types';
 import { getSessionTranscript } from '@/lib/openclaw/chat';
 import { getOpenClawFleetSnapshot } from '@/lib/openclaw/fleet';
 import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
-import type { MobileControlAction, MobileInboxItem, MobileInboxSnapshot } from '@/lib/mobile/types';
+import type { MobileControlAction, MobileInboxItem, MobileInboxSnapshot, MobileReviewFocus } from '@/lib/mobile/types';
 
 function sessionActions(agent: AgentSummary): MobileControlAction[] {
   return [
@@ -103,9 +103,15 @@ export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
     }
   }
 
+  let review: MobileReviewFocus | undefined;
+
   if (reviewSnapshot) {
     const leadPr = reviewSnapshot.pullRequests[0];
     const changedCount = reviewSnapshot.changedFiles.length;
+    const issueStackLabel = reviewSnapshot.activeIssues.length
+      ? ` • ${reviewSnapshot.activeIssues.map((issue) => `#${issue.number}`).join(' • ')}`
+      : '';
+
     items.push({
       id: `review:${reviewSnapshot.branch}`,
       kind: 'review',
@@ -114,24 +120,34 @@ export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
         ? `Review ready • PR #${leadPr.number}`
         : `Review surface • ${reviewSnapshot.branch}`,
       detail: leadPr
-        ? `${leadPr.title} • ${changedCount} changed file${changedCount === 1 ? '' : 's'}`
-        : `${reviewSnapshot.branch} • ${changedCount} changed file${changedCount === 1 ? '' : 's'}`,
+        ? `${leadPr.title} • ${changedCount} changed file${changedCount === 1 ? '' : 's'}${issueStackLabel}`
+        : `${reviewSnapshot.branch} • ${changedCount} changed file${changedCount === 1 ? '' : 's'}${issueStackLabel}`,
       timestampLabel: 'desktop review',
       actions: [
         {
           kind: 'open_review',
-          label: 'Open desktop review',
-          href: '/',
+          label: 'Review stack ↗',
+          href: '/#workflow-review-panel',
           available: true,
         },
         {
           kind: 'open_desktop',
-          label: 'Desktop ↗',
-          href: '/',
+          label: leadPr ? 'GitHub PR ↗' : 'Desktop ↗',
+          href: leadPr?.url ?? '/',
           available: true,
         },
       ],
     });
+
+    review = {
+      repoSlug: reviewSnapshot.repoSlug,
+      branch: reviewSnapshot.branch,
+      desktopHref: '/#workflow-review-panel',
+      pullRequest: leadPr,
+      issues: reviewSnapshot.activeIssues,
+      changedFiles: reviewSnapshot.changedFiles.slice(0, 6),
+      diffStat: reviewSnapshot.diffStat,
+    };
   }
 
   const alerts = items.filter((item) => item.kind === 'alert' && item.severity !== 'info').length;
@@ -156,5 +172,6 @@ export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
       reviewItems,
       activeRuns,
     },
+    review,
   };
 }
