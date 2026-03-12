@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
@@ -272,6 +272,52 @@ function resolveRepoFile(relativePath: string) {
   return nextPath;
 }
 
+async function fileTouchedAt(reviewPath: string) {
+  try {
+    const { currentPath } = parseReviewPath(reviewPath);
+    if (!currentPath) {
+      return 0;
+    }
+    const target = resolveRepoFile(currentPath);
+    const details = await stat(target);
+    return details.mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+async function sortChangedFilesByTouchedAt(changedFiles: ReviewChangedFile[]) {
+  const withTouchedAt = await Promise.all(
+    changedFiles.map(async (file) => ({
+      file,
+      touchedAt: await fileTouchedAt(file.path),
+    })),
+  );
+
+  return withTouchedAt
+    .sort((left, right) => {
+      if (left.touchedAt !== right.touchedAt) {
+        return right.touchedAt - left.touchedAt;
+      }
+      return left.file.path.localeCompare(right.file.path);
+    })
+    .map((entry) => entry.file);
+}
+
+function summarizeLocalDiff(changedFiles: ReviewChangedFile[], diffStatRaw: string) {
+  const untrackedFiles = changedFiles.filter((file) => file.status === 'untracked');
+  const trackedSummary = diffStatRaw.trim();
+
+  if (!untrackedFiles.length) {
+    return trackedSummary || 'Working tree changed, but git diff --stat returned no visible summary.';
+  }
+
+  const lines = trackedSummary ? trackedSummary.split('\n') : [];
+  lines.push(`untracked: ${untrackedFiles.length} file${untrackedFiles.length === 1 ? '' : 's'}`);
+  lines.push(`total review files: ${changedFiles.length}`);
+  return lines.join('\n');
+}
+
 function trimPreview(text: string, maxLines = 120, maxChars = 6000) {
   const lines = text.split('\n').slice(0, maxLines).join('\n').trim();
   if (!lines) return '';
@@ -500,7 +546,7 @@ export async function getWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapsh
     ]),
   ]);
 
-  const localChangedFiles = parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw);
+  const localChangedFiles = await sortChangedFilesByTouchedAt(parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw));
   const recentCommits = recentCommitsRaw ? recentCommitsRaw.split('\n').filter(Boolean) : [];
   const worktrees = parseWorktrees(worktreesRaw);
 
@@ -519,7 +565,7 @@ export async function getWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapsh
     : [];
   const changedFiles = localChangedFiles.length ? localChangedFiles : pullRequestChangedFiles;
   const diffStat = localChangedFiles.length
-    ? diffStatRaw || 'Working tree changed, but git diff --stat returned no visible summary.'
+    ? summarizeLocalDiff(localChangedFiles, diffStatRaw)
     : pullRequestChangedFiles.length
       ? summarizePullRequestDiff(pullRequestChangedFiles)
       : 'Working tree clean.';
