@@ -162,7 +162,7 @@ export function WorkflowReviewPanel({ initialSnapshot }: { initialSnapshot?: Wor
       ) : null}
 
       <div className="workflow-grid">
-        <div className="inset-card inspector-block">
+        <div className="inset-card inspector-block tool-shell">
           <div className="row space-between compact-row operator-header-row">
             <div>
               <span>Changed surfaces</span>
@@ -191,7 +191,7 @@ export function WorkflowReviewPanel({ initialSnapshot }: { initialSnapshot?: Wor
           )}
         </div>
 
-        <div className="inset-card inspector-block">
+        <div className="inset-card inspector-block tool-shell">
           <div className="row space-between compact-row operator-header-row">
             <div>
               <span>GitHub + worktrees</span>
@@ -265,7 +265,7 @@ export function WorkflowReviewPanel({ initialSnapshot }: { initialSnapshot?: Wor
         </div>
       </div>
 
-      <div className="inset-card inspector-block">
+      <div className="inset-card inspector-block tool-shell terminal-shell">
         <div className="row space-between compact-row operator-header-row">
           <div>
             <span>Diff stat</span>

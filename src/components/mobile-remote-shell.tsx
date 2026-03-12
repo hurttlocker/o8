@@ -348,55 +348,105 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
         </Link>
       </header>
 
-      <section className="mobile-grid">
-        <div className="surface-card mobile-card">
-          <span>Mode</span>
-          <strong>{snapshot.mode === 'live' ? 'Live control' : 'Demo fallback'}</strong>
-          <p>{snapshot.note ?? 'Mobile is reading a control snapshot, not talking to one vendor runtime directly.'}</p>
-        </div>
-        <div className="surface-card mobile-card">
-          <span>Primary session</span>
-          <strong>{selectedSession?.name ?? 'Unknown'}</strong>
-          <p>{selectedSession?.sessionKey ?? snapshot.primarySessionKey ?? 'No live session visible.'}</p>
-        </div>
-      </section>
-
-      <section className="mobile-grid">
-        <div className="surface-card mobile-card">
-          <span>Active runs</span>
-          <strong>{snapshot.summary.activeRuns}</strong>
-          <p>Running, blocked, and review-warm sessions that may need attention tonight.</p>
-        </div>
-        <div className="surface-card mobile-card">
-          <span>Alerts</span>
-          <strong>{snapshot.summary.alerts}</strong>
-          <p>Critical or warning items surfaced into the phone inbox instead of hiding in the desktop shell.</p>
-        </div>
-      </section>
-
-      <section className="mobile-grid">
-        <div className="surface-card mobile-card">
-          <span>Approvals</span>
-          <strong>{snapshot.summary.approvals}</strong>
-          <p>Contract supports them; OpenClaw-backed approval handling is still a truthful future lane.</p>
-        </div>
-        <div className="surface-card mobile-card">
-          <span>Review items</span>
-          <strong>{snapshot.summary.reviewItems}</strong>
-          <p>Desktop review stays heavy, but phone now knows when review-ready work exists.</p>
-        </div>
-      </section>
-
-      <section className="surface-card">
+      <section className="surface-card mobile-panel-surface">
         <div className="section-head">
           <div>
-            <div className="eyebrow">Inbox</div>
+            <div className="eyebrow">Panel + toolbar</div>
+            <h2>Remote tasking queue</h2>
+          </div>
+          <span className={`status-pill ${statusClass(refreshError ? 'warning' : snapshot.mode === 'live' ? 'success' : 'warning')}`}>
+            {refreshError ? 'refresh warning' : snapshot.mode === 'live' ? 'live adapter' : 'demo lane'}
+          </span>
+        </div>
+        <p className="muted operator-note">
+          This pass starts folding in the next donor language: panel framing, toolbar chips, queue cards,
+          and tool / terminal surfaces that still stay truthful to the current OpenClaw-backed lane.
+        </p>
+        <div className="toolbar-strip">
+          <div className="toolbar-chip">
+            <span>Mode</span>
+            <strong>{snapshot.mode === 'live' ? 'Live control' : 'Demo fallback'}</strong>
+            <p>{snapshot.note ?? 'Mobile is reading a control snapshot, not talking to one vendor runtime directly.'}</p>
+          </div>
+          <div className="toolbar-chip">
+            <span>Primary session</span>
+            <strong>{selectedSession?.name ?? 'Unknown'}</strong>
+            <p className="mono">{selectedSession?.sessionKey ?? snapshot.primarySessionKey ?? 'No live session visible.'}</p>
+          </div>
+          <div className="toolbar-chip">
+            <span>Review lane</span>
+            <strong>
+              {snapshot.review?.pullRequest
+                ? `PR #${snapshot.review.pullRequest.number}`
+                : snapshot.review?.branch ?? 'No review lane'}
+            </strong>
+            <p>{snapshot.review?.pullRequest?.title ?? snapshot.review?.branch ?? 'No linked PR is visible yet.'}</p>
+          </div>
+          <div className="toolbar-chip">
+            <span>Current focus</span>
+            <strong>{selectedSession?.isCurrentSession ? 'This chat' : selectedSession?.name ?? 'Queue mirror'}</strong>
+            <p>{selectedSession?.isCurrentSession ? 'You are steering the same live Q ↔ Mister thread.' : 'Phone is watching the freshest visible live surface.'}</p>
+          </div>
+        </div>
+        <div className="toolbar-strip toolbar-strip-secondary">
+          <div className="toolbar-chip">
+            <span>Active runs</span>
+            <strong>{snapshot.summary.activeRuns}</strong>
+            <p>Running, blocked, and review-warm sessions that may need attention tonight.</p>
+          </div>
+          <div className="toolbar-chip">
+            <span>Alerts</span>
+            <strong>{snapshot.summary.alerts}</strong>
+            <p>Critical or warning items surfaced into the phone inbox instead of hiding in the desktop shell.</p>
+          </div>
+          <div className="toolbar-chip">
+            <span>Approvals</span>
+            <strong>{snapshot.summary.approvals}</strong>
+            <p>Contract supports them; OpenClaw-backed approval handling is still a truthful future lane.</p>
+          </div>
+          <div className="toolbar-chip">
+            <span>Review items</span>
+            <strong>{snapshot.summary.reviewItems}</strong>
+            <p>Desktop review stays heavy, but phone now knows when review-ready work exists.</p>
+          </div>
+        </div>
+        <div className="queue-toolbar toolbar-link-row">
+          <Link href="/" className="mobile-action-link">
+            Desktop surface ↗
+          </Link>
+          {snapshot.review ? (
+            <Link href={snapshot.review.desktopHref} className="mobile-action-link">
+              Review stack ↗
+            </Link>
+          ) : (
+            <div className="mobile-action-link mobile-action-link-disabled">Review stack soon</div>
+          )}
+          {snapshot.review?.pullRequest ? (
+            <a href={snapshot.review.pullRequest.url} target="_blank" rel="noreferrer" className="mobile-action-link">
+              GitHub PR ↗
+            </a>
+          ) : (
+            <div className="mobile-action-link mobile-action-link-disabled">No PR linked</div>
+          )}
+          <button type="button" onClick={() => window.location.reload()}>
+            Refresh lane
+          </button>
+        </div>
+      </section>
+
+      <section className="surface-card mobile-panel-surface">
+        <div className="section-head">
+          <div>
+            <div className="eyebrow">Task queue</div>
             <h2>Live operator queue</h2>
           </div>
           <span className={`status-pill ${refreshError ? 'status-warning' : 'status-success'}`}>
-            {refreshError ? 'refresh warning' : 'live inbox'}
+            {refreshError ? 'refresh warning' : 'live queue'}
           </span>
         </div>
+        <p className="muted operator-note">
+          Each card now behaves like a real queue item: summary up top, action toolbar in the middle, and tool / terminal drilldown only when you open it.
+        </p>
         {actionHint ? <p className="muted operator-note">{actionHint}</p> : null}
         <div className="mobile-stack">
           {snapshot.items.map((item) => {
@@ -411,7 +461,7 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
             const composeOpen = Boolean(sessionKey && composeSessionKey === sessionKey);
 
             return (
-              <div key={item.id} className="mobile-action-card">
+              <div key={item.id} className="mobile-action-card queue-card">
                 <div className="row space-between compact-row">
                   <div>
                     <h3>{item.title}</h3>
@@ -419,8 +469,11 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
                   </div>
                   <span className={`status-pill ${statusClass(item.severity)}`}>{item.kind.replace('_', ' ')}</span>
                 </div>
-                <p className="muted mono">{item.timestampLabel ?? 'now'}</p>
-                <div className="tool-drawer-list tool-drawer-list-mobile">
+                <div className="queue-meta-row">
+                  <span className="muted mono">{item.timestampLabel ?? 'now'}</span>
+                  {sessionKey ? <span className="muted mono">{sessionKey}</span> : null}
+                </div>
+                <div className="tool-drawer-list tool-drawer-list-mobile queue-toolbar">
                   {item.actions.map((action) => (
                     action.href ? (
                       action.href.startsWith('http') ? (
@@ -460,7 +513,7 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
                 </div>
 
                 {composeOpen && sessionKey ? (
-                  <div className="inset-card">
+                  <div className="inset-card tool-shell">
                     <div className="row space-between compact-row operator-header-row">
                       <div>
                         <span>Direct steer</span>
@@ -514,7 +567,7 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
                 {inlineActionNote ? <p className="muted operator-note">{inlineActionNote}</p> : null}
 
                 {historyOpen && sessionKey ? (
-                  <div className="inset-card">
+                  <div className="inset-card tool-shell terminal-shell">
                     <div className="row space-between compact-row operator-header-row">
                       <div>
                         <span>Inline history</span>
@@ -527,9 +580,9 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
                     </p>
                     {inlineHistoryError ? <p className="muted operator-note">{inlineHistoryError}</p> : null}
                     {inlineHistory.length ? (
-                      <div className="transcript-list top-gap">
+                      <div className="transcript-list top-gap terminal-stack">
                         {inlineHistory.map((entry) => (
-                          <div key={entry.id} className="transcript-entry">
+                          <div key={entry.id} className="transcript-entry terminal-entry">
                             <div className="row space-between compact-row">
                               <strong>{roleLabel(entry.role)}</strong>
                               <span className="muted mono">{entry.timestampLabel ?? 'now'}</span>
@@ -552,7 +605,7 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
       </section>
 
       {snapshot.review ? (
-        <section className="surface-card mobile-review-focus">
+        <section className="surface-card mobile-review-focus mobile-panel-surface">
           <div className="section-head">
             <div>
               <div className="eyebrow">Review focus</div>
@@ -642,7 +695,7 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
           ) : null}
 
           {selectedReviewFilePath ? (
-            <div className="glass-review-preview inset-card">
+            <div className="glass-review-preview inset-card tool-shell terminal-shell">
               <div className="row space-between compact-row operator-header-row">
                 <div>
                   <span>Per-file drilldown</span>
@@ -662,7 +715,7 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
               {reviewFileByPath[selectedReviewFilePath] ? (
                 <>
                   <p className="muted operator-note">{reviewFileByPath[selectedReviewFilePath].note}</p>
-                  <pre className="glass-diff-preview">{reviewFileByPath[selectedReviewFilePath].preview}</pre>
+                  <pre className="glass-diff-preview terminal-output">{reviewFileByPath[selectedReviewFilePath].preview}</pre>
                 </>
               ) : reviewFileLoadingPath === selectedReviewFilePath ? (
                 <p className="muted operator-note">Loading per-file review preview…</p>
@@ -673,21 +726,21 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
           ) : null}
 
           {snapshot.review.diffStat ? (
-            <pre className="glass-diff-preview">
+            <pre className="glass-diff-preview terminal-output">
               {snapshot.review.diffStat.split('\n').filter(Boolean).slice(0, 6).join('\n')}
             </pre>
           ) : null}
         </section>
       ) : null}
 
-      <section className="surface-card">
+      <section className="surface-card mobile-panel-surface">
         <div className="section-head">
           <div>
             <div className="eyebrow">Current session truth</div>
             <h2>Mirrored session first</h2>
           </div>
         </div>
-        <div className="mobile-memory-card">
+        <div className="mobile-memory-card queue-card">
           <div>
             <strong>{selectedSession?.name ?? 'No current session'}</strong>
             <p className="muted">
