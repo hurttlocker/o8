@@ -1,36 +1,49 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
-import { SessionOperatorPanel } from '@/components/session-operator-panel';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
+import {
+  ArrowUp,
+  Copy,
+  Download,
+  ExternalLink,
+  FileDiff,
+  FileText,
+  GitBranch,
+  Image as ImageIcon,
+  Menu,
+  Monitor,
+  Plus,
+  RefreshCw,
+  SlidersHorizontal,
+  Square,
+  X,
+} from 'lucide-react';
 import type {
   MobileActionRequest,
   MobileActionResponse,
-  MobileControlAction,
   MobileHistoryResponse,
   MobileInboxSnapshot,
   MobileReviewFileResponse,
   MobileTranscriptEntry,
+  MobileTranscriptMedia,
 } from '@/lib/mobile/types';
 
 function pickCurrentSession(snapshot: MobileInboxSnapshot) {
   return snapshot.sessions.find((session) => session.isCurrentSession)
     ?? snapshot.sessions.find((session) => session.sessionKey === snapshot.primarySessionKey)
     ?? snapshot.sessions[0];
-}
-
-function statusClass(kind: string) {
-  switch (kind) {
-    case 'critical':
-      return 'status-critical';
-    case 'warning':
-      return 'status-warning';
-    case 'success':
-      return 'status-success';
-    case 'info':
-    default:
-      return 'status-info';
-  }
 }
 
 function roleLabel(role: MobileTranscriptEntry['role']) {
@@ -53,6 +66,223 @@ function compactLine(text: string | null | undefined, fallback: string, max = 84
   return value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
 }
 
+function diffLineTone(line: string) {
+  if (line.startsWith('@@')) return 'hunk';
+  if (line.startsWith('diff --git') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
+    return 'meta';
+  }
+  if (line.startsWith('+')) return 'add';
+  if (line.startsWith('-')) return 'remove';
+  return 'context';
+}
+
+function contextPressureTone(usedPercent: number) {
+  if (usedPercent >= 85) return 'critical';
+  if (usedPercent >= 70) return 'high';
+  if (usedPercent >= 50) return 'watch';
+  return 'calm';
+}
+
+function contextTrendLabel(trend?: 'falling' | 'stable' | 'rising') {
+  switch (trend) {
+    case 'rising':
+      return 'Rising';
+    case 'falling':
+      return 'Falling';
+    case 'stable':
+    default:
+      return 'Stable';
+  }
+}
+
+function mediaHref(path: string, download = false) {
+  const params = new URLSearchParams({ path });
+  if (download) {
+    params.set('download', '1');
+  }
+  return `/api/mobile/media?${params.toString()}`;
+}
+
+function isImageMedia(media: MobileTranscriptMedia) {
+  return media.kind === 'image';
+}
+
+type DraftAttachment = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  content: string;
+  previewUrl: string;
+};
+
+async function fileToDataUrl(file: File) {
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error(`Unable to read ${file.name}`));
+    };
+    reader.onerror = () => reject(new Error(`Unable to read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+function pushPlainInline(nodes: ReactNode[], text: string, keyPrefix: string) {
+  if (!text) {
+    return;
+  }
+
+  text.split('\n').forEach((part, index) => {
+    if (index > 0) {
+      nodes.push(<br key={`${keyPrefix}-br-${index}`} />);
+    }
+    if (part) {
+      nodes.push(<Fragment key={`${keyPrefix}-text-${index}`}>{part}</Fragment>);
+    }
+  });
+}
+
+function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const tokenRegex = /(\*\*[^*][\s\S]*?\*\*|`[^`]+`|\*[^*][\s\S]*?\*)/g;
+  let lastIndex = 0;
+  let matchIndex = 0;
+
+  for (const match of text.matchAll(tokenRegex)) {
+    const token = match[0];
+    const start = match.index ?? 0;
+    pushPlainInline(nodes, text.slice(lastIndex, start), `${keyPrefix}-${matchIndex}-plain`);
+
+    if (token.startsWith('**') && token.endsWith('**')) {
+      nodes.push(
+        <strong key={`${keyPrefix}-${matchIndex}-strong`}>
+          {renderInlineMarkdown(token.slice(2, -2), `${keyPrefix}-${matchIndex}-strong-inner`)}
+        </strong>,
+      );
+    } else if (token.startsWith('*') && token.endsWith('*')) {
+      nodes.push(
+        <em key={`${keyPrefix}-${matchIndex}-em`}>
+          {renderInlineMarkdown(token.slice(1, -1), `${keyPrefix}-${matchIndex}-em-inner`)}
+        </em>,
+      );
+    } else if (token.startsWith('`') && token.endsWith('`')) {
+      nodes.push(<code key={`${keyPrefix}-${matchIndex}-code`}>{token.slice(1, -1)}</code>);
+    } else {
+      pushPlainInline(nodes, token, `${keyPrefix}-${matchIndex}-fallback`);
+    }
+
+    lastIndex = start + token.length;
+    matchIndex += 1;
+  }
+
+  pushPlainInline(nodes, text.slice(lastIndex), `${keyPrefix}-tail`);
+  return nodes;
+}
+
+function renderMessageBody(text: string, keyPrefix: string) {
+  const blocks: ReactNode[] = [];
+  const lines = text.replace(/\r/g, '').split('\n');
+  let paragraphLines: string[] = [];
+  let listType: 'ul' | 'ol' | null = null;
+  let listItems: string[] = [];
+
+  const flushParagraph = () => {
+    if (!paragraphLines.length) {
+      return;
+    }
+    const paragraph = paragraphLines.join('\n').trim();
+    if (paragraph) {
+      blocks.push(
+        <p key={`${keyPrefix}-p-${blocks.length}`} className="remodex-rich-paragraph">
+          {renderInlineMarkdown(paragraph, `${keyPrefix}-p-${blocks.length}`)}
+        </p>,
+      );
+    }
+    paragraphLines = [];
+  };
+
+  const flushList = () => {
+    if (!listType || !listItems.length) {
+      listType = null;
+      listItems = [];
+      return;
+    }
+
+    const ListTag = listType;
+    blocks.push(
+      <ListTag key={`${keyPrefix}-${listType}-${blocks.length}`} className="remodex-rich-list">
+        {listItems.map((item, index) => (
+          <li key={`${keyPrefix}-${listType}-${blocks.length}-${index}`}>
+            {renderInlineMarkdown(item, `${keyPrefix}-${listType}-${blocks.length}-${index}`)}
+          </li>
+        ))}
+      </ListTag>,
+    );
+
+    listType = null;
+    listItems = [];
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const trimmed = line.trim();
+    const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
+    const orderedMatch = trimmed.match(/^\d+\.\s+(.*)$/);
+    const unorderedMatch = trimmed.match(/^[-*]\s+(.*)$/);
+
+    if (!trimmed) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    if (headingMatch) {
+      flushParagraph();
+      flushList();
+      blocks.push(
+        <p
+          key={`${keyPrefix}-h-${blocks.length}`}
+          className={`remodex-rich-heading remodex-rich-heading-${Math.min(headingMatch[1].length, 3)}`}
+        >
+          {renderInlineMarkdown(headingMatch[2], `${keyPrefix}-h-${blocks.length}`)}
+        </p>,
+      );
+      continue;
+    }
+
+    if (orderedMatch) {
+      flushParagraph();
+      if (listType && listType !== 'ol') {
+        flushList();
+      }
+      listType = 'ol';
+      listItems.push(orderedMatch[1]);
+      continue;
+    }
+
+    if (unorderedMatch) {
+      flushParagraph();
+      if (listType && listType !== 'ul') {
+        flushList();
+      }
+      listType = 'ul';
+      listItems.push(unorderedMatch[1]);
+      continue;
+    }
+
+    flushList();
+    paragraphLines.push(line);
+  }
+
+  flushParagraph();
+  flushList();
+
+  return <div className="remodex-rich-text">{blocks}</div>;
+}
+
 async function readJson<T>(response: Response) {
   const payload = (await response.json().catch(() => null)) as T | { error?: string } | null;
   if (!response.ok) {
@@ -66,28 +296,54 @@ async function readJson<T>(response: Response) {
   return payload as T;
 }
 
-export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: MobileInboxSnapshot }) {
+export function MobileRemoteShell({
+  initialSnapshot,
+  initialTranscript,
+  initialReviewFile,
+}: {
+  initialSnapshot: MobileInboxSnapshot;
+  initialTranscript?: { sessionKey: string; transcript: MobileTranscriptEntry[] };
+  initialReviewFile?: MobileReviewFileResponse['file'] | null;
+}) {
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot>(initialSnapshot);
   const [selectedId, setSelectedId] = useState(() => pickCurrentSession(initialSnapshot)?.id ?? '');
   const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [actionHint, setActionHint] = useState<string | null>(null);
-  const [expandedSessionKey, setExpandedSessionKey] = useState<string | null>(null);
-  const [composeSessionKey, setComposeSessionKey] = useState<string | null>(null);
-  const [historyBySession, setHistoryBySession] = useState<Record<string, MobileTranscriptEntry[]>>({});
+  const [surfaceNote, setSurfaceNote] = useState<string | null>(null);
+  const [historyBySession, setHistoryBySession] = useState<Record<string, MobileTranscriptEntry[]>>(() => (
+    initialTranscript?.sessionKey ? { [initialTranscript.sessionKey]: initialTranscript.transcript } : {}
+  ));
   const [historyLoading, setHistoryLoading] = useState<Record<string, boolean>>({});
   const [historyError, setHistoryError] = useState<Record<string, string | null>>({});
   const [draftBySession, setDraftBySession] = useState<Record<string, string>>({});
   const [actionStateBySession, setActionStateBySession] = useState<Record<string, 'idle' | 'steering' | 'stopping'>>({});
   const [actionNoteBySession, setActionNoteBySession] = useState<Record<string, string | null>>({});
-  const [selectedReviewFilePath, setSelectedReviewFilePath] = useState<string | null>(null);
-  const [reviewFileByPath, setReviewFileByPath] = useState<Record<string, MobileReviewFileResponse['file']>>({});
+  const [draftAttachmentsBySession, setDraftAttachmentsBySession] = useState<Record<string, DraftAttachment[]>>({});
+  const [selectedReviewFilePath, setSelectedReviewFilePath] = useState<string | null>(() => (
+    initialReviewFile?.path ?? initialSnapshot.review?.changedFiles[0]?.path ?? null
+  ));
+  const [reviewFileByPath, setReviewFileByPath] = useState<Record<string, MobileReviewFileResponse['file']>>(() => (
+    initialReviewFile ? { [initialReviewFile.path]: initialReviewFile } : {}
+  ));
   const [reviewFileLoadingPath, setReviewFileLoadingPath] = useState<string | null>(null);
   const [reviewFileError, setReviewFileError] = useState<string | null>(null);
-  const [queueExpanded, setQueueExpanded] = useState(false);
-  const [reviewExpanded, setReviewExpanded] = useState(false);
-  const [operatorOpen, setOperatorOpen] = useState(false);
+  const [diffOpen, setDiffOpen] = useState(false);
+  const [controlsOpen, setControlsOpen] = useState(false);
+  const [surfaceRefreshing, setSurfaceRefreshing] = useState(false);
+  const [expandedMedia, setExpandedMedia] = useState<MobileTranscriptMedia | null>(null);
+  const [scrollY, setScrollY] = useState(0);
+  const [isScrolling, setIsScrolling] = useState(false);
+  const [headerVisible, setHeaderVisible] = useState(true);
+  const [viewportTopOffset, setViewportTopOffset] = useState(0);
+  const [composeFocused, setComposeFocused] = useState(false);
+  const composeRef = useRef<HTMLTextAreaElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const transcriptBottomRef = useRef<HTMLDivElement | null>(null);
+  const scrollStopTimerRef = useRef<number | null>(null);
+  const headerRevealTimerRef = useRef<number | null>(null);
+  const initialBottomPinBySessionRef = useRef<Record<string, boolean>>({});
+  const stickToBottomRef = useRef(true);
 
-  async function refreshInbox() {
+  const refreshInbox = useCallback(async () => {
     const response = await fetch('/api/mobile/inbox', { cache: 'no-store' });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -97,7 +353,49 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
     setSnapshot(nextSnapshot);
     setRefreshError(null);
     return nextSnapshot;
-  }
+  }, []);
+
+  const isWindowNearBottom = useCallback((threshold = 160) => {
+    if (typeof window === 'undefined') {
+      return true;
+    }
+
+    const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+    const viewportBottom = scrollTop + window.innerHeight;
+    const documentHeight = Math.max(document.documentElement.scrollHeight, document.body.scrollHeight);
+    return documentHeight - viewportBottom <= threshold;
+  }, []);
+
+  const scrollToLatestMessage = useCallback((force = false) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    if (!force && !stickToBottomRef.current) {
+      return;
+    }
+
+    transcriptBottomRef.current?.scrollIntoView({ block: 'end', behavior: 'auto' });
+  }, []);
+
+  useEffect(() => {
+    const readViewportTopOffset = () => {
+      const nextOffset = typeof window === 'undefined'
+        ? 0
+        : Math.max(0, Math.round(window.visualViewport?.offsetTop ?? 0));
+      setViewportTopOffset((current) => (current === nextOffset ? current : nextOffset));
+    };
+
+    readViewportTopOffset();
+    window.visualViewport?.addEventListener('resize', readViewportTopOffset);
+    window.visualViewport?.addEventListener('scroll', readViewportTopOffset);
+    window.addEventListener('orientationchange', readViewportTopOffset);
+
+    return () => {
+      window.visualViewport?.removeEventListener('resize', readViewportTopOffset);
+      window.visualViewport?.removeEventListener('scroll', readViewportTopOffset);
+      window.removeEventListener('orientationchange', readViewportTopOffset);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -131,6 +429,91 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
   }, []);
 
   useEffect(() => {
+    let frame = 0;
+
+    const clearHeaderReveal = () => {
+      if (headerRevealTimerRef.current) {
+        window.clearTimeout(headerRevealTimerRef.current);
+        headerRevealTimerRef.current = null;
+      }
+    };
+
+    const scheduleHeaderReveal = (delayMs = 3000) => {
+      clearHeaderReveal();
+      headerRevealTimerRef.current = window.setTimeout(() => {
+        setHeaderVisible(true);
+        headerRevealTimerRef.current = null;
+      }, delayMs);
+    };
+
+    const readScrollY = () => window.scrollY || document.documentElement.scrollTop || 0;
+
+    const markScrollSettled = () => {
+      if (scrollStopTimerRef.current) {
+        window.clearTimeout(scrollStopTimerRef.current);
+      }
+      scrollStopTimerRef.current = window.setTimeout(() => {
+        setIsScrolling(false);
+        if (readScrollY() <= 12) {
+          clearHeaderReveal();
+          setHeaderVisible(true);
+        }
+        scrollStopTimerRef.current = null;
+      }, 150);
+    };
+
+    const updateScrollY = () => {
+      frame = 0;
+      const nextScrollY = readScrollY();
+      stickToBottomRef.current = isWindowNearBottom();
+      setScrollY((current) => (Math.abs(current - nextScrollY) > 1 ? nextScrollY : current));
+    };
+
+    const handleScroll = () => {
+      const nextScrollY = readScrollY();
+      setIsScrolling(true);
+      if (nextScrollY > 12) {
+        setHeaderVisible(false);
+        scheduleHeaderReveal(3000);
+      } else {
+        clearHeaderReveal();
+        setHeaderVisible(true);
+      }
+      markScrollSettled();
+      if (frame) {
+        return;
+      }
+      frame = window.requestAnimationFrame(updateScrollY);
+    };
+
+    const handleResize = () => {
+      if (frame) {
+        return;
+      }
+      frame = window.requestAnimationFrame(updateScrollY);
+    };
+
+    updateScrollY();
+    if (readScrollY() <= 12) {
+      setHeaderVisible(true);
+    }
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+      if (scrollStopTimerRef.current) {
+        window.clearTimeout(scrollStopTimerRef.current);
+      }
+      clearHeaderReveal();
+      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [isWindowNearBottom]);
+
+  useEffect(() => {
     setSelectedId((currentId) => {
       if (currentId && snapshot.sessions.some((session) => session.id === currentId)) {
         return currentId;
@@ -144,47 +527,17 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
     [selectedId, snapshot],
   );
 
-  const visibleQueueItems = useMemo(
-    () => (queueExpanded ? snapshot.items : snapshot.items.slice(0, 3)),
-    [queueExpanded, snapshot.items],
-  );
+  const selectedSessionKey = selectedSession?.sessionKey;
+  const reviewFiles = useMemo(() => snapshot.review?.changedFiles ?? [], [snapshot.review?.changedFiles]);
 
-  const hiddenQueueCount = Math.max(snapshot.items.length - visibleQueueItems.length, 0);
-  const visibleReviewFiles = useMemo(
-    () => (reviewExpanded ? snapshot.review?.changedFiles ?? [] : (snapshot.review?.changedFiles ?? []).slice(0, 3)),
-    [reviewExpanded, snapshot.review?.changedFiles],
-  );
-  const hiddenReviewCount = Math.max((snapshot.review?.changedFiles.length ?? 0) - visibleReviewFiles.length, 0);
-
-  useEffect(() => {
-    if (!selectedReviewFilePath) {
-      return;
-    }
-
-    if (!snapshot.review?.changedFiles.some((file) => file.path === selectedReviewFilePath)) {
-      setSelectedReviewFilePath(null);
-      setReviewFileError(null);
-    }
-  }, [selectedReviewFilePath, snapshot.review]);
-
-  function syncSelection(sessionKey: string) {
-    const matchingSession = snapshot.sessions.find((session) => session.sessionKey === sessionKey);
-    if (!matchingSession) {
-      return null;
-    }
-
-    setSelectedId(matchingSession.id);
-    return matchingSession;
-  }
-
-  async function loadHistory(sessionKey: string, force = false) {
+  const loadHistory = useCallback(async (sessionKey: string, force = false) => {
     if (!force && historyBySession[sessionKey]?.length) {
       return historyBySession[sessionKey];
     }
 
     setHistoryLoading((current) => ({ ...current, [sessionKey]: true }));
     try {
-      const response = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=6`, {
+      const response = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=18`, {
         cache: 'no-store',
       });
       const payload = await readJson<MobileHistoryResponse>(response);
@@ -198,9 +551,9 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
     } finally {
       setHistoryLoading((current) => ({ ...current, [sessionKey]: false }));
     }
-  }
+  }, [historyBySession]);
 
-  async function loadReviewFile(reviewPath: string, force = false) {
+  const loadReviewFile = useCallback(async (reviewPath: string, force = false) => {
     if (!force && reviewFileByPath[reviewPath]) {
       setReviewFileError(null);
       return reviewFileByPath[reviewPath];
@@ -222,21 +575,190 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
     } finally {
       setReviewFileLoadingPath((current) => (current === reviewPath ? null : current));
     }
-  }
+  }, [reviewFileByPath]);
 
-  async function handleReviewFileSelect(reviewPath: string) {
-    if (selectedReviewFilePath === reviewPath) {
+  useEffect(() => {
+    if (!selectedSessionKey) {
+      return;
+    }
+
+    if (!historyBySession[selectedSessionKey]?.length && !historyLoading[selectedSessionKey]) {
+      void loadHistory(selectedSessionKey).catch(() => undefined);
+    }
+  }, [historyBySession, historyLoading, loadHistory, selectedSessionKey]);
+
+  useEffect(() => {
+    if (!reviewFiles.length) {
       setSelectedReviewFilePath(null);
       setReviewFileError(null);
       return;
     }
 
-    setSelectedReviewFilePath(reviewPath);
-    try {
-      await loadReviewFile(reviewPath);
-    } catch {
-      // reviewFileError already captures the route failure for the inline surface
+    if (selectedReviewFilePath && reviewFiles.some((file) => file.path === selectedReviewFilePath)) {
+      return;
     }
+
+    const nextPath = reviewFiles[0]?.path ?? null;
+    setSelectedReviewFilePath(nextPath);
+    if (nextPath) {
+      void loadReviewFile(nextPath).catch(() => undefined);
+    }
+  }, [loadReviewFile, reviewFiles, selectedReviewFilePath]);
+
+  useEffect(() => {
+    if (!selectedSessionKey) {
+      return;
+    }
+
+    const intervalMs = selectedSession?.status === 'running' ? 2500 : 10000;
+    const timer = window.setInterval(() => {
+      void loadHistory(selectedSessionKey, true).catch(() => undefined);
+      if (selectedSession?.status === 'running') {
+        void refreshInbox().catch(() => undefined);
+      }
+      if (selectedReviewFilePath && (diffOpen || selectedSession?.status === 'running')) {
+        void loadReviewFile(selectedReviewFilePath, true).catch(() => undefined);
+      }
+    }, intervalMs);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [diffOpen, loadHistory, loadReviewFile, refreshInbox, selectedReviewFilePath, selectedSession?.status, selectedSessionKey]);
+
+  const transcriptEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
+  const transcriptLoading = selectedSessionKey ? historyLoading[selectedSessionKey] ?? false : false;
+  const transcriptError = selectedSessionKey ? historyError[selectedSessionKey] ?? null : null;
+  const transcriptDraft = selectedSessionKey ? draftBySession[selectedSessionKey] ?? '' : '';
+  const transcriptAttachments = selectedSessionKey ? draftAttachmentsBySession[selectedSessionKey] ?? [] : [];
+  const transcriptActionState = selectedSessionKey ? actionStateBySession[selectedSessionKey] ?? 'idle' : 'idle';
+  const transcriptActionNote = selectedSessionKey ? actionNoteBySession[selectedSessionKey] ?? null : null;
+  const latestTranscriptMarker = transcriptEntries[transcriptEntries.length - 1]?.id ?? 'empty';
+  const selectedReviewFile = selectedReviewFilePath ? reviewFileByPath[selectedReviewFilePath] : undefined;
+  const selectedReviewFileIndex = selectedReviewFilePath
+    ? reviewFiles.findIndex((file) => file.path === selectedReviewFilePath)
+    : -1;
+  const selectedReviewFilePosition = selectedReviewFileIndex >= 0 ? selectedReviewFileIndex + 1 : 0;
+  const hasPrevReviewFile = selectedReviewFileIndex > 0;
+  const hasNextReviewFile = selectedReviewFileIndex >= 0 && selectedReviewFileIndex < reviewFiles.length - 1;
+  const totalAdditions = reviewFiles.reduce((sum, file) => sum + (file.additions ?? 0), 0);
+  const totalDeletions = reviewFiles.reduce((sum, file) => sum + (file.deletions ?? 0), 0);
+  const focusedAdditions = selectedReviewFile?.additions ?? totalAdditions;
+  const focusedDeletions = selectedReviewFile?.deletions ?? totalDeletions;
+  const sessionSwitcher = snapshot.sessions.slice(0, 5);
+  const activeTitle = compactLine(
+    snapshot.review?.pullRequest?.title ?? selectedSession?.name ?? selectedSession?.currentTask,
+    selectedSession?.isCurrentSession ? 'Q ↔ Mister live' : selectedSession?.name ?? 'Current session',
+    26,
+  );
+  const activeSubtitle = compactLine(
+    snapshot.review ? `/${snapshot.review.repoSlug}/${snapshot.review.branch}` : selectedSession?.sessionKey,
+    selectedSession?.sessionKey ?? 'mobile/live',
+    42,
+  );
+  const headerLabel = selectedSession?.status === 'running'
+    ? 'Live session'
+    : snapshot.review?.pullRequest
+      ? 'Focused review'
+      : 'Focused session';
+  const headerProgress = Math.min(scrollY / 88, 1);
+  const isHeaderCompact = headerProgress > 0.12;
+  const isComposerPrimed = composeFocused || transcriptAttachments.length > 0;
+  const dockMotionProgress = !isComposerPrimed && isScrolling ? 1 : 0;
+  const dockFadeProgress = dockMotionProgress;
+  const diffFileLabel = reviewFiles.length === 1 ? 'file' : 'files';
+  const contextUsedPercent = Math.round(selectedSession?.context.usedPercent ?? 0);
+  const contextTone = contextPressureTone(contextUsedPercent);
+  const contextTrend = contextTrendLabel(selectedSession?.context.trend);
+  const shellStyle = {
+    '--remodex-header-progress': headerProgress.toFixed(3),
+    '--remodex-dock-fade-progress': dockFadeProgress.toFixed(3),
+    '--remodex-dock-motion-progress': dockMotionProgress.toFixed(3),
+    '--remodex-compose-active': isComposerPrimed ? '1' : '0',
+    '--remodex-viewport-top-offset': `${viewportTopOffset}px`,
+  } as CSSProperties;
+
+  useLayoutEffect(() => {
+    if (!selectedSessionKey || !transcriptEntries.length || typeof window === 'undefined') {
+      return;
+    }
+
+    const shouldForcePin = !initialBottomPinBySessionRef.current[selectedSessionKey];
+    const shouldStick = shouldForcePin || stickToBottomRef.current;
+    if (!shouldStick) {
+      return;
+    }
+
+    let frameA = 0;
+    let frameB = 0;
+    const runPin = () => scrollToLatestMessage(true);
+
+    frameA = window.requestAnimationFrame(() => {
+      runPin();
+      frameB = window.requestAnimationFrame(runPin);
+    });
+
+    initialBottomPinBySessionRef.current[selectedSessionKey] = true;
+    return () => {
+      if (frameA) {
+        window.cancelAnimationFrame(frameA);
+      }
+      if (frameB) {
+        window.cancelAnimationFrame(frameB);
+      }
+    };
+  }, [latestTranscriptMarker, scrollToLatestMessage, selectedSessionKey, transcriptEntries.length]);
+
+  async function handleAttachmentSelection(files: FileList | null) {
+    if (!selectedSessionKey || !files?.length) {
+      return;
+    }
+
+    const chosenFiles = Array.from(files).filter((file) => file.type.startsWith('image/'));
+    if (!chosenFiles.length) {
+      setSurfaceNote('Only image attachments are wired truthfully on the OpenClaw mobile lane right now.');
+      return;
+    }
+
+    try {
+      const nextAttachments = await Promise.all(chosenFiles.slice(0, 4).map(async (file, index) => {
+        if (file.size > 5_000_000) {
+          throw new Error(`${file.name} is too large. Keep image attachments under 5 MB.`);
+        }
+        const content = await fileToDataUrl(file);
+        return {
+          id: `${file.name}:${file.lastModified}:${index}`,
+          fileName: file.name,
+          mimeType: file.type || 'image/png',
+          content,
+          previewUrl: URL.createObjectURL(file),
+        } satisfies DraftAttachment;
+      }));
+
+      setDraftAttachmentsBySession((current) => ({
+        ...current,
+        [selectedSessionKey]: [...(current[selectedSessionKey] ?? []), ...nextAttachments].slice(0, 4),
+      }));
+      setSurfaceNote(`Attached ${nextAttachments.length} image${nextAttachments.length === 1 ? '' : 's'} for the next steer.`);
+      window.requestAnimationFrame(() => composeRef.current?.focus());
+    } catch (error) {
+      setSurfaceNote(error instanceof Error ? error.message : 'Unable to prepare these image attachments.');
+    }
+  }
+
+  function removeDraftAttachment(sessionKey: string, attachmentId: string) {
+    setDraftAttachmentsBySession((current) => {
+      const existing = current[sessionKey] ?? [];
+      const removed = existing.find((item) => item.id === attachmentId);
+      if (removed) {
+        URL.revokeObjectURL(removed.previewUrl);
+      }
+      const remaining = existing.filter((item) => item.id !== attachmentId);
+      return {
+        ...current,
+        [sessionKey]: remaining,
+      };
+    });
   }
 
   async function runAction(payload: MobileActionRequest) {
@@ -257,81 +779,18 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
       const result = await readJson<MobileActionResponse>(response);
       setActionNoteBySession((current) => ({ ...current, [sessionKey]: result.note }));
       await refreshInbox();
-      if (expandedSessionKey === sessionKey || payload.action === 'steer') {
-        await loadHistory(sessionKey, true).catch(() => undefined);
-      }
+      await loadHistory(sessionKey, true).catch(() => undefined);
       return result;
     } finally {
       setActionStateBySession((current) => ({ ...current, [sessionKey]: 'idle' }));
     }
   }
 
-  async function handleAction(action: MobileControlAction) {
-    if (!action.available) {
-      setActionHint(action.reasonUnavailable ?? 'That action is not wired yet on this adapter.');
-      return;
-    }
-
-    if (action.href) {
-      setActionHint('This action lives on the desktop review surface.');
-      return;
-    }
-
-    if (!action.sessionKey) {
-      setActionHint('This action needs a live session key, and none is visible here.');
-      return;
-    }
-
-    const sessionKey = action.sessionKey;
-    const matchingSession = syncSelection(sessionKey);
-    if (!matchingSession) {
-      setActionHint('That session is no longer visible in the live mirror.');
-      return;
-    }
-
-    switch (action.kind) {
-      case 'inspect': {
-        const nextExpanded = expandedSessionKey === sessionKey ? null : sessionKey;
-        setExpandedSessionKey(nextExpanded);
-        if (nextExpanded) {
-          try {
-            await loadHistory(sessionKey);
-            setActionHint('Inline history loaded for this session.');
-          } catch {
-            setActionHint('Tried to load inline history, but the route returned an error.');
-          }
-        }
-        return;
-      }
-      case 'steer': {
-        setComposeSessionKey((current) => (current === sessionKey ? null : sessionKey));
-        setExpandedSessionKey(sessionKey);
-        await loadHistory(sessionKey).catch(() => undefined);
-        setActionHint('Inline steer composer opened on this card.');
-        return;
-      }
-      case 'stop': {
-        const confirmed = window.confirm('Stop the active run for this session?');
-        if (!confirmed) {
-          return;
-        }
-        try {
-          await runAction({ action: 'stop', sessionKey });
-          setActionHint('Stop action sent directly from the inbox card.');
-        } catch (error) {
-          setActionHint(error instanceof Error ? error.message : 'Unable to stop the session from mobile.');
-        }
-        return;
-      }
-      default:
-        setActionHint(`${action.kind} is part of the contract, but not directly wired on this card yet.`);
-    }
-  }
-
   async function handleSteerSubmit(sessionKey: string) {
     const message = draftBySession[sessionKey]?.trim();
-    if (!message) {
-      setActionNoteBySession((current) => ({ ...current, [sessionKey]: 'Steer message is required.' }));
+    const attachments = draftAttachmentsBySession[sessionKey] ?? [];
+    if (!message && attachments.length === 0) {
+      setActionNoteBySession((current) => ({ ...current, [sessionKey]: 'Add a steer message or attach an image first.' }));
       return;
     }
 
@@ -340,10 +799,23 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
         action: 'steer',
         sessionKey,
         message,
+        attachments: attachments.map((item) => ({
+          type: 'image',
+          mimeType: item.mimeType,
+          fileName: item.fileName,
+          content: item.content,
+        })),
+      });
+      attachments.forEach((item) => {
+        URL.revokeObjectURL(item.previewUrl);
       });
       setDraftBySession((current) => ({ ...current, [sessionKey]: '' }));
-      setExpandedSessionKey(sessionKey);
-      setActionHint('Steer request queued directly from the inbox card.');
+      setDraftAttachmentsBySession((current) => ({ ...current, [sessionKey]: [] }));
+      setSurfaceNote(
+        attachments.length > 0
+          ? `Queued the steer request with ${attachments.length} image attachment${attachments.length === 1 ? '' : 's'}.`
+          : 'Queued the steer request on the focused mobile session.',
+      );
     } catch (error) {
       setActionNoteBySession((current) => ({
         ...current,
@@ -352,443 +824,610 @@ export function MobileRemoteShell({ initialSnapshot }: { initialSnapshot: Mobile
     }
   }
 
-  return (
-    <div className="mobile-wrap">
-      <header className="surface-card mobile-header">
-        <div>
-          <div className="eyebrow">Cortex IDE Remote</div>
-          <h1>Mobile control inbox</h1>
-          <p className="muted">
-            Phone stays operator-first: alerts, blockers, run watch, and review-ready awareness. Desktop stays
-            the heavy execution surface.
-          </p>
-        </div>
-        <Link href="/" className="inline-link">
-          Back to desktop ↗
-        </Link>
-      </header>
+  function handleCopy(text: string) {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      setSurfaceNote('Clipboard is not available on this browser.');
+      return;
+    }
 
-      <section className="surface-card mobile-panel-surface mobile-panel-compact">
-        <div className="section-head">
-          <div>
-            <div className="eyebrow">At a glance</div>
-            <h2>Remote tasking queue</h2>
-          </div>
-          <span className={`status-pill ${statusClass(refreshError ? 'warning' : snapshot.mode === 'live' ? 'success' : 'warning')}`}>
-            {refreshError ? 'warning' : snapshot.mode === 'live' ? 'live' : 'demo'}
-          </span>
-        </div>
-        <p className="muted section-caption">
-          Compact mobile pass: less narration, stronger hierarchy, same truthful control lane.
-        </p>
-        <div className="toolbar-strip toolbar-strip-primary">
-          <div className="toolbar-chip toolbar-chip-strong">
-            <span>Now</span>
-            <strong>{selectedSession?.isCurrentSession ? 'This chat' : selectedSession?.name ?? 'Queue mirror'}</strong>
-            <p>{selectedSession?.isCurrentSession ? 'Q ↔ Mister live' : compactLine(selectedSession?.name, 'Freshest live session', 38)}</p>
-          </div>
-          <div className="toolbar-chip toolbar-chip-strong">
-            <span>Review</span>
-            <strong>
-              {snapshot.review?.pullRequest
-                ? `PR #${snapshot.review.pullRequest.number}`
-                : snapshot.review?.branch ?? 'No lane'}
-            </strong>
-            <p>{compactLine(snapshot.review?.pullRequest?.title ?? snapshot.review?.branch, 'No review lane yet', 42)}</p>
-          </div>
-        </div>
-        <div className="toolbar-strip toolbar-strip-secondary toolbar-strip-metrics">
-          <div className="toolbar-chip toolbar-chip-stat">
-            <span>Hot</span>
-            <strong>{snapshot.summary.activeRuns}</strong>
-            <p>runs</p>
-          </div>
-          <div className="toolbar-chip toolbar-chip-stat">
-            <span>Alerts</span>
-            <strong>{snapshot.summary.alerts}</strong>
-            <p>need eyes</p>
-          </div>
-          <div className="toolbar-chip toolbar-chip-stat">
-            <span>Review</span>
-            <strong>{snapshot.summary.reviewItems}</strong>
-            <p>ready</p>
-          </div>
-          <div className="toolbar-chip toolbar-chip-stat">
-            <span>Approvals</span>
-            <strong>{snapshot.summary.approvals}</strong>
-            <p>pending</p>
-          </div>
-        </div>
-        <div className="queue-toolbar toolbar-link-row compact-link-row">
-          <Link href="/" className="mobile-action-link">
-            Desktop ↗
-          </Link>
-          {snapshot.review ? (
-            <Link href={snapshot.review.desktopHref} className="mobile-action-link">
-              Review ↗
-            </Link>
-          ) : (
-            <div className="mobile-action-link mobile-action-link-disabled">Review soon</div>
-          )}
-          {snapshot.review?.pullRequest ? (
-            <a href={snapshot.review.pullRequest.url} target="_blank" rel="noreferrer" className="mobile-action-link">
-              GitHub ↗
-            </a>
-          ) : (
-            <div className="mobile-action-link mobile-action-link-disabled">No PR</div>
-          )}
-          <button type="button" onClick={() => window.location.reload()}>
-            Refresh
-          </button>
-        </div>
-      </section>
+    void navigator.clipboard.writeText(text).then(() => {
+      setSurfaceNote('Copied to clipboard.');
+    }).catch(() => {
+      setSurfaceNote('Could not copy to the clipboard.');
+    });
+  }
 
-      <section className="surface-card mobile-panel-surface mobile-panel-compact">
-        <div className="section-head">
-          <div>
-            <div className="eyebrow">Now + queue</div>
-            <h2>Live operator queue</h2>
-          </div>
-          <span className={`status-pill ${refreshError ? 'status-warning' : 'status-success'}`}>
-            {refreshError ? 'warning' : `${snapshot.items.length} live`}
-          </span>
-        </div>
-        <p className="muted section-caption">
-          Lead with what matters now. Keep the rest available without turning the screen into a dump.
-        </p>
-        {actionHint ? <p className="muted operator-note compact-note">{actionHint}</p> : null}
-        <div className="mobile-stack mobile-stack-tight">
-          {visibleQueueItems.map((item, index) => {
-            const sessionKey = item.sessionKey;
-            const inlineHistory = sessionKey ? historyBySession[sessionKey] ?? [] : [];
-            const inlineHistoryError = sessionKey ? historyError[sessionKey] : null;
-            const inlineHistoryLoading = sessionKey ? historyLoading[sessionKey] : false;
-            const inlineActionState = sessionKey ? actionStateBySession[sessionKey] ?? 'idle' : 'idle';
-            const inlineActionNote = sessionKey ? actionNoteBySession[sessionKey] : null;
-            const inlineDraft = sessionKey ? draftBySession[sessionKey] ?? '' : '';
-            const historyOpen = Boolean(sessionKey && expandedSessionKey === sessionKey);
-            const composeOpen = Boolean(sessionKey && composeSessionKey === sessionKey);
-            const visibleActions = index === 0 ? item.actions.slice(0, 3) : item.actions.slice(0, 2);
+  async function handleSurfaceRefresh() {
+    setSurfaceRefreshing(true);
+    try {
+      const nextSnapshot = await refreshInbox();
+      const nextSessionKey = selectedSessionKey
+        ?? nextSnapshot.primarySessionKey
+        ?? nextSnapshot.sessions.find((session) => session.isCurrentSession)?.sessionKey
+        ?? nextSnapshot.sessions[0]?.sessionKey;
+      const nextReviewPath = selectedReviewFilePath ?? nextSnapshot.review?.changedFiles[0]?.path ?? null;
 
+      if (nextSessionKey) {
+        await loadHistory(nextSessionKey, true).catch(() => undefined);
+      }
+      if (nextReviewPath) {
+        await loadReviewFile(nextReviewPath, true).catch(() => undefined);
+      }
+      setSurfaceNote('Refreshed the live session and diff surface.');
+    } catch (error) {
+      setSurfaceNote(error instanceof Error ? error.message : 'Unable to refresh the mobile surface right now.');
+    } finally {
+      setSurfaceRefreshing(false);
+    }
+  }
+
+  function handleSessionFocus(sessionId: string) {
+    const nextSession = snapshot.sessions.find((session) => session.id === sessionId);
+    if (!nextSession?.sessionKey) {
+      return;
+    }
+
+    setSelectedId(sessionId);
+    setControlsOpen(false);
+    setSurfaceNote(`Focused ${compactLine(nextSession.name, 'the selected session', 40)}.`);
+    void loadHistory(nextSession.sessionKey).catch(() => undefined);
+  }
+
+  async function handleStopActiveRun() {
+    if (!selectedSessionKey || !window.confirm('Stop the active run for this session?')) {
+      return;
+    }
+
+    try {
+      const result = await runAction({
+        action: 'stop',
+        sessionKey: selectedSessionKey,
+      });
+      setSurfaceNote(result.note);
+      setControlsOpen(false);
+    } catch (error) {
+      setSurfaceNote(error instanceof Error ? error.message : 'Unable to stop the active run from mobile.');
+    }
+  }
+
+  function openDiffViewer() {
+    if (!reviewFiles.length) {
+      setSurfaceNote('There is no active review diff on the mobile surface right now.');
+      return;
+    }
+    setControlsOpen(false);
+    setDiffOpen(true);
+  }
+
+  function handleReviewFileFocus(reviewPath: string) {
+    setSelectedReviewFilePath(reviewPath);
+    void loadReviewFile(reviewPath).catch(() => undefined);
+  }
+
+  function jumpReviewFile(direction: 'prev' | 'next') {
+    if (!reviewFiles.length) {
+      return;
+    }
+
+    const fallbackIndex = direction === 'prev' ? reviewFiles.length - 1 : 0;
+    const currentIndex = selectedReviewFileIndex >= 0 ? selectedReviewFileIndex : fallbackIndex;
+    const nextIndex = direction === 'prev'
+      ? Math.max(0, currentIndex - 1)
+      : Math.min(reviewFiles.length - 1, currentIndex + 1);
+    const nextFile = reviewFiles[nextIndex];
+    if (!nextFile) {
+      return;
+    }
+
+    handleReviewFileFocus(nextFile.path);
+  }
+
+  function renderMediaGrid(media: MobileTranscriptMedia[], align: 'left' | 'right' = 'left') {
+    return (
+      <div className={`remodex-media-grid ${align === 'right' ? 'remodex-media-grid-right' : ''}`}>
+        {media.map((item) => {
+          if (isImageMedia(item)) {
             return (
-              <div key={item.id} className={`mobile-action-card queue-card ${index === 0 ? 'queue-card-featured' : 'queue-card-secondary'}`}>
-                <div className="row space-between compact-row queue-card-head">
-                  <div>
-                    <div className="queue-kicker">{index === 0 ? 'Now' : 'Queued'}</div>
-                    <h3>{compactLine(item.title, 'Queue item', 46)}</h3>
-                    <p>{compactLine(item.detail, 'Open the live session for more detail.', index === 0 ? 82 : 76)}</p>
-                  </div>
-                  <span className={`status-pill ${statusClass(item.severity)}`}>{item.kind.replace('_', ' ')}</span>
-                </div>
-                <div className="queue-meta-row">
-                  <span className="muted mono queue-meta-pill">{item.timestampLabel ?? 'now'}</span>
-                  {sessionKey ? <span className="muted mono queue-meta-pill">{compactLine(sessionKey, sessionKey, 30)}</span> : null}
-                </div>
-                <div className="tool-drawer-list tool-drawer-list-mobile queue-toolbar">
-                  {visibleActions.map((action) => (
-                    action.href ? (
-                      action.href.startsWith('http') ? (
-                        <a
-                          key={`${item.id}:${action.kind}`}
-                          href={action.href}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="mobile-action-link"
-                        >
-                          {action.label}
-                        </a>
-                      ) : (
-                        <Link key={`${item.id}:${action.kind}`} href={action.href} className="mobile-action-link">
-                          {action.label}
-                        </Link>
-                      )
-                    ) : (
-                      <button
-                        key={`${item.id}:${action.kind}`}
-                        type="button"
-                        onClick={() => {
-                          void handleAction(action);
-                        }}
-                        disabled={!action.available || (Boolean(sessionKey) && inlineActionState !== 'idle' && action.kind !== 'inspect')}
-                      >
-                        {action.kind === 'inspect' && historyOpen
-                          ? 'Hide log'
-                          : action.kind === 'steer' && composeOpen
-                            ? 'Close steer'
-                            : action.kind === 'stop' && inlineActionState === 'stopping'
-                              ? 'Stopping…'
-                              : action.label}
-                      </button>
-                    )
-                  ))}
-                </div>
-                {item.actions.length > visibleActions.length ? (
-                  <span className="queue-action-caption">+{item.actions.length - visibleActions.length} more actions inside the full operator view</span>
-                ) : null}
-
-                {composeOpen && sessionKey ? (
-                  <div className="inset-card tool-shell">
-                    <div className="row space-between compact-row operator-header-row">
-                      <div>
-                        <span>Direct steer</span>
-                        <strong>Send from inbox</strong>
-                      </div>
-                      <span className="status-pill status-running">/api/mobile/action</span>
-                    </div>
-                    <div className="operator-form top-gap">
-                      <textarea
-                        className="operator-textarea"
-                        rows={3}
-                        value={inlineDraft}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setDraftBySession((current) => ({ ...current, [sessionKey]: value }));
-                        }}
-                        placeholder="Steer this live session directly from the mobile inbox…"
-                      />
-                      <div className="operator-actions">
-                        <button
-                          className="button-primary"
-                          type="button"
-                          disabled={inlineActionState !== 'idle' || !inlineDraft.trim()}
-                          onClick={() => {
-                            void handleSteerSubmit(sessionKey);
-                          }}
-                        >
-                          {inlineActionState === 'steering' ? 'Sending…' : 'Send steer'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setComposeSessionKey(null)}
-                          disabled={inlineActionState !== 'idle'}
-                        >
-                          Close
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            void loadHistory(sessionKey, true);
-                          }}
-                          disabled={inlineActionState !== 'idle' || inlineHistoryLoading}
-                        >
-                          {inlineHistoryLoading ? 'Refreshing…' : 'Refresh log'}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                {inlineActionNote ? <p className="muted operator-note">{inlineActionNote}</p> : null}
-
-                {historyOpen && sessionKey ? (
-                  <div className="inset-card tool-shell terminal-shell">
-                    <div className="row space-between compact-row operator-header-row">
-                      <div>
-                        <span>Inline history</span>
-                        <strong>Phone-side run watch</strong>
-                      </div>
-                      <span className="status-pill status-healthy">/api/mobile/history</span>
-                    </div>
-                    <p className="muted operator-note">
-                      This is the tighter mobile watch lane: inspect the latest readable turns here without dropping into the full desktop operator surface.
-                    </p>
-                    {inlineHistoryError ? <p className="muted operator-note">{inlineHistoryError}</p> : null}
-                    {inlineHistory.length ? (
-                      <div className="transcript-list top-gap terminal-stack">
-                        {inlineHistory.map((entry) => (
-                          <div key={entry.id} className="transcript-entry terminal-entry">
-                            <div className="row space-between compact-row">
-                              <strong>{roleLabel(entry.role)}</strong>
-                              <span className="muted mono">{entry.timestampLabel ?? 'now'}</span>
-                            </div>
-                            <p>{entry.text}</p>
-                          </div>
-                        ))}
-                      </div>
-                    ) : inlineHistoryLoading ? (
-                      <p className="muted operator-note">Loading inline history…</p>
-                    ) : (
-                      <p className="muted operator-note">No readable transcript turns are visible for this session yet.</p>
-                    )}
-                  </div>
-                ) : null}
-              </div>
+              <button
+                key={item.path}
+                type="button"
+                className="remodex-media-card remodex-media-card-image"
+                onClick={() => setExpandedMedia(item)}
+              >
+                <Image
+                  src={mediaHref(item.path)}
+                  alt={item.name}
+                  width={1200}
+                  height={900}
+                  unoptimized
+                  onLoadingComplete={() => {
+                    if (stickToBottomRef.current) {
+                      window.requestAnimationFrame(() => scrollToLatestMessage());
+                    }
+                  }}
+                />
+                <span className="remodex-media-card-caption">Tap to expand</span>
+              </button>
             );
-          })}
-        </div>
-        {hiddenQueueCount > 0 ? (
+          }
+
+          return (
+            <div key={item.path} className="remodex-media-card remodex-media-card-file">
+              <div className="remodex-media-file-icon">
+                {item.kind === 'pdf' ? <FileText size={18} strokeWidth={2.1} /> : <ImageIcon size={18} strokeWidth={2.1} />}
+              </div>
+              <div className="remodex-media-file-copy">
+                <strong>{item.name}</strong>
+                <span>{item.kind === 'pdf' ? 'PDF artifact' : 'File artifact'}</span>
+              </div>
+              <div className="remodex-media-file-actions">
+                <a href={mediaHref(item.path)} target="_blank" rel="noreferrer">Open</a>
+                <a href={mediaHref(item.path, true)} download={item.name}>Save</a>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mobile-wrap remodex-mobile-page" style={shellStyle}>
+      <div className="remodex-phone-shell">
+        <header
+          className="remodex-topbar"
+          data-compact={isHeaderCompact ? 'true' : 'false'}
+          data-visible={headerVisible ? 'true' : 'false'}
+        >
           <button
             type="button"
-            className="queue-toggle"
-            onClick={() => setQueueExpanded((current) => !current)}
+            className="remodex-circle-button"
+            aria-label="Conversation controls"
+            onClick={() => setControlsOpen(true)}
           >
-            {queueExpanded ? 'Show less queue' : `Show ${hiddenQueueCount} more queue item${hiddenQueueCount === 1 ? '' : 's'}`}
+            <Menu size={18} strokeWidth={2.1} />
           </button>
-        ) : null}
-      </section>
-
-      {snapshot.review ? (
-        <section className="surface-card mobile-review-focus mobile-panel-surface mobile-panel-compact">
-          <div className="section-head">
-            <div>
-              <div className="eyebrow">Review</div>
-              <h2>Desktop lane, mobile triage</h2>
+          <div className="remodex-title-shell">
+            <div className="remodex-title-stack">
+              <span className="remodex-title-kicker">{headerLabel}</span>
+              <h1>{activeTitle}</h1>
+              <p>{activeSubtitle}</p>
             </div>
-            <span className={`status-pill ${statusClass(snapshot.review.changedFiles.length ? 'reviewing' : 'healthy')}`}>
-              {snapshot.review.changedFiles.length ? `${snapshot.review.changedFiles.length} files` : 'clean'}
+          </div>
+          <button
+            type="button"
+            className="remodex-diff-pill"
+            onClick={openDiffViewer}
+            disabled={!reviewFiles.length}
+            aria-label={`Open diff sheet with +${focusedAdditions ?? 0}, -${focusedDeletions ?? 0}, ${reviewFiles.length} ${diffFileLabel}`}
+          >
+            <span className="remodex-diff-pill-stats" aria-hidden="true">
+              <span className="remodex-diff-pill-chip remodex-diff-pill-chip-add">+{focusedAdditions ?? 0}</span>
+              <span className="remodex-diff-pill-chip remodex-diff-pill-chip-remove">-{focusedDeletions ?? 0}</span>
             </span>
+            <span className="remodex-diff-pill-meta">
+              <span className="remodex-diff-pill-count">{reviewFiles.length}</span>
+              <span className="remodex-diff-pill-caption">{diffFileLabel}</span>
+            </span>
+            <SlidersHorizontal size={15} strokeWidth={2} />
+          </button>
+        </header>
+
+        <div className="remodex-scroll-view">
+          <div className="remodex-system-row">
+            <p className="remodex-system-line">
+              {selectedSession?.isCurrentSession
+                ? 'Mirroring the live Q ↔ Mister conversation, not spawning a fresh session.'
+                : 'Mirroring the selected OpenClaw session on phone so you can steer it without dropping into desktop.'}
+            </p>
+            {selectedSession?.status === 'running' ? <span className="remodex-live-pill">Live</span> : null}
           </div>
 
-          <div className="mobile-review-headline compact-review-headline">
-            <div>
-              <span>Current lane</span>
-              <strong>
-                {snapshot.review.pullRequest
-                  ? `PR #${snapshot.review.pullRequest.number} — ${compactLine(snapshot.review.pullRequest.title, snapshot.review.branch, 46)}`
-                  : snapshot.review.branch}
-              </strong>
-              <p className="muted mono">{snapshot.review.branch}</p>
+          <div className={`remodex-context-card remodex-context-card-${contextTone}`}>
+            <div className="remodex-context-card-copy">
+              <span className="remodex-context-card-kicker">Context pressure</span>
+              <strong>{contextUsedPercent}% used</strong>
             </div>
-            <div className="glass-link-row compact-link-row">
-              <Link href={snapshot.review.desktopHref} className="mobile-action-link">
-                Review ↗
-              </Link>
-              {snapshot.review.pullRequest ? (
-                <a href={snapshot.review.pullRequest.url} target="_blank" rel="noreferrer" className="mobile-action-link">
-                  GitHub ↗
-                </a>
-              ) : null}
-            </div>
+            <span className="remodex-context-card-trend">{contextTrend}</span>
           </div>
 
-          {snapshot.review.issues.length ? (
-            <div className="glass-chip-grid compact-chip-grid">
-              {snapshot.review.issues.map((issue) => (
-                <a key={issue.number} href={issue.url} target="_blank" rel="noreferrer" className="glass-chip compact-chip">
-                  {`#${issue.number}`}
-                </a>
-              ))}
-            </div>
-          ) : null}
+          {refreshError ? <p className="remodex-banner-note">{refreshError}</p> : null}
+          {surfaceNote ? <p className="remodex-banner-note">{surfaceNote}</p> : null}
+          {transcriptError ? <p className="remodex-banner-note">{transcriptError}</p> : null}
 
-          {snapshot.review.changedFiles.length ? (
-            <>
-              <p className="muted section-caption">
-                Only the first few files stay open on mobile by default. The heavy review still belongs on desktop.
-              </p>
-              <div className="glass-file-list compact-file-list">
-                {visibleReviewFiles.map((file) => {
-                  const fileTone = file.status === 'deleted'
-                    ? 'critical'
-                    : file.status === 'untracked'
-                      ? 'warning'
-                      : file.status === 'renamed'
-                        ? 'reviewing'
-                        : file.status === 'added'
-                          ? 'healthy'
-                          : 'running';
-                  const isSelected = selectedReviewFilePath === file.path;
+          <div className="remodex-message-stack">
+            {transcriptEntries.length ? transcriptEntries.map((entry, index) => {
+              const isUser = entry.role === 'user';
+              const isLatest = index === transcriptEntries.length - 1;
+              const hasText = Boolean(entry.text.trim());
+              const hasMedia = Boolean(entry.media?.length);
 
-                  return (
+              if (isUser) {
+                return (
+                  <div key={entry.id} className="remodex-user-turn-wrap">
+                    {hasText ? <div className="remodex-user-bubble">{renderMessageBody(entry.text, `${entry.id}-user`)}</div> : null}
+                    {hasMedia ? renderMediaGrid(entry.media ?? [], 'right') : null}
+                    <span className="remodex-turn-time">{entry.timestampLabel ?? 'now'}</span>
+                  </div>
+                );
+              }
+
+              return (
+                <article key={entry.id} className="remodex-message-card remodex-message-card-assistant">
+                  <div className="remodex-message-head">
+                    <span>{roleLabel(entry.role)}</span>
+                    <div className="remodex-message-tools">
+                      {hasText ? (
+                        <button type="button" className="remodex-icon-link" onClick={() => handleCopy(entry.text)} aria-label="Copy message">
+                          <Copy size={16} strokeWidth={2.1} />
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                  {hasText ? renderMessageBody(entry.text, `${entry.id}-assistant`) : null}
+                  {hasMedia ? renderMediaGrid(entry.media ?? []) : null}
+                  {isLatest && selectedReviewFile ? (
+                    <button type="button" className="remodex-inline-diff-thumb" onClick={openDiffViewer}>
+                      <div className="remodex-inline-diff-mini">
+                        <FileDiff size={14} strokeWidth={2.1} />
+                      </div>
+                      <div className="remodex-inline-diff-copy">
+                        <strong>{compactLine(selectedReviewFile.path, selectedReviewFile.path, 28)}</strong>
+                        <span>{`+${selectedReviewFile.additions ?? 0} / -${selectedReviewFile.deletions ?? 0}`}</span>
+                      </div>
+                    </button>
+                  ) : null}
+                </article>
+              );
+            }) : transcriptLoading ? (
+              <div className="remodex-loading-card">Syncing the focused session…</div>
+            ) : (
+              <div className="remodex-loading-card">
+                No readable transcript turns are visible yet. That usually means the latest activity was tool-heavy or compacted,
+                not that the session failed.
+              </div>
+            )}
+          </div>
+          <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
+        </div>
+
+        <div className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
+          <div className="remodex-compose-shell">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="remodex-file-input-hidden"
+              onChange={(event) => {
+                void handleAttachmentSelection(event.target.files);
+                event.currentTarget.value = '';
+              }}
+            />
+            {transcriptAttachments.length ? (
+              <div className="remodex-attachment-strip">
+                {transcriptAttachments.map((attachment) => (
+                  <div key={attachment.id} className="remodex-attachment-pill">
+                    <Image src={attachment.previewUrl} alt={attachment.fileName} width={72} height={72} unoptimized />
+                    <div className="remodex-attachment-pill-copy">
+                      <strong>{compactLine(attachment.fileName, attachment.fileName, 20)}</strong>
+                      <span>Ready to send</span>
+                    </div>
                     <button
-                      key={`${file.status}:${file.path}`}
                       type="button"
-                      className={`glass-file-row glass-file-button compact-file-row ${isSelected ? 'glass-file-row-active' : ''}`}
+                      className="remodex-attachment-pill-remove"
+                      aria-label={`Remove ${attachment.fileName}`}
                       onClick={() => {
-                        void handleReviewFileSelect(file.path);
+                        if (!selectedSessionKey) return;
+                        removeDraftAttachment(selectedSessionKey, attachment.id);
                       }}
                     >
-                      <div className="row space-between compact-row">
-                        <strong className="mono">{compactLine(file.path, file.path, 42)}</strong>
-                        <span className={`status-pill ${statusClass(fileTone)}`}>
-                          {file.status}
-                        </span>
-                      </div>
-                      <p className="muted mono">
-                        +{file.additions ?? 0} / -{file.deletions ?? 0}
-                      </p>
-                      <span className="glass-file-caption">
-                        {isSelected ? 'Hide preview' : 'Open preview'}
-                      </span>
+                      <X size={14} strokeWidth={2.2} />
                     </button>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
-              {hiddenReviewCount > 0 ? (
+            ) : null}
+            <div className="remodex-compose-surface">
+              <textarea
+                ref={composeRef}
+                className="remodex-compose-input"
+                rows={2}
+                value={transcriptDraft}
+                onChange={(event) => {
+                  if (!selectedSessionKey) return;
+                  const value = event.target.value;
+                  setDraftBySession((current) => ({ ...current, [selectedSessionKey]: value }));
+                }}
+                onFocus={() => setComposeFocused(true)}
+                onBlur={() => setComposeFocused(false)}
+                placeholder={transcriptAttachments.length ? 'Add context for the attached image' : 'Ask for follow-up changes'}
+              />
+              <div className="remodex-compose-row">
                 <button
                   type="button"
-                  className="queue-toggle"
-                  onClick={() => setReviewExpanded((current) => !current)}
+                  className="remodex-compose-chip remodex-compose-chip-icon"
+                  aria-label="Attach image"
+                  onClick={() => fileInputRef.current?.click()}
                 >
-                  {reviewExpanded ? 'Show fewer files' : `Show ${hiddenReviewCount} more file${hiddenReviewCount === 1 ? '' : 's'}`}
+                  <Plus size={16} strokeWidth={2.2} />
+                </button>
+                <button
+                  type="button"
+                  className="remodex-compose-chip remodex-compose-chip-icon"
+                  aria-label="Refresh conversation"
+                  onClick={() => {
+                    void handleSurfaceRefresh();
+                  }}
+                >
+                  <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
+                </button>
+                <span className="remodex-compose-chip remodex-compose-pill">{selectedSession?.model ?? 'live'}</span>
+                <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{selectedSession?.status ?? 'idle'}</span>
+                <button
+                  type="button"
+                  className="remodex-send-button"
+                  disabled={!selectedSessionKey || transcriptActionState !== 'idle' || (!transcriptDraft.trim() && transcriptAttachments.length === 0)}
+                  onClick={() => {
+                    if (!selectedSessionKey) return;
+                    void handleSteerSubmit(selectedSessionKey);
+                  }}
+                  aria-label="Send steer"
+                >
+                  {transcriptActionState === 'steering' ? <RefreshCw size={17} className="spin" /> : <ArrowUp size={17} strokeWidth={2.2} />}
+                </button>
+              </div>
+            </div>
+            {isComposerPrimed ? (
+              <p className="remodex-compose-helper">Images only for now — this lane is wired truthfully against OpenClaw image attachments.</p>
+            ) : null}
+            {transcriptActionNote ? <p className="remodex-inline-action-note">{transcriptActionNote}</p> : null}
+          </div>
+
+          <div className="remodex-runtime-bar">
+            <div className="remodex-runtime-chip">
+              <Monitor size={15} strokeWidth={2.1} />
+              {selectedSession?.runtime ?? snapshot.mode}
+            </div>
+            <div className="remodex-runtime-chip remodex-runtime-chip-accent">
+              <FileDiff size={15} strokeWidth={2.1} />
+              {snapshot.review ? `${reviewFiles.length} files` : 'No diff'}
+            </div>
+            <div
+              className="remodex-runtime-chip remodex-runtime-chip-quiet"
+              title={snapshot.review?.branch ?? selectedSession?.branch ?? 'main'}
+            >
+              <GitBranch size={15} strokeWidth={2.1} />
+              {compactLine(snapshot.review?.branch ?? selectedSession?.branch ?? 'main', 'main', 18)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {controlsOpen ? (
+        <div className="remodex-controls-overlay" role="dialog" aria-modal="true" onClick={() => setControlsOpen(false)}>
+          <section className="remodex-controls-sheet" onClick={(event) => event.stopPropagation()}>
+            <div className="remodex-diff-sheet-head remodex-sheet-head-generic">
+              <div className="remodex-diff-sheet-handle" />
+              <h2>Conversation Controls</h2>
+              <button type="button" className="remodex-done-button" onClick={() => setControlsOpen(false)}>
+                Done
+              </button>
+            </div>
+
+            <div className="remodex-controls-summary-card">
+              <span className="remodex-controls-label">Focused session</span>
+              <strong>{selectedSession?.isCurrentSession ? 'Q ↔ Mister live' : compactLine(selectedSession?.name, 'Focused session', 36)}</strong>
+              <p>{compactLine(selectedSessionKey, 'No session key available.', 96)}</p>
+            </div>
+
+            <div className="remodex-controls-action-grid">
+              <button type="button" className="remodex-controls-action" onClick={() => { void handleSurfaceRefresh(); setControlsOpen(false); }}>
+                <RefreshCw size={16} strokeWidth={2.1} className={surfaceRefreshing ? 'spin' : undefined} />
+                Refresh live surface
+              </button>
+              <button type="button" className="remodex-controls-action" onClick={openDiffViewer} disabled={!reviewFiles.length}>
+                <FileDiff size={16} strokeWidth={2.1} />
+                Open diff sheet
+              </button>
+              <button
+                type="button"
+                className="remodex-controls-action"
+                disabled={!selectedSessionKey}
+                onClick={() => {
+                  handleCopy(selectedSessionKey ?? '');
+                  setControlsOpen(false);
+                }}
+              >
+                <Copy size={16} strokeWidth={2.1} />
+                Copy session key
+              </button>
+              <Link href="/" className="remodex-controls-action remodex-controls-action-link" onClick={() => setControlsOpen(false)}>
+                <Monitor size={16} strokeWidth={2.1} />
+                Open desktop review
+              </Link>
+              {selectedSession?.status === 'running' ? (
+                <button type="button" className="remodex-controls-action remodex-controls-action-danger" onClick={() => void handleStopActiveRun()}>
+                  <Square size={16} strokeWidth={2.1} />
+                  Stop active run
                 </button>
               ) : null}
-            </>
-          ) : null}
-
-          {selectedReviewFilePath ? (
-            <div className="glass-review-preview inset-card tool-shell terminal-shell">
-              <div className="row space-between compact-row operator-header-row">
-                <div>
-                  <span>Per-file drilldown</span>
-                  <strong className="mono">{selectedReviewFilePath}</strong>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void loadReviewFile(selectedReviewFilePath, true);
-                  }}
-                  disabled={reviewFileLoadingPath === selectedReviewFilePath}
-                >
-                  {reviewFileLoadingPath === selectedReviewFilePath ? 'Refreshing…' : 'Refresh preview'}
-                </button>
-              </div>
-              {reviewFileError ? <p className="muted operator-note">{reviewFileError}</p> : null}
-              {reviewFileByPath[selectedReviewFilePath] ? (
-                <>
-                  <p className="muted operator-note compact-note">{compactLine(reviewFileByPath[selectedReviewFilePath].note, 'Inline review preview.', 120)}</p>
-                  <pre className="glass-diff-preview terminal-output">{reviewFileByPath[selectedReviewFilePath].preview}</pre>
-                </>
-              ) : reviewFileLoadingPath === selectedReviewFilePath ? (
-                <p className="muted operator-note">Loading per-file review preview…</p>
-              ) : (
-                <p className="muted operator-note">No inline review preview is cached for this file yet.</p>
-              )}
             </div>
-          ) : null}
-        </section>
+
+            {sessionSwitcher.length > 1 ? (
+              <div className="remodex-controls-session-list">
+                <span className="remodex-controls-label">Focus another session</span>
+                <div className="remodex-controls-session-grid">
+                  {sessionSwitcher.map((session) => {
+                    const active = session.id === selectedSession?.id;
+                    return (
+                      <button
+                        key={session.id}
+                        type="button"
+                        className={`remodex-controls-session-pill ${active ? 'remodex-controls-session-pill-active' : ''}`}
+                        onClick={() => handleSessionFocus(session.id)}
+                      >
+                        <strong>{compactLine(session.isCurrentSession ? 'Q ↔ Mister live' : session.name, session.name, 28)}</strong>
+                        <span>{session.status} · {compactLine(session.lastEventAt, 'now', 20)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+          </section>
+        </div>
       ) : null}
 
-      <section className="surface-card mobile-panel-surface mobile-panel-compact">
-        <div className="section-head">
-          <div>
-            <div className="eyebrow">Operator</div>
-            <h2>Open tools only when you need them</h2>
-          </div>
-          <span className="status-pill status-info">{operatorOpen ? 'open' : 'collapsed'}</span>
-        </div>
-        <div className="mobile-memory-card queue-card compact-launcher-card">
-          <div>
-            <strong>{selectedSession?.name ?? 'No current session'}</strong>
-            <p className="muted">
-              {selectedSession?.isCurrentSession
-                ? 'Same live Q ↔ Mister session.'
-                : 'Fallback to the freshest visible live session.'}
-            </p>
-            <p className="muted mono">{selectedSession?.sessionKey ?? snapshot.primarySessionKey ?? 'unknown'}</p>
-          </div>
-          <div className="queue-toolbar compact-launcher-actions">
-            <button className="button-primary" type="button" onClick={() => setSelectedId(selectedSession?.id ?? '')}>
-              Focus session
-            </button>
-            <button type="button" onClick={() => setOperatorOpen((current) => !current)}>
-              {operatorOpen ? 'Hide tools' : 'Open tools'}
-            </button>
-          </div>
-        </div>
-      </section>
+      {diffOpen ? (
+        <div className="remodex-diff-overlay" role="dialog" aria-modal="true" onClick={() => setDiffOpen(false)}>
+          <section className="remodex-diff-sheet" onClick={(event) => event.stopPropagation()}>
+            <div className="remodex-diff-sheet-head">
+              <div className="remodex-diff-sheet-handle" />
+              <h2>Repository Changes</h2>
+              <div className="remodex-sheet-head-actions">
+                <button
+                  type="button"
+                  className="remodex-sheet-icon-button"
+                  aria-label="Refresh diff"
+                  onClick={() => {
+                    if (selectedReviewFilePath) {
+                      void loadReviewFile(selectedReviewFilePath, true);
+                    } else {
+                      void handleSurfaceRefresh();
+                    }
+                  }}
+                >
+                  <RefreshCw size={16} strokeWidth={2.1} className={reviewFileLoadingPath === selectedReviewFilePath ? 'spin' : undefined} />
+                </button>
+                <button type="button" className="remodex-done-button" onClick={() => setDiffOpen(false)}>
+                  Done
+                </button>
+              </div>
+            </div>
 
-      {selectedSession && operatorOpen ? <SessionOperatorPanel agent={selectedSession} compact /> : null}
+            {reviewFiles.length ? (
+              <>
+                <div className="remodex-diff-nav-row">
+                  <div className="remodex-diff-position-chip">
+                    {selectedReviewFilePosition ? `${selectedReviewFilePosition} of ${reviewFiles.length}` : `${reviewFiles.length} files`}
+                  </div>
+                  <div className="remodex-diff-nav-actions">
+                    <button
+                      type="button"
+                      className="remodex-diff-nav-button"
+                      onClick={() => jumpReviewFile('prev')}
+                      disabled={!hasPrevReviewFile}
+                    >
+                      Prev file
+                    </button>
+                    <button
+                      type="button"
+                      className="remodex-diff-nav-button"
+                      onClick={() => jumpReviewFile('next')}
+                      disabled={!hasNextReviewFile}
+                    >
+                      Next file
+                    </button>
+                  </div>
+                </div>
+                <div className="remodex-diff-file-strip">
+                  {reviewFiles.map((file) => {
+                    const active = selectedReviewFilePath === file.path;
+                    return (
+                      <button
+                        key={`${file.status}:${file.path}`}
+                        type="button"
+                        className={`remodex-diff-file-pill ${active ? 'remodex-diff-file-pill-active' : ''}`}
+                        onClick={() => handleReviewFileFocus(file.path)}
+                      >
+                        {compactLine(file.path, file.path, 22)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : null}
+
+            {reviewFileError ? <p className="remodex-banner-note remodex-banner-note-sheet">{reviewFileError}</p> : null}
+
+            <div className="remodex-diff-scroll">
+              {selectedReviewFile ? (
+                <>
+                  <div className="remodex-diff-meta-row">
+                    <div className="remodex-diff-meta-copy">
+                      <strong>{selectedReviewFile.path}</strong>
+                      <span className="remodex-diff-meta-position">{selectedReviewFilePosition ? `${selectedReviewFilePosition} of ${reviewFiles.length}` : `${reviewFiles.length} files`}</span>
+                    </div>
+                    <span>{`+${selectedReviewFile.additions ?? 0} / -${selectedReviewFile.deletions ?? 0}`}</span>
+                  </div>
+                  <div className="remodex-diff-block">
+                    {selectedReviewFile.preview.split('\n').map((line, index) => {
+                      const tone = diffLineTone(line);
+                      return (
+                        <div key={`${selectedReviewFile.path}:${index}`} className={`remodex-diff-line remodex-diff-line-${tone}`}>
+                          <div className="remodex-diff-gutter" />
+                          <code>{line || ' '}</code>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              ) : reviewFileLoadingPath ? (
+                <div className="remodex-loading-card">Loading repository diff…</div>
+              ) : (
+                <div className="remodex-loading-card">No diff is selected on the mobile review surface yet.</div>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {expandedMedia ? (
+        <div className="remodex-media-overlay" role="dialog" aria-modal="true" onClick={() => setExpandedMedia(null)}>
+          <section className="remodex-media-lightbox" onClick={(event) => event.stopPropagation()}>
+            <div className="remodex-media-lightbox-head">
+              <strong>{expandedMedia.name}</strong>
+              <button type="button" className="remodex-sheet-icon-button" onClick={() => setExpandedMedia(null)} aria-label="Close media viewer">
+                <X size={16} strokeWidth={2.1} />
+              </button>
+            </div>
+            <div className="remodex-media-lightbox-body">
+              {isImageMedia(expandedMedia) ? (
+                <Image
+                  src={mediaHref(expandedMedia.path)}
+                  alt={expandedMedia.name}
+                  width={1600}
+                  height={1200}
+                  unoptimized
+                  className="remodex-media-lightbox-image"
+                />
+              ) : (
+                <div className="remodex-media-lightbox-file">
+                  <FileText size={32} strokeWidth={2.1} />
+                  <p>{expandedMedia.name}</p>
+                </div>
+              )}
+            </div>
+            <div className="remodex-media-lightbox-actions">
+              <a href={mediaHref(expandedMedia.path)} target="_blank" rel="noreferrer" className="remodex-media-action-link">
+                <ExternalLink size={16} strokeWidth={2.1} />
+                Open
+              </a>
+              <a href={mediaHref(expandedMedia.path, true)} download={expandedMedia.name} className="remodex-media-action-link remodex-media-action-link-primary">
+                <Download size={16} strokeWidth={2.1} />
+                Save
+              </a>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      <div className="remodex-desktop-link-row">
+        <Link href="/" className="remodex-desktop-link">
+          Open desktop review ↗
+        </Link>
+      </div>
     </div>
   );
 }

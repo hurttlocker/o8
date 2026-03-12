@@ -80,10 +80,20 @@ export interface MobileInboxSnapshot {
   review?: MobileReviewFocus;
 }
 
+export type MobileTranscriptMediaKind = 'image' | 'pdf' | 'file';
+
+export interface MobileTranscriptMedia {
+  kind: MobileTranscriptMediaKind;
+  path: string;
+  name: string;
+  mimeType?: string;
+}
+
 export interface MobileTranscriptEntry {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;
+  media?: MobileTranscriptMedia[];
   timestamp?: number;
   timestampLabel?: string;
 }
@@ -97,10 +107,18 @@ export interface MobileReviewFileResponse {
   file: MobileReviewFileDetail;
 }
 
+export interface MobileActionAttachment {
+  type?: string;
+  mimeType: string;
+  fileName: string;
+  content: string;
+}
+
 export interface MobileActionRequest {
   action: Extract<MobileControlActionKind, 'steer' | 'stop' | 'approve' | 'deny' | 'pause' | 'resume'>;
   sessionKey: string;
   message?: string;
+  attachments?: MobileActionAttachment[];
   runId?: string;
 }
 
