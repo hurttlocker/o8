@@ -15,6 +15,88 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const isOwnedCodex = sessionKey.startsWith('codex-owned:');
+
+    if (action === 'resume') {
+      if (!isOwnedCodex) {
+        const response: MobileActionResponse = {
+          ok: false,
+          action,
+          sessionKey,
+          status: 'unavailable',
+          note: 'Resume is only wired truthfully for IDE-owned Codex sessions between runs on mobile right now.',
+        };
+        return NextResponse.json(response, {
+          status: 501,
+          headers: {
+            'Cache-Control': 'no-store, max-age=0',
+          },
+        });
+      }
+
+      const result = await performRuntimeAction({
+        action: 'send_input',
+        surfaceId: sessionKey,
+        message: payload?.message,
+        runId: payload?.runId,
+      });
+
+      const response: MobileActionResponse = {
+        ok: result.ok,
+        action,
+        sessionKey,
+        status: result.status,
+        note: result.note,
+        runId: result.runId,
+        aborted: result.aborted,
+      };
+
+      return NextResponse.json(response, {
+        status: result.status === 'unavailable' ? 501 : 200,
+        headers: {
+          'Cache-Control': 'no-store, max-age=0',
+        },
+      });
+    }
+
+    if (action === 'watch' || action === 'resolve') {
+      if (!isOwnedCodex) {
+        const response: MobileActionResponse = {
+          ok: false,
+          action,
+          sessionKey,
+          status: 'unavailable',
+          note: `${action} is only wired truthfully for IDE-owned Codex review packets on mobile right now.`,
+        };
+        return NextResponse.json(response, {
+          status: 501,
+          headers: {
+            'Cache-Control': 'no-store, max-age=0',
+          },
+        });
+      }
+
+      const result = await performRuntimeAction({
+        action,
+        surfaceId: sessionKey,
+      });
+
+      const response: MobileActionResponse = {
+        ok: result.ok,
+        action,
+        sessionKey,
+        status: result.status,
+        note: result.note,
+      };
+
+      return NextResponse.json(response, {
+        status: result.status === 'unavailable' ? 501 : 200,
+        headers: {
+          'Cache-Control': 'no-store, max-age=0',
+        },
+      });
+    }
+
     if (action !== 'steer' && action !== 'stop') {
       const response: MobileActionResponse = {
         ok: false,
@@ -22,6 +104,22 @@ export async function POST(request: NextRequest) {
         sessionKey,
         status: 'unavailable',
         note: `${action} is part of the mobile control contract, but it is not wired truthfully on the current runtime lane yet.`,
+      };
+      return NextResponse.json(response, {
+        status: 501,
+        headers: {
+          'Cache-Control': 'no-store, max-age=0',
+        },
+      });
+    }
+
+    if (action === 'stop' && isOwnedCodex) {
+      const response: MobileActionResponse = {
+        ok: false,
+        action,
+        sessionKey,
+        status: 'unavailable',
+        note: 'Interrupt still stays on desktop for IDE-owned Codex. Mobile is limited to review-state changes and between-run resume for now.',
       };
       return NextResponse.json(response, {
         status: 501,

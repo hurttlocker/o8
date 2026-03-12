@@ -16,6 +16,8 @@ export type MobileControlActionKind =
   | 'pause'
   | 'resume'
   | 'stop'
+  | 'watch'
+  | 'resolve'
   | 'open_review'
   | 'open_desktop';
 
@@ -128,7 +130,7 @@ export interface MobileActionAttachment {
 }
 
 export interface MobileActionRequest {
-  action: Extract<MobileControlActionKind, 'steer' | 'stop' | 'approve' | 'deny' | 'pause' | 'resume'>;
+  action: Extract<MobileControlActionKind, 'steer' | 'stop' | 'approve' | 'deny' | 'pause' | 'resume' | 'watch' | 'resolve'>;
   sessionKey: string;
   message?: string;
   attachments?: MobileActionAttachment[];

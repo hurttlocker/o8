@@ -10,7 +10,7 @@ function sessionActions(agent: AgentSummary): MobileControlAction[] {
   const canSteer = isOpenClaw && Boolean(runtimeSurface?.capabilities.sendInput);
   const canStop = isOpenClaw && Boolean(runtimeSurface?.capabilities.interrupt);
   const ownershipNote = agent.runtime === 'codex'
-    ? 'Owned Codex is watch-first on phone right now. Lifecycle and grouped tail are live, but resume/interrupt stay on desktop until mobile control semantics are cleaner.'
+    ? 'Owned Codex on phone now supports review-state visibility and between-runs resume only. Live interrupt still stays on desktop until the mobile control semantics are cleaner.'
     : 'This action is not wired truthfully on the current runtime surface.';
 
   return [
@@ -202,7 +202,7 @@ export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
     primarySessionKey: fleet.meta.primarySessionKey,
     note:
       fleet.meta.mode === 'live'
-        ? 'Mobile now speaks to a Cortex IDE control snapshot. OpenClaw remains the first actionable backing adapter, while IDE-owned Codex surfaces are watch-first on phone with lifecycle + grouped tail. Resume/interrupt stay on desktop until the mobile control semantics are cleaner.'
+        ? 'Mobile now speaks to a Cortex IDE control snapshot. OpenClaw remains the first actionable backing adapter, while IDE-owned Codex surfaces now expose lifecycle, review state, exact diff context, and between-runs resume on phone. Live interrupt still stays on desktop until the mobile control semantics are cleaner.'
         : fleet.meta.note,
     sessions,
     items,

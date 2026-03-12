@@ -15,9 +15,11 @@ import {
 } from 'react';
 import {
   ArrowUp,
+  Check,
   Copy,
   Download,
   ExternalLink,
+  Eye,
   FileDiff,
   FileText,
   GitBranch,
@@ -30,6 +32,7 @@ import {
   Square,
   X,
 } from 'lucide-react';
+import type { RuntimeReviewPacket } from '@/lib/fleet/types';
 import type {
   MobileActionRequest,
   MobileActionResponse,
@@ -127,6 +130,39 @@ function ownedOutcomeLabel(lastOutcome?: string) {
     default:
       return 'No outcome yet';
   }
+}
+
+function ownedReviewDispositionLabel(disposition?: RuntimeReviewPacket['reviewDisposition']) {
+  return disposition === 'resolved' ? 'Resolved' : 'Watching';
+}
+
+function ownedReviewDispositionTone(disposition?: RuntimeReviewPacket['reviewDisposition']) {
+  return disposition === 'resolved' ? 'calm' : 'watch';
+}
+
+function buildOwnedCorrectionDraft(packet: RuntimeReviewPacket) {
+  const lines = [
+    'Continue from the current owned session state. Use the packet evidence below and make the smallest correct next move.',
+  ];
+
+  if (packet.lastRun) {
+    lines.push(`Last run: ${packet.lastRun.mode} • ${packet.lastRun.outcome}.`);
+  }
+  if (packet.lastRun?.assistantSummary) {
+    lines.push(`Assistant summary: ${packet.lastRun.assistantSummary}`);
+  }
+  if (packet.lastRun?.commands[0]) {
+    const command = packet.lastRun.commands[0];
+    lines.push(`Command evidence: ${command.command} (${command.status}${command.exitCode != null ? `, exit ${command.exitCode}` : ''}).`);
+  }
+  if (packet.changedFiles.length) {
+    lines.push(`Current repo delta: ${packet.changedFiles.slice(0, 5).map((file) => file.path).join(', ')}.`);
+  } else {
+    lines.push('Current repo delta is clean, so prefer a bounded verification or summary step over a broad rewrite.');
+  }
+
+  lines.push('Inspect the exact diff context, correct only the smallest failing or incomplete piece, and then summarize what changed and what still needs review.');
+  return lines.join('\n');
 }
 
 function mediaHref(path: string, download = false) {
@@ -349,8 +385,11 @@ export function MobileRemoteShell({
   const [historyGroupsBySession, setHistoryGroupsBySession] = useState<Record<string, MobileRuntimeTailGroup[]>>({});
   const [historyLoading, setHistoryLoading] = useState<Record<string, boolean>>({});
   const [historyError, setHistoryError] = useState<Record<string, string | null>>({});
+  const [reviewPacketBySession, setReviewPacketBySession] = useState<Record<string, RuntimeReviewPacket>>({});
+  const [reviewPacketLoadingBySession, setReviewPacketLoadingBySession] = useState<Record<string, boolean>>({});
+  const [reviewPacketErrorBySession, setReviewPacketErrorBySession] = useState<Record<string, string | null>>({});
   const [draftBySession, setDraftBySession] = useState<Record<string, string>>({});
-  const [actionStateBySession, setActionStateBySession] = useState<Record<string, 'idle' | 'steering' | 'stopping'>>({});
+  const [actionStateBySession, setActionStateBySession] = useState<Record<string, 'idle' | 'steering' | 'stopping' | 'reviewing'>>({});
   const [actionNoteBySession, setActionNoteBySession] = useState<Record<string, string | null>>({});
   const [draftAttachmentsBySession, setDraftAttachmentsBySession] = useState<Record<string, DraftAttachment[]>>({});
   const [selectedReviewFilePath, setSelectedReviewFilePath] = useState<string | null>(() => (
@@ -565,7 +604,15 @@ export function MobileRemoteShell({
   );
 
   const selectedSessionKey = selectedSession?.sessionKey;
-  const reviewFiles = useMemo(() => snapshot.review?.changedFiles ?? [], [snapshot.review?.changedFiles]);
+  const isOpenClawSession = selectedSession?.runtime === 'openclaw';
+  const isOwnedCodexSession = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'owned';
+  const selectedReviewPacket = selectedSessionKey && isOwnedCodexSession ? reviewPacketBySession[selectedSessionKey] ?? null : null;
+  const selectedReviewPacketLoading = selectedSessionKey && isOwnedCodexSession ? reviewPacketLoadingBySession[selectedSessionKey] ?? false : false;
+  const selectedReviewPacketError = selectedSessionKey && isOwnedCodexSession ? reviewPacketErrorBySession[selectedSessionKey] ?? null : null;
+  const reviewFiles = useMemo(
+    () => (isOwnedCodexSession ? selectedReviewPacket?.changedFiles ?? [] : snapshot.review?.changedFiles ?? []),
+    [isOwnedCodexSession, selectedReviewPacket, snapshot.review?.changedFiles],
+  );
 
   const loadHistory = useCallback(async (sessionKey: string, force = false) => {
     if (!force && historyBySession[sessionKey]?.length) {
@@ -590,6 +637,32 @@ export function MobileRemoteShell({
       setHistoryLoading((current) => ({ ...current, [sessionKey]: false }));
     }
   }, [historyBySession]);
+
+  const loadOwnedReviewPacket = useCallback(async (sessionKey: string, force = false) => {
+    if (!sessionKey.startsWith('codex-owned:')) {
+      return null;
+    }
+    if (!force && reviewPacketBySession[sessionKey]) {
+      return reviewPacketBySession[sessionKey];
+    }
+
+    setReviewPacketLoadingBySession((current) => ({ ...current, [sessionKey]: true }));
+    try {
+      const response = await fetch(`/api/runtime/review?surfaceId=${encodeURIComponent(sessionKey)}`, {
+        cache: 'no-store',
+      });
+      const payload = await readJson<RuntimeReviewPacket>(response);
+      setReviewPacketBySession((current) => ({ ...current, [sessionKey]: payload }));
+      setReviewPacketErrorBySession((current) => ({ ...current, [sessionKey]: null }));
+      return payload;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to load the owned review packet.';
+      setReviewPacketErrorBySession((current) => ({ ...current, [sessionKey]: message }));
+      throw error;
+    } finally {
+      setReviewPacketLoadingBySession((current) => ({ ...current, [sessionKey]: false }));
+    }
+  }, [reviewPacketBySession]);
 
   const loadReviewFile = useCallback(async (reviewPath: string, force = false) => {
     if (!force && reviewFileByPath[reviewPath]) {
@@ -626,6 +699,16 @@ export function MobileRemoteShell({
   }, [historyBySession, historyLoading, loadHistory, selectedSessionKey]);
 
   useEffect(() => {
+    if (!selectedSessionKey || !selectedSessionKey.startsWith('codex-owned:')) {
+      return;
+    }
+
+    if (!reviewPacketBySession[selectedSessionKey] && !reviewPacketLoadingBySession[selectedSessionKey]) {
+      void loadOwnedReviewPacket(selectedSessionKey).catch(() => undefined);
+    }
+  }, [loadOwnedReviewPacket, reviewPacketBySession, reviewPacketLoadingBySession, selectedSessionKey]);
+
+  useEffect(() => {
     if (!reviewFiles.length) {
       setSelectedReviewFilePath(null);
       setReviewFileError(null);
@@ -654,7 +737,10 @@ export function MobileRemoteShell({
       if (selectedSession?.status === 'running') {
         void refreshInbox().catch(() => undefined);
       }
-      if (selectedReviewFilePath && (diffOpen || selectedSession?.status === 'running')) {
+      if (selectedSessionKey.startsWith('codex-owned:')) {
+        void loadOwnedReviewPacket(selectedSessionKey, true).catch(() => undefined);
+      }
+      if (selectedReviewFilePath && (diffOpen || selectedSession?.status === 'running' || selectedSessionKey.startsWith('codex-owned:'))) {
         void loadReviewFile(selectedReviewFilePath, true).catch(() => undefined);
       }
     }, intervalMs);
@@ -662,10 +748,8 @@ export function MobileRemoteShell({
     return () => {
       window.clearInterval(timer);
     };
-  }, [diffOpen, loadHistory, loadReviewFile, refreshInbox, selectedReviewFilePath, selectedSession?.status, selectedSessionKey]);
+  }, [diffOpen, loadHistory, loadOwnedReviewPacket, loadReviewFile, refreshInbox, selectedReviewFilePath, selectedSession?.status, selectedSessionKey]);
 
-  const isOpenClawSession = selectedSession?.runtime === 'openclaw';
-  const isOwnedCodexSession = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'owned';
   const transcriptEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
   const transcriptGroups = selectedSessionKey ? historyGroupsBySession[selectedSessionKey] ?? [] : [];
   const transcriptLoading = selectedSessionKey ? historyLoading[selectedSessionKey] ?? false : false;
@@ -688,17 +772,21 @@ export function MobileRemoteShell({
   const focusedDeletions = selectedReviewFile?.deletions ?? totalDeletions;
   const sessionSwitcher = snapshot.sessions.slice(0, 5);
   const activeTitle = compactLine(
-    snapshot.review?.pullRequest?.title ?? selectedSession?.name ?? selectedSession?.currentTask,
+    isOwnedCodexSession
+      ? selectedReviewPacket?.title ?? selectedSession?.name ?? selectedSession?.currentTask
+      : snapshot.review?.pullRequest?.title ?? selectedSession?.name ?? selectedSession?.currentTask,
     selectedSession?.isCurrentSession ? 'Q ↔ Mister live' : selectedSession?.name ?? 'Current session',
     26,
   );
   const activeSubtitle = compactLine(
-    snapshot.review ? `/${snapshot.review.repoSlug}/${snapshot.review.branch}` : selectedSession?.sessionKey,
+    isOwnedCodexSession
+      ? (selectedReviewPacket?.repoSlug && selectedReviewPacket?.branch ? `/${selectedReviewPacket.repoSlug}/${selectedReviewPacket.branch}` : selectedSession?.sessionKey)
+      : (snapshot.review ? `/${snapshot.review.repoSlug}/${snapshot.review.branch}` : selectedSession?.sessionKey),
     selectedSession?.sessionKey ?? 'mobile/live',
     42,
   );
   const headerLabel = isOwnedCodexSession
-    ? 'Owned run watch'
+    ? (selectedSession?.runtimeSurface?.capabilities.sendInput ? 'Owned run resume' : 'Owned run watch')
     : selectedSession?.status === 'running'
       ? 'Live session'
       : snapshot.review?.pullRequest
@@ -713,6 +801,8 @@ export function MobileRemoteShell({
   const contextUsedPercent = Math.round(selectedSession?.context.usedPercent ?? 0);
   const ownedAvailability = selectedSession?.runtimeSurface?.lifecycle?.availability;
   const ownedLastOutcome = selectedSession?.runtimeSurface?.lifecycle?.lastOutcome;
+  const ownedReviewDisposition = selectedReviewPacket?.reviewDisposition;
+  const canResumeOwnedCodex = Boolean(isOwnedCodexSession && selectedSession?.runtimeSurface?.capabilities.sendInput);
   const statusTone = isOwnedCodexSession
     ? ownedLifecycleTone(ownedAvailability, ownedLastOutcome)
     : contextPressureTone(contextUsedPercent);
@@ -720,7 +810,7 @@ export function MobileRemoteShell({
     ? ownedLifecycleLabel(ownedAvailability)
     : `${contextUsedPercent}% used`;
   const statusMeta = isOwnedCodexSession
-    ? ownedOutcomeLabel(ownedLastOutcome)
+    ? [ownedOutcomeLabel(ownedLastOutcome), ownedReviewDispositionLabel(ownedReviewDisposition)].join(' • ')
     : contextTrendLabel(selectedSession?.context.trend);
   const statusKicker = isOwnedCodexSession ? 'Owned lifecycle' : 'Context pressure';
   const showFloatingContextRail = scrollY > 180;
@@ -821,9 +911,15 @@ export function MobileRemoteShell({
 
   async function runAction(payload: MobileActionRequest) {
     const sessionKey = payload.sessionKey;
+    const nextState = payload.action === 'stop'
+      ? 'stopping'
+      : payload.action === 'watch' || payload.action === 'resolve'
+        ? 'reviewing'
+        : 'steering';
+
     setActionStateBySession((current) => ({
       ...current,
-      [sessionKey]: payload.action === 'stop' ? 'stopping' : 'steering',
+      [sessionKey]: nextState,
     }));
 
     try {
@@ -838,6 +934,9 @@ export function MobileRemoteShell({
       setActionNoteBySession((current) => ({ ...current, [sessionKey]: result.note }));
       await refreshInbox();
       await loadHistory(sessionKey, true).catch(() => undefined);
+      if (sessionKey.startsWith('codex-owned:')) {
+        await loadOwnedReviewPacket(sessionKey, true).catch(() => undefined);
+      }
       return result;
     } finally {
       setActionStateBySession((current) => ({ ...current, [sessionKey]: 'idle' }));
@@ -849,7 +948,7 @@ export function MobileRemoteShell({
     if (targetSession?.runtime !== 'openclaw') {
       setActionNoteBySession((current) => ({
         ...current,
-        [sessionKey]: 'Owned Codex is watch-first on phone right now. Resume and interrupt stay on desktop until the mobile control semantics are cleaner.',
+        [sessionKey]: 'Owned Codex no longer uses mobile steer. Use the bounded between-runs resume lane instead.',
       }));
       return;
     }
@@ -891,6 +990,68 @@ export function MobileRemoteShell({
     }
   }
 
+  function handleLoadOwnedCorrectionDraft(sessionKey: string) {
+    const packet = reviewPacketBySession[sessionKey];
+    if (!packet) {
+      setActionNoteBySession((current) => ({
+        ...current,
+        [sessionKey]: 'Review packet is still loading. Refresh the surface and try again.',
+      }));
+      return;
+    }
+
+    setDraftBySession((current) => ({
+      ...current,
+      [sessionKey]: buildOwnedCorrectionDraft(packet),
+    }));
+    setActionNoteBySession((current) => ({
+      ...current,
+      [sessionKey]: 'Loaded a correction draft grounded in the owned review packet.',
+    }));
+    window.requestAnimationFrame(() => composeRef.current?.focus());
+  }
+
+  async function handleOwnedResumeSubmit(sessionKey: string) {
+    const message = draftBySession[sessionKey]?.trim();
+    if (!message) {
+      setActionNoteBySession((current) => ({
+        ...current,
+        [sessionKey]: 'Load the correction draft or write the next bounded instruction first.',
+      }));
+      return;
+    }
+
+    try {
+      await runAction({
+        action: 'resume',
+        sessionKey,
+        message,
+      });
+      setDraftBySession((current) => ({ ...current, [sessionKey]: '' }));
+      setSurfaceNote('Queued the next bounded resume input for this owned Codex session.');
+    } catch (error) {
+      setActionNoteBySession((current) => ({
+        ...current,
+        [sessionKey]: error instanceof Error ? error.message : 'Unable to resume the owned Codex session from mobile.',
+      }));
+    }
+  }
+
+  async function handleOwnedReviewDisposition(action: 'watch' | 'resolve', sessionKey: string) {
+    try {
+      const result = await runAction({
+        action,
+        sessionKey,
+      });
+      setSurfaceNote(result.note);
+    } catch (error) {
+      setActionNoteBySession((current) => ({
+        ...current,
+        [sessionKey]: error instanceof Error ? error.message : 'Unable to update the owned review state from mobile.',
+      }));
+    }
+  }
+
   function handleCopy(text: string) {
     if (typeof navigator === 'undefined' || !navigator.clipboard) {
       setSurfaceNote('Clipboard is not available on this browser.');
@@ -916,6 +1077,9 @@ export function MobileRemoteShell({
 
       if (nextSessionKey) {
         await loadHistory(nextSessionKey, true).catch(() => undefined);
+        if (nextSessionKey.startsWith('codex-owned:')) {
+          await loadOwnedReviewPacket(nextSessionKey, true).catch(() => undefined);
+        }
       }
       if (nextReviewPath) {
         await loadReviewFile(nextReviewPath, true).catch(() => undefined);
@@ -1107,13 +1271,15 @@ export function MobileRemoteShell({
               {selectedSession?.isCurrentSession
                 ? 'Mirroring the live Q ↔ Mister conversation, not spawning a fresh session.'
                 : isOwnedCodexSession
-                  ? 'Watching an IDE-owned Codex surface on phone with truthful lifecycle + grouped tail. Resume and interrupt stay on desktop for now.'
+                  ? canResumeOwnedCodex
+                    ? 'Owned Codex is now reviewable on phone and can accept the next bounded resume input between runs. Live interrupt still stays on desktop.'
+                    : 'Owned Codex is reviewable on phone with truthful lifecycle, review state, and exact diff context. Live interrupt still stays on desktop.'
                   : 'Mirroring the selected OpenClaw session on phone so you can steer it without dropping into desktop.'}
             </p>
             {selectedSession?.status === 'running'
               ? <span className="remodex-live-pill">Live</span>
               : isOwnedCodexSession
-                ? <span className="remodex-live-pill">Watch</span>
+                ? <span className="remodex-live-pill">{canResumeOwnedCodex ? 'Resume' : 'Watch'}</span>
                 : null}
           </div>
 
@@ -1125,9 +1291,62 @@ export function MobileRemoteShell({
             <span className="remodex-context-card-trend">{statusMeta}</span>
           </div>
 
+          {isOwnedCodexSession && (selectedReviewPacket || selectedReviewPacketLoading || selectedReviewPacketError) ? (
+            <div className={`remodex-owned-review-card remodex-context-card remodex-context-card-${ownedReviewDispositionTone(ownedReviewDisposition)}`}>
+              <div className="remodex-owned-review-head">
+                <div className="remodex-context-card-copy">
+                  <span className="remodex-context-card-kicker">Review packet</span>
+                  <strong>{ownedReviewDispositionLabel(ownedReviewDisposition)}</strong>
+                </div>
+                <span className="remodex-context-card-trend">
+                  {selectedReviewPacket?.reviewDispositionUpdatedAtLabel
+                    ? `Updated ${selectedReviewPacket.reviewDispositionUpdatedAtLabel}`
+                    : selectedReviewPacketLoading
+                      ? 'Loading…'
+                      : `${reviewFiles.length} file${reviewFiles.length === 1 ? '' : 's'}`}
+                </span>
+              </div>
+              {selectedReviewPacket ? (
+                <>
+                  <p className="remodex-owned-review-copy">{selectedReviewPacket.summary}</p>
+                  <div className="remodex-owned-review-actions">
+                    <button
+                      type="button"
+                      className="remodex-controls-action"
+                      onClick={() => openDiffViewer()}
+                      disabled={!reviewFiles.length}
+                    >
+                      <FileDiff size={16} strokeWidth={2.1} />
+                      Open exact diff
+                    </button>
+                    <button
+                      type="button"
+                      className="remodex-controls-action"
+                      onClick={() => selectedSessionKey && handleLoadOwnedCorrectionDraft(selectedSessionKey)}
+                      disabled={!selectedSessionKey || !canResumeOwnedCodex}
+                    >
+                      <ArrowUp size={16} strokeWidth={2.1} />
+                      Load correction
+                    </button>
+                    <button
+                      type="button"
+                      className="remodex-controls-action"
+                      onClick={() => selectedSessionKey && void handleOwnedReviewDisposition(selectedReviewPacket.reviewDisposition === 'resolved' ? 'watch' : 'resolve', selectedSessionKey)}
+                      disabled={!selectedSessionKey || transcriptActionState !== 'idle'}
+                    >
+                      {selectedReviewPacket.reviewDisposition === 'resolved' ? <Eye size={16} strokeWidth={2.1} /> : <Check size={16} strokeWidth={2.1} />}
+                      {selectedReviewPacket.reviewDisposition === 'resolved' ? 'Keep watching' : 'Mark resolved'}
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+
           {refreshError ? <p className="remodex-banner-note">{refreshError}</p> : null}
           {surfaceNote ? <p className="remodex-banner-note">{surfaceNote}</p> : null}
           {transcriptError ? <p className="remodex-banner-note">{transcriptError}</p> : null}
+          {selectedReviewPacketError ? <p className="remodex-banner-note">{selectedReviewPacketError}</p> : null}
 
           <div className="remodex-message-stack">
             {isOwnedCodexSession && transcriptGroups.length ? transcriptGroups.map((group) => (
@@ -1317,15 +1536,109 @@ export function MobileRemoteShell({
                   <p className="remodex-compose-helper">Images only for now — this lane is wired truthfully against OpenClaw image attachments.</p>
                 ) : null}
               </>
+            ) : canResumeOwnedCodex ? (
+              <div className="remodex-compose-surface remodex-compose-surface-watch">
+                <div className="remodex-watch-card">
+                  <div className="remodex-watch-copy">
+                    <strong>Between-runs resume is live</strong>
+                    <p>
+                      This owned Codex session is settled and can accept the next bounded input from phone. This is not
+                      live keystroke injection — it is the truthful between-runs resume lane.
+                    </p>
+                  </div>
+                  <textarea
+                    ref={composeRef}
+                    className="remodex-compose-input"
+                    rows={2}
+                    value={transcriptDraft}
+                    onChange={(event) => {
+                      if (!selectedSessionKey) return;
+                      const value = event.target.value;
+                      setDraftBySession((current) => ({ ...current, [selectedSessionKey]: value }));
+                    }}
+                    onFocus={() => setComposeFocused(true)}
+                    onBlur={() => setComposeFocused(false)}
+                    placeholder="Load the correction draft or write the next bounded resume instruction"
+                  />
+                  <div className="remodex-owned-quick-actions">
+                    <button
+                      type="button"
+                      className="remodex-compose-chip"
+                      onClick={() => selectedSessionKey && handleLoadOwnedCorrectionDraft(selectedSessionKey)}
+                      disabled={!selectedSessionKey || !selectedReviewPacket}
+                    >
+                      <ArrowUp size={15} strokeWidth={2.1} />
+                      Load correction
+                    </button>
+                    <button
+                      type="button"
+                      className="remodex-compose-chip"
+                      onClick={openDiffViewer}
+                      disabled={!reviewFiles.length}
+                    >
+                      <FileDiff size={15} strokeWidth={2.1} />
+                      Exact diff
+                    </button>
+                  </div>
+                  <div className="remodex-compose-row remodex-compose-row-watch remodex-compose-row-owned">
+                    <button
+                      type="button"
+                      className="remodex-compose-chip remodex-compose-chip-icon"
+                      aria-label="Refresh owned runtime surface"
+                      onClick={() => {
+                        void handleSurfaceRefresh();
+                      }}
+                    >
+                      <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
+                    </button>
+                    <span className="remodex-compose-chip remodex-compose-pill">{selectedSession?.model ?? 'live'}</span>
+                    <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{ownedLifecycleLabel(ownedAvailability)}</span>
+                    <span className="remodex-compose-chip remodex-compose-pill">{ownedReviewDispositionLabel(ownedReviewDisposition)}</span>
+                    <button
+                      type="button"
+                      className="remodex-send-button"
+                      disabled={!selectedSessionKey || transcriptActionState !== 'idle' || !transcriptDraft.trim()}
+                      onClick={() => {
+                        if (!selectedSessionKey) return;
+                        void handleOwnedResumeSubmit(selectedSessionKey);
+                      }}
+                      aria-label="Resume owned Codex session"
+                    >
+                      {transcriptActionState === 'steering' ? <RefreshCw size={17} className="spin" /> : <ArrowUp size={17} strokeWidth={2.2} />}
+                    </button>
+                  </div>
+                  <p className="remodex-compose-helper">Phone can now review exact diff context and queue the next bounded owned resume. Interrupt still stays on desktop.</p>
+                </div>
+              </div>
             ) : (
               <div className="remodex-compose-surface remodex-compose-surface-watch">
                 <div className="remodex-watch-card">
                   <div className="remodex-watch-copy">
-                    <strong>Watch-first on phone</strong>
+                    <strong>Review-first on phone</strong>
                     <p>
-                      Lifecycle and grouped tail are live here, but resume and interrupt stay on desktop until the
-                      mobile control semantics are cleaner.
+                      Lifecycle, review state, grouped tail, and exact diff are live here. The next resume becomes
+                      available only after the active run settles and the owned session exposes a truthful between-runs lane.
                     </p>
+                  </div>
+                  <div className="remodex-owned-quick-actions">
+                    <button
+                      type="button"
+                      className="remodex-compose-chip"
+                      onClick={openDiffViewer}
+                      disabled={!reviewFiles.length}
+                    >
+                      <FileDiff size={15} strokeWidth={2.1} />
+                      Exact diff
+                    </button>
+                    <button
+                      type="button"
+                      className="remodex-compose-chip"
+                      onClick={() => selectedSessionKey && void handleOwnedReviewDisposition(ownedReviewDisposition === 'resolved' ? 'watch' : 'resolve', selectedSessionKey)}
+                      disabled={!selectedSessionKey || !selectedReviewPacket || transcriptActionState !== 'idle'}
+                    >
+                      {ownedReviewDisposition === 'resolved' ? <Eye size={15} strokeWidth={2.1} /> : <Check size={15} strokeWidth={2.1} />}
+                      {ownedReviewDisposition === 'resolved' ? 'Keep watching' : 'Mark resolved'}
+                    </button>
                   </div>
                   <div className="remodex-compose-row remodex-compose-row-watch">
                     <button
@@ -1340,7 +1653,7 @@ export function MobileRemoteShell({
                     </button>
                     <span className="remodex-compose-chip remodex-compose-pill">{selectedSession?.model ?? 'live'}</span>
                     <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{ownedLifecycleLabel(ownedAvailability)}</span>
-                    <span className="remodex-compose-chip remodex-compose-pill">{ownedOutcomeLabel(ownedLastOutcome)}</span>
+                    <span className="remodex-compose-chip remodex-compose-pill">{ownedReviewDispositionLabel(ownedReviewDisposition)}</span>
                   </div>
                 </div>
               </div>

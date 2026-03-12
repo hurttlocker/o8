@@ -2627,6 +2627,54 @@ button.workflow-file-item.workflow-file-item-active {
   line-height: 1.4;
 }
 
+.remodex-owned-review-card {
+  display: grid;
+  gap: 0.72rem;
+}
+
+.remodex-owned-review-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.remodex-owned-review-copy {
+  margin: 0;
+  color: rgba(17, 24, 39, 0.64);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.remodex-owned-review-actions,
+.remodex-owned-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+
+.remodex-owned-review-actions .remodex-controls-action:last-child {
+  grid-column: 1 / -1;
+}
+
+.remodex-owned-review-actions .remodex-controls-action,
+.remodex-owned-quick-actions .remodex-compose-chip {
+  min-height: 44px;
+  justify-content: center;
+}
+
+.remodex-owned-review-actions .remodex-controls-action {
+  width: 100%;
+  justify-items: center;
+  text-align: center;
+  padding: 0.72rem 0.7rem;
+  border-radius: 18px;
+}
+
+.remodex-compose-row-owned {
+  grid-template-columns: auto minmax(0, auto) minmax(0, auto) minmax(0, 1fr);
+}
+
 .remodex-file-input-hidden {
   display: none;
 }
