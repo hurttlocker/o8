@@ -131,6 +131,9 @@ export interface RuntimeReviewPacket {
   diffStat: string;
   changedFiles: ReviewChangedFile[];
   recentCommits: string[];
+  reviewDisposition: 'watching' | 'resolved';
+  reviewDispositionUpdatedAt?: string;
+  reviewDispositionUpdatedAtLabel?: string;
   lastRun?: {
     id: string;
     mode: 'launch' | 'resume';

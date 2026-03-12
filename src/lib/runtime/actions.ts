@@ -1,9 +1,9 @@
 import type { AgentSummary } from '@/lib/fleet/types';
-import { continueOwnedCodexSession, interruptOwnedCodexSession } from '@/lib/codex/owned';
+import { continueOwnedCodexSession, interruptOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
 import { abortOpenClawSession, steerOpenClawSession } from '@/lib/openclaw/chat';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 
-export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt';
+export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt' | 'watch' | 'resolve';
 
 export interface RuntimeActionRequest {
   action: RuntimeActionKind;
@@ -158,10 +158,25 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
         };
       }
 
+      if (payload.action === 'watch' || payload.action === 'resolve') {
+        const result = await setOwnedCodexReviewDisposition(
+          runtimeSurface.id,
+          payload.action === 'resolve' ? 'resolved' : 'watching',
+        );
+        return {
+          ok: true,
+          action: payload.action,
+          surfaceId: runtimeSurface.id,
+          runtime: agent.runtime,
+          status: 'completed',
+          note: result.note,
+        };
+      }
+
       return unavailable(
         agent,
         payload.action,
-        'This IDE-owned Codex surface supports launch/resume/interrupt only in the bounded owned-session lane for now.',
+        'This IDE-owned Codex surface supports launch/resume/interrupt and review-state disposition changes only in the bounded owned-session lane for now.',
       );
     }
     default:
