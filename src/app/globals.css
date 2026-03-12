@@ -950,6 +950,19 @@ button:hover {
   background: rgba(255, 255, 255, 0.72);
 }
 
+button.workflow-file-item {
+  width: 100%;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+
+button.workflow-file-item:hover,
+button.workflow-file-item.workflow-file-item-active {
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.08);
+}
+
 .workflow-file-item p,
 .workflow-pr-item p,
 .workflow-worktree-item p,

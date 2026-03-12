@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
 
 const execFileAsync = promisify(execFile);
+const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
 
 async function tryGit(repoPath: string, args: string[]) {
   try {
@@ -15,6 +16,10 @@ async function tryGit(repoPath: string, args: string[]) {
   }
 }
 
+function isReviewNoisePath(reviewPath: string) {
+  return REVIEW_NOISE_PATHS.has(reviewPath.trim());
+}
+
 function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedRaw: string) {
   const changed = new Map<string, ReviewChangedFile>();
 
@@ -24,6 +29,9 @@ function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedR
 
     const status = statusToken[0];
     const reviewPath = status === 'R' && secondPath ? `${firstPath} → ${secondPath}` : secondPath ?? firstPath;
+    if (isReviewNoisePath(firstPath) || (secondPath && isReviewNoisePath(secondPath)) || isReviewNoisePath(reviewPath)) {
+      continue;
+    }
 
     changed.set(reviewPath, {
       path: reviewPath,
@@ -42,7 +50,7 @@ function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedR
 
   for (const line of numStatRaw.split('\n').filter(Boolean)) {
     const [additionsRaw, deletionsRaw, reviewPath] = line.split('\t');
-    if (!reviewPath) continue;
+    if (!reviewPath || isReviewNoisePath(reviewPath)) continue;
 
     const entry = changed.get(reviewPath) ?? {
       path: reviewPath,
@@ -57,6 +65,7 @@ function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedR
   }
 
   for (const reviewPath of untrackedRaw.split('\n').map((value) => value.trim()).filter(Boolean)) {
+    if (isReviewNoisePath(reviewPath)) continue;
     changed.set(reviewPath, {
       path: reviewPath,
       status: 'untracked',

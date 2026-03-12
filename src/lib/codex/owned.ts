@@ -52,6 +52,8 @@ type OwnedCodexRunRecord = {
   interruptRequestedAt?: string;
 };
 
+type OwnedReviewDisposition = 'watching' | 'resolved';
+
 type OwnedCodexSessionRecord = {
   surfaceId: string;
   sessionDir: string;
@@ -66,6 +68,8 @@ type OwnedCodexSessionRecord = {
   threadId?: string;
   latestPrompt: string;
   latestSummary: string;
+  reviewDisposition?: OwnedReviewDisposition;
+  reviewDispositionUpdatedAt?: string;
   activeRun?: OwnedCodexRunRecord;
   recentRuns: OwnedCodexRunRecord[];
 };
@@ -616,6 +620,9 @@ function buildOwnedCurrentTask(session: OwnedCodexSessionRecord, running: boolea
   if (lifecycle.availability === 'awaiting-thread') {
     return `IDE-owned Codex session launched and waiting for its first thread id. ${session.latestSummary}`;
   }
+  if (reviewDisposition(session) === 'resolved') {
+    return `Operator marked this owned result resolved. Keep watching only if new evidence appears. ${session.latestSummary}`;
+  }
   if (lifecycle.lastOutcome === 'interrupted') {
     return `IDE-owned Codex session is ready for resume after an interrupted run. ${session.latestSummary}`;
   }
@@ -669,6 +676,8 @@ async function spawnOwnedRun(session: OwnedCodexSessionRecord, prompt: string, m
 
     session.latestPrompt = prompt;
     session.latestSummary = compactText(prompt, 140) || session.latestSummary;
+    session.reviewDisposition = 'watching';
+    session.reviewDispositionUpdatedAt = nowIso();
     session.activeRun = run;
     session.recentRuns = [run, ...session.recentRuns].slice(0, 16);
     await saveOwnedSession(session);
@@ -704,6 +713,8 @@ export async function launchOwnedCodexSession(request: OwnedCodexLaunchRequest):
     updatedAt: nowIso(),
     latestPrompt: prompt,
     latestSummary: compactText(prompt, 140) || 'Owned Codex session launched from Cortex IDE.',
+    reviewDisposition: 'watching',
+    reviewDispositionUpdatedAt: nowIso(),
     recentRuns: [],
   };
 
@@ -773,6 +784,24 @@ export async function interruptOwnedCodexSession(surfaceId: string) {
   }
 }
 
+export async function setOwnedCodexReviewDisposition(surfaceId: string, disposition: OwnedReviewDisposition) {
+  const session = await findOwnedSession(surfaceId);
+  if (!session) {
+    throw new Error('Owned Codex session was not found.');
+  }
+
+  session.reviewDisposition = disposition;
+  session.reviewDispositionUpdatedAt = nowIso();
+  await saveOwnedSession(session);
+
+  return {
+    disposition,
+    note: disposition === 'resolved'
+      ? 'Marked this owned result resolved. It stays visible, but no longer needs active attention unless new evidence appears.'
+      : 'Switched this owned result back to keep-watching mode.',
+  };
+}
+
 async function findOwnedSession(surfaceId: string) {
   for (const sessionDir of await listOwnedSessionDirs()) {
     const filePath = metadataPath(sessionDir);
@@ -826,12 +855,16 @@ async function collectOwnedTailEntries(session: OwnedCodexSessionRecord) {
   };
 }
 
-function buildReviewActions(packet: Pick<RuntimeReviewPacket, 'dirty' | 'changedFiles' | 'lastRun'>) {
+function buildReviewActions(packet: Pick<RuntimeReviewPacket, 'dirty' | 'changedFiles' | 'lastRun' | 'reviewDisposition'>) {
   const actions = [] as string[];
 
   if (packet.lastRun?.outcome === 'running') {
     actions.push('Watch the active run', 'Interrupt if it drifts');
     return actions;
+  }
+
+  if (packet.reviewDisposition === 'resolved') {
+    actions.push('Keep watching for new evidence');
   }
 
   if (packet.dirty) {
@@ -867,6 +900,10 @@ function buildReviewNotes(session: OwnedCodexSessionRecord, dirty: boolean) {
   }
 
   return notes;
+}
+
+function reviewDisposition(session: OwnedCodexSessionRecord): OwnedReviewDisposition {
+  return session.reviewDisposition ?? 'watching';
 }
 
 export async function getOwnedCodexRuntimeTail(surfaceId: string) {
@@ -918,6 +955,9 @@ export async function getOwnedCodexReviewPacket(surfaceId: string): Promise<Runt
     diffStat: repoReview.diffStat,
     changedFiles: repoReview.changedFiles,
     recentCommits: repoReview.recentCommits,
+    reviewDisposition: reviewDisposition(session),
+    reviewDispositionUpdatedAt: session.reviewDispositionUpdatedAt,
+    reviewDispositionUpdatedAtLabel: formatClock(session.reviewDispositionUpdatedAt),
     lastRun: lastRun
       ? {
           id: lastRun.id,
