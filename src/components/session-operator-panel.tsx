@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import type { AgentSummary, RuntimeReviewPacket } from '@/lib/fleet/types';
 
 type SessionTranscriptEntry = {
@@ -28,6 +28,17 @@ type OwnedRuntimeTailGroup = {
   finishedAtLabel?: string;
   summary: string;
   entries: RuntimeLogEntry[];
+};
+
+type ReviewFileDetail = {
+  path: string;
+  status: 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
+  additions?: number | null;
+  deletions?: number | null;
+  originalPath?: string;
+  currentPath?: string;
+  note: string;
+  preview: string;
 };
 
 function roleLabel(role: SessionTranscriptEntry['role']) {
@@ -99,6 +110,35 @@ function activeRunHint(agent: AgentSummary) {
   }
 }
 
+function reviewDispositionTone(disposition: RuntimeReviewPacket['reviewDisposition']) {
+  return disposition === 'resolved' ? 'healthy' : 'warning';
+}
+
+function buildCorrectionDraft(packet: RuntimeReviewPacket) {
+  const lines = [
+    'Continue from the current owned session state. Use the evidence below and make the smallest correct next move.',
+  ];
+
+  if (packet.lastRun) {
+    lines.push(`Last run: ${packet.lastRun.mode} • ${packet.lastRun.outcome}.`);
+  }
+  if (packet.lastRun?.assistantSummary) {
+    lines.push(`Assistant summary: ${packet.lastRun.assistantSummary}`);
+  }
+  if (packet.lastRun?.commands[0]) {
+    lines.push(`Command evidence: ${packet.lastRun.commands[0].command} (${packet.lastRun.commands[0].status}${packet.lastRun.commands[0].exitCode != null ? `, exit ${packet.lastRun.commands[0].exitCode}` : ''}).`);
+  }
+  if (packet.changedFiles.length) {
+    const files = packet.changedFiles.slice(0, 5).map((file) => file.path).join(', ');
+    lines.push(`Current repo delta: ${files}.`);
+  } else {
+    lines.push('Current repo delta is clean, so prefer a bounded follow-up or verification step over broad rewrites.');
+  }
+
+  lines.push('Inspect the current diff context, correct the smallest failing or incomplete piece, and then summarize exactly what changed and what still needs review.');
+  return lines.join('\n');
+}
+
 export function SessionOperatorPanel({
   agent,
   compact = false,
@@ -114,10 +154,14 @@ export function SessionOperatorPanel({
   const [reviewPacket, setReviewPacket] = useState<RuntimeReviewPacket | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewFile, setReviewFile] = useState<ReviewFileDetail | null>(null);
+  const [reviewFileLoading, setReviewFileLoading] = useState(false);
+  const [reviewFileError, setReviewFileError] = useState<string | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
-  const [actionState, setActionState] = useState<'idle' | 'sending' | 'stopping'>('idle');
+  const [actionState, setActionState] = useState<'idle' | 'sending' | 'stopping' | 'reviewing'>('idle');
   const [actionNote, setActionNote] = useState<string | null>(null);
+  const draftRef = useRef<HTMLTextAreaElement | null>(null);
   const transcriptLimit = compact ? 6 : 10;
   const liveRunVisible = ['running', 'reviewing'].includes(agent.status);
   const runtimeSurface = agent.runtimeSurface;
@@ -190,9 +234,61 @@ export function SessionOperatorPanel({
     }
   }, [isOwnedCodex, runtimeSurface]);
 
+  const loadReviewFile = useCallback(async (reviewPath: string) => {
+    setReviewFileLoading(true);
+    try {
+      const response = await fetch(`/api/review/file?path=${encodeURIComponent(reviewPath)}`, {
+        cache: 'no-store',
+      });
+      const payload = await readJson<{ file: ReviewFileDetail }>(response);
+      setReviewFile(payload.file);
+      setReviewFileError(null);
+    } catch (error) {
+      setReviewFileError(error instanceof Error ? error.message : 'Unable to load exact diff context');
+    } finally {
+      setReviewFileLoading(false);
+    }
+  }, []);
+
+  async function handleReviewDisposition(action: 'watch' | 'resolve') {
+    if (!runtimeSurface?.id || !isOwnedCodex) return;
+    setActionState('reviewing');
+    setActionNote(null);
+
+    try {
+      const response = await fetch('/api/runtime/action', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action,
+          surfaceId: runtimeSurface.id,
+        }),
+      });
+      const result = await readJson<{ note?: string }>(response);
+      setActionNote(result.note ?? (action === 'resolve' ? 'Marked resolved.' : 'Switched back to keep-watching.'));
+      await loadReviewPacket();
+      await onRuntimeRefresh?.(agent.id);
+    } catch (error) {
+      setActionNote(error instanceof Error ? error.message : 'Unable to update review disposition');
+    } finally {
+      setActionState('idle');
+    }
+  }
+
+  function handleLoadCorrectionDraft() {
+    if (!reviewPacket) return;
+    setDraft(buildCorrectionDraft(reviewPacket));
+    setActionNote('Loaded a correction draft grounded in the current packet. Review it or send it as-is.');
+    draftRef.current?.focus();
+  }
+
   useEffect(() => {
     setDraft('');
     setActionNote(null);
+    setReviewFile(null);
+    setReviewFileError(null);
     void loadTranscript();
     void loadReviewPacket();
   }, [agent.sessionKey, loadTranscript, loadReviewPacket]);
@@ -337,6 +433,7 @@ export function SessionOperatorPanel({
         {hasActionLane ? (
           <form className="operator-form" onSubmit={handleSteerSubmit}>
             <textarea
+              ref={draftRef}
               className="operator-textarea"
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
@@ -380,8 +477,12 @@ export function SessionOperatorPanel({
               <span>Review packet</span>
               <strong>Decision-ready evidence</strong>
             </div>
-            <span className={`status-pill ${reviewPacket?.dirty ? 'status-warning' : 'status-healthy'}`}>
-              {reviewLoading ? 'loading' : reviewPacket?.dirty ? `${reviewPacket.changedFiles.length} review files` : 'clean repo'}
+            <span className={`status-pill status-${reviewDispositionTone(reviewPacket?.reviewDisposition ?? 'watching')}`}>
+              {reviewLoading
+                ? 'loading'
+                : reviewPacket
+                  ? `${reviewPacket.reviewDisposition} • ${reviewPacket.dirty ? `${reviewPacket.changedFiles.length} review files` : 'clean repo'}`
+                  : 'watching'}
             </span>
           </div>
           <p className="muted operator-note">
@@ -402,14 +503,45 @@ export function SessionOperatorPanel({
                   <p className="muted mono">{reviewPacket.head ?? 'unknown head'}</p>
                 </div>
                 <div className="operator-state-card">
-                  <span>Next actions</span>
-                  <strong>{reviewPacket.nextActions[0] ?? 'Review evidence'}</strong>
-                  <p className="muted">{reviewPacket.nextActions.slice(1).join(' • ') || 'No extra guidance yet.'}</p>
+                  <span>Review state</span>
+                  <strong>{reviewPacket.reviewDisposition}</strong>
+                  <p className="muted">
+                    {reviewPacket.reviewDispositionUpdatedAtLabel
+                      ? `Last changed ${reviewPacket.reviewDispositionUpdatedAtLabel}`
+                      : 'No explicit operator disposition yet.'}
+                  </p>
                 </div>
+              </div>
+
+              <div className="operator-actions queue-toolbar top-gap">
+                <button
+                  type="button"
+                  onClick={() => reviewPacket.changedFiles[0] && void loadReviewFile(reviewPacket.changedFiles[0].path)}
+                  disabled={actionState !== 'idle' || !reviewPacket.changedFiles.length}
+                >
+                  {reviewFileLoading ? 'Opening diff…' : 'Open exact diff context'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLoadCorrectionDraft}
+                  disabled={actionState !== 'idle' || !canSendInput}
+                >
+                  Resume with correction
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleReviewDisposition(reviewPacket.reviewDisposition === 'resolved' ? 'watch' : 'resolve')}
+                  disabled={actionState !== 'idle'}
+                >
+                  {reviewPacket.reviewDisposition === 'resolved' ? 'Keep watching' : 'Mark resolved'}
+                </button>
               </div>
 
               <div className="workflow-warning-list">
                 <p className="muted workflow-note">{reviewPacket.summary}</p>
+                <p className="muted workflow-note">
+                  Next actions: {reviewPacket.nextActions.join(' • ') || 'Review the latest evidence.'}
+                </p>
                 {reviewPacket.notes.map((note) => (
                   <p key={note} className="muted workflow-note">{note}</p>
                 ))}
@@ -457,13 +589,18 @@ export function SessionOperatorPanel({
                   {reviewPacket.changedFiles.length ? (
                     <div className="workflow-file-list">
                       {reviewPacket.changedFiles.slice(0, 8).map((file) => (
-                        <div key={`${file.status}:${file.path}`} className="workflow-file-item">
+                        <button
+                          key={`${file.status}:${file.path}`}
+                          type="button"
+                          className={`workflow-file-item ${reviewFile?.path === file.path ? 'workflow-file-item-active' : ''}`}
+                          onClick={() => void loadReviewFile(file.path)}
+                        >
                           <div className="row space-between compact-row">
                             <strong className="mono">{file.path}</strong>
                             <span className="status-pill status-reviewing">{file.status}</span>
                           </div>
                           <p className="muted mono">+{file.additions ?? '—'} / -{file.deletions ?? '—'}</p>
-                        </div>
+                        </button>
                       ))}
                     </div>
                   ) : null}
@@ -489,6 +626,30 @@ export function SessionOperatorPanel({
                   )}
                 </div>
               </div>
+
+              {reviewFile || reviewFileLoading || reviewFileError ? (
+                <div className="inset-card inspector-block tool-shell terminal-shell top-gap">
+                  <div className="row space-between compact-row operator-header-row">
+                    <div>
+                      <span>Exact diff context</span>
+                      <strong>{reviewFile?.path ?? 'Opening file context…'}</strong>
+                    </div>
+                    <span className={`status-pill ${reviewFile?.status ? 'status-reviewing' : 'status-running'}`}>
+                      {reviewFileLoading ? 'loading' : reviewFile?.status ?? 'diff'}
+                    </span>
+                  </div>
+                  {reviewFileError ? <p className="muted workflow-note">{reviewFileError}</p> : null}
+                  {reviewFile ? (
+                    <>
+                      <p className="muted workflow-note">{reviewFile.note}</p>
+                      <p className="muted mono">+{reviewFile.additions ?? '—'} / -{reviewFile.deletions ?? '—'}</p>
+                      <pre className="terminal-preview">{reviewFile.preview}</pre>
+                    </>
+                  ) : reviewFileLoading ? (
+                    <p className="muted workflow-note">Loading exact diff context…</p>
+                  ) : null}
+                </div>
+              ) : null}
             </>
           ) : reviewLoading ? (
             <p className="muted operator-note">Loading review packet…</p>
