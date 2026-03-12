@@ -98,9 +98,22 @@ export interface MobileTranscriptEntry {
   timestampLabel?: string;
 }
 
+export interface MobileRuntimeTailGroup {
+  id: string;
+  title: string;
+  mode: 'launch' | 'resume';
+  outcome: 'running' | 'finished' | 'interrupted' | 'failed';
+  prompt: string;
+  startedAtLabel?: string;
+  finishedAtLabel?: string;
+  summary: string;
+  entries: MobileTranscriptEntry[];
+}
+
 export interface MobileHistoryResponse {
   sessionKey: string;
   transcript: MobileTranscriptEntry[];
+  groups?: MobileRuntimeTailGroup[];
 }
 
 export interface MobileReviewFileResponse {

@@ -1722,6 +1722,10 @@ button:hover {
     transform 360ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.remodex-topbar[data-context-visible='true'] {
+  max-height: 154px;
+}
+
 .remodex-topbar[data-visible='false'] {
   max-height: 0;
   opacity: 0;
@@ -1931,6 +1935,96 @@ button:hover {
   overflow: hidden;
 }
 
+.remodex-context-rail {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.56rem;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0.42rem 0.82rem;
+  border-radius: 999px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+  backdrop-filter: blur(16px) saturate(1.12);
+}
+
+.remodex-context-rail-label,
+.remodex-context-rail-meta,
+.remodex-context-rail strong {
+  min-width: 0;
+  margin: 0;
+}
+
+.remodex-context-rail-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(17, 24, 39, 0.46);
+  white-space: nowrap;
+}
+
+.remodex-context-rail-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.9;
+}
+
+.remodex-context-rail strong {
+  font-size: 0.82rem;
+  font-weight: 800;
+  color: #111827;
+  white-space: nowrap;
+}
+
+.remodex-context-rail-meta {
+  justify-self: end;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: rgba(17, 24, 39, 0.56);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.remodex-context-rail-calm {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(236, 253, 245, 0.82));
+}
+
+.remodex-context-rail-calm .remodex-context-rail-label,
+.remodex-context-rail-calm .remodex-context-rail-meta {
+  color: #047857;
+}
+
+.remodex-context-rail-watch {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(254, 249, 195, 0.84));
+}
+
+.remodex-context-rail-watch .remodex-context-rail-label,
+.remodex-context-rail-watch .remodex-context-rail-meta {
+  color: #b45309;
+}
+
+.remodex-context-rail-high,
+.remodex-context-rail-critical {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(254, 242, 242, 0.86));
+}
+
+.remodex-context-rail-high .remodex-context-rail-label,
+.remodex-context-rail-high .remodex-context-rail-meta,
+.remodex-context-rail-critical .remodex-context-rail-label,
+.remodex-context-rail-critical .remodex-context-rail-meta {
+  color: #b91c1c;
+}
+
 .remodex-scroll-view {
   display: grid;
   gap: 0.82rem;
@@ -2069,6 +2163,55 @@ button:hover {
   display: grid;
   gap: 0.6rem;
   padding: 0.2rem 0;
+}
+
+.remodex-owned-turn-card {
+  padding: 1rem 1rem 0.95rem;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.06);
+}
+
+.remodex-owned-turn-summary {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.remodex-owned-turn-chip-row {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.remodex-owned-turn-copy,
+.remodex-owned-turn-prompt {
+  margin: 0;
+}
+
+.remodex-owned-turn-copy {
+  color: rgba(17, 24, 39, 0.72);
+  font-size: 0.94rem;
+  line-height: 1.45;
+}
+
+.remodex-owned-turn-prompt {
+  color: rgba(17, 24, 39, 0.54);
+  font-size: 0.86rem;
+  line-height: 1.45;
+}
+
+.remodex-owned-turn-entry-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.remodex-owned-turn-entry {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 22px;
+  background: rgba(247, 250, 252, 0.92);
+  border: 1px solid rgba(15, 23, 42, 0.05);
 }
 
 .remodex-message-card p,
@@ -2445,6 +2588,32 @@ button:hover {
     box-shadow 220ms ease;
 }
 
+.remodex-compose-surface-watch {
+  padding-bottom: 0.72rem;
+}
+
+.remodex-watch-card {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.remodex-watch-copy {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.remodex-watch-copy strong {
+  color: #111111;
+  font-size: 0.96rem;
+}
+
+.remodex-watch-copy p {
+  margin: 0;
+  color: rgba(17, 24, 39, 0.56);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
 .remodex-file-input-hidden {
   display: none;
 }
@@ -2532,6 +2701,10 @@ button:hover {
   grid-template-columns: auto auto minmax(0, auto) minmax(0, auto) minmax(0, 1fr);
   gap: 0.38rem;
   align-items: center;
+}
+
+.remodex-compose-row-watch {
+  grid-template-columns: auto repeat(3, minmax(0, auto));
 }
 
 .remodex-compose-chip {
@@ -3083,21 +3256,6 @@ button:hover {
 .remodex-diff-line-meta .remodex-diff-gutter,
 .remodex-diff-line-hunk .remodex-diff-gutter {
   background: #94a3b8;
-}
-
-.remodex-desktop-link-row {
-  display: flex;
-  justify-content: center;
-  margin-top: 0.65rem;
-}
-
-.remodex-desktop-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  color: rgba(17, 24, 39, 0.52);
-  font-size: 0.9rem;
-  font-weight: 600;
 }
 
 @media (max-width: 820px) {

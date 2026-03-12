@@ -36,6 +36,7 @@ import type {
   MobileHistoryResponse,
   MobileInboxSnapshot,
   MobileReviewFileResponse,
+  MobileRuntimeTailGroup,
   MobileTranscriptEntry,
   MobileTranscriptMedia,
 } from '@/lib/mobile/types';
@@ -92,6 +93,39 @@ function contextTrendLabel(trend?: 'falling' | 'stable' | 'rising') {
     case 'stable':
     default:
       return 'Stable';
+  }
+}
+
+function ownedLifecycleTone(availability?: string, lastOutcome?: string) {
+  if (lastOutcome === 'failed') return 'critical' as const;
+  if (availability === 'running') return 'high' as const;
+  if (lastOutcome === 'interrupted') return 'watch' as const;
+  return 'calm' as const;
+}
+
+function ownedLifecycleLabel(availability?: string) {
+  switch (availability) {
+    case 'awaiting-thread':
+      return 'Awaiting thread';
+    case 'ready-for-resume':
+      return 'Ready for resume';
+    case 'running':
+      return 'Running';
+    default:
+      return 'Idle';
+  }
+}
+
+function ownedOutcomeLabel(lastOutcome?: string) {
+  switch (lastOutcome) {
+    case 'finished':
+      return 'Finished';
+    case 'interrupted':
+      return 'Interrupted';
+    case 'failed':
+      return 'Failed';
+    default:
+      return 'No outcome yet';
   }
 }
 
@@ -312,6 +346,7 @@ export function MobileRemoteShell({
   const [historyBySession, setHistoryBySession] = useState<Record<string, MobileTranscriptEntry[]>>(() => (
     initialTranscript?.sessionKey ? { [initialTranscript.sessionKey]: initialTranscript.transcript } : {}
   ));
+  const [historyGroupsBySession, setHistoryGroupsBySession] = useState<Record<string, MobileRuntimeTailGroup[]>>({});
   const [historyLoading, setHistoryLoading] = useState<Record<string, boolean>>({});
   const [historyError, setHistoryError] = useState<Record<string, string | null>>({});
   const [draftBySession, setDraftBySession] = useState<Record<string, string>>({});
@@ -471,6 +506,8 @@ export function MobileRemoteShell({
 
     const handleScroll = () => {
       const nextScrollY = readScrollY();
+      stickToBottomRef.current = isWindowNearBottom();
+      setScrollY((current) => (Math.abs(current - nextScrollY) > 1 ? nextScrollY : current));
       setIsScrolling(true);
       if (nextScrollY > 12) {
         setHeaderVisible(false);
@@ -542,6 +579,7 @@ export function MobileRemoteShell({
       });
       const payload = await readJson<MobileHistoryResponse>(response);
       setHistoryBySession((current) => ({ ...current, [sessionKey]: payload.transcript }));
+      setHistoryGroupsBySession((current) => ({ ...current, [sessionKey]: payload.groups ?? [] }));
       setHistoryError((current) => ({ ...current, [sessionKey]: null }));
       return payload.transcript;
     } catch (error) {
@@ -626,7 +664,10 @@ export function MobileRemoteShell({
     };
   }, [diffOpen, loadHistory, loadReviewFile, refreshInbox, selectedReviewFilePath, selectedSession?.status, selectedSessionKey]);
 
+  const isOpenClawSession = selectedSession?.runtime === 'openclaw';
+  const isOwnedCodexSession = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'owned';
   const transcriptEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
+  const transcriptGroups = selectedSessionKey ? historyGroupsBySession[selectedSessionKey] ?? [] : [];
   const transcriptLoading = selectedSessionKey ? historyLoading[selectedSessionKey] ?? false : false;
   const transcriptError = selectedSessionKey ? historyError[selectedSessionKey] ?? null : null;
   const transcriptDraft = selectedSessionKey ? draftBySession[selectedSessionKey] ?? '' : '';
@@ -656,20 +697,33 @@ export function MobileRemoteShell({
     selectedSession?.sessionKey ?? 'mobile/live',
     42,
   );
-  const headerLabel = selectedSession?.status === 'running'
-    ? 'Live session'
-    : snapshot.review?.pullRequest
-      ? 'Focused review'
-      : 'Focused session';
+  const headerLabel = isOwnedCodexSession
+    ? 'Owned run watch'
+    : selectedSession?.status === 'running'
+      ? 'Live session'
+      : snapshot.review?.pullRequest
+        ? 'Focused review'
+        : 'Focused session';
   const headerProgress = Math.min(scrollY / 88, 1);
   const isHeaderCompact = headerProgress > 0.12;
-  const isComposerPrimed = composeFocused || transcriptAttachments.length > 0;
+  const isComposerPrimed = isOpenClawSession && (composeFocused || transcriptAttachments.length > 0);
   const dockMotionProgress = !isComposerPrimed && isScrolling ? 1 : 0;
   const dockFadeProgress = dockMotionProgress;
   const diffFileLabel = reviewFiles.length === 1 ? 'file' : 'files';
   const contextUsedPercent = Math.round(selectedSession?.context.usedPercent ?? 0);
-  const contextTone = contextPressureTone(contextUsedPercent);
-  const contextTrend = contextTrendLabel(selectedSession?.context.trend);
+  const ownedAvailability = selectedSession?.runtimeSurface?.lifecycle?.availability;
+  const ownedLastOutcome = selectedSession?.runtimeSurface?.lifecycle?.lastOutcome;
+  const statusTone = isOwnedCodexSession
+    ? ownedLifecycleTone(ownedAvailability, ownedLastOutcome)
+    : contextPressureTone(contextUsedPercent);
+  const statusHeadline = isOwnedCodexSession
+    ? ownedLifecycleLabel(ownedAvailability)
+    : `${contextUsedPercent}% used`;
+  const statusMeta = isOwnedCodexSession
+    ? ownedOutcomeLabel(ownedLastOutcome)
+    : contextTrendLabel(selectedSession?.context.trend);
+  const statusKicker = isOwnedCodexSession ? 'Owned lifecycle' : 'Context pressure';
+  const showFloatingContextRail = scrollY > 180;
   const shellStyle = {
     '--remodex-header-progress': headerProgress.toFixed(3),
     '--remodex-dock-fade-progress': dockFadeProgress.toFixed(3),
@@ -711,6 +765,10 @@ export function MobileRemoteShell({
 
   async function handleAttachmentSelection(files: FileList | null) {
     if (!selectedSessionKey || !files?.length) {
+      return;
+    }
+    if (!isOpenClawSession) {
+      setSurfaceNote('Owned Codex is watch-first on phone right now. Image attachments stay on the OpenClaw mobile lane only.');
       return;
     }
 
@@ -787,6 +845,15 @@ export function MobileRemoteShell({
   }
 
   async function handleSteerSubmit(sessionKey: string) {
+    const targetSession = snapshot.sessions.find((session) => session.sessionKey === sessionKey);
+    if (targetSession?.runtime !== 'openclaw') {
+      setActionNoteBySession((current) => ({
+        ...current,
+        [sessionKey]: 'Owned Codex is watch-first on phone right now. Resume and interrupt stay on desktop until the mobile control semantics are cleaner.',
+      }));
+      return;
+    }
+
     const message = draftBySession[sessionKey]?.trim();
     const attachments = draftAttachmentsBySession[sessionKey] ?? [];
     if (!message && attachments.length === 0) {
@@ -874,7 +941,14 @@ export function MobileRemoteShell({
   }
 
   async function handleStopActiveRun() {
-    if (!selectedSessionKey || !window.confirm('Stop the active run for this session?')) {
+    if (!selectedSessionKey) {
+      return;
+    }
+    if (!isOpenClawSession) {
+      setSurfaceNote('Owned Codex is watch-first on phone right now. Interrupt stays on desktop for now.');
+      return;
+    }
+    if (!window.confirm('Stop the active run for this session?')) {
       return;
     }
 
@@ -977,6 +1051,7 @@ export function MobileRemoteShell({
         <header
           className="remodex-topbar"
           data-compact={isHeaderCompact ? 'true' : 'false'}
+          data-context-visible={showFloatingContextRail ? 'true' : 'false'}
           data-visible={headerVisible ? 'true' : 'false'}
         >
           <button
@@ -1011,6 +1086,19 @@ export function MobileRemoteShell({
             </span>
             <SlidersHorizontal size={15} strokeWidth={2} />
           </button>
+          {showFloatingContextRail ? (
+            <div
+              className={`remodex-context-rail remodex-context-rail-${statusTone}`}
+              aria-label={`${statusKicker} ${statusHeadline}, ${statusMeta}`}
+            >
+              <span className="remodex-context-rail-label">
+                <span className="remodex-context-rail-dot" aria-hidden="true" />
+                {isOwnedCodexSession ? 'Owned run' : 'Context'}
+              </span>
+              <strong>{statusHeadline}</strong>
+              <span className="remodex-context-rail-meta">{statusMeta}</span>
+            </div>
+          ) : null}
         </header>
 
         <div className="remodex-scroll-view">
@@ -1018,17 +1106,23 @@ export function MobileRemoteShell({
             <p className="remodex-system-line">
               {selectedSession?.isCurrentSession
                 ? 'Mirroring the live Q ↔ Mister conversation, not spawning a fresh session.'
-                : 'Mirroring the selected OpenClaw session on phone so you can steer it without dropping into desktop.'}
+                : isOwnedCodexSession
+                  ? 'Watching an IDE-owned Codex surface on phone with truthful lifecycle + grouped tail. Resume and interrupt stay on desktop for now.'
+                  : 'Mirroring the selected OpenClaw session on phone so you can steer it without dropping into desktop.'}
             </p>
-            {selectedSession?.status === 'running' ? <span className="remodex-live-pill">Live</span> : null}
+            {selectedSession?.status === 'running'
+              ? <span className="remodex-live-pill">Live</span>
+              : isOwnedCodexSession
+                ? <span className="remodex-live-pill">Watch</span>
+                : null}
           </div>
 
-          <div className={`remodex-context-card remodex-context-card-${contextTone}`}>
+          <div className={`remodex-context-card remodex-context-card-${statusTone}`}>
             <div className="remodex-context-card-copy">
-              <span className="remodex-context-card-kicker">Context pressure</span>
-              <strong>{contextUsedPercent}% used</strong>
+              <span className="remodex-context-card-kicker">{statusKicker}</span>
+              <strong>{statusHeadline}</strong>
             </div>
-            <span className="remodex-context-card-trend">{contextTrend}</span>
+            <span className="remodex-context-card-trend">{statusMeta}</span>
           </div>
 
           {refreshError ? <p className="remodex-banner-note">{refreshError}</p> : null}
@@ -1036,7 +1130,45 @@ export function MobileRemoteShell({
           {transcriptError ? <p className="remodex-banner-note">{transcriptError}</p> : null}
 
           <div className="remodex-message-stack">
-            {transcriptEntries.length ? transcriptEntries.map((entry, index) => {
+            {isOwnedCodexSession && transcriptGroups.length ? transcriptGroups.map((group) => (
+              <article key={group.id} className="remodex-message-card remodex-message-card-assistant remodex-owned-turn-card">
+                <div className="remodex-message-head">
+                  <span>{group.title}</span>
+                  <div className="remodex-message-tools">
+                    <span className="remodex-turn-time">{group.finishedAtLabel ?? group.startedAtLabel ?? 'now'}</span>
+                  </div>
+                </div>
+                <div className="remodex-owned-turn-summary">
+                  <div className="remodex-owned-turn-chip-row">
+                    <span className="remodex-compose-chip remodex-compose-pill">{group.mode}</span>
+                    <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{group.outcome}</span>
+                  </div>
+                  <p className="remodex-owned-turn-copy">{group.summary}</p>
+                  <p className="remodex-owned-turn-prompt">{group.prompt}</p>
+                </div>
+                <div className="remodex-owned-turn-entry-list">
+                  {group.entries.map((entry) => {
+                    const hasText = Boolean(entry.text.trim());
+                    if (!hasText) {
+                      return null;
+                    }
+                    return (
+                      <div key={entry.id} className="remodex-owned-turn-entry">
+                        <div className="remodex-message-head">
+                          <span>{roleLabel(entry.role)}</span>
+                          <div className="remodex-message-tools">
+                            <button type="button" className="remodex-icon-link" onClick={() => handleCopy(entry.text)} aria-label="Copy message">
+                              <Copy size={16} strokeWidth={2.1} />
+                            </button>
+                          </div>
+                        </div>
+                        {renderMessageBody(entry.text, `${entry.id}-owned`) }
+                      </div>
+                    );
+                  })}
+                </div>
+              </article>
+            )) : transcriptEntries.length ? transcriptEntries.map((entry, index) => {
               const isUser = entry.role === 'user';
               const isLatest = index === transcriptEntries.length - 1;
               const hasText = Boolean(entry.text.trim());
@@ -1083,8 +1215,9 @@ export function MobileRemoteShell({
               <div className="remodex-loading-card">Syncing the focused session…</div>
             ) : (
               <div className="remodex-loading-card">
-                No readable transcript turns are visible yet. That usually means the latest activity was tool-heavy or compacted,
-                not that the session failed.
+                {isOwnedCodexSession
+                  ? 'No grouped owned-run history is visible yet. That usually means the latest launch/resume has not emitted readable JSON items yet, not that the owned session failed.'
+                  : 'No readable transcript turns are visible yet. That usually means the latest activity was tool-heavy or compacted, not that the session failed.'}
               </div>
             )}
           </div>
@@ -1093,94 +1226,125 @@ export function MobileRemoteShell({
 
         <div className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
           <div className="remodex-compose-shell">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="remodex-file-input-hidden"
-              onChange={(event) => {
-                void handleAttachmentSelection(event.target.files);
-                event.currentTarget.value = '';
-              }}
-            />
-            {transcriptAttachments.length ? (
-              <div className="remodex-attachment-strip">
-                {transcriptAttachments.map((attachment) => (
-                  <div key={attachment.id} className="remodex-attachment-pill">
-                    <Image src={attachment.previewUrl} alt={attachment.fileName} width={72} height={72} unoptimized />
-                    <div className="remodex-attachment-pill-copy">
-                      <strong>{compactLine(attachment.fileName, attachment.fileName, 20)}</strong>
-                      <span>Ready to send</span>
-                    </div>
+            {isOpenClawSession ? (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="remodex-file-input-hidden"
+                  onChange={(event) => {
+                    void handleAttachmentSelection(event.target.files);
+                    event.currentTarget.value = '';
+                  }}
+                />
+                {transcriptAttachments.length ? (
+                  <div className="remodex-attachment-strip">
+                    {transcriptAttachments.map((attachment) => (
+                      <div key={attachment.id} className="remodex-attachment-pill">
+                        <Image src={attachment.previewUrl} alt={attachment.fileName} width={72} height={72} unoptimized />
+                        <div className="remodex-attachment-pill-copy">
+                          <strong>{compactLine(attachment.fileName, attachment.fileName, 20)}</strong>
+                          <span>Ready to send</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="remodex-attachment-pill-remove"
+                          aria-label={`Remove ${attachment.fileName}`}
+                          onClick={() => {
+                            if (!selectedSessionKey) return;
+                            removeDraftAttachment(selectedSessionKey, attachment.id);
+                          }}
+                        >
+                          <X size={14} strokeWidth={2.2} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="remodex-compose-surface">
+                  <textarea
+                    ref={composeRef}
+                    className="remodex-compose-input"
+                    rows={2}
+                    value={transcriptDraft}
+                    onChange={(event) => {
+                      if (!selectedSessionKey) return;
+                      const value = event.target.value;
+                      setDraftBySession((current) => ({ ...current, [selectedSessionKey]: value }));
+                    }}
+                    onFocus={() => setComposeFocused(true)}
+                    onBlur={() => setComposeFocused(false)}
+                    placeholder={transcriptAttachments.length ? 'Add context for the attached image' : 'Ask for follow-up changes'}
+                  />
+                  <div className="remodex-compose-row">
                     <button
                       type="button"
-                      className="remodex-attachment-pill-remove"
-                      aria-label={`Remove ${attachment.fileName}`}
+                      className="remodex-compose-chip remodex-compose-chip-icon"
+                      aria-label="Attach image"
+                      onClick={() => fileInputRef.current?.click()}
+                    >
+                      <Plus size={16} strokeWidth={2.2} />
+                    </button>
+                    <button
+                      type="button"
+                      className="remodex-compose-chip remodex-compose-chip-icon"
+                      aria-label="Refresh conversation"
                       onClick={() => {
-                        if (!selectedSessionKey) return;
-                        removeDraftAttachment(selectedSessionKey, attachment.id);
+                        void handleSurfaceRefresh();
                       }}
                     >
-                      <X size={14} strokeWidth={2.2} />
+                      <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
+                    </button>
+                    <span className="remodex-compose-chip remodex-compose-pill">{selectedSession?.model ?? 'live'}</span>
+                    <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{selectedSession?.status ?? 'idle'}</span>
+                    <button
+                      type="button"
+                      className="remodex-send-button"
+                      disabled={!selectedSessionKey || transcriptActionState !== 'idle' || (!transcriptDraft.trim() && transcriptAttachments.length === 0)}
+                      onClick={() => {
+                        if (!selectedSessionKey) return;
+                        void handleSteerSubmit(selectedSessionKey);
+                      }}
+                      aria-label="Send steer"
+                    >
+                      {transcriptActionState === 'steering' ? <RefreshCw size={17} className="spin" /> : <ArrowUp size={17} strokeWidth={2.2} />}
                     </button>
                   </div>
-                ))}
+                </div>
+                {isComposerPrimed ? (
+                  <p className="remodex-compose-helper">Images only for now — this lane is wired truthfully against OpenClaw image attachments.</p>
+                ) : null}
+              </>
+            ) : (
+              <div className="remodex-compose-surface remodex-compose-surface-watch">
+                <div className="remodex-watch-card">
+                  <div className="remodex-watch-copy">
+                    <strong>Watch-first on phone</strong>
+                    <p>
+                      Lifecycle and grouped tail are live here, but resume and interrupt stay on desktop until the
+                      mobile control semantics are cleaner.
+                    </p>
+                  </div>
+                  <div className="remodex-compose-row remodex-compose-row-watch">
+                    <button
+                      type="button"
+                      className="remodex-compose-chip remodex-compose-chip-icon"
+                      aria-label="Refresh runtime watch"
+                      onClick={() => {
+                        void handleSurfaceRefresh();
+                      }}
+                    >
+                      <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
+                    </button>
+                    <span className="remodex-compose-chip remodex-compose-pill">{selectedSession?.model ?? 'live'}</span>
+                    <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{ownedLifecycleLabel(ownedAvailability)}</span>
+                    <span className="remodex-compose-chip remodex-compose-pill">{ownedOutcomeLabel(ownedLastOutcome)}</span>
+                  </div>
+                </div>
               </div>
-            ) : null}
-            <div className="remodex-compose-surface">
-              <textarea
-                ref={composeRef}
-                className="remodex-compose-input"
-                rows={2}
-                value={transcriptDraft}
-                onChange={(event) => {
-                  if (!selectedSessionKey) return;
-                  const value = event.target.value;
-                  setDraftBySession((current) => ({ ...current, [selectedSessionKey]: value }));
-                }}
-                onFocus={() => setComposeFocused(true)}
-                onBlur={() => setComposeFocused(false)}
-                placeholder={transcriptAttachments.length ? 'Add context for the attached image' : 'Ask for follow-up changes'}
-              />
-              <div className="remodex-compose-row">
-                <button
-                  type="button"
-                  className="remodex-compose-chip remodex-compose-chip-icon"
-                  aria-label="Attach image"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <Plus size={16} strokeWidth={2.2} />
-                </button>
-                <button
-                  type="button"
-                  className="remodex-compose-chip remodex-compose-chip-icon"
-                  aria-label="Refresh conversation"
-                  onClick={() => {
-                    void handleSurfaceRefresh();
-                  }}
-                >
-                  <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
-                </button>
-                <span className="remodex-compose-chip remodex-compose-pill">{selectedSession?.model ?? 'live'}</span>
-                <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{selectedSession?.status ?? 'idle'}</span>
-                <button
-                  type="button"
-                  className="remodex-send-button"
-                  disabled={!selectedSessionKey || transcriptActionState !== 'idle' || (!transcriptDraft.trim() && transcriptAttachments.length === 0)}
-                  onClick={() => {
-                    if (!selectedSessionKey) return;
-                    void handleSteerSubmit(selectedSessionKey);
-                  }}
-                  aria-label="Send steer"
-                >
-                  {transcriptActionState === 'steering' ? <RefreshCw size={17} className="spin" /> : <ArrowUp size={17} strokeWidth={2.2} />}
-                </button>
-              </div>
-            </div>
-            {isComposerPrimed ? (
-              <p className="remodex-compose-helper">Images only for now — this lane is wired truthfully against OpenClaw image attachments.</p>
-            ) : null}
+            )}
             {transcriptActionNote ? <p className="remodex-inline-action-note">{transcriptActionNote}</p> : null}
           </div>
 
@@ -1246,7 +1410,7 @@ export function MobileRemoteShell({
                 <Monitor size={16} strokeWidth={2.1} />
                 Open desktop review
               </Link>
-              {selectedSession?.status === 'running' ? (
+              {isOpenClawSession && selectedSession?.status === 'running' ? (
                 <button type="button" className="remodex-controls-action remodex-controls-action-danger" onClick={() => void handleStopActiveRun()}>
                   <Square size={16} strokeWidth={2.1} />
                   Stop active run
@@ -1423,11 +1587,6 @@ export function MobileRemoteShell({
         </div>
       ) : null}
 
-      <div className="remodex-desktop-link-row">
-        <Link href="/" className="remodex-desktop-link">
-          Open desktop review ↗
-        </Link>
-      </div>
     </div>
   );
 }

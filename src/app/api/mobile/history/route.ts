@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { MobileHistoryResponse } from '@/lib/mobile/types';
+import { getOwnedCodexRuntimeTail } from '@/lib/codex/owned';
+import type { MobileHistoryResponse, MobileTranscriptEntry } from '@/lib/mobile/types';
 import { getSessionTranscript } from '@/lib/openclaw/chat';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+function runtimeTailRole(label: string): MobileTranscriptEntry['role'] {
+  const normalized = label.toLowerCase();
+  if (normalized.includes('assistant')) return 'assistant';
+  if (normalized.includes('user')) return 'user';
+  if (normalized.includes('tool')) return 'tool';
+  return 'system';
+}
 
 export async function GET(request: NextRequest) {
   const sessionKey = request.nextUrl.searchParams.get('sessionKey')?.trim();
@@ -16,6 +25,41 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    if (sessionKey.startsWith('codex-owned:')) {
+      const tail = await getOwnedCodexRuntimeTail(sessionKey);
+      const payload: MobileHistoryResponse = {
+        sessionKey,
+        transcript: (tail.entries ?? []).map((entry) => ({
+          id: entry.id,
+          role: runtimeTailRole(entry.label),
+          text: entry.text,
+          timestampLabel: entry.timestampLabel,
+        })),
+        groups: (tail.groups ?? []).map((group) => ({
+          id: group.id,
+          title: group.title,
+          mode: group.mode,
+          outcome: group.outcome,
+          prompt: group.prompt,
+          startedAtLabel: group.startedAtLabel,
+          finishedAtLabel: group.finishedAtLabel,
+          summary: group.summary,
+          entries: group.entries.map((entry) => ({
+            id: entry.id,
+            role: runtimeTailRole(entry.label),
+            text: entry.text,
+            timestampLabel: entry.timestampLabel,
+          })),
+        })),
+      };
+
+      return NextResponse.json(payload, {
+        headers: {
+          'Cache-Control': 'no-store, max-age=0',
+        },
+      });
+    }
+
     const transcript = await getSessionTranscript(sessionKey, limit);
     const payload: MobileHistoryResponse = {
       sessionKey,
