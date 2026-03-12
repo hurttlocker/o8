@@ -25,6 +25,7 @@ Child issues:
 - **#8** — Define fleet state model and agent/squad status taxonomy
 - **#9** — Build agent inspector with inline tool drawers (terminal, diff, artifacts, memory)
 - **#10** — Build timeline / event rail and saved focus views
+- **#24** — Add chat-first front door and progressive disclosure doctrine
 
 Why it exists:
 - this is the Karpathy baseline
@@ -40,6 +41,8 @@ Child issues:
 - **#11** — Define runtime adapter contract for Cortex IDE
 - **#12** — Implement OpenClaw / ACP adapter MVP
 - **#13** — Ship Git / GitHub / worktree review surface
+- **#25** — Add RuntimeSurface / TerminalSession layer above runtime adapters
+- **#26** — Run attach/read-tail spike for existing local Codex sessions
 
 Why it exists:
 - the product is fake if it cannot supervise real work
@@ -108,7 +111,7 @@ Why it exists:
 - **#1** Command center core
 - **#2** Runtime adapters + workflow surfaces
 - **#4** Mobile remote control via Remodex/Phodex-derived lane
-- plus child issues **#7–#13**, **#16–#18**
+- plus child issues **#7–#13**, **#16–#18**, **#24–#26**
 
 ### P1
 - **#3** Cortex memory-native layer
@@ -123,7 +126,8 @@ Why it exists:
 
 ## Recommended execution order
 
-### Sequence 1 — Make the shell real
+### Sequence 1 — Lock the product front door while making the shell real
+- #24
 - #7
 - #8
 - #9
@@ -131,8 +135,10 @@ Why it exists:
 
 ### Sequence 2 — Make it operate real runs
 - #11
+- #25
 - #12
 - #13
+- #26
 
 ### Sequence 3 — Make mobile real early
 - #16
@@ -155,6 +161,9 @@ Why it exists:
 ## Principle
 
 The product requirement is **legibility, control, and reusable agent operations**.
+
+The front door, however, should still feel like **beautiful, fluent chat**.
+Deeper control should unfold behind that front door, not replace it too early.
 
 Not:
 - a particular geometry
