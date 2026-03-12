@@ -558,8 +558,102 @@ button:hover {
   border-radius: 16px;
 }
 
+.mobile-panel-surface,
+.queue-card,
+.tool-shell {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.toolbar-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.toolbar-strip-secondary {
+  margin-top: -0.1rem;
+}
+
+.toolbar-chip {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.9rem 0.95rem;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.44));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.44);
+}
+
+.toolbar-chip span {
+  color: #64748b;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.toolbar-chip strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.toolbar-chip p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.queue-card,
+.workflow-file-item,
+.workflow-pr-item,
+.workflow-worktree-item,
+.workflow-issue-card,
+.workflow-commit-item {
+  position: relative;
+  overflow: hidden;
+}
+
+.queue-card::before,
+.workflow-file-item::before,
+.workflow-pr-item::before,
+.workflow-worktree-item::before,
+.workflow-issue-card::before,
+.workflow-commit-item::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.45), rgba(99, 102, 241, 0.18), transparent);
+  pointer-events: none;
+}
+
+.queue-meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.queue-toolbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.toolbar-link-row {
+  margin-top: -0.1rem;
+}
+
+.mobile-action-link-disabled {
+  opacity: 0.58;
+  pointer-events: none;
+}
+
 .tool-drawer-list-mobile {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.tool-drawer-list-mobile.queue-toolbar {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .operator-header-row {
@@ -613,6 +707,64 @@ button:hover {
 }
 
 .transcript-entry p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.tool-shell .operator-note {
+  padding: 0.75rem 0.85rem;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.05);
+}
+
+.terminal-shell {
+  background: linear-gradient(180deg, rgba(7, 12, 24, 0.96), rgba(15, 23, 42, 0.9)) !important;
+  border: 1px solid rgba(96, 165, 250, 0.2) !important;
+  box-shadow:
+    0 24px 60px rgba(15, 23, 42, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04) !important;
+  color: #dbeafe;
+}
+
+.terminal-shell .operator-note,
+.terminal-shell .mono,
+.terminal-shell .muted,
+.terminal-shell .transcript-entry p,
+.terminal-shell .transcript-entry strong,
+.terminal-shell .operator-textarea {
+  color: #dbeafe;
+}
+
+.terminal-shell .operator-note {
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.terminal-shell .operator-textarea,
+.terminal-shell .transcript-entry,
+.terminal-shell .terminal-preview,
+.terminal-shell .glass-diff-preview {
+  background: rgba(15, 23, 42, 0.74);
+  border-color: rgba(148, 163, 184, 0.24);
+}
+
+.terminal-shell button,
+.terminal-shell .mobile-action-link {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.88));
+  color: #e2e8f0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.terminal-stack {
+  gap: 0.75rem;
+}
+
+.terminal-entry {
+  background: rgba(15, 23, 42, 0.74);
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+.terminal-output {
   margin: 0;
   white-space: pre-wrap;
 }
@@ -833,7 +985,9 @@ button:hover {
   .signal-grid,
   .mobile-grid,
   .artifact-grid,
-  .tool-drawer-list-mobile {
+  .tool-drawer-list-mobile,
+  .toolbar-strip,
+  .queue-toolbar {
     grid-template-columns: 1fr;
     display: grid;
   }
@@ -857,7 +1011,9 @@ button:hover {
   .operator-actions,
   .operator-state-grid,
   .workflow-summary-grid,
-  .workflow-grid {
+  .workflow-grid,
+  .toolbar-strip,
+  .queue-toolbar {
     grid-template-columns: 1fr;
   }
 
