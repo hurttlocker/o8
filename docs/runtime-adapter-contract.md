@@ -62,6 +62,17 @@ Why:
 - session lifecycle already exists
 - approvals, artifacts, and chat/tool surfaces already exist
 
+## Current MVP status
+
+The live bridge MVP now wires the first truthful operator actions through the OpenClaw gateway:
+- `chat.history` for sanitized transcript / session-log viewing
+- `chat.send` for explicit steer actions on an existing session
+- `chat.abort` for explicit interrupt / stop actions on an existing session
+
+Important truth guardrail:
+- **spawn is still intentionally disabled in the live bridge UI**
+- the shell mirrors existing sessions first and only adds runtime control where it is semantically honest
+
 ## Later targets
 - Codex CLI / app-server
 - Claude Code

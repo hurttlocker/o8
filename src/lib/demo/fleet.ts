@@ -2,6 +2,12 @@ import type { FleetSnapshot } from '@/lib/fleet/types';
 
 export const demoFleet: FleetSnapshot = {
   generatedAt: '2026-03-11T21:36:00Z',
+  meta: {
+    mode: 'demo',
+    sourceLabel: 'Demo fleet snapshot',
+    mirrorMode: 'demo-only',
+    note: 'Live OpenClaw bridge not attached yet. Demo data is filling the shell.',
+  },
   squads: [
     {
       id: 'squad-platform',
@@ -10,7 +16,7 @@ export const demoFleet: FleetSnapshot = {
       throughputLabel: '3 runs moving',
       blockers: 0,
       alerts: 1,
-      budgetUsdToday: 18.2,
+      liveSessions: 3,
       members: ['agent-mister', 'agent-ace', 'agent-hawk'],
     },
     {
@@ -20,7 +26,7 @@ export const demoFleet: FleetSnapshot = {
       throughputLabel: '1 audit, 1 spec',
       blockers: 0,
       alerts: 1,
-      budgetUsdToday: 6.8,
+      liveSessions: 2,
       members: ['agent-remodex-audit', 'agent-mobile-ui'],
     },
   ],
@@ -41,6 +47,10 @@ export const demoFleet: FleetSnapshot = {
       context: { usedPercent: 41, trend: 'rising' },
       cost: { sessionUsd: 3.42, dailyUsd: 7.13 },
       alerts: 0,
+      sessionKind: 'direct',
+      surfaceLabel: 'Direct session',
+      isCurrentSession: true,
+      tokenUsage: { totalTokens: 144992, remainingTokens: 855008, fresh: true },
     },
     {
       id: 'agent-ace',
@@ -58,6 +68,9 @@ export const demoFleet: FleetSnapshot = {
       context: { usedPercent: 26, trend: 'stable' },
       cost: { sessionUsd: 1.14, dailyUsd: 2.71 },
       alerts: 1,
+      sessionKind: 'direct',
+      surfaceLabel: 'Direct session',
+      tokenUsage: { totalTokens: 78640, remainingTokens: 921360, fresh: true },
     },
     {
       id: 'agent-hawk',
@@ -75,6 +88,9 @@ export const demoFleet: FleetSnapshot = {
       context: { usedPercent: 12, trend: 'falling' },
       cost: { sessionUsd: 0.42, dailyUsd: 1.03 },
       alerts: 0,
+      sessionKind: 'direct',
+      surfaceLabel: 'Direct session',
+      tokenUsage: { totalTokens: 25961, remainingTokens: 974039, fresh: true },
     },
     {
       id: 'agent-remodex-audit',
@@ -92,6 +108,8 @@ export const demoFleet: FleetSnapshot = {
       context: { usedPercent: 0, trend: 'stable' },
       cost: { sessionUsd: 0, dailyUsd: 0 },
       alerts: 0,
+      sessionKind: 'draft',
+      surfaceLabel: 'Research draft',
     },
     {
       id: 'agent-mobile-ui',
@@ -109,6 +127,8 @@ export const demoFleet: FleetSnapshot = {
       context: { usedPercent: 0, trend: 'stable' },
       cost: { sessionUsd: 0, dailyUsd: 0 },
       alerts: 2,
+      sessionKind: 'draft',
+      surfaceLabel: 'Prototype lane',
     },
   ],
   events: [
@@ -141,9 +161,33 @@ export const demoFleet: FleetSnapshot = {
     },
   ],
   artifacts: [
-    { kind: 'diff', title: 'Shell bootstrap diff', state: 'new' },
-    { kind: 'doc', title: 'Fleet state model', state: 'reviewing' },
-    { kind: 'doc', title: 'Runtime adapter contract', state: 'reviewing' },
-    { kind: 'screenshot', title: 'Desktop shell preview', state: 'new' },
+    {
+      kind: 'diff',
+      title: 'Shell bootstrap diff',
+      state: 'new',
+      agentId: 'agent-mister',
+      detail: 'Initial desktop shell surface changed files.',
+    },
+    {
+      kind: 'doc',
+      title: 'Fleet state model',
+      state: 'reviewing',
+      agentId: 'agent-ace',
+      detail: 'Bounded contract for agent / squad / event status.',
+    },
+    {
+      kind: 'doc',
+      title: 'Runtime adapter contract',
+      state: 'reviewing',
+      agentId: 'agent-mister',
+      detail: 'Explains truthful runtime control vs fake spawn behavior.',
+    },
+    {
+      kind: 'screenshot',
+      title: 'Desktop shell preview',
+      state: 'new',
+      agentId: 'agent-mobile-ui',
+      detail: 'Latest desktop shell proof image from the command-center lane.',
+    },
   ],
 };

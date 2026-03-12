@@ -1,33 +1,31 @@
 'use client';
 
-import { useMemo, useState } from 'react';
-import { demoFleet } from '@/lib/demo/fleet';
-import type { EventItem, SquadSummary } from '@/lib/fleet/types';
+import { useEffect, useMemo, useState } from 'react';
+import type { EventItem, FleetSnapshot, SquadSummary, WorkflowReviewSnapshot } from '@/lib/fleet/types';
 import { openClawAdapterContract } from '@/lib/runtime/adapter';
+import { SessionOperatorPanel } from '@/components/session-operator-panel';
+import { WorkflowReviewPanel } from '@/components/workflow-review-panel';
 
-const money = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  maximumFractionDigits: 2,
-});
+const compactNumber = new Intl.NumberFormat('en-US', { notation: 'compact' });
 
 const githubPulse = {
   repo: 'hurttlocker/cortex-ide',
   branch: 'feat/shell-contract-mvp',
-  pullRequest: '#22 — bootstrap command center shell and runtime contracts',
-  milestone: 'Phase 1 — Command center shell',
+  pullRequest: '#22 — live OpenClaw bridge lane',
+  milestone: 'Phase 2 → workflow review',
   checks: [
     '#7 Desktop shell',
     '#8 Fleet state model',
     '#11 Runtime adapter contract',
     '#12 OpenClaw / ACP adapter MVP',
+    '#13 Git / GitHub / worktree review surface',
   ],
 };
 
 const karpathyGuardrails = [
   'Primary object stays the agent / run / squad, not the file tree.',
   'Idle / blocked / reviewing visibility must stay obvious at a glance.',
-  'Inline tools and review surfaces must feel native to supervision.',
+  'Inline tools and supervision must feel native to live operator work.',
   'Usage, cost, and context pressure stay first-class, not hidden settings.',
   'Mobile remains a real remote-operator lane, not an afterthought.',
   'Topology only survives if it improves legibility faster than lists and boards.',
@@ -37,8 +35,22 @@ function statusClass(status: string) {
   return `status-pill status-${status}`;
 }
 
-function formatTrend(value: number) {
+function formatPercent(value?: number | null) {
+  if (value == null) return '—';
   return `${value}%`;
+}
+
+function formatTokens(value?: number | null) {
+  if (value == null) return '—';
+  return compactNumber.format(value);
+}
+
+function pickPreferredAgent(snapshot: FleetSnapshot, currentId?: string) {
+  if (currentId && snapshot.agents.some((agent) => agent.id === currentId)) {
+    return currentId;
+  }
+
+  return snapshot.agents.find((agent) => agent.isCurrentSession)?.id ?? snapshot.agents[0]?.id ?? '';
 }
 
 function SquadCard({ squad }: { squad: SquadSummary }) {
@@ -54,8 +66,8 @@ function SquadCard({ squad }: { squad: SquadSummary }) {
       <p className="muted">{squad.throughputLabel}</p>
       <div className="stat-grid compact">
         <div>
-          <span>Budget</span>
-          <strong>{money.format(squad.budgetUsdToday)}</strong>
+          <span>Sessions</span>
+          <strong>{squad.liveSessions}</strong>
         </div>
         <div>
           <span>Alerts</span>
@@ -82,11 +94,52 @@ function EventRow({ event }: { event: EventItem }) {
   );
 }
 
-export function CommandCenterShell() {
-  const [selectedId, setSelectedId] = useState(demoFleet.agents[0]?.id ?? '');
+export function CommandCenterShell({
+  initialSnapshot,
+  initialReview,
+}: {
+  initialSnapshot: FleetSnapshot;
+  initialReview?: WorkflowReviewSnapshot | null;
+}) {
+  const [fleet, setFleet] = useState<FleetSnapshot>(initialSnapshot);
+  const [selectedId, setSelectedId] = useState(() => pickPreferredAgent(initialSnapshot));
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSelectedId((currentId) => pickPreferredAgent(fleet, currentId));
+  }, [fleet]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function refreshLiveFleet() {
+      try {
+        const response = await fetch('/api/openclaw/fleet', { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const nextSnapshot = (await response.json()) as FleetSnapshot;
+        if (!active) return;
+        setFleet(nextSnapshot);
+        setRefreshError(null);
+      } catch (error) {
+        if (!active) return;
+        setRefreshError(error instanceof Error ? error.message : 'Unable to refresh live fleet');
+      }
+    }
+
+    refreshLiveFleet();
+    const timer = window.setInterval(refreshLiveFleet, 30000);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
   const selectedAgent = useMemo(
-    () => demoFleet.agents.find((agent) => agent.id === selectedId) ?? demoFleet.agents[0],
-    [selectedId],
+    () => fleet.agents.find((agent) => agent.id === selectedId) ?? fleet.agents[0],
+    [fleet, selectedId],
   );
 
   const desktopInfo =
@@ -96,14 +149,33 @@ export function CommandCenterShell() {
         }).cortexDesktop
       : undefined;
 
-  const selectedSquad = demoFleet.squads.find((squad) => squad.id === selectedAgent?.squadId);
+  const selectedSquad = fleet.squads.find((squad) => squad.id === selectedAgent?.squadId);
+  const activeRuns = fleet.agents.filter((agent) => ['running', 'reviewing'].includes(agent.status)).length;
+  const currentSession = fleet.agents.find((agent) => agent.isCurrentSession);
+  const alertCount = fleet.agents.reduce((sum, agent) => sum + agent.alerts, 0);
+  const gatewayLabel = fleet.meta.gatewayLabel ?? 'Gateway status unknown';
+  const selectedEvents = selectedAgent
+    ? fleet.events.filter((event) => event.agentId === selectedAgent.id)
+    : [];
+  const selectedArtifacts = selectedAgent
+    ? fleet.artifacts.filter((artifact) => !artifact.agentId || artifact.agentId === selectedAgent.id)
+    : fleet.artifacts;
+  const visibleEvents = selectedEvents.length ? selectedEvents : fleet.events;
+  const visibleArtifacts = selectedArtifacts.length ? selectedArtifacts : fleet.artifacts;
+
+  const inspectorTokenLabel = selectedAgent?.tokenUsage?.totalTokens
+    ? `${formatTokens(selectedAgent.tokenUsage.totalTokens)} used`
+    : '—';
 
   return (
     <div className="page-wrap">
       <div className="announcement-bar">
-        <span>Option B + touch of A is active.</span>
+        <span className={statusClass(fleet.meta.mode === 'live' ? 'healthy' : 'warning')}>
+          {fleet.meta.mode === 'live' ? 'live OpenClaw' : 'demo fallback'}
+        </span>
         <span className="muted">
-          Control plane first, native desktop shell added early, Code-OSS fork deferred until the wedge is proven.
+          {fleet.meta.note}
+          {refreshError ? ` Refresh warning: ${refreshError}.` : ''}
         </span>
       </div>
 
@@ -113,12 +185,13 @@ export function CommandCenterShell() {
             <div className="brand-orb">C</div>
             <div>
               <div className="eyebrow">Cortex IDE</div>
-              <h1>Agent command center</h1>
+              <h1>Live OpenClaw command center</h1>
             </div>
           </div>
           <p className="hero-copy">
-            A bigger IDE for the agent era: fleet visibility, inline tools, runtime control, review,
-            memory, GitHub pulse, and mobile supervision.
+            First live bridge mode: mirror existing OpenClaw sessions into the control plane, starting
+            with this Q ↔ Mister chat. New sessions belong behind explicit spawn actions, not silent UI
+            side effects.
           </p>
         </div>
         <div className="command-strip">
@@ -128,7 +201,9 @@ export function CommandCenterShell() {
           <a href="https://github.com/hurttlocker/cortex-ide/issues" target="_blank" rel="noreferrer">
             <button>Issues</button>
           </a>
-          <button>Steer</button>
+          <button type="button" onClick={() => window.location.reload()}>
+            Refresh
+          </button>
           <a href="/mobile" rel="noreferrer">
             <button className="button-primary">Mobile remote</button>
           </a>
@@ -139,27 +214,31 @@ export function CommandCenterShell() {
         <aside className="surface-card sidebar-column">
           <div className="section-head">
             <div>
-              <div className="eyebrow">Fleet</div>
-              <h2>Agents</h2>
+              <div className="eyebrow">Live surfaces</div>
+              <h2>Sessions</h2>
             </div>
-            <span className="status-pill status-running">{demoFleet.agents.length} online</span>
+            <span className={statusClass(fleet.meta.mode === 'live' ? 'running' : 'warning')}>
+              {fleet.agents.length} visible
+            </span>
           </div>
 
           <div className="sidebar-list">
-            {demoFleet.agents.map((agent) => (
+            {fleet.agents.map((agent) => (
               <button
                 key={agent.id}
                 type="button"
-                className={`agent-row ${agent.id === selectedAgent.id ? 'agent-row-active' : ''}`}
+                className={`agent-row ${agent.id === selectedAgent?.id ? 'agent-row-active' : ''}`}
                 onClick={() => setSelectedId(agent.id)}
               >
                 <div>
                   <div className="agent-row-name">{agent.name}</div>
                   <div className="agent-row-task">{agent.currentTask}</div>
+                  <div className="eyebrow top-gap-small">{agent.surfaceLabel}</div>
                 </div>
                 <div className="agent-row-meta">
                   <span className={statusClass(agent.status)}>{agent.status}</span>
-                  <span className="mono">{agent.context.usedPercent}% ctx</span>
+                  <span className="mono">{formatPercent(agent.context.usedPercent)} ctx</span>
+                  {agent.isCurrentSession ? <span className={statusClass('healthy')}>mirrored now</span> : null}
                 </div>
               </button>
             ))}
@@ -169,19 +248,19 @@ export function CommandCenterShell() {
         <section className="main-column">
           <div className="summary-grid">
             <div className="surface-card metric-card">
-              <span>Active runs</span>
-              <strong>3</strong>
-              <p>1 blocked, 1 awaiting approval</p>
+              <span>Active surfaces</span>
+              <strong>{activeRuns}</strong>
+              <p>Existing sessions are mirrored first; nothing here silently spawns a fresh run.</p>
             </div>
             <div className="surface-card metric-card">
-              <span>Pending approvals</span>
-              <strong>2</strong>
-              <p>1 mobile-worthy, 1 review-chain gate</p>
+              <span>Primary mirror</span>
+              <strong>{currentSession?.name ?? 'No current session'}</strong>
+              <p>{fleet.meta.primarySessionKey ?? 'No primary session key detected.'}</p>
             </div>
             <div className="surface-card metric-card">
-              <span>Spend today</span>
-              <strong>{money.format(10.87)}</strong>
-              <p>Budget visibility stays first-class.</p>
+              <span>Gateway</span>
+              <strong>{fleet.meta.mode === 'live' ? 'reachable' : 'fallback'}</strong>
+              <p>{gatewayLabel}</p>
             </div>
             <div className="surface-card metric-card">
               <span>Desktop shell</span>
@@ -189,7 +268,7 @@ export function CommandCenterShell() {
               <p>
                 {desktopInfo?.isDesktop
                   ? `Electron ${desktopInfo.version} on ${desktopInfo.platform}`
-                  : 'Browser remains the fast iteration surface.'}
+                  : 'Browser remains the fast dev surface while the desktop wrapper matures.'}
               </p>
             </div>
           </div>
@@ -252,7 +331,7 @@ export function CommandCenterShell() {
               <div className="section-head">
                 <div>
                   <div className="eyebrow">Overview</div>
-                  <h2>Command canvas</h2>
+                  <h2>Live OpenClaw inventory</h2>
                 </div>
                 <a href="/mobile" className="inline-link">
                   View mobile remote ↗
@@ -260,24 +339,25 @@ export function CommandCenterShell() {
               </div>
               <div className="topology-board">
                 <div className="topology-panel">
-                  <div className="eyebrow">Squads</div>
+                  <div className="eyebrow">Agent squads</div>
                   <div className="stack-grid">
-                    {demoFleet.squads.map((squad) => (
+                    {fleet.squads.map((squad) => (
                       <SquadCard key={squad.id} squad={squad} />
                     ))}
                   </div>
                 </div>
                 <div className="topology-panel surface-card inset-card">
-                  <div className="eyebrow">Topology stance</div>
-                  <h3>Legibility before gimmicks</h3>
+                  <div className="eyebrow">Session model</div>
+                  <h3>Mirror first, spawn explicitly</h3>
                   <p className="muted">
-                    Hoberman / spatial views stay optional. v1 earns the right to experiment only after the
-                    core board, filters, inspector, and review loop are genuinely faster than terminals.
+                    The first live bridge should show what OpenClaw is already doing, especially this
+                    active session. Spawning belongs behind an explicit action so the UI never creates
+                    ghost work or fake context.
                   </p>
                   <ul className="bullet-list muted">
-                    <li>Primary object: agent / run / squad</li>
-                    <li>Primary controls: spawn, steer, pause, review</li>
-                    <li>Primary visibility: idle, blocked, reviewing, cost, context</li>
+                    <li>Primary mirror: {fleet.meta.primarySessionKey ?? 'unknown'}</li>
+                    <li>Mode: {fleet.meta.mirrorMode}</li>
+                    <li>Alerts across visible surfaces: {alertCount}</li>
                   </ul>
                 </div>
               </div>
@@ -287,104 +367,147 @@ export function CommandCenterShell() {
               <div className="section-head">
                 <div>
                   <div className="eyebrow">Review rail</div>
-                  <h2>Events + artifacts</h2>
+                  <h2>{selectedAgent ? `${selectedAgent.name} evidence` : 'Live events + artifacts'}</h2>
                 </div>
-                <span className="status-pill status-reviewing">{demoFleet.artifacts.length} queued</span>
+                <span className="status-pill status-reviewing">{visibleArtifacts.length} artifacts</span>
               </div>
+              <p className="muted operator-note">
+                {selectedEvents.length
+                  ? 'This rail is filtered to the selected session first so transcript, events, and artifacts read as one bounded operator story.'
+                  : 'No session-specific events were found, so this rail falls back to the broader fleet view.'}
+              </p>
               <div className="event-stack">
-                {demoFleet.events.map((event) => (
+                {visibleEvents.map((event) => (
                   <EventRow key={event.id} event={event} />
                 ))}
               </div>
               <div className="artifact-grid">
-                {demoFleet.artifacts.map((artifact) => (
-                  <div key={artifact.title} className="artifact-chip">
-                    <span>{artifact.kind.replace('_', ' ')}</span>
-                    <strong>{artifact.title}</strong>
-                    <em>{artifact.state}</em>
-                  </div>
-                ))}
+                {visibleArtifacts.map((artifact) => {
+                  const chip = (
+                    <div className="artifact-chip">
+                      <span>{artifact.kind.replace('_', ' ')}</span>
+                      <strong>{artifact.title}</strong>
+                      {artifact.detail ? <p>{artifact.detail}</p> : null}
+                      <em>{artifact.state}</em>
+                    </div>
+                  );
+
+                  return artifact.href ? (
+                    <a key={`${artifact.kind}:${artifact.title}`} href={artifact.href} target="_blank" rel="noreferrer">
+                      {chip}
+                    </a>
+                  ) : (
+                    <div key={`${artifact.kind}:${artifact.title}`}>{chip}</div>
+                  );
+                })}
               </div>
             </div>
           </div>
+
+          <WorkflowReviewPanel initialSnapshot={initialReview} />
         </section>
 
-        <aside className="surface-card inspector-column">
-          <div className="section-head">
-            <div>
-              <div className="eyebrow">Inspector</div>
-              <h2>{selectedAgent.name}</h2>
-            </div>
-            <span className={statusClass(selectedAgent.status)}>{selectedAgent.status}</span>
-          </div>
-
-          <div className="inspector-block">
-            <span>Current task</span>
-            <strong>{selectedAgent.currentTask}</strong>
-          </div>
-
-          <div className="stat-grid">
-            <div>
-              <span>Runtime</span>
-              <strong>{selectedAgent.runtime}</strong>
-            </div>
-            <div>
-              <span>Model</span>
-              <strong>{selectedAgent.model}</strong>
-            </div>
-            <div>
-              <span>Branch</span>
-              <strong>{selectedAgent.branch}</strong>
-            </div>
-            <div>
-              <span>Session</span>
-              <strong className="mono">{selectedAgent.sessionKey}</strong>
-            </div>
-            <div>
-              <span>Context</span>
-              <strong>{formatTrend(selectedAgent.context.usedPercent)}</strong>
-            </div>
-            <div>
-              <span>Cost</span>
-              <strong>{money.format(selectedAgent.cost.sessionUsd)}</strong>
-            </div>
-          </div>
-
-          <div className="inspector-block">
-            <span>Squad</span>
-            <strong>{selectedSquad?.name ?? 'Unassigned'}</strong>
-            <p className="muted">{selectedAgent.workspace}</p>
-          </div>
-
-          <div className="inset-card inspector-block">
-            <div className="row space-between compact-row">
+        {selectedAgent ? (
+          <aside className="surface-card inspector-column">
+            <div className="section-head">
               <div>
-                <span>Adapter contract</span>
-                <strong>{openClawAdapterContract.displayName}</strong>
+                <div className="eyebrow">Inspector</div>
+                <h2>{selectedAgent.name}</h2>
               </div>
-              <span className="status-pill status-healthy">draft MVP</span>
+              <span className={statusClass(selectedAgent.status)}>{selectedAgent.status}</span>
             </div>
-            <ul className="bullet-list muted">
-              <li>Spawn / attach / steer / stop mapped into one runtime contract</li>
-              <li>Approvals, artifacts, and cost telemetry stay first-class</li>
-              <li>Pause remains explicitly unsupported until runtime semantics are consistent</li>
-            </ul>
-          </div>
 
-          <div className="inset-card inspector-block">
-            <span>Inline tools</span>
-            <div className="tool-drawer-list">
-              <button>Terminal</button>
-              <button>Diff</button>
-              <button>Artifacts</button>
-              <button>Memory</button>
+            <div className="inspector-block">
+              <span>Current task</span>
+              <strong>{selectedAgent.currentTask}</strong>
+              {selectedAgent.isCurrentSession ? (
+                <p className="muted">This is the same live session you and I are in right now.</p>
+              ) : null}
             </div>
-            <pre className="terminal-preview">$ cortex-ide open agent {selectedAgent.id}
-&gt; status={selectedAgent.status}
-&gt; approval={selectedAgent.approvalStatus}
-&gt; alerts={selectedAgent.alerts}</pre>
-          </div>
-        </aside>
+
+            <div className="stat-grid">
+              <div>
+                <span>Runtime</span>
+                <strong>{selectedAgent.runtime}</strong>
+              </div>
+              <div>
+                <span>Model</span>
+                <strong>{selectedAgent.model}</strong>
+              </div>
+              <div>
+                <span>Surface</span>
+                <strong>{selectedAgent.surfaceLabel ?? selectedAgent.sessionKind ?? 'unknown'}</strong>
+              </div>
+              <div>
+                <span>Session kind</span>
+                <strong>{selectedAgent.sessionKind ?? 'unknown'}</strong>
+              </div>
+              <div>
+                <span>Context</span>
+                <strong>{formatPercent(selectedAgent.context.usedPercent)}</strong>
+              </div>
+              <div>
+                <span>Tokens</span>
+                <strong>{inspectorTokenLabel}</strong>
+              </div>
+            </div>
+
+            <div className="inspector-block">
+              <span>Session key</span>
+              <strong className="mono">{selectedAgent.sessionKey}</strong>
+              <p className="muted">Session id: {selectedAgent.sessionId ?? 'unknown'}</p>
+            </div>
+
+            <div className="inspector-block">
+              <span>Agent workspace</span>
+              <strong>{selectedSquad?.name ?? 'Unassigned'}</strong>
+              <p className="muted">{selectedAgent.workspace}</p>
+            </div>
+
+            <div className="inset-card inspector-block">
+              <div className="row space-between compact-row">
+                <div>
+                  <span>Adapter contract</span>
+                  <strong>{openClawAdapterContract.displayName}</strong>
+                </div>
+                <span className="status-pill status-healthy">live bridge v1</span>
+              </div>
+              <ul className="bullet-list muted">
+                <li>Current mode mirrors existing sessions, starting with this one.</li>
+                <li>Steer + stop are now wired through the real OpenClaw gateway on explicit click only.</li>
+                <li>Spawn remains an explicit future action, not an automatic side effect.</li>
+                <li>Pause remains unsupported until runtime semantics are clean across providers.</li>
+              </ul>
+            </div>
+
+            <SessionOperatorPanel agent={selectedAgent} />
+
+            <div className="inset-card inspector-block">
+              <span>Runtime trace</span>
+              <pre className="terminal-preview">
+                {`$ openclaw status --json
+> source=${fleet.meta.sourceLabel}
+> primary_session=${fleet.meta.primarySessionKey ?? 'unknown'}
+> selected_session=${selectedAgent.sessionKey}
+> percent_used=${formatPercent(selectedAgent.context.usedPercent)}
+> tokens=${formatTokens(selectedAgent.tokenUsage?.totalTokens)}
+
+$ openclaw gateway call chat.history --json --params '${JSON.stringify({
+                  sessionKey: selectedAgent.sessionKey,
+                  limit: 10,
+                })}'
+$ openclaw gateway call chat.send --json --params '${JSON.stringify({
+                  sessionKey: selectedAgent.sessionKey,
+                  message: '...',
+                  idempotencyKey: '<uuid>',
+                })}'
+$ openclaw gateway call chat.abort --json --params '${JSON.stringify({
+                  sessionKey: selectedAgent.sessionKey,
+                })}'`}
+              </pre>
+            </div>
+          </aside>
+        ) : null}
       </main>
     </div>
   );
