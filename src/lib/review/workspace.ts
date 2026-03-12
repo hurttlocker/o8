@@ -82,6 +82,70 @@ async function loadIssueSummaries(issueNumbers: number[]) {
     });
 }
 
+interface PullRequestFileSummary {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  previous_filename?: string;
+  patch?: string;
+}
+
+function normalizePullRequestFileStatus(status?: string): ReviewChangedFile['status'] {
+  switch ((status ?? '').toLowerCase()) {
+    case 'added':
+      return 'added';
+    case 'removed':
+      return 'deleted';
+    case 'renamed':
+      return 'renamed';
+    case 'copied':
+      return 'added';
+    case 'modified':
+    default:
+      return 'modified';
+  }
+}
+
+function formatPullRequestFilePath(file: PullRequestFileSummary) {
+  return file.status === 'renamed' && file.previous_filename
+    ? `${file.previous_filename} → ${file.filename}`
+    : file.filename;
+}
+
+function parsePullRequestChangedFiles(raw: string) {
+  const files = parseJson<PullRequestFileSummary[]>(raw, []);
+
+  return files
+    .filter((file) => file.filename && !isReviewNoisePath(file.filename) && !isReviewNoisePath(formatPullRequestFilePath(file)))
+    .map((file) => ({
+      path: formatPullRequestFilePath(file),
+      status: normalizePullRequestFileStatus(file.status),
+      additions: file.additions,
+      deletions: file.deletions,
+    } satisfies ReviewChangedFile));
+}
+
+function summarizePullRequestDiff(files: ReviewChangedFile[]) {
+  if (!files.length) {
+    return 'No PR file summary is visible yet.';
+  }
+
+  return files
+    .slice(0, 8)
+    .map((file) => `${file.path}  +${file.additions ?? 0}  -${file.deletions ?? 0}`)
+    .join('\n');
+}
+
+async function loadPullRequestFiles(pullRequestNumber: number) {
+  const raw = await tryRunFile('gh', [
+    'api',
+    `repos/${REVIEW_REPO_SLUG}/pulls/${pullRequestNumber}/files?per_page=100`,
+  ]);
+
+  return parseJson<PullRequestFileSummary[]>(raw, []);
+}
+
 async function runFile(command: string, args: string[]) {
   const { stdout } = await execFileAsync(command, args, {
     cwd: REVIEW_REPO_ROOT,
@@ -214,21 +278,34 @@ function trimPreview(text: string, maxLines = 120, maxChars = 6000) {
   return lines.length > maxChars ? `${lines.slice(0, maxChars - 1)}…` : lines;
 }
 
-function buildReviewFileNote(file: ReviewChangedFile, originalPath?: string, currentPath?: string) {
+function buildReviewFileNote(
+  file: ReviewChangedFile,
+  originalPath?: string,
+  currentPath?: string,
+  source: 'local' | 'pull_request' = 'local',
+) {
+  const previewLabel = source === 'pull_request' ? 'the committed PR patch' : 'the current local diff';
+
   switch (file.status) {
     case 'added':
-      return 'Added file • preview shows the current local patch against HEAD.';
+      return source === 'pull_request'
+        ? 'Added file • preview shows the committed PR patch already attached to this branch.'
+        : 'Added file • preview shows the current local patch against HEAD.';
     case 'deleted':
-      return 'Deleted file • preview shows the removal diff still waiting in the working tree.';
+      return source === 'pull_request'
+        ? 'Deleted file • preview shows the committed PR removal patch from GitHub.'
+        : 'Deleted file • preview shows the removal diff still waiting in the working tree.';
     case 'renamed':
       return originalPath && currentPath
-        ? `Renamed ${originalPath} → ${currentPath} • preview keeps the rename visible on phone.`
-        : 'Renamed file • preview keeps the rename visible on phone.';
+        ? `Renamed ${originalPath} → ${currentPath} • preview keeps the rename visible on phone via ${previewLabel}.`
+        : `Renamed file • preview keeps the rename visible on phone via ${previewLabel}.`;
     case 'untracked':
       return 'Untracked file • git has no HEAD baseline yet, so the phone shows the current file contents instead of a patch.';
     case 'modified':
     default:
-      return 'Modified file • preview shows the current local diff so you can triage without dropping to desktop first.';
+      return source === 'pull_request'
+        ? 'Modified file • preview shows the committed PR patch so you can triage after push without dropping to desktop first.'
+        : 'Modified file • preview shows the current local diff so you can triage without dropping to desktop first.';
   }
 }
 
@@ -268,6 +345,35 @@ async function loadReviewFilePreview(file: ReviewChangedFile, originalPath?: str
   }
 
   return 'No inline diff preview is available for this file yet.';
+}
+
+async function loadPullRequestFileDetail(pullRequestNumber: number, reviewPath: string) {
+  const files = await loadPullRequestFiles(pullRequestNumber);
+  const matched = files.find((file) => formatPullRequestFilePath(file) === reviewPath);
+
+  if (!matched) {
+    return null;
+  }
+
+  const file: ReviewChangedFile = {
+    path: formatPullRequestFilePath(matched),
+    status: normalizePullRequestFileStatus(matched.status),
+    additions: matched.additions,
+    deletions: matched.deletions,
+  };
+  const preview = trimPreview(matched.patch ?? '') || 'GitHub did not return an inline patch for this file.';
+  const { originalPath, currentPath } = parseReviewPath(file.path);
+
+  return {
+    path: file.path,
+    status: file.status,
+    additions: file.additions,
+    deletions: file.deletions,
+    originalPath,
+    currentPath,
+    note: buildReviewFileNote(file, originalPath, currentPath, 'pull_request'),
+    preview,
+  } satisfies MobileReviewFileDetail;
 }
 
 function parseWorktrees(raw: string) {
@@ -317,23 +423,33 @@ export async function getReviewFileDetail(reviewPath: string): Promise<MobileRev
   const changedFiles = await loadReviewChangedFiles();
   const file = changedFiles.find((entry) => entry.path === reviewPath);
 
-  if (!file) {
-    throw new Error('Requested file is no longer part of the live review surface.');
+  if (file) {
+    const { originalPath, currentPath } = parseReviewPath(file.path);
+    const preview = await loadReviewFilePreview(file, originalPath, currentPath);
+
+    return {
+      path: file.path,
+      status: file.status,
+      additions: file.additions,
+      deletions: file.deletions,
+      originalPath,
+      currentPath,
+      note: buildReviewFileNote(file, originalPath, currentPath),
+      preview,
+    };
   }
 
-  const { originalPath, currentPath } = parseReviewPath(file.path);
-  const preview = await loadReviewFilePreview(file, originalPath, currentPath);
+  const snapshot = await getWorkspaceReviewSnapshot();
+  const leadPullRequest = snapshot.pullRequests[0];
 
-  return {
-    path: file.path,
-    status: file.status,
-    additions: file.additions,
-    deletions: file.deletions,
-    originalPath,
-    currentPath,
-    note: buildReviewFileNote(file, originalPath, currentPath),
-    preview,
-  };
+  if (leadPullRequest) {
+    const committedFile = await loadPullRequestFileDetail(leadPullRequest.number, reviewPath);
+    if (committedFile) {
+      return committedFile;
+    }
+  }
+
+  throw new Error('Requested file is no longer part of the live review surface.');
 }
 
 export async function getWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapshot> {
@@ -384,8 +500,7 @@ export async function getWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapsh
     ]),
   ]);
 
-  const changedFiles = parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw);
-  const diffStat = diffStatRaw || (changedFiles.length ? 'Working tree changed, but git diff --stat returned no visible summary.' : 'Working tree clean.');
+  const localChangedFiles = parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw);
   const recentCommits = recentCommitsRaw ? recentCommitsRaw.split('\n').filter(Boolean) : [];
   const worktrees = parseWorktrees(worktreesRaw);
 
@@ -397,6 +512,17 @@ export async function getWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapsh
     reviewDecision: normalizeReviewDecision(pullRequest.reviewDecision),
     linkedIssueNumbers: parseLinkedIssueNumbers(pullRequest.body),
   }));
+
+  const pullRequestFiles = pullRequests[0] ? await loadPullRequestFiles(pullRequests[0].number) : [];
+  const pullRequestChangedFiles = pullRequestFiles.length
+    ? parsePullRequestChangedFiles(JSON.stringify(pullRequestFiles))
+    : [];
+  const changedFiles = localChangedFiles.length ? localChangedFiles : pullRequestChangedFiles;
+  const diffStat = localChangedFiles.length
+    ? diffStatRaw || 'Working tree changed, but git diff --stat returned no visible summary.'
+    : pullRequestChangedFiles.length
+      ? summarizePullRequestDiff(pullRequestChangedFiles)
+      : 'Working tree clean.';
 
   const linkedIssueNumbers = pullRequests.flatMap((pullRequest) => pullRequest.linkedIssueNumbers ?? []);
   const activeIssues = await loadIssueSummaries(
@@ -428,7 +554,7 @@ export async function getWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapsh
     upstream,
     ahead,
     behind,
-    dirty: changedFiles.length > 0,
+    dirty: localChangedFiles.length > 0,
     changedFiles,
     diffStat,
     recentCommits,
