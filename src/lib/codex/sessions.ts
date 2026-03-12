@@ -302,6 +302,7 @@ function buildRuntimeSurface(thread: CodexThreadRow, activity?: CodexThreadActiv
     id: `codex:${thread.id}`,
     runtime: 'codex',
     kind: 'terminal-session',
+    ownership: 'discovered',
     title: surfaceDisplayTitle(thread),
     cwd: shortenPath(thread.cwd),
     branch: thread.git_branch || undefined,
