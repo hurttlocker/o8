@@ -11,7 +11,7 @@ Cortex IDE is a thesis for an **agent-native development environment**:
 - memory is not an afterthought, but a first-class **operating system primitive**
 - mobile is not a bolt-on viewer, but a **remote control surface** for approval, monitoring, and steering
 
-This repo captures the initial company thesis, v0 product spec, system architecture, mobile strategy, and research notes from the first design sprint.
+This repo captures the initial company thesis, v0 product spec, system architecture, mobile strategy, research notes, and the first live shell prototype.
 
 ## Current position
 
@@ -47,7 +47,13 @@ The right model is:
 - `docs/issue-map.md` — epic lanes and issue structure
 - `docs/remodex-integration-plan.md` — how to use the Remodex/Phodex lane without letting it define the whole product
 - `docs/research/x-thread-notes.md` — notes from the Karpathy + Remodex threads
+- `docs/fleet-state-model.md` — first state taxonomy for agents and squads
+- `docs/runtime-adapter-contract.md` — first runtime abstraction contract
+- `docs/desktop-app-strategy.md` — Option B + touch of A desktop packaging path
+- `docs/live-openclaw-bridge.md` — why the first live mode mirrors this session instead of auto-spawning a new one
 - `assets/mockups/` — early visual directions
+- `src/app/` — initial Next.js desktop + mobile remote shell prototype
+- `electron/` — native desktop shell wrapper for the control plane
 
 ## Initial product stance
 
@@ -69,7 +75,31 @@ The right model is:
 3. Integrate Cortex deeply as the memory and audit substrate
 4. Consider VS Code distribution later only if the control plane is already clearly valuable
 
+## Local preview
+
+```bash
+cd /Users/marquisehurtt/clawd/repos/cortex-ide
+npm install
+npm run dev
+```
+
+Routes:
+- Desktop shell: `http://localhost:3001/`
+- Mobile remote preview: `http://localhost:3001/mobile`
+- Live OpenClaw fleet JSON: `http://localhost:3001/api/openclaw/fleet`
+
+## Native desktop shell (current dev path)
+
+```bash
+cd /Users/marquisehurtt/clawd/repos/cortex-ide
+npm install
+npm run desktop:dev
+```
+
+This keeps the current control-plane architecture intact while giving the product a real desktop-app shell early.
+
 ## Status
 
 Drafted on 2026-03-11.
+Execution started on 2026-03-11 with a real desktop shell, mobile remote preview, fleet state model, runtime adapter contract, and an Electron desktop wrapper for the control plane.
 Private repo only for now.
