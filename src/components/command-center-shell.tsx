@@ -8,20 +8,6 @@ import { WorkflowReviewPanel } from '@/components/workflow-review-panel';
 
 const compactNumber = new Intl.NumberFormat('en-US', { notation: 'compact' });
 
-const githubPulse = {
-  repo: 'hurttlocker/cortex-ide',
-  branch: 'feat/shell-contract-mvp',
-  pullRequest: '#22 — live OpenClaw bridge lane',
-  milestone: 'Phase 2 → workflow review',
-  checks: [
-    '#7 Desktop shell',
-    '#8 Fleet state model',
-    '#11 Runtime adapter contract',
-    '#12 OpenClaw / ACP adapter MVP',
-    '#13 Git / GitHub / worktree review surface',
-  ],
-};
-
 const karpathyGuardrails = [
   'Primary object stays the agent / run / squad, not the file tree.',
   'Idle / blocked / reviewing visibility must stay obvious at a glance.',
@@ -43,6 +29,12 @@ function formatPercent(value?: number | null) {
 function formatTokens(value?: number | null) {
   if (value == null) return '—';
   return compactNumber.format(value);
+}
+
+function formatIssueStack(snapshot?: WorkflowReviewSnapshot | null) {
+  const issues = snapshot?.activeIssues ?? [];
+  if (!issues.length) return 'Issue stack unavailable';
+  return issues.map((issue) => `#${issue.number}`).join(' • ');
 }
 
 function pickPreferredAgent(snapshot: FleetSnapshot, currentId?: string) {
@@ -102,8 +94,10 @@ export function CommandCenterShell({
   initialReview?: WorkflowReviewSnapshot | null;
 }) {
   const [fleet, setFleet] = useState<FleetSnapshot>(initialSnapshot);
+  const [review, setReview] = useState<WorkflowReviewSnapshot | null>(initialReview ?? null);
   const [selectedId, setSelectedId] = useState(() => pickPreferredAgent(initialSnapshot));
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedId((currentId) => pickPreferredAgent(fleet, currentId));
@@ -128,8 +122,40 @@ export function CommandCenterShell({
       }
     }
 
-    refreshLiveFleet();
-    const timer = window.setInterval(refreshLiveFleet, 30000);
+    void refreshLiveFleet();
+    const timer = window.setInterval(() => {
+      void refreshLiveFleet();
+    }, 30000);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function refreshReview() {
+      try {
+        const response = await fetch('/api/review/workspace', { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const nextSnapshot = (await response.json()) as WorkflowReviewSnapshot;
+        if (!active) return;
+        setReview(nextSnapshot);
+        setReviewError(null);
+      } catch (error) {
+        if (!active) return;
+        setReviewError(error instanceof Error ? error.message : 'Unable to refresh workflow review');
+      }
+    }
+
+    void refreshReview();
+    const timer = window.setInterval(() => {
+      void refreshReview();
+    }, 45000);
 
     return () => {
       active = false;
@@ -154,6 +180,14 @@ export function CommandCenterShell({
   const currentSession = fleet.agents.find((agent) => agent.isCurrentSession);
   const alertCount = fleet.agents.reduce((sum, agent) => sum + agent.alerts, 0);
   const gatewayLabel = fleet.meta.gatewayLabel ?? 'Gateway status unknown';
+  const reviewPullRequest = review?.pullRequests?.[0];
+  const reviewIssues = review?.activeIssues ?? [];
+  const repoLaneLabel = reviewPullRequest
+    ? `PR #${reviewPullRequest.number} • ${reviewPullRequest.headRefName}`
+    : review?.branch
+      ? `Branch • ${review.branch}`
+      : 'Repo lane unavailable';
+  const repoStateLabel = review?.dirty ? `${review.changedFiles.length} local changes` : 'working tree clean';
   const selectedEvents = selectedAgent
     ? fleet.events.filter((event) => event.agentId === selectedAgent.id)
     : [];
@@ -195,10 +229,12 @@ export function CommandCenterShell({
           </p>
         </div>
         <div className="command-strip">
-          <a href="https://github.com/hurttlocker/cortex-ide/pull/22" target="_blank" rel="noreferrer">
-            <button>PR #22</button>
-          </a>
-          <a href="https://github.com/hurttlocker/cortex-ide/issues" target="_blank" rel="noreferrer">
+          {reviewPullRequest ? (
+            <a href={reviewPullRequest.url} target="_blank" rel="noreferrer">
+              <button>{`PR #${reviewPullRequest.number}`}</button>
+            </a>
+          ) : null}
+          <a href={`https://github.com/${review?.repoSlug ?? 'hurttlocker/cortex-ide'}/issues`} target="_blank" rel="noreferrer">
             <button>Issues</button>
           </a>
           <button type="button" onClick={() => window.location.reload()}>
@@ -277,34 +313,50 @@ export function CommandCenterShell({
             <div className="surface-card">
               <div className="section-head">
                 <div>
-                  <div className="eyebrow">GitHub pulse</div>
+                  <div className="eyebrow">Repo truth</div>
                   <h2>Execution truth</h2>
                 </div>
-                <span className="status-pill status-reviewing">Live repo lane</span>
+                <span className={statusClass(review?.dirty ? 'warning' : 'reviewing')}>
+                  {review?.dirty ? 'local changes' : 'live repo lane'}
+                </span>
               </div>
               <div className="signal-stack">
                 <div className="signal-row">
                   <span>Repo</span>
-                  <strong>{githubPulse.repo}</strong>
+                  <strong>{review?.repoSlug ?? 'hurttlocker/cortex-ide'}</strong>
                 </div>
                 <div className="signal-row">
                   <span>Branch</span>
-                  <strong className="mono">{githubPulse.branch}</strong>
+                  <strong className="mono">{review?.branch ?? 'Loading…'}</strong>
                 </div>
                 <div className="signal-row">
                   <span>PR</span>
-                  <strong>{githubPulse.pullRequest}</strong>
+                  <strong>
+                    {reviewPullRequest
+                      ? `#${reviewPullRequest.number} — ${reviewPullRequest.title}`
+                      : 'No open PR attached'}
+                  </strong>
                 </div>
                 <div className="signal-row">
-                  <span>Milestone</span>
-                  <strong>{githubPulse.milestone}</strong>
+                  <span>Issue stack</span>
+                  <strong>{formatIssueStack(review)}</strong>
                 </div>
               </div>
               <ul className="bullet-list muted top-gap">
-                {githubPulse.checks.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
+                <li>{repoLaneLabel}</li>
+                <li>{repoStateLabel}</li>
+                <li>
+                  {review?.recentCommits?.[0]
+                    ? `Latest commit • ${review.recentCommits[0]}`
+                    : 'Latest commit unavailable'}
+                </li>
+                <li>
+                  {reviewIssues.length
+                    ? reviewIssues.map((issue) => `${issue.state.toLowerCase()} #${issue.number} ${issue.title}`).join(' • ')
+                    : 'Issue linkage unavailable'}
+                </li>
               </ul>
+              {reviewError ? <p className="muted operator-note">{reviewError}</p> : null}
             </div>
 
             <div className="surface-card">
@@ -404,7 +456,7 @@ export function CommandCenterShell({
             </div>
           </div>
 
-          <WorkflowReviewPanel initialSnapshot={initialReview} />
+          <WorkflowReviewPanel initialSnapshot={review} />
         </section>
 
         {selectedAgent ? (

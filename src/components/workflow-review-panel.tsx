@@ -102,6 +102,7 @@ export function WorkflowReviewPanel({ initialSnapshot }: { initialSnapshot?: Wor
   const changedFiles = snapshot?.changedFiles ?? [];
   const pullRequests = snapshot?.pullRequests ?? [];
   const worktrees = snapshot?.worktrees ?? [];
+  const activeIssues = snapshot?.activeIssues ?? [];
 
   return (
     <section className="surface-card workflow-review-surface">
@@ -134,11 +135,13 @@ export function WorkflowReviewPanel({ initialSnapshot }: { initialSnapshot?: Wor
           </p>
         </div>
         <div className="surface-card metric-card">
-          <span>Active issue</span>
-          <strong>
-            {snapshot?.activeIssue ? `#${snapshot.activeIssue.number}` : 'Not linked'}
-          </strong>
-          <p>{snapshot?.activeIssue?.title ?? 'Issue linkage not loaded yet.'}</p>
+          <span>Active issues</span>
+          <strong>{activeIssues.length || 'Not linked'}</strong>
+          <p>
+            {activeIssues.length
+              ? activeIssues.map((issue) => `#${issue.number}`).join(' • ')
+              : 'Issue linkage not loaded yet.'}
+          </p>
         </div>
         <div className="surface-card metric-card">
           <span>Open PRs</span>
@@ -200,11 +203,22 @@ export function WorkflowReviewPanel({ initialSnapshot }: { initialSnapshot?: Wor
           </div>
 
           <div className="workflow-issue-card">
-            <span>Active issue</span>
-            {snapshot?.activeIssue ? (
-              <a href={snapshot.activeIssue.url} target="_blank" rel="noreferrer">
-                <strong>{`#${snapshot.activeIssue.number} — ${snapshot.activeIssue.title}`}</strong>
-              </a>
+            <span>Issue stack</span>
+            {activeIssues.length ? (
+              <div className="workflow-pr-list">
+                {activeIssues.map((issue) => (
+                  <a key={issue.number} href={issue.url} target="_blank" rel="noreferrer">
+                    <div className="workflow-pr-item">
+                      <div className="row space-between compact-row">
+                        <strong>{`#${issue.number} — ${issue.title}`}</strong>
+                        <span className={statusClass(issue.state.toLowerCase() === 'open' ? 'reviewing' : 'healthy')}>
+                          {issue.state.toLowerCase()}
+                        </span>
+                      </div>
+                    </div>
+                  </a>
+                ))}
+              </div>
             ) : (
               <strong>Issue linkage unavailable</strong>
             )}
