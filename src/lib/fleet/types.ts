@@ -28,6 +28,33 @@ export interface TokenUsageSnapshot {
   fresh?: boolean;
 }
 
+export interface RuntimeSurfaceCapabilities {
+  attach: boolean;
+  readTail: boolean;
+  sendInput: boolean;
+  interrupt: boolean;
+  resize: boolean;
+  diffContext: boolean;
+  reviewContext: boolean;
+}
+
+export interface RuntimeSurfaceSummary {
+  id: string;
+  runtime: string;
+  kind: 'chat-session' | 'terminal-session' | 'runtime-session';
+  title: string;
+  cwd?: string;
+  branch?: string;
+  sourceLabel: string;
+  tailSourceLabel?: string;
+  capabilities: RuntimeSurfaceCapabilities;
+  reviewContext?: {
+    repoSlug?: string;
+    branch?: string;
+    head?: string;
+  };
+}
+
 export interface AgentSummary {
   id: string;
   name: string;
@@ -49,6 +76,7 @@ export interface AgentSummary {
   surfaceLabel?: string;
   isCurrentSession?: boolean;
   tokenUsage?: TokenUsageSnapshot;
+  runtimeSurface?: RuntimeSurfaceSummary;
 }
 
 export interface SquadSummary {

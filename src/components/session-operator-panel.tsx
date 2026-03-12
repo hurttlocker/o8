@@ -12,6 +12,13 @@ type SessionTranscriptEntry = {
   timestampLabel?: string;
 };
 
+type RuntimeLogEntry = {
+  id: string;
+  label: string;
+  text: string;
+  timestampLabel?: string;
+};
+
 function roleLabel(role: SessionTranscriptEntry['role']) {
   switch (role) {
     case 'assistant':
@@ -40,8 +47,12 @@ async function readJson<T>(response: Response) {
   return payload as T;
 }
 
-function activeRunHint(status: AgentSummary['status']) {
-  switch (status) {
+function activeRunHint(agent: AgentSummary) {
+  if (agent.runtime !== 'openclaw') {
+    return 'This surface is currently read-only. The first truthful lane is attach/read-tail; input and interrupt stay disabled until runtime semantics are cleaner.';
+  }
+
+  switch (agent.status) {
     case 'running':
       return 'Live surface looks active right now. Steer and abort should both behave like real operator actions.';
     case 'reviewing':
@@ -65,32 +76,53 @@ export function SessionOperatorPanel({
   compact?: boolean;
 }) {
   const [draft, setDraft] = useState('');
-  const [history, setHistory] = useState<SessionTranscriptEntry[]>([]);
+  const [history, setHistory] = useState<RuntimeLogEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [actionState, setActionState] = useState<'idle' | 'sending' | 'stopping'>('idle');
   const [actionNote, setActionNote] = useState<string | null>(null);
   const transcriptLimit = compact ? 6 : 10;
   const liveRunVisible = ['running', 'reviewing'].includes(agent.status);
+  const runtimeSurface = agent.runtimeSurface;
+  const isOpenClaw = agent.runtime === 'openclaw';
+  const canSendInput = Boolean(runtimeSurface?.capabilities.sendInput && isOpenClaw);
+  const canInterrupt = Boolean(runtimeSurface?.capabilities.interrupt && isOpenClaw);
 
   const loadTranscript = useCallback(async () => {
     setHistoryLoading(true);
     try {
-      const response = await fetch(
-        `/api/openclaw/history?sessionKey=${encodeURIComponent(agent.sessionKey)}&limit=${transcriptLimit}`,
-        {
+      if (isOpenClaw) {
+        const response = await fetch(
+          `/api/openclaw/history?sessionKey=${encodeURIComponent(agent.sessionKey)}&limit=${transcriptLimit}`,
+          {
+            cache: 'no-store',
+          },
+        );
+        const payload = await readJson<{ transcript?: SessionTranscriptEntry[] }>(response);
+        setHistory(
+          (payload.transcript ?? []).map((entry) => ({
+            id: entry.id,
+            label: roleLabel(entry.role),
+            text: entry.text,
+            timestampLabel: entry.timestampLabel,
+          })),
+        );
+      } else if (runtimeSurface?.capabilities.readTail) {
+        const response = await fetch(`/api/runtime/tail?surfaceId=${encodeURIComponent(runtimeSurface.id)}`, {
           cache: 'no-store',
-        },
-      );
-      const payload = await readJson<{ transcript?: SessionTranscriptEntry[] }>(response);
-      setHistory(payload.transcript ?? []);
+        });
+        const payload = await readJson<{ entries?: RuntimeLogEntry[] }>(response);
+        setHistory(payload.entries ?? []);
+      } else {
+        setHistory([]);
+      }
       setHistoryError(null);
     } catch (error) {
-      setHistoryError(error instanceof Error ? error.message : 'Unable to load transcript');
+      setHistoryError(error instanceof Error ? error.message : 'Unable to load runtime history');
     } finally {
       setHistoryLoading(false);
     }
-  }, [agent.sessionKey, transcriptLimit]);
+  }, [agent.sessionKey, isOpenClaw, runtimeSurface, transcriptLimit]);
 
   useEffect(() => {
     setDraft('');
@@ -101,7 +133,7 @@ export function SessionOperatorPanel({
   async function handleSteerSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const instruction = draft.trim();
-    if (!instruction) return;
+    if (!instruction || !canSendInput) return;
 
     setActionState('sending');
     setActionNote(null);
@@ -122,6 +154,8 @@ export function SessionOperatorPanel({
   }
 
   async function handleStop() {
+    if (!canInterrupt) return;
+
     setActionState('stopping');
     setActionNote(null);
 
@@ -155,65 +189,99 @@ export function SessionOperatorPanel({
         <div className="row space-between compact-row operator-header-row">
           <div>
             <span>Operator actions</span>
-            <strong>Explicit runtime control</strong>
+            <strong>{isOpenClaw ? 'Explicit runtime control' : 'Read-only runtime watch'}</strong>
           </div>
-          <span className="status-pill status-running">chat.send / chat.abort</span>
+          <span className={`status-pill ${isOpenClaw ? 'status-running' : 'status-warning'}`}>
+            {isOpenClaw ? 'chat.send / chat.abort' : 'attach / read-tail'}
+          </span>
         </div>
         <p className="muted operator-note">
-          This is the first truthful control lane: explicit steer and stop only. Opening the UI still does
-          not create a ghost session or auto-deliver anything back to Telegram.
+          {isOpenClaw
+            ? 'This is the first truthful control lane: explicit steer and stop only. Opening the UI still does not create a ghost session or auto-deliver anything back to Telegram.'
+            : `${runtimeSurface?.sourceLabel ?? 'Runtime surface'} is visible inside the same product, but mutation stays disabled until input/interrupt semantics are proven truthful.`}
         </p>
         <div className="operator-state-grid">
           <div className="operator-state-card">
             <span>Visible run state</span>
             <strong>{agent.status}</strong>
-            <p className="muted">{activeRunHint(agent.status)}</p>
+            <p className="muted">{activeRunHint(agent)}</p>
           </div>
           <div className="operator-state-card">
-            <span>Abort lane</span>
-            <strong>{liveRunVisible ? 'armed' : 'idle-ish'}</strong>
-            <p className="muted">Fleet state is heuristic-driven, so abort can still no-op even when the surface looks warm.</p>
+            <span>{isOpenClaw ? 'Abort lane' : 'Attach lane'}</span>
+            <strong>
+              {isOpenClaw ? (liveRunVisible ? 'armed' : 'idle-ish') : runtimeSurface?.capabilities.attach ? 'readable' : 'unavailable'}
+            </strong>
+            <p className="muted">
+              {isOpenClaw
+                ? 'Fleet state is heuristic-driven, so abort can still no-op even when the surface looks warm.'
+                : 'This is a truthful first pass: runtime watch is available, but send-input and interrupt remain off.'}
+            </p>
           </div>
           <div className="operator-state-card">
             <span>Readable log</span>
             <strong>{historyLoading ? 'loading' : `${history.length} entries`}</strong>
-            <p className="muted">Only user/assistant/system text survives here. Hidden thinking and tool blobs stay out.</p>
+            <p className="muted">
+              {isOpenClaw
+                ? 'Only user/assistant/system text survives here. Hidden thinking and tool blobs stay out.'
+                : `Recovered from ${runtimeSurface?.tailSourceLabel ?? 'runtime metadata'} and summarized into a bounded readable tail.`}
+            </p>
           </div>
         </div>
-        <form className="operator-form" onSubmit={handleSteerSubmit}>
-          <textarea
-            className="operator-textarea"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            rows={compact ? 3 : 4}
-            placeholder={`Steer ${agent.name} without creating a new session…`}
-          />
+        {isOpenClaw ? (
+          <form className="operator-form" onSubmit={handleSteerSubmit}>
+            <textarea
+              className="operator-textarea"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              rows={compact ? 3 : 4}
+              placeholder={`Steer ${agent.name} without creating a new session…`}
+            />
+            <div className="operator-actions queue-toolbar">
+              <button className="button-primary" type="submit" disabled={actionState !== 'idle' || !draft.trim() || !canSendInput}>
+                {actionState === 'sending' ? 'Steering…' : 'Steer session'}
+              </button>
+              <button type="button" onClick={handleStop} disabled={actionState !== 'idle' || !canInterrupt}>
+                {actionState === 'stopping' ? 'Stopping…' : 'Stop active run'}
+              </button>
+              <button type="button" onClick={() => void loadTranscript()} disabled={historyLoading || actionState !== 'idle'}>
+                {historyLoading ? 'Refreshing…' : 'Refresh log'}
+              </button>
+            </div>
+          </form>
+        ) : (
           <div className="operator-actions queue-toolbar">
-            <button className="button-primary" type="submit" disabled={actionState !== 'idle' || !draft.trim()}>
-              {actionState === 'sending' ? 'Steering…' : 'Steer session'}
+            <button type="button" onClick={() => void loadTranscript()} disabled={historyLoading}>
+              {historyLoading ? 'Refreshing…' : 'Refresh tail'}
             </button>
-            <button type="button" onClick={handleStop} disabled={actionState !== 'idle'}>
-              {actionState === 'stopping' ? 'Stopping…' : 'Stop active run'}
+            <button type="button" disabled>
+              Send input (later)
             </button>
-            <button type="button" onClick={() => void loadTranscript()} disabled={historyLoading || actionState !== 'idle'}>
-              {historyLoading ? 'Refreshing…' : 'Refresh log'}
+            <button type="button" disabled>
+              Interrupt (later)
             </button>
           </div>
-        </form>
+        )}
         {actionNote ? <p className="muted operator-note">{actionNote}</p> : null}
       </div>
 
       <div className="inset-card inspector-block tool-shell terminal-shell">
         <div className="row space-between compact-row operator-header-row">
           <div>
-            <span>Session log</span>
-            <strong>Sanitized transcript</strong>
+            <span>{isOpenClaw ? 'Session log' : 'Runtime tail'}</span>
+            <strong>{isOpenClaw ? 'Sanitized transcript' : 'Readable Codex tail'}</strong>
           </div>
-          <span className="status-pill status-healthy">history</span>
+          <span className="status-pill status-healthy">{isOpenClaw ? 'history' : 'tail'}</span>
         </div>
         <p className="muted operator-note">
-          Pulled from OpenClaw <span className="mono">chat.history</span>. Hidden thinking and raw tool internals
-          are intentionally omitted here.
+          {isOpenClaw ? (
+            <>
+              Pulled from OpenClaw <span className="mono">chat.history</span>. Hidden thinking and raw tool internals are intentionally omitted here.
+            </>
+          ) : (
+            <>
+              Recovered from <span className="mono">~/.codex/sessions/*.jsonl</span> and summarized into a bounded operator-readable watch surface.
+            </>
+          )}
         </p>
         {historyError ? <p className="muted operator-note">{historyError}</p> : null}
         {history.length ? (
@@ -221,7 +289,7 @@ export function SessionOperatorPanel({
             {history.map((entry) => (
               <div key={entry.id} className="transcript-entry terminal-entry">
                 <div className="row space-between compact-row">
-                  <strong>{roleLabel(entry.role)}</strong>
+                  <strong>{entry.label}</strong>
                   <span className="muted mono">{entry.timestampLabel ?? 'now'}</span>
                 </div>
                 <p>{entry.text}</p>
@@ -229,11 +297,12 @@ export function SessionOperatorPanel({
             ))}
           </div>
         ) : historyLoading ? (
-          <p className="muted operator-note">Loading transcript…</p>
+          <p className="muted operator-note">{isOpenClaw ? 'Loading transcript…' : 'Loading runtime tail…'}</p>
         ) : (
           <p className="muted operator-note">
-            No visible transcript text is available for this session yet. That usually means the freshest activity
-            was tool-heavy/internal or compaction trimmed the readable turns, not that the bridge is broken.
+            {isOpenClaw
+              ? 'No visible transcript text is available for this session yet. That usually means the freshest activity was tool-heavy/internal or compaction trimmed the readable turns, not that the bridge is broken.'
+              : 'No readable tail entries were recovered yet. That usually means the session has not emitted recent readable events, not that discovery failed.'}
           </p>
         )}
       </div>

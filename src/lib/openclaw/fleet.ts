@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { demoFleet } from '@/lib/demo/fleet';
+import { getCodexDiscoveredFleetAdditions } from '@/lib/codex/sessions';
 import type {
   AgentStatus,
   AgentSummary,
@@ -138,6 +139,32 @@ function deriveTrend(percentUsed?: number | null, ageMs?: number) {
   return 'stable' as const;
 }
 
+function buildOpenClawRuntimeSurface(title: string, session: OpenClawRecentSession, workspace: string, branch: string, surfaceLabel: string) {
+  return {
+    id: session.key,
+    runtime: 'openclaw',
+    kind: 'chat-session' as const,
+    title,
+    cwd: workspace,
+    branch,
+    sourceLabel: `OpenClaw live gateway • ${surfaceLabel}`,
+    tailSourceLabel: 'chat.history',
+    capabilities: {
+      attach: true,
+      readTail: true,
+      sendInput: true,
+      interrupt: true,
+      resize: false,
+      diffContext: true,
+      reviewContext: true,
+    },
+    reviewContext: {
+      branch,
+      repoSlug: 'hurttlocker/cortex-ide',
+    },
+  };
+}
+
 function deriveEventSeverity(status: AgentStatus, isCurrentSession: boolean): EventSeverity {
   if (status === 'blocked' || status === 'failed') return 'critical';
   if (isCurrentSession) return 'success';
@@ -194,17 +221,19 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
       const status = deriveStatus(session);
       const alerts = Number(Boolean(session.abortedLastRun)) + Number((session.percentUsed ?? 0) >= 70);
       const workspace = shortenPath(agentMeta[session.agentId ?? '']?.workspaceDir);
+      const branch = `surface/${surfaceLabel.toLowerCase().replace(/\s+/g, '-')}`;
+      const name = deriveSessionName(session, agentMeta, isCurrentSession);
 
       return {
         id: session.key,
-        name: deriveSessionName(session, agentMeta, isCurrentSession),
+        name,
         squadId: `squad-${session.agentId ?? 'openclaw'}`,
         runtime: 'openclaw',
         model: session.model ?? 'unknown',
         status,
         currentTask: deriveCurrentTask(session, surfaceLabel, isCurrentSession),
         workspace,
-        branch: `surface/${surfaceLabel.toLowerCase().replace(/\s+/g, '-')}`,
+        branch,
         sessionKey: session.key,
         approvalStatus: 'none',
         lastEventAt: relativeAge(ageMs),
@@ -217,6 +246,7 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
         sessionKind: session.kind ?? 'direct',
         surfaceLabel,
         isCurrentSession,
+        runtimeSurface: buildOpenClawRuntimeSurface(name, session, workspace, branch, surfaceLabel),
         tokenUsage: {
           totalTokens: session.totalTokens,
           remainingTokens: session.remainingTokens,
@@ -225,7 +255,7 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
       };
     });
 
-    const squads: SquadSummary[] = (parsed.agents?.agents ?? [])
+    const openClawSquads: SquadSummary[] = (parsed.agents?.agents ?? [])
       .map((agent) => {
         const members = agents.filter((item) => item.squadId === `squad-${agent.id}`).map((item) => item.id);
         if (!members.length) return null;
@@ -250,7 +280,7 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
       })
       .filter((item): item is SquadSummary => Boolean(item));
 
-    const events = agents.slice(0, 6).map((agent) => ({
+    const openClawEvents = agents.slice(0, 6).map((agent) => ({
       id: `evt-${agent.id}`,
       agentId: agent.id,
       squadId: agent.squadId,
@@ -260,24 +290,33 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
       timestamp: agent.lastEventAt,
     }));
 
+    const codexDiscovery = await getCodexDiscoveredFleetAdditions();
+    const allAgents = [...agents, ...codexDiscovery.agents];
+    const allSquads = [...openClawSquads, ...codexDiscovery.squads];
+    const allEvents = [...openClawEvents, ...codexDiscovery.events];
+
     return {
       generatedAt: new Date().toISOString(),
       meta: {
         mode: 'live',
-        sourceLabel: 'openclaw status --json',
+        sourceLabel: codexDiscovery.sourceLabel
+          ? `openclaw status --json + ${codexDiscovery.sourceLabel}`
+          : 'openclaw status --json',
         gatewayLabel: parsed.gateway?.reachable
           ? `OpenClaw ${parsed.gateway?.self?.version ?? 'unknown'} • ${parsed.gateway?.mode ?? 'local'} gateway`
           : 'Gateway unreachable',
         primarySessionKey: primarySession.key,
         mirrorMode: 'current-session-first',
-        note:
+        note: [
           primarySession.key === 'agent:main:main'
             ? 'Mirroring this live Q ↔ Mister session first. New sessions should only appear when you explicitly spawn them.'
             : 'Mirroring existing OpenClaw sessions first. New sessions should only appear when you explicitly spawn them.',
+          codexDiscovery.note,
+        ].filter(Boolean).join(' '),
       },
-      squads,
-      agents,
-      events,
+      squads: allSquads,
+      agents: allAgents,
+      events: allEvents,
       artifacts: [
         {
           kind: 'run_log',
@@ -300,6 +339,7 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
           state: 'reviewing',
           detail: 'Active code lane that turned the shell into a truthful live bridge.',
         },
+        ...codexDiscovery.artifacts,
       ],
     };
   } catch (error) {
