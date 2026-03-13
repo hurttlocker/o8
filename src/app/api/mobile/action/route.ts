@@ -113,22 +113,6 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    if (action === 'stop' && isOwnedCodex) {
-      const response: MobileActionResponse = {
-        ok: false,
-        action,
-        sessionKey,
-        status: 'unavailable',
-        note: 'Interrupt still stays on desktop for IDE-owned Codex. Mobile is limited to review-state changes and between-run resume for now.',
-      };
-      return NextResponse.json(response, {
-        status: 501,
-        headers: {
-          'Cache-Control': 'no-store, max-age=0',
-        },
-      });
-    }
-
     const result = await performRuntimeAction({
       action,
       surfaceId: sessionKey,
