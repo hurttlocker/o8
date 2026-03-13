@@ -1598,20 +1598,38 @@ export function MobileRemoteShell({
 
         <div className="remodex-scroll-view">
 
-          {threadSwitcher.length > 1 ? (
-            <div className="remodex-thread-rail">
+          {threadSwitcher.length > 0 ? (
+            <div className="remodex-squad-rail">
               {threadSwitcher.map((session) => {
                 const active = session.id === selectedSession?.id;
+                const isRunning = session.status === 'running' || session.status === 'reviewing';
+                const ctxPct = Math.round(session.context?.usedPercent ?? 0);
+                const ctxTone = ctxPct >= 85 ? 'critical' : ctxPct >= 75 ? 'high' : ctxPct >= 65 ? 'watch' : 'calm';
+                const agentName = session.isCurrentSession ? 'Mister' : session.name?.split(/[\s/]/)[0] ?? 'Agent';
+                const taskLine = session.isCurrentSession
+                  ? 'Main session'
+                  : session.currentTask
+                    ? compactLine(session.currentTask, '', 32)
+                    : session.status;
                 return (
                   <button
                     key={session.id}
                     type="button"
-                    className={`remodex-thread-pill ${active ? 'remodex-thread-pill-active' : ''}`}
+                    className={`remodex-squad-card ${active ? 'remodex-squad-card-active' : ''}`}
                     onClick={() => handleSessionFocus(session.id)}
                   >
-                    <span className="remodex-thread-pill-kicker">{threadLaneLabel(session)}</span>
-                    <strong>{session.isCurrentSession ? 'Q ↔ Mister' : compactLine(session.name, session.name, 20)}</strong>
-                    <span className="remodex-thread-pill-meta">{threadLaneState(session)}{session.lastEventAt && !session.isCurrentSession ? ` · ${session.lastEventAt}` : ''}</span>
+                    <div className="remodex-squad-card-head">
+                      <span className={`remodex-squad-dot ${isRunning ? 'remodex-squad-dot-live' : ''} remodex-squad-dot-${ctxTone}`} />
+                      <strong className="remodex-squad-name">{agentName}</strong>
+                      <span className="remodex-squad-time">{session.lastEventAt ?? 'idle'}</span>
+                    </div>
+                    <span className="remodex-squad-task">{taskLine}</span>
+                    <div className="remodex-squad-bar-track">
+                      <div
+                        className={`remodex-squad-bar-fill remodex-squad-bar-${ctxTone}`}
+                        style={{ width: `${ctxPct}%` }}
+                      />
+                    </div>
                   </button>
                 );
               })}
