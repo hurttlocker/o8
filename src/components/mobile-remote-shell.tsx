@@ -648,7 +648,15 @@ export function MobileRemoteShell({
   const stickyReviewFilesRef = useRef<ReviewChangedFile[]>([]);
   const [waitingForResponse, setWaitingForResponse] = useState(false);
   const lastAssistantCountRef = useRef(0);
-  const seenMessageIdsRef = useRef(new Set<string>());
+  const seenMessageIdsRef = useRef<Set<string> | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => {
+    // Seed with all current IDs so initial render doesn't animate everything
+    if (!seenMessageIdsRef.current) {
+      seenMessageIdsRef.current = new Set(transcriptEntries.map((e) => e.id));
+    }
+    setHydrated(true);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const reviewFiles = useMemo(() => {
     const next = isOwnedCodexSession
       ? selectedReviewPacket?.changedFiles ?? []
@@ -1700,8 +1708,8 @@ export function MobileRemoteShell({
               const isLatest = !transcriptEntries.slice(index + 1).some((e) => e.role === 'assistant');
               const hasText = Boolean(entry.text.trim());
               const hasMedia = Boolean(entry.media?.length);
-              const isNewMessage = !seenMessageIdsRef.current.has(entry.id);
-              if (isNewMessage) seenMessageIdsRef.current.add(entry.id);
+              const isNewMessage = hydrated && seenMessageIdsRef.current != null && !seenMessageIdsRef.current.has(entry.id);
+              if (isNewMessage) seenMessageIdsRef.current?.add(entry.id);
               const fadeClass = isNewMessage ? ' remodex-turn-new' : '';
               const prevEntry = index > 0 ? transcriptEntries[index - 1] : null;
               const speakerChanged = !prevEntry || prevEntry.role !== entry.role;
