@@ -2663,6 +2663,12 @@ button.workflow-file-item.workflow-file-item-active {
   justify-content: center;
 }
 
+.remodex-compose-chip-danger {
+  color: #b42318;
+  border-color: rgba(180, 35, 24, 0.18);
+  background: rgba(255, 237, 213, 0.96);
+}
+
 .remodex-owned-review-actions .remodex-controls-action {
   width: 100%;
   justify-items: center;
