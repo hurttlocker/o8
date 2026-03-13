@@ -80,7 +80,14 @@ function summarizeTranscript(text: string) {
   return normalized.length > 180 ? `${normalized.slice(0, 177)}…` : normalized;
 }
 
+let inboxCache: { snapshot: MobileInboxSnapshot; timestamp: number } | null = null;
+const INBOX_CACHE_TTL = 5000; // 5 seconds
+
 export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
+  if (inboxCache && Date.now() - inboxCache.timestamp < INBOX_CACHE_TTL) {
+    return inboxCache.snapshot;
+  }
+
   const fleet = await getRuntimeInventorySnapshot();
   const sessions = fleet.agents
     .filter((agent) => (
@@ -195,7 +202,7 @@ export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
   const reviewItems = items.filter((item) => item.kind === 'review').length;
   const activeRuns = sessions.filter((agent) => ['running', 'reviewing', 'blocked', 'waiting', 'failed'].includes(agent.status)).length;
 
-  return {
+  const result: MobileInboxSnapshot = {
     generatedAt: new Date().toISOString(),
     mode: fleet.meta.mode,
     sourceLabel: fleet.meta.sourceLabel,
@@ -214,4 +221,7 @@ export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
     },
     review,
   };
+
+  inboxCache = { snapshot: result, timestamp: Date.now() };
+  return result;
 }

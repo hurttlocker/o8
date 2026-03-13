@@ -2381,6 +2381,42 @@ button.workflow-file-item.workflow-file-item-active {
   }
 }
 
+/* ── Skeleton loading ── */
+.remodex-skeleton-stack {
+  display: grid;
+  gap: 1.2rem;
+  padding: 0.5rem 0;
+}
+
+.remodex-skeleton-bubble {
+  height: 52px;
+  border-radius: 22px;
+  background: linear-gradient(90deg, rgba(15, 23, 42, 0.04) 25%, rgba(15, 23, 42, 0.08) 50%, rgba(15, 23, 42, 0.04) 75%);
+  background-size: 200% 100%;
+  animation: remodex-shimmer 1.6s ease-in-out infinite;
+}
+
+.remodex-skeleton-assistant {
+  width: 75%;
+  justify-self: start;
+}
+
+.remodex-skeleton-user {
+  width: 55%;
+  justify-self: end;
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.04) 25%, rgba(37, 99, 235, 0.08) 50%, rgba(37, 99, 235, 0.04) 75%);
+  background-size: 200% 100%;
+  animation: remodex-shimmer 1.6s ease-in-out infinite;
+}
+
+.remodex-skeleton-wide { width: 85%; height: 80px; }
+.remodex-skeleton-short { width: 40%; height: 38px; }
+
+@keyframes remodex-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
 .remodex-owned-turn-card {
   padding: 1rem 1rem 0.95rem;
   border-radius: 28px;

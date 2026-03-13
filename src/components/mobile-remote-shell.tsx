@@ -1088,6 +1088,22 @@ export function MobileRemoteShell({
     }
   }
 
+  function playSendClick() {
+    try {
+      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.setValueAtTime(1800, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(600, ctx.currentTime + 0.04);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.06);
+    } catch { /* audio not available */ }
+  }
+
   async function handleSteerSubmit(sessionKey: string) {
     if (actionStateBySession[sessionKey] === 'steering') return;
 
@@ -1106,6 +1122,8 @@ export function MobileRemoteShell({
       setActionNoteBySession((current) => ({ ...current, [sessionKey]: 'Type a message or attach an image first.' }));
       return;
     }
+
+    playSendClick();
 
     // Show typing indicator until a new assistant message arrives
     lastAssistantCountRef.current = transcriptEntries.filter((e) => e.role === 'assistant').length;
@@ -1192,6 +1210,8 @@ export function MobileRemoteShell({
       }));
       return;
     }
+
+    playSendClick();
 
     const pendingTurn: PendingOwnedTurn = {
       id: `pending-${Date.now()}`,
@@ -1439,6 +1459,7 @@ export function MobileRemoteShell({
                   width={1200}
                   height={900}
                   unoptimized
+                  loading="lazy"
                   onLoadingComplete={() => {
                     if (stickToBottomRef.current) {
                       window.requestAnimationFrame(() => scrollToLatestMessage());
@@ -1770,7 +1791,12 @@ export function MobileRemoteShell({
                 </article>
               );
             }) : transcriptLoading ? (
-              <div className="remodex-loading-card">Syncing the focused session…</div>
+              <div className="remodex-skeleton-stack">
+                <div className="remodex-skeleton-bubble remodex-skeleton-assistant" />
+                <div className="remodex-skeleton-bubble remodex-skeleton-user" />
+                <div className="remodex-skeleton-bubble remodex-skeleton-assistant remodex-skeleton-wide" />
+                <div className="remodex-skeleton-bubble remodex-skeleton-user remodex-skeleton-short" />
+              </div>
             ) : (
               <div className="remodex-loading-card">
                 {isOwnedCodexSession
