@@ -1459,6 +1459,7 @@ export function MobileRemoteShell({
             className="remodex-circle-button"
             aria-label="Conversation controls"
             onClick={() => setControlsOpen(true)}
+            style={{ background: '#ef4444', color: '#ffffff', border: 'none', boxShadow: '0 4px 12px rgba(239,68,68,0.25)' }}
           >
             <Menu size={18} strokeWidth={2.1} />
           </button>
