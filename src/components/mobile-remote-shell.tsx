@@ -2348,8 +2348,8 @@ export function MobileRemoteShell({
       ) : null}
 
       {diffOpen ? (
-        <div className="remodex-diff-overlay" role="dialog" aria-modal="true" onClick={() => setDiffOpen(false)} onTouchMove={(event) => event.preventDefault()}>
-          <section className="remodex-diff-sheet" onClick={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()}>
+        <div className="remodex-diff-overlay" role="dialog" aria-modal="true" onClick={() => setDiffOpen(false)}>
+          <section className="remodex-diff-sheet" onClick={(event) => event.stopPropagation()}>
             <div className="remodex-diff-sheet-head">
               <div className="remodex-diff-sheet-handle" />
               <h2>Changes</h2>
