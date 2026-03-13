@@ -68,6 +68,12 @@ export interface MobileReviewFileDetail {
   currentPath?: string;
   note: string;
   preview: string;
+  /** Last commit message that touched this file (free — from git log) */
+  commitSummary?: string;
+  /** Commit author */
+  commitAuthor?: string;
+  /** Relative time of last commit */
+  commitAge?: string;
 }
 
 export interface MobileInboxSnapshot {
