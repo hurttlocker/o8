@@ -2836,18 +2836,18 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-compose-row {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr) minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: nowrap;
   gap: 0.38rem;
   align-items: center;
 }
 
 .remodex-compose-row-watch {
-  grid-template-columns: auto repeat(3, minmax(0, auto));
+  /* watch-only: no Send button, pills fill naturally */
 }
 
 .remodex-compose-row-owned {
-  grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  /* owned resume: 3 pills + Send, same flex logic */
 }
 
 .remodex-compose-chip {
@@ -2878,6 +2878,7 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-compose-pill {
+  flex: 1 1 0;
   justify-content: center;
   pointer-events: none;
   min-width: 0;
@@ -2891,13 +2892,15 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-compose-chip-icon {
+  flex: 0 0 32px;
   width: 32px;
   justify-content: center;
   padding: 0;
 }
 
 .remodex-send-button {
-  justify-self: end;
+  flex: 0 0 auto;
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2943,7 +2946,10 @@ button.workflow-file-item.workflow-file-item-active {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.36rem;
   align-items: center;
-  padding: 0 0.06rem;
+  padding: 0.22rem 0.14rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.52);
+  backdrop-filter: blur(16px) saturate(1.2);
   opacity: calc(0.96 - (var(--remodex-dock-fade-progress) * 0.28) - (var(--remodex-dock-motion-progress) * 0.4));
   transform: translateY(calc((var(--remodex-dock-fade-progress) * 2px) + (var(--remodex-dock-motion-progress) * 6px)));
   transition: opacity 220ms ease, transform 220ms ease;

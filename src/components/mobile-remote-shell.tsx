@@ -1046,6 +1046,9 @@ export function MobileRemoteShell({
       });
       const result = await readJson<MobileActionResponse>(response);
       setActionNoteBySession((current) => ({ ...current, [sessionKey]: result.note }));
+      window.setTimeout(() => {
+        setActionNoteBySession((current) => (current[sessionKey] === result.note ? { ...current, [sessionKey]: null } : current));
+      }, 3000);
       await refreshInbox();
       await loadHistory(sessionKey, true).catch(() => undefined);
       if (sessionKey.startsWith('codex-owned:')) {
