@@ -2069,20 +2069,13 @@ export function MobileRemoteShell({
           </div>
 
           <div className="remodex-runtime-bar">
-            {statusTone !== 'calm' ? (
-              <div className={`remodex-runtime-pressure remodex-runtime-pressure-${statusTone}`}>
-                <span className="remodex-pressure-dot" />
-                <span className="remodex-pressure-label">{statusHeadline}</span>
-                <span className="remodex-pressure-sep">·</span>
-                <GitBranch size={12} strokeWidth={1.6} />
-                <span className="remodex-pressure-branch">{compactLine(snapshot.review?.branch ?? selectedSession?.branch ?? 'main', 'main', 18)}</span>
-              </div>
-            ) : (
-              <div className="remodex-runtime-chip remodex-runtime-chip-quiet">
-                <GitBranch size={14} strokeWidth={1.8} />
-                {compactLine(snapshot.review?.branch ?? selectedSession?.branch ?? 'main', 'main', 26)}
-              </div>
-            )}
+            <div className={`remodex-runtime-pressure remodex-runtime-pressure-${statusTone}`}>
+              <span className="remodex-pressure-dot" />
+              <span className="remodex-pressure-label">{statusHeadline}</span>
+              <span className="remodex-pressure-sep">·</span>
+              <GitBranch size={12} strokeWidth={1.6} />
+              <span className="remodex-pressure-branch">{compactLine(snapshot.review?.branch ?? selectedSession?.branch ?? 'main', 'main', 18)}</span>
+            </div>
           </div>
         </div>
       </div>
