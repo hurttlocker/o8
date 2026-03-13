@@ -1729,12 +1729,13 @@ export function MobileRemoteShell({
                   {isLatest && selectedReviewFile ? (
                     <button type="button" className="remodex-inline-diff-thumb" onClick={openDiffViewer}>
                       <div className="remodex-inline-diff-mini">
-                        <FileDiff size={14} strokeWidth={2.1} />
+                        <FileDiff size={16} strokeWidth={1.8} />
                       </div>
                       <div className="remodex-inline-diff-copy">
-                        <strong>{compactLine(selectedReviewFile.path, selectedReviewFile.path, 28)}</strong>
-                        <span>{`+${selectedReviewFile.additions ?? 0} / -${selectedReviewFile.deletions ?? 0}`}</span>
+                        <strong>{selectedReviewFile.path.split('/').pop() ?? selectedReviewFile.path}</strong>
+                        <span>{`${selectedReviewFile.additions ?? 0} additions, ${selectedReviewFile.deletions ?? 0} removals`}</span>
                       </div>
+                      <ChevronRight size={16} strokeWidth={1.6} className="remodex-inline-diff-chevron" />
                     </button>
                   ) : null}
                 </article>
@@ -2062,10 +2063,20 @@ export function MobileRemoteShell({
           </div>
 
           <div className="remodex-runtime-bar">
-            <div className="remodex-runtime-chip remodex-runtime-chip-quiet">
-              <GitBranch size={14} strokeWidth={1.8} />
-              {compactLine(snapshot.review?.branch ?? selectedSession?.branch ?? 'main', 'main', 26)}
-            </div>
+            {statusTone !== 'calm' ? (
+              <div className={`remodex-runtime-pressure remodex-runtime-pressure-${statusTone}`}>
+                <span className="remodex-pressure-dot" />
+                <span className="remodex-pressure-label">{statusHeadline}</span>
+                <span className="remodex-pressure-sep">·</span>
+                <GitBranch size={12} strokeWidth={1.6} />
+                <span className="remodex-pressure-branch">{compactLine(snapshot.review?.branch ?? selectedSession?.branch ?? 'main', 'main', 18)}</span>
+              </div>
+            ) : (
+              <div className="remodex-runtime-chip remodex-runtime-chip-quiet">
+                <GitBranch size={14} strokeWidth={1.8} />
+                {compactLine(snapshot.review?.branch ?? selectedSession?.branch ?? 'main', 'main', 26)}
+              </div>
+            )}
           </div>
         </div>
       </div>
