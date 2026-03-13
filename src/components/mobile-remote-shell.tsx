@@ -808,6 +808,7 @@ export function MobileRemoteShell({
   const transcriptActionState = selectedSessionKey ? actionStateBySession[selectedSessionKey] ?? 'idle' : 'idle';
   const transcriptActionNote = selectedSessionKey ? actionNoteBySession[selectedSessionKey] ?? null : null;
   const latestTranscriptMarker = transcriptEntries[transcriptEntries.length - 1]?.id ?? 'empty';
+  const scrollMarker = pendingOwnedTurn ? `${latestTranscriptMarker}:${pendingOwnedTurn.id}` : latestTranscriptMarker;
   const selectedReviewFile = selectedReviewFilePath ? reviewFileByPath[selectedReviewFilePath] : undefined;
   const threadSwitcher = useMemo(() => {
     const candidates = [
@@ -933,7 +934,10 @@ export function MobileRemoteShell({
   } as CSSProperties;
 
   useLayoutEffect(() => {
-    if (!selectedSessionKey || !transcriptEntries.length || typeof window === 'undefined') {
+    if (!selectedSessionKey || typeof window === 'undefined') {
+      return;
+    }
+    if (!transcriptEntries.length && !transcriptGroups.length && !pendingOwnedTurn) {
       return;
     }
 
@@ -961,20 +965,20 @@ export function MobileRemoteShell({
         window.cancelAnimationFrame(frameB);
       }
     };
-  }, [latestTranscriptMarker, scrollToLatestMessage, selectedSessionKey, transcriptEntries.length]);
+  }, [pendingOwnedTurn, scrollMarker, scrollToLatestMessage, selectedSessionKey, transcriptEntries.length, transcriptGroups.length]);
 
   async function handleAttachmentSelection(files: FileList | null) {
     if (!selectedSessionKey || !files?.length) {
       return;
     }
     if (!isOpenClawSession) {
-      setSurfaceNote('Owned Codex is watch-first on phone right now. Image attachments stay on the OpenClaw mobile lane only.');
+      setSurfaceNote('Image attachments are only available on the Mister lane right now.');
       return;
     }
 
     const chosenFiles = Array.from(files).filter((file) => file.type.startsWith('image/'));
     if (!chosenFiles.length) {
-      setSurfaceNote('Only image attachments are wired truthfully on the OpenClaw mobile lane right now.');
+      setSurfaceNote('Only image attachments are supported right now.');
       return;
     }
 
@@ -997,7 +1001,7 @@ export function MobileRemoteShell({
         ...current,
         [selectedSessionKey]: [...(current[selectedSessionKey] ?? []), ...nextAttachments].slice(0, 4),
       }));
-      setSurfaceNote(`Attached ${nextAttachments.length} image${nextAttachments.length === 1 ? '' : 's'} for the next steer.`);
+      setSurfaceNote(`Attached ${nextAttachments.length} image${nextAttachments.length === 1 ? '' : 's'}.`);
       window.requestAnimationFrame(() => composeRef.current?.focus());
     } catch (error) {
       setSurfaceNote(error instanceof Error ? error.message : 'Unable to prepare these image attachments.');
@@ -1058,7 +1062,7 @@ export function MobileRemoteShell({
     if (targetSession?.runtime !== 'openclaw') {
       setActionNoteBySession((current) => ({
         ...current,
-        [sessionKey]: 'Owned Codex no longer uses mobile steer. Use the bounded between-runs resume lane instead.',
+        [sessionKey]: 'Use the Codex resume lane instead — steer is for the Mister lane only.',
       }));
       return;
     }
@@ -1066,7 +1070,7 @@ export function MobileRemoteShell({
     const message = draftBySession[sessionKey]?.trim();
     const attachments = draftAttachmentsBySession[sessionKey] ?? [];
     if (!message && attachments.length === 0) {
-      setActionNoteBySession((current) => ({ ...current, [sessionKey]: 'Add a steer message or attach an image first.' }));
+      setActionNoteBySession((current) => ({ ...current, [sessionKey]: 'Type a message or attach an image first.' }));
       return;
     }
 
@@ -1089,8 +1093,8 @@ export function MobileRemoteShell({
       setDraftAttachmentsBySession((current) => ({ ...current, [sessionKey]: [] }));
       setSurfaceNote(
         attachments.length > 0
-          ? `Queued the steer request with ${attachments.length} image attachment${attachments.length === 1 ? '' : 's'}.`
-          : 'Queued the steer request on the focused mobile session.',
+          ? `Sent with ${attachments.length} image${attachments.length === 1 ? '' : 's'}.`
+          : 'Sent.',
       );
     } catch (error) {
       setActionNoteBySession((current) => ({
@@ -1105,7 +1109,7 @@ export function MobileRemoteShell({
     if (!packet) {
       setActionNoteBySession((current) => ({
         ...current,
-        [sessionKey]: 'Review packet is still loading. Refresh the surface and try again.',
+        [sessionKey]: 'Review packet is still loading. Refresh and try again.',
       }));
       return;
     }
@@ -1116,7 +1120,7 @@ export function MobileRemoteShell({
     }));
     setActionNoteBySession((current) => ({
       ...current,
-      [sessionKey]: 'Loaded a draft reply grounded in the owned review packet.',
+      [sessionKey]: 'Loaded correction draft from review packet.',
     }));
     window.requestAnimationFrame(() => composeRef.current?.focus());
   }
@@ -1126,7 +1130,7 @@ export function MobileRemoteShell({
     if (!message) {
       setActionNoteBySession((current) => ({
         ...current,
-        [sessionKey]: 'Load the correction draft or write the next bounded instruction first.',
+        [sessionKey]: 'Write an instruction or load the correction draft first.',
       }));
       return;
     }
@@ -1144,7 +1148,7 @@ export function MobileRemoteShell({
     }));
     setActionNoteBySession((current) => ({
       ...current,
-      [sessionKey]: 'Queuing the next Codex turn from phone…',
+      [sessionKey]: 'Queuing turn…',
     }));
 
     try {
@@ -1154,7 +1158,7 @@ export function MobileRemoteShell({
         message,
       });
       setDraftBySession((current) => ({ ...current, [sessionKey]: '' }));
-      setSurfaceNote('Queued the next Codex turn from phone.');
+      setSurfaceNote('Turn queued.');
     } catch (error) {
       setPendingOwnedTurnBySession((current) => {
         if (!current[sessionKey]) {
@@ -1203,9 +1207,7 @@ export function MobileRemoteShell({
 
     setActionNoteBySession((current) => ({
       ...current,
-      [sessionKey]: action === 'resolve'
-        ? 'Marking this owned result resolved…'
-        : 'Switching this owned result back to keep-watching mode…',
+      [sessionKey]: action === 'resolve' ? 'Marking resolved…' : 'Switching to watching…',
     }));
 
     try {
@@ -1264,7 +1266,7 @@ export function MobileRemoteShell({
       if (nextReviewPath) {
         await loadReviewFile(nextReviewPath, true).catch(() => undefined);
       }
-      setSurfaceNote('Refreshed the live session and diff surface.');
+      setSurfaceNote('Refreshed.');
     } catch (error) {
       setSurfaceNote(error instanceof Error ? error.message : 'Unable to refresh the mobile surface right now.');
     } finally {
@@ -1303,7 +1305,7 @@ export function MobileRemoteShell({
       return;
     }
     if (!isOpenClawSession && !canInterruptOwnedCodex) {
-      setSurfaceNote('There is no active mobile-stop lane for this surface right now. Owned Codex can only interrupt when an active owned run is actually in flight.');
+      setSurfaceNote('No active run to interrupt right now.');
       return;
     }
     if (!window.confirm(isOwnedCodexSession ? 'Interrupt the active owned Codex run?' : 'Stop the active run for this session?')) {
@@ -1324,7 +1326,7 @@ export function MobileRemoteShell({
 
   function openDiffViewer() {
     if (!reviewFiles.length) {
-      setSurfaceNote('There is no active review diff on the mobile surface right now.');
+      setSurfaceNote('No active diff to review right now.');
       return;
     }
 
@@ -1475,12 +1477,12 @@ export function MobileRemoteShell({
                 ? 'Mirroring the live Q ↔ Mister conversation, not spawning a fresh session.'
                 : isOwnedCodexSession
                   ? ownedQueuedTurn
-                    ? 'Owned Codex accepted the next bounded turn from phone. This surface should promote into active runtime watch as soon as readable output starts landing.'
+                    ? 'Turn queued — this surface will promote into runtime watch once Codex starts.'
                     : canInterruptOwnedCodex
-                      ? 'Owned Codex is now reviewable on phone and the active run can be interrupted from here. Between-run resume stays available when the run settles.'
+                      ? 'Active Codex run — interrupt available. Resume reappears when the run settles.'
                       : canResumeOwnedCodex
-                        ? 'Owned Codex is now reviewable on phone and can accept the next bounded resume input between runs.'
-                        : 'Owned Codex is reviewable on phone with truthful lifecycle, review state, and exact diff context.'
+                        ? 'Codex is between runs — send the next turn from phone.'
+                        : 'Codex is in watch mode — review state and diff context are live.'
                   : 'Mirroring the selected OpenClaw session on phone so you can steer it without dropping into desktop.'}
             </p>
             {selectedSession?.status === 'running'
@@ -1672,7 +1674,7 @@ export function MobileRemoteShell({
                     </div>
                     <div className="remodex-owned-turn-note">
                       <span className="remodex-owned-turn-note-kicker">Codex status</span>
-                      <p>Waiting for the owned runtime to emit the first readable turn output. Interrupt should appear here as soon as the run is truly active.</p>
+                      <p>Starting up — interrupt will appear once the run is active.</p>
                     </div>
                   </article>
                 ) : null}
@@ -1725,8 +1727,8 @@ export function MobileRemoteShell({
             ) : (
               <div className="remodex-loading-card">
                 {isOwnedCodexSession
-                  ? 'No grouped owned-run history is visible yet. That usually means the latest launch/resume has not emitted readable JSON items yet, not that the owned session failed.'
-                  : 'No readable transcript turns are visible yet. That usually means the latest activity was tool-heavy or compacted, not that the session failed.'}
+                  ? 'No run history yet — waiting for the first readable output.'
+                  : 'No transcript turns visible yet — latest activity may have been tool-heavy or compacted.'}
               </div>
             )}
           </div>
@@ -1774,10 +1776,8 @@ export function MobileRemoteShell({
                 ) : null}
                 <div className="remodex-compose-surface">
                   <div className="remodex-watch-copy remodex-watch-copy-openclaw">
-                    <strong>Message Mister from phone</strong>
-                    <p>
-                      This lane should let you talk to me directly from mobile. Type a message and tap send — you should not need to fall back to Telegram for normal back-and-forth.
-                    </p>
+                    <strong>Message Mister</strong>
+                    <p>Send directly from mobile — no need to switch to Telegram.</p>
                   </div>
                   <textarea
                     ref={composeRef}
@@ -1791,7 +1791,7 @@ export function MobileRemoteShell({
                     }}
                     onFocus={() => setComposeFocused(true)}
                     onBlur={() => setComposeFocused(false)}
-                    placeholder={transcriptAttachments.length ? 'Add context for the attached image before sending to Mister' : 'Message Mister directly from mobile'}
+                    placeholder={transcriptAttachments.length ? 'Add context for the attached image…' : 'Message Mister…'}
                   />
                   <div className="remodex-compose-row">
                     <button
@@ -1839,18 +1839,15 @@ export function MobileRemoteShell({
                   </div>
                 </div>
                 {isComposerPrimed ? (
-                  <p className="remodex-compose-helper">You can message Mister directly here. Images are supported too — the current OpenClaw lane is truthfully wired for image attachments only right now.</p>
+                  <p className="remodex-compose-helper">Images are supported. Other file types coming soon.</p>
                 ) : null}
               </>
             ) : canResumeOwnedCodex ? (
               <div className="remodex-compose-surface remodex-compose-surface-watch">
                 <div className="remodex-watch-card">
                   <div className="remodex-watch-copy">
-                    <strong>Message Codex from phone</strong>
-                    <p>
-                      This owned Codex session is settled and can accept the next bounded turn from phone. It still queues a
-                      new turn between runs — not live keystroke injection into a random terminal.
-                    </p>
+                    <strong>Message Codex</strong>
+                    <p>Send the next turn between runs. Queues immediately — output lands once Codex starts.</p>
                   </div>
                   <textarea
                     ref={composeRef}
@@ -1864,7 +1861,7 @@ export function MobileRemoteShell({
                     }}
                     onFocus={() => setComposeFocused(true)}
                     onBlur={() => setComposeFocused(false)}
-                    placeholder="Draft the next bounded message to Codex"
+                    placeholder="Next instruction for Codex…"
                   />
                   <div className="remodex-owned-quick-actions">
                     <button
@@ -1923,18 +1920,20 @@ export function MobileRemoteShell({
                       )}
                     </button>
                   </div>
-                  <p className="remodex-compose-helper">Phone can now review exact diff context and send the next owned Codex turn. If this session becomes active again, interrupt reappears on phone while the run is in flight.</p>
+                  <p className="remodex-compose-helper">Review diffs and send the next turn. Interrupt reappears while the run is active.</p>
                 </div>
               </div>
             ) : (
               <div className="remodex-compose-surface remodex-compose-surface-watch">
                 <div className="remodex-watch-card">
                   <div className="remodex-watch-copy">
-                    <strong>{canInterruptOwnedCodex ? 'Active owned run on phone' : 'Review-first on phone'}</strong>
+                    <strong>{ownedQueuedTurn ? 'Turn queued' : canInterruptOwnedCodex ? 'Active run' : 'Review-first'}</strong>
                     <p>
-                      {canInterruptOwnedCodex
-                        ? 'Lifecycle, review state, grouped tail, and exact diff are live here, and you can now interrupt the active owned run from phone. The next resume opens back up once the run settles.'
-                        : 'Lifecycle, review state, grouped tail, and exact diff are live here. The next resume becomes available only after the active run settles and the owned session exposes a truthful between-runs lane.'}
+                      {ownedQueuedTurn
+                        ? 'Codex accepted the turn. This surface will promote into runtime watch once output starts landing.'
+                        : canInterruptOwnedCodex
+                          ? 'Interrupt is available while the run is active. Resume reappears once the run settles.'
+                          : 'Review and diff context are live. Resume becomes available once the current run settles.'}
                     </p>
                   </div>
                   <div className="remodex-owned-quick-actions">
