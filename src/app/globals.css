@@ -1749,7 +1749,26 @@ button.workflow-file-item.workflow-file-item-active {
   pointer-events: none;
 }
 
-.remodex-circle-button,
+.remodex-circle-button {
+  display: grid;
+  place-items: center;
+  align-self: center;
+  width: 46px;
+  min-height: 46px;
+  padding: 0;
+  border-radius: 999px;
+  border: none;
+  background: #ef4444;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.25);
+  transition: background 180ms ease, transform 180ms ease;
+}
+
+.remodex-circle-button:active {
+  background: #dc2626;
+  transform: scale(0.94);
+}
+
 .remodex-icon-link {
   display: grid;
   place-items: center;
