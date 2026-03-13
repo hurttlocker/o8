@@ -822,6 +822,21 @@ export function MobileRemoteShell({
     }
   }, [loadReviewFile, reviewFiles, selectedReviewFilePath]);
 
+  // Adaptive polling: fast when active, slow when idle, paused when tab hidden
+  const documentVisibleRef = useRef(true);
+  useEffect(() => {
+    const handler = () => {
+      documentVisibleRef.current = document.visibilityState === 'visible';
+      // Immediately refresh when tab becomes visible again
+      if (documentVisibleRef.current && selectedSessionKey) {
+        void loadHistory(selectedSessionKey, true).catch(() => undefined);
+        void refreshInbox().catch(() => undefined);
+      }
+    };
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  }, [loadHistory, refreshInbox, selectedSessionKey]);
+
   useEffect(() => {
     if (!selectedSessionKey) {
       return;
@@ -833,23 +848,28 @@ export function MobileRemoteShell({
         || Boolean(pendingOwnedTurnBySession[selectedSessionKey])
         || actionStateBySession[selectedSessionKey] === 'steering'
       );
+    const isActive = ownedActive || selectedSession?.status === 'running' || waitingForResponse;
     const intervalMs = ownedActive
       ? 1500
       : selectedSessionKey.startsWith('codex-owned:')
         ? 4000
-        : selectedSession?.status === 'running'
+        : isActive
           ? 2500
-          : 10000;
+          : 20000; // idle: 20s instead of 10s — less aggressive
 
     const timer = window.setInterval(() => {
+      // Skip polling when tab is hidden — no point updating invisible UI
+      if (!documentVisibleRef.current) return;
+
       void loadHistory(selectedSessionKey, true).catch(() => undefined);
-      if (selectedSession?.status === 'running' || ownedActive) {
+      // Only refresh inbox when something is actually happening
+      if (isActive) {
         void refreshInbox().catch(() => undefined);
       }
       if (selectedSessionKey.startsWith('codex-owned:')) {
         void loadOwnedReviewPacket(selectedSessionKey, true).catch(() => undefined);
       }
-      if (selectedReviewFilePath && (diffOpen || selectedSession?.status === 'running' || ownedActive || selectedSessionKey.startsWith('codex-owned:'))) {
+      if (selectedReviewFilePath && (diffOpen || isActive || selectedSessionKey.startsWith('codex-owned:'))) {
         void loadReviewFile(selectedReviewFilePath, true).catch(() => undefined);
       }
     }, intervalMs);
@@ -857,7 +877,7 @@ export function MobileRemoteShell({
     return () => {
       window.clearInterval(timer);
     };
-  }, [actionStateBySession, diffOpen, loadHistory, loadOwnedReviewPacket, loadReviewFile, pendingOwnedTurnBySession, refreshInbox, selectedReviewFilePath, selectedSession?.runtimeSurface?.lifecycle?.availability, selectedSession?.status, selectedSessionKey]);
+  }, [actionStateBySession, diffOpen, loadHistory, loadOwnedReviewPacket, loadReviewFile, pendingOwnedTurnBySession, refreshInbox, selectedReviewFilePath, selectedSession?.runtimeSurface?.lifecycle?.availability, selectedSession?.status, selectedSessionKey, waitingForResponse]);
 
   const transcriptEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
   const transcriptGroups = selectedSessionKey ? historyGroupsBySession[selectedSessionKey] ?? [] : [];
