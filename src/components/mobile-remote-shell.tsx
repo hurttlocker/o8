@@ -1792,6 +1792,12 @@ export function MobileRemoteShell({
                       const value = event.target.value;
                       setDraftBySession((current) => ({ ...current, [selectedSessionKey]: value }));
                     }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey && selectedSessionKey && transcriptDraft.trim()) {
+                        event.preventDefault();
+                        void handleSteerSubmit(selectedSessionKey);
+                      }
+                    }}
                     onFocus={() => setComposeFocused(true)}
                     onBlur={() => setComposeFocused(false)}
                     placeholder={transcriptAttachments.length ? 'Add context for the image…' : 'Message Mister…'}
@@ -1857,6 +1863,12 @@ export function MobileRemoteShell({
                       if (!selectedSessionKey) return;
                       const value = event.target.value;
                       setDraftBySession((current) => ({ ...current, [selectedSessionKey]: value }));
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey && selectedSessionKey && transcriptDraft.trim()) {
+                        event.preventDefault();
+                        void handleOwnedResumeSubmit(selectedSessionKey);
+                      }
                     }}
                     onFocus={() => setComposeFocused(true)}
                     onBlur={() => setComposeFocused(false)}
