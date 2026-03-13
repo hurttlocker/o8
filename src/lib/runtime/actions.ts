@@ -80,7 +80,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
           surfaceId: runtimeSurface.id,
           runtime: agent.runtime,
           status: 'queued',
-          note: 'Steer request queued on the live session.',
+          note: 'Sent.',
           runId: result.runId,
         };
       }
