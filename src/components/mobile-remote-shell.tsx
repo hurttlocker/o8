@@ -460,7 +460,16 @@ export function MobileRemoteShell({
     }
 
     const nextSnapshot = (await response.json()) as MobileInboxSnapshot;
-    setSnapshot(nextSnapshot);
+    // Only update state if snapshot meaningfully changed — prevents cascade re-renders
+    setSnapshot((prev) => {
+      // Compare session count + statuses + context usage as a fast equality check
+      const prevKey = prev.sessions.map((s) => `${s.sessionKey}:${s.status}:${s.context?.usedPercent ?? 0}`).join('|');
+      const nextKey = nextSnapshot.sessions.map((s) => `${s.sessionKey}:${s.status}:${s.context?.usedPercent ?? 0}`).join('|');
+      if (prevKey === nextKey && prev.summary.alerts === nextSnapshot.summary.alerts) {
+        return prev; // same reference — React skips re-render
+      }
+      return nextSnapshot;
+    });
     setRefreshError(null);
     return nextSnapshot;
   }, []);
@@ -681,8 +690,39 @@ export function MobileRemoteShell({
         cache: 'no-store',
       });
       const payload = await readJson<MobileHistoryResponse>(response);
-      setHistoryBySession((current) => ({ ...current, [sessionKey]: payload.transcript }));
-      setHistoryGroupsBySession((current) => ({ ...current, [sessionKey]: payload.groups ?? [] }));
+      // Diff-and-patch: only update state if transcript actually changed.
+      // Prevents React re-render flash when polling returns identical data.
+      setHistoryBySession((current) => {
+        const prev = current[sessionKey] ?? [];
+        const next = payload.transcript;
+        // Fast path: same length + same last ID = no change
+        if (
+          prev.length === next.length
+          && prev.length > 0
+          && prev[prev.length - 1]?.id === next[next.length - 1]?.id
+          // Also check the last message text in case of streaming/edit updates
+          && prev[prev.length - 1]?.text === next[next.length - 1]?.text
+        ) {
+          return current; // return same reference — React skips re-render
+        }
+        // Merge: keep optimistic entries that haven't been replaced yet,
+        // then append only genuinely new server entries
+        const existingIds = new Set(prev.filter((e) => !e.id.startsWith('optimistic-')).map((e) => e.id));
+        const newServerEntries = next.filter((e) => !existingIds.has(e.id));
+        if (newServerEntries.length === 0 && prev.length >= next.length) {
+          // Server returned subset of what we have (optimistic entries still pending)
+          return current;
+        }
+        return { ...current, [sessionKey]: next };
+      });
+      setHistoryGroupsBySession((current) => {
+        const prev = current[sessionKey] ?? [];
+        const next = payload.groups ?? [];
+        if (prev.length === next.length && prev.length > 0 && prev[prev.length - 1]?.id === next[next.length - 1]?.id) {
+          return current;
+        }
+        return { ...current, [sessionKey]: next };
+      });
       setHistoryError((current) => ({ ...current, [sessionKey]: null }));
       return payload.transcript;
     } catch (error) {
