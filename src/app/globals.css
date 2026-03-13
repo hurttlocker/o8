@@ -2290,6 +2290,32 @@ button.workflow-file-item.workflow-file-item-active {
   box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
 }
 
+/* ── Compaction card ── */
+.remodex-compaction-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0;
+}
+
+.remodex-compaction-icon {
+  font-size: 0.82rem;
+  color: rgba(17, 24, 39, 0.22);
+}
+
+.remodex-compaction-label {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: rgba(17, 24, 39, 0.3);
+  letter-spacing: 0.02em;
+}
+
+.remodex-compaction-time {
+  font-size: 0.72rem;
+  color: rgba(17, 24, 39, 0.2);
+}
+
 .remodex-message-card {
   display: grid;
   gap: 0.6rem;
@@ -3023,14 +3049,9 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-runtime-bar {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.36rem;
-  align-items: center;
-  padding: 0.22rem 0.14rem;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.52);
-  backdrop-filter: blur(16px) saturate(1.2);
+  display: flex;
+  justify-content: center;
+  padding: 0.15rem 0;
   opacity: calc(0.96 - (var(--remodex-dock-fade-progress) * 0.28) - (var(--remodex-dock-motion-progress) * 0.4));
   transform: translateY(calc((var(--remodex-dock-fade-progress) * 2px) + (var(--remodex-dock-motion-progress) * 6px)));
   transition: opacity 220ms ease, transform 220ms ease;
@@ -3073,17 +3094,18 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-runtime-chip-quiet {
-  justify-content: flex-start;
-  color: rgba(17, 24, 39, 0.66);
-  background: rgba(
-    255,
-    255,
-    255,
-    calc(0.56 - (var(--remodex-dock-fade-progress) * 0.12) - (var(--remodex-dock-motion-progress) * 0.12) + (var(--remodex-compose-active) * 0.1))
-  );
-  border-color: rgba(255, 255, 255, 0.32);
+  justify-content: center;
+  border: none;
+  background: transparent;
+  backdrop-filter: none;
   box-shadow: none;
+  color: rgba(17, 24, 39, 0.36);
+  font-size: 0.72rem;
+  font-weight: 500;
+  gap: 0.3rem;
 }
+
+
 
 .remodex-controls-overlay,
 .remodex-diff-overlay,
