@@ -870,7 +870,8 @@ export function MobileRemoteShell({
       if (selectedSessionKey.startsWith('codex-owned:')) {
         void loadOwnedReviewPacket(selectedSessionKey, true).catch(() => undefined);
       }
-      if (selectedReviewFilePath && (diffOpen || isActive || selectedSessionKey.startsWith('codex-owned:'))) {
+      // Only poll review files when diff view is actually open AND session is active
+      if (selectedReviewFilePath && diffOpen && (isActive || selectedSessionKey.startsWith('codex-owned:'))) {
         void loadReviewFile(selectedReviewFilePath, true).catch(() => undefined);
       }
     }, intervalMs);
