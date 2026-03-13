@@ -140,6 +140,24 @@ function ownedReviewDispositionTone(disposition?: RuntimeReviewPacket['reviewDis
   return disposition === 'resolved' ? 'calm' : 'watch';
 }
 
+function threadLaneLabel(session: MobileInboxSnapshot['sessions'][number]) {
+  if (session.isCurrentSession) return 'Mister';
+  if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') return 'Codex';
+  return session.runtime === 'openclaw' ? 'OpenClaw' : 'Session';
+}
+
+function threadLaneState(session: MobileInboxSnapshot['sessions'][number]) {
+  if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') {
+    const availability = session.runtimeSurface?.lifecycle?.availability;
+    if (availability === 'running') return 'live';
+    if (session.runtimeSurface?.capabilities.sendInput) return 'chat';
+    return 'watch';
+  }
+
+  if (session.isCurrentSession) return 'live';
+  return session.status;
+}
+
 function buildOwnedCorrectionDraft(packet: RuntimeReviewPacket) {
   const lines = [
     'Continue from the current owned session state. Use the packet evidence below and make the smallest correct next move.',
@@ -735,16 +753,25 @@ export function MobileRemoteShell({
       return;
     }
 
-    const intervalMs = selectedSession?.status === 'running' ? 2500 : 10000;
+    const ownedActive = selectedSessionKey.startsWith('codex-owned:')
+      && selectedSession?.runtimeSurface?.lifecycle?.availability === 'running';
+    const intervalMs = ownedActive
+      ? 1500
+      : selectedSessionKey.startsWith('codex-owned:')
+        ? 4000
+        : selectedSession?.status === 'running'
+          ? 2500
+          : 10000;
+
     const timer = window.setInterval(() => {
       void loadHistory(selectedSessionKey, true).catch(() => undefined);
-      if (selectedSession?.status === 'running') {
+      if (selectedSession?.status === 'running' || ownedActive) {
         void refreshInbox().catch(() => undefined);
       }
       if (selectedSessionKey.startsWith('codex-owned:')) {
         void loadOwnedReviewPacket(selectedSessionKey, true).catch(() => undefined);
       }
-      if (selectedReviewFilePath && (diffOpen || selectedSession?.status === 'running' || selectedSessionKey.startsWith('codex-owned:'))) {
+      if (selectedReviewFilePath && (diffOpen || selectedSession?.status === 'running' || ownedActive || selectedSessionKey.startsWith('codex-owned:'))) {
         void loadReviewFile(selectedReviewFilePath, true).catch(() => undefined);
       }
     }, intervalMs);
@@ -752,7 +779,7 @@ export function MobileRemoteShell({
     return () => {
       window.clearInterval(timer);
     };
-  }, [diffOpen, loadHistory, loadOwnedReviewPacket, loadReviewFile, refreshInbox, selectedReviewFilePath, selectedSession?.status, selectedSessionKey]);
+  }, [diffOpen, loadHistory, loadOwnedReviewPacket, loadReviewFile, refreshInbox, selectedReviewFilePath, selectedSession?.runtimeSurface?.lifecycle?.availability, selectedSession?.status, selectedSessionKey]);
 
   const transcriptEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
   const transcriptGroups = selectedSessionKey ? historyGroupsBySession[selectedSessionKey] ?? [] : [];
@@ -764,6 +791,27 @@ export function MobileRemoteShell({
   const transcriptActionNote = selectedSessionKey ? actionNoteBySession[selectedSessionKey] ?? null : null;
   const latestTranscriptMarker = transcriptEntries[transcriptEntries.length - 1]?.id ?? 'empty';
   const selectedReviewFile = selectedReviewFilePath ? reviewFileByPath[selectedReviewFilePath] : undefined;
+  const threadSwitcher = useMemo(() => {
+    const candidates = [
+      selectedSession,
+      ...snapshot.sessions.filter((session) => session.isCurrentSession),
+      ...snapshot.sessions.filter((session) => session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned'),
+    ].filter(Boolean) as MobileInboxSnapshot['sessions'];
+
+    const seen = new Set<string>();
+    const deduped = [] as MobileInboxSnapshot['sessions'];
+    for (const session of candidates) {
+      if (seen.has(session.id)) {
+        continue;
+      }
+      seen.add(session.id);
+      deduped.push(session);
+      if (deduped.length >= 4) {
+        break;
+      }
+    }
+    return deduped;
+  }, [selectedSession, snapshot.sessions]);
   const selectedReviewFileIndex = selectedReviewFilePath
     ? reviewFiles.findIndex((file) => file.path === selectedReviewFilePath)
     : -1;
@@ -1151,6 +1199,7 @@ export function MobileRemoteShell({
 
     setSelectedId(sessionId);
     setControlsOpen(false);
+    setDiffOpen(false);
     setSurfaceNote(`Focused ${compactLine(nextSession.name, 'the selected session', 40)}.`);
 
     void (async () => {
@@ -1357,6 +1406,26 @@ export function MobileRemoteShell({
                 ? <span className="remodex-live-pill">{canInterruptOwnedCodex ? 'Interrupt' : canResumeOwnedCodex ? 'Resume' : 'Watch'}</span>
                 : null}
           </div>
+
+          {threadSwitcher.length > 1 ? (
+            <div className="remodex-thread-rail">
+              {threadSwitcher.map((session) => {
+                const active = session.id === selectedSession?.id;
+                return (
+                  <button
+                    key={session.id}
+                    type="button"
+                    className={`remodex-thread-pill ${active ? 'remodex-thread-pill-active' : ''}`}
+                    onClick={() => handleSessionFocus(session.id)}
+                  >
+                    <span className="remodex-thread-pill-kicker">{threadLaneLabel(session)}</span>
+                    <strong>{compactLine(session.isCurrentSession ? 'Q ↔ Mister' : session.name, session.name, 20)}</strong>
+                    <span className="remodex-thread-pill-meta">{threadLaneState(session)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
 
           <div className={`remodex-context-card remodex-context-card-${statusTone}`}>
             <div className="remodex-context-card-copy">
