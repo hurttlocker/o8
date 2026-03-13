@@ -336,7 +336,7 @@ function summarizeLocalDiff(changedFiles: ReviewChangedFile[], diffStatRaw: stri
   return lines.join('\n');
 }
 
-function trimPreview(text: string, maxLines = 120, maxChars = 6000) {
+function trimPreview(text: string, maxLines = 600, maxChars = 40000) {
   const lines = text.split('\n').slice(0, maxLines).join('\n').trim();
   if (!lines) return '';
   return lines.length > maxChars ? `${lines.slice(0, maxChars - 1)}…` : lines;
@@ -442,8 +442,14 @@ async function loadPullRequestFileDetail(pullRequestNumber: number, reviewPath: 
     additions: matched.additions,
     deletions: matched.deletions,
   };
-  const preview = trimPreview(matched.patch ?? '') || 'GitHub did not return an inline patch for this file.';
   const { originalPath, currentPath } = parseReviewPath(file.path);
+
+  // Prefer local git diff (full, un-truncated) over GitHub API patch
+  const localDiff = trimPreview(
+    await tryRunFile('git', ['diff', '--no-ext-diff', '--unified=4', 'origin/main...HEAD', '--', ...[originalPath, currentPath].filter((v): v is string => Boolean(v))]),
+  );
+  const preview = localDiff || trimPreview(matched.patch ?? '') || 'GitHub did not return an inline patch for this file.';
+  const commitInfo = await loadFileCommitSummary(currentPath ?? originalPath ?? file.path);
 
   return {
     path: file.path,
@@ -454,6 +460,7 @@ async function loadPullRequestFileDetail(pullRequestNumber: number, reviewPath: 
     currentPath,
     note: buildReviewFileNote(file, originalPath, currentPath, 'pull_request'),
     preview,
+    ...commitInfo,
   } satisfies MobileReviewFileDetail;
 }
 
