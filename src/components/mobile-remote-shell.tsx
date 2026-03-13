@@ -1819,6 +1819,7 @@ export function MobileRemoteShell({
                       type="button"
                       className="remodex-send-button"
                       disabled={!selectedSessionKey || transcriptActionState !== 'idle' || (!transcriptDraft.trim() && transcriptAttachments.length === 0)}
+                      onMouseDown={(event) => event.preventDefault()}
                       onClick={() => {
                         if (!selectedSessionKey) return;
                         void handleSteerSubmit(selectedSessionKey);
@@ -1899,6 +1900,7 @@ export function MobileRemoteShell({
                       type="button"
                       className="remodex-send-button"
                       disabled={!selectedSessionKey || transcriptActionState !== 'idle' || !transcriptDraft.trim()}
+                      onMouseDown={(event) => event.preventDefault()}
                       onClick={() => {
                         if (!selectedSessionKey) return;
                         void handleOwnedResumeSubmit(selectedSessionKey);
