@@ -370,10 +370,12 @@ export function MobileRemoteShell({
   initialSnapshot,
   initialTranscript,
   initialReviewFile,
+  initialOwnedReviewPacket,
 }: {
   initialSnapshot: MobileInboxSnapshot;
   initialTranscript?: { sessionKey: string; transcript: MobileTranscriptEntry[] };
   initialReviewFile?: MobileReviewFileResponse['file'] | null;
+  initialOwnedReviewPacket?: RuntimeReviewPacket | null;
 }) {
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot>(initialSnapshot);
   const [selectedId, setSelectedId] = useState(() => pickCurrentSession(initialSnapshot)?.id ?? '');
@@ -385,7 +387,9 @@ export function MobileRemoteShell({
   const [historyGroupsBySession, setHistoryGroupsBySession] = useState<Record<string, MobileRuntimeTailGroup[]>>({});
   const [historyLoading, setHistoryLoading] = useState<Record<string, boolean>>({});
   const [historyError, setHistoryError] = useState<Record<string, string | null>>({});
-  const [reviewPacketBySession, setReviewPacketBySession] = useState<Record<string, RuntimeReviewPacket>>({});
+  const [reviewPacketBySession, setReviewPacketBySession] = useState<Record<string, RuntimeReviewPacket>>(() => (
+    initialOwnedReviewPacket ? { [initialOwnedReviewPacket.surfaceId]: initialOwnedReviewPacket } : {}
+  ));
   const [reviewPacketLoadingBySession, setReviewPacketLoadingBySession] = useState<Record<string, boolean>>({});
   const [reviewPacketErrorBySession, setReviewPacketErrorBySession] = useState<Record<string, string | null>>({});
   const [draftBySession, setDraftBySession] = useState<Record<string, string>>({});
@@ -393,7 +397,7 @@ export function MobileRemoteShell({
   const [actionNoteBySession, setActionNoteBySession] = useState<Record<string, string | null>>({});
   const [draftAttachmentsBySession, setDraftAttachmentsBySession] = useState<Record<string, DraftAttachment[]>>({});
   const [selectedReviewFilePath, setSelectedReviewFilePath] = useState<string | null>(() => (
-    initialReviewFile?.path ?? initialSnapshot.review?.changedFiles[0]?.path ?? null
+    initialReviewFile?.path ?? initialOwnedReviewPacket?.changedFiles[0]?.path ?? initialSnapshot.review?.changedFiles[0]?.path ?? null
   ));
   const [reviewFileByPath, setReviewFileByPath] = useState<Record<string, MobileReviewFileResponse['file']>>(() => (
     initialReviewFile ? { [initialReviewFile.path]: initialReviewFile } : {}
@@ -1116,12 +1120,15 @@ export function MobileRemoteShell({
         ?? nextSnapshot.primarySessionKey
         ?? nextSnapshot.sessions.find((session) => session.isCurrentSession)?.sessionKey
         ?? nextSnapshot.sessions[0]?.sessionKey;
-      const nextReviewPath = selectedReviewFilePath ?? nextSnapshot.review?.changedFiles[0]?.path ?? null;
+      let nextReviewPath = selectedReviewFilePath;
 
       if (nextSessionKey) {
         await loadHistory(nextSessionKey, true).catch(() => undefined);
         if (nextSessionKey.startsWith('codex-owned:')) {
-          await loadOwnedReviewPacket(nextSessionKey, true).catch(() => undefined);
+          const packet = await loadOwnedReviewPacket(nextSessionKey, true).catch(() => null);
+          nextReviewPath = nextReviewPath ?? packet?.changedFiles[0]?.path ?? null;
+        } else {
+          nextReviewPath = nextReviewPath ?? nextSnapshot.review?.changedFiles[0]?.path ?? null;
         }
       }
       if (nextReviewPath) {
@@ -1144,7 +1151,20 @@ export function MobileRemoteShell({
     setSelectedId(sessionId);
     setControlsOpen(false);
     setSurfaceNote(`Focused ${compactLine(nextSession.name, 'the selected session', 40)}.`);
-    void loadHistory(nextSession.sessionKey).catch(() => undefined);
+
+    void (async () => {
+      await loadHistory(nextSession.sessionKey).catch(() => undefined);
+      if (!nextSession.sessionKey.startsWith('codex-owned:')) {
+        return;
+      }
+      const packet = await loadOwnedReviewPacket(nextSession.sessionKey).catch(() => null);
+      const nextPath = packet?.changedFiles[0]?.path;
+      if (!nextPath) {
+        return;
+      }
+      setSelectedReviewFilePath(nextPath);
+      await loadReviewFile(nextPath).catch(() => undefined);
+    })();
   }
 
   async function handleStopActiveRun() {
@@ -1176,6 +1196,15 @@ export function MobileRemoteShell({
       setSurfaceNote('There is no active review diff on the mobile surface right now.');
       return;
     }
+
+    const nextPath = selectedReviewFilePath ?? reviewFiles[0]?.path ?? null;
+    if (nextPath) {
+      setSelectedReviewFilePath(nextPath);
+      if (!reviewFileByPath[nextPath]) {
+        void loadReviewFile(nextPath).catch(() => undefined);
+      }
+    }
+
     setControlsOpen(false);
     setDiffOpen(true);
   }
