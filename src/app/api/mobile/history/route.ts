@@ -41,6 +41,8 @@ export async function GET(request: NextRequest) {
           mode: group.mode,
           outcome: group.outcome,
           prompt: group.prompt,
+          startedAt: group.startedAt,
+          finishedAt: group.finishedAt,
           startedAtLabel: group.startedAtLabel,
           finishedAtLabel: group.finishedAtLabel,
           summary: group.summary,
