@@ -111,20 +111,20 @@ The inbox endpoint is the bottleneck. It runs `gh` CLI commands (GitHub API call
 
 ## Summary: What Ships vs. What Waits
 
-### Ship now (same PR):
-- P0 #1: User bubble tint
-- P0 #3: Collapse system intro text
-- P1 #5: Collapse consecutive speaker labels
-- P1 #7: Hide copy buttons (show on tap/hover)
-- P1 #8: Simplify runtime bar
-
-### Ship next (follow-up PR):
-- P0 #2: Typing indicator
-- P1 #4: Smart timestamps
-- P1 #6: Remove duplicate context card
-- P2 #10: Differentiate Codex thread pills
+### Ship now (same PR) — `1e30be5`:
+- [x] P0 #1: User bubble tint — super light blue frost `rgba(37, 99, 235, 0.07)`
+- [x] P0 #2: Typing indicator — built from scratch, 3 animated dots, no deps
+- [x] P0 #3: System intro text — removed entirely
+- [x] P1 #4: Smart timestamps — only show on 15+ min gaps
+- [x] P1 #5: Collapse consecutive speaker labels + show "Mister"/"Codex" instead of "Assistant"
+- [x] P1 #6: Context card → system message, only shows at watch/high/critical (>= 65%)
+- [x] P1 #7: Copy buttons removed from message headers
+- [x] P1 #8: Runtime bar → just branch name
+- [x] P2 #9: Codex thread pills now show last event time for differentiation
+- [x] P2 #10: Header reveal speed → 2 seconds (was 3)
 
 ### Backlog:
 - Performance optimization (inbox endpoint caching, skeleton loading)
 - Swipe gestures between sessions
 - Image attachment corner radius audit
+- Long-press to copy message (iOS-native pattern)
