@@ -463,8 +463,9 @@ export function MobileRemoteShell({
     // Only update state if snapshot meaningfully changed — prevents cascade re-renders
     setSnapshot((prev) => {
       // Compare session count + statuses + context usage as a fast equality check
-      const prevKey = prev.sessions.map((s) => `${s.sessionKey}:${s.status}:${s.context?.usedPercent ?? 0}`).join('|');
-      const nextKey = nextSnapshot.sessions.map((s) => `${s.sessionKey}:${s.status}:${s.context?.usedPercent ?? 0}`).join('|');
+      // Round usedPercent to nearest integer — fractional changes shouldn't trigger re-renders
+      const prevKey = prev.sessions.map((s) => `${s.sessionKey}:${s.status}:${Math.round(s.context?.usedPercent ?? 0)}`).join('|');
+      const nextKey = nextSnapshot.sessions.map((s) => `${s.sessionKey}:${s.status}:${Math.round(s.context?.usedPercent ?? 0)}`).join('|');
       if (prevKey === nextKey && prev.summary.alerts === nextSnapshot.summary.alerts) {
         return prev; // same reference — React skips re-render
       }
@@ -1550,7 +1551,7 @@ export function MobileRemoteShell({
   }
 
   return (
-    <div className="mobile-wrap remodex-mobile-page" style={shellStyle}>
+    <div className="mobile-wrap remodex-mobile-page" style={shellStyle} suppressHydrationWarning>
       <div className="remodex-phone-shell">
         <header
           className="remodex-topbar"
