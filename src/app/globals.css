@@ -3483,16 +3483,16 @@ button.workflow-file-item.workflow-file-item-active {
 .remodex-media-overlay {
   position: fixed;
   inset: 0;
-  z-index: 20;
-  padding: 2rem 0.5rem 0.5rem;
-  background: rgba(245, 245, 247, 0.95);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  animation: remodex-fade-in 200ms ease-out both;
+  z-index: 100;
+  padding: 0;
+  background: #f5f5f7;
+  animation: remodex-fade-in 150ms ease-out both;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
 }
 
 .remodex-controls-sheet,
-.remodex-diff-sheet,
 .remodex-media-lightbox {
   display: grid;
   gap: 0.85rem;
@@ -3502,6 +3502,17 @@ button.workflow-file-item.workflow-file-item-active {
   border-radius: 34px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 30px 80px rgba(15, 23, 42, 0.14);
+}
+
+.remodex-diff-sheet {
+  display: grid;
+  gap: 0.65rem;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: env(safe-area-inset-top, 0.5rem) 0 0;
+  border-radius: 0;
+  background: #ffffff;
 }
 
 .remodex-controls-sheet {
@@ -3519,8 +3530,9 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-diff-sheet {
-  height: calc(100vh - 2.5rem);
-  animation: remodex-sheet-slide-up 280ms ease-out both;
+  height: 100vh;
+  height: 100dvh;
+  animation: remodex-sheet-slide-up 200ms ease-out both;
 }
 
 @keyframes remodex-sheet-slide-up {
@@ -3540,7 +3552,7 @@ button.workflow-file-item.workflow-file-item-active {
   grid-template-columns: 1fr auto 1fr;
   gap: 0.85rem;
   align-items: center;
-  padding: 0.3rem 0.1rem 0;
+  padding: 0.5rem 0.75rem 0;
 }
 
 .remodex-diff-sheet-head h2 {
@@ -3920,7 +3932,7 @@ button.workflow-file-item.workflow-file-item-active {
   display: grid;
   align-content: start;
   gap: 0.75rem;
-  padding-right: 0.1rem;
+  padding: 0 0.75rem 2rem;
 }
 
 .remodex-diff-meta-row {
