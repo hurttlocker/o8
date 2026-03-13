@@ -557,7 +557,7 @@ export function MobileRemoteShell({
       }
     };
 
-    const scheduleHeaderReveal = (delayMs = 1250) => {
+    const scheduleHeaderReveal = (delayMs = 700) => {
       clearHeaderReveal();
       headerRevealTimerRef.current = window.setTimeout(() => {
         setHeaderVisible(true);
@@ -595,7 +595,7 @@ export function MobileRemoteShell({
       setIsScrolling(true);
       if (nextScrollY > 12) {
         setHeaderVisible(false);
-        scheduleHeaderReveal(3000);
+        scheduleHeaderReveal(700);
       } else {
         clearHeaderReveal();
         setHeaderVisible(true);
@@ -1029,31 +1029,29 @@ export function MobileRemoteShell({
       return;
     }
 
-    const shouldForcePin = !initialBottomPinBySessionRef.current[selectedSessionKey];
-    const shouldStick = shouldForcePin || stickToBottomRef.current;
-    if (!shouldStick) {
-      return;
+    const isFirstLoad = !initialBottomPinBySessionRef.current[selectedSessionKey];
+    if (isFirstLoad) {
+      // First load: always pin to bottom immediately (no smooth — instant)
+      initialBottomPinBySessionRef.current[selectedSessionKey] = true;
+      const runPin = () => transcriptBottomRef.current?.scrollIntoView({ block: 'end', behavior: 'auto' });
+      const frameA = window.requestAnimationFrame(() => {
+        runPin();
+        window.requestAnimationFrame(runPin);
+      });
+      return () => window.cancelAnimationFrame(frameA);
     }
 
-    let frameA = 0;
-    let frameB = 0;
-    const runPin = () => scrollToLatestMessage(true);
+    // Subsequent updates: only scroll if user is already near the bottom
+    if (!stickToBottomRef.current) {
+      return; // user scrolled up — don't interrupt them
+    }
 
-    frameA = window.requestAnimationFrame(() => {
-      runPin();
-      frameB = window.requestAnimationFrame(runPin);
+    // Smooth scroll to bottom for new content
+    const frame = window.requestAnimationFrame(() => {
+      transcriptBottomRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
     });
-
-    initialBottomPinBySessionRef.current[selectedSessionKey] = true;
-    return () => {
-      if (frameA) {
-        window.cancelAnimationFrame(frameA);
-      }
-      if (frameB) {
-        window.cancelAnimationFrame(frameB);
-      }
-    };
-  }, [pendingOwnedTurn, scrollMarker, scrollToLatestMessage, selectedSessionKey, transcriptEntries.length, transcriptGroups.length]);
+    return () => window.cancelAnimationFrame(frame);
+  }, [pendingOwnedTurn, scrollMarker, selectedSessionKey]);
 
   async function handleAttachmentSelection(files: FileList | null) {
     if (!selectedSessionKey || !files?.length) {
