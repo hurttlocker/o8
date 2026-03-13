@@ -1865,11 +1865,11 @@ export function MobileRemoteShell({
                           padding: '0 0.82rem',
                           borderRadius: 999,
                           border: 'none',
-                          background: isDisabled ? '#d1d5db' : '#2563eb',
+                          background: isDisabled ? '#d1d5db' : '#ef4444',
                           color: isDisabled ? '#9ca3af' : '#ffffff',
                           fontSize: '0.84rem',
                           fontWeight: 700,
-                          boxShadow: isDisabled ? 'none' : '0 4px 14px rgba(37, 99, 235, 0.4)',
+                          boxShadow: isDisabled ? 'none' : '0 4px 14px rgba(239, 68, 68, 0.4)',
                           cursor: isDisabled ? 'default' : 'pointer',
                         } satisfies CSSProperties;
                       })()}
@@ -1972,11 +1972,11 @@ export function MobileRemoteShell({
                           padding: '0 0.82rem',
                           borderRadius: 999,
                           border: 'none',
-                          background: isDisabled ? '#d1d5db' : '#2563eb',
+                          background: isDisabled ? '#d1d5db' : '#ef4444',
                           color: isDisabled ? '#9ca3af' : '#ffffff',
                           fontSize: '0.84rem',
                           fontWeight: 700,
-                          boxShadow: isDisabled ? 'none' : '0 4px 14px rgba(37, 99, 235, 0.4)',
+                          boxShadow: isDisabled ? 'none' : '0 4px 14px rgba(239, 68, 68, 0.4)',
                           cursor: isDisabled ? 'default' : 'pointer',
                         } satisfies CSSProperties;
                       })()}
