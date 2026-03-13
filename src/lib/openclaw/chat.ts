@@ -437,18 +437,62 @@ const TOOL_HEADLINES: Record<string, (args: Record<string, unknown>) => string> 
   Read: (a) => `Reading ${shortenFilePath(String(a.file_path ?? a.path ?? ''))}`,
   Edit: (a) => `Editing ${shortenFilePath(String(a.file_path ?? a.path ?? ''))}`,
   Write: (a) => `Writing ${shortenFilePath(String(a.file_path ?? a.path ?? ''))}`,
-  exec: (a) => `Running ${truncate(String(a.command ?? ''), 40)}`,
+  exec: (a) => {
+    const cmd = String(a.command ?? '');
+    if (cmd.includes('npm run')) return `Running ${cmd.match(/npm run \S+/)?.[0] ?? 'npm'}`;
+    if (cmd.includes('git ')) return `Running ${cmd.match(/git \S+/)?.[0] ?? 'git'}`;
+    if (cmd.includes('curl')) return 'Fetching API data';
+    if (cmd.includes('grep') || cmd.includes('rg ')) return 'Searching codebase';
+    if (cmd.includes('kill') || cmd.includes('lsof')) return 'Managing processes';
+    return `Running ${truncate(cmd.split('&&')[0].split('|')[0].trim(), 32)}`;
+  },
+  process: (a) => {
+    const action = String(a.action ?? '');
+    if (action === 'poll') return 'Watching process output';
+    if (action === 'log') return 'Reading process log';
+    if (action === 'kill') return 'Stopping process';
+    if (action === 'list') return 'Checking running processes';
+    return 'Managing process';
+  },
   web_search: (a) => `Searching "${truncate(String(a.query ?? ''), 36)}"`,
   web_fetch: (a) => `Fetching ${truncate(String(a.url ?? ''), 40)}`,
-  browser: () => 'Using browser',
+  browser: (a) => {
+    const action = String(a.action ?? '');
+    if (action === 'snapshot' || action === 'screenshot') return 'Capturing page';
+    if (action === 'navigate') return 'Navigating browser';
+    return 'Using browser';
+  },
   image: () => 'Analyzing image',
-  message: () => 'Sending message',
+  message: (a) => {
+    const action = String(a.action ?? '');
+    if (action === 'send') return 'Sending message';
+    if (action === 'react') return 'Adding reaction';
+    return 'Managing messages';
+  },
   memory_search: (a) => `Searching memory for "${truncate(String(a.query ?? ''), 28)}"`,
+  memory_get: () => 'Reading memory',
   cortex_search: (a) => `Searching Cortex for "${truncate(String(a.query ?? ''), 28)}"`,
+  cortex_store: () => 'Saving to memory',
   sessions_spawn: () => 'Spawning sub-agent',
+  sessions_list: () => 'Checking agent sessions',
+  session_status: () => 'Checking session status',
+  subagents: () => 'Managing sub-agents',
   tts: () => 'Generating speech',
-  cron: () => 'Managing schedules',
-  gateway: () => 'Updating gateway',
+  cron: (a) => {
+    const action = String(a.action ?? '');
+    if (action === 'add') return 'Creating scheduled job';
+    if (action === 'list') return 'Checking schedules';
+    return 'Managing schedules';
+  },
+  gateway: (a) => {
+    const action = String(a.action ?? '');
+    if (action === 'config.patch' || action === 'config.apply') return 'Updating config';
+    if (action === 'restart') return 'Restarting gateway';
+    return 'Managing gateway';
+  },
+  diffs: () => 'Generating diff view',
+  pdf: () => 'Analyzing PDF',
+  nodes: () => 'Checking paired devices',
 };
 
 function shortenFilePath(filePath: string): string {
