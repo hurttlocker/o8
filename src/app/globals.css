@@ -1766,6 +1766,12 @@ button.workflow-file-item.workflow-file-item-active {
   transition: background 220ms ease, box-shadow 220ms ease, transform 180ms ease, backdrop-filter 220ms ease;
 }
 
+.remodex-circle-button {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
+}
+
 .remodex-title-shell {
   display: flex;
   align-items: center;

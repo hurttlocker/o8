@@ -646,6 +646,8 @@ export function MobileRemoteShell({
   const selectedReviewPacketLoading = selectedSessionKey && isOwnedCodexSession ? reviewPacketLoadingBySession[selectedSessionKey] ?? false : false;
   const selectedReviewPacketError = selectedSessionKey && isOwnedCodexSession ? reviewPacketErrorBySession[selectedSessionKey] ?? null : null;
   const stickyReviewFilesRef = useRef<ReviewChangedFile[]>([]);
+  const [waitingForResponse, setWaitingForResponse] = useState(false);
+  const lastTranscriptCountRef = useRef(0);
   const reviewFiles = useMemo(() => {
     const next = isOwnedCodexSession
       ? selectedReviewPacket?.changedFiles ?? []
@@ -816,6 +818,13 @@ export function MobileRemoteShell({
   const transcriptAttachments = selectedSessionKey ? draftAttachmentsBySession[selectedSessionKey] ?? [] : [];
   const pendingOwnedTurn = selectedSessionKey ? pendingOwnedTurnBySession[selectedSessionKey] ?? null : null;
   const transcriptActionState = selectedSessionKey ? actionStateBySession[selectedSessionKey] ?? 'idle' : 'idle';
+
+  // Clear typing indicator when a new message appears in the transcript
+  useEffect(() => {
+    if (waitingForResponse && transcriptEntries.length > lastTranscriptCountRef.current) {
+      setWaitingForResponse(false);
+    }
+  }, [waitingForResponse, transcriptEntries.length]);
   const transcriptActionNote = selectedSessionKey ? actionNoteBySession[selectedSessionKey] ?? null : null;
   const latestTranscriptMarker = transcriptEntries[transcriptEntries.length - 1]?.id ?? 'empty';
   const scrollMarker = pendingOwnedTurn ? `${latestTranscriptMarker}:${pendingOwnedTurn.id}` : latestTranscriptMarker;
@@ -1087,6 +1096,10 @@ export function MobileRemoteShell({
       setActionNoteBySession((current) => ({ ...current, [sessionKey]: 'Type a message or attach an image first.' }));
       return;
     }
+
+    // Show typing indicator until a new assistant message arrives
+    lastTranscriptCountRef.current = transcriptEntries.length;
+    setWaitingForResponse(true);
 
     // Optimistic: clear UI immediately before the API round-trip
     setDraftBySession((current) => ({ ...current, [sessionKey]: '' }));
@@ -1666,7 +1679,7 @@ export function MobileRemoteShell({
               </>
             ) : transcriptEntries.length ? transcriptEntries.map((entry, index) => {
               const isUser = entry.role === 'user';
-              const isLatest = index === transcriptEntries.length - 1;
+              const isLatest = !transcriptEntries.slice(index + 1).some((e) => e.role === 'assistant');
               const hasText = Boolean(entry.text.trim());
               const hasMedia = Boolean(entry.media?.length);
               const prevEntry = index > 0 ? transcriptEntries[index - 1] : null;
@@ -1736,7 +1749,7 @@ export function MobileRemoteShell({
               </div>
             )}
           </div>
-          {actionStateBySession[selectedSessionKey ?? ''] === 'steering' ? (
+          {(waitingForResponse || actionStateBySession[selectedSessionKey ?? ''] === 'steering') ? (
             <div className="remodex-typing-indicator" aria-label={`${isOwnedCodexSession ? 'Codex' : 'Mister'} is thinking`}>
               <span className="remodex-typing-dot" />
               <span className="remodex-typing-dot" />
@@ -2107,25 +2120,41 @@ export function MobileRemoteShell({
               <div className="remodex-controls-session-list">
                 <span className="remodex-controls-label">Sessions</span>
                 <div className="remodex-controls-session-grid">
-                  {sessionSwitcher.map((session) => {
-                    const active = session.id === selectedSession?.id;
-                    const isLive = session.status === 'running' || session.status === 'reviewing';
-                    return (
-                      <button
-                        key={session.id}
-                        type="button"
-                        className={`remodex-controls-session-row ${active ? 'remodex-controls-session-row-active' : ''}`}
-                        onClick={() => handleSessionFocus(session.id)}
-                      >
-                        <span className={`remodex-session-dot ${isLive ? 'remodex-session-dot-live' : ''}`} />
-                        <span className="remodex-session-row-copy">
-                          <strong>{compactLine(session.isCurrentSession ? 'Q ↔ Mister' : session.name, session.name, 32)}</strong>
-                          <span>{compactLine(session.lastEventAt, 'now', 20)}</span>
-                        </span>
-                        {active ? <span className="remodex-session-check">✓</span> : null}
-                      </button>
-                    );
-                  })}
+                  {(() => {
+                    // Number duplicate session names so they're distinguishable
+                    const nameCount = new Map<string, number>();
+                    const nameIndex = new Map<string, number>();
+                    for (const s of sessionSwitcher) {
+                      nameCount.set(s.name, (nameCount.get(s.name) ?? 0) + 1);
+                    }
+                    return sessionSwitcher.map((session) => {
+                      const count = nameCount.get(session.name) ?? 1;
+                      const idx = (nameIndex.get(session.name) ?? 0) + 1;
+                      nameIndex.set(session.name, idx);
+                      const displayName = session.isCurrentSession
+                        ? 'Q ↔ Mister'
+                        : count > 1
+                          ? `${compactLine(session.name, session.name, 24)} #${idx}`
+                          : compactLine(session.name, session.name, 32);
+                      const active = session.id === selectedSession?.id;
+                      const isLive = session.status === 'running' || session.status === 'reviewing';
+                      return (
+                        <button
+                          key={session.id}
+                          type="button"
+                          className={`remodex-controls-session-row ${active ? 'remodex-controls-session-row-active' : ''}`}
+                          onClick={() => handleSessionFocus(session.id)}
+                        >
+                          <span className={`remodex-session-dot ${isLive ? 'remodex-session-dot-live' : ''}`} />
+                          <span className="remodex-session-row-copy">
+                            <strong>{displayName}</strong>
+                            <span>{session.status} · {compactLine(session.lastEventAt, 'now', 20)}</span>
+                          </span>
+                          {active ? <span className="remodex-session-check">✓</span> : null}
+                        </button>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
             ) : null}
