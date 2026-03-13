@@ -7,6 +7,10 @@ Roadmap is ordered by **wedge strength**, not by visual polish.
 The product wins if it becomes the best way to operate an agent organization.
 Not if it becomes the prettiest speculative IDE mockup.
 
+A second rule now matters just as much:
+- keep the **chat page** as the fluent front door
+- let deeper runtime and org-control layers unfold progressively behind it
+
 ## Phase 0 — Lock the thesis and architecture
 
 ### Outcome

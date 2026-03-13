@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
+import { getMobileInboxSnapshot } from '@/lib/mobile/openclaw';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
-  const snapshot = await getRuntimeInventorySnapshot();
+  const snapshot = await getMobileInboxSnapshot();
 
   return NextResponse.json(snapshot, {
     headers: {

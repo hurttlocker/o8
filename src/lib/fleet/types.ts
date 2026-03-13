@@ -28,6 +28,44 @@ export interface TokenUsageSnapshot {
   fresh?: boolean;
 }
 
+export interface RuntimeSurfaceCapabilities {
+  attach: boolean;
+  readTail: boolean;
+  sendInput: boolean;
+  interrupt: boolean;
+  resize: boolean;
+  diffContext: boolean;
+  reviewContext: boolean;
+}
+
+export interface RuntimeSurfaceLifecycle {
+  availability?: 'awaiting-thread' | 'running' | 'ready-for-resume';
+  lastOutcome?: 'finished' | 'interrupted' | 'failed';
+  lastRunMode?: 'launch' | 'resume';
+  lastRunStartedAt?: string;
+  lastRunFinishedAt?: string;
+  summary?: string;
+}
+
+export interface RuntimeSurfaceSummary {
+  id: string;
+  runtime: string;
+  kind: 'chat-session' | 'terminal-session' | 'runtime-session';
+  ownership: 'provider' | 'discovered' | 'owned';
+  title: string;
+  cwd?: string;
+  branch?: string;
+  sourceLabel: string;
+  tailSourceLabel?: string;
+  capabilities: RuntimeSurfaceCapabilities;
+  lifecycle?: RuntimeSurfaceLifecycle;
+  reviewContext?: {
+    repoSlug?: string;
+    branch?: string;
+    head?: string;
+  };
+}
+
 export interface AgentSummary {
   id: string;
   name: string;
@@ -49,6 +87,7 @@ export interface AgentSummary {
   surfaceLabel?: string;
   isCurrentSession?: boolean;
   tokenUsage?: TokenUsageSnapshot;
+  runtimeSurface?: RuntimeSurfaceSummary;
 }
 
 export interface SquadSummary {
@@ -69,6 +108,46 @@ export interface ReviewArtifact {
   state: 'new' | 'reviewing' | 'approved';
   agentId?: string;
   detail?: string;
+}
+
+export interface RuntimeReviewCommandEvidence {
+  id: string;
+  command: string;
+  status: 'running' | 'completed' | 'interrupted' | 'failed';
+  exitCode?: number | null;
+  outputPreview?: string;
+}
+
+export interface RuntimeReviewPacket {
+  surfaceId: string;
+  runtime: string;
+  title: string;
+  summary: string;
+  repoPath: string;
+  repoSlug?: string;
+  branch?: string;
+  head?: string;
+  dirty: boolean;
+  diffStat: string;
+  changedFiles: ReviewChangedFile[];
+  recentCommits: string[];
+  reviewDisposition: 'watching' | 'resolved';
+  reviewDispositionUpdatedAt?: string;
+  reviewDispositionUpdatedAtLabel?: string;
+  lastRun?: {
+    id: string;
+    mode: 'launch' | 'resume';
+    outcome: 'running' | 'finished' | 'interrupted' | 'failed';
+    prompt: string;
+    startedAt?: string;
+    finishedAt?: string;
+    startedAtLabel?: string;
+    finishedAtLabel?: string;
+    assistantSummary?: string;
+    commands: RuntimeReviewCommandEvidence[];
+  };
+  nextActions: string[];
+  notes: string[];
 }
 
 export interface ReviewChangedFile {
@@ -98,6 +177,8 @@ export interface ReviewPullRequestSummary {
   state: string;
   isDraft?: boolean;
   reviewDecision?: string | null;
+  body?: string;
+  linkedIssueNumbers?: number[];
 }
 
 export interface ReviewIssueSummary {
@@ -122,6 +203,7 @@ export interface WorkflowReviewSnapshot {
   worktrees: ReviewWorktreeSummary[];
   pullRequests: ReviewPullRequestSummary[];
   activeIssue?: ReviewIssueSummary;
+  activeIssues: ReviewIssueSummary[];
   warnings?: string[];
 }
 

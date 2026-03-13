@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process';
+import { readFile, stat } from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
   ReviewChangedFile,
@@ -7,14 +9,33 @@ import type {
   ReviewWorktreeSummary,
   WorkflowReviewSnapshot,
 } from '@/lib/fleet/types';
+import type { MobileReviewFileDetail } from '@/lib/mobile/types';
 
 const execFileAsync = promisify(execFile);
 const REVIEW_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
 const REVIEW_REPO_SLUG = process.env.CORTEX_IDE_REVIEW_REPO || 'hurttlocker/cortex-ide';
-const ACTIVE_ISSUE_NUMBER = Number.parseInt(process.env.CORTEX_IDE_ACTIVE_REVIEW_ISSUE || '13', 10);
+const FALLBACK_ACTIVE_ISSUE_NUMBER = Number.parseInt(process.env.CORTEX_IDE_ACTIVE_REVIEW_ISSUE || '18', 10);
+const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
 
 function shortenPath(path: string) {
   return path.replace('/Users/marquisehurtt/', '~/');
+}
+
+// Cache changed files list for 30 seconds to avoid re-running git commands per file click
+let _cachedChangedFiles: ReviewChangedFile[] | null = null;
+let _cachedChangedFilesAt = 0;
+const CHANGED_FILES_CACHE_TTL_MS = 30_000;
+
+async function getCachedChangedFiles(): Promise<ReviewChangedFile[]> {
+  const now = Date.now();
+  if (_cachedChangedFiles && now - _cachedChangedFilesAt < CHANGED_FILES_CACHE_TTL_MS) {
+    return _cachedChangedFiles;
+  }
+  const files = await loadReviewChangedFiles();
+  const sorted = await sortChangedFilesByTouchedAt(files);
+  _cachedChangedFiles = sorted;
+  _cachedChangedFilesAt = now;
+  return sorted;
 }
 
 function parseJson<T>(raw: string, fallback: T) {
@@ -28,6 +49,119 @@ function parseJson<T>(raw: string, fallback: T) {
 function normalizeReviewDecision(value?: string | null) {
   if (!value) return null;
   return value.toLowerCase();
+}
+
+function parseLinkedIssueNumbers(body?: string) {
+  if (!body) return [] as number[];
+
+  const seen = new Set<number>();
+  for (const match of body.matchAll(/#(\d+)/g)) {
+    const nextNumber = Number.parseInt(match[1] ?? '', 10);
+    if (Number.isFinite(nextNumber)) {
+      seen.add(nextNumber);
+    }
+  }
+
+  return Array.from(seen).sort((left, right) => right - left);
+}
+
+async function loadIssueSummaries(issueNumbers: number[]) {
+  const unique = Array.from(new Set(issueNumbers)).filter((value) => Number.isFinite(value));
+
+  if (!unique.length) {
+    return [] as ReviewIssueSummary[];
+  }
+
+  const issues = await Promise.all(
+    unique.map(async (issueNumber) => {
+      const raw = await tryRunFile('gh', [
+        'issue',
+        'view',
+        String(issueNumber),
+        '--repo',
+        REVIEW_REPO_SLUG,
+        '--json',
+        'number,title,url,state',
+      ]);
+
+      return parseJson<ReviewIssueSummary | undefined>(raw, undefined);
+    }),
+  );
+
+  return issues
+    .filter((issue): issue is ReviewIssueSummary => Boolean(issue))
+    .sort((left, right) => {
+      if (left.state !== right.state) {
+        if (left.state === 'OPEN') return -1;
+        if (right.state === 'OPEN') return 1;
+      }
+      return right.number - left.number;
+    });
+}
+
+interface PullRequestFileSummary {
+  filename: string;
+  status: string;
+  additions: number;
+  deletions: number;
+  previous_filename?: string;
+  patch?: string;
+}
+
+function normalizePullRequestFileStatus(status?: string): ReviewChangedFile['status'] {
+  switch ((status ?? '').toLowerCase()) {
+    case 'added':
+      return 'added';
+    case 'removed':
+      return 'deleted';
+    case 'renamed':
+      return 'renamed';
+    case 'copied':
+      return 'added';
+    case 'modified':
+    default:
+      return 'modified';
+  }
+}
+
+function formatPullRequestFilePath(file: PullRequestFileSummary) {
+  return file.status === 'renamed' && file.previous_filename
+    ? `${file.previous_filename} → ${file.filename}`
+    : file.filename;
+}
+
+function parsePullRequestChangedFiles(raw: string) {
+  const files = parseJson<PullRequestFileSummary[]>(raw, []);
+
+  return files
+    .filter((file) => file.filename && !isReviewNoisePath(file.filename) && !isReviewNoisePath(formatPullRequestFilePath(file)))
+    .map((file) => ({
+      path: formatPullRequestFilePath(file),
+      status: normalizePullRequestFileStatus(file.status),
+      additions: file.additions,
+      deletions: file.deletions,
+    } satisfies ReviewChangedFile))
+    .sort((a, b) => ((b.additions ?? 0) + (b.deletions ?? 0)) - ((a.additions ?? 0) + (a.deletions ?? 0)));
+}
+
+function summarizePullRequestDiff(files: ReviewChangedFile[]) {
+  if (!files.length) {
+    return 'No PR file summary is visible yet.';
+  }
+
+  return files
+    .slice(0, 8)
+    .map((file) => `${file.path}  +${file.additions ?? 0}  -${file.deletions ?? 0}`)
+    .join('\n');
+}
+
+async function loadPullRequestFiles(pullRequestNumber: number) {
+  const raw = await tryRunFile('gh', [
+    'api',
+    `repos/${REVIEW_REPO_SLUG}/pulls/${pullRequestNumber}/files?per_page=100`,
+  ]);
+
+  return parseJson<PullRequestFileSummary[]>(raw, []);
 }
 
 async function runFile(command: string, args: string[]) {
@@ -72,6 +206,10 @@ function parseBranchStatus(raw: string) {
   return { branch, upstream, ahead, behind };
 }
 
+function isReviewNoisePath(path: string) {
+  return REVIEW_NOISE_PATHS.has(path.trim());
+}
+
 function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedRaw: string) {
   const changed = new Map<string, ReviewChangedFile>();
 
@@ -81,6 +219,9 @@ function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedR
 
     const status = statusToken[0];
     const path = status === 'R' && secondPath ? `${firstPath} → ${secondPath}` : secondPath ?? firstPath;
+    if (isReviewNoisePath(firstPath) || (secondPath && isReviewNoisePath(secondPath)) || isReviewNoisePath(path)) {
+      continue;
+    }
 
     changed.set(path, {
       path,
@@ -99,7 +240,7 @@ function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedR
 
   for (const line of numStatRaw.split('\n').filter(Boolean)) {
     const [additionsRaw, deletionsRaw, path] = line.split('\t');
-    if (!path) continue;
+    if (!path || isReviewNoisePath(path)) continue;
 
     const entry = changed.get(path) ?? {
       path,
@@ -114,6 +255,8 @@ function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedR
   }
 
   for (const path of untrackedRaw.split('\n').map((value) => value.trim()).filter(Boolean)) {
+    if (isReviewNoisePath(path)) continue;
+
     changed.set(path, {
       path,
       status: 'untracked',
@@ -123,6 +266,178 @@ function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedR
   }
 
   return Array.from(changed.values());
+}
+
+function parseReviewPath(reviewPath: string) {
+  const [originalPath, currentPath] = reviewPath.includes(' → ')
+    ? reviewPath.split(' → ')
+    : [undefined, reviewPath];
+
+  return {
+    originalPath,
+    currentPath,
+  };
+}
+
+function resolveRepoFile(relativePath: string) {
+  const repoRoot = path.resolve(REVIEW_REPO_ROOT);
+  const nextPath = path.resolve(repoRoot, relativePath);
+
+  if (nextPath !== repoRoot && !nextPath.startsWith(`${repoRoot}${path.sep}`)) {
+    throw new Error('Requested review file path escapes the repo root.');
+  }
+
+  return nextPath;
+}
+
+async function fileTouchedAt(reviewPath: string) {
+  try {
+    const { currentPath } = parseReviewPath(reviewPath);
+    if (!currentPath) {
+      return 0;
+    }
+    const target = resolveRepoFile(currentPath);
+    const details = await stat(target);
+    return details.mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+async function sortChangedFilesByTouchedAt(changedFiles: ReviewChangedFile[]) {
+  const withTouchedAt = await Promise.all(
+    changedFiles.map(async (file) => ({
+      file,
+      touchedAt: await fileTouchedAt(file.path),
+    })),
+  );
+
+  return withTouchedAt
+    .sort((left, right) => {
+      if (left.touchedAt !== right.touchedAt) {
+        return right.touchedAt - left.touchedAt;
+      }
+      return left.file.path.localeCompare(right.file.path);
+    })
+    .map((entry) => entry.file);
+}
+
+function summarizeLocalDiff(changedFiles: ReviewChangedFile[], diffStatRaw: string) {
+  const untrackedFiles = changedFiles.filter((file) => file.status === 'untracked');
+  const trackedSummary = diffStatRaw.trim();
+
+  if (!untrackedFiles.length) {
+    return trackedSummary || 'Working tree changed, but git diff --stat returned no visible summary.';
+  }
+
+  const lines = trackedSummary ? trackedSummary.split('\n') : [];
+  lines.push(`untracked: ${untrackedFiles.length} file${untrackedFiles.length === 1 ? '' : 's'}`);
+  lines.push(`total review files: ${changedFiles.length}`);
+  return lines.join('\n');
+}
+
+function trimPreview(text: string, maxLines = 120, maxChars = 6000) {
+  const lines = text.split('\n').slice(0, maxLines).join('\n').trim();
+  if (!lines) return '';
+  return lines.length > maxChars ? `${lines.slice(0, maxChars - 1)}…` : lines;
+}
+
+function buildReviewFileNote(
+  file: ReviewChangedFile,
+  originalPath?: string,
+  currentPath?: string,
+  source: 'local' | 'pull_request' = 'local',
+) {
+  const previewLabel = source === 'pull_request' ? 'the committed PR patch' : 'the current local diff';
+
+  switch (file.status) {
+    case 'added':
+      return source === 'pull_request'
+        ? 'Added file • preview shows the committed PR patch already attached to this branch.'
+        : 'Added file • preview shows the current local patch against HEAD.';
+    case 'deleted':
+      return source === 'pull_request'
+        ? 'Deleted file • preview shows the committed PR removal patch from GitHub.'
+        : 'Deleted file • preview shows the removal diff still waiting in the working tree.';
+    case 'renamed':
+      return originalPath && currentPath
+        ? `Renamed ${originalPath} → ${currentPath} • preview keeps the rename visible on phone via ${previewLabel}.`
+        : `Renamed file • preview keeps the rename visible on phone via ${previewLabel}.`;
+    case 'untracked':
+      return 'Untracked file • git has no HEAD baseline yet, so the phone shows the current file contents instead of a patch.';
+    case 'modified':
+    default:
+      return source === 'pull_request'
+        ? 'Modified file • preview shows the committed PR patch so you can triage after push without dropping to desktop first.'
+        : 'Modified file • preview shows the current local diff so you can triage without dropping to desktop first.';
+  }
+}
+
+async function loadReviewChangedFiles() {
+  const [nameStatusRaw, numStatRaw, untrackedRaw] = await Promise.all([
+    tryRunFile('git', ['diff', '--name-status', '--relative', '-M', 'HEAD']),
+    tryRunFile('git', ['diff', '--numstat', '--relative', '-M', 'HEAD']),
+    tryRunFile('git', ['ls-files', '--others', '--exclude-standard']),
+  ]);
+
+  return parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw);
+}
+
+async function loadReviewFilePreview(file: ReviewChangedFile, originalPath?: string, currentPath?: string) {
+  if (file.status === 'untracked' && currentPath) {
+    const raw = await readFile(resolveRepoFile(currentPath), 'utf8').catch(() => '');
+    return trimPreview(raw)
+      ? trimPreview(raw)
+      : 'No readable file preview is available for this untracked path yet.';
+  }
+
+  const diffTargets = [originalPath, currentPath].filter((value): value is string => Boolean(value));
+  const diffPreview = trimPreview(
+    await tryRunFile('git', ['diff', '--no-ext-diff', '--unified=16', '--relative', '-M', 'HEAD', '--', ...diffTargets]),
+  );
+
+  if (diffPreview) {
+    return diffPreview;
+  }
+
+  if (currentPath && file.status !== 'deleted') {
+    const raw = await readFile(resolveRepoFile(currentPath), 'utf8').catch(() => '');
+    const filePreview = trimPreview(raw);
+    if (filePreview) {
+      return filePreview;
+    }
+  }
+
+  return 'No inline diff preview is available for this file yet.';
+}
+
+async function loadPullRequestFileDetail(pullRequestNumber: number, reviewPath: string) {
+  const files = await loadPullRequestFiles(pullRequestNumber);
+  const matched = files.find((file) => formatPullRequestFilePath(file) === reviewPath);
+
+  if (!matched) {
+    return null;
+  }
+
+  const file: ReviewChangedFile = {
+    path: formatPullRequestFilePath(matched),
+    status: normalizePullRequestFileStatus(matched.status),
+    additions: matched.additions,
+    deletions: matched.deletions,
+  };
+  const preview = trimPreview(matched.patch ?? '') || 'GitHub did not return an inline patch for this file.';
+  const { originalPath, currentPath } = parseReviewPath(file.path);
+
+  return {
+    path: file.path,
+    status: file.status,
+    additions: file.additions,
+    deletions: file.deletions,
+    originalPath,
+    currentPath,
+    note: buildReviewFileNote(file, originalPath, currentPath, 'pull_request'),
+    preview,
+  } satisfies MobileReviewFileDetail;
 }
 
 function parseWorktrees(raw: string) {
@@ -168,6 +483,39 @@ function parseWorktrees(raw: string) {
   return worktrees;
 }
 
+export async function getReviewFileDetail(reviewPath: string): Promise<MobileReviewFileDetail> {
+  const changedFiles = await getCachedChangedFiles();
+  const file = changedFiles.find((entry) => entry.path === reviewPath);
+
+  if (file) {
+    const { originalPath, currentPath } = parseReviewPath(file.path);
+    const preview = await loadReviewFilePreview(file, originalPath, currentPath);
+
+    return {
+      path: file.path,
+      status: file.status,
+      additions: file.additions,
+      deletions: file.deletions,
+      originalPath,
+      currentPath,
+      note: buildReviewFileNote(file, originalPath, currentPath),
+      preview,
+    };
+  }
+
+  const snapshot = await getWorkspaceReviewSnapshot();
+  const leadPullRequest = snapshot.pullRequests[0];
+
+  if (leadPullRequest) {
+    const committedFile = await loadPullRequestFileDetail(leadPullRequest.number, reviewPath);
+    if (committedFile) {
+      return committedFile;
+    }
+  }
+
+  throw new Error('Requested file is no longer part of the live review surface.');
+}
+
 export async function getWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapshot> {
   const warnings: string[] = [];
 
@@ -183,7 +531,6 @@ export async function getWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapsh
     worktreesRaw,
     branchPrsRaw,
     fallbackPrsRaw,
-    activeIssueRaw,
   ] = await Promise.all([
     tryRunFile('git', ['diff', '--name-status', '--relative', '-M', 'HEAD']),
     tryRunFile('git', ['diff', '--numstat', '--relative', '-M', 'HEAD']),
@@ -201,7 +548,7 @@ export async function getWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapsh
       '--head',
       branch,
       '--json',
-      'number,title,url,headRefName,baseRefName,isDraft,reviewDecision,state',
+      'number,title,url,headRefName,baseRefName,isDraft,reviewDecision,state,body',
     ]),
     tryRunFile('gh', [
       'pr',
@@ -213,33 +560,51 @@ export async function getWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapsh
       '--limit',
       '3',
       '--json',
-      'number,title,url,headRefName,baseRefName,isDraft,reviewDecision,state',
-    ]),
-    tryRunFile('gh', [
-      'api',
-      `repos/${REVIEW_REPO_SLUG}/issues/${ACTIVE_ISSUE_NUMBER}`,
-      '--jq',
-      '{number,title,url:.html_url,state}',
+      'number,title,url,headRefName,baseRefName,isDraft,reviewDecision,state,body',
     ]),
   ]);
 
-  const changedFiles = parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw);
-  const diffStat = diffStatRaw || (changedFiles.length ? 'Working tree changed, but git diff --stat returned no visible summary.' : 'Working tree clean.');
+  const parsedFiles = parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw);
+  const localChangedFiles = await sortChangedFilesByTouchedAt(parsedFiles);
+  // Refresh the cache with the latest sorted list
+  _cachedChangedFiles = localChangedFiles;
+  _cachedChangedFilesAt = Date.now();
   const recentCommits = recentCommitsRaw ? recentCommitsRaw.split('\n').filter(Boolean) : [];
   const worktrees = parseWorktrees(worktreesRaw);
 
   const branchPullRequests = parseJson<ReviewPullRequestSummary[]>(branchPrsRaw, []);
   const fallbackPullRequests = parseJson<ReviewPullRequestSummary[]>(fallbackPrsRaw, []);
-  const activeIssue = parseJson<ReviewIssueSummary | undefined>(activeIssueRaw, undefined);
-
-  if (!activeIssue) {
-    warnings.push(`Unable to load GitHub issue #${ACTIVE_ISSUE_NUMBER}.`);
-  }
 
   const pullRequests = (branchPullRequests.length ? branchPullRequests : fallbackPullRequests).map((pullRequest) => ({
     ...pullRequest,
     reviewDecision: normalizeReviewDecision(pullRequest.reviewDecision),
+    linkedIssueNumbers: parseLinkedIssueNumbers(pullRequest.body),
   }));
+
+  const pullRequestFiles = pullRequests[0] ? await loadPullRequestFiles(pullRequests[0].number) : [];
+  const pullRequestChangedFiles = pullRequestFiles.length
+    ? parsePullRequestChangedFiles(JSON.stringify(pullRequestFiles))
+    : [];
+  const changedFiles = localChangedFiles.length ? localChangedFiles : pullRequestChangedFiles;
+  const diffStat = localChangedFiles.length
+    ? summarizeLocalDiff(localChangedFiles, diffStatRaw)
+    : pullRequestChangedFiles.length
+      ? summarizePullRequestDiff(pullRequestChangedFiles)
+      : 'Working tree clean.';
+
+  const linkedIssueNumbers = pullRequests.flatMap((pullRequest) => pullRequest.linkedIssueNumbers ?? []);
+  const activeIssues = await loadIssueSummaries(
+    linkedIssueNumbers.length ? linkedIssueNumbers : [FALLBACK_ACTIVE_ISSUE_NUMBER],
+  );
+  const activeIssue = activeIssues[0];
+
+  if (!activeIssues.length) {
+    warnings.push(
+      linkedIssueNumbers.length
+        ? 'Unable to load the linked GitHub issues for the current review lane.'
+        : `Unable to load fallback GitHub issue #${FALLBACK_ACTIVE_ISSUE_NUMBER}.`,
+    );
+  }
 
   if (!pullRequests.length) {
     warnings.push('No open GitHub pull request is attached to the current branch yet.');
@@ -257,13 +622,14 @@ export async function getWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapsh
     upstream,
     ahead,
     behind,
-    dirty: changedFiles.length > 0,
+    dirty: localChangedFiles.length > 0,
     changedFiles,
     diffStat,
     recentCommits,
     worktrees,
     pullRequests,
     activeIssue,
+    activeIssues,
     warnings,
   };
 }
