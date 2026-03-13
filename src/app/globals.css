@@ -2905,31 +2905,30 @@ button.workflow-file-item.workflow-file-item-active {
   align-items: center;
   justify-content: center;
   gap: 0.32rem;
-  min-width: 38px;
-  min-height: 38px;
-  padding: 0 0.78rem;
+  min-width: 42px;
+  min-height: 42px;
+  padding: 0 0.82rem;
   border-radius: 999px;
-  border: 1px solid rgba(147, 197, 253, calc(0.28 + (var(--remodex-compose-active) * 0.12)));
-  background: linear-gradient(
-    180deg,
-    rgba(96, 165, 250, calc(0.9 - (var(--remodex-dock-motion-progress) * 0.12) + (var(--remodex-compose-active) * 0.08))),
-    rgba(59, 130, 246, calc(0.94 - (var(--remodex-dock-motion-progress) * 0.08) + (var(--remodex-compose-active) * 0.06)))
-  );
-  color: white;
-  font-size: 0.82rem;
+  border: none;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 0.84rem;
   font-weight: 700;
   letter-spacing: 0.01em;
-  backdrop-filter: blur(calc(4px + (var(--remodex-compose-active) * 8px)));
-  box-shadow: 0 10px 20px rgba(59, 130, 246, calc(0.18 - (var(--remodex-dock-motion-progress) * 0.08) + (var(--remodex-compose-active) * 0.12)));
-  transition: border-color 220ms ease, background 220ms ease, box-shadow 220ms ease, backdrop-filter 220ms ease, opacity 220ms ease;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+  transition: background 160ms ease, box-shadow 160ms ease, transform 120ms ease;
+}
+
+.remodex-send-button:active {
+  transform: scale(0.94);
+  background: #1d4ed8;
 }
 
 .remodex-send-button:disabled {
-  opacity: 0.36;
-  background: rgba(148, 163, 184, 0.32);
-  border-color: rgba(148, 163, 184, 0.18);
+  background: #d1d5db;
+  color: #9ca3af;
   box-shadow: none;
-  color: rgba(148, 163, 184, 0.7);
+  transform: none;
 }
 
 .remodex-diff-pill:disabled {
