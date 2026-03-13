@@ -383,6 +383,23 @@ async function loadReviewChangedFiles() {
   return parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw);
 }
 
+async function loadFileCommitSummary(filePath: string): Promise<{ commitSummary?: string; commitAuthor?: string; commitAge?: string }> {
+  try {
+    const raw = await tryRunFile('git', [
+      'log', '-1', '--format=%s%n%an%n%ar', '--follow', '--', filePath,
+    ]);
+    const [subject, author, age] = raw.trim().split('\n');
+    if (!subject) return {};
+    return {
+      commitSummary: subject,
+      commitAuthor: author,
+      commitAge: age,
+    };
+  } catch {
+    return {};
+  }
+}
+
 async function loadReviewFilePreview(file: ReviewChangedFile, originalPath?: string, currentPath?: string) {
   if (file.status === 'untracked' && currentPath) {
     const raw = await readFile(resolveRepoFile(currentPath), 'utf8').catch(() => '');
@@ -489,7 +506,10 @@ export async function getReviewFileDetail(reviewPath: string): Promise<MobileRev
 
   if (file) {
     const { originalPath, currentPath } = parseReviewPath(file.path);
-    const preview = await loadReviewFilePreview(file, originalPath, currentPath);
+    const [preview, commitInfo] = await Promise.all([
+      loadReviewFilePreview(file, originalPath, currentPath),
+      loadFileCommitSummary(currentPath ?? originalPath ?? file.path),
+    ]);
 
     return {
       path: file.path,
@@ -500,6 +520,7 @@ export async function getReviewFileDetail(reviewPath: string): Promise<MobileRev
       currentPath,
       note: buildReviewFileNote(file, originalPath, currentPath),
       preview,
+      ...commitInfo,
     };
   }
 

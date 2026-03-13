@@ -3952,6 +3952,28 @@ button.workflow-file-item.workflow-file-item-active {
   font-weight: 500;
 }
 
+.remodex-diff-commit-card {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.65rem 0.8rem;
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.06);
+  border: 1px solid rgba(59, 130, 246, 0.1);
+}
+
+.remodex-diff-commit-summary {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: rgba(17, 24, 39, 0.82);
+  line-height: 1.35;
+}
+
+.remodex-diff-commit-meta {
+  font-size: 0.7rem;
+  color: rgba(17, 24, 39, 0.42);
+  font-weight: 500;
+}
+
 .remodex-diff-block {
   display: grid;
   gap: 1px;
