@@ -81,12 +81,28 @@ function summarizeTranscript(text: string) {
 }
 
 let inboxCache: { snapshot: MobileInboxSnapshot; timestamp: number } | null = null;
-const INBOX_CACHE_TTL = 5000; // 5 seconds
+let inboxInflight: Promise<MobileInboxSnapshot> | null = null;
+const INBOX_CACHE_TTL = 8000; // 8 seconds — generous idle TTL
 
 export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
   if (inboxCache && Date.now() - inboxCache.timestamp < INBOX_CACHE_TTL) {
     return inboxCache.snapshot;
   }
+
+  // Deduplicate: if a request is already in-flight, piggyback on it
+  if (inboxInflight) return inboxInflight;
+
+  inboxInflight = (async () => {
+    try {
+      return await _fetchMobileInboxSnapshot();
+    } finally {
+      inboxInflight = null;
+    }
+  })();
+  return inboxInflight;
+}
+
+async function _fetchMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
 
   const fleet = await getRuntimeInventorySnapshot();
   const sessions = fleet.agents

@@ -313,7 +313,8 @@ function isBareDeliveryMirrorEcho(text: string) {
 }
 
 const transcriptCache = new Map<string, { entries: SessionTranscriptEntry[]; timestamp: number }>();
-const TRANSCRIPT_CACHE_TTL = 3000; // 3 seconds
+const transcriptInflight = new Map<string, Promise<SessionTranscriptEntry[]>>();
+const TRANSCRIPT_CACHE_TTL = 5000; // 5 seconds
 
 export async function getSessionTranscript(sessionKey: string, limit = 12) {
   const cached = transcriptCache.get(sessionKey);
@@ -321,10 +322,19 @@ export async function getSessionTranscript(sessionKey: string, limit = 12) {
     return cached.entries.slice(-limit);
   }
 
-  const payload = await callGateway<GatewayChatHistoryResult>('chat.history', {
-    sessionKey,
-    limit: Math.min(Math.max(limit * 5, 24), 100),
-  });
+  // Deduplicate: if a request is already in-flight for this session, piggyback
+  const existing = transcriptInflight.get(sessionKey);
+  if (existing) {
+    const entries = await existing;
+    return entries.slice(-limit);
+  }
+
+  const promise = (async () => {
+    try {
+      const payload = await callGateway<GatewayChatHistoryResult>('chat.history', {
+        sessionKey,
+        limit: Math.min(Math.max(limit * 5, 24), 100),
+      });
 
   const entries = (payload.messages ?? [])
     .map((message, index) => {
@@ -374,7 +384,15 @@ export async function getSessionTranscript(sessionKey: string, limit = 12) {
     })
     .filter(Boolean) as SessionTranscriptEntry[];
 
-  transcriptCache.set(sessionKey, { entries, timestamp: Date.now() });
+      transcriptCache.set(sessionKey, { entries, timestamp: Date.now() });
+      return entries;
+    } finally {
+      transcriptInflight.delete(sessionKey);
+    }
+  })();
+
+  transcriptInflight.set(sessionKey, promise);
+  const entries = await promise;
   return entries.slice(-limit);
 }
 
