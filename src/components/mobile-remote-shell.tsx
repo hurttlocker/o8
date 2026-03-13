@@ -1037,7 +1037,43 @@ export function MobileRemoteShell({
     }
   }
 
+  function optimisticallySetOwnedReviewDisposition(
+    sessionKey: string,
+    disposition: RuntimeReviewPacket['reviewDisposition'],
+  ) {
+    const updatedAt = new Date().toISOString();
+    setReviewPacketBySession((current) => {
+      const existing = current[sessionKey];
+      if (!existing) {
+        return current;
+      }
+      return {
+        ...current,
+        [sessionKey]: {
+          ...existing,
+          reviewDisposition: disposition,
+          reviewDispositionUpdatedAt: updatedAt,
+          reviewDispositionUpdatedAtLabel: 'Just now',
+        },
+      };
+    });
+  }
+
   async function handleOwnedReviewDisposition(action: 'watch' | 'resolve', sessionKey: string) {
+    const previousPacket = reviewPacketBySession[sessionKey];
+    const nextDisposition = action === 'resolve' ? 'resolved' : 'watching';
+
+    if (previousPacket) {
+      optimisticallySetOwnedReviewDisposition(sessionKey, nextDisposition);
+    }
+
+    setActionNoteBySession((current) => ({
+      ...current,
+      [sessionKey]: action === 'resolve'
+        ? 'Marking this owned result resolved…'
+        : 'Switching this owned result back to keep-watching mode…',
+    }));
+
     try {
       const result = await runAction({
         action,
@@ -1045,6 +1081,13 @@ export function MobileRemoteShell({
       });
       setSurfaceNote(result.note);
     } catch (error) {
+      if (previousPacket) {
+        setReviewPacketBySession((current) => ({
+          ...current,
+          [sessionKey]: previousPacket,
+        }));
+      }
+      void loadOwnedReviewPacket(sessionKey, true).catch(() => undefined);
       setActionNoteBySession((current) => ({
         ...current,
         [sessionKey]: error instanceof Error ? error.message : 'Unable to update the owned review state from mobile.',
