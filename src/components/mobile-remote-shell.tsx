@@ -2231,10 +2231,15 @@ export function MobileRemoteShell({
                   <div className="remodex-diff-block">
                     {selectedReviewFile.preview.split('\n').map((line, index) => {
                       const tone = diffLineTone(line);
+                      const displayLine = tone === 'add' || tone === 'remove'
+                        ? line.slice(1)
+                        : tone === 'context'
+                          ? (line.startsWith(' ') ? line.slice(1) : line)
+                          : line;
                       return (
                         <div key={`${selectedReviewFile.path}:${index}`} className={`remodex-diff-line remodex-diff-line-${tone}`}>
                           <div className="remodex-diff-gutter" />
-                          <code>{line || ' '}</code>
+                          <code>{displayLine || '\u00A0'}</code>
                         </div>
                       );
                     })}
