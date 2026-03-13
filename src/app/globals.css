@@ -3338,8 +3338,10 @@ button.workflow-file-item.workflow-file-item-active {
   inset: 0;
   z-index: 20;
   padding: 3.8rem 0.65rem 1rem;
-  background: rgba(255, 255, 255, 0.55);
-  backdrop-filter: blur(16px);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: remodex-fade-in 200ms ease-out both;
 }
 
 .remodex-controls-sheet,
@@ -3358,15 +3360,31 @@ button.workflow-file-item.workflow-file-item-active {
 .remodex-controls-sheet {
   max-height: calc(100vh - 4.8rem);
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  animation: remodex-sheet-slide-up 280ms ease-out both;
 }
 
 .remodex-media-lightbox {
   max-height: calc(100vh - 4.8rem);
+  animation: remodex-sheet-slide-up 280ms ease-out both;
   overflow: hidden;
 }
 
 .remodex-diff-sheet {
   height: calc(100vh - 4.8rem);
+  animation: remodex-sheet-slide-up 280ms ease-out both;
+}
+
+@keyframes remodex-sheet-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .remodex-diff-sheet-head {
@@ -3750,6 +3768,8 @@ button.workflow-file-item.workflow-file-item-active {
 .remodex-diff-scroll {
   min-height: 0;
   overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
   display: grid;
   align-content: start;
   gap: 0.75rem;
@@ -3792,6 +3812,7 @@ button.workflow-file-item.workflow-file-item-active {
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid rgba(15, 23, 42, 0.06);
+  contain: layout style;
 }
 
 .remodex-diff-line {
@@ -3802,6 +3823,9 @@ button.workflow-file-item.workflow-file-item-active {
   border-radius: 0;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.96);
+  contain: content;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 28px;
 }
 
 .remodex-diff-line code {
