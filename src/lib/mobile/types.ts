@@ -106,6 +106,8 @@ export interface MobileRuntimeTailGroup {
   mode: 'launch' | 'resume';
   outcome: 'running' | 'finished' | 'interrupted' | 'failed';
   prompt: string;
+  startedAt?: string;
+  finishedAt?: string;
   startedAtLabel?: string;
   finishedAtLabel?: string;
   summary: string;
