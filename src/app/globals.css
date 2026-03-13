@@ -4019,19 +4019,22 @@ body:has(.remodex-diff-overlay) {
   border-radius: 0;
   overflow: hidden;
   background: #ffffff;
-  min-height: 0;
+  min-height: 22px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
 }
 
 .remodex-diff-line code {
   display: block;
-  padding: 0.35rem 0.65rem;
+  padding: 0.25rem 0.5rem;
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: break-all;
   font-family: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.82rem;
-  line-height: 1.55;
-  color: #1e293b;
-  font-weight: 450;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #0f172a;
+  font-weight: 500;
+  -webkit-text-size-adjust: 100%;
 }
 
 .remodex-diff-gutter {
