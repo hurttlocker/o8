@@ -66,6 +66,17 @@ export interface RuntimeSurfaceSummary {
   };
 }
 
+export interface AgentActivity {
+  /** One-line summary: "Editing auth.ts", "Running build", "Thinking…" */
+  headline: string;
+  /** Tool name if a tool call was the last action */
+  toolName?: string;
+  /** File path if activity involves a file */
+  filePath?: string;
+  /** Timestamp of the activity */
+  timestamp?: number;
+}
+
 export interface AgentSummary {
   id: string;
   name: string;
@@ -88,6 +99,7 @@ export interface AgentSummary {
   isCurrentSession?: boolean;
   tokenUsage?: TokenUsageSnapshot;
   runtimeSurface?: RuntimeSurfaceSummary;
+  activity?: AgentActivity;
 }
 
 export interface SquadSummary {

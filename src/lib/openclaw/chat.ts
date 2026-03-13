@@ -3,6 +3,7 @@ import { basename, extname } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { MobileTranscriptMedia } from '@/lib/mobile/types';
+import type { AgentActivity } from '@/lib/fleet/types';
 
 const execFileAsync = promisify(execFile);
 const WORKSPACE_ROOT = process.env.CORTEX_IDE_WORKSPACE_ROOT || '/Users/marquisehurtt/clawd';
@@ -428,4 +429,126 @@ export async function abortOpenClawSession(sessionKey: string, runId?: string) {
     sessionKey,
     ...(runId ? { runId } : {}),
   });
+}
+
+// ── Observable agent activity extraction ──
+
+const TOOL_HEADLINES: Record<string, (args: Record<string, unknown>) => string> = {
+  Read: (a) => `Reading ${shortenFilePath(String(a.file_path ?? a.path ?? ''))}`,
+  Edit: (a) => `Editing ${shortenFilePath(String(a.file_path ?? a.path ?? ''))}`,
+  Write: (a) => `Writing ${shortenFilePath(String(a.file_path ?? a.path ?? ''))}`,
+  exec: (a) => `Running ${truncate(String(a.command ?? ''), 40)}`,
+  web_search: (a) => `Searching "${truncate(String(a.query ?? ''), 36)}"`,
+  web_fetch: (a) => `Fetching ${truncate(String(a.url ?? ''), 40)}`,
+  browser: () => 'Using browser',
+  image: () => 'Analyzing image',
+  message: () => 'Sending message',
+  memory_search: (a) => `Searching memory for "${truncate(String(a.query ?? ''), 28)}"`,
+  cortex_search: (a) => `Searching Cortex for "${truncate(String(a.query ?? ''), 28)}"`,
+  sessions_spawn: () => 'Spawning sub-agent',
+  tts: () => 'Generating speech',
+  cron: () => 'Managing schedules',
+  gateway: () => 'Updating gateway',
+};
+
+function shortenFilePath(filePath: string): string {
+  if (!filePath) return 'file';
+  const parts = filePath.split('/');
+  if (parts.length <= 2) return filePath;
+  return `…/${parts.slice(-2).join('/')}`;
+}
+
+function truncate(text: string, max: number): string {
+  if (text.length <= max) return text;
+  return text.slice(0, max - 1) + '…';
+}
+
+function extractToolCallsFromContent(content: unknown): Array<{ name: string; args: Record<string, unknown> }> {
+  if (!content) return [];
+
+  // content can be an array of blocks (Anthropic format)
+  if (Array.isArray(content)) {
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
+    for (const block of content) {
+      if (typeof block !== 'object' || block === null) continue;
+      const b = block as Record<string, unknown>;
+      if (b.type === 'tool_use' && typeof b.name === 'string') {
+        calls.push({ name: b.name, args: (b.input ?? {}) as Record<string, unknown> });
+      }
+      // OpenAI format
+      if (b.type === 'function_call' && typeof b.name === 'string') {
+        const parsedArgs = typeof b.arguments === 'string' ? safeJsonParse(b.arguments) : (b.arguments ?? {});
+        calls.push({ name: b.name, args: parsedArgs as Record<string, unknown> });
+      }
+    }
+    return calls;
+  }
+
+  return [];
+}
+
+function safeJsonParse(text: string): unknown {
+  try { return JSON.parse(text); } catch { return {}; }
+}
+
+function deriveActivityFromMessages(messages: GatewayChatHistoryMessage[]): AgentActivity | undefined {
+  // Walk backward from the last message to find the latest meaningful activity
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (!msg) continue;
+
+    // Check for tool calls in assistant messages
+    if (msg.role === 'assistant') {
+      const toolCalls = extractToolCallsFromContent(msg.content);
+      if (toolCalls.length > 0) {
+        const lastCall = toolCalls[toolCalls.length - 1];
+        const headlineFn = TOOL_HEADLINES[lastCall.name];
+        const headline = headlineFn
+          ? headlineFn(lastCall.args)
+          : `Using ${lastCall.name}`;
+        const filePath = String(lastCall.args.file_path ?? lastCall.args.path ?? '');
+        return {
+          headline,
+          toolName: lastCall.name,
+          filePath: filePath || undefined,
+          timestamp: msg.timestamp,
+        };
+      }
+
+      // Assistant text without tool calls — agent is composing a response
+      const text = typeof msg.content === 'string' ? msg.content : '';
+      if (text.length > 10) {
+        return {
+          headline: `Responded · ${truncate(text.replace(/\n/g, ' '), 38)}`,
+          timestamp: msg.timestamp,
+        };
+      }
+    }
+  }
+
+  return undefined;
+}
+
+const activityCache = new Map<string, { activity: AgentActivity | undefined; timestamp: number }>();
+const ACTIVITY_CACHE_TTL = 8000;
+
+/** Fetch the latest observable activity for an agent session */
+export async function getSessionActivity(sessionKey: string): Promise<AgentActivity | undefined> {
+  const cached = activityCache.get(sessionKey);
+  if (cached && Date.now() - cached.timestamp < ACTIVITY_CACHE_TTL) {
+    return cached.activity;
+  }
+
+  try {
+    const payload = await callGateway<GatewayChatHistoryResult>('chat.history', {
+      sessionKey,
+      limit: 8,
+    });
+
+    const activity = deriveActivityFromMessages(payload.messages ?? []);
+    activityCache.set(sessionKey, { activity, timestamp: Date.now() });
+    return activity;
+  } catch {
+    return undefined;
+  }
 }
