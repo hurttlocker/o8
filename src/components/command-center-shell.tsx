@@ -1,26 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { EventItem, FleetSnapshot, SquadSummary, WorkflowReviewSnapshot } from '@/lib/fleet/types';
 import { openClawAdapterContract } from '@/lib/runtime/adapter';
 import { SessionOperatorPanel } from '@/components/session-operator-panel';
 import { WorkflowReviewPanel } from '@/components/workflow-review-panel';
 
 const compactNumber = new Intl.NumberFormat('en-US', { notation: 'compact' });
-
-const githubPulse = {
-  repo: 'hurttlocker/cortex-ide',
-  branch: 'feat/shell-contract-mvp',
-  pullRequest: '#22 — live OpenClaw bridge lane',
-  milestone: 'Phase 2 → workflow review',
-  checks: [
-    '#7 Desktop shell',
-    '#8 Fleet state model',
-    '#11 Runtime adapter contract',
-    '#12 OpenClaw / ACP adapter MVP',
-    '#13 Git / GitHub / worktree review surface',
-  ],
-};
 
 const karpathyGuardrails = [
   'Primary object stays the agent / run / squad, not the file tree.',
@@ -43,6 +29,12 @@ function formatPercent(value?: number | null) {
 function formatTokens(value?: number | null) {
   if (value == null) return '—';
   return compactNumber.format(value);
+}
+
+function formatIssueStack(snapshot?: WorkflowReviewSnapshot | null) {
+  const issues = snapshot?.activeIssues ?? [];
+  if (!issues.length) return 'Issue stack unavailable';
+  return issues.map((issue) => `#${issue.number}`).join(' • ');
 }
 
 function pickPreferredAgent(snapshot: FleetSnapshot, currentId?: string) {
@@ -102,34 +94,85 @@ export function CommandCenterShell({
   initialReview?: WorkflowReviewSnapshot | null;
 }) {
   const [fleet, setFleet] = useState<FleetSnapshot>(initialSnapshot);
+  const [review, setReview] = useState<WorkflowReviewSnapshot | null>(initialReview ?? null);
   const [selectedId, setSelectedId] = useState(() => pickPreferredAgent(initialSnapshot));
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [launchCwd, setLaunchCwd] = useState(initialReview?.repoPath ?? '/Users/marquisehurtt/clawd/repos/cortex-ide');
+  const [launchPrompt, setLaunchPrompt] = useState('');
+  const [launchState, setLaunchState] = useState<'idle' | 'launching'>('idle');
+  const [launchNote, setLaunchNote] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedId((currentId) => pickPreferredAgent(fleet, currentId));
   }, [fleet]);
 
   useEffect(() => {
+    if (review?.repoPath && !launchPrompt) {
+      setLaunchCwd((current) => (current === '/Users/marquisehurtt/clawd/repos/cortex-ide' ? review.repoPath ?? current : current));
+    }
+  }, [review?.repoPath, launchPrompt]);
+
+  const refreshLiveFleet = useCallback(async (preferredId?: string) => {
+    const response = await fetch('/api/runtime/inventory', { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    const nextSnapshot = (await response.json()) as FleetSnapshot;
+    setFleet(nextSnapshot);
+    setRefreshError(null);
+    if (preferredId && nextSnapshot.agents.some((agent) => agent.id === preferredId)) {
+      setSelectedId(preferredId);
+    }
+    return nextSnapshot;
+  }, []);
+
+  useEffect(() => {
     let active = true;
 
-    async function refreshLiveFleet() {
+    async function refreshLiveFleetLoop() {
       try {
-        const response = await fetch('/api/openclaw/fleet', { cache: 'no-store' });
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        const nextSnapshot = (await response.json()) as FleetSnapshot;
-        if (!active) return;
-        setFleet(nextSnapshot);
-        setRefreshError(null);
+        await refreshLiveFleet();
       } catch (error) {
         if (!active) return;
         setRefreshError(error instanceof Error ? error.message : 'Unable to refresh live fleet');
       }
     }
 
-    refreshLiveFleet();
-    const timer = window.setInterval(refreshLiveFleet, 30000);
+    void refreshLiveFleetLoop();
+    const timer = window.setInterval(() => {
+      void refreshLiveFleetLoop();
+    }, 30000);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [refreshLiveFleet]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function refreshReview() {
+      try {
+        const response = await fetch('/api/review/workspace', { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const nextSnapshot = (await response.json()) as WorkflowReviewSnapshot;
+        if (!active) return;
+        setReview(nextSnapshot);
+        setReviewError(null);
+      } catch (error) {
+        if (!active) return;
+        setReviewError(error instanceof Error ? error.message : 'Unable to refresh workflow review');
+      }
+    }
+
+    void refreshReview();
+    const timer = window.setInterval(() => {
+      void refreshReview();
+    }, 45000);
 
     return () => {
       active = false;
@@ -141,6 +184,7 @@ export function CommandCenterShell({
     () => fleet.agents.find((agent) => agent.id === selectedId) ?? fleet.agents[0],
     [fleet, selectedId],
   );
+  const selectedRuntimeSurface = selectedAgent?.runtimeSurface;
 
   const desktopInfo =
     typeof window !== 'undefined'
@@ -154,6 +198,14 @@ export function CommandCenterShell({
   const currentSession = fleet.agents.find((agent) => agent.isCurrentSession);
   const alertCount = fleet.agents.reduce((sum, agent) => sum + agent.alerts, 0);
   const gatewayLabel = fleet.meta.gatewayLabel ?? 'Gateway status unknown';
+  const reviewPullRequest = review?.pullRequests?.[0];
+  const reviewIssues = review?.activeIssues ?? [];
+  const repoLaneLabel = reviewPullRequest
+    ? `PR #${reviewPullRequest.number} • ${reviewPullRequest.headRefName}`
+    : review?.branch
+      ? `Branch • ${review.branch}`
+      : 'Repo lane unavailable';
+  const repoStateLabel = review?.dirty ? `${review.changedFiles.length} local changes` : 'working tree clean';
   const selectedEvents = selectedAgent
     ? fleet.events.filter((event) => event.agentId === selectedAgent.id)
     : [];
@@ -167,11 +219,45 @@ export function CommandCenterShell({
     ? `${formatTokens(selectedAgent.tokenUsage.totalTokens)} used`
     : '—';
 
+  async function handleOwnedCodexLaunch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!launchPrompt.trim()) return;
+
+    setLaunchState('launching');
+    setLaunchNote(null);
+
+    try {
+      const response = await fetch('/api/runtime/launch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          runtime: 'codex',
+          cwd: launchCwd,
+          prompt: launchPrompt,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as { surfaceId?: string; note?: string; error?: string } | null;
+      if (!response.ok) {
+        throw new Error(payload?.error ?? `HTTP ${response.status}`);
+      }
+
+      setLaunchPrompt('');
+      setLaunchNote(payload?.note ?? 'Owned Codex run launched.');
+      await refreshLiveFleet(payload?.surfaceId);
+    } catch (error) {
+      setLaunchNote(error instanceof Error ? error.message : 'Unable to launch owned Codex session');
+    } finally {
+      setLaunchState('idle');
+    }
+  }
+
   return (
     <div className="page-wrap">
       <div className="announcement-bar">
         <span className={statusClass(fleet.meta.mode === 'live' ? 'healthy' : 'warning')}>
-          {fleet.meta.mode === 'live' ? 'live OpenClaw' : 'demo fallback'}
+          {fleet.meta.mode === 'live' ? 'live runtime inventory' : 'demo fallback'}
         </span>
         <span className="muted">
           {fleet.meta.note}
@@ -185,20 +271,23 @@ export function CommandCenterShell({
             <div className="brand-orb">C</div>
             <div>
               <div className="eyebrow">Cortex IDE</div>
-              <h1>Live OpenClaw command center</h1>
+              <h1>Live runtime command center</h1>
             </div>
           </div>
           <p className="hero-copy">
             First live bridge mode: mirror existing OpenClaw sessions into the control plane, starting
-            with this Q ↔ Mister chat. New sessions belong behind explicit spawn actions, not silent UI
-            side effects.
+            with this Q ↔ Mister chat, while also surfacing recent local Codex terminals as truthful
+            read-only runtime depth. New sessions belong behind explicit spawn actions, not silent UI side
+            effects.
           </p>
         </div>
         <div className="command-strip">
-          <a href="https://github.com/hurttlocker/cortex-ide/pull/22" target="_blank" rel="noreferrer">
-            <button>PR #22</button>
-          </a>
-          <a href="https://github.com/hurttlocker/cortex-ide/issues" target="_blank" rel="noreferrer">
+          {reviewPullRequest ? (
+            <a href={reviewPullRequest.url} target="_blank" rel="noreferrer">
+              <button>{`PR #${reviewPullRequest.number}`}</button>
+            </a>
+          ) : null}
+          <a href={`https://github.com/${review?.repoSlug ?? 'hurttlocker/cortex-ide'}/issues`} target="_blank" rel="noreferrer">
             <button>Issues</button>
           </a>
           <button type="button" onClick={() => window.location.reload()}>
@@ -277,34 +366,50 @@ export function CommandCenterShell({
             <div className="surface-card">
               <div className="section-head">
                 <div>
-                  <div className="eyebrow">GitHub pulse</div>
+                  <div className="eyebrow">Repo truth</div>
                   <h2>Execution truth</h2>
                 </div>
-                <span className="status-pill status-reviewing">Live repo lane</span>
+                <span className={statusClass(review?.dirty ? 'warning' : 'reviewing')}>
+                  {review?.dirty ? 'local changes' : 'live repo lane'}
+                </span>
               </div>
               <div className="signal-stack">
                 <div className="signal-row">
                   <span>Repo</span>
-                  <strong>{githubPulse.repo}</strong>
+                  <strong>{review?.repoSlug ?? 'hurttlocker/cortex-ide'}</strong>
                 </div>
                 <div className="signal-row">
                   <span>Branch</span>
-                  <strong className="mono">{githubPulse.branch}</strong>
+                  <strong className="mono">{review?.branch ?? 'Loading…'}</strong>
                 </div>
                 <div className="signal-row">
                   <span>PR</span>
-                  <strong>{githubPulse.pullRequest}</strong>
+                  <strong>
+                    {reviewPullRequest
+                      ? `#${reviewPullRequest.number} — ${reviewPullRequest.title}`
+                      : 'No open PR attached'}
+                  </strong>
                 </div>
                 <div className="signal-row">
-                  <span>Milestone</span>
-                  <strong>{githubPulse.milestone}</strong>
+                  <span>Issue stack</span>
+                  <strong>{formatIssueStack(review)}</strong>
                 </div>
               </div>
               <ul className="bullet-list muted top-gap">
-                {githubPulse.checks.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
+                <li>{repoLaneLabel}</li>
+                <li>{repoStateLabel}</li>
+                <li>
+                  {review?.recentCommits?.[0]
+                    ? `Latest commit • ${review.recentCommits[0]}`
+                    : 'Latest commit unavailable'}
+                </li>
+                <li>
+                  {reviewIssues.length
+                    ? reviewIssues.map((issue) => `${issue.state.toLowerCase()} #${issue.number} ${issue.title}`).join(' • ')
+                    : 'Issue linkage unavailable'}
+                </li>
               </ul>
+              {reviewError ? <p className="muted operator-note">{reviewError}</p> : null}
             </div>
 
             <div className="surface-card">
@@ -331,7 +436,7 @@ export function CommandCenterShell({
               <div className="section-head">
                 <div>
                   <div className="eyebrow">Overview</div>
-                  <h2>Live OpenClaw inventory</h2>
+                  <h2>Live runtime inventory</h2>
                 </div>
                 <a href="/mobile" className="inline-link">
                   View mobile remote ↗
@@ -359,6 +464,34 @@ export function CommandCenterShell({
                     <li>Mode: {fleet.meta.mirrorMode}</li>
                     <li>Alerts across visible surfaces: {alertCount}</li>
                   </ul>
+                  <div className="top-gap">
+                    <div className="eyebrow">Owned Codex launch</div>
+                    <p className="muted operator-note">
+                      This is the first truthful mutable Codex lane: Cortex IDE launches the session,
+                      tracks ownership, resumes it between runs, and can interrupt the active process.
+                    </p>
+                    <form className="operator-form" onSubmit={handleOwnedCodexLaunch}>
+                      <input
+                        className="operator-textarea"
+                        value={launchCwd}
+                        onChange={(event) => setLaunchCwd(event.target.value)}
+                        placeholder="/Users/marquisehurtt/clawd/repos/cortex-ide"
+                      />
+                      <textarea
+                        className="operator-textarea"
+                        value={launchPrompt}
+                        onChange={(event) => setLaunchPrompt(event.target.value)}
+                        rows={4}
+                        placeholder="Launch an IDE-owned Codex run with a bounded task…"
+                      />
+                      <div className="operator-actions queue-toolbar">
+                        <button className="button-primary" type="submit" disabled={launchState !== 'idle' || !launchPrompt.trim()}>
+                          {launchState === 'launching' ? 'Launching…' : 'Launch owned Codex'}
+                        </button>
+                      </div>
+                    </form>
+                    {launchNote ? <p className="muted operator-note">{launchNote}</p> : null}
+                  </div>
                 </div>
               </div>
             </div>
@@ -404,7 +537,7 @@ export function CommandCenterShell({
             </div>
           </div>
 
-          <WorkflowReviewPanel initialSnapshot={initialReview} />
+          <WorkflowReviewPanel initialSnapshot={review} />
         </section>
 
         {selectedAgent ? (
@@ -450,11 +583,23 @@ export function CommandCenterShell({
                 <span>Tokens</span>
                 <strong>{inspectorTokenLabel}</strong>
               </div>
+              {selectedRuntimeSurface?.ownership === 'owned' ? (
+                <>
+                  <div>
+                    <span>Lifecycle</span>
+                    <strong>{selectedRuntimeSurface.lifecycle?.availability ?? 'unknown'}</strong>
+                  </div>
+                  <div>
+                    <span>Last outcome</span>
+                    <strong>{selectedRuntimeSurface.lifecycle?.lastOutcome ?? 'none yet'}</strong>
+                  </div>
+                </>
+              ) : null}
             </div>
 
             <div className="inspector-block">
-              <span>Session key</span>
-              <strong className="mono">{selectedAgent.sessionKey}</strong>
+              <span>{selectedAgent.runtime === 'openclaw' ? 'Session key' : 'Runtime surface id'}</span>
+              <strong className="mono">{selectedRuntimeSurface?.id ?? selectedAgent.sessionKey}</strong>
               <p className="muted">Session id: {selectedAgent.sessionId ?? 'unknown'}</p>
             </div>
 
@@ -467,43 +612,98 @@ export function CommandCenterShell({
             <div className="inset-card inspector-block">
               <div className="row space-between compact-row">
                 <div>
-                  <span>Adapter contract</span>
-                  <strong>{openClawAdapterContract.displayName}</strong>
+                  <span>Runtime surface</span>
+                  <strong>
+                    {selectedAgent.runtime === 'openclaw'
+                      ? openClawAdapterContract.displayName
+                      : selectedRuntimeSurface?.sourceLabel ?? 'Runtime discovery'}
+                  </strong>
                 </div>
-                <span className="status-pill status-healthy">live bridge v1</span>
+                <span className={`status-pill ${selectedAgent.runtime === 'openclaw' ? 'status-healthy' : selectedRuntimeSurface?.ownership === 'owned' ? 'status-healthy' : 'status-warning'}`}>
+                  {selectedAgent.runtime === 'openclaw' ? 'live bridge v1' : selectedRuntimeSurface?.ownership === 'owned' ? 'owned launch lane' : 'read-tail spike'}
+                </span>
               </div>
               <ul className="bullet-list muted">
-                <li>Current mode mirrors existing sessions, starting with this one.</li>
-                <li>Steer + stop are now wired through the real OpenClaw gateway on explicit click only.</li>
-                <li>Spawn remains an explicit future action, not an automatic side effect.</li>
-                <li>Pause remains unsupported until runtime semantics are clean across providers.</li>
+                {selectedAgent.runtime === 'openclaw' ? (
+                  <>
+                    <li>Current mode mirrors existing sessions, starting with this one.</li>
+                    <li>Steer + stop are now wired through the real OpenClaw gateway on explicit click only.</li>
+                    <li>Spawn remains an explicit future action, not an automatic side effect.</li>
+                    <li>Pause remains unsupported until runtime semantics are clean across providers.</li>
+                  </>
+                ) : selectedRuntimeSurface?.ownership === 'owned' ? (
+                  <>
+                    <li>This Codex surface was launched by Cortex IDE and is tracked in the owned-session registry.</li>
+                    <li>Lifecycle now preserves current availability separately from last outcome.</li>
+                    <li>Input is truthful only between runs via resume; interrupt is truthful only while the run is active.</li>
+                    <li>The transport is JSON exec/resume, not fake keystroke injection into an arbitrary terminal.</li>
+                  </>
+                ) : (
+                  <>
+                    <li>Codex surfaces now distinguish live pid-backed terminals from recent session history.</li>
+                    <li>Attach/read-tail are surfaced first because they are truthful right now.</li>
+                    <li>Only IDE-owned Codex surfaces may eventually become mutable; discovered terminals stay watch-only.</li>
+                    <li>Runtime depth should feel inside the product, not like a hostile terminal takeover.</li>
+                  </>
+                )}
               </ul>
             </div>
 
-            <SessionOperatorPanel agent={selectedAgent} />
+            <SessionOperatorPanel agent={selectedAgent} onRuntimeRefresh={refreshLiveFleet} />
 
             <div className="inset-card inspector-block">
               <span>Runtime trace</span>
               <pre className="terminal-preview">
-                {`$ openclaw status --json
+                {selectedAgent.runtime === 'openclaw'
+                  ? `$ openclaw status --json
 > source=${fleet.meta.sourceLabel}
 > primary_session=${fleet.meta.primarySessionKey ?? 'unknown'}
 > selected_session=${selectedAgent.sessionKey}
+> ownership=${selectedRuntimeSurface?.ownership ?? 'provider'}
 > percent_used=${formatPercent(selectedAgent.context.usedPercent)}
 > tokens=${formatTokens(selectedAgent.tokenUsage?.totalTokens)}
 
 $ openclaw gateway call chat.history --json --params '${JSON.stringify({
-                  sessionKey: selectedAgent.sessionKey,
-                  limit: 10,
-                })}'
+                      sessionKey: selectedAgent.sessionKey,
+                      limit: 10,
+                    })}'
 $ openclaw gateway call chat.send --json --params '${JSON.stringify({
-                  sessionKey: selectedAgent.sessionKey,
-                  message: '...',
-                  idempotencyKey: '<uuid>',
-                })}'
+                      sessionKey: selectedAgent.sessionKey,
+                      message: '...',
+                      idempotencyKey: '<uuid>',
+                    })}'
 $ openclaw gateway call chat.abort --json --params '${JSON.stringify({
-                  sessionKey: selectedAgent.sessionKey,
-                })}'`}
+                      sessionKey: selectedAgent.sessionKey,
+                    })}'`
+                  : selectedRuntimeSurface?.ownership === 'owned'
+                    ? `$ POST /api/runtime/launch { runtime: "codex", cwd: "${selectedRuntimeSurface?.cwd ?? selectedAgent.workspace}", prompt: "..." }
+> selected_surface=${selectedRuntimeSurface?.id ?? selectedAgent.sessionKey}
+> source=${selectedRuntimeSurface?.sourceLabel ?? 'Owned Codex launch registry'}
+> cwd=${selectedRuntimeSurface?.cwd ?? selectedAgent.workspace}
+> branch=${selectedRuntimeSurface?.branch ?? selectedAgent.branch}
+> ownership=${selectedRuntimeSurface?.ownership ?? 'owned'}
+> tail_source=${selectedRuntimeSurface?.tailSourceLabel ?? '~/.cortex-ide/owned-codex/...'}
+
+$ POST /api/runtime/action { action: "steer", surfaceId: "${selectedRuntimeSurface?.id ?? selectedAgent.sessionKey}", message: "..." }
+$ POST /api/runtime/action { action: "stop", surfaceId: "${selectedRuntimeSurface?.id ?? selectedAgent.sessionKey}" }
+$ GET /api/runtime/tail?surfaceId=${encodeURIComponent(selectedRuntimeSurface?.id ?? selectedAgent.sessionKey)}
+> attach=${selectedRuntimeSurface?.capabilities.attach ? 'true' : 'false'}
+> read_tail=${selectedRuntimeSurface?.capabilities.readTail ? 'true' : 'false'}
+> send_input=${selectedRuntimeSurface?.capabilities.sendInput ? 'true' : 'false'}
+> interrupt=${selectedRuntimeSurface?.capabilities.interrupt ? 'true' : 'false'}`
+                    : `$ sqlite3 -json ~/.codex/state_5.sqlite "select id,title,cwd,updated_at,rollout_path,git_branch,git_sha from threads order by updated_at desc limit 1;"
+> selected_surface=${selectedRuntimeSurface?.id ?? selectedAgent.sessionKey}
+> source=${selectedRuntimeSurface?.sourceLabel ?? 'Local Codex discovery'}
+> cwd=${selectedRuntimeSurface?.cwd ?? selectedAgent.workspace}
+> branch=${selectedRuntimeSurface?.branch ?? selectedAgent.branch}
+> ownership=${selectedRuntimeSurface?.ownership ?? 'discovered'}
+> tail_source=${selectedRuntimeSurface?.tailSourceLabel ?? '~/.codex/sessions/*.jsonl'}
+
+$ GET /api/runtime/tail?surfaceId=${encodeURIComponent(selectedRuntimeSurface?.id ?? selectedAgent.sessionKey)}
+> attach=${selectedRuntimeSurface?.capabilities.attach ? 'true' : 'false'}
+> read_tail=${selectedRuntimeSurface?.capabilities.readTail ? 'true' : 'false'}
+> send_input=${selectedRuntimeSurface?.capabilities.sendInput ? 'true' : 'false'}
+> interrupt=${selectedRuntimeSurface?.capabilities.interrupt ? 'true' : 'false'}`}
               </pre>
             </div>
           </aside>

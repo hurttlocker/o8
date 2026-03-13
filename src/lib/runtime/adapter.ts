@@ -144,7 +144,7 @@ export const openClawAdapterContract: RuntimeAdapter = {
   },
   async getTelemetry(sessionKey) {
     const fleet = await readJson<FleetSnapshot>(
-      await fetch('/api/openclaw/fleet', {
+      await fetch('/api/runtime/inventory', {
         cache: 'no-store',
       }),
     );

@@ -29,6 +29,14 @@ Do **not** begin as a full VS Code fork.
 - **Git / GitHub / worktrees / terminals** = software delivery substrate
 - **Cortex IDE** = operator surface that makes all of it legible and steerable
 
+### Front-door rule
+The product should feel like a **beautiful, fluent AI chat surface on first contact**, then progressively reveal deeper review, runtime, and org-control layers.
+
+That means:
+- protect the chat page as the onboarding/front-door surface
+- let deeper control open contextually from within the same product language
+- do not let runtime/operator depth bulldoze the familiar chat experience
+
 ### Mobile view
 Mobile support should likely exist from day one, but as a **remote operator surface**, not a full mobile IDE.
 The right model is:
@@ -39,6 +47,7 @@ The right model is:
 ## Repo map
 
 - `docs/company-thesis.md` — why this company should exist
+- `docs/chat-front-door-doctrine.md` — product memo + implementation doctrine for preserving chat as the front door while layering runtime depth underneath
 - `docs/v0-product-spec.md` — first shipping surface and user flows
 - `docs/v1-build-plan.md` — v1 plan grounded in Karpathy’s command-center requirements
 - `docs/system-architecture.md` — system map and where Cortex / OpenClaw / Paperclip fit
