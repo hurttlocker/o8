@@ -647,7 +647,7 @@ export function MobileRemoteShell({
   const selectedReviewPacketError = selectedSessionKey && isOwnedCodexSession ? reviewPacketErrorBySession[selectedSessionKey] ?? null : null;
   const stickyReviewFilesRef = useRef<ReviewChangedFile[]>([]);
   const [waitingForResponse, setWaitingForResponse] = useState(false);
-  const lastTranscriptCountRef = useRef(0);
+  const lastAssistantCountRef = useRef(0);
   const reviewFiles = useMemo(() => {
     const next = isOwnedCodexSession
       ? selectedReviewPacket?.changedFiles ?? []
@@ -819,12 +819,13 @@ export function MobileRemoteShell({
   const pendingOwnedTurn = selectedSessionKey ? pendingOwnedTurnBySession[selectedSessionKey] ?? null : null;
   const transcriptActionState = selectedSessionKey ? actionStateBySession[selectedSessionKey] ?? 'idle' : 'idle';
 
-  // Clear typing indicator when a new message appears in the transcript
+  // Clear typing indicator only when a new ASSISTANT message appears
+  const assistantCount = transcriptEntries.filter((e) => e.role === 'assistant').length;
   useEffect(() => {
-    if (waitingForResponse && transcriptEntries.length > lastTranscriptCountRef.current) {
+    if (waitingForResponse && assistantCount > lastAssistantCountRef.current) {
       setWaitingForResponse(false);
     }
-  }, [waitingForResponse, transcriptEntries.length]);
+  }, [waitingForResponse, assistantCount]);
   const transcriptActionNote = selectedSessionKey ? actionNoteBySession[selectedSessionKey] ?? null : null;
   const latestTranscriptMarker = transcriptEntries[transcriptEntries.length - 1]?.id ?? 'empty';
   const scrollMarker = pendingOwnedTurn ? `${latestTranscriptMarker}:${pendingOwnedTurn.id}` : latestTranscriptMarker;
@@ -1098,7 +1099,7 @@ export function MobileRemoteShell({
     }
 
     // Show typing indicator until a new assistant message arrives
-    lastTranscriptCountRef.current = transcriptEntries.length;
+    lastAssistantCountRef.current = transcriptEntries.filter((e) => e.role === 'assistant').length;
     setWaitingForResponse(true);
 
     // Optimistic: clear UI immediately before the API round-trip
