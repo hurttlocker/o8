@@ -466,16 +466,21 @@ function truncate(text: string, max: number): string {
 function extractToolCallsFromContent(content: unknown): Array<{ name: string; args: Record<string, unknown> }> {
   if (!content) return [];
 
-  // content can be an array of blocks (Anthropic format)
   if (Array.isArray(content)) {
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     for (const block of content) {
       if (typeof block !== 'object' || block === null) continue;
       const b = block as Record<string, unknown>;
+      // OpenClaw format: type=toolCall, name, arguments (as string or object)
+      if (b.type === 'toolCall' && typeof b.name === 'string') {
+        const parsedArgs = typeof b.arguments === 'string' ? safeJsonParse(b.arguments) : (b.arguments ?? {});
+        calls.push({ name: b.name, args: parsedArgs as Record<string, unknown> });
+      }
+      // Anthropic format: type=tool_use, name, input
       if (b.type === 'tool_use' && typeof b.name === 'string') {
         calls.push({ name: b.name, args: (b.input ?? {}) as Record<string, unknown> });
       }
-      // OpenAI format
+      // OpenAI format: type=function_call, name, arguments
       if (b.type === 'function_call' && typeof b.name === 'string') {
         const parsedArgs = typeof b.arguments === 'string' ? safeJsonParse(b.arguments) : (b.arguments ?? {});
         calls.push({ name: b.name, args: parsedArgs as Record<string, unknown> });
@@ -496,6 +501,9 @@ function deriveActivityFromMessages(messages: GatewayChatHistoryMessage[]): Agen
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (!msg) continue;
+
+    // Skip tool results — we want the tool *call*, not the result
+    if (msg.role === 'tool' || msg.role === 'toolResult') continue;
 
     // Check for tool calls in assistant messages
     if (msg.role === 'assistant') {
