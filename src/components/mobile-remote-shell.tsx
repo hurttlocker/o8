@@ -17,6 +17,7 @@ import {
   ArrowUp,
   Check,
   Copy,
+  ChevronRight,
   Download,
   ExternalLink,
   Eye,
@@ -32,7 +33,7 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import type { RuntimeReviewPacket } from '@/lib/fleet/types';
+import type { ReviewChangedFile, RuntimeReviewPacket } from '@/lib/fleet/types';
 import type {
   MobileActionRequest,
   MobileActionResponse,
@@ -644,10 +645,19 @@ export function MobileRemoteShell({
   const selectedReviewPacket = selectedSessionKey && isOwnedCodexSession ? reviewPacketBySession[selectedSessionKey] ?? null : null;
   const selectedReviewPacketLoading = selectedSessionKey && isOwnedCodexSession ? reviewPacketLoadingBySession[selectedSessionKey] ?? false : false;
   const selectedReviewPacketError = selectedSessionKey && isOwnedCodexSession ? reviewPacketErrorBySession[selectedSessionKey] ?? null : null;
-  const reviewFiles = useMemo(
-    () => (isOwnedCodexSession ? selectedReviewPacket?.changedFiles ?? [] : snapshot.review?.changedFiles ?? []),
-    [isOwnedCodexSession, selectedReviewPacket, snapshot.review?.changedFiles],
-  );
+  const stickyReviewFilesRef = useRef<ReviewChangedFile[]>([]);
+  const reviewFiles = useMemo(() => {
+    const next = isOwnedCodexSession
+      ? selectedReviewPacket?.changedFiles ?? []
+      : snapshot.review?.changedFiles ?? [];
+    // Keep last known non-empty file list if a poll temporarily returns empty
+    // (e.g., during compaction, git lock, or slow endpoint)
+    if (next.length) {
+      stickyReviewFilesRef.current = next;
+      return next;
+    }
+    return stickyReviewFilesRef.current;
+  }, [isOwnedCodexSession, selectedReviewPacket, snapshot.review?.changedFiles]);
 
   const loadHistory = useCallback(async (sessionKey: string, force = false) => {
     if (!force && historyBySession[sessionKey]?.length) {
@@ -2076,66 +2086,67 @@ export function MobileRemoteShell({
           <section className="remodex-controls-sheet" onClick={(event) => event.stopPropagation()}>
             <div className="remodex-diff-sheet-head remodex-sheet-head-generic">
               <div className="remodex-diff-sheet-handle" />
-              <h2>Conversation Controls</h2>
-              <button type="button" className="remodex-done-button" onClick={() => setControlsOpen(false)}>
+              <h2>{selectedSession?.isCurrentSession ? 'Q ↔ Mister' : compactLine(selectedSession?.name, 'Session', 24)}</h2>
+              <button type="button" className="remodex-done-button remodex-done-tinted" onClick={() => setControlsOpen(false)}>
                 Done
               </button>
             </div>
 
-            <div className="remodex-controls-summary-card">
-              <span className="remodex-controls-label">Focused session</span>
-              <strong>{selectedSession?.isCurrentSession ? 'Q ↔ Mister live' : compactLine(selectedSession?.name, 'Focused session', 36)}</strong>
-              <p>{compactLine(selectedSessionKey, 'No session key available.', 96)}</p>
-            </div>
-
-            <div className="remodex-controls-action-grid">
-              <button type="button" className="remodex-controls-action" onClick={() => { void handleSurfaceRefresh(); setControlsOpen(false); }}>
-                <RefreshCw size={16} strokeWidth={2.1} className={surfaceRefreshing ? 'spin' : undefined} />
-                Refresh live surface
+            <div className="remodex-controls-action-list">
+              <button type="button" className="remodex-controls-action-row" onClick={() => { void handleSurfaceRefresh(); setControlsOpen(false); }}>
+                <span className="remodex-action-row-icon"><RefreshCw size={18} strokeWidth={1.8} className={surfaceRefreshing ? 'spin' : undefined} /></span>
+                <span className="remodex-action-row-label">Refresh</span>
               </button>
-              <button type="button" className="remodex-controls-action" onClick={openDiffViewer} disabled={!reviewFiles.length}>
-                <FileDiff size={16} strokeWidth={2.1} />
-                Open diff sheet
+              <button type="button" className="remodex-controls-action-row" onClick={openDiffViewer} disabled={!reviewFiles.length}>
+                <span className="remodex-action-row-icon"><FileDiff size={18} strokeWidth={1.8} /></span>
+                <span className="remodex-action-row-label">Changes</span>
+                {reviewFiles.length ? <span className="remodex-action-row-badge">{reviewFiles.length}</span> : null}
               </button>
               <button
                 type="button"
-                className="remodex-controls-action"
+                className="remodex-controls-action-row"
                 disabled={!selectedSessionKey}
                 onClick={() => {
                   handleCopy(selectedSessionKey ?? '');
                   setControlsOpen(false);
                 }}
               >
-                <Copy size={16} strokeWidth={2.1} />
-                Copy session key
+                <span className="remodex-action-row-icon"><Copy size={18} strokeWidth={1.8} /></span>
+                <span className="remodex-action-row-label">Copy session key</span>
               </button>
-              <Link href="/" className="remodex-controls-action remodex-controls-action-link" onClick={() => setControlsOpen(false)}>
-                <Monitor size={16} strokeWidth={2.1} />
-                Open desktop review
+              <Link href="/" className="remodex-controls-action-row remodex-controls-action-link" onClick={() => setControlsOpen(false)}>
+                <span className="remodex-action-row-icon"><Monitor size={18} strokeWidth={1.8} /></span>
+                <span className="remodex-action-row-label">Open on desktop</span>
+                <ChevronRight size={16} strokeWidth={1.8} className="remodex-action-row-chevron" />
               </Link>
               {(isOpenClawSession && selectedSession?.status === 'running') || canInterruptOwnedCodex ? (
-                <button type="button" className="remodex-controls-action remodex-controls-action-danger" onClick={() => void handleStopActiveRun()}>
-                  <Square size={16} strokeWidth={2.1} />
-                  {isOwnedCodexSession ? 'Interrupt active run' : 'Stop active run'}
+                <button type="button" className="remodex-controls-action-row remodex-controls-action-row-danger" onClick={() => void handleStopActiveRun()}>
+                  <span className="remodex-action-row-icon"><Square size={18} strokeWidth={1.8} /></span>
+                  <span className="remodex-action-row-label">{isOwnedCodexSession ? 'Interrupt run' : 'Stop run'}</span>
                 </button>
               ) : null}
             </div>
 
             {sessionSwitcher.length > 1 ? (
               <div className="remodex-controls-session-list">
-                <span className="remodex-controls-label">Focus another session</span>
+                <span className="remodex-controls-label">Sessions</span>
                 <div className="remodex-controls-session-grid">
                   {sessionSwitcher.map((session) => {
                     const active = session.id === selectedSession?.id;
+                    const isLive = session.status === 'running' || session.status === 'reviewing';
                     return (
                       <button
                         key={session.id}
                         type="button"
-                        className={`remodex-controls-session-pill ${active ? 'remodex-controls-session-pill-active' : ''}`}
+                        className={`remodex-controls-session-row ${active ? 'remodex-controls-session-row-active' : ''}`}
                         onClick={() => handleSessionFocus(session.id)}
                       >
-                        <strong>{compactLine(session.isCurrentSession ? 'Q ↔ Mister live' : session.name, session.name, 28)}</strong>
-                        <span>{session.status} · {compactLine(session.lastEventAt, 'now', 20)}</span>
+                        <span className={`remodex-session-dot ${isLive ? 'remodex-session-dot-live' : ''}`} />
+                        <span className="remodex-session-row-copy">
+                          <strong>{compactLine(session.isCurrentSession ? 'Q ↔ Mister' : session.name, session.name, 32)}</strong>
+                          <span>{compactLine(session.lastEventAt, 'now', 20)}</span>
+                        </span>
+                        {active ? <span className="remodex-session-check">✓</span> : null}
                       </button>
                     );
                   })}
