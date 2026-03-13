@@ -807,6 +807,7 @@ export function MobileRemoteShell({
   const ownedLastOutcome = selectedSession?.runtimeSurface?.lifecycle?.lastOutcome;
   const ownedReviewDisposition = selectedReviewPacket?.reviewDisposition;
   const canResumeOwnedCodex = Boolean(isOwnedCodexSession && selectedSession?.runtimeSurface?.capabilities.sendInput);
+  const canInterruptOwnedCodex = Boolean(isOwnedCodexSession && selectedSession?.runtimeSurface?.capabilities.interrupt);
   const statusTone = isOwnedCodexSession
     ? ownedLifecycleTone(ownedAvailability, ownedLastOutcome)
     : contextPressureTone(contextUsedPercent);
@@ -1171,11 +1172,11 @@ export function MobileRemoteShell({
     if (!selectedSessionKey) {
       return;
     }
-    if (!isOpenClawSession) {
-      setSurfaceNote('Owned Codex is watch-first on phone right now. Interrupt stays on desktop for now.');
+    if (!isOpenClawSession && !canInterruptOwnedCodex) {
+      setSurfaceNote('There is no active mobile-stop lane for this surface right now. Owned Codex can only interrupt when an active owned run is actually in flight.');
       return;
     }
-    if (!window.confirm('Stop the active run for this session?')) {
+    if (!window.confirm(isOwnedCodexSession ? 'Interrupt the active owned Codex run?' : 'Stop the active run for this session?')) {
       return;
     }
 
@@ -1187,7 +1188,7 @@ export function MobileRemoteShell({
       setSurfaceNote(result.note);
       setControlsOpen(false);
     } catch (error) {
-      setSurfaceNote(error instanceof Error ? error.message : 'Unable to stop the active run from mobile.');
+      setSurfaceNote(error instanceof Error ? error.message : isOwnedCodexSession ? 'Unable to interrupt the owned Codex run from mobile.' : 'Unable to stop the active run from mobile.');
     }
   }
 
@@ -1343,15 +1344,17 @@ export function MobileRemoteShell({
               {selectedSession?.isCurrentSession
                 ? 'Mirroring the live Q ↔ Mister conversation, not spawning a fresh session.'
                 : isOwnedCodexSession
-                  ? canResumeOwnedCodex
-                    ? 'Owned Codex is now reviewable on phone and can accept the next bounded resume input between runs. Live interrupt still stays on desktop.'
-                    : 'Owned Codex is reviewable on phone with truthful lifecycle, review state, and exact diff context. Live interrupt still stays on desktop.'
+                  ? canInterruptOwnedCodex
+                    ? 'Owned Codex is now reviewable on phone and the active run can be interrupted from here. Between-run resume stays available when the run settles.'
+                    : canResumeOwnedCodex
+                      ? 'Owned Codex is now reviewable on phone and can accept the next bounded resume input between runs.'
+                      : 'Owned Codex is reviewable on phone with truthful lifecycle, review state, and exact diff context.'
                   : 'Mirroring the selected OpenClaw session on phone so you can steer it without dropping into desktop.'}
             </p>
             {selectedSession?.status === 'running'
               ? <span className="remodex-live-pill">Live</span>
               : isOwnedCodexSession
-                ? <span className="remodex-live-pill">{canResumeOwnedCodex ? 'Resume' : 'Watch'}</span>
+                ? <span className="remodex-live-pill">{canInterruptOwnedCodex ? 'Interrupt' : canResumeOwnedCodex ? 'Resume' : 'Watch'}</span>
                 : null}
           </div>
 
@@ -1679,17 +1682,18 @@ export function MobileRemoteShell({
                       {transcriptActionState === 'steering' ? <RefreshCw size={17} className="spin" /> : <ArrowUp size={17} strokeWidth={2.2} />}
                     </button>
                   </div>
-                  <p className="remodex-compose-helper">Phone can now review exact diff context and queue the next bounded owned resume. Interrupt still stays on desktop.</p>
+                  <p className="remodex-compose-helper">Phone can now review exact diff context and queue the next bounded owned resume. If this owned session becomes active again, interrupt reappears on phone while the run is in flight.</p>
                 </div>
               </div>
             ) : (
               <div className="remodex-compose-surface remodex-compose-surface-watch">
                 <div className="remodex-watch-card">
                   <div className="remodex-watch-copy">
-                    <strong>Review-first on phone</strong>
+                    <strong>{canInterruptOwnedCodex ? 'Active owned run on phone' : 'Review-first on phone'}</strong>
                     <p>
-                      Lifecycle, review state, grouped tail, and exact diff are live here. The next resume becomes
-                      available only after the active run settles and the owned session exposes a truthful between-runs lane.
+                      {canInterruptOwnedCodex
+                        ? 'Lifecycle, review state, grouped tail, and exact diff are live here, and you can now interrupt the active owned run from phone. The next resume opens back up once the run settles.'
+                        : 'Lifecycle, review state, grouped tail, and exact diff are live here. The next resume becomes available only after the active run settles and the owned session exposes a truthful between-runs lane.'}
                     </p>
                   </div>
                   <div className="remodex-owned-quick-actions">
@@ -1711,6 +1715,17 @@ export function MobileRemoteShell({
                       {ownedReviewDisposition === 'resolved' ? <Eye size={15} strokeWidth={2.1} /> : <Check size={15} strokeWidth={2.1} />}
                       {ownedReviewDisposition === 'resolved' ? 'Keep watching' : 'Mark resolved'}
                     </button>
+                    {canInterruptOwnedCodex ? (
+                      <button
+                        type="button"
+                        className="remodex-compose-chip remodex-compose-chip-danger"
+                        onClick={() => void handleStopActiveRun()}
+                        disabled={!selectedSessionKey || transcriptActionState !== 'idle'}
+                      >
+                        <Square size={15} strokeWidth={2.1} />
+                        Interrupt run
+                      </button>
+                    ) : null}
                   </div>
                   <div className="remodex-compose-row remodex-compose-row-watch">
                     <button
@@ -1795,10 +1810,10 @@ export function MobileRemoteShell({
                 <Monitor size={16} strokeWidth={2.1} />
                 Open desktop review
               </Link>
-              {isOpenClawSession && selectedSession?.status === 'running' ? (
+              {(isOpenClawSession && selectedSession?.status === 'running') || canInterruptOwnedCodex ? (
                 <button type="button" className="remodex-controls-action remodex-controls-action-danger" onClick={() => void handleStopActiveRun()}>
                   <Square size={16} strokeWidth={2.1} />
-                  Stop active run
+                  {isOwnedCodexSession ? 'Interrupt active run' : 'Stop active run'}
                 </button>
               ) : null}
             </div>
