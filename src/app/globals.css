@@ -2075,6 +2075,52 @@ button.workflow-file-item.workflow-file-item-active {
   text-transform: uppercase;
 }
 
+.remodex-thread-rail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.remodex-thread-pill {
+  display: grid;
+  gap: 0.18rem;
+  justify-items: start;
+  min-height: 62px;
+  padding: 0.72rem 0.82rem;
+  border-radius: 22px;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.04);
+  color: #111111;
+  text-align: left;
+}
+
+.remodex-thread-pill-active {
+  border-color: rgba(59, 130, 246, 0.2);
+  background: rgba(239, 246, 255, 0.92);
+}
+
+.remodex-thread-pill-kicker,
+.remodex-thread-pill-meta {
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.remodex-thread-pill-kicker {
+  color: rgba(17, 24, 39, 0.42);
+}
+
+.remodex-thread-pill strong {
+  font-size: 0.88rem;
+  line-height: 1.25;
+}
+
+.remodex-thread-pill-meta {
+  color: rgba(17, 24, 39, 0.56);
+}
+
 .remodex-context-card {
   display: flex;
   align-items: center;
