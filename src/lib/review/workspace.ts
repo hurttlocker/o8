@@ -21,6 +21,23 @@ function shortenPath(path: string) {
   return path.replace('/Users/marquisehurtt/', '~/');
 }
 
+// Cache changed files list for 30 seconds to avoid re-running git commands per file click
+let _cachedChangedFiles: ReviewChangedFile[] | null = null;
+let _cachedChangedFilesAt = 0;
+const CHANGED_FILES_CACHE_TTL_MS = 30_000;
+
+async function getCachedChangedFiles(): Promise<ReviewChangedFile[]> {
+  const now = Date.now();
+  if (_cachedChangedFiles && now - _cachedChangedFilesAt < CHANGED_FILES_CACHE_TTL_MS) {
+    return _cachedChangedFiles;
+  }
+  const files = await loadReviewChangedFiles();
+  const sorted = await sortChangedFilesByTouchedAt(files);
+  _cachedChangedFiles = sorted;
+  _cachedChangedFilesAt = now;
+  return sorted;
+}
+
 function parseJson<T>(raw: string, fallback: T) {
   try {
     return JSON.parse(raw) as T;
@@ -123,7 +140,8 @@ function parsePullRequestChangedFiles(raw: string) {
       status: normalizePullRequestFileStatus(file.status),
       additions: file.additions,
       deletions: file.deletions,
-    } satisfies ReviewChangedFile));
+    } satisfies ReviewChangedFile))
+    .sort((a, b) => ((b.additions ?? 0) + (b.deletions ?? 0)) - ((a.additions ?? 0) + (a.deletions ?? 0)));
 }
 
 function summarizePullRequestDiff(files: ReviewChangedFile[]) {
@@ -466,7 +484,7 @@ function parseWorktrees(raw: string) {
 }
 
 export async function getReviewFileDetail(reviewPath: string): Promise<MobileReviewFileDetail> {
-  const changedFiles = await loadReviewChangedFiles();
+  const changedFiles = await getCachedChangedFiles();
   const file = changedFiles.find((entry) => entry.path === reviewPath);
 
   if (file) {
@@ -546,7 +564,11 @@ export async function getWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapsh
     ]),
   ]);
 
-  const localChangedFiles = await sortChangedFilesByTouchedAt(parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw));
+  const parsedFiles = parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw);
+  const localChangedFiles = await sortChangedFilesByTouchedAt(parsedFiles);
+  // Refresh the cache with the latest sorted list
+  _cachedChangedFiles = localChangedFiles;
+  _cachedChangedFilesAt = Date.now();
   const recentCommits = recentCommitsRaw ? recentCommitsRaw.split('\n').filter(Boolean) : [];
   const worktrees = parseWorktrees(worktreesRaw);
 
