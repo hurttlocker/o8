@@ -1061,6 +1061,8 @@ export function MobileRemoteShell({
   }
 
   async function handleSteerSubmit(sessionKey: string) {
+    if (actionStateBySession[sessionKey] === 'steering') return;
+
     const targetSession = snapshot.sessions.find((session) => session.sessionKey === sessionKey);
     if (targetSession?.runtime !== 'openclaw') {
       setActionNoteBySession((current) => ({
@@ -1077,6 +1079,18 @@ export function MobileRemoteShell({
       return;
     }
 
+    // Optimistic: clear UI immediately before the API round-trip
+    setDraftBySession((current) => ({ ...current, [sessionKey]: '' }));
+    setDraftAttachmentsBySession((current) => ({ ...current, [sessionKey]: [] }));
+    attachments.forEach((item) => {
+      URL.revokeObjectURL(item.previewUrl);
+    });
+    setSurfaceNote(
+      attachments.length > 0
+        ? `Sent with ${attachments.length} image${attachments.length === 1 ? '' : 's'}.`
+        : 'Sent.',
+    );
+
     try {
       await runAction({
         action: 'steer',
@@ -1089,20 +1103,12 @@ export function MobileRemoteShell({
           content: item.content,
         })),
       });
-      attachments.forEach((item) => {
-        URL.revokeObjectURL(item.previewUrl);
-      });
-      setDraftBySession((current) => ({ ...current, [sessionKey]: '' }));
-      setDraftAttachmentsBySession((current) => ({ ...current, [sessionKey]: [] }));
-      setSurfaceNote(
-        attachments.length > 0
-          ? `Sent with ${attachments.length} image${attachments.length === 1 ? '' : 's'}.`
-          : 'Sent.',
-      );
     } catch (error) {
+      // Restore draft on failure so the user doesn't lose their message
+      setDraftBySession((current) => ({ ...current, [sessionKey]: message ?? '' }));
       setActionNoteBySession((current) => ({
         ...current,
-        [sessionKey]: error instanceof Error ? error.message : 'Unable to steer the session from mobile.',
+        [sessionKey]: error instanceof Error ? error.message : 'Failed to send. Message restored.',
       }));
     }
   }
@@ -1129,6 +1135,8 @@ export function MobileRemoteShell({
   }
 
   async function handleOwnedResumeSubmit(sessionKey: string) {
+    if (actionStateBySession[sessionKey] === 'steering') return;
+
     const message = draftBySession[sessionKey]?.trim();
     if (!message) {
       setActionNoteBySession((current) => ({
@@ -1149,10 +1157,10 @@ export function MobileRemoteShell({
       ...current,
       [sessionKey]: pendingTurn,
     }));
-    setActionNoteBySession((current) => ({
-      ...current,
-      [sessionKey]: 'Queuing turn…',
-    }));
+
+    // Optimistic: clear draft immediately
+    setDraftBySession((current) => ({ ...current, [sessionKey]: '' }));
+    setSurfaceNote('Turn queued.');
 
     try {
       await runAction({
@@ -1160,8 +1168,6 @@ export function MobileRemoteShell({
         sessionKey,
         message,
       });
-      setDraftBySession((current) => ({ ...current, [sessionKey]: '' }));
-      setSurfaceNote('Turn queued.');
     } catch (error) {
       setPendingOwnedTurnBySession((current) => {
         if (!current[sessionKey]) {
