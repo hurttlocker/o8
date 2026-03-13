@@ -2222,6 +2222,74 @@ button.workflow-file-item.workflow-file-item-active {
   scroll-margin-bottom: 228px;
 }
 
+/* ── Typing indicator ── */
+.remodex-typing-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  padding: 0.7rem 1rem;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.05);
+}
+
+.remodex-typing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.28);
+  animation: remodex-typing-bounce 1.4s ease-in-out infinite;
+}
+
+.remodex-typing-dot:nth-child(2) { animation-delay: 0.16s; }
+.remodex-typing-dot:nth-child(3) { animation-delay: 0.32s; }
+
+@keyframes remodex-typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.28; }
+  30% { transform: translateY(-4px); opacity: 0.8; }
+}
+
+/* ── Context pressure system message ── */
+.remodex-context-system-msg {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: rgba(17, 24, 39, 0.56);
+}
+
+.remodex-context-system-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.remodex-context-system-msg-watch {
+  background: rgba(251, 191, 36, 0.08);
+  color: #92400e;
+}
+
+.remodex-context-system-msg-watch .remodex-context-system-dot {
+  background: #f59e0b;
+}
+
+.remodex-context-system-msg-high,
+.remodex-context-system-msg-critical {
+  background: rgba(239, 68, 68, 0.06);
+  color: #991b1b;
+}
+
+.remodex-context-system-msg-high .remodex-context-system-dot,
+.remodex-context-system-msg-critical .remodex-context-system-dot {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.4);
+}
+
 .remodex-message-card {
   display: grid;
   gap: 0.6rem;
@@ -2395,9 +2463,10 @@ button.workflow-file-item.workflow-file-item-active {
   max-width: 78%;
   padding: 0.95rem 1.1rem;
   border-radius: 28px;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.05);
-  color: #111111;
+  background: rgba(37, 99, 235, 0.07);
+  border: 1px solid rgba(37, 99, 235, 0.08);
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.04);
+  color: #111827;
   font-size: 1rem;
   line-height: 1.35;
 }
