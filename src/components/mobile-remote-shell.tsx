@@ -82,8 +82,8 @@ function diffLineTone(line: string) {
 
 function contextPressureTone(usedPercent: number) {
   if (usedPercent >= 85) return 'critical';
-  if (usedPercent >= 70) return 'high';
-  if (usedPercent >= 50) return 'watch';
+  if (usedPercent >= 75) return 'high';
+  if (usedPercent >= 65) return 'watch';
   return 'calm';
 }
 
@@ -859,10 +859,10 @@ export function MobileRemoteShell({
   const headerLabel = isOwnedCodexSession
     ? (selectedSession?.runtimeSurface?.capabilities.interrupt ? 'Codex live' : selectedSession?.runtimeSurface?.capabilities.sendInput ? 'Codex chat' : 'Codex watch')
     : selectedSession?.status === 'running'
-      ? 'Live session'
+      ? 'Live'
       : snapshot.review?.pullRequest
-        ? 'Focused review'
-        : 'Focused session';
+        ? 'Review'
+        : 'Session';
   const headerProgress = Math.min(scrollY / 88, 1);
   const isHeaderCompact = headerProgress > 0.12;
   const isComposerPrimed = isOpenClawSession && (composeFocused || transcriptAttachments.length > 0);
@@ -1469,12 +1469,17 @@ export function MobileRemoteShell({
               className={`remodex-context-rail remodex-context-rail-${statusTone}`}
               aria-label={`${statusKicker} ${statusHeadline}, ${statusMeta}`}
             >
-              <span className="remodex-context-rail-label">
-                <span className="remodex-context-rail-dot" aria-hidden="true" />
-                {isOwnedCodexSession ? 'Codex' : 'Context'}
-              </span>
+              <span className="remodex-context-rail-label">{isOwnedCodexSession ? 'Codex' : 'Context'}</span>
               <strong>{statusHeadline}</strong>
               <span className="remodex-context-rail-meta">{statusMeta}</span>
+              {!isOwnedCodexSession && typeof contextUsedPercent === 'number' ? (
+                <div className="remodex-context-rail-bar" aria-hidden="true">
+                  <div
+                    className="remodex-context-rail-bar-fill"
+                    style={{ width: `${Math.min(contextUsedPercent, 100)}%` }}
+                  />
+                </div>
+              ) : null}
             </div>
           ) : null}
         </header>
