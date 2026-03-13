@@ -441,6 +441,23 @@ export function MobileRemoteShell({
   const [surfaceRefreshing, setSurfaceRefreshing] = useState(false);
   const [expandedMedia, setExpandedMedia] = useState<MobileTranscriptMedia | null>(null);
   const [scrollY, setScrollY] = useState(0);
+
+  // Lock body scroll when diff overlay is open (iOS Safari requires JS approach)
+  useEffect(() => {
+    if (!diffOpen) return;
+    const scrollPos = window.scrollY;
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollPos}px`;
+    document.body.style.width = '100%';
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.width = '';
+      window.scrollTo(0, scrollPos);
+    };
+  }, [diffOpen]);
   const [isScrolling, setIsScrolling] = useState(false);
   const [headerVisible, setHeaderVisible] = useState(true);
   const [viewportTopOffset, setViewportTopOffset] = useState(0);
@@ -2331,8 +2348,8 @@ export function MobileRemoteShell({
       ) : null}
 
       {diffOpen ? (
-        <div className="remodex-diff-overlay" role="dialog" aria-modal="true" onClick={() => setDiffOpen(false)}>
-          <section className="remodex-diff-sheet" onClick={(event) => event.stopPropagation()}>
+        <div className="remodex-diff-overlay" role="dialog" aria-modal="true" onClick={() => setDiffOpen(false)} onTouchMove={(event) => event.preventDefault()}>
+          <section className="remodex-diff-sheet" onClick={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()}>
             <div className="remodex-diff-sheet-head">
               <div className="remodex-diff-sheet-handle" />
               <h2>Changes</h2>
