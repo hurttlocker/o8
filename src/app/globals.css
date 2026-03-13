@@ -3957,6 +3957,7 @@ body:has(.remodex-diff-overlay) {
   padding: 0.3rem 0;
   color: rgba(17, 24, 39, 0.52);
   font-size: 0.82rem;
+  flex-shrink: 0;
 }
 
 .remodex-diff-meta-copy {
@@ -3985,6 +3986,7 @@ body:has(.remodex-diff-overlay) {
   border-radius: 12px;
   background: rgba(59, 130, 246, 0.06);
   border: 1px solid rgba(59, 130, 246, 0.1);
+  flex-shrink: 0;
 }
 
 .remodex-diff-commit-summary {
@@ -4001,25 +4003,24 @@ body:has(.remodex-diff-overlay) {
 }
 
 .remodex-diff-block {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+  display: block;
   padding-bottom: 0.25rem;
   border-radius: 8px;
-  overflow: hidden;
   border: 1px solid rgba(15, 23, 42, 0.08);
+  overflow-x: auto;
+  flex-shrink: 0;
 }
 
 .remodex-diff-line {
   display: grid;
-  grid-template-columns: 4px minmax(0, 1fr);
+  grid-template-columns: 4px 1fr;
   gap: 0;
   align-items: stretch;
   border-radius: 0;
-  overflow: hidden;
   background: #ffffff;
-  min-height: 22px;
+  min-height: 24px;
   border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+  flex-shrink: 0;
 }
 
 .remodex-diff-line code {
