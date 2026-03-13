@@ -312,7 +312,15 @@ function isBareDeliveryMirrorEcho(text: string) {
   return /^[a-z0-9-]+\.(png|jpe?g|gif|webp|pdf)$/i.test(text.trim());
 }
 
+const transcriptCache = new Map<string, { entries: SessionTranscriptEntry[]; timestamp: number }>();
+const TRANSCRIPT_CACHE_TTL = 3000; // 3 seconds
+
 export async function getSessionTranscript(sessionKey: string, limit = 12) {
+  const cached = transcriptCache.get(sessionKey);
+  if (cached && Date.now() - cached.timestamp < TRANSCRIPT_CACHE_TTL) {
+    return cached.entries.slice(-limit);
+  }
+
   const payload = await callGateway<GatewayChatHistoryResult>('chat.history', {
     sessionKey,
     limit: Math.min(Math.max(limit * 5, 24), 100),
@@ -366,6 +374,7 @@ export async function getSessionTranscript(sessionKey: string, limit = 12) {
     })
     .filter(Boolean) as SessionTranscriptEntry[];
 
+  transcriptCache.set(sessionKey, { entries, timestamp: Date.now() });
   return entries.slice(-limit);
 }
 
