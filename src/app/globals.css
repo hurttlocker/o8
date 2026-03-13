@@ -1,3 +1,8 @@
+html {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
 :root {
   color-scheme: light;
   --bg: #f5f7fb;
@@ -2255,6 +2260,7 @@ button.workflow-file-item.workflow-file-item-active {
   width: fit-content;
   min-width: 80px;
   margin-top: 0.5rem;
+  animation: remodex-fade-in 350ms ease-out both;
 }
 
 .remodex-typing-bubble-label {
@@ -2358,6 +2364,21 @@ button.workflow-file-item.workflow-file-item-active {
   display: grid;
   gap: 0.6rem;
   padding: 0.2rem 0;
+}
+
+.remodex-turn-new {
+  animation: remodex-fade-in 350ms ease-out both;
+}
+
+@keyframes remodex-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .remodex-owned-turn-card {

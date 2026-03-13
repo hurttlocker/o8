@@ -484,7 +484,7 @@ export function MobileRemoteShell({
       return;
     }
 
-    transcriptBottomRef.current?.scrollIntoView({ block: 'end', behavior: 'auto' });
+    transcriptBottomRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }, []);
 
   useEffect(() => {
@@ -648,6 +648,7 @@ export function MobileRemoteShell({
   const stickyReviewFilesRef = useRef<ReviewChangedFile[]>([]);
   const [waitingForResponse, setWaitingForResponse] = useState(false);
   const lastAssistantCountRef = useRef(0);
+  const seenMessageIdsRef = useRef(new Set<string>());
   const reviewFiles = useMemo(() => {
     const next = isOwnedCodexSession
       ? selectedReviewPacket?.changedFiles ?? []
@@ -1101,6 +1102,21 @@ export function MobileRemoteShell({
     // Show typing indicator until a new assistant message arrives
     lastAssistantCountRef.current = transcriptEntries.filter((e) => e.role === 'assistant').length;
     setWaitingForResponse(true);
+
+    // Optimistic: inject user message into transcript immediately
+    const optimisticEntry: MobileTranscriptEntry = {
+      id: `optimistic-${Date.now()}`,
+      role: 'user',
+      text: message ?? '',
+      media: attachments.length > 0
+        ? attachments.map((a) => ({ kind: 'image' as const, path: a.previewUrl, name: a.fileName }))
+        : undefined,
+      timestampLabel: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+    };
+    setHistoryBySession((current) => ({
+      ...current,
+      [sessionKey]: [...(current[sessionKey] ?? []), optimisticEntry],
+    }));
 
     // Optimistic: clear UI immediately before the API round-trip
     setDraftBySession((current) => ({ ...current, [sessionKey]: '' }));
@@ -1684,6 +1700,9 @@ export function MobileRemoteShell({
               const isLatest = !transcriptEntries.slice(index + 1).some((e) => e.role === 'assistant');
               const hasText = Boolean(entry.text.trim());
               const hasMedia = Boolean(entry.media?.length);
+              const isNewMessage = !seenMessageIdsRef.current.has(entry.id);
+              if (isNewMessage) seenMessageIdsRef.current.add(entry.id);
+              const fadeClass = isNewMessage ? ' remodex-turn-new' : '';
               const prevEntry = index > 0 ? transcriptEntries[index - 1] : null;
               const speakerChanged = !prevEntry || prevEntry.role !== entry.role;
               // Smart timestamps: only show if 15+ min gap from previous entry
@@ -1697,7 +1716,7 @@ export function MobileRemoteShell({
 
               if (isUser) {
                 return (
-                  <div key={entry.id} className="remodex-user-turn-wrap">
+                  <div key={entry.id} className={`remodex-user-turn-wrap${fadeClass}`}>
                     {hasText ? <div className="remodex-user-bubble">{renderMessageBody(entry.text, `${entry.id}-user`)}</div> : null}
                     {hasMedia ? renderMediaGrid(entry.media ?? [], 'right') : null}
                     {showTimestamp ? <span className="remodex-turn-time">{entry.timestampLabel ?? 'now'}</span> : null}
@@ -1720,7 +1739,7 @@ export function MobileRemoteShell({
               const agentName = isOwnedCodexSession ? 'Codex' : (selectedSession?.isCurrentSession ? 'Mister' : undefined);
 
               return (
-                <article key={entry.id} className="remodex-message-card remodex-message-card-assistant">
+                <article key={entry.id} className={`remodex-message-card remodex-message-card-assistant${fadeClass}`}>
                   {speakerChanged ? (
                     <div className="remodex-message-head">
                       <span>{roleLabel(entry.role, agentName)}</span>

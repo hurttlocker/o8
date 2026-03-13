@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
         'Content-Type': contentTypeForExtension(filePath),
         'Content-Length': String(buffer.byteLength),
         'Content-Disposition': `${disposition}; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
-        'Cache-Control': 'private, no-store, max-age=0',
+        'Cache-Control': 'private, max-age=86400, immutable',
       },
     });
   } catch {
