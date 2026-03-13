@@ -2254,6 +2254,50 @@ button.workflow-file-item.workflow-file-item-active {
 .remodex-squad-bar-high { background: #ef4444; }
 .remodex-squad-bar-critical { background: #dc2626; }
 
+/* ── Activity bar (observable agents) ── */
+.remodex-activity-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.04);
+  font-size: 0.76rem;
+  color: rgba(17, 24, 39, 0.62);
+  animation: remodex-fade-in 300ms ease-out both;
+  contain: content;
+}
+
+.remodex-activity-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #3b82f6;
+  flex-shrink: 0;
+  animation: remodex-squad-pulse 1.8s ease-in-out infinite;
+}
+
+.remodex-activity-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: rgba(17, 24, 39, 0.72);
+}
+
+.remodex-activity-file {
+  flex-shrink: 0;
+  padding: 0.12rem 0.45rem;
+  border-radius: 6px;
+  background: rgba(59, 130, 246, 0.08);
+  color: rgba(59, 130, 246, 0.8);
+  font-family: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.68rem;
+  font-weight: 500;
+}
+
 .remodex-context-card {
   display: flex;
   align-items: center;

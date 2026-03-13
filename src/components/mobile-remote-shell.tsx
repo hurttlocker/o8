@@ -1606,10 +1606,11 @@ export function MobileRemoteShell({
                 const ctxPct = Math.round(session.context?.usedPercent ?? 0);
                 const ctxTone = ctxPct >= 85 ? 'critical' : ctxPct >= 75 ? 'high' : ctxPct >= 65 ? 'watch' : 'calm';
                 const agentName = session.isCurrentSession ? 'Mister' : session.name?.split(/[\s/]/)[0] ?? 'Agent';
-                const taskLine = session.isCurrentSession
-                  ? 'Main session'
-                  : session.currentTask
-                    ? compactLine(session.currentTask, '', 32)
+                const activityLine = session.activity?.headline;
+                const taskLine = activityLine
+                  ? activityLine
+                  : session.isCurrentSession
+                    ? 'Main session'
                     : session.status;
                 return (
                   <button
@@ -1633,6 +1634,16 @@ export function MobileRemoteShell({
                   </button>
                 );
               })}
+            </div>
+          ) : null}
+
+          {selectedSession?.activity && selectedSession.status !== 'idle' ? (
+            <div className="remodex-activity-bar">
+              <span className="remodex-activity-dot" />
+              <span className="remodex-activity-label">{selectedSession.activity.headline}</span>
+              {selectedSession.activity.filePath ? (
+                <span className="remodex-activity-file">{selectedSession.activity.filePath.split('/').pop()}</span>
+              ) : null}
             </div>
           ) : null}
 
