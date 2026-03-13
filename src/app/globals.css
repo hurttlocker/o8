@@ -2231,6 +2231,11 @@ button.workflow-file-item.workflow-file-item-active {
   box-shadow: 0 12px 26px rgba(15, 23, 42, 0.06);
 }
 
+.remodex-owned-turn-card-pending {
+  border: 1px solid rgba(96, 165, 250, 0.2);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(239, 246, 255, 0.78));
+}
+
 .remodex-owned-turn-head {
   display: flex;
   align-items: flex-start;
@@ -2893,11 +2898,13 @@ button.workflow-file-item.workflow-file-item-active {
 
 .remodex-send-button {
   justify-self: end;
-  display: grid;
-  place-items: center;
-  width: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.32rem;
+  min-width: 38px;
   min-height: 38px;
-  padding: 0;
+  padding: 0 0.78rem;
   border-radius: 999px;
   border: 1px solid rgba(147, 197, 253, calc(0.28 + (var(--remodex-compose-active) * 0.12)));
   background: linear-gradient(
@@ -2906,14 +2913,21 @@ button.workflow-file-item.workflow-file-item-active {
     rgba(59, 130, 246, calc(0.94 - (var(--remodex-dock-motion-progress) * 0.08) + (var(--remodex-compose-active) * 0.06)))
   );
   color: white;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   backdrop-filter: blur(calc(4px + (var(--remodex-compose-active) * 8px)));
   box-shadow: 0 10px 20px rgba(59, 130, 246, calc(0.18 - (var(--remodex-dock-motion-progress) * 0.08) + (var(--remodex-compose-active) * 0.12)));
-  transition: border-color 220ms ease, background 220ms ease, box-shadow 220ms ease, backdrop-filter 220ms ease;
+  transition: border-color 220ms ease, background 220ms ease, box-shadow 220ms ease, backdrop-filter 220ms ease, opacity 220ms ease;
 }
 
 .remodex-send-button:disabled,
 .remodex-diff-pill:disabled {
-  opacity: 0.45;
+  opacity: 0.58;
+}
+
+.remodex-watch-copy-openclaw {
+  gap: 0.3rem;
 }
 
 .remodex-compose-helper,

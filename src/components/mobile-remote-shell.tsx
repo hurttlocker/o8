@@ -183,6 +183,11 @@ function buildOwnedCorrectionDraft(packet: RuntimeReviewPacket) {
   return lines.join('\n');
 }
 
+const mobileClockFormatter = new Intl.DateTimeFormat('en-US', {
+  hour: 'numeric',
+  minute: '2-digit',
+});
+
 function mediaHref(path: string, download = false) {
   const params = new URLSearchParams({ path });
   if (download) {
@@ -201,6 +206,13 @@ type DraftAttachment = {
   mimeType: string;
   content: string;
   previewUrl: string;
+};
+
+type PendingOwnedTurn = {
+  id: string;
+  prompt: string;
+  createdAt: number;
+  timestampLabel: string;
 };
 
 async function fileToDataUrl(file: File) {
@@ -414,6 +426,7 @@ export function MobileRemoteShell({
   const [actionStateBySession, setActionStateBySession] = useState<Record<string, 'idle' | 'steering' | 'stopping' | 'reviewing'>>({});
   const [actionNoteBySession, setActionNoteBySession] = useState<Record<string, string | null>>({});
   const [draftAttachmentsBySession, setDraftAttachmentsBySession] = useState<Record<string, DraftAttachment[]>>({});
+  const [pendingOwnedTurnBySession, setPendingOwnedTurnBySession] = useState<Record<string, PendingOwnedTurn>>({});
   const [selectedReviewFilePath, setSelectedReviewFilePath] = useState<string | null>(() => (
     initialReviewFile?.path ?? initialOwnedReviewPacket?.changedFiles[0]?.path ?? initialSnapshot.review?.changedFiles[0]?.path ?? null
   ));
@@ -754,7 +767,11 @@ export function MobileRemoteShell({
     }
 
     const ownedActive = selectedSessionKey.startsWith('codex-owned:')
-      && selectedSession?.runtimeSurface?.lifecycle?.availability === 'running';
+      && (
+        selectedSession?.runtimeSurface?.lifecycle?.availability === 'running'
+        || Boolean(pendingOwnedTurnBySession[selectedSessionKey])
+        || actionStateBySession[selectedSessionKey] === 'steering'
+      );
     const intervalMs = ownedActive
       ? 1500
       : selectedSessionKey.startsWith('codex-owned:')
@@ -779,7 +796,7 @@ export function MobileRemoteShell({
     return () => {
       window.clearInterval(timer);
     };
-  }, [diffOpen, loadHistory, loadOwnedReviewPacket, loadReviewFile, refreshInbox, selectedReviewFilePath, selectedSession?.runtimeSurface?.lifecycle?.availability, selectedSession?.status, selectedSessionKey]);
+  }, [actionStateBySession, diffOpen, loadHistory, loadOwnedReviewPacket, loadReviewFile, pendingOwnedTurnBySession, refreshInbox, selectedReviewFilePath, selectedSession?.runtimeSurface?.lifecycle?.availability, selectedSession?.status, selectedSessionKey]);
 
   const transcriptEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
   const transcriptGroups = selectedSessionKey ? historyGroupsBySession[selectedSessionKey] ?? [] : [];
@@ -787,6 +804,7 @@ export function MobileRemoteShell({
   const transcriptError = selectedSessionKey ? historyError[selectedSessionKey] ?? null : null;
   const transcriptDraft = selectedSessionKey ? draftBySession[selectedSessionKey] ?? '' : '';
   const transcriptAttachments = selectedSessionKey ? draftAttachmentsBySession[selectedSessionKey] ?? [] : [];
+  const pendingOwnedTurn = selectedSessionKey ? pendingOwnedTurnBySession[selectedSessionKey] ?? null : null;
   const transcriptActionState = selectedSessionKey ? actionStateBySession[selectedSessionKey] ?? 'idle' : 'idle';
   const transcriptActionNote = selectedSessionKey ? actionNoteBySession[selectedSessionKey] ?? null : null;
   const latestTranscriptMarker = transcriptEntries[transcriptEntries.length - 1]?.id ?? 'empty';
@@ -854,8 +872,47 @@ export function MobileRemoteShell({
   const ownedAvailability = selectedSession?.runtimeSurface?.lifecycle?.availability;
   const ownedLastOutcome = selectedSession?.runtimeSurface?.lifecycle?.lastOutcome;
   const ownedReviewDisposition = selectedReviewPacket?.reviewDisposition;
-  const canResumeOwnedCodex = Boolean(isOwnedCodexSession && selectedSession?.runtimeSurface?.capabilities.sendInput);
+  const ownedQueuedTurn = Boolean(pendingOwnedTurn) || transcriptActionState === 'steering';
+  const canResumeOwnedCodex = Boolean(isOwnedCodexSession && selectedSession?.runtimeSurface?.capabilities.sendInput && !ownedQueuedTurn);
   const canInterruptOwnedCodex = Boolean(isOwnedCodexSession && selectedSession?.runtimeSurface?.capabilities.interrupt);
+
+  useEffect(() => {
+    if (!selectedSessionKey?.startsWith('codex-owned:')) {
+      return;
+    }
+
+    const pendingTurn = pendingOwnedTurnBySession[selectedSessionKey];
+    if (!pendingTurn) {
+      return;
+    }
+
+    const sessionGroups = historyGroupsBySession[selectedSessionKey] ?? [];
+    const matchingGroup = sessionGroups.find((group) => {
+      const promptMatches = group.prompt.trim() === pendingTurn.prompt.trim();
+      const startedAt = group.startedAt ? new Date(group.startedAt).getTime() : 0;
+      return promptMatches || (startedAt > 0 && startedAt >= pendingTurn.createdAt - 1000);
+    });
+
+    const runSettledAgain = Boolean(
+      selectedSession?.runtimeSurface?.capabilities.sendInput
+      && !selectedSession?.runtimeSurface?.capabilities.interrupt
+      && transcriptActionState === 'idle',
+    );
+
+    if (!matchingGroup && !runSettledAgain) {
+      return;
+    }
+
+    setPendingOwnedTurnBySession((current) => {
+      if (!current[selectedSessionKey]) {
+        return current;
+      }
+      const next = { ...current };
+      delete next[selectedSessionKey];
+      return next;
+    });
+  }, [historyGroupsBySession, pendingOwnedTurnBySession, selectedSession?.runtimeSurface?.capabilities.interrupt, selectedSession?.runtimeSurface?.capabilities.sendInput, selectedSessionKey, transcriptActionState]);
+
   const statusTone = isOwnedCodexSession
     ? ownedLifecycleTone(ownedAvailability, ownedLastOutcome)
     : contextPressureTone(contextUsedPercent);
@@ -1074,6 +1131,22 @@ export function MobileRemoteShell({
       return;
     }
 
+    const pendingTurn: PendingOwnedTurn = {
+      id: `pending-${Date.now()}`,
+      prompt: message,
+      createdAt: Date.now(),
+      timestampLabel: mobileClockFormatter.format(new Date()),
+    };
+
+    setPendingOwnedTurnBySession((current) => ({
+      ...current,
+      [sessionKey]: pendingTurn,
+    }));
+    setActionNoteBySession((current) => ({
+      ...current,
+      [sessionKey]: 'Queuing the next Codex turn from phone…',
+    }));
+
     try {
       await runAction({
         action: 'resume',
@@ -1083,6 +1156,14 @@ export function MobileRemoteShell({
       setDraftBySession((current) => ({ ...current, [sessionKey]: '' }));
       setSurfaceNote('Queued the next Codex turn from phone.');
     } catch (error) {
+      setPendingOwnedTurnBySession((current) => {
+        if (!current[sessionKey]) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[sessionKey];
+        return next;
+      });
       setActionNoteBySession((current) => ({
         ...current,
         [sessionKey]: error instanceof Error ? error.message : 'Unable to resume the owned Codex session from mobile.',
@@ -1393,17 +1474,19 @@ export function MobileRemoteShell({
               {selectedSession?.isCurrentSession
                 ? 'Mirroring the live Q ↔ Mister conversation, not spawning a fresh session.'
                 : isOwnedCodexSession
-                  ? canInterruptOwnedCodex
-                    ? 'Owned Codex is now reviewable on phone and the active run can be interrupted from here. Between-run resume stays available when the run settles.'
-                    : canResumeOwnedCodex
-                      ? 'Owned Codex is now reviewable on phone and can accept the next bounded resume input between runs.'
-                      : 'Owned Codex is reviewable on phone with truthful lifecycle, review state, and exact diff context.'
+                  ? ownedQueuedTurn
+                    ? 'Owned Codex accepted the next bounded turn from phone. This surface should promote into active runtime watch as soon as readable output starts landing.'
+                    : canInterruptOwnedCodex
+                      ? 'Owned Codex is now reviewable on phone and the active run can be interrupted from here. Between-run resume stays available when the run settles.'
+                      : canResumeOwnedCodex
+                        ? 'Owned Codex is now reviewable on phone and can accept the next bounded resume input between runs.'
+                        : 'Owned Codex is reviewable on phone with truthful lifecycle, review state, and exact diff context.'
                   : 'Mirroring the selected OpenClaw session on phone so you can steer it without dropping into desktop.'}
             </p>
             {selectedSession?.status === 'running'
               ? <span className="remodex-live-pill">Live</span>
               : isOwnedCodexSession
-                ? <span className="remodex-live-pill">{canInterruptOwnedCodex ? 'Interrupt' : canResumeOwnedCodex ? 'Resume' : 'Watch'}</span>
+                ? <span className="remodex-live-pill">{ownedQueuedTurn ? 'Queued' : canInterruptOwnedCodex ? 'Interrupt' : canResumeOwnedCodex ? 'Resume' : 'Watch'}</span>
                 : null}
           </div>
 
@@ -1493,21 +1576,23 @@ export function MobileRemoteShell({
           {selectedReviewPacketError ? <p className="remodex-banner-note">{selectedReviewPacketError}</p> : null}
 
           <div className="remodex-message-stack">
-            {isOwnedCodexSession && transcriptGroups.length ? transcriptGroups.map((group) => {
-              const promptText = group.prompt.trim();
-              const visibleEntries = group.entries.filter((entry) => {
-                const text = entry.text.trim();
-                if (!text) {
-                  return false;
-                }
-                if (promptText && text === promptText) {
-                  return false;
-                }
-                return true;
-              });
+            {isOwnedCodexSession && (transcriptGroups.length || pendingOwnedTurn) ? (
+              <>
+                {transcriptGroups.map((group) => {
+                  const promptText = group.prompt.trim();
+                  const visibleEntries = group.entries.filter((entry) => {
+                    const text = entry.text.trim();
+                    if (!text) {
+                      return false;
+                    }
+                    if (promptText && text === promptText) {
+                      return false;
+                    }
+                    return true;
+                  });
 
-              return (
-                <article key={group.id} className="remodex-message-card remodex-message-card-assistant remodex-owned-turn-card">
+                  return (
+                    <article key={group.id} className="remodex-message-card remodex-message-card-assistant remodex-owned-turn-card">
                   <div className="remodex-owned-turn-head">
                     <div className="remodex-owned-turn-head-copy">
                       <span className="remodex-owned-turn-kicker">{group.mode === 'launch' ? 'Launch turn' : 'Reply turn'}</span>
@@ -1566,9 +1651,33 @@ export function MobileRemoteShell({
                       );
                     })}
                   </div>
-                </article>
-              );
-            }) : transcriptEntries.length ? transcriptEntries.map((entry, index) => {
+                    </article>
+                  );
+                })}
+                {pendingOwnedTurn ? (
+                  <article className="remodex-message-card remodex-message-card-assistant remodex-owned-turn-card remodex-owned-turn-card-pending">
+                    <div className="remodex-owned-turn-head">
+                      <div className="remodex-owned-turn-head-copy">
+                        <span className="remodex-owned-turn-kicker">Queued turn</span>
+                        <strong>Codex is starting this turn</strong>
+                      </div>
+                      <div className="remodex-owned-turn-chip-row">
+                        <span className="remodex-compose-chip remodex-compose-pill">resume</span>
+                        <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">queued</span>
+                      </div>
+                    </div>
+                    <div className="remodex-user-turn-wrap">
+                      <div className="remodex-user-bubble">{renderMessageBody(pendingOwnedTurn.prompt, `${pendingOwnedTurn.id}-pending-prompt`)}</div>
+                      <span className="remodex-turn-time">{pendingOwnedTurn.timestampLabel}</span>
+                    </div>
+                    <div className="remodex-owned-turn-note">
+                      <span className="remodex-owned-turn-note-kicker">Codex status</span>
+                      <p>Waiting for the owned runtime to emit the first readable turn output. Interrupt should appear here as soon as the run is truly active.</p>
+                    </div>
+                  </article>
+                ) : null}
+              </>
+            ) : transcriptEntries.length ? transcriptEntries.map((entry, index) => {
               const isUser = entry.role === 'user';
               const isLatest = index === transcriptEntries.length - 1;
               const hasText = Boolean(entry.text.trim());
@@ -1664,6 +1773,12 @@ export function MobileRemoteShell({
                   </div>
                 ) : null}
                 <div className="remodex-compose-surface">
+                  <div className="remodex-watch-copy remodex-watch-copy-openclaw">
+                    <strong>Message Mister from phone</strong>
+                    <p>
+                      This lane should let you talk to me directly from mobile. Type a message and tap send — you should not need to fall back to Telegram for normal back-and-forth.
+                    </p>
+                  </div>
                   <textarea
                     ref={composeRef}
                     className="remodex-compose-input"
@@ -1676,7 +1791,7 @@ export function MobileRemoteShell({
                     }}
                     onFocus={() => setComposeFocused(true)}
                     onBlur={() => setComposeFocused(false)}
-                    placeholder={transcriptAttachments.length ? 'Add context for the attached image' : 'Ask for follow-up changes'}
+                    placeholder={transcriptAttachments.length ? 'Add context for the attached image before sending to Mister' : 'Message Mister directly from mobile'}
                   />
                   <div className="remodex-compose-row">
                     <button
@@ -1707,14 +1822,24 @@ export function MobileRemoteShell({
                         if (!selectedSessionKey) return;
                         void handleSteerSubmit(selectedSessionKey);
                       }}
-                      aria-label="Send steer"
+                      aria-label="Send message to Mister"
                     >
-                      {transcriptActionState === 'steering' ? <RefreshCw size={17} className="spin" /> : <ArrowUp size={17} strokeWidth={2.2} />}
+                      {transcriptActionState === 'steering' ? (
+                        <>
+                          <RefreshCw size={17} className="spin" />
+                          <span>Sending</span>
+                        </>
+                      ) : (
+                        <>
+                          <ArrowUp size={17} strokeWidth={2.2} />
+                          <span>Send</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
                 {isComposerPrimed ? (
-                  <p className="remodex-compose-helper">Images only for now — this lane is wired truthfully against OpenClaw image attachments.</p>
+                  <p className="remodex-compose-helper">You can message Mister directly here. Images are supported too — the current OpenClaw lane is truthfully wired for image attachments only right now.</p>
                 ) : null}
               </>
             ) : canResumeOwnedCodex ? (
@@ -1785,7 +1910,17 @@ export function MobileRemoteShell({
                       }}
                       aria-label="Send next turn to owned Codex"
                     >
-                      {transcriptActionState === 'steering' ? <RefreshCw size={17} className="spin" /> : <ArrowUp size={17} strokeWidth={2.2} />}
+                      {transcriptActionState === 'steering' ? (
+                        <>
+                          <RefreshCw size={17} className="spin" />
+                          <span>Sending</span>
+                        </>
+                      ) : (
+                        <>
+                          <ArrowUp size={17} strokeWidth={2.2} />
+                          <span>Send</span>
+                        </>
+                      )}
                     </button>
                   </div>
                   <p className="remodex-compose-helper">Phone can now review exact diff context and send the next owned Codex turn. If this session becomes active again, interrupt reappears on phone while the run is in flight.</p>
