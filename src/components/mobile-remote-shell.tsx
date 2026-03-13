@@ -902,10 +902,25 @@ export function MobileRemoteShell({
   const scrollMarker = pendingOwnedTurn ? `${latestTranscriptMarker}:${pendingOwnedTurn.id}` : latestTranscriptMarker;
   const selectedReviewFile = selectedReviewFilePath ? reviewFileByPath[selectedReviewFilePath] : undefined;
   const threadSwitcher = useMemo(() => {
+    // Filter: only show sessions that are active/recent or currently selected
+    const isRelevant = (session: MobileInboxSnapshot['sessions'][number]) => {
+      if (session.isCurrentSession) return true;
+      if (session.id === selectedSession?.id) return true;
+      if (['running', 'reviewing', 'blocked'].includes(session.status)) return true;
+      // Filter out stale sessions — "Xh ago" with X > 4
+      const ageMatch = session.lastEventAt?.match(/^(\d+)h/);
+      if (ageMatch && parseInt(ageMatch[1], 10) > 4) return false;
+      // Keep sessions with activity or alerts
+      if (session.activity || session.alerts > 0) return true;
+      // Keep owned Codex sessions that aren't ancient
+      if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') return true;
+      return false;
+    };
+
     const candidates = [
       selectedSession,
       ...snapshot.sessions.filter((session) => session.isCurrentSession),
-      ...snapshot.sessions.filter((session) => session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned'),
+      ...snapshot.sessions.filter((session) => isRelevant(session)),
     ].filter(Boolean) as MobileInboxSnapshot['sessions'];
 
     const seen = new Set<string>();
@@ -916,7 +931,7 @@ export function MobileRemoteShell({
       }
       seen.add(session.id);
       deduped.push(session);
-      if (deduped.length >= 4) {
+      if (deduped.length >= 6) {
         break;
       }
     }
