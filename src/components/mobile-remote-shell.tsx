@@ -51,12 +51,12 @@ function pickCurrentSession(snapshot: MobileInboxSnapshot) {
     ?? snapshot.sessions[0];
 }
 
-function roleLabel(role: MobileTranscriptEntry['role']) {
+function roleLabel(role: MobileTranscriptEntry['role'], agentName?: string) {
   switch (role) {
     case 'assistant':
-      return 'Assistant';
+      return agentName ?? 'Mister';
     case 'user':
-      return 'User';
+      return 'You';
     case 'system':
       return 'System';
     case 'tool':
@@ -548,7 +548,7 @@ export function MobileRemoteShell({
       }
     };
 
-    const scheduleHeaderReveal = (delayMs = 3000) => {
+    const scheduleHeaderReveal = (delayMs = 2000) => {
       clearHeaderReveal();
       headerRevealTimerRef.current = window.setTimeout(() => {
         setHeaderVisible(true);
@@ -1495,26 +1495,6 @@ export function MobileRemoteShell({
         </header>
 
         <div className="remodex-scroll-view">
-          <div className="remodex-system-row">
-            <p className="remodex-system-line">
-              {selectedSession?.isCurrentSession
-                ? 'Mirroring the live Q ↔ Mister conversation, not spawning a fresh session.'
-                : isOwnedCodexSession
-                  ? ownedQueuedTurn
-                    ? 'Turn queued — this surface will promote into runtime watch once Codex starts.'
-                    : canInterruptOwnedCodex
-                      ? 'Active Codex run — interrupt available. Resume reappears when the run settles.'
-                      : canResumeOwnedCodex
-                        ? 'Codex is between runs — send the next turn from phone.'
-                        : 'Codex is in watch mode — review state and diff context are live.'
-                  : 'Mirroring the selected OpenClaw session on phone so you can steer it without dropping into desktop.'}
-            </p>
-            {selectedSession?.status === 'running'
-              ? <span className="remodex-live-pill">Live</span>
-              : isOwnedCodexSession
-                ? <span className="remodex-live-pill">{ownedQueuedTurn ? 'Queued' : canInterruptOwnedCodex ? 'Interrupt' : canResumeOwnedCodex ? 'Resume' : 'Watch'}</span>
-                : null}
-          </div>
 
           {threadSwitcher.length > 1 ? (
             <div className="remodex-thread-rail">
@@ -1528,21 +1508,20 @@ export function MobileRemoteShell({
                     onClick={() => handleSessionFocus(session.id)}
                   >
                     <span className="remodex-thread-pill-kicker">{threadLaneLabel(session)}</span>
-                    <strong>{compactLine(session.isCurrentSession ? 'Q ↔ Mister' : session.name, session.name, 20)}</strong>
-                    <span className="remodex-thread-pill-meta">{threadLaneState(session)}</span>
+                    <strong>{session.isCurrentSession ? 'Q ↔ Mister' : compactLine(session.name, session.name, 20)}</strong>
+                    <span className="remodex-thread-pill-meta">{threadLaneState(session)}{session.lastEventAt && !session.isCurrentSession ? ` · ${session.lastEventAt}` : ''}</span>
                   </button>
                 );
               })}
             </div>
           ) : null}
 
-          <div className={`remodex-context-card remodex-context-card-${statusTone}`}>
-            <div className="remodex-context-card-copy">
-              <span className="remodex-context-card-kicker">{statusKicker}</span>
-              <strong>{statusHeadline}</strong>
+          {statusTone !== 'calm' ? (
+            <div className={`remodex-context-system-msg remodex-context-system-msg-${statusTone}`}>
+              <span className="remodex-context-system-dot" />
+              <span>{statusHeadline} · {statusMeta}</span>
             </div>
-            <span className="remodex-context-card-trend">{statusMeta}</span>
-          </div>
+          ) : null}
 
           {isOwnedCodexSession && (selectedReviewPacket || selectedReviewPacketLoading || selectedReviewPacketError) ? (
             <div className={`remodex-owned-review-card remodex-context-card remodex-context-card-${ownedReviewDispositionTone(ownedReviewDisposition)}`}>
@@ -1708,29 +1687,36 @@ export function MobileRemoteShell({
               const isLatest = index === transcriptEntries.length - 1;
               const hasText = Boolean(entry.text.trim());
               const hasMedia = Boolean(entry.media?.length);
+              const prevEntry = index > 0 ? transcriptEntries[index - 1] : null;
+              const speakerChanged = !prevEntry || prevEntry.role !== entry.role;
+              // Smart timestamps: only show if 15+ min gap from previous entry
+              const showTimestamp = (() => {
+                if (!prevEntry?.timestampLabel || !entry.timestampLabel) return speakerChanged;
+                const prev = new Date(`1970-01-01 ${prevEntry.timestampLabel}`).getTime();
+                const curr = new Date(`1970-01-01 ${entry.timestampLabel}`).getTime();
+                if (Number.isNaN(prev) || Number.isNaN(curr)) return speakerChanged;
+                return Math.abs(curr - prev) >= 15 * 60 * 1000;
+              })();
 
               if (isUser) {
                 return (
                   <div key={entry.id} className="remodex-user-turn-wrap">
                     {hasText ? <div className="remodex-user-bubble">{renderMessageBody(entry.text, `${entry.id}-user`)}</div> : null}
                     {hasMedia ? renderMediaGrid(entry.media ?? [], 'right') : null}
-                    <span className="remodex-turn-time">{entry.timestampLabel ?? 'now'}</span>
+                    {showTimestamp ? <span className="remodex-turn-time">{entry.timestampLabel ?? 'now'}</span> : null}
                   </div>
                 );
               }
 
+              const agentName = isOwnedCodexSession ? 'Codex' : (selectedSession?.isCurrentSession ? 'Mister' : undefined);
+
               return (
                 <article key={entry.id} className="remodex-message-card remodex-message-card-assistant">
-                  <div className="remodex-message-head">
-                    <span>{roleLabel(entry.role)}</span>
-                    <div className="remodex-message-tools">
-                      {hasText ? (
-                        <button type="button" className="remodex-icon-link" onClick={() => handleCopy(entry.text)} aria-label="Copy message">
-                          <Copy size={16} strokeWidth={2.1} />
-                        </button>
-                      ) : null}
+                  {speakerChanged ? (
+                    <div className="remodex-message-head">
+                      <span>{roleLabel(entry.role, agentName)}</span>
                     </div>
-                  </div>
+                  ) : null}
                   {hasText ? renderMessageBody(entry.text, `${entry.id}-assistant`) : null}
                   {hasMedia ? renderMediaGrid(entry.media ?? []) : null}
                   {isLatest && selectedReviewFile ? (
@@ -1756,6 +1742,13 @@ export function MobileRemoteShell({
               </div>
             )}
           </div>
+          {(selectedSession?.status === 'running' || actionStateBySession[selectedSessionKey ?? ''] === 'steering') ? (
+            <div className="remodex-typing-indicator" aria-label={`${isOwnedCodexSession ? 'Codex' : 'Mister'} is thinking`}>
+              <span className="remodex-typing-dot" />
+              <span className="remodex-typing-dot" />
+              <span className="remodex-typing-dot" />
+            </div>
+          ) : null}
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
 
@@ -2062,20 +2055,9 @@ export function MobileRemoteShell({
           </div>
 
           <div className="remodex-runtime-bar">
-            <div className="remodex-runtime-chip">
-              <Monitor size={15} strokeWidth={2.1} />
-              {selectedSession?.runtime ?? snapshot.mode}
-            </div>
-            <div className="remodex-runtime-chip remodex-runtime-chip-accent">
-              <FileDiff size={15} strokeWidth={2.1} />
-              {snapshot.review ? `${reviewFiles.length} files` : 'No diff'}
-            </div>
-            <div
-              className="remodex-runtime-chip remodex-runtime-chip-quiet"
-              title={snapshot.review?.branch ?? selectedSession?.branch ?? 'main'}
-            >
-              <GitBranch size={15} strokeWidth={2.1} />
-              {compactLine(snapshot.review?.branch ?? selectedSession?.branch ?? 'main', 'main', 18)}
+            <div className="remodex-runtime-chip remodex-runtime-chip-quiet">
+              <GitBranch size={14} strokeWidth={1.8} />
+              {compactLine(snapshot.review?.branch ?? selectedSession?.branch ?? 'main', 'main', 26)}
             </div>
           </div>
         </div>
