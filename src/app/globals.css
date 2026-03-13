@@ -3201,6 +3201,20 @@ button.workflow-file-item.workflow-file-item-active {
   white-space: nowrap;
 }
 
+.remodex-runtime-pressure-calm {
+  background: transparent;
+  color: rgba(17, 24, 39, 0.36);
+}
+
+.remodex-runtime-pressure-calm .remodex-pressure-dot {
+  background: rgba(34, 197, 94, 0.6);
+}
+
+.remodex-runtime-pressure-calm .remodex-pressure-sep,
+.remodex-runtime-pressure-calm .remodex-pressure-branch {
+  color: rgba(17, 24, 39, 0.28);
+}
+
 .remodex-runtime-pressure-watch {
   background: #f59e0b;
   color: #ffffff;
