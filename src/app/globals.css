@@ -2151,6 +2151,109 @@ button.workflow-file-item.workflow-file-item-active {
   color: rgba(17, 24, 39, 0.56);
 }
 
+/* ── Squad cards ── */
+.remodex-squad-rail {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.5rem;
+}
+
+.remodex-squad-card {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.72rem 0.82rem 0.6rem;
+  border-radius: 18px;
+  border: 1.5px solid rgba(15, 23, 42, 0.06);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
+  text-align: left;
+  color: #111827;
+  transition: border-color 200ms ease, background 200ms ease, transform 120ms ease;
+  contain: content;
+}
+
+.remodex-squad-card:active {
+  transform: scale(0.97);
+}
+
+.remodex-squad-card-active {
+  border-color: rgba(239, 68, 68, 0.22);
+  background: rgba(254, 242, 242, 0.7);
+}
+
+.remodex-squad-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.remodex-squad-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  background: rgba(17, 24, 39, 0.18);
+  transition: background 300ms ease;
+}
+
+.remodex-squad-dot-live {
+  animation: remodex-squad-pulse 2s ease-in-out infinite;
+}
+
+.remodex-squad-dot-calm { background: rgba(34, 197, 94, 0.6); }
+.remodex-squad-dot-watch { background: #f59e0b; }
+.remodex-squad-dot-high { background: #ef4444; }
+.remodex-squad-dot-critical { background: #dc2626; }
+
+@keyframes remodex-squad-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.3); }
+}
+
+.remodex-squad-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remodex-squad-time {
+  font-size: 0.68rem;
+  color: rgba(17, 24, 39, 0.36);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.remodex-squad-task {
+  font-size: 0.72rem;
+  color: rgba(17, 24, 39, 0.52);
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remodex-squad-bar-track {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+.remodex-squad-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 600ms ease;
+}
+
+.remodex-squad-bar-calm { background: rgba(34, 197, 94, 0.4); }
+.remodex-squad-bar-watch { background: #f59e0b; }
+.remodex-squad-bar-high { background: #ef4444; }
+.remodex-squad-bar-critical { background: #dc2626; }
+
 .remodex-context-card {
   display: flex;
   align-items: center;
