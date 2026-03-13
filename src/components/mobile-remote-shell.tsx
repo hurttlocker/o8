@@ -1829,7 +1829,27 @@ export function MobileRemoteShell({
                     </button>
                     <button
                       type="button"
-                      className="remodex-send-button"
+                      style={(() => {
+                        const isDisabled = !selectedSessionKey || transcriptActionState !== 'idle' || (!transcriptDraft.trim() && transcriptAttachments.length === 0);
+                        return {
+                          marginLeft: 'auto',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.32rem',
+                          minWidth: 42,
+                          minHeight: 42,
+                          padding: '0 0.82rem',
+                          borderRadius: 999,
+                          border: 'none',
+                          background: isDisabled ? '#d1d5db' : '#2563eb',
+                          color: isDisabled ? '#9ca3af' : '#ffffff',
+                          fontSize: '0.84rem',
+                          fontWeight: 700,
+                          boxShadow: isDisabled ? 'none' : '0 4px 14px rgba(37, 99, 235, 0.4)',
+                          cursor: isDisabled ? 'default' : 'pointer',
+                        } satisfies CSSProperties;
+                      })()}
                       disabled={!selectedSessionKey || transcriptActionState !== 'idle' || (!transcriptDraft.trim() && transcriptAttachments.length === 0)}
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => {
@@ -1916,7 +1936,27 @@ export function MobileRemoteShell({
                     <span className="remodex-compose-chip remodex-compose-pill">{ownedReviewDispositionLabel(ownedReviewDisposition)}</span>
                     <button
                       type="button"
-                      className="remodex-send-button"
+                      style={(() => {
+                        const isDisabled = !selectedSessionKey || transcriptActionState !== 'idle' || !transcriptDraft.trim();
+                        return {
+                          marginLeft: 'auto',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.32rem',
+                          minWidth: 42,
+                          minHeight: 42,
+                          padding: '0 0.82rem',
+                          borderRadius: 999,
+                          border: 'none',
+                          background: isDisabled ? '#d1d5db' : '#2563eb',
+                          color: isDisabled ? '#9ca3af' : '#ffffff',
+                          fontSize: '0.84rem',
+                          fontWeight: 700,
+                          boxShadow: isDisabled ? 'none' : '0 4px 14px rgba(37, 99, 235, 0.4)',
+                          cursor: isDisabled ? 'default' : 'pointer',
+                        } satisfies CSSProperties;
+                      })()}
                       disabled={!selectedSessionKey || transcriptActionState !== 'idle' || !transcriptDraft.trim()}
                       onMouseDown={(event) => event.preventDefault()}
                       onClick={() => {
