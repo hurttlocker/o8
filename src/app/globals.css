@@ -2929,8 +2929,10 @@ button.workflow-file-item.workflow-file-item-active {
   opacity: 0.58;
 }
 
-.remodex-watch-copy-openclaw {
-  gap: 0.3rem;
+.remodex-compose-status-bar {
+  display: flex;
+  gap: 0.38rem;
+  align-items: center;
 }
 
 .remodex-compose-helper,

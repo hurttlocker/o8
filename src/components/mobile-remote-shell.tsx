@@ -1778,9 +1778,9 @@ export function MobileRemoteShell({
                   </div>
                 ) : null}
                 <div className="remodex-compose-surface">
-                  <div className="remodex-watch-copy remodex-watch-copy-openclaw">
-                    <strong>Message Mister</strong>
-                    <p>Send directly from mobile — no need to switch to Telegram.</p>
+                  <div className="remodex-compose-status-bar">
+                    <span className="remodex-compose-chip remodex-compose-pill">{selectedSession?.model ?? 'live'}</span>
+                    <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{selectedSession?.status ?? 'idle'}</span>
                   </div>
                   <textarea
                     ref={composeRef}
@@ -1794,7 +1794,7 @@ export function MobileRemoteShell({
                     }}
                     onFocus={() => setComposeFocused(true)}
                     onBlur={() => setComposeFocused(false)}
-                    placeholder={transcriptAttachments.length ? 'Add context for the attached image…' : 'Message Mister…'}
+                    placeholder={transcriptAttachments.length ? 'Add context for the image…' : 'Message Mister…'}
                   />
                   <div className="remodex-compose-row">
                     <button
@@ -1815,8 +1815,6 @@ export function MobileRemoteShell({
                     >
                       <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
                     </button>
-                    <span className="remodex-compose-chip remodex-compose-pill">{selectedSession?.model ?? 'live'}</span>
-                    <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{selectedSession?.status ?? 'idle'}</span>
                     <button
                       type="button"
                       className="remodex-send-button"
@@ -1841,9 +1839,6 @@ export function MobileRemoteShell({
                     </button>
                   </div>
                 </div>
-                {isComposerPrimed ? (
-                  <p className="remodex-compose-helper">Images are supported. Other file types coming soon.</p>
-                ) : null}
               </>
             ) : canResumeOwnedCodex ? (
               <div className="remodex-compose-surface remodex-compose-surface-watch">
