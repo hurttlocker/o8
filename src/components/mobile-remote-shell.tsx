@@ -548,7 +548,7 @@ export function MobileRemoteShell({
       }
     };
 
-    const scheduleHeaderReveal = (delayMs = 2000) => {
+    const scheduleHeaderReveal = (delayMs = 1250) => {
       clearHeaderReveal();
       headerRevealTimerRef.current = window.setTimeout(() => {
         setHeaderVisible(true);
@@ -933,8 +933,7 @@ export function MobileRemoteShell({
   const statusMeta = isOwnedCodexSession
     ? [ownedOutcomeLabel(ownedLastOutcome), ownedReviewDispositionLabel(ownedReviewDisposition)].join(' • ')
     : contextTrendLabel(selectedSession?.context.trend);
-  const statusKicker = isOwnedCodexSession ? 'Owned lifecycle' : 'Context pressure';
-  const showFloatingContextRail = scrollY > 180;
+
   const shellStyle = {
     '--remodex-header-progress': headerProgress.toFixed(3),
     '--remodex-dock-fade-progress': dockFadeProgress.toFixed(3),
@@ -1439,7 +1438,7 @@ export function MobileRemoteShell({
         <header
           className="remodex-topbar"
           data-compact={isHeaderCompact ? 'true' : 'false'}
-          data-context-visible={showFloatingContextRail ? 'true' : 'false'}
+          data-context-visible="false"
           data-visible={headerVisible ? 'true' : 'false'}
         >
           <button
@@ -1474,24 +1473,7 @@ export function MobileRemoteShell({
             </span>
             <SlidersHorizontal size={15} strokeWidth={2} />
           </button>
-          {showFloatingContextRail ? (
-            <div
-              className={`remodex-context-rail remodex-context-rail-${statusTone}`}
-              aria-label={`${statusKicker} ${statusHeadline}, ${statusMeta}`}
-            >
-              <span className="remodex-context-rail-label">{isOwnedCodexSession ? 'Codex' : 'Context'}</span>
-              <strong>{statusHeadline}</strong>
-              <span className="remodex-context-rail-meta">{statusMeta}</span>
-              {!isOwnedCodexSession && typeof contextUsedPercent === 'number' ? (
-                <div className="remodex-context-rail-bar" aria-hidden="true">
-                  <div
-                    className="remodex-context-rail-bar-fill"
-                    style={{ width: `${Math.min(contextUsedPercent, 100)}%` }}
-                  />
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+
         </header>
 
         <div className="remodex-scroll-view">
@@ -1708,6 +1690,18 @@ export function MobileRemoteShell({
                 );
               }
 
+              // Compaction events get a special card
+              const isCompaction = entry.role === 'system' && entry.text.toLowerCase().includes('compaction');
+              if (isCompaction) {
+                return (
+                  <div key={entry.id} className="remodex-compaction-card">
+                    <span className="remodex-compaction-icon" aria-hidden="true">⟳</span>
+                    <span className="remodex-compaction-label">Context compacted</span>
+                    {showTimestamp ? <span className="remodex-compaction-time">{entry.timestampLabel ?? ''}</span> : null}
+                  </div>
+                );
+              }
+
               const agentName = isOwnedCodexSession ? 'Codex' : (selectedSession?.isCurrentSession ? 'Mister' : undefined);
 
               return (
@@ -1742,7 +1736,7 @@ export function MobileRemoteShell({
               </div>
             )}
           </div>
-          {(selectedSession?.status === 'running' || actionStateBySession[selectedSessionKey ?? ''] === 'steering') ? (
+          {actionStateBySession[selectedSessionKey ?? ''] === 'steering' ? (
             <div className="remodex-typing-indicator" aria-label={`${isOwnedCodexSession ? 'Codex' : 'Mister'} is thinking`}>
               <span className="remodex-typing-dot" />
               <span className="remodex-typing-dot" />
