@@ -3491,7 +3491,6 @@ button.workflow-file-item.workflow-file-item-active {
   align-items: stretch;
   justify-content: center;
   overflow: hidden;
-  touch-action: none;
 }
 
 /* Prevent body scroll when diff overlay is open */
