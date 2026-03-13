@@ -1750,13 +1750,7 @@ export function MobileRemoteShell({
               </div>
             )}
           </div>
-          {(waitingForResponse || actionStateBySession[selectedSessionKey ?? ''] === 'steering') ? (
-            <div className="remodex-typing-indicator" aria-label={`${isOwnedCodexSession ? 'Codex' : 'Mister'} is thinking`}>
-              <span className="remodex-typing-dot" />
-              <span className="remodex-typing-dot" />
-              <span className="remodex-typing-dot" />
-            </div>
-          ) : null}
+
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
 
@@ -1802,7 +1796,9 @@ export function MobileRemoteShell({
                 <div className="remodex-compose-surface">
                   <div className="remodex-compose-status-bar">
                     <span className="remodex-compose-chip remodex-compose-pill">{selectedSession?.model ?? 'live'}</span>
-                    <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{selectedSession?.status ?? 'idle'}</span>
+                    <span className={`remodex-compose-chip remodex-compose-pill remodex-compose-pill-status ${waitingForResponse ? 'remodex-pill-thinking' : ''}`}>
+                      {waitingForResponse ? 'Thinking…' : (selectedSession?.status ?? 'idle')}
+                    </span>
                   </div>
                   <textarea
                     ref={composeRef}
