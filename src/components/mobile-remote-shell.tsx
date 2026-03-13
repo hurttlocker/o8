@@ -2412,6 +2412,14 @@ export function MobileRemoteShell({
                     </div>
                     <span>{`+${selectedReviewFile.additions ?? 0} / -${selectedReviewFile.deletions ?? 0}`}</span>
                   </div>
+                  {selectedReviewFile.commitSummary ? (
+                    <div className="remodex-diff-commit-card">
+                      <span className="remodex-diff-commit-summary">{selectedReviewFile.commitSummary}</span>
+                      <span className="remodex-diff-commit-meta">
+                        {selectedReviewFile.commitAuthor}{selectedReviewFile.commitAge ? ` · ${selectedReviewFile.commitAge}` : ''}
+                      </span>
+                    </div>
+                  ) : null}
                   <div className="remodex-diff-block">
                     {selectedReviewFile.preview.split('\n').map((line, index) => {
                       const tone = diffLineTone(line);
