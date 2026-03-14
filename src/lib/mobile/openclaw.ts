@@ -108,7 +108,7 @@ async function _fetchMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
   const sessions = fleet.agents
     .filter((agent) => (
       agent.runtime === 'openclaw'
-        || (agent.runtime === 'codex' && agent.runtimeSurface?.ownership === 'owned')
+        || agent.runtime === 'codex'
     ))
     .map((agent, index) => ({ agent, index }))
     .sort((left, right) => {
