@@ -33,6 +33,10 @@ import {
   Square,
   X,
 } from 'lucide-react';
+import { Renderer } from '@json-render/react';
+import { registry } from '@/lib/json-render/registry';
+import { deployApprovalSpec, decisionSpec, dashboardSpec } from '@/lib/json-render/demo-specs';
+import type { Spec } from '@json-render/core';
 import type { ReviewChangedFile, RuntimeReviewPacket } from '@/lib/fleet/types';
 import type {
   MobileActionRequest,
@@ -470,6 +474,7 @@ export function MobileRemoteShell({
   const [reviewFileError, setReviewFileError] = useState<string | null>(null);
   const [diffOpen, setDiffOpen] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState<Spec[]>([]);
   const [surfaceRefreshing, setSurfaceRefreshing] = useState(false);
   const [expandedMedia, setExpandedMedia] = useState<MobileTranscriptMedia | null>(null);
   const [scrollY, setScrollY] = useState(0);
@@ -2179,6 +2184,17 @@ export function MobileRemoteShell({
             </div>
           ) : null}
 
+          {/* ── json-render approval cards ── */}
+          {pendingApprovals.length > 0 ? (
+            <div className="remodex-approval-stack">
+              {pendingApprovals.map((spec, i) => (
+                <div key={`approval-${i}`} className="remodex-approval-card-wrap">
+                  <Renderer spec={spec} registry={registry} />
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
 
@@ -2528,6 +2544,20 @@ export function MobileRemoteShell({
               >
                 <span className="remodex-action-row-icon"><Copy size={18} strokeWidth={1.8} /></span>
                 <span className="remodex-action-row-label">Copy session key</span>
+              </button>
+              <button
+                type="button"
+                className="remodex-controls-action-row"
+                onClick={() => {
+                  setPendingApprovals((cur) =>
+                    cur.length > 0 ? [] : [deployApprovalSpec, decisionSpec, dashboardSpec],
+                  );
+                  setControlsOpen(false);
+                }}
+              >
+                <span className="remodex-action-row-icon"><SlidersHorizontal size={18} strokeWidth={1.8} /></span>
+                <span className="remodex-action-row-label">{pendingApprovals.length ? 'Hide demo approvals' : 'Show demo approvals'}</span>
+                {pendingApprovals.length ? <span className="remodex-action-row-badge">{pendingApprovals.length}</span> : null}
               </button>
               <Link href="/" className="remodex-controls-action-row remodex-controls-action-link" onClick={() => setControlsOpen(false)}>
                 <span className="remodex-action-row-icon"><Monitor size={18} strokeWidth={1.8} /></span>

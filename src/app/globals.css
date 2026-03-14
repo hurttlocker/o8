@@ -4250,3 +4250,24 @@ body:has(.remodex-diff-overlay) {
     display: grid;
   }
 }
+
+/* ── json-render approval cards ── */
+.remodex-approval-stack {
+  padding: 12px 16px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.remodex-approval-card-wrap {
+  animation: remodex-approval-slide-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+@keyframes remodex-approval-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
