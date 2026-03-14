@@ -66,15 +66,44 @@ export async function GET(request: NextRequest) {
     // Discovered Codex sessions — read JSONL tail from ~/.codex/sessions/
     if (sessionKey.startsWith('codex:')) {
       const tail = await getCodexRuntimeTail(sessionKey);
-      const payload: MobileHistoryResponse = {
-        sessionKey,
-        transcript: (tail.entries ?? []).map((entry) => ({
-          id: entry.id,
-          role: runtimeTailRole(entry.label),
-          text: entry.text,
-          timestampLabel: entry.timestampLabel,
-        })),
-      };
+      const transcript: MobileTranscriptEntry[] = [];
+      for (const entry of tail.entries ?? []) {
+        // Skip noisy system/instruction entries — only show user, assistant, and tool activity
+        if (entry.kind === 'event' && entry.label === 'Agent update') {
+          // Agent updates are assistant messages
+          transcript.push({ id: entry.id, role: 'assistant', text: entry.text, timestampLabel: entry.timestampLabel });
+          continue;
+        }
+        if (entry.kind === 'message') {
+          const role = runtimeTailRole(entry.label);
+          // Filter out system instructions (permissions, collaboration mode, AGENTS.md)
+          if (role === 'system' || role === 'user') {
+            const lowerText = entry.text.toLowerCase();
+            if (lowerText.includes('<permissions') || lowerText.includes('collaboration_mode') || lowerText.includes('# agents.md') || lowerText.includes('sandbox_mode')) continue;
+          }
+          transcript.push({ id: entry.id, role, text: entry.text, timestampLabel: entry.timestampLabel });
+          continue;
+        }
+        if (entry.kind === 'tool') {
+          // Format tool calls as system entries with clean names
+          const toolName = entry.label || 'Tool';
+          transcript.push({ id: entry.id, role: 'system', text: `🔧 ${toolName}`, timestampLabel: entry.timestampLabel });
+          continue;
+        }
+        if (entry.kind === 'tool-output') {
+          // Show compact tool output
+          transcript.push({ id: entry.id, role: 'system', text: entry.text, timestampLabel: entry.timestampLabel });
+          continue;
+        }
+      }
+      // Deduplicate consecutive assistant messages with identical text
+      const deduped: MobileTranscriptEntry[] = [];
+      for (const entry of transcript) {
+        const prev = deduped[deduped.length - 1];
+        if (prev && prev.role === 'assistant' && entry.role === 'assistant' && prev.text === entry.text) continue;
+        deduped.push(entry);
+      }
+      const payload: MobileHistoryResponse = { sessionKey, transcript: deduped };
       return NextResponse.json(payload, {
         headers: { 'Cache-Control': 'no-store, max-age=0' },
       });
