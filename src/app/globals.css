@@ -2396,6 +2396,20 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 /* ── Typing bubble ── */
+/* ── Streaming preview card ── */
+.remodex-streaming-card {
+  animation: remodex-fade-in 250ms ease-out both;
+  border-left: 3px solid #ef4444;
+  opacity: 0.92;
+}
+
+.remodex-streaming-card .remodex-message-text {
+  white-space: pre-wrap;
+  max-height: 40vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .remodex-typing-bubble {
   display: flex;
   flex-direction: column;
