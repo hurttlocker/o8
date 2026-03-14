@@ -1029,8 +1029,47 @@ export function MobileRemoteShell({
     };
   }, [actionStateBySession, diffOpen, loadHistory, loadOwnedReviewPacket, loadReviewFile, pendingOwnedTurnBySession, refreshInbox, selectedReviewFilePath, selectedSession?.runtimeSurface?.lifecycle?.availability, selectedSession?.status, selectedSessionKey, waitingForResponse]);
 
-  const transcriptEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
-  const transcriptGroups = selectedSessionKey ? historyGroupsBySession[selectedSessionKey] ?? [] : [];
+  // For discovered Codex sessions, find the linked owned session and show its history
+  // This makes the chat seamless — user sees Codex responses without knowing about the owned/discovered split
+  const linkedOwnedKey = useMemo(() => {
+    if (!selectedSession || selectedSession.runtime !== 'codex' || selectedSession.runtimeSurface?.ownership !== 'discovered') return null;
+    const cwd = selectedSession.runtimeSurface?.cwd ?? selectedSession.workspace ?? '';
+    const owned = snapshot.sessions.find((s) =>
+      s.runtime === 'codex' &&
+      s.runtimeSurface?.ownership === 'owned' &&
+      (s.runtimeSurface?.cwd === cwd || s.workspace === cwd),
+    );
+    return owned?.sessionKey ?? null;
+  }, [selectedSession, snapshot.sessions]);
+
+  // Load linked owned session history when it exists
+  useEffect(() => {
+    if (linkedOwnedKey && !historyBySession[linkedOwnedKey] && !historyLoading[linkedOwnedKey]) {
+      void loadHistory(linkedOwnedKey, true).catch(() => undefined);
+    }
+  }, [linkedOwnedKey, historyBySession, historyLoading, loadHistory]);
+
+  // Poll linked owned session too
+  useEffect(() => {
+    if (!linkedOwnedKey) return;
+    const timer = window.setInterval(() => {
+      if (!documentVisibleRef.current) return;
+      void loadHistory(linkedOwnedKey, true).catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [linkedOwnedKey, loadHistory]);
+
+  // Merge discovered + owned history for seamless display
+  const effectiveHistoryKey = linkedOwnedKey && historyBySession[linkedOwnedKey]?.length ? linkedOwnedKey : selectedSessionKey;
+  const discoveredEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
+  const ownedEntries = linkedOwnedKey ? historyBySession[linkedOwnedKey] ?? [] : [];
+  // Show discovered session's history PLUS owned session's history (which has the responses)
+  const mergedEntries = linkedOwnedKey && ownedEntries.length > 0
+    ? [...discoveredEntries, ...ownedEntries]
+    : discoveredEntries;
+
+  const transcriptEntries = mergedEntries;
+  const transcriptGroups = effectiveHistoryKey ? historyGroupsBySession[effectiveHistoryKey] ?? [] : [];
   const transcriptLoading = selectedSessionKey ? historyLoading[selectedSessionKey] ?? false : false;
   const transcriptError = selectedSessionKey ? historyError[selectedSessionKey] ?? null : null;
   const transcriptDraft = selectedSessionKey ? draftBySession[selectedSessionKey] ?? '' : '';
