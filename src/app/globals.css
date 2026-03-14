@@ -2254,6 +2254,97 @@ button.workflow-file-item.workflow-file-item-active {
 .remodex-squad-bar-high { background: #ef4444; }
 .remodex-squad-bar-critical { background: #dc2626; }
 
+/* ── Project group cards ── */
+.remodex-project-group {
+  display: contents;
+}
+
+.remodex-project-card {
+  position: relative;
+}
+
+.remodex-project-card-expanded {
+  border-color: rgba(99, 102, 241, 0.18);
+  background: rgba(238, 242, 255, 0.5);
+}
+
+.remodex-project-summary {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: rgba(17, 24, 39, 0.4);
+  letter-spacing: 0.01em;
+}
+
+.remodex-project-chevron {
+  position: absolute;
+  right: 0.6rem;
+  bottom: 0.55rem;
+  color: rgba(17, 24, 39, 0.25);
+  transition: transform 200ms ease;
+}
+
+.remodex-project-chevron-open {
+  transform: rotate(90deg);
+}
+
+.remodex-project-agents {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.4rem;
+  border-radius: 12px;
+  background: rgba(99, 102, 241, 0.03);
+  border: 1px solid rgba(99, 102, 241, 0.06);
+  animation: remodex-fade-in 200ms ease-out both;
+}
+
+/* Agent pills — compact horizontal rows inside expanded project */
+.remodex-agent-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(15, 23, 42, 0.05);
+  text-align: left;
+  color: #111827;
+  transition: background 150ms ease, transform 100ms ease;
+}
+
+.remodex-agent-pill:active {
+  transform: scale(0.98);
+  background: rgba(255, 255, 255, 1);
+}
+
+.remodex-agent-pill-active {
+  border-color: rgba(239, 68, 68, 0.2);
+  background: rgba(254, 242, 242, 0.6);
+}
+
+.remodex-agent-pill-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.remodex-agent-pill-sep {
+  font-size: 0.75rem;
+  color: rgba(17, 24, 39, 0.2);
+  flex-shrink: 0;
+}
+
+.remodex-agent-pill-status {
+  font-size: 0.72rem;
+  color: rgba(17, 24, 39, 0.45);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ── Activity bar (observable agents) ── */
 .remodex-activity-bar {
   display: flex;
@@ -4158,4 +4249,296 @@ body:has(.remodex-diff-overlay) {
   .mobile-grid {
     display: grid;
   }
+}
+
+/* ── json-render approval cards ── */
+.remodex-approval-stack {
+  padding: 12px 16px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.remodex-approval-card-wrap {
+  animation: remodex-approval-slide-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+@keyframes remodex-approval-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* ── Cost Dashboard ── */
+/* ── Cost Dashboard — Apple 8pt grid, refined spacing ── */
+.remodex-costs-view {
+  padding: 0 16px 32px;
+}
+.remodex-costs-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  color: #ef4444;
+  font-size: 15px;
+  font-weight: 400;
+  padding: 10px 0 12px;
+  cursor: pointer;
+  letter-spacing: -0.01em;
+}
+
+/* Section label above model cards */
+.remodex-costs-section-label {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+  padding: 20px 0 8px;
+  display: block;
+}
+
+/* Hero card */
+.remodex-costs-hero {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 18px 18px 16px;
+  margin-bottom: 0;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+.remodex-costs-hero-kicker {
+  font-size: 12px;
+  font-weight: 500;
+  color: #86868b;
+  letter-spacing: -0.01em;
+}
+.remodex-costs-hero-value {
+  display: block;
+  font-size: 28px;
+  font-weight: 700;
+  color: #1d1d1f;
+  line-height: 1.15;
+  margin: 4px 0 2px;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.remodex-costs-hero-sub {
+  font-size: 12px;
+  color: #86868b;
+  line-height: 1.4;
+}
+.remodex-costs-hero-bar {
+  height: 4px;
+  background: #f5f5f7;
+  border-radius: 2px;
+  margin-top: 12px;
+  overflow: hidden;
+}
+.remodex-costs-hero-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #34c759, #ff9f0a, #ff3b30);
+  border-radius: 2px;
+  transition: width 0.5s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+
+/* Model cards */
+.remodex-costs-model-card {
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 8px;
+  box-shadow: 0 0.5px 2px rgba(0,0,0,0.04);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+.remodex-costs-model-card-muted {
+  opacity: 0.65;
+}
+.remodex-costs-model-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.remodex-costs-model-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.remodex-costs-model-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1d1d1f;
+  flex: 1;
+  letter-spacing: -0.01em;
+}
+.remodex-costs-model-pct {
+  font-size: 15px;
+  font-weight: 600;
+  color: #86868b;
+  font-variant-numeric: tabular-nums;
+}
+.remodex-costs-model-bar {
+  height: 4px;
+  background: #f5f5f7;
+  border-radius: 2px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.remodex-costs-model-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.5s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+.remodex-costs-model-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: #86868b;
+  padding-bottom: 4px;
+}
+.remodex-costs-codex-note {
+  font-size: 13px;
+  color: #86868b;
+  margin: 4px 0 0;
+  line-height: 1.45;
+}
+
+/* Session rows inside model cards */
+.remodex-costs-session-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 2px;
+  background: none;
+  border: none;
+  border-top: 1px solid #f5f5f7;
+  cursor: pointer;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s;
+}
+.remodex-costs-session-row:active {
+  background: #f5f5f7;
+  border-radius: 8px;
+}
+.remodex-costs-session-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.remodex-costs-session-name {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 400;
+  color: #1d1d1f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+.remodex-costs-session-tokens {
+  font-size: 13px;
+  font-weight: 500;
+  color: #636366;
+  font-variant-numeric: tabular-nums;
+}
+.remodex-costs-session-pct {
+  font-size: 13px;
+  color: #aeaeb2;
+  min-width: 36px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Squad rail summary card — full-width above grid, Apple widget style */
+.remodex-costs-summary-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: calc(100% - 32px);
+  margin: 0 16px 12px;
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 16px 20px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  border: 1px solid rgba(0,0,0,0.06);
+  cursor: pointer;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.remodex-costs-summary-card:active {
+  transform: scale(0.98);
+  box-shadow: 0 0.5px 2px rgba(0,0,0,0.04);
+}
+.remodex-costs-summary-left {
+  flex: 1;
+  min-width: 0;
+}
+.remodex-costs-summary-kicker {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: #86868b;
+  letter-spacing: -0.01em;
+  margin-bottom: 3px;
+  white-space: nowrap;
+}
+.remodex-costs-summary-value {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 26px;
+  font-weight: 700;
+  color: #1d1d1f;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.remodex-costs-summary-unit {
+  font-size: 15px;
+  font-weight: 500;
+  color: #86868b;
+  letter-spacing: -0.01em;
+}
+.remodex-costs-summary-right {
+  flex-shrink: 0;
+}
+.remodex-costs-summary-chevron {
+  color: #c7c7cc;
+  flex-shrink: 0;
+}
+
+/* Donut ring — Apple Watch style */
+.remodex-costs-summary-ring {
+  position: relative;
+  width: 48px;
+  height: 48px;
+}
+.remodex-costs-ring-svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+.remodex-costs-ring-svg path:first-child {
+  stroke: #f5f5f7;
+}
+.remodex-costs-ring-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #1d1d1f;
+  letter-spacing: -0.02em;
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { MobileActionRequest, MobileActionResponse } from '@/lib/mobile/types';
-import { performRuntimeAction } from '@/lib/runtime/actions';
+import { launchCodexFromMobile, performRuntimeAction } from '@/lib/runtime/actions';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,6 +16,29 @@ export async function POST(request: NextRequest) {
 
   try {
     const isOwnedCodex = sessionKey.startsWith('codex-owned:');
+
+    if (action === 'launch') {
+      const cwd = payload?.cwd?.trim();
+      const message = payload?.message?.trim();
+      if (!cwd || !message) {
+        return NextResponse.json(
+          { error: 'cwd and message are required for launch' },
+          { status: 400, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+        );
+      }
+      const result = await launchCodexFromMobile(cwd, message);
+      const response: MobileActionResponse = {
+        ok: result.ok,
+        action,
+        sessionKey: result.surfaceId ?? sessionKey,
+        status: result.status,
+        note: result.note,
+      };
+      return NextResponse.json(response, {
+        status: 200,
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    }
 
     if (action === 'resume') {
       if (!isOwnedCodex) {

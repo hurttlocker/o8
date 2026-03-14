@@ -188,7 +188,9 @@ function isPidAlive(pid?: number) {
 }
 
 async function validateWorkspace(targetCwd: string) {
-  const resolved = path.resolve(targetCwd);
+  // Expand ~ to home directory (client sends ~/clawd/repos/... format)
+  const expanded = targetCwd.startsWith('~/') ? path.join(os.homedir(), targetCwd.slice(2)) : targetCwd;
+  const resolved = path.resolve(expanded);
   const real = await realpath(resolved).catch(() => resolved);
   if (!real.startsWith(path.join(os.homedir(), 'clawd'))) {
     throw new Error('Owned Codex launch is currently restricted to paths under ~/clawd.');
