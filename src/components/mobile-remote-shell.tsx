@@ -1493,13 +1493,26 @@ export function MobileRemoteShell({
     try {
       if (isDiscoveredCodex) {
         // Launch an owned Codex session in the same workspace as the discovered one
-        await runAction({
+        const launchResult = await runAction({
           action: 'launch' as MobileActionRequest['action'],
           sessionKey,
           message,
           cwd: targetSession?.runtimeSurface?.cwd ?? targetSession?.workspace ?? '',
         });
-        setSurfaceNote('Codex session launched. It will appear in the squad once it starts.');
+        // Switch to the newly created owned session so the user sees the response
+        if (launchResult?.ok && launchResult.sessionKey && launchResult.sessionKey !== sessionKey) {
+          setSurfaceNote('Codex launched — switching to live session…');
+          // Give the session a moment to appear in the inbox
+          await new Promise((r) => setTimeout(r, 2000));
+          const freshInbox = await refreshInbox();
+          const newSession = freshInbox?.sessions?.find((s: { sessionKey?: string }) => s.sessionKey === launchResult.sessionKey);
+          if (newSession) {
+            setSelectedId(newSession.id);
+            await loadHistory(launchResult.sessionKey, true).catch(() => undefined);
+          }
+        } else {
+          setSurfaceNote('Codex session launched.');
+        }
       } else {
         await runAction({
           action: 'steer',
