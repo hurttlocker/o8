@@ -52,11 +52,13 @@ function pickCurrentSession(snapshot: MobileInboxSnapshot) {
 }
 
 /**
- * Strip markdown syntax and truncate to the last ~6 readable lines for
- * the streaming preview. Shows the "live tail" of the response.
+ * Strip markdown syntax and return a very short "live tail" of the response.
+ * Apple notification style: just enough to show activity, never a wall of text.
  */
 function formatStreamingPreview(raw: string): string {
   let text = raw;
+  // Strip code blocks entirely (```...```)
+  text = text.replace(/```[\s\S]*?```/g, '');
   // Strip markdown tables (lines starting with |)
   text = text.replace(/^\|.*\|$/gm, '');
   // Strip markdown bold/italic
@@ -65,19 +67,20 @@ function formatStreamingPreview(raw: string): string {
   text = text.replace(/^#{1,4}\s+/gm, '');
   // Strip inline code backticks
   text = text.replace(/`([^`]+)`/g, '$1');
-  // Strip code block fences
-  text = text.replace(/^```[\s\S]*?```$/gm, '');
   // Strip markdown links [text](url) → text
   text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
-  // Strip horizontal rules
+  // Strip horizontal rules, bullet points
   text = text.replace(/^[-*_]{3,}$/gm, '');
-  // Collapse multiple newlines
-  text = text.replace(/\n{3,}/g, '\n\n').trim();
+  text = text.replace(/^[-*]\s+/gm, '');
+  // Collapse whitespace
+  text = text.replace(/\n{2,}/g, '\n').trim();
 
-  // Take the last ~6 non-empty lines (the "live tail")
+  // Take ONLY the last 2 non-empty lines, each capped at 80 chars
   const lines = text.split('\n').filter((l) => l.trim());
-  const tail = lines.slice(-6).join('\n');
-  return tail || text.slice(-300);
+  const tail = lines.slice(-2).map((l) => l.length > 80 ? l.slice(0, 77) + '…' : l);
+  const result = tail.join('\n');
+  // Hard cap at 160 chars total
+  return result.length > 160 ? result.slice(0, 157) + '…' : result;
 }
 
 function roleLabel(role: MobileTranscriptEntry['role'], agentName?: string) {
@@ -2063,7 +2066,7 @@ export function MobileRemoteShell({
                   <span className="remodex-typing-dot" />
                 </div>
               </div>
-              <div className="remodex-streaming-preview">{formatStreamingPreview(streamingText)}</div>
+              <div className="remodex-streaming-preview" style={{ maxHeight: 60, overflow: 'hidden', fontSize: '0.85rem', lineHeight: 1.4, color: '#475569' }}>{formatStreamingPreview(streamingText)}</div>
             </article>
           ) : (waitingForResponse || actionStateBySession[selectedSessionKey ?? ''] === 'steering') ? (
             <div className="remodex-typing-bubble">
