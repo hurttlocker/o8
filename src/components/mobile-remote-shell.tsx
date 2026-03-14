@@ -1441,8 +1441,9 @@ export function MobileRemoteShell({
     if (actionStateBySession[sessionKey] === 'steering') return;
 
     const targetSession = snapshot.sessions.find((session) => session.sessionKey === sessionKey);
-    // Allow steering both OpenClaw sessions and discovered Codex sessions
-    if (targetSession?.runtime !== 'openclaw' && !(targetSession?.runtime === 'codex' && targetSession?.runtimeSurface?.ownership === 'discovered')) {
+    const isDiscoveredCodex = targetSession?.runtime === 'codex' && targetSession?.runtimeSurface?.ownership === 'discovered';
+    const isChat = targetSession?.runtime === 'openclaw' || isDiscoveredCodex;
+    if (!isChat) {
       setActionNoteBySession((current) => ({
         ...current,
         [sessionKey]: 'Use the Codex resume lane for owned Codex sessions.',
@@ -1491,17 +1492,28 @@ export function MobileRemoteShell({
     );
 
     try {
-      await runAction({
-        action: 'steer',
-        sessionKey,
-        message,
-        attachments: attachments.map((item) => ({
-          type: 'image',
-          mimeType: item.mimeType,
-          fileName: item.fileName,
-          content: item.content,
-        })),
-      });
+      if (isDiscoveredCodex) {
+        // Launch an owned Codex session in the same workspace as the discovered one
+        await runAction({
+          action: 'launch' as MobileActionRequest['action'],
+          sessionKey,
+          message,
+          cwd: targetSession?.runtimeSurface?.cwd ?? targetSession?.workspace ?? '',
+        });
+        setSurfaceNote('Codex session launched. It will appear in the squad once it starts.');
+      } else {
+        await runAction({
+          action: 'steer',
+          sessionKey,
+          message,
+          attachments: attachments.map((item) => ({
+            type: 'image',
+            mimeType: item.mimeType,
+            fileName: item.fileName,
+            content: item.content,
+          })),
+        });
+      }
     } catch (error) {
       // Restore draft on failure so the user doesn't lose their message
       setDraftBySession((current) => ({ ...current, [sessionKey]: message ?? '' }));
