@@ -701,7 +701,7 @@ export function MobileRemoteShell({
   const selectedSessionKey = selectedSession?.sessionKey;
   const isOpenClawSession = selectedSession?.runtime === 'openclaw';
   // Discovered Codex sessions use the same chat UI as OpenClaw sessions
-  const isChatSession = isOpenClawSession || (selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'discovered');
+  const isChatSession = isOpenClawSession || selectedSession?.runtime === 'codex';
   const isOwnedCodexSession = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'owned';
   const selectedReviewPacket = selectedSessionKey && isOwnedCodexSession ? reviewPacketBySession[selectedSessionKey] ?? null : null;
   const selectedReviewPacketLoading = selectedSessionKey && isOwnedCodexSession ? reviewPacketLoadingBySession[selectedSessionKey] ?? false : false;
@@ -1492,11 +1492,12 @@ export function MobileRemoteShell({
 
     const targetSession = snapshot.sessions.find((session) => session.sessionKey === sessionKey);
     const isDiscoveredCodex = targetSession?.runtime === 'codex' && targetSession?.runtimeSurface?.ownership === 'discovered';
-    const isChat = targetSession?.runtime === 'openclaw' || isDiscoveredCodex;
+    const isOwnedCodex = targetSession?.runtime === 'codex' && targetSession?.runtimeSurface?.ownership === 'owned';
+    const isChat = targetSession?.runtime === 'openclaw' || isDiscoveredCodex || isOwnedCodex;
     if (!isChat) {
       setActionNoteBySession((current) => ({
         ...current,
-        [sessionKey]: 'Use the Codex resume lane for owned Codex sessions.',
+        [sessionKey]: 'Cannot send to this session type.',
       }));
       return;
     }
@@ -1587,6 +1588,14 @@ export function MobileRemoteShell({
             setSurfaceNote('Codex session launched.');
           }
         }
+      } else if (isOwnedCodex) {
+        // Owned Codex: resume the session directly
+        await runAction({
+          action: 'resume' as MobileActionRequest['action'],
+          sessionKey,
+          message,
+        });
+        setSurfaceNote('Sent to Codex…');
       } else {
         await runAction({
           action: 'steer',
@@ -2057,57 +2066,7 @@ export function MobileRemoteShell({
             </div>
           ) : null}
 
-          {isOwnedCodexSession && (selectedReviewPacket || selectedReviewPacketLoading || selectedReviewPacketError) ? (
-            <div className={`remodex-owned-review-card remodex-context-card remodex-context-card-${ownedReviewDispositionTone(ownedReviewDisposition)}`}>
-              <div className="remodex-owned-review-head">
-                <div className="remodex-context-card-copy">
-                  <span className="remodex-context-card-kicker">Review packet</span>
-                  <strong>{ownedReviewDispositionLabel(ownedReviewDisposition)}</strong>
-                </div>
-                <span className="remodex-context-card-trend">
-                  {selectedReviewPacket?.reviewDispositionUpdatedAtLabel
-                    ? `Updated ${selectedReviewPacket.reviewDispositionUpdatedAtLabel}`
-                    : selectedReviewPacketLoading
-                      ? 'Loading…'
-                      : `${reviewFiles.length} file${reviewFiles.length === 1 ? '' : 's'}`}
-                </span>
-              </div>
-              {selectedReviewPacket ? (
-                <>
-                  <p className="remodex-owned-review-copy">{selectedReviewPacket.summary}</p>
-                  <div className="remodex-owned-review-actions">
-                    <button
-                      type="button"
-                      className="remodex-controls-action"
-                      onClick={() => openDiffViewer()}
-                      disabled={!reviewFiles.length}
-                    >
-                      <FileDiff size={16} strokeWidth={2.1} />
-                      Open exact diff
-                    </button>
-                    <button
-                      type="button"
-                      className="remodex-controls-action"
-                      onClick={() => selectedSessionKey && handleLoadOwnedCorrectionDraft(selectedSessionKey)}
-                      disabled={!selectedSessionKey || !canResumeOwnedCodex}
-                    >
-                      <ArrowUp size={16} strokeWidth={2.1} />
-                      Draft reply
-                    </button>
-                    <button
-                      type="button"
-                      className="remodex-controls-action"
-                      onClick={() => selectedSessionKey && void handleOwnedReviewDisposition(selectedReviewPacket.reviewDisposition === 'resolved' ? 'watch' : 'resolve', selectedSessionKey)}
-                      disabled={!selectedSessionKey || transcriptActionState !== 'idle'}
-                    >
-                      {selectedReviewPacket.reviewDisposition === 'resolved' ? <Eye size={16} strokeWidth={2.1} /> : <Check size={16} strokeWidth={2.1} />}
-                      {selectedReviewPacket.reviewDisposition === 'resolved' ? 'Keep watching' : 'Mark resolved'}
-                    </button>
-                  </div>
-                </>
-              ) : null}
-            </div>
-          ) : null}
+          {/* Review packet kept but collapsed for owned Codex — available via diff viewer */}
 
           {refreshError ? <p className="remodex-banner-note">{refreshError}</p> : null}
           {surfaceNote ? <p className="remodex-banner-note">{surfaceNote}</p> : null}
@@ -2115,108 +2074,7 @@ export function MobileRemoteShell({
           {selectedReviewPacketError ? <p className="remodex-banner-note">{selectedReviewPacketError}</p> : null}
 
           <div className="remodex-message-stack">
-            {isOwnedCodexSession && (transcriptGroups.length || pendingOwnedTurn) ? (
-              <>
-                {transcriptGroups.map((group) => {
-                  const promptText = group.prompt.trim();
-                  const visibleEntries = group.entries.filter((entry) => {
-                    const text = entry.text.trim();
-                    if (!text) {
-                      return false;
-                    }
-                    if (promptText && text === promptText) {
-                      return false;
-                    }
-                    return true;
-                  });
-
-                  return (
-                    <article key={group.id} className="remodex-message-card remodex-message-card-assistant remodex-owned-turn-card">
-                  <div className="remodex-owned-turn-head">
-                    <div className="remodex-owned-turn-head-copy">
-                      <span className="remodex-owned-turn-kicker">{group.mode === 'launch' ? 'Launch turn' : 'Reply turn'}</span>
-                      <strong>{group.title}</strong>
-                    </div>
-                    <div className="remodex-owned-turn-chip-row">
-                      <span className="remodex-compose-chip remodex-compose-pill">{group.mode}</span>
-                      <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{group.outcome}</span>
-                    </div>
-                  </div>
-
-                  {promptText ? (
-                    <div className="remodex-user-turn-wrap">
-                      <div className="remodex-user-bubble">{renderMessageBody(promptText, `${group.id}-prompt`)}</div>
-                      <span className="remodex-turn-time">{group.startedAtLabel ?? 'now'}</span>
-                    </div>
-                  ) : null}
-
-                  <div className="remodex-owned-turn-note">
-                    <span className="remodex-owned-turn-note-kicker">Codex status</span>
-                    <p>{group.summary}</p>
-                  </div>
-
-                  <div className="remodex-owned-chat-list">
-                    {visibleEntries.map((entry) => {
-                      const hasText = Boolean(entry.text.trim());
-                      if (!hasText) {
-                        return null;
-                      }
-
-                      if (entry.role === 'user') {
-                        return (
-                          <div key={entry.id} className="remodex-user-turn-wrap">
-                            <div className="remodex-user-bubble">{renderMessageBody(entry.text, `${entry.id}-user`)}</div>
-                            <span className="remodex-turn-time">{entry.timestampLabel ?? group.finishedAtLabel ?? group.startedAtLabel ?? 'now'}</span>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <article
-                          key={entry.id}
-                          className={`remodex-message-card remodex-message-card-assistant remodex-owned-chat-bubble ${entry.role !== 'assistant' ? 'remodex-owned-chat-bubble-muted' : ''}`}
-                        >
-                          <div className="remodex-message-head">
-                            <span>{entry.role === 'assistant' ? 'Codex' : roleLabel(entry.role)}</span>
-                            <div className="remodex-message-tools">
-                              <span className="remodex-turn-time">{entry.timestampLabel ?? group.finishedAtLabel ?? group.startedAtLabel ?? 'now'}</span>
-                              <button type="button" className="remodex-icon-link" onClick={() => handleCopy(entry.text)} aria-label="Copy message">
-                                <Copy size={16} strokeWidth={2.1} />
-                              </button>
-                            </div>
-                          </div>
-                          {renderMessageBody(entry.text, `${entry.id}-owned`)}
-                        </article>
-                      );
-                    })}
-                  </div>
-                    </article>
-                  );
-                })}
-                {pendingOwnedTurn ? (
-                  <article className="remodex-message-card remodex-message-card-assistant remodex-owned-turn-card remodex-owned-turn-card-pending">
-                    <div className="remodex-owned-turn-head">
-                      <div className="remodex-owned-turn-head-copy">
-                        <span className="remodex-owned-turn-kicker">Queued turn</span>
-                        <strong>Codex is starting this turn</strong>
-                      </div>
-                      <div className="remodex-owned-turn-chip-row">
-                        <span className="remodex-compose-chip remodex-compose-pill">resume</span>
-                        <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">queued</span>
-                      </div>
-                    </div>
-                    <div className="remodex-user-turn-wrap">
-                      <div className="remodex-user-bubble">{renderMessageBody(pendingOwnedTurn.prompt, `${pendingOwnedTurn.id}-pending-prompt`)}</div>
-                      <span className="remodex-turn-time">{pendingOwnedTurn.timestampLabel}</span>
-                    </div>
-                    <div className="remodex-owned-turn-note">
-                      <span className="remodex-owned-turn-note-kicker">Codex status</span>
-                      <p>Starting up — interrupt will appear once the run is active.</p>
-                    </div>
-                  </article>
-                ) : null}
-              </>
-            ) : transcriptEntries.length ? transcriptEntries.map((entry, index) => {
+            {transcriptEntries.length ? transcriptEntries.map((entry, index) => {
               const isUser = entry.role === 'user';
               const isLatest = !transcriptEntries.slice(index + 1).some((e) => e.role === 'assistant');
               const hasText = Boolean(entry.text.trim());
