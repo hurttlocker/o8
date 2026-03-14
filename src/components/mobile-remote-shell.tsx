@@ -1109,19 +1109,7 @@ export function MobileRemoteShell({
       if (session.isCurrentSession) return true;
       if (session.id === selectedSession?.id) return true;
 
-      // Codex sessions: show if they have a live process or recent activity.
-      // Filter out dead registry entries and persisted-only history.
-      if (session.runtime === 'codex') {
-        const src = session.runtimeSurface?.sourceLabel ?? '';
-        // "live pid" = running process, "recent session history" = just used
-        if (src.includes('live pid') || src.includes('recent session')) return true;
-        // "persisted session history" or "ready for resume" = dead/old
-        if (src.includes('persisted') || src.includes('ready for resume')) return false;
-        // Unknown source — show it
-        return true;
-      }
-
-      // OpenClaw sessions: filter stale ones (automation, old surfaces)
+      // Parse age once — used by both Codex and OpenClaw filters
       const ageText = session.lastEventAt ?? '';
       const hoursMatch = ageText.match(/^(\d+)h/);
       const daysMatch = ageText.match(/^(\d+)d/);
@@ -1129,6 +1117,17 @@ export function MobileRemoteShell({
         : hoursMatch ? parseInt(hoursMatch[1], 10)
         : 0;
       const isStale = ageHours > 4;
+
+      // Codex sessions:
+      // - "discovered" = user opened from terminal → always show
+      // - "owned" = IDE/OpenClaw opened programmatically → filter if stale
+      if (session.runtime === 'codex') {
+        if (session.runtimeSurface?.ownership !== 'owned') return true;
+        if (isStale) return false;
+        return true;
+      }
+
+      // OpenClaw sessions: filter stale ones
       if (isStale) return false;
 
       if (['running', 'reviewing', 'blocked'].includes(session.status)) return true;
