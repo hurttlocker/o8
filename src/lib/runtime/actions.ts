@@ -107,11 +107,29 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
       );
     }
     case 'codex': {
+      // Discovered Codex sessions (user-launched from terminal) can be steered
+      // via the OpenClaw gateway's sessions_send, same as OpenClaw sessions.
       if (runtimeSurface.ownership !== 'owned') {
+        if (payload.action === 'steer') {
+          const message = payload.message?.trim();
+          if (!message) {
+            throw new Error('message is required to steer a Codex session');
+          }
+          const result = await steerOpenClawSession(agent.sessionKey, message, []);
+          return {
+            ok: true,
+            action: payload.action,
+            surfaceId: runtimeSurface.id,
+            runtime: agent.runtime,
+            status: 'queued',
+            note: 'Sent.',
+            runId: result.runId,
+          };
+        }
         return unavailable(
           agent,
           payload.action,
-          'This Codex surface was discovered from local runtime history, not launched or owned by Cortex IDE. Read-tail is truthful; input and interrupt stay disabled until we can prove an owned-session seam.',
+          'This Codex surface was discovered from local runtime history. Only steer (send message) is supported right now.',
         );
       }
 
