@@ -30,6 +30,7 @@ import {
   Plus,
   RefreshCw,
   SlidersHorizontal,
+  Sparkles,
   Square,
   X,
 } from 'lucide-react';
@@ -475,6 +476,8 @@ export function MobileRemoteShell({
   const [controlsOpen, setControlsOpen] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [resolvedApprovals, setResolvedApprovals] = useState<Record<string, 'approved' | 'rejected'>>({});
+  const [enhancing, setEnhancing] = useState(false);
+  const [preEnhanceDraft, setPreEnhanceDraft] = useState<string | null>(null);
   const [surfaceRefreshing, setSurfaceRefreshing] = useState(false);
   const [expandedMedia, setExpandedMedia] = useState<MobileTranscriptMedia | null>(null);
   const [scrollY, setScrollY] = useState(0);
@@ -1492,6 +1495,38 @@ export function MobileRemoteShell({
     } catch { /* audio not available */ }
   }
 
+  async function handleEnhancePrompt() {
+    if (!selectedSessionKey || enhancing) return;
+    const raw = draftBySession[selectedSessionKey]?.trim();
+    if (!raw || raw.length < 3) return;
+
+    setEnhancing(true);
+    setPreEnhanceDraft(raw);
+    try {
+      const res = await fetch('/api/mobile/enhance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: raw }),
+      });
+      if (!res.ok) throw new Error('enhance failed');
+      const { enhanced } = await res.json();
+      if (enhanced && typeof enhanced === 'string') {
+        setDraftBySession((cur) => ({ ...cur, [selectedSessionKey]: enhanced }));
+      }
+    } catch {
+      setSurfaceNote('Enhancement failed — original prompt kept');
+      setPreEnhanceDraft(null);
+    } finally {
+      setEnhancing(false);
+    }
+  }
+
+  function handleUndoEnhance() {
+    if (!selectedSessionKey || preEnhanceDraft === null) return;
+    setDraftBySession((cur) => ({ ...cur, [selectedSessionKey]: preEnhanceDraft }));
+    setPreEnhanceDraft(null);
+  }
+
   async function handleSteerSubmit(sessionKey: string) {
     if (actionStateBySession[sessionKey] === 'steering') return;
 
@@ -1538,6 +1573,7 @@ export function MobileRemoteShell({
     // Optimistic: clear UI immediately before the API round-trip
     setDraftBySession((current) => ({ ...current, [sessionKey]: '' }));
     setDraftAttachmentsBySession((current) => ({ ...current, [sessionKey]: [] }));
+    setPreEnhanceDraft(null);
     attachments.forEach((item) => {
       URL.revokeObjectURL(item.previewUrl);
     });
@@ -2582,6 +2618,31 @@ export function MobileRemoteShell({
                     >
                       <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
                     </button>
+                    {/* ✨ Enhance prompt button */}
+                    {transcriptDraft.trim().length >= 3 ? (
+                      preEnhanceDraft !== null ? (
+                        <button
+                          type="button"
+                          className="remodex-compose-chip remodex-compose-chip-icon"
+                          aria-label="Undo enhancement"
+                          onClick={handleUndoEnhance}
+                          style={{ color: '#ef4444', fontSize: 13, fontWeight: 600, minWidth: 42, minHeight: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(239,68,68,0.08)', borderRadius: 999, border: 'none', cursor: 'pointer' }}
+                        >
+                          Undo
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="remodex-compose-chip remodex-compose-chip-icon"
+                          aria-label="Enhance prompt"
+                          disabled={enhancing}
+                          onClick={() => void handleEnhancePrompt()}
+                          style={{ minWidth: 42, minHeight: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: enhancing ? 'default' : 'pointer', color: enhancing ? '#d1d5db' : '#ff9f0a' }}
+                        >
+                          <Sparkles size={18} strokeWidth={2} className={enhancing ? 'spin' : undefined} />
+                        </button>
+                      )
+                    ) : null}
                     <button
                       type="button"
                       style={(() => {
