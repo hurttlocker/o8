@@ -1109,7 +1109,11 @@ export function MobileRemoteShell({
       if (session.isCurrentSession) return true;
       if (session.id === selectedSession?.id) return true;
 
-      // Parse age from lastEventAt (e.g. "4h ago", "1d ago", "2m ago")
+      // Codex sessions: always show — they represent real work in repos.
+      // Group them by project; even old sessions show the repo had agent work.
+      if (session.runtime === 'codex') return true;
+
+      // OpenClaw sessions: filter stale ones (automation, old surfaces)
       const ageText = session.lastEventAt ?? '';
       const hoursMatch = ageText.match(/^(\d+)h/);
       const daysMatch = ageText.match(/^(\d+)d/);
@@ -1117,14 +1121,10 @@ export function MobileRemoteShell({
         : hoursMatch ? parseInt(hoursMatch[1], 10)
         : 0;
       const isStale = ageHours > 4;
-
-      // Stale sessions get dropped regardless of status
-      // (dead Codex processes still report "reviewing"/"waiting")
       if (isStale) return false;
 
       if (['running', 'reviewing', 'blocked'].includes(session.status)) return true;
       if (session.activity || session.alerts > 0) return true;
-      if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') return true;
       return false;
     };
 
@@ -1138,7 +1138,18 @@ export function MobileRemoteShell({
     }
 
     const groups: ProjectGroup[] = [];
-    for (const [ws, sessions] of groupMap) {
+    for (const [ws, rawSessions] of groupMap) {
+      // Deduplicate Codex sessions: keep only the most recent per branch
+      const deduped: typeof rawSessions = [];
+      const seenBranches = new Set<string>();
+      for (const s of rawSessions) {
+        if (s.runtime === 'codex' && s.branch) {
+          if (seenBranches.has(s.branch)) continue;
+          seenBranches.add(s.branch);
+        }
+        deduped.push(s);
+      }
+      const sessions = deduped;
       const running = sessions.some((s) => s.status === 'running' || s.status === 'reviewing');
       const bestCtx = Math.max(...sessions.map((s) => s.context?.usedPercent ?? 0));
       let mostRecentTime: string | undefined;
@@ -1892,7 +1903,11 @@ export function MobileRemoteShell({
                           const isRunning = session.status === 'running' || session.status === 'reviewing';
                           const sCtxTone = (() => { const p = Math.round(session.context?.usedPercent ?? 0); return p >= 85 ? 'critical' : p >= 75 ? 'high' : p >= 65 ? 'watch' : 'calm'; })();
                           const name = agentDisplayName(session);
-                          const statusLabel = session.activity?.headline ?? session.status;
+                          // For Codex: show branch name. For OpenClaw: show activity/status.
+                          const branchShort = session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '') ?? '';
+                          const statusLabel = session.runtime === 'codex' && branchShort
+                            ? branchShort
+                            : (session.activity?.headline ?? session.status);
                           return (
                             <button
                               key={session.id}
