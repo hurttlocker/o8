@@ -1108,9 +1108,21 @@ export function MobileRemoteShell({
     const isRelevant = (session: MobileInboxSnapshot['sessions'][number]) => {
       if (session.isCurrentSession) return true;
       if (session.id === selectedSession?.id) return true;
+
+      // Parse age from lastEventAt (e.g. "4h ago", "1d ago", "2m ago")
+      const ageText = session.lastEventAt ?? '';
+      const hoursMatch = ageText.match(/^(\d+)h/);
+      const daysMatch = ageText.match(/^(\d+)d/);
+      const ageHours = daysMatch ? parseInt(daysMatch[1], 10) * 24
+        : hoursMatch ? parseInt(hoursMatch[1], 10)
+        : 0;
+      const isStale = ageHours > 4;
+
+      // Stale sessions get dropped regardless of status
+      // (dead Codex processes still report "reviewing"/"waiting")
+      if (isStale) return false;
+
       if (['running', 'reviewing', 'blocked'].includes(session.status)) return true;
-      const ageMatch = session.lastEventAt?.match(/^(\d+)h/);
-      if (ageMatch && parseInt(ageMatch[1], 10) > 4) return false;
       if (session.activity || session.alerts > 0) return true;
       if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') return true;
       return false;
