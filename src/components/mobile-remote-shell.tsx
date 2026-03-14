@@ -1109,9 +1109,17 @@ export function MobileRemoteShell({
       if (session.isCurrentSession) return true;
       if (session.id === selectedSession?.id) return true;
 
-      // Codex sessions: always show — they represent real work in repos.
-      // Group them by project; even old sessions show the repo had agent work.
-      if (session.runtime === 'codex') return true;
+      // Codex sessions: show if they have a live process or recent activity.
+      // Filter out dead registry entries and persisted-only history.
+      if (session.runtime === 'codex') {
+        const src = session.runtimeSurface?.sourceLabel ?? '';
+        // "live pid" = running process, "recent session history" = just used
+        if (src.includes('live pid') || src.includes('recent session')) return true;
+        // "persisted session history" or "ready for resume" = dead/old
+        if (src.includes('persisted') || src.includes('ready for resume')) return false;
+        // Unknown source — show it
+        return true;
+      }
 
       // OpenClaw sessions: filter stale ones (automation, old surfaces)
       const ageText = session.lastEventAt ?? '';
@@ -1211,11 +1219,13 @@ export function MobileRemoteShell({
   );
   const headerLabel = isOwnedCodexSession
     ? (selectedSession?.runtimeSurface?.capabilities.interrupt ? 'Codex live' : selectedSession?.runtimeSurface?.capabilities.sendInput ? 'Codex chat' : 'Codex watch')
-    : selectedSession?.status === 'running'
-      ? 'Live'
-      : snapshot.review?.pullRequest
-        ? 'Review'
-        : 'Session';
+    : selectedSession?.runtime === 'codex'
+      ? 'Codex'
+      : selectedSession?.status === 'running'
+        ? 'Live'
+        : snapshot.review?.pullRequest
+          ? 'Review'
+          : 'Session';
   const headerProgress = Math.min(scrollY / 88, 1);
   const isHeaderCompact = headerProgress > 0.12;
   const isComposerPrimed = isOpenClawSession && (composeFocused || transcriptAttachments.length > 0);
@@ -1430,10 +1440,11 @@ export function MobileRemoteShell({
     if (actionStateBySession[sessionKey] === 'steering') return;
 
     const targetSession = snapshot.sessions.find((session) => session.sessionKey === sessionKey);
-    if (targetSession?.runtime !== 'openclaw') {
+    // Allow steering both OpenClaw sessions and discovered Codex sessions
+    if (targetSession?.runtime !== 'openclaw' && !(targetSession?.runtime === 'codex' && targetSession?.runtimeSurface?.ownership === 'discovered')) {
       setActionNoteBySession((current) => ({
         ...current,
-        [sessionKey]: 'Use the Codex resume lane instead — steer is for the Mister lane only.',
+        [sessionKey]: 'Use the Codex resume lane for owned Codex sessions.',
       }));
       return;
     }
@@ -2191,7 +2202,7 @@ export function MobileRemoteShell({
           {streamingText ? (
             <article className="remodex-message-card remodex-message-card-assistant remodex-streaming-card">
               <div className="remodex-message-header">
-                <span className="remodex-speaker-label">{isOwnedCodexSession ? 'Codex' : (selectedSession?.name ?? 'Mister')}</span>
+                <span className="remodex-speaker-label">{selectedSession ? agentDisplayName(selectedSession) : 'Mister'}</span>
                 <div className="remodex-typing-bubble-dots" style={{ display: 'inline-flex', marginLeft: 6 }}>
                   <span className="remodex-typing-dot" />
                   <span className="remodex-typing-dot" />
@@ -2276,7 +2287,7 @@ export function MobileRemoteShell({
                     }}
                     onFocus={() => setComposeFocused(true)}
                     onBlur={() => setComposeFocused(false)}
-                    placeholder={transcriptAttachments.length ? 'Add context for the image…' : 'Message Mister…'}
+                    placeholder={transcriptAttachments.length ? 'Add context for the image…' : `Message ${selectedSession ? agentDisplayName(selectedSession) : 'Mister'}…`}
                   />
                   <div className="remodex-compose-row">
                     <button
@@ -2326,7 +2337,7 @@ export function MobileRemoteShell({
                         if (!selectedSessionKey) return;
                         void handleSteerSubmit(selectedSessionKey);
                       }}
-                      aria-label="Send message to Mister"
+                      aria-label={`Send message to ${selectedSession ? agentDisplayName(selectedSession) : 'Mister'}`}
                     >
                       {transcriptActionState === 'steering' ? (
                         <>
