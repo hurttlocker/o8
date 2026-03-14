@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOwnedCodexRuntimeTail } from '@/lib/codex/owned';
+import { getCodexRuntimeTail } from '@/lib/codex/sessions';
 import type { MobileHistoryResponse, MobileTranscriptEntry } from '@/lib/mobile/types';
 import { getSessionTranscript } from '@/lib/openclaw/chat';
 
@@ -62,6 +63,24 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // Discovered Codex sessions — read JSONL tail from ~/.codex/sessions/
+    if (sessionKey.startsWith('codex:')) {
+      const tail = await getCodexRuntimeTail(sessionKey);
+      const payload: MobileHistoryResponse = {
+        sessionKey,
+        transcript: (tail.entries ?? []).map((entry) => ({
+          id: entry.id,
+          role: runtimeTailRole(entry.label),
+          text: entry.text,
+          timestampLabel: entry.timestampLabel,
+        })),
+      };
+      return NextResponse.json(payload, {
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    }
+
+    // OpenClaw sessions — use gateway chat.history
     const transcript = await getSessionTranscript(sessionKey, limit);
     const payload: MobileHistoryResponse = {
       sessionKey,
