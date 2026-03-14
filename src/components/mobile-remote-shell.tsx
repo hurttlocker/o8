@@ -1120,12 +1120,21 @@ export function MobileRemoteShell({
         : 0;
       const isStale = ageHours > 4;
 
-      // Codex sessions: only show if the process is alive.
-      // sourceLabel contains "live pid" or "recent session" when running;
-      // "persisted session" or "ready for resume" when dead/killed.
+      // Codex sessions: show live/recent discovered sessions and active owned sessions.
       if (session.runtime === 'codex') {
         const src = session.runtimeSurface?.sourceLabel ?? '';
-        if (src.includes('live pid') || src.includes('recent session')) return true;
+        const ownership = session.runtimeSurface?.ownership ?? '';
+        // Discovered sessions: show if process is alive
+        if (ownership === 'discovered') {
+          if (src.includes('live pid') || src.includes('recent session')) return true;
+          return false;
+        }
+        // Owned sessions: show if recently active (not stale) or currently running
+        if (ownership === 'owned') {
+          if (src.includes('active pid')) return true;
+          if (!isStale) return true; // Show owned sessions under 4h old
+          return false;
+        }
         return false;
       }
 
