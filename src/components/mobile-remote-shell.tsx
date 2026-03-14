@@ -1,9 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import Link from 'next/link';
 import {
-  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -11,27 +9,14 @@ import {
   useRef,
   useState,
   type CSSProperties,
-  type ReactNode,
 } from 'react';
 import {
-  ArrowUp,
-  Check,
-  Copy,
-  ChevronRight,
   Download,
   ExternalLink,
-  Eye,
-  FileDiff,
   FileText,
   GitBranch,
-  Image as ImageIcon,
   Menu,
-  Monitor,
-  Plus,
-  RefreshCw,
   SlidersHorizontal,
-  Sparkles,
-  Square,
   X,
 } from 'lucide-react';
 import { demoApprovals } from '@/lib/json-render/demo-specs';
@@ -48,389 +33,39 @@ import type {
   MobileTranscriptMedia,
 } from '@/lib/mobile/types';
 
-function pickCurrentSession(snapshot: MobileInboxSnapshot) {
-  return snapshot.sessions.find((session) => session.isCurrentSession)
-    ?? snapshot.sessions.find((session) => session.sessionKey === snapshot.primarySessionKey)
-    ?? snapshot.sessions[0];
-}
-
-/**
- * Strip markdown syntax and return a very short "live tail" of the response.
- * Apple notification style: just enough to show activity, never a wall of text.
- */
-function formatStreamingPreview(raw: string): string {
-  let text = raw;
-  // Strip code blocks entirely (```...```)
-  text = text.replace(/```[\s\S]*?```/g, '');
-  // Strip markdown tables (lines starting with |)
-  text = text.replace(/^\|.*\|$/gm, '');
-  // Strip markdown bold/italic
-  text = text.replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1');
-  // Strip markdown headers
-  text = text.replace(/^#{1,4}\s+/gm, '');
-  // Strip inline code backticks
-  text = text.replace(/`([^`]+)`/g, '$1');
-  // Strip markdown links [text](url) → text
-  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
-  // Strip horizontal rules, bullet points
-  text = text.replace(/^[-*_]{3,}$/gm, '');
-  text = text.replace(/^[-*]\s+/gm, '');
-  // Collapse whitespace
-  text = text.replace(/\n{2,}/g, '\n').trim();
-
-  // Take ONLY the last 2 non-empty lines, each capped at 80 chars
-  const lines = text.split('\n').filter((l) => l.trim());
-  const tail = lines.slice(-2).map((l) => l.length > 80 ? l.slice(0, 77) + '…' : l);
-  const result = tail.join('\n');
-  // Hard cap at 160 chars total
-  return result.length > 160 ? result.slice(0, 157) + '…' : result;
-}
-
-function roleLabel(role: MobileTranscriptEntry['role'], agentName?: string) {
-  switch (role) {
-    case 'assistant':
-      return agentName ?? 'Mister';
-    case 'user':
-      return 'You';
-    case 'system':
-      return 'System';
-    case 'tool':
-      return 'Tool';
-    default:
-      return 'Message';
-  }
-}
-
-function compactLine(text: string | null | undefined, fallback: string, max = 84) {
-  const value = text?.trim() || fallback;
-  return value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
-}
-
-function diffLineTone(line: string) {
-  if (line.startsWith('@@')) return 'hunk';
-  if (line.startsWith('diff --git') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
-    return 'meta';
-  }
-  if (line.startsWith('+')) return 'add';
-  if (line.startsWith('-')) return 'remove';
-  return 'context';
-}
-
-function contextPressureTone(usedPercent: number) {
-  if (usedPercent >= 85) return 'critical';
-  if (usedPercent >= 75) return 'high';
-  if (usedPercent >= 65) return 'watch';
-  return 'calm';
-}
-
-function contextTrendLabel(trend?: 'falling' | 'stable' | 'rising') {
-  switch (trend) {
-    case 'rising':
-      return 'Rising';
-    case 'falling':
-      return 'Falling';
-    case 'stable':
-    default:
-      return 'Stable';
-  }
-}
-
-function ownedLifecycleTone(availability?: string, lastOutcome?: string) {
-  if (lastOutcome === 'failed') return 'critical' as const;
-  if (availability === 'running') return 'high' as const;
-  if (lastOutcome === 'interrupted') return 'watch' as const;
-  return 'calm' as const;
-}
-
-function ownedLifecycleLabel(availability?: string) {
-  switch (availability) {
-    case 'awaiting-thread':
-      return 'Awaiting thread';
-    case 'ready-for-resume':
-      return 'Ready for resume';
-    case 'running':
-      return 'Running';
-    default:
-      return 'Idle';
-  }
-}
-
-function ownedOutcomeLabel(lastOutcome?: string) {
-  switch (lastOutcome) {
-    case 'finished':
-      return 'Finished';
-    case 'interrupted':
-      return 'Interrupted';
-    case 'failed':
-      return 'Failed';
-    default:
-      return 'No outcome yet';
-  }
-}
-
-function ownedReviewDispositionLabel(disposition?: RuntimeReviewPacket['reviewDisposition']) {
-  return disposition === 'resolved' ? 'Resolved' : 'Watching';
-}
-
-function ownedReviewDispositionTone(disposition?: RuntimeReviewPacket['reviewDisposition']) {
-  return disposition === 'resolved' ? 'calm' : 'watch';
-}
-
-function threadLaneLabel(session: MobileInboxSnapshot['sessions'][number]) {
-  if (session.isCurrentSession) return 'Mister';
-  if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') return 'Codex';
-  return session.runtime === 'openclaw' ? 'OpenClaw' : 'Session';
-}
-
-function threadLaneState(session: MobileInboxSnapshot['sessions'][number]) {
-  if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') {
-    const availability = session.runtimeSurface?.lifecycle?.availability;
-    if (availability === 'running') return 'live';
-    if (session.runtimeSurface?.capabilities.sendInput) return 'chat';
-    return 'watch';
-  }
-
-  if (session.isCurrentSession) return 'live';
-  return session.status;
-}
-
-function buildOwnedCorrectionDraft(packet: RuntimeReviewPacket) {
-  const lines = [
-    'Continue from the current owned session state. Use the packet evidence below and make the smallest correct next move.',
-  ];
-
-  if (packet.lastRun) {
-    lines.push(`Last run: ${packet.lastRun.mode} • ${packet.lastRun.outcome}.`);
-  }
-  if (packet.lastRun?.assistantSummary) {
-    lines.push(`Assistant summary: ${packet.lastRun.assistantSummary}`);
-  }
-  if (packet.lastRun?.commands[0]) {
-    const command = packet.lastRun.commands[0];
-    lines.push(`Command evidence: ${command.command} (${command.status}${command.exitCode != null ? `, exit ${command.exitCode}` : ''}).`);
-  }
-  if (packet.changedFiles.length) {
-    lines.push(`Current repo delta: ${packet.changedFiles.slice(0, 5).map((file) => file.path).join(', ')}.`);
-  } else {
-    lines.push('Current repo delta is clean, so prefer a bounded verification or summary step over a broad rewrite.');
-  }
-
-  lines.push('Inspect the exact diff context, correct only the smallest failing or incomplete piece, and then summarize what changed and what still needs review.');
-  return lines.join('\n');
-}
+import type { DraftAttachment, PendingOwnedTurn, ProjectGroup } from './mobile/types';
+import {
+  agentDisplayName,
+  buildOwnedCorrectionDraft,
+  compactLine,
+  contextPressureTone,
+  contextTrendLabel,
+  fileToDataUrl,
+  isImageMedia,
+  mediaHref,
+  ownedLifecycleLabel,
+  ownedLifecycleTone,
+  ownedOutcomeLabel,
+  ownedReviewDispositionLabel,
+  pickCurrentSession,
+  projectDisplayName,
+  projectSummary,
+  readJson,
+  renderMessageBody,
+} from './mobile/utils';
+import { ApprovalStack } from './mobile/ApprovalStack';
+import { TokenUsageSummary } from './mobile/TokenUsageSummary';
+import { ChatView } from './mobile/ChatView';
+import { CostsDashboard } from './mobile/CostsDashboard';
+import { SquadRail } from './mobile/SquadRail';
+import { ComposeBar } from './mobile/ComposeBar';
+import { ControlsSheet } from './mobile/ControlsSheet';
+import { DiffOverlay } from './mobile/DiffOverlay';
 
 const mobileClockFormatter = new Intl.DateTimeFormat('en-US', {
   hour: 'numeric',
   minute: '2-digit',
 });
-
-function mediaHref(path: string, download = false) {
-  const params = new URLSearchParams({ path });
-  if (download) {
-    params.set('download', '1');
-  }
-  return `/api/mobile/media?${params.toString()}`;
-}
-
-function isImageMedia(media: MobileTranscriptMedia) {
-  return media.kind === 'image';
-}
-
-type DraftAttachment = {
-  id: string;
-  fileName: string;
-  mimeType: string;
-  content: string;
-  previewUrl: string;
-};
-
-type PendingOwnedTurn = {
-  id: string;
-  prompt: string;
-  createdAt: number;
-  timestampLabel: string;
-};
-
-async function fileToDataUrl(file: File) {
-  return await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result);
-        return;
-      }
-      reject(new Error(`Unable to read ${file.name}`));
-    };
-    reader.onerror = () => reject(new Error(`Unable to read ${file.name}`));
-    reader.readAsDataURL(file);
-  });
-}
-
-function pushPlainInline(nodes: ReactNode[], text: string, keyPrefix: string) {
-  if (!text) {
-    return;
-  }
-
-  text.split('\n').forEach((part, index) => {
-    if (index > 0) {
-      nodes.push(<br key={`${keyPrefix}-br-${index}`} />);
-    }
-    if (part) {
-      nodes.push(<Fragment key={`${keyPrefix}-text-${index}`}>{part}</Fragment>);
-    }
-  });
-}
-
-function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  const tokenRegex = /(\*\*[^*][\s\S]*?\*\*|`[^`]+`|\*[^*][\s\S]*?\*)/g;
-  let lastIndex = 0;
-  let matchIndex = 0;
-
-  for (const match of text.matchAll(tokenRegex)) {
-    const token = match[0];
-    const start = match.index ?? 0;
-    pushPlainInline(nodes, text.slice(lastIndex, start), `${keyPrefix}-${matchIndex}-plain`);
-
-    if (token.startsWith('**') && token.endsWith('**')) {
-      nodes.push(
-        <strong key={`${keyPrefix}-${matchIndex}-strong`}>
-          {renderInlineMarkdown(token.slice(2, -2), `${keyPrefix}-${matchIndex}-strong-inner`)}
-        </strong>,
-      );
-    } else if (token.startsWith('*') && token.endsWith('*')) {
-      nodes.push(
-        <em key={`${keyPrefix}-${matchIndex}-em`}>
-          {renderInlineMarkdown(token.slice(1, -1), `${keyPrefix}-${matchIndex}-em-inner`)}
-        </em>,
-      );
-    } else if (token.startsWith('`') && token.endsWith('`')) {
-      nodes.push(<code key={`${keyPrefix}-${matchIndex}-code`}>{token.slice(1, -1)}</code>);
-    } else {
-      pushPlainInline(nodes, token, `${keyPrefix}-${matchIndex}-fallback`);
-    }
-
-    lastIndex = start + token.length;
-    matchIndex += 1;
-  }
-
-  pushPlainInline(nodes, text.slice(lastIndex), `${keyPrefix}-tail`);
-  return nodes;
-}
-
-function renderMessageBody(text: string, keyPrefix: string) {
-  const blocks: ReactNode[] = [];
-  const lines = text.replace(/\r/g, '').split('\n');
-  let paragraphLines: string[] = [];
-  let listType: 'ul' | 'ol' | null = null;
-  let listItems: string[] = [];
-
-  const flushParagraph = () => {
-    if (!paragraphLines.length) {
-      return;
-    }
-    const paragraph = paragraphLines.join('\n').trim();
-    if (paragraph) {
-      blocks.push(
-        <p key={`${keyPrefix}-p-${blocks.length}`} className="remodex-rich-paragraph">
-          {renderInlineMarkdown(paragraph, `${keyPrefix}-p-${blocks.length}`)}
-        </p>,
-      );
-    }
-    paragraphLines = [];
-  };
-
-  const flushList = () => {
-    if (!listType || !listItems.length) {
-      listType = null;
-      listItems = [];
-      return;
-    }
-
-    const ListTag = listType;
-    blocks.push(
-      <ListTag key={`${keyPrefix}-${listType}-${blocks.length}`} className="remodex-rich-list">
-        {listItems.map((item, index) => (
-          <li key={`${keyPrefix}-${listType}-${blocks.length}-${index}`}>
-            {renderInlineMarkdown(item, `${keyPrefix}-${listType}-${blocks.length}-${index}`)}
-          </li>
-        ))}
-      </ListTag>,
-    );
-
-    listType = null;
-    listItems = [];
-  };
-
-  for (const rawLine of lines) {
-    const line = rawLine.trimEnd();
-    const trimmed = line.trim();
-    const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
-    const orderedMatch = trimmed.match(/^\d+\.\s+(.*)$/);
-    const unorderedMatch = trimmed.match(/^[-*]\s+(.*)$/);
-
-    if (!trimmed) {
-      flushParagraph();
-      flushList();
-      continue;
-    }
-
-    if (headingMatch) {
-      flushParagraph();
-      flushList();
-      blocks.push(
-        <p
-          key={`${keyPrefix}-h-${blocks.length}`}
-          className={`remodex-rich-heading remodex-rich-heading-${Math.min(headingMatch[1].length, 3)}`}
-        >
-          {renderInlineMarkdown(headingMatch[2], `${keyPrefix}-h-${blocks.length}`)}
-        </p>,
-      );
-      continue;
-    }
-
-    if (orderedMatch) {
-      flushParagraph();
-      if (listType && listType !== 'ol') {
-        flushList();
-      }
-      listType = 'ol';
-      listItems.push(orderedMatch[1]);
-      continue;
-    }
-
-    if (unorderedMatch) {
-      flushParagraph();
-      if (listType && listType !== 'ul') {
-        flushList();
-      }
-      listType = 'ul';
-      listItems.push(unorderedMatch[1]);
-      continue;
-    }
-
-    flushList();
-    paragraphLines.push(line);
-  }
-
-  flushParagraph();
-  flushList();
-
-  return <div className="remodex-rich-text">{blocks}</div>;
-}
-
-async function readJson<T>(response: Response) {
-  const payload = (await response.json().catch(() => null)) as T | { error?: string } | null;
-  if (!response.ok) {
-    const errorMessage =
-      payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
-        ? payload.error
-        : `HTTP ${response.status}`;
-    throw new Error(errorMessage);
-  }
-
-  return payload as T;
-}
 
 export function MobileRemoteShell({
   initialSnapshot,
@@ -722,7 +357,6 @@ export function MobileRemoteShell({
 
   // ── Streaming state ──
   const [streamingText, setStreamingText] = useState('');
-  const [streamingRunId, setStreamingRunId] = useState<string | null>(null);
   const streamingTextRef = useRef(''); // avoid stale closures in EventSource handler
   useEffect(() => {
     // Seed with all current IDs so initial render doesn't animate everything
@@ -753,7 +387,6 @@ export function MobileRemoteShell({
           if (data.text) {
             streamingTextRef.current = data.text;
             setStreamingText(data.text);
-            setStreamingRunId(data.runId ?? null);
           }
         } catch { /* ignore malformed events */ }
       });
@@ -763,7 +396,6 @@ export function MobileRemoteShell({
         // Response complete — clear streaming state, force poll for final transcript
         streamingTextRef.current = '';
         setStreamingText('');
-        setStreamingRunId(null);
         try {
           const data = JSON.parse(event.data);
           // Inline the final text immediately for zero-latency display
@@ -796,7 +428,6 @@ export function MobileRemoteShell({
         if (disposed) return;
         streamingTextRef.current = '';
         setStreamingText('');
-        setStreamingRunId(null);
       });
 
       es.onerror = () => {
@@ -804,8 +435,7 @@ export function MobileRemoteShell({
         if (!disposed) {
           streamingTextRef.current = '';
           setStreamingText('');
-          setStreamingRunId(null);
-        }
+          }
       };
     };
 
@@ -819,7 +449,6 @@ export function MobileRemoteShell({
       }
       streamingTextRef.current = '';
       setStreamingText('');
-      setStreamingRunId(null);
     };
   }, [selectedSessionKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1098,61 +727,6 @@ export function MobileRemoteShell({
   const scrollMarker = pendingOwnedTurn ? `${latestTranscriptMarker}:${pendingOwnedTurn.id}` : latestTranscriptMarker;
   const selectedReviewFile = selectedReviewFilePath ? reviewFileByPath[selectedReviewFilePath] : undefined;
   // ── Project-grouped squad rail ──
-  interface ProjectGroup {
-    projectName: string;
-    workspace: string;
-    sessions: MobileInboxSnapshot['sessions'];
-    hasPrimary: boolean;
-    summary: string; // e.g. "4 Codex · 1 running"
-    mostRecentTime?: string;
-    bestContextPct: number;
-    hasRunning: boolean;
-  }
-
-  /** Derive a human name for an agent session */
-  function agentDisplayName(session: MobileInboxSnapshot['sessions'][number]): string {
-    if (session.isCurrentSession) return 'Mister';
-    if (session.runtime === 'codex') return 'Codex';
-    // OpenClaw sessions: extract the agent name from the session name
-    const n = session.name || '';
-    if (n.startsWith('Hawk')) return 'Hawk';
-    if (n.startsWith('Niot')) return 'Niot';
-    if (n.includes('automation') || n.includes('cron')) return 'Cron';
-    if (n.includes('Telegram')) return 'Telegram';
-    if (n.includes('Discord')) return 'Discord';
-    if (n.includes('Mister')) return 'Mister';
-    return n.split(/[\s·•/]/)[0] || 'Agent';
-  }
-
-  /** Derive a readable project name from a workspace path */
-  function projectDisplayName(ws: string, sessions: MobileInboxSnapshot['sessions']): string {
-    // Named agent workspaces → use agent name
-    if (ws.includes('workspace-ace')) return 'Niot';
-    if (ws.includes('workspace-hawk')) return 'Hawk';
-    // Repo workspaces → use repo name
-    const segments = ws.replace(/^~\//, '').split('/');
-    const last = segments[segments.length - 1] || segments[0] || 'workspace';
-    // If this is the main clawd workspace with the primary session, call it "Main"
-    if (last === 'clawd' && sessions.some((s) => s.isCurrentSession)) return 'Main';
-    return last;
-  }
-
-  /** Build a summary like "4 Codex · 2 running" */
-  function projectSummary(sessions: MobileInboxSnapshot['sessions']): string {
-    const runtimeCounts = new Map<string, number>();
-    let runningCount = 0;
-    for (const s of sessions) {
-      const label = s.runtime === 'codex' ? 'Codex' : 'OpenClaw';
-      runtimeCounts.set(label, (runtimeCounts.get(label) ?? 0) + 1);
-      if (s.status === 'running' || s.status === 'reviewing') runningCount++;
-    }
-    const parts: string[] = [];
-    for (const [label, count] of runtimeCounts) {
-      parts.push(`${count} ${label}`);
-    }
-    if (runningCount > 0) parts.push(`${runningCount} active`);
-    return parts.join(' · ');
-  }
 
   const projectGroups = useMemo(() => {
     const isRelevant = (session: MobileInboxSnapshot['sessions'][number]) => {
@@ -1251,12 +825,6 @@ export function MobileRemoteShell({
   }, [selectedSession, snapshot.sessions]);
 
   const [expandedProject, setExpandedProject] = useState<string | null>(null);
-  const selectedReviewFileIndex = selectedReviewFilePath
-    ? reviewFiles.findIndex((file) => file.path === selectedReviewFilePath)
-    : -1;
-  const selectedReviewFilePosition = selectedReviewFileIndex >= 0 ? selectedReviewFileIndex + 1 : 0;
-  const hasPrevReviewFile = selectedReviewFileIndex > 0;
-  const hasNextReviewFile = selectedReviewFileIndex >= 0 && selectedReviewFileIndex < reviewFiles.length - 1;
   const totalAdditions = reviewFiles.reduce((sum, file) => sum + (file.additions ?? 0), 0);
   const totalDeletions = reviewFiles.reduce((sum, file) => sum + (file.deletions ?? 0), 0);
   const focusedAdditions = selectedReviewFile?.additions ?? totalAdditions;
@@ -1906,73 +1474,97 @@ export function MobileRemoteShell({
     void loadReviewFile(reviewPath).catch(() => undefined);
   }
 
-  function jumpReviewFile(direction: 'prev' | 'next') {
-    if (!reviewFiles.length) {
-      return;
-    }
 
-    const fallbackIndex = direction === 'prev' ? reviewFiles.length - 1 : 0;
-    const currentIndex = selectedReviewFileIndex >= 0 ? selectedReviewFileIndex : fallbackIndex;
-    const nextIndex = direction === 'prev'
-      ? Math.max(0, currentIndex - 1)
-      : Math.min(reviewFiles.length - 1, currentIndex + 1);
-    const nextFile = reviewFiles[nextIndex];
-    if (!nextFile) {
-      return;
-    }
-
-    handleReviewFileFocus(nextFile.path);
+  function handleApprovalDecision(approval: ApprovalRequest, resolution: 'approved' | 'rejected') {
+    setResolvedApprovals((current) => ({ ...current, [approval.id]: resolution }));
+    setSurfaceNote(`${resolution === 'approved' ? '✅ Approved' : '❌ Rejected'}: ${approval.title}`);
+    window.setTimeout(() => {
+      setPendingApprovals((current) => current.filter((item) => item.id !== approval.id));
+    }, 1500);
   }
 
-  function renderMediaGrid(media: MobileTranscriptMedia[], align: 'left' | 'right' = 'left') {
-    return (
-      <div className={`remodex-media-grid ${align === 'right' ? 'remodex-media-grid-right' : ''}`}>
-        {media.map((item) => {
-          if (isImageMedia(item)) {
-            return (
-              <button
-                key={item.path}
-                type="button"
-                className="remodex-media-card remodex-media-card-image"
-                onClick={() => setExpandedMedia(item)}
-              >
-                <Image
-                  src={mediaHref(item.path)}
-                  alt={item.name}
-                  width={1200}
-                  height={900}
-                  unoptimized
-                  loading="lazy"
-                  onLoadingComplete={() => {
-                    if (stickToBottomRef.current) {
-                      window.requestAnimationFrame(() => scrollToLatestMessage());
-                    }
-                  }}
-                />
-                <span className="remodex-media-card-caption">Tap to expand</span>
-              </button>
-            );
-          }
-
-          return (
-            <div key={item.path} className="remodex-media-card remodex-media-card-file">
-              <div className="remodex-media-file-icon">
-                {item.kind === 'pdf' ? <FileText size={18} strokeWidth={2.1} /> : <ImageIcon size={18} strokeWidth={2.1} />}
-              </div>
-              <div className="remodex-media-file-copy">
-                <strong>{item.name}</strong>
-                <span>{item.kind === 'pdf' ? 'PDF artifact' : 'File artifact'}</span>
-              </div>
-              <div className="remodex-media-file-actions">
-                <a href={mediaHref(item.path)} target="_blank" rel="noreferrer">Open</a>
-                <a href={mediaHref(item.path, true)} download={item.name}>Save</a>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    );
+  function handleApprovalApprove(approval: ApprovalRequest) {
+    handleApprovalDecision(approval, 'approved');
   }
+
+  function handleApprovalReject(approval: ApprovalRequest) {
+    handleApprovalDecision(approval, 'rejected');
+  }
+
+  function handleToggleApprovals() {
+    setPendingApprovals((current) => (current.length > 0 ? [] : [...demoApprovals]));
+    setResolvedApprovals({});
+    setControlsOpen(false);
+  }
+
+  function handleCopySelectedSessionKey() {
+    if (!selectedSessionKey) {
+      return;
+    }
+    handleCopy(selectedSessionKey);
+    setControlsOpen(false);
+  }
+
+  function handleControlsRefresh() {
+    void handleSurfaceRefresh();
+    setControlsOpen(false);
+  }
+
+  function handleDiffRefresh() {
+    if (selectedReviewFilePath) {
+      void loadReviewFile(selectedReviewFilePath, true);
+      return;
+    }
+    void handleSurfaceRefresh();
+  }
+
+  const composeBarHandlers = {
+    onSend: () => {
+      if (!selectedSessionKey) {
+        return;
+      }
+      return handleSteerSubmit(selectedSessionKey);
+    },
+    onOwnedResume: () => {
+      if (!selectedSessionKey) {
+        return;
+      }
+      return handleOwnedResumeSubmit(selectedSessionKey);
+    },
+    onEnhance: () => handleEnhancePrompt(),
+    onUndoEnhance: handleUndoEnhance,
+    onAttach: () => fileInputRef.current?.click(),
+    onAttachFiles: (files: FileList | null) => handleAttachmentSelection(files),
+    onRemoveAttachment: (attachmentId: string) => {
+      if (!selectedSessionKey) {
+        return;
+      }
+      removeDraftAttachment(selectedSessionKey, attachmentId);
+    },
+    onRefresh: () => handleSurfaceRefresh(),
+    onStop: () => handleStopActiveRun(),
+    onInterrupt: () => handleStopActiveRun(),
+    onOpenDiff: openDiffViewer,
+    onLoadCorrectionDraft: () => {
+      if (!selectedSessionKey) {
+        return;
+      }
+      handleLoadOwnedCorrectionDraft(selectedSessionKey);
+    },
+    onToggleOwnedReviewDisposition: () => {
+      if (!selectedSessionKey) {
+        return;
+      }
+      return handleOwnedReviewDisposition(ownedReviewDisposition === 'resolved' ? 'watch' : 'resolve', selectedSessionKey);
+    },
+    onDraftChange: (value: string) => {
+      if (!selectedSessionKey) {
+        return;
+      }
+      setDraftBySession((current) => ({ ...current, [selectedSessionKey]: value }));
+    },
+    onFocusChange: setComposeFocused,
+  };
 
   return (
     <div className="mobile-wrap remodex-mobile-page" style={shellStyle} suppressHydrationWarning>
@@ -2021,236 +1613,36 @@ export function MobileRemoteShell({
             </span>
             <SlidersHorizontal size={15} strokeWidth={2} />
           </button>
-
         </header>
 
         <div className="remodex-scroll-view">
+          {activeView === 'costs' ? (
+            <CostsDashboard
+              snapshot={snapshot}
+              onBack={() => setActiveView('squad')}
+              onSessionSelect={(sessionId) => {
+                setSelectedId(sessionId);
+                setActiveView('chat');
+              }}
+              compactLine={compactLine}
+            />
+          ) : null}
 
-          {/* ── Cost Dashboard View ── */}
-          {activeView === 'costs' ? (() => {
-            const openClawSessions = snapshot.sessions.filter(
-              (s) => s.runtime === 'openclaw' && s.tokenUsage,
-            );
-            const totalTokens = openClawSessions.reduce((sum, s) => sum + (s.tokenUsage?.totalTokens ?? 0), 0);
-            const totalRemaining = openClawSessions.reduce((sum, s) => sum + (s.tokenUsage?.remainingTokens ?? 0), 0);
-            const totalCapacity = totalTokens + totalRemaining;
+          {activeView !== 'costs' ? (
+            <TokenUsageSummary snapshot={snapshot} onViewCosts={() => setActiveView('costs')} />
+          ) : null}
 
-            // Group by model
-            const byModel = new Map<string, { sessions: typeof openClawSessions; tokens: number; capacity: number }>();
-            for (const s of openClawSessions) {
-              const model = s.model ?? 'unknown';
-              const existing = byModel.get(model) ?? { sessions: [], tokens: 0, capacity: 0 };
-              existing.sessions.push(s);
-              existing.tokens += s.tokenUsage?.totalTokens ?? 0;
-              existing.capacity += (s.tokenUsage?.totalTokens ?? 0) + (s.tokenUsage?.remainingTokens ?? 0);
-              byModel.set(model, existing);
-            }
-
-            const modelColor: Record<string, string> = {
-              'claude-opus-4-6': '#ff3b30',
-              'claude-sonnet-4-20250514': '#ff9f0a',
-              'claude-haiku-4-5-20251001': '#34c759',
-            };
-
-            return (
-              <div className="remodex-costs-view">
-                <button
-                  type="button"
-                  className="remodex-costs-back"
-                  onClick={() => setActiveView('squad')}
-                >
-                  ‹ Squad
-                </button>
-
-                {/* ── Aggregate overview ── */}
-                <div className="remodex-costs-hero">
-                  <span className="remodex-costs-hero-kicker">Token Usage</span>
-                  <strong className="remodex-costs-hero-value">{totalTokens.toLocaleString()}</strong>
-                  <span className="remodex-costs-hero-sub">
-                    {totalCapacity.toLocaleString()} total capacity · {openClawSessions.length} active session{openClawSessions.length === 1 ? '' : 's'}
-                  </span>
-                  <div className="remodex-costs-hero-bar">
-                    <div
-                      className="remodex-costs-hero-fill"
-                      style={{ width: `${totalCapacity > 0 ? Math.round((totalTokens / totalCapacity) * 100) : 0}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* ── Per-model breakdown ── */}
-                <span className="remodex-costs-section-label">By Model</span>
-                {Array.from(byModel.entries()).map(([model, data]) => {
-                  const pct = data.capacity > 0 ? Math.round((data.tokens / data.capacity) * 100) : 0;
-                  const color = modelColor[model] ?? '#6366f1';
-                  const shortModel = model.replace('claude-', '').replace(/-20\d{6}$/, '');
-                  return (
-                    <div key={model} className="remodex-costs-model-card">
-                      <div className="remodex-costs-model-head">
-                        <span className="remodex-costs-model-dot" style={{ background: color }} />
-                        <strong className="remodex-costs-model-name">{shortModel}</strong>
-                        <span className="remodex-costs-model-pct">{pct}%</span>
-                      </div>
-                      <div className="remodex-costs-model-bar">
-                        <div className="remodex-costs-model-fill" style={{ width: `${pct}%`, background: color }} />
-                      </div>
-                      <div className="remodex-costs-model-meta">
-                        <span>{data.tokens.toLocaleString()} tokens used</span>
-                        <span>{data.sessions.length} session{data.sessions.length === 1 ? '' : 's'}</span>
-                      </div>
-
-                      {/* Per-session rows */}
-                      {data.sessions.map((s) => {
-                        const sPct = s.context?.usedPercent ?? 0;
-                        const tone = sPct >= 85 ? 'critical' : sPct >= 75 ? 'high' : sPct >= 65 ? 'watch' : 'calm';
-                        return (
-                          <button
-                            key={s.id}
-                            type="button"
-                            className="remodex-costs-session-row"
-                            onClick={() => { setSelectedId(s.id); setActiveView('chat'); }}
-                          >
-                            <span className={`remodex-costs-session-dot remodex-squad-dot-${tone}`} />
-                            <span className="remodex-costs-session-name">{s.isCurrentSession ? 'This chat' : compactLine(s.name, 'Session', 28)}</span>
-                            <span className="remodex-costs-session-tokens">{(s.tokenUsage?.totalTokens ?? 0).toLocaleString()}</span>
-                            <span className="remodex-costs-session-pct">{sPct}%</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-
-                {/* ── Codex sessions (no token data) ── */}
-                {(() => {
-                  const codexSessions = snapshot.sessions.filter((s) => s.runtime === 'codex');
-                  if (!codexSessions.length) return null;
-                  return (
-                    <div className="remodex-costs-model-card remodex-costs-model-card-muted">
-                      <div className="remodex-costs-model-head">
-                        <span className="remodex-costs-model-dot" style={{ background: '#6366f1' }} />
-                        <strong className="remodex-costs-model-name">Codex</strong>
-                        <span className="remodex-costs-model-pct">{codexSessions.length} session{codexSessions.length === 1 ? '' : 's'}</span>
-                      </div>
-                      <p className="remodex-costs-codex-note">Billed through ChatGPT Pro — token-level usage not available.</p>
-                    </div>
-                  );
-                })()}
-              </div>
-            );
-          })() : null}
-
-          {/* ── Squad Rail ── */}
-          {/* ── Token usage summary — full-width above squad grid ── */}
-          {activeView !== 'costs' ? (() => {
-            const tracked = snapshot.sessions.filter((s) => s.runtime === 'openclaw' && s.tokenUsage);
-            const total = tracked.reduce((sum, s) => sum + (s.tokenUsage?.totalTokens ?? 0), 0);
-            const cap = tracked.reduce((sum, s) => sum + (s.tokenUsage?.totalTokens ?? 0) + (s.tokenUsage?.remainingTokens ?? 0), 0);
-            const pct = cap > 0 ? Math.round((total / cap) * 100) : 0;
-            if (!tracked.length) return null;
-            return (
-              <button
-                type="button"
-                className="remodex-costs-summary-card"
-                onClick={() => setActiveView('costs')}
-              >
-                <div className="remodex-costs-summary-left">
-                  <span className="remodex-costs-summary-kicker">Token Usage · {tracked.length} session{tracked.length === 1 ? '' : 's'}</span>
-                  <strong className="remodex-costs-summary-value">{total.toLocaleString()} <span className="remodex-costs-summary-unit">tokens</span></strong>
-                </div>
-                <div className="remodex-costs-summary-right">
-                  <div className="remodex-costs-summary-ring">
-                    <svg viewBox="0 0 36 36" className="remodex-costs-ring-svg">
-                      <path
-                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                        fill="none"
-                        stroke="#f5f5f7"
-                        strokeWidth="3"
-                      />
-                      <path
-                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                        fill="none"
-                        stroke={pct >= 75 ? '#ff3b30' : pct >= 50 ? '#ff9f0a' : '#34c759'}
-                        strokeWidth="3"
-                        strokeDasharray={`${pct}, 100`}
-                        strokeLinecap="round"
-                      />
-                    </svg>
-                    <span className="remodex-costs-ring-label">{pct}%</span>
-                  </div>
-                </div>
-                <ChevronRight size={16} strokeWidth={1.8} className="remodex-costs-summary-chevron" />
-              </button>
-            );
-          })() : null}
-
-          {activeView !== 'costs' && projectGroups.length > 0 ? (
-            <div className="remodex-squad-rail">
-              {projectGroups.map((group) => {
-                const isExpanded = expandedProject === group.workspace;
-                const ctxPct = Math.round(group.bestContextPct);
-                const ctxTone = ctxPct >= 85 ? 'critical' : ctxPct >= 75 ? 'high' : ctxPct >= 65 ? 'watch' : 'calm';
-                const containsSelected = group.sessions.some((s) => s.id === selectedSession?.id);
-                const isSingleAgent = group.sessions.length === 1;
-
-                // Single-agent projects: tap goes directly to chat (no expand)
-                const handleProjectTap = () => {
-                  if (isSingleAgent) {
-                    handleSessionFocus(group.sessions[0].id);
-                  } else {
-                    setExpandedProject(isExpanded ? null : group.workspace);
-                  }
-                };
-
-                return (
-                  <div key={group.workspace} className="remodex-project-group">
-                    <button
-                      type="button"
-                      className={`remodex-squad-card remodex-project-card ${containsSelected ? 'remodex-squad-card-active' : ''} ${isExpanded ? 'remodex-project-card-expanded' : ''}`}
-                      onClick={handleProjectTap}
-                    >
-                      <div className="remodex-squad-card-head">
-                        <span className={`remodex-squad-dot ${group.hasRunning ? 'remodex-squad-dot-live' : ''} remodex-squad-dot-${ctxTone}`} />
-                        <strong className="remodex-squad-name">{group.projectName}</strong>
-                        <span className="remodex-squad-time">{group.mostRecentTime ?? 'idle'}</span>
-                      </div>
-                      <span className="remodex-project-summary">{group.summary}</span>
-                      {!isSingleAgent ? (
-                        <ChevronRight size={11} className={`remodex-project-chevron ${isExpanded ? 'remodex-project-chevron-open' : ''}`} />
-                      ) : null}
-                    </button>
-
-                    {isExpanded && !isSingleAgent ? (
-                      <div className="remodex-project-agents">
-                        {group.sessions.map((session) => {
-                          const active = session.id === selectedSession?.id;
-                          const isRunning = session.status === 'running' || session.status === 'reviewing';
-                          const sCtxTone = (() => { const p = Math.round(session.context?.usedPercent ?? 0); return p >= 85 ? 'critical' : p >= 75 ? 'high' : p >= 65 ? 'watch' : 'calm'; })();
-                          const name = agentDisplayName(session);
-                          // For Codex: show branch name. For OpenClaw: show activity/status.
-                          const branchShort = session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '') ?? '';
-                          const statusLabel = session.runtime === 'codex' && branchShort
-                            ? branchShort
-                            : (session.activity?.headline ?? session.status);
-                          return (
-                            <button
-                              key={session.id}
-                              type="button"
-                              className={`remodex-agent-pill ${active ? 'remodex-agent-pill-active' : ''}`}
-                              onClick={() => handleSessionFocus(session.id)}
-                            >
-                              <span className={`remodex-squad-dot ${isRunning ? 'remodex-squad-dot-live' : ''} remodex-squad-dot-${sCtxTone}`} />
-                              <span className="remodex-agent-pill-name">{name}</span>
-                              <span className="remodex-agent-pill-sep">·</span>
-                              <span className="remodex-agent-pill-status">{statusLabel}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
+          {activeView !== 'costs' ? (
+            <SquadRail
+              snapshot={snapshot}
+              projectGroups={projectGroups}
+              expandedProject={expandedProject}
+              selectedSession={selectedSession}
+              onSessionFocus={handleSessionFocus}
+              onProjectToggle={(workspace) => setExpandedProject(workspace)}
+              onCostsView={() => setActiveView('costs')}
+              agentDisplayName={agentDisplayName}
+            />
           ) : null}
 
           {selectedSession?.activity && selectedSession.status !== 'idle' ? (
@@ -2270,596 +1662,66 @@ export function MobileRemoteShell({
             </div>
           ) : null}
 
-          {/* Review packet kept but collapsed for owned Codex — available via diff viewer */}
-
           {refreshError ? <p className="remodex-banner-note">{refreshError}</p> : null}
           {surfaceNote ? <p className="remodex-banner-note">{surfaceNote}</p> : null}
           {transcriptError ? <p className="remodex-banner-note">{transcriptError}</p> : null}
           {selectedReviewPacketError ? <p className="remodex-banner-note">{selectedReviewPacketError}</p> : null}
 
-          <div className="remodex-message-stack">
-            {transcriptEntries.length ? transcriptEntries.map((entry, index) => {
-              const isUser = entry.role === 'user';
-              const isLatest = !transcriptEntries.slice(index + 1).some((e) => e.role === 'assistant');
-              const hasText = Boolean(entry.text.trim());
-              const hasMedia = Boolean(entry.media?.length);
-              const isNewMessage = hydrated && seenMessageIdsRef.current != null && seenMessageIdsRef.current.size > 0 && !seenMessageIdsRef.current.has(entry.id);
-              if (isNewMessage) seenMessageIdsRef.current?.add(entry.id);
-              const fadeClass = isNewMessage ? ' remodex-turn-new' : '';
-              const prevEntry = index > 0 ? transcriptEntries[index - 1] : null;
-              const speakerChanged = !prevEntry || prevEntry.role !== entry.role;
-              // Smart timestamps: only show if 15+ min gap from previous entry
-              const showTimestamp = (() => {
-                if (!prevEntry?.timestampLabel || !entry.timestampLabel) return speakerChanged;
-                const prev = new Date(`1970-01-01 ${prevEntry.timestampLabel}`).getTime();
-                const curr = new Date(`1970-01-01 ${entry.timestampLabel}`).getTime();
-                if (Number.isNaN(prev) || Number.isNaN(curr)) return speakerChanged;
-                return Math.abs(curr - prev) >= 15 * 60 * 1000;
-              })();
+          <ChatView
+            transcriptEntries={transcriptEntries}
+            selectedSession={selectedSession}
+            isOwnedCodexSession={isOwnedCodexSession}
+            transcriptLoading={transcriptLoading}
+            selectedReviewFile={selectedReviewFile}
+            streamingText={streamingText}
+            waitingForResponse={waitingForResponse}
+            hydrated={hydrated}
+            seenMessageIdsRef={seenMessageIdsRef}
+            agentDisplayName={agentDisplayName}
+            renderMessageBody={renderMessageBody}
+            expandedMedia={expandedMedia}
+            setExpandedMedia={setExpandedMedia}
+            onOpenDiff={openDiffViewer}
+            onScrollToLatestMessage={scrollToLatestMessage}
+            actionState={transcriptActionState}
+          />
 
-              if (isUser) {
-                return (
-                  <div key={entry.id} className={`remodex-user-turn-wrap${fadeClass}`}>
-                    {hasText ? <div className="remodex-user-bubble">{renderMessageBody(entry.text, `${entry.id}-user`)}</div> : null}
-                    {hasMedia ? renderMediaGrid(entry.media ?? [], 'right') : null}
-                    {showTimestamp ? <span className="remodex-turn-time">{entry.timestampLabel ?? 'now'}</span> : null}
-                  </div>
-                );
-              }
-
-              // Compaction events get a special card
-              const isCompaction = entry.role === 'system' && entry.text.toLowerCase().includes('compaction');
-              if (isCompaction) {
-                return (
-                  <div key={entry.id} className="remodex-compaction-card">
-                    <span className="remodex-compaction-icon" aria-hidden="true">⟳</span>
-                    <span className="remodex-compaction-label">Context compacted</span>
-                    {showTimestamp ? <span className="remodex-compaction-time">{entry.timestampLabel ?? ''}</span> : null}
-                  </div>
-                );
-              }
-
-              const agentName = isOwnedCodexSession ? 'Codex' : (selectedSession?.isCurrentSession ? 'Mister' : undefined);
-
-              return (
-                <article key={entry.id} className={`remodex-message-card remodex-message-card-assistant${fadeClass}`}>
-                  {speakerChanged ? (
-                    <div className="remodex-message-head">
-                      <span>{roleLabel(entry.role, agentName)}</span>
-                    </div>
-                  ) : null}
-                  {hasText ? renderMessageBody(entry.text, `${entry.id}-assistant`) : null}
-                  {hasMedia ? renderMediaGrid(entry.media ?? []) : null}
-                  {isLatest && selectedReviewFile ? (
-                    <button type="button" className="remodex-inline-diff-thumb" onClick={openDiffViewer}>
-                      <div className="remodex-inline-diff-mini">
-                        <FileDiff size={16} strokeWidth={1.8} />
-                      </div>
-                      <div className="remodex-inline-diff-copy">
-                        <strong>{selectedReviewFile.path.split('/').pop() ?? selectedReviewFile.path}</strong>
-                        <span>{`${selectedReviewFile.additions ?? 0} additions, ${selectedReviewFile.deletions ?? 0} removals`}</span>
-                      </div>
-                      <ChevronRight size={16} strokeWidth={1.6} className="remodex-inline-diff-chevron" />
-                    </button>
-                  ) : null}
-                </article>
-              );
-            }) : transcriptLoading ? (
-              <div className="remodex-skeleton-stack">
-                <div className="remodex-skeleton-bubble remodex-skeleton-assistant" />
-                <div className="remodex-skeleton-bubble remodex-skeleton-user" />
-                <div className="remodex-skeleton-bubble remodex-skeleton-assistant remodex-skeleton-wide" />
-                <div className="remodex-skeleton-bubble remodex-skeleton-user remodex-skeleton-short" />
-              </div>
-            ) : (
-              <div className="remodex-loading-card">
-                {isOwnedCodexSession
-                  ? 'No run history yet — waiting for the first readable output.'
-                  : 'No transcript turns visible yet — latest activity may have been tool-heavy or compacted.'}
-              </div>
-            )}
-          </div>
-
-          {streamingText ? (
-            <article className="remodex-message-card remodex-message-card-assistant remodex-streaming-card">
-              <div className="remodex-message-header">
-                <span className="remodex-speaker-label">{selectedSession ? agentDisplayName(selectedSession) : 'Mister'}</span>
-                <div className="remodex-typing-bubble-dots" style={{ display: 'inline-flex', marginLeft: 6 }}>
-                  <span className="remodex-typing-dot" />
-                  <span className="remodex-typing-dot" />
-                  <span className="remodex-typing-dot" />
-                </div>
-              </div>
-              <div className="remodex-streaming-preview" style={{ maxHeight: 60, overflow: 'hidden', fontSize: '0.85rem', lineHeight: 1.4, color: '#475569' }}>{formatStreamingPreview(streamingText)}</div>
-            </article>
-          ) : (waitingForResponse || actionStateBySession[selectedSessionKey ?? ''] === 'steering') ? (
-            <div className="remodex-typing-bubble">
-              <span className="remodex-typing-bubble-label">{selectedSession ? agentDisplayName(selectedSession) : 'Mister'}</span>
-              <div className="remodex-typing-bubble-dots">
-                <span className="remodex-typing-dot" />
-                <span className="remodex-typing-dot" />
-                <span className="remodex-typing-dot" />
-              </div>
-            </div>
-          ) : null}
-
-          {/* ── Approval cards ── */}
-          {pendingApprovals.length > 0 ? (
-            <div className="remodex-approval-stack">
-              {pendingApprovals.map((approval) => {
-                const resolved = resolvedApprovals[approval.id];
-                const severityColor = approval.severity === 'critical' ? '#ff3b30' : approval.severity === 'warning' ? '#ff9f0a' : '#007aff';
-                const elapsed = Math.round((Date.now() - approval.createdAt) / 60_000);
-                const timeLabel = elapsed < 1 ? 'just now' : `${elapsed}m ago`;
-
-                const cardStyle: CSSProperties = {
-                  background: '#ffffff',
-                  borderRadius: 16,
-                  padding: '16px 18px',
-                  border: '1px solid rgba(0,0,0,0.06)',
-                  borderLeft: `4px solid ${severityColor}`,
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-                };
-                const headerStyle: CSSProperties = {
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  marginBottom: 10,
-                };
-                const agentDotStyle: CSSProperties = {
-                  width: 8, height: 8, borderRadius: '50%',
-                  background: severityColor, display: 'inline-block', marginRight: 8,
-                };
-                const agentNameStyle: CSSProperties = {
-                  fontSize: 13, fontWeight: 600, color: '#86868b',
-                  textTransform: 'uppercase', letterSpacing: '0.03em',
-                };
-                const timeStyle: CSSProperties = {
-                  fontSize: 12, color: '#aeaeb2',
-                };
-                const titleStyle: CSSProperties = {
-                  fontSize: 17, fontWeight: 700, color: '#1d1d1f',
-                  margin: '0 0 6px', letterSpacing: '-0.02em', lineHeight: 1.25,
-                };
-                const descStyle: CSSProperties = {
-                  fontSize: 14, color: '#636366', margin: '0 0 12px', lineHeight: 1.45,
-                };
-                const metaWrapStyle: CSSProperties = {
-                  borderTop: '1px solid #f5f5f7', paddingTop: 10, marginBottom: 14,
-                };
-                const metaRowStyle: CSSProperties = {
-                  display: 'flex', justifyContent: 'space-between',
-                  alignItems: 'baseline', padding: '4px 0',
-                };
-                const metaKeyStyle: CSSProperties = { fontSize: 13, color: '#aeaeb2' };
-                const metaValStyle: CSSProperties = {
-                  fontSize: 13, fontWeight: 500, color: '#1d1d1f',
-                  fontVariantNumeric: 'tabular-nums',
-                };
-                const actionsStyle: CSSProperties = {
-                  display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10,
-                };
-                const btnBase: CSSProperties = {
-                  padding: '13px 0', borderRadius: 12, fontSize: 15,
-                  fontWeight: 600, border: 'none', textAlign: 'center',
-                  WebkitTapHighlightColor: 'transparent', cursor: 'pointer',
-                };
-                const rejectBtnStyle: CSSProperties = {
-                  ...btnBase, background: '#f5f5f7', color: '#636366',
-                };
-                const approveBtnStyle: CSSProperties = {
-                  ...btnBase, background: '#ef4444', color: '#ffffff',
-                  boxShadow: '0 2px 10px rgba(239,68,68,0.3)',
-                };
-                const resolvedBarStyle: CSSProperties = {
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  gap: 6, padding: '12px 0', borderRadius: 12, fontSize: 15, fontWeight: 600,
-                  background: resolved === 'approved' ? 'rgba(52,199,89,0.12)' : 'rgba(255,59,48,0.08)',
-                  color: resolved === 'approved' ? '#34c759' : '#ff3b30',
-                };
-
-                return (
-                  <div
-                    key={approval.id}
-                    className={`remodex-approval-card-wrap ${resolved ? 'remodex-approval-resolved' : ''}`}
-                  >
-                    <div style={cardStyle}>
-                      {/* Header — agent + time inline */}
-                      <div style={headerStyle}>
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
-                          <span style={agentDotStyle} />
-                          <span style={agentNameStyle}>{approval.agent}</span>
-                        </div>
-                        <span style={timeStyle}>{timeLabel}</span>
-                      </div>
-
-                      {/* Title + description */}
-                      <h3 style={titleStyle}>{approval.title}</h3>
-                      <p style={descStyle}>{approval.description}</p>
-
-                      {/* Metadata rows */}
-                      {approval.metadata ? (
-                        <div style={metaWrapStyle}>
-                          {Object.entries(approval.metadata).map(([key, val]) => (
-                            <div key={key} style={metaRowStyle}>
-                              <span style={metaKeyStyle}>{key}</span>
-                              <span style={metaValStyle}>{val}</span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-
-                      {/* Action buttons or resolved state */}
-                      {resolved ? (
-                        <div style={resolvedBarStyle}>
-                          <span>{resolved === 'approved' ? '✓' : '✕'}</span>
-                          <span>{resolved === 'approved' ? 'Approved' : 'Rejected'}</span>
-                        </div>
-                      ) : (
-                        <div style={actionsStyle}>
-                          <button
-                            type="button"
-                            style={rejectBtnStyle}
-                            onClick={() => {
-                              setResolvedApprovals((cur) => ({ ...cur, [approval.id]: 'rejected' }));
-                              setSurfaceNote(`❌ Rejected: ${approval.title}`);
-                              setTimeout(() => {
-                                setPendingApprovals((cur) => cur.filter((a) => a.id !== approval.id));
-                              }, 1500);
-                            }}
-                          >
-                            {approval.actions.reject.label}
-                          </button>
-                          <button
-                            type="button"
-                            style={approveBtnStyle}
-                            onClick={() => {
-                              setResolvedApprovals((cur) => ({ ...cur, [approval.id]: 'approved' }));
-                              setSurfaceNote(`✅ Approved: ${approval.title}`);
-                              setTimeout(() => {
-                                setPendingApprovals((cur) => cur.filter((a) => a.id !== approval.id));
-                              }, 1500);
-                            }}
-                          >
-                            {approval.actions.approve.label}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
+          <ApprovalStack
+            pendingApprovals={pendingApprovals}
+            resolvedApprovals={resolvedApprovals}
+            onApprove={handleApprovalApprove}
+            onReject={handleApprovalReject}
+          />
 
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
 
         <div className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
           <div className="remodex-compose-shell">
-            {isChatSession ? (
-              <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  className="remodex-file-input-hidden"
-                  onChange={(event) => {
-                    void handleAttachmentSelection(event.target.files);
-                    event.currentTarget.value = '';
-                  }}
-                />
-                {transcriptAttachments.length ? (
-                  <div className="remodex-attachment-strip">
-                    {transcriptAttachments.map((attachment) => (
-                      <div key={attachment.id} className="remodex-attachment-pill">
-                        <Image src={attachment.previewUrl} alt={attachment.fileName} width={72} height={72} unoptimized />
-                        <div className="remodex-attachment-pill-copy">
-                          <strong>{compactLine(attachment.fileName, attachment.fileName, 20)}</strong>
-                          <span>Ready to send</span>
-                        </div>
-                        <button
-                          type="button"
-                          className="remodex-attachment-pill-remove"
-                          aria-label={`Remove ${attachment.fileName}`}
-                          onClick={() => {
-                            if (!selectedSessionKey) return;
-                            removeDraftAttachment(selectedSessionKey, attachment.id);
-                          }}
-                        >
-                          <X size={14} strokeWidth={2.2} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="remodex-compose-surface">
-                  <div className="remodex-compose-status-bar">
-                    <span className="remodex-compose-chip remodex-compose-pill">{selectedSession?.model ?? 'live'}</span>
-                    <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{selectedSession?.status ?? 'idle'}</span>
-                  </div>
-                  <textarea
-                    ref={composeRef}
-                    className="remodex-compose-input"
-                    rows={2}
-                    value={transcriptDraft}
-                    onChange={(event) => {
-                      if (!selectedSessionKey) return;
-                      const value = event.target.value;
-                      setDraftBySession((current) => ({ ...current, [selectedSessionKey]: value }));
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.shiftKey && selectedSessionKey && transcriptDraft.trim()) {
-                        event.preventDefault();
-                        void handleSteerSubmit(selectedSessionKey);
-                      }
-                    }}
-                    onFocus={() => setComposeFocused(true)}
-                    onBlur={() => setComposeFocused(false)}
-                    placeholder={transcriptAttachments.length ? 'Add context for the image…' : `Message ${selectedSession ? agentDisplayName(selectedSession) : 'Mister'}…`}
-                  />
-                  <div className="remodex-compose-row">
-                    <button
-                      type="button"
-                      className="remodex-compose-chip remodex-compose-chip-icon"
-                      aria-label="Attach image"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <Plus size={16} strokeWidth={2.2} />
-                    </button>
-                    <button
-                      type="button"
-                      className="remodex-compose-chip remodex-compose-chip-icon"
-                      aria-label="Refresh conversation"
-                      onClick={() => {
-                        void handleSurfaceRefresh();
-                      }}
-                    >
-                      <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
-                    </button>
-                    {/* ✨ Enhance prompt button */}
-                    {transcriptDraft.trim().length >= 3 ? (
-                      preEnhanceDraft !== null ? (
-                        <button
-                          type="button"
-                          className="remodex-compose-chip remodex-compose-chip-icon"
-                          aria-label="Undo enhancement"
-                          onClick={handleUndoEnhance}
-                          style={{ color: '#ef4444', fontSize: 13, fontWeight: 600, minWidth: 42, minHeight: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(239,68,68,0.08)', borderRadius: 999, border: 'none', cursor: 'pointer' }}
-                        >
-                          Undo
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="remodex-compose-chip remodex-compose-chip-icon"
-                          aria-label="Enhance prompt"
-                          disabled={enhancing}
-                          onClick={() => void handleEnhancePrompt()}
-                          style={{ minWidth: 42, minHeight: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: enhancing ? 'default' : 'pointer', color: enhancing ? '#d1d5db' : '#ff9f0a' }}
-                        >
-                          <Sparkles size={18} strokeWidth={2} className={enhancing ? 'spin' : undefined} />
-                        </button>
-                      )
-                    ) : null}
-                    <button
-                      type="button"
-                      style={(() => {
-                        const isDisabled = !selectedSessionKey || transcriptActionState !== 'idle' || (!transcriptDraft.trim() && transcriptAttachments.length === 0);
-                        return {
-                          marginLeft: 'auto',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '0.32rem',
-                          minWidth: 42,
-                          minHeight: 42,
-                          padding: '0 0.82rem',
-                          borderRadius: 999,
-                          border: 'none',
-                          background: isDisabled ? '#d1d5db' : '#ef4444',
-                          color: isDisabled ? '#9ca3af' : '#ffffff',
-                          fontSize: '0.84rem',
-                          fontWeight: 700,
-                          boxShadow: isDisabled ? 'none' : '0 4px 14px rgba(239, 68, 68, 0.4)',
-                          cursor: isDisabled ? 'default' : 'pointer',
-                        } satisfies CSSProperties;
-                      })()}
-                      disabled={!selectedSessionKey || transcriptActionState !== 'idle' || (!transcriptDraft.trim() && transcriptAttachments.length === 0)}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => {
-                        if (!selectedSessionKey) return;
-                        void handleSteerSubmit(selectedSessionKey);
-                      }}
-                      aria-label={`Send message to ${selectedSession ? agentDisplayName(selectedSession) : 'Mister'}`}
-                    >
-                      {transcriptActionState === 'steering' ? (
-                        <>
-                          <RefreshCw size={17} className="spin" />
-                          <span>Sending</span>
-                        </>
-                      ) : (
-                        <>
-                          <ArrowUp size={17} strokeWidth={2.2} />
-                          <span>Send</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              </>
-            ) : canResumeOwnedCodex ? (
-              <div className="remodex-compose-surface remodex-compose-surface-watch">
-                <div className="remodex-watch-card">
-                  <div className="remodex-watch-copy">
-                    <strong>Message Codex</strong>
-                    <p>Send the next turn between runs. Queues immediately — output lands once Codex starts.</p>
-                  </div>
-                  <textarea
-                    ref={composeRef}
-                    className="remodex-compose-input"
-                    rows={2}
-                    value={transcriptDraft}
-                    onChange={(event) => {
-                      if (!selectedSessionKey) return;
-                      const value = event.target.value;
-                      setDraftBySession((current) => ({ ...current, [selectedSessionKey]: value }));
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.shiftKey && selectedSessionKey && transcriptDraft.trim()) {
-                        event.preventDefault();
-                        void handleOwnedResumeSubmit(selectedSessionKey);
-                      }
-                    }}
-                    onFocus={() => setComposeFocused(true)}
-                    onBlur={() => setComposeFocused(false)}
-                    placeholder="Next instruction for Codex…"
-                  />
-                  <div className="remodex-owned-quick-actions">
-                    <button
-                      type="button"
-                      className="remodex-compose-chip"
-                      onClick={() => selectedSessionKey && handleLoadOwnedCorrectionDraft(selectedSessionKey)}
-                      disabled={!selectedSessionKey || !selectedReviewPacket}
-                    >
-                      <ArrowUp size={15} strokeWidth={2.1} />
-                      Draft reply
-                    </button>
-                    <button
-                      type="button"
-                      className="remodex-compose-chip"
-                      onClick={openDiffViewer}
-                      disabled={!reviewFiles.length}
-                    >
-                      <FileDiff size={15} strokeWidth={2.1} />
-                      Exact diff
-                    </button>
-                  </div>
-                  <div className="remodex-compose-row remodex-compose-row-watch remodex-compose-row-owned">
-                    <button
-                      type="button"
-                      className="remodex-compose-chip remodex-compose-chip-icon"
-                      aria-label="Refresh owned runtime surface"
-                      onClick={() => {
-                        void handleSurfaceRefresh();
-                      }}
-                    >
-                      <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
-                    </button>
-                    <span className="remodex-compose-chip remodex-compose-pill">{selectedSession?.model ?? 'live'}</span>
-                    <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{ownedLifecycleLabel(ownedAvailability)}</span>
-                    <span className="remodex-compose-chip remodex-compose-pill">{ownedReviewDispositionLabel(ownedReviewDisposition)}</span>
-                    <button
-                      type="button"
-                      style={(() => {
-                        const isDisabled = !selectedSessionKey || transcriptActionState !== 'idle' || !transcriptDraft.trim();
-                        return {
-                          marginLeft: 'auto',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '0.32rem',
-                          minWidth: 42,
-                          minHeight: 42,
-                          padding: '0 0.82rem',
-                          borderRadius: 999,
-                          border: 'none',
-                          background: isDisabled ? '#d1d5db' : '#ef4444',
-                          color: isDisabled ? '#9ca3af' : '#ffffff',
-                          fontSize: '0.84rem',
-                          fontWeight: 700,
-                          boxShadow: isDisabled ? 'none' : '0 4px 14px rgba(239, 68, 68, 0.4)',
-                          cursor: isDisabled ? 'default' : 'pointer',
-                        } satisfies CSSProperties;
-                      })()}
-                      disabled={!selectedSessionKey || transcriptActionState !== 'idle' || !transcriptDraft.trim()}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => {
-                        if (!selectedSessionKey) return;
-                        void handleOwnedResumeSubmit(selectedSessionKey);
-                      }}
-                      aria-label="Send next turn to owned Codex"
-                    >
-                      {transcriptActionState === 'steering' ? (
-                        <>
-                          <RefreshCw size={17} className="spin" />
-                          <span>Sending</span>
-                        </>
-                      ) : (
-                        <>
-                          <ArrowUp size={17} strokeWidth={2.2} />
-                          <span>Send</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  <p className="remodex-compose-helper">Review diffs and send the next turn. Interrupt reappears while the run is active.</p>
-                </div>
-              </div>
-            ) : (
-              <div className="remodex-compose-surface remodex-compose-surface-watch">
-                <div className="remodex-watch-card">
-                  <div className="remodex-watch-copy">
-                    <strong>{ownedQueuedTurn ? 'Turn queued' : canInterruptOwnedCodex ? 'Active run' : 'Review-first'}</strong>
-                    <p>
-                      {ownedQueuedTurn
-                        ? 'Codex accepted the turn. This surface will promote into runtime watch once output starts landing.'
-                        : canInterruptOwnedCodex
-                          ? 'Interrupt is available while the run is active. Resume reappears once the run settles.'
-                          : 'Review and diff context are live. Resume becomes available once the current run settles.'}
-                    </p>
-                  </div>
-                  <div className="remodex-owned-quick-actions">
-                    <button
-                      type="button"
-                      className="remodex-compose-chip"
-                      onClick={openDiffViewer}
-                      disabled={!reviewFiles.length}
-                    >
-                      <FileDiff size={15} strokeWidth={2.1} />
-                      Exact diff
-                    </button>
-                    <button
-                      type="button"
-                      className="remodex-compose-chip"
-                      onClick={() => selectedSessionKey && void handleOwnedReviewDisposition(ownedReviewDisposition === 'resolved' ? 'watch' : 'resolve', selectedSessionKey)}
-                      disabled={!selectedSessionKey || !selectedReviewPacket || transcriptActionState !== 'idle'}
-                    >
-                      {ownedReviewDisposition === 'resolved' ? <Eye size={15} strokeWidth={2.1} /> : <Check size={15} strokeWidth={2.1} />}
-                      {ownedReviewDisposition === 'resolved' ? 'Keep watching' : 'Mark resolved'}
-                    </button>
-                    {canInterruptOwnedCodex ? (
-                      <button
-                        type="button"
-                        className="remodex-compose-chip remodex-compose-chip-danger"
-                        onClick={() => void handleStopActiveRun()}
-                        disabled={!selectedSessionKey || transcriptActionState !== 'idle'}
-                      >
-                        <Square size={15} strokeWidth={2.1} />
-                        Interrupt run
-                      </button>
-                    ) : null}
-                  </div>
-                  <div className="remodex-compose-row remodex-compose-row-watch">
-                    <button
-                      type="button"
-                      className="remodex-compose-chip remodex-compose-chip-icon"
-                      aria-label="Refresh runtime watch"
-                      onClick={() => {
-                        void handleSurfaceRefresh();
-                      }}
-                    >
-                      <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
-                    </button>
-                    <span className="remodex-compose-chip remodex-compose-pill">{selectedSession?.model ?? 'live'}</span>
-                    <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{ownedLifecycleLabel(ownedAvailability)}</span>
-                    <span className="remodex-compose-chip remodex-compose-pill">{ownedReviewDispositionLabel(ownedReviewDisposition)}</span>
-                  </div>
-                </div>
-              </div>
-            )}
-            {transcriptActionNote ? <p className="remodex-inline-action-note">{transcriptActionNote}</p> : null}
+            <ComposeBar
+              session={selectedSession}
+              sessionKey={selectedSessionKey}
+              draft={transcriptDraft}
+              attachments={transcriptAttachments}
+              actionState={transcriptActionState}
+              enhancing={enhancing}
+              preEnhanceDraft={preEnhanceDraft}
+              isChatSession={isChatSession}
+              canResumeOwnedCodex={canResumeOwnedCodex}
+              canInterruptOwnedCodex={canInterruptOwnedCodex}
+              selectedReviewPacket={selectedReviewPacket}
+              reviewFiles={reviewFiles}
+              ownedAvailability={ownedAvailability}
+              ownedReviewDisposition={ownedReviewDisposition}
+              ownedQueuedTurn={ownedQueuedTurn}
+              surfaceRefreshing={surfaceRefreshing}
+              actionNote={transcriptActionNote}
+              compactLine={compactLine}
+              agentDisplayName={agentDisplayName}
+              composeRef={composeRef}
+              fileInputRef={fileInputRef}
+              handlers={composeBarHandlers}
+            />
           </div>
 
           <div className="remodex-runtime-bar">
@@ -2874,229 +1736,42 @@ export function MobileRemoteShell({
         </div>
       </div>
 
-      {controlsOpen ? (
-        <div className="remodex-controls-overlay" role="dialog" aria-modal="true" onClick={() => setControlsOpen(false)}>
-          <section className="remodex-controls-sheet" onClick={(event) => event.stopPropagation()}>
-            <div className="remodex-diff-sheet-head remodex-sheet-head-generic">
-              <div className="remodex-diff-sheet-handle" />
-              <h2>{selectedSession?.isCurrentSession ? 'Q ↔ Mister' : compactLine(selectedSession?.name, 'Session', 24)}</h2>
-              <button type="button" className="remodex-done-button remodex-done-tinted" onClick={() => setControlsOpen(false)}>
-                Done
-              </button>
-            </div>
+      <ControlsSheet
+        controlsOpen={controlsOpen}
+        selectedSession={selectedSession}
+        selectedSessionKey={selectedSessionKey}
+        pendingApprovals={pendingApprovals}
+        sessionSwitcher={sessionSwitcher}
+        reviewFiles={reviewFiles}
+        surfaceRefreshing={surfaceRefreshing}
+        isChatSession={isChatSession}
+        isOwnedCodexSession={isOwnedCodexSession}
+        canInterruptOwnedCodex={canInterruptOwnedCodex}
+        compactLine={compactLine}
+        onClose={() => setControlsOpen(false)}
+        onRefresh={handleControlsRefresh}
+        onOpenDiff={openDiffViewer}
+        onToggleApprovals={handleToggleApprovals}
+        onCopyKey={handleCopySelectedSessionKey}
+        onAbort={() => handleStopActiveRun()}
+        onSessionFocus={handleSessionFocus}
+      />
 
-            <div className="remodex-controls-action-list">
-              <button type="button" className="remodex-controls-action-row" onClick={() => { void handleSurfaceRefresh(); setControlsOpen(false); }}>
-                <span className="remodex-action-row-icon"><RefreshCw size={18} strokeWidth={1.8} className={surfaceRefreshing ? 'spin' : undefined} /></span>
-                <span className="remodex-action-row-label">Refresh</span>
-              </button>
-              <button type="button" className="remodex-controls-action-row" onClick={openDiffViewer} disabled={!reviewFiles.length}>
-                <span className="remodex-action-row-icon"><FileDiff size={18} strokeWidth={1.8} /></span>
-                <span className="remodex-action-row-label">Changes</span>
-                {reviewFiles.length ? <span className="remodex-action-row-badge">{reviewFiles.length}</span> : null}
-              </button>
-              <button
-                type="button"
-                className="remodex-controls-action-row"
-                disabled={!selectedSessionKey}
-                onClick={() => {
-                  handleCopy(selectedSessionKey ?? '');
-                  setControlsOpen(false);
-                }}
-              >
-                <span className="remodex-action-row-icon"><Copy size={18} strokeWidth={1.8} /></span>
-                <span className="remodex-action-row-label">Copy session key</span>
-              </button>
-              <button
-                type="button"
-                className="remodex-controls-action-row"
-                onClick={() => {
-                  setPendingApprovals((cur) =>
-                    cur.length > 0 ? [] : [...demoApprovals],
-                  );
-                  setResolvedApprovals({});
-                  setControlsOpen(false);
-                }}
-              >
-                <span className="remodex-action-row-icon"><SlidersHorizontal size={18} strokeWidth={1.8} /></span>
-                <span className="remodex-action-row-label">{pendingApprovals.length ? 'Hide demo approvals' : 'Show demo approvals'}</span>
-                {pendingApprovals.length ? <span className="remodex-action-row-badge">{pendingApprovals.length}</span> : null}
-              </button>
-              <Link href="/" className="remodex-controls-action-row remodex-controls-action-link" onClick={() => setControlsOpen(false)}>
-                <span className="remodex-action-row-icon"><Monitor size={18} strokeWidth={1.8} /></span>
-                <span className="remodex-action-row-label">Open on desktop</span>
-                <ChevronRight size={16} strokeWidth={1.8} className="remodex-action-row-chevron" />
-              </Link>
-              {(isChatSession && selectedSession?.status === 'running') || canInterruptOwnedCodex ? (
-                <button type="button" className="remodex-controls-action-row remodex-controls-action-row-danger" onClick={() => void handleStopActiveRun()}>
-                  <span className="remodex-action-row-icon"><Square size={18} strokeWidth={1.8} /></span>
-                  <span className="remodex-action-row-label">{isOwnedCodexSession ? 'Interrupt run' : 'Stop run'}</span>
-                </button>
-              ) : null}
-            </div>
-
-            {sessionSwitcher.length > 1 ? (
-              <div className="remodex-controls-session-list">
-                <span className="remodex-controls-label">Sessions</span>
-                <div className="remodex-controls-session-grid">
-                  {(() => {
-                    // Number duplicate session names so they're distinguishable
-                    const nameCount = new Map<string, number>();
-                    const nameIndex = new Map<string, number>();
-                    for (const s of sessionSwitcher) {
-                      nameCount.set(s.name, (nameCount.get(s.name) ?? 0) + 1);
-                    }
-                    return sessionSwitcher.map((session) => {
-                      const count = nameCount.get(session.name) ?? 1;
-                      const idx = (nameIndex.get(session.name) ?? 0) + 1;
-                      nameIndex.set(session.name, idx);
-                      const displayName = session.isCurrentSession
-                        ? 'Q ↔ Mister'
-                        : count > 1
-                          ? `${compactLine(session.name, session.name, 24)} #${idx}`
-                          : compactLine(session.name, session.name, 32);
-                      const active = session.id === selectedSession?.id;
-                      const isLive = session.status === 'running' || session.status === 'reviewing';
-                      return (
-                        <button
-                          key={session.id}
-                          type="button"
-                          className={`remodex-controls-session-row ${active ? 'remodex-controls-session-row-active' : ''}`}
-                          onClick={() => handleSessionFocus(session.id)}
-                        >
-                          <span className={`remodex-session-dot ${isLive ? 'remodex-session-dot-live' : ''}`} />
-                          <span className="remodex-session-row-copy">
-                            <strong>{displayName}</strong>
-                            <span>{session.status} · {compactLine(session.lastEventAt, 'now', 20)}</span>
-                          </span>
-                          {active ? <span className="remodex-session-check">✓</span> : null}
-                        </button>
-                      );
-                    });
-                  })()}
-                </div>
-              </div>
-            ) : null}
-          </section>
-        </div>
-      ) : null}
-
-      {diffOpen ? (
-        <div className="remodex-diff-overlay" role="dialog" aria-modal="true" onClick={() => setDiffOpen(false)}>
-          <section className="remodex-diff-sheet" onClick={(event) => event.stopPropagation()}>
-            <div className="remodex-diff-sheet-head">
-              <div className="remodex-diff-sheet-handle" />
-              <h2>Changes</h2>
-              <div className="remodex-sheet-head-actions">
-                <button
-                  type="button"
-                  className="remodex-sheet-icon-button"
-                  aria-label="Refresh diff"
-                  onClick={() => {
-                    if (selectedReviewFilePath) {
-                      void loadReviewFile(selectedReviewFilePath, true);
-                    } else {
-                      void handleSurfaceRefresh();
-                    }
-                  }}
-                >
-                  <RefreshCw size={16} strokeWidth={2.1} className={reviewFileLoadingPath === selectedReviewFilePath ? 'spin' : undefined} />
-                </button>
-                <button type="button" className="remodex-done-button" onClick={() => setDiffOpen(false)}>
-                  Done
-                </button>
-              </div>
-            </div>
-
-            {reviewFiles.length ? (
-              <>
-                <div className="remodex-diff-nav-row">
-                  <div className="remodex-diff-position-chip">
-                    {selectedReviewFilePosition ? `${selectedReviewFilePosition} of ${reviewFiles.length}` : `${reviewFiles.length} files`}
-                  </div>
-                  <div className="remodex-diff-nav-actions">
-                    <button
-                      type="button"
-                      className="remodex-diff-nav-button"
-                      onClick={() => jumpReviewFile('prev')}
-                      disabled={!hasPrevReviewFile}
-                    >
-                      Prev file
-                    </button>
-                    <button
-                      type="button"
-                      className="remodex-diff-nav-button"
-                      onClick={() => jumpReviewFile('next')}
-                      disabled={!hasNextReviewFile}
-                    >
-                      Next file
-                    </button>
-                  </div>
-                </div>
-                <div className="remodex-diff-file-strip">
-                  {reviewFiles.map((file) => {
-                    const active = selectedReviewFilePath === file.path;
-                    return (
-                      <button
-                        key={`${file.status}:${file.path}`}
-                        type="button"
-                        className={`remodex-diff-file-pill ${active ? 'remodex-diff-file-pill-active' : ''}`}
-                        onClick={() => handleReviewFileFocus(file.path)}
-                      >
-                        {compactLine(file.path, file.path, 22)}
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            ) : null}
-
-            {reviewFileError ? <p className="remodex-banner-note remodex-banner-note-sheet">{reviewFileError}</p> : null}
-
-            <div className="remodex-diff-scroll">
-              {selectedReviewFile ? (
-                <>
-                  <div className="remodex-diff-meta-row">
-                    <div className="remodex-diff-meta-copy">
-                      <strong>{selectedReviewFile.path}</strong>
-                      <span className="remodex-diff-meta-position">{selectedReviewFilePosition ? `${selectedReviewFilePosition} of ${reviewFiles.length}` : `${reviewFiles.length} files`}</span>
-                    </div>
-                    <span>{`+${selectedReviewFile.additions ?? 0} / -${selectedReviewFile.deletions ?? 0}`}</span>
-                  </div>
-                  {selectedReviewFile.commitSummary ? (
-                    <div className="remodex-diff-commit-card">
-                      <span className="remodex-diff-commit-summary">{selectedReviewFile.commitSummary}</span>
-                      <span className="remodex-diff-commit-meta">
-                        {selectedReviewFile.commitAuthor}{selectedReviewFile.commitAge ? ` · ${selectedReviewFile.commitAge}` : ''}
-                      </span>
-                    </div>
-                  ) : null}
-                  <div className="remodex-diff-block">
-                    {selectedReviewFile.preview.split('\n').map((line, index) => {
-                      const tone = diffLineTone(line);
-                      const displayLine = tone === 'add' || tone === 'remove'
-                        ? line.slice(1)
-                        : tone === 'context'
-                          ? (line.startsWith(' ') ? line.slice(1) : line)
-                          : line;
-                      return (
-                        <div key={`${selectedReviewFile.path}:${index}`} className={`remodex-diff-line remodex-diff-line-${tone}`}>
-                          <div className="remodex-diff-gutter" />
-                          <code>{displayLine || '\u00A0'}</code>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              ) : reviewFileLoadingPath ? (
-                <div className="remodex-loading-card">Loading repository diff…</div>
-              ) : (
-                <div className="remodex-loading-card">No diff is selected on the mobile review surface yet.</div>
-              )}
-            </div>
-          </section>
-        </div>
-      ) : null}
+      <DiffOverlay
+        diffOpen={diffOpen}
+        selectedFile={selectedReviewFile}
+        selectedReviewFilePath={selectedReviewFilePath}
+        reviewFiles={reviewFiles}
+        reviewFileByPath={reviewFileByPath}
+        stickyReviewFilesRef={stickyReviewFilesRef}
+        reviewFileError={reviewFileError}
+        reviewFileLoadingPath={reviewFileLoadingPath}
+        compactLine={compactLine}
+        onClose={() => setDiffOpen(false)}
+        onFileSelect={handleReviewFileFocus}
+        onLoadFile={loadReviewFile}
+        onRefresh={handleDiffRefresh}
+      />
 
       {expandedMedia ? (
         <div className="remodex-media-overlay" role="dialog" aria-modal="true" onClick={() => setExpandedMedia(null)}>
@@ -3137,7 +1812,6 @@ export function MobileRemoteShell({
           </section>
         </div>
       ) : null}
-
     </div>
   );
 }
