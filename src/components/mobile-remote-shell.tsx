@@ -2007,9 +2007,9 @@ export function MobileRemoteShell({
             }
 
             const modelColor: Record<string, string> = {
-              'claude-opus-4-6': '#ef4444',
-              'claude-sonnet-4-20250514': '#f59e0b',
-              'claude-haiku-4-5-20251001': '#22c55e',
+              'claude-opus-4-6': '#ff3b30',
+              'claude-sonnet-4-20250514': '#ff9f0a',
+              'claude-haiku-4-5-20251001': '#34c759',
             };
 
             return (
@@ -2019,15 +2019,15 @@ export function MobileRemoteShell({
                   className="remodex-costs-back"
                   onClick={() => setActiveView('squad')}
                 >
-                  ← Squad
+                  ‹ Squad
                 </button>
 
                 {/* ── Aggregate overview ── */}
                 <div className="remodex-costs-hero">
-                  <span className="remodex-costs-hero-kicker">Total Tokens Used</span>
+                  <span className="remodex-costs-hero-kicker">Token Usage</span>
                   <strong className="remodex-costs-hero-value">{totalTokens.toLocaleString()}</strong>
                   <span className="remodex-costs-hero-sub">
-                    of {totalCapacity.toLocaleString()} capacity across {openClawSessions.length} session{openClawSessions.length === 1 ? '' : 's'}
+                    {totalCapacity.toLocaleString()} total capacity · {openClawSessions.length} active session{openClawSessions.length === 1 ? '' : 's'}
                   </span>
                   <div className="remodex-costs-hero-bar">
                     <div
@@ -2038,6 +2038,7 @@ export function MobileRemoteShell({
                 </div>
 
                 {/* ── Per-model breakdown ── */}
+                <span className="remodex-costs-section-label">By Model</span>
                 {Array.from(byModel.entries()).map(([model, data]) => {
                   const pct = data.capacity > 0 ? Math.round((data.tokens / data.capacity) * 100) : 0;
                   const color = modelColor[model] ?? '#6366f1';
@@ -2053,7 +2054,7 @@ export function MobileRemoteShell({
                         <div className="remodex-costs-model-fill" style={{ width: `${pct}%`, background: color }} />
                       </div>
                       <div className="remodex-costs-model-meta">
-                        <span>{data.tokens.toLocaleString()} tokens</span>
+                        <span>{data.tokens.toLocaleString()} tokens used</span>
                         <span>{data.sessions.length} session{data.sessions.length === 1 ? '' : 's'}</span>
                       </div>
 
@@ -2090,7 +2091,7 @@ export function MobileRemoteShell({
                         <strong className="remodex-costs-model-name">Codex</strong>
                         <span className="remodex-costs-model-pct">{codexSessions.length} session{codexSessions.length === 1 ? '' : 's'}</span>
                       </div>
-                      <p className="remodex-costs-codex-note">Token usage not tracked for Codex sessions — billed through ChatGPT Pro subscription.</p>
+                      <p className="remodex-costs-codex-note">Billed through ChatGPT Pro — token-level usage not available.</p>
                     </div>
                   );
                 })()}
@@ -2124,13 +2125,13 @@ export function MobileRemoteShell({
                           <path
                             d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                             fill="none"
-                            stroke="#e5e7eb"
+                            stroke="#f5f5f7"
                             strokeWidth="3"
                           />
                           <path
                             d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                             fill="none"
-                            stroke={pct >= 75 ? '#ef4444' : pct >= 50 ? '#f59e0b' : '#22c55e'}
+                            stroke={pct >= 75 ? '#ff3b30' : pct >= 50 ? '#ff9f0a' : '#34c759'}
                             strokeWidth="3"
                             strokeDasharray={`${pct}, 100`}
                             strokeLinecap="round"
