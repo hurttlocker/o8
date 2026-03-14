@@ -1850,7 +1850,7 @@ export function MobileRemoteShell({
               const isLatest = !transcriptEntries.slice(index + 1).some((e) => e.role === 'assistant');
               const hasText = Boolean(entry.text.trim());
               const hasMedia = Boolean(entry.media?.length);
-              const isNewMessage = hydrated && seenMessageIdsRef.current != null && !seenMessageIdsRef.current.has(entry.id);
+              const isNewMessage = hydrated && seenMessageIdsRef.current != null && seenMessageIdsRef.current.size > 0 && !seenMessageIdsRef.current.has(entry.id);
               if (isNewMessage) seenMessageIdsRef.current?.add(entry.id);
               const fadeClass = isNewMessage ? ' remodex-turn-new' : '';
               const prevEntry = index > 0 ? transcriptEntries[index - 1] : null;
