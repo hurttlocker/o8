@@ -4354,12 +4354,12 @@ body:has(.remodex-diff-overlay) {
 
 /* Action buttons */
 .remodex-approval-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
 }
 .remodex-approval-btn {
-  flex: 1;
-  padding: 12px 0;
+  padding: 13px 0;
   border-radius: 12px;
   font-size: 15px;
   font-weight: 600;
@@ -4367,14 +4367,15 @@ body:has(.remodex-diff-overlay) {
   border: none;
   transition: transform 0.1s, opacity 0.1s;
   -webkit-tap-highlight-color: transparent;
+  text-align: center;
 }
 .remodex-approval-btn:active {
-  transform: scale(0.97);
+  transform: scale(0.96);
 }
 .remodex-approval-btn-approve {
-  background: #34c759;
+  background: #ef4444;
   color: #ffffff;
-  box-shadow: 0 2px 8px rgba(52,199,89,0.3);
+  box-shadow: 0 2px 10px rgba(239,68,68,0.3);
 }
 .remodex-approval-btn-reject {
   background: #f5f5f7;
