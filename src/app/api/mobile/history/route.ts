@@ -28,32 +28,54 @@ export async function GET(request: NextRequest) {
   try {
     if (sessionKey.startsWith('codex-owned:')) {
       const tail = await getOwnedCodexRuntimeTail(sessionKey);
+
+      // Build a chat-style flat transcript (no groups/turns — just user bubbles and assistant bubbles)
+      const chatTranscript: MobileTranscriptEntry[] = [];
+      const groups = tail.groups ?? [];
+
+      for (const group of groups) {
+        // User prompt → user bubble
+        const promptText = group.prompt?.trim();
+        if (promptText) {
+          chatTranscript.push({
+            id: `${group.id}-prompt`,
+            role: 'user',
+            text: promptText,
+            timestampLabel: group.startedAtLabel,
+          });
+        }
+
+        // Assistant entries from this turn → assistant bubbles
+        for (const entry of group.entries) {
+          const text = entry.text.trim();
+          if (!text) continue;
+          // Skip entries that just echo the prompt
+          if (promptText && text === promptText) continue;
+          // Skip meta noise (usage stats, launch/resume markers)
+          if (text.startsWith('Usage •') || text.includes('Owned Codex session') || text.includes('Codex run launched')) continue;
+
+          const role = runtimeTailRole(entry.label);
+          if (role === 'assistant') {
+            chatTranscript.push({
+              id: entry.id,
+              role: 'assistant',
+              text,
+              timestampLabel: entry.timestampLabel,
+            });
+          } else if (entry.kind === 'tool') {
+            chatTranscript.push({
+              id: entry.id,
+              role: 'system',
+              text: `🔧 ${entry.label || 'Tool'}`,
+              timestampLabel: entry.timestampLabel,
+            });
+          }
+        }
+      }
+
       const payload: MobileHistoryResponse = {
         sessionKey,
-        transcript: (tail.entries ?? []).map((entry) => ({
-          id: entry.id,
-          role: runtimeTailRole(entry.label),
-          text: entry.text,
-          timestampLabel: entry.timestampLabel,
-        })),
-        groups: (tail.groups ?? []).map((group) => ({
-          id: group.id,
-          title: group.title,
-          mode: group.mode,
-          outcome: group.outcome,
-          prompt: group.prompt,
-          startedAt: group.startedAt,
-          finishedAt: group.finishedAt,
-          startedAtLabel: group.startedAtLabel,
-          finishedAtLabel: group.finishedAtLabel,
-          summary: group.summary,
-          entries: group.entries.map((entry) => ({
-            id: entry.id,
-            role: runtimeTailRole(entry.label),
-            text: entry.text,
-            timestampLabel: entry.timestampLabel,
-          })),
-        })),
+        transcript: chatTranscript,
       };
 
       return NextResponse.json(payload, {
