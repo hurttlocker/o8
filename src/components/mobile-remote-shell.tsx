@@ -503,7 +503,7 @@ export function MobileRemoteShell({
   const stickToBottomRef = useRef(true);
 
   const refreshInbox = useCallback(async () => {
-    const response = await fetch('/api/mobile/inbox', { cache: 'no-store' });
+    const response = await fetch(`/api/mobile/inbox?_t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -835,8 +835,9 @@ export function MobileRemoteShell({
 
     setHistoryLoading((current) => ({ ...current, [sessionKey]: true }));
     try {
-      const response = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=18`, {
+      const response = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=18&_t=${Date.now()}`, {
         cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
       });
       const payload = await readJson<MobileHistoryResponse>(response);
       // Diff-and-patch: only update state if transcript actually changed.
