@@ -1,5 +1,5 @@
 import type { AgentSummary, EventSeverity } from '@/lib/fleet/types';
-import { getSessionTranscript } from '@/lib/openclaw/chat';
+import { getSessionActivity, getSessionTranscript } from '@/lib/openclaw/chat';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
 import type { MobileControlAction, MobileInboxItem, MobileInboxSnapshot, MobileReviewFocus } from '@/lib/mobile/types';
@@ -121,10 +121,24 @@ async function _fetchMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
     ?? sessions.find((session) => session.runtime === 'openclaw')
     ?? sessions[0];
 
-  const [reviewSnapshot, primaryTranscript] = await Promise.all([
+  // Fetch review, transcript, and activity for all sessions in parallel
+  const activityPromises = sessions.map((s) =>
+    getSessionActivity(s.sessionKey).catch(() => undefined),
+  );
+
+  const [reviewSnapshot, primaryTranscript, ...activities] = await Promise.all([
     getWorkspaceReviewSnapshot().catch(() => null),
     primarySession ? getSessionTranscript(primarySession.sessionKey, 3).catch(() => []) : Promise.resolve([]),
+    ...activityPromises,
   ]);
+
+  // Attach activity to each session
+  for (let i = 0; i < sessions.length; i++) {
+    const activity = activities[i];
+    if (activity) {
+      sessions[i] = { ...sessions[i], activity };
+    }
+  }
 
   const primarySnippet = primaryTranscript.length
     ? summarizeTranscript(primaryTranscript[primaryTranscript.length - 1]?.text ?? '')
