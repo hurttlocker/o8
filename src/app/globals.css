@@ -4284,9 +4284,9 @@ body:has(.remodex-diff-overlay) {
   background: none;
   border: none;
   color: #ef4444;
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 400;
-  padding: 12px 0 16px;
+  padding: 10px 0 12px;
   cursor: pointer;
   letter-spacing: -0.01em;
 }
@@ -4306,29 +4306,29 @@ body:has(.remodex-diff-overlay) {
 .remodex-costs-hero {
   background: #ffffff;
   border-radius: 16px;
-  padding: 24px 20px 20px;
+  padding: 18px 18px 16px;
   margin-bottom: 0;
   box-shadow: 0 1px 4px rgba(0,0,0,0.05);
   border: 1px solid rgba(0,0,0,0.06);
 }
 .remodex-costs-hero-kicker {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   color: #86868b;
   letter-spacing: -0.01em;
 }
 .remodex-costs-hero-value {
   display: block;
-  font-size: 34px;
+  font-size: 28px;
   font-weight: 700;
   color: #1d1d1f;
-  line-height: 1.1;
-  margin: 6px 0 4px;
+  line-height: 1.15;
+  margin: 4px 0 2px;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
 .remodex-costs-hero-sub {
-  font-size: 13px;
+  font-size: 12px;
   color: #86868b;
   line-height: 1.4;
 }
@@ -4336,7 +4336,7 @@ body:has(.remodex-diff-overlay) {
   height: 4px;
   background: #f5f5f7;
   border-radius: 2px;
-  margin-top: 16px;
+  margin-top: 12px;
   overflow: hidden;
 }
 .remodex-costs-hero-fill {
