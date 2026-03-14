@@ -51,6 +51,38 @@ function pickCurrentSession(snapshot: MobileInboxSnapshot) {
     ?? snapshot.sessions[0];
 }
 
+/**
+ * Strip markdown syntax and return a very short "live tail" of the response.
+ * Apple notification style: just enough to show activity, never a wall of text.
+ */
+function formatStreamingPreview(raw: string): string {
+  let text = raw;
+  // Strip code blocks entirely (```...```)
+  text = text.replace(/```[\s\S]*?```/g, '');
+  // Strip markdown tables (lines starting with |)
+  text = text.replace(/^\|.*\|$/gm, '');
+  // Strip markdown bold/italic
+  text = text.replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1');
+  // Strip markdown headers
+  text = text.replace(/^#{1,4}\s+/gm, '');
+  // Strip inline code backticks
+  text = text.replace(/`([^`]+)`/g, '$1');
+  // Strip markdown links [text](url) → text
+  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  // Strip horizontal rules, bullet points
+  text = text.replace(/^[-*_]{3,}$/gm, '');
+  text = text.replace(/^[-*]\s+/gm, '');
+  // Collapse whitespace
+  text = text.replace(/\n{2,}/g, '\n').trim();
+
+  // Take ONLY the last 2 non-empty lines, each capped at 80 chars
+  const lines = text.split('\n').filter((l) => l.trim());
+  const tail = lines.slice(-2).map((l) => l.length > 80 ? l.slice(0, 77) + '…' : l);
+  const result = tail.join('\n');
+  // Hard cap at 160 chars total
+  return result.length > 160 ? result.slice(0, 157) + '…' : result;
+}
+
 function roleLabel(role: MobileTranscriptEntry['role'], agentName?: string) {
   switch (role) {
     case 'assistant':
@@ -441,6 +473,23 @@ export function MobileRemoteShell({
   const [surfaceRefreshing, setSurfaceRefreshing] = useState(false);
   const [expandedMedia, setExpandedMedia] = useState<MobileTranscriptMedia | null>(null);
   const [scrollY, setScrollY] = useState(0);
+
+  // Lock body scroll when diff overlay is open (iOS Safari requires JS approach)
+  useEffect(() => {
+    if (!diffOpen) return;
+    const scrollPos = window.scrollY;
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.top = `-${scrollPos}px`;
+    document.body.style.width = '100%';
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.top = '';
+      document.body.style.width = '';
+      window.scrollTo(0, scrollPos);
+    };
+  }, [diffOpen]);
   const [isScrolling, setIsScrolling] = useState(false);
   const [headerVisible, setHeaderVisible] = useState(true);
   const [viewportTopOffset, setViewportTopOffset] = useState(0);
@@ -660,6 +709,11 @@ export function MobileRemoteShell({
   const lastAssistantCountRef = useRef(0);
   const seenMessageIdsRef = useRef<Set<string> | null>(null);
   const [hydrated, setHydrated] = useState(false);
+
+  // ── Streaming state ──
+  const [streamingText, setStreamingText] = useState('');
+  const [streamingRunId, setStreamingRunId] = useState<string | null>(null);
+  const streamingTextRef = useRef(''); // avoid stale closures in EventSource handler
   useEffect(() => {
     // Seed with all current IDs so initial render doesn't animate everything
     if (!seenMessageIdsRef.current) {
@@ -667,6 +721,98 @@ export function MobileRemoteShell({
     }
     setHydrated(true);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── SSE streaming connection ──
+  useEffect(() => {
+    if (!selectedSessionKey || typeof window === 'undefined') return;
+    // Only stream OpenClaw sessions (not owned Codex which has its own tail)
+    const session = snapshot.sessions.find((s) => s.sessionKey === selectedSessionKey);
+    if (session?.runtime !== 'openclaw') return;
+
+    let es: EventSource | null = null;
+    let disposed = false;
+
+    const connect = () => {
+      if (disposed) return;
+      es = new EventSource(`/api/mobile/stream?sessionKey=${encodeURIComponent(selectedSessionKey)}`);
+
+      es.addEventListener('chat-delta', (event) => {
+        if (disposed) return;
+        try {
+          const data = JSON.parse(event.data);
+          if (data.text) {
+            streamingTextRef.current = data.text;
+            setStreamingText(data.text);
+            setStreamingRunId(data.runId ?? null);
+          }
+        } catch { /* ignore malformed events */ }
+      });
+
+      es.addEventListener('chat-done', (event) => {
+        if (disposed) return;
+        // Response complete — clear streaming state, force poll for final transcript
+        streamingTextRef.current = '';
+        setStreamingText('');
+        setStreamingRunId(null);
+        try {
+          const data = JSON.parse(event.data);
+          // Inline the final text immediately for zero-latency display
+          if (data.text && selectedSessionKey) {
+            setHistoryBySession((current) => {
+              const prev = current[selectedSessionKey] ?? [];
+              // Don't add if the last message already matches (poll caught up)
+              if (prev.length > 0 && prev[prev.length - 1]?.text === data.text) {
+                return current;
+              }
+              // Append a synthetic entry — the next poll will reconcile with the real one
+              const syntheticEntry: MobileTranscriptEntry = {
+                id: `stream:${data.runId ?? Date.now()}`,
+                role: 'assistant',
+                text: data.text,
+                timestampLabel: new Date(data.timestamp ?? Date.now()).toLocaleTimeString('en-US', {
+                  hour: 'numeric',
+                  minute: '2-digit',
+                }),
+              };
+              return { ...current, [selectedSessionKey]: [...prev, syntheticEntry] };
+            });
+          }
+        } catch { /* ignore */ }
+        // Force a fresh poll to get the authoritative transcript
+        void loadHistory(selectedSessionKey, true).catch(() => undefined);
+      });
+
+      es.addEventListener('chat-error', () => {
+        if (disposed) return;
+        streamingTextRef.current = '';
+        setStreamingText('');
+        setStreamingRunId(null);
+      });
+
+      es.onerror = () => {
+        // EventSource auto-reconnects on error — just clean up streaming state
+        if (!disposed) {
+          streamingTextRef.current = '';
+          setStreamingText('');
+          setStreamingRunId(null);
+        }
+      };
+    };
+
+    connect();
+
+    return () => {
+      disposed = true;
+      if (es) {
+        es.close();
+        es = null;
+      }
+      streamingTextRef.current = '';
+      setStreamingText('');
+      setStreamingRunId(null);
+    };
+  }, [selectedSessionKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const reviewFiles = useMemo(() => {
     const next = isOwnedCodexSession
       ? selectedReviewPacket?.changedFiles ?? []
@@ -902,10 +1048,25 @@ export function MobileRemoteShell({
   const scrollMarker = pendingOwnedTurn ? `${latestTranscriptMarker}:${pendingOwnedTurn.id}` : latestTranscriptMarker;
   const selectedReviewFile = selectedReviewFilePath ? reviewFileByPath[selectedReviewFilePath] : undefined;
   const threadSwitcher = useMemo(() => {
+    // Filter: only show sessions that are active/recent or currently selected
+    const isRelevant = (session: MobileInboxSnapshot['sessions'][number]) => {
+      if (session.isCurrentSession) return true;
+      if (session.id === selectedSession?.id) return true;
+      if (['running', 'reviewing', 'blocked'].includes(session.status)) return true;
+      // Filter out stale sessions — "Xh ago" with X > 4
+      const ageMatch = session.lastEventAt?.match(/^(\d+)h/);
+      if (ageMatch && parseInt(ageMatch[1], 10) > 4) return false;
+      // Keep sessions with activity or alerts
+      if (session.activity || session.alerts > 0) return true;
+      // Keep owned Codex sessions that aren't ancient
+      if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') return true;
+      return false;
+    };
+
     const candidates = [
       selectedSession,
       ...snapshot.sessions.filter((session) => session.isCurrentSession),
-      ...snapshot.sessions.filter((session) => session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned'),
+      ...snapshot.sessions.filter((session) => isRelevant(session)),
     ].filter(Boolean) as MobileInboxSnapshot['sessions'];
 
     const seen = new Set<string>();
@@ -916,7 +1077,7 @@ export function MobileRemoteShell({
       }
       seen.add(session.id);
       deduped.push(session);
-      if (deduped.length >= 4) {
+      if (deduped.length >= 6) {
         break;
       }
     }
@@ -1598,23 +1759,52 @@ export function MobileRemoteShell({
 
         <div className="remodex-scroll-view">
 
-          {threadSwitcher.length > 1 ? (
-            <div className="remodex-thread-rail">
+          {threadSwitcher.length > 0 ? (
+            <div className="remodex-squad-rail">
               {threadSwitcher.map((session) => {
                 const active = session.id === selectedSession?.id;
+                const isRunning = session.status === 'running' || session.status === 'reviewing';
+                const ctxPct = Math.round(session.context?.usedPercent ?? 0);
+                const ctxTone = ctxPct >= 85 ? 'critical' : ctxPct >= 75 ? 'high' : ctxPct >= 65 ? 'watch' : 'calm';
+                const agentName = session.isCurrentSession ? 'Mister' : session.name?.split(/[\s/]/)[0] ?? 'Agent';
+                const activityLine = session.activity?.headline;
+                const taskLine = activityLine
+                  ? activityLine
+                  : session.isCurrentSession
+                    ? 'Main session'
+                    : session.status;
                 return (
                   <button
                     key={session.id}
                     type="button"
-                    className={`remodex-thread-pill ${active ? 'remodex-thread-pill-active' : ''}`}
+                    className={`remodex-squad-card ${active ? 'remodex-squad-card-active' : ''}`}
                     onClick={() => handleSessionFocus(session.id)}
                   >
-                    <span className="remodex-thread-pill-kicker">{threadLaneLabel(session)}</span>
-                    <strong>{session.isCurrentSession ? 'Q ↔ Mister' : compactLine(session.name, session.name, 20)}</strong>
-                    <span className="remodex-thread-pill-meta">{threadLaneState(session)}{session.lastEventAt && !session.isCurrentSession ? ` · ${session.lastEventAt}` : ''}</span>
+                    <div className="remodex-squad-card-head">
+                      <span className={`remodex-squad-dot ${isRunning ? 'remodex-squad-dot-live' : ''} remodex-squad-dot-${ctxTone}`} />
+                      <strong className="remodex-squad-name">{agentName}</strong>
+                      <span className="remodex-squad-time">{session.lastEventAt ?? 'idle'}</span>
+                    </div>
+                    <span className="remodex-squad-task">{taskLine}</span>
+                    <div className="remodex-squad-bar-track">
+                      <div
+                        className={`remodex-squad-bar-fill remodex-squad-bar-${ctxTone}`}
+                        style={{ width: `${ctxPct}%` }}
+                      />
+                    </div>
                   </button>
                 );
               })}
+            </div>
+          ) : null}
+
+          {selectedSession?.activity && selectedSession.status !== 'idle' ? (
+            <div className="remodex-activity-bar">
+              <span className="remodex-activity-dot" />
+              <span className="remodex-activity-label">{selectedSession.activity.headline}</span>
+              {selectedSession.activity.filePath ? (
+                <span className="remodex-activity-file">{selectedSession.activity.filePath.split('/').pop()}</span>
+              ) : null}
             </div>
           ) : null}
 
@@ -1789,7 +1979,7 @@ export function MobileRemoteShell({
               const isLatest = !transcriptEntries.slice(index + 1).some((e) => e.role === 'assistant');
               const hasText = Boolean(entry.text.trim());
               const hasMedia = Boolean(entry.media?.length);
-              const isNewMessage = hydrated && seenMessageIdsRef.current != null && !seenMessageIdsRef.current.has(entry.id);
+              const isNewMessage = hydrated && seenMessageIdsRef.current != null && seenMessageIdsRef.current.size > 0 && !seenMessageIdsRef.current.has(entry.id);
               if (isNewMessage) seenMessageIdsRef.current?.add(entry.id);
               const fadeClass = isNewMessage ? ' remodex-turn-new' : '';
               const prevEntry = index > 0 ? transcriptEntries[index - 1] : null;
@@ -1866,7 +2056,19 @@ export function MobileRemoteShell({
             )}
           </div>
 
-          {(waitingForResponse || actionStateBySession[selectedSessionKey ?? ''] === 'steering') ? (
+          {streamingText ? (
+            <article className="remodex-message-card remodex-message-card-assistant remodex-streaming-card">
+              <div className="remodex-message-header">
+                <span className="remodex-speaker-label">{isOwnedCodexSession ? 'Codex' : (selectedSession?.name ?? 'Mister')}</span>
+                <div className="remodex-typing-bubble-dots" style={{ display: 'inline-flex', marginLeft: 6 }}>
+                  <span className="remodex-typing-dot" />
+                  <span className="remodex-typing-dot" />
+                  <span className="remodex-typing-dot" />
+                </div>
+              </div>
+              <div className="remodex-streaming-preview" style={{ maxHeight: 60, overflow: 'hidden', fontSize: '0.85rem', lineHeight: 1.4, color: '#475569' }}>{formatStreamingPreview(streamingText)}</div>
+            </article>
+          ) : (waitingForResponse || actionStateBySession[selectedSessionKey ?? ''] === 'steering') ? (
             <div className="remodex-typing-bubble">
               <span className="remodex-typing-bubble-label">{isOwnedCodexSession ? 'Codex' : 'Mister'}</span>
               <div className="remodex-typing-bubble-dots">
@@ -2368,6 +2570,14 @@ export function MobileRemoteShell({
                     </div>
                     <span>{`+${selectedReviewFile.additions ?? 0} / -${selectedReviewFile.deletions ?? 0}`}</span>
                   </div>
+                  {selectedReviewFile.commitSummary ? (
+                    <div className="remodex-diff-commit-card">
+                      <span className="remodex-diff-commit-summary">{selectedReviewFile.commitSummary}</span>
+                      <span className="remodex-diff-commit-meta">
+                        {selectedReviewFile.commitAuthor}{selectedReviewFile.commitAge ? ` · ${selectedReviewFile.commitAge}` : ''}
+                      </span>
+                    </div>
+                  ) : null}
                   <div className="remodex-diff-block">
                     {selectedReviewFile.preview.split('\n').map((line, index) => {
                       const tone = diffLineTone(line);
