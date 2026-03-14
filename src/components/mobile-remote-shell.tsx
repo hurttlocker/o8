@@ -33,10 +33,8 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import { Renderer } from '@json-render/react';
-import { registry } from '@/lib/json-render/registry';
-import { deployApprovalSpec, decisionSpec, dashboardSpec } from '@/lib/json-render/demo-specs';
-import type { Spec } from '@json-render/core';
+import { demoApprovals } from '@/lib/json-render/demo-specs';
+import type { ApprovalRequest } from '@/lib/json-render/demo-specs';
 import type { ReviewChangedFile, RuntimeReviewPacket } from '@/lib/fleet/types';
 import type {
   MobileActionRequest,
@@ -475,7 +473,8 @@ export function MobileRemoteShell({
   const [reviewFileError, setReviewFileError] = useState<string | null>(null);
   const [diffOpen, setDiffOpen] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
-  const [pendingApprovals, setPendingApprovals] = useState<Spec[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
+  const [resolvedApprovals, setResolvedApprovals] = useState<Record<string, 'approved' | 'rejected'>>({});
   const [surfaceRefreshing, setSurfaceRefreshing] = useState(false);
   const [expandedMedia, setExpandedMedia] = useState<MobileTranscriptMedia | null>(null);
   const [scrollY, setScrollY] = useState(0);
@@ -1948,15 +1947,20 @@ export function MobileRemoteShell({
           data-context-visible="false"
           data-visible={headerVisible ? 'true' : 'false'}
         >
-          <button
-            type="button"
-            className="remodex-circle-button"
-            aria-label="Conversation controls"
-            onClick={() => setControlsOpen(true)}
-            style={{ background: '#ef4444', color: '#ffffff', border: 'none', boxShadow: '0 4px 12px rgba(239,68,68,0.25)' }}
-          >
-            <Menu size={18} strokeWidth={2.1} />
-          </button>
+          <div style={{ position: 'relative' }}>
+            <button
+              type="button"
+              className="remodex-circle-button"
+              aria-label="Conversation controls"
+              onClick={() => setControlsOpen(true)}
+              style={{ background: '#ef4444', color: '#ffffff', border: 'none', boxShadow: '0 4px 12px rgba(239,68,68,0.25)' }}
+            >
+              <Menu size={18} strokeWidth={2.1} />
+            </button>
+            {pendingApprovals.length > 0 ? (
+              <span className="remodex-approval-badge">{pendingApprovals.length}</span>
+            ) : null}
+          </div>
           <div className="remodex-title-shell">
             <div className="remodex-title-stack">
               <span className="remodex-title-kicker">{headerLabel}</span>
@@ -2343,14 +2347,89 @@ export function MobileRemoteShell({
             </div>
           ) : null}
 
-          {/* ── json-render approval cards ── */}
+          {/* ── Approval cards ── */}
           {pendingApprovals.length > 0 ? (
             <div className="remodex-approval-stack">
-              {pendingApprovals.map((spec, i) => (
-                <div key={`approval-${i}`} className="remodex-approval-card-wrap">
-                  <Renderer spec={spec} registry={registry} />
-                </div>
-              ))}
+              {pendingApprovals.map((approval) => {
+                const resolved = resolvedApprovals[approval.id];
+                const severityColor = approval.severity === 'critical' ? '#ff3b30' : approval.severity === 'warning' ? '#ff9f0a' : '#007aff';
+                const elapsed = Math.round((Date.now() - approval.createdAt) / 60_000);
+                const timeLabel = elapsed < 1 ? 'just now' : `${elapsed}m ago`;
+
+                return (
+                  <div
+                    key={approval.id}
+                    className={`remodex-approval-card-wrap ${resolved ? 'remodex-approval-resolved' : ''}`}
+                  >
+                    <div
+                      className="remodex-approval-card"
+                      style={{ borderLeftColor: severityColor }}
+                    >
+                      {/* Header */}
+                      <div className="remodex-approval-header">
+                        <div className="remodex-approval-agent">
+                          <span className="remodex-approval-agent-dot" style={{ background: severityColor }} />
+                          <span className="remodex-approval-agent-name">{approval.agent}</span>
+                        </div>
+                        <span className="remodex-approval-time">{timeLabel}</span>
+                      </div>
+
+                      {/* Title + description */}
+                      <h3 className="remodex-approval-title">{approval.title}</h3>
+                      <p className="remodex-approval-desc">{approval.description}</p>
+
+                      {/* Metadata rows */}
+                      {approval.metadata ? (
+                        <div className="remodex-approval-meta">
+                          {Object.entries(approval.metadata).map(([key, val]) => (
+                            <div key={key} className="remodex-approval-meta-row">
+                              <span className="remodex-approval-meta-key">{key}</span>
+                              <span className="remodex-approval-meta-val">{val}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {/* Action buttons or resolved state */}
+                      {resolved ? (
+                        <div className={`remodex-approval-resolved-bar remodex-approval-resolved-${resolved}`}>
+                          <span>{resolved === 'approved' ? '✓' : '✕'}</span>
+                          <span>{resolved === 'approved' ? 'Approved' : 'Rejected'}</span>
+                        </div>
+                      ) : (
+                        <div className="remodex-approval-actions">
+                          <button
+                            type="button"
+                            className="remodex-approval-btn remodex-approval-btn-reject"
+                            onClick={() => {
+                              setResolvedApprovals((cur) => ({ ...cur, [approval.id]: 'rejected' }));
+                              setSurfaceNote(`❌ Rejected: ${approval.title}`);
+                              setTimeout(() => {
+                                setPendingApprovals((cur) => cur.filter((a) => a.id !== approval.id));
+                              }, 1500);
+                            }}
+                          >
+                            {approval.actions.reject.label}
+                          </button>
+                          <button
+                            type="button"
+                            className="remodex-approval-btn remodex-approval-btn-approve"
+                            onClick={() => {
+                              setResolvedApprovals((cur) => ({ ...cur, [approval.id]: 'approved' }));
+                              setSurfaceNote(`✅ Approved: ${approval.title}`);
+                              setTimeout(() => {
+                                setPendingApprovals((cur) => cur.filter((a) => a.id !== approval.id));
+                              }, 1500);
+                            }}
+                          >
+                            {approval.actions.approve.label}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           ) : null}
 
@@ -2709,8 +2788,9 @@ export function MobileRemoteShell({
                 className="remodex-controls-action-row"
                 onClick={() => {
                   setPendingApprovals((cur) =>
-                    cur.length > 0 ? [] : [deployApprovalSpec, decisionSpec, dashboardSpec],
+                    cur.length > 0 ? [] : [...demoApprovals],
                   );
+                  setResolvedApprovals({});
                   setControlsOpen(false);
                 }}
               >

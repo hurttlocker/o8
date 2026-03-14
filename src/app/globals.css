@@ -4251,25 +4251,177 @@ body:has(.remodex-diff-overlay) {
   }
 }
 
-/* ── json-render approval cards ── */
+/* ── Approval cards ── */
 .remodex-approval-stack {
-  padding: 12px 16px 4px;
+  padding: 8px 16px 4px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 .remodex-approval-card-wrap {
-  animation: remodex-approval-slide-in 0.35s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+  animation: remodex-approval-slide-in 0.4s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+}
+.remodex-approval-resolved {
+  animation: remodex-approval-fade-out 1.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation-delay: 0.3s;
 }
 @keyframes remodex-approval-slide-in {
-  from {
-    opacity: 0;
-    transform: translateY(16px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  from { opacity: 0; transform: translateY(20px) scale(0.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes remodex-approval-fade-out {
+  from { opacity: 1; transform: scale(1); max-height: 400px; margin-bottom: 10px; }
+  to { opacity: 0; transform: scale(0.95); max-height: 0; margin-bottom: 0; overflow: hidden; }
+}
+
+.remodex-approval-card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 16px 18px;
+  border: 1px solid rgba(0,0,0,0.06);
+  border-left: 4px solid #007aff;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+/* Header */
+.remodex-approval-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.remodex-approval-agent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.remodex-approval-agent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.remodex-approval-agent-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #86868b;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.remodex-approval-time {
+  font-size: 12px;
+  color: #aeaeb2;
+}
+
+/* Content */
+.remodex-approval-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: #1d1d1f;
+  margin: 0 0 6px;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.remodex-approval-desc {
+  font-size: 14px;
+  color: #636366;
+  margin: 0 0 12px;
+  line-height: 1.45;
+}
+
+/* Metadata */
+.remodex-approval-meta {
+  border-top: 1px solid #f5f5f7;
+  padding-top: 10px;
+  margin-bottom: 14px;
+}
+.remodex-approval-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 4px 0;
+}
+.remodex-approval-meta-key {
+  font-size: 13px;
+  color: #aeaeb2;
+}
+.remodex-approval-meta-val {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1d1d1f;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Action buttons */
+.remodex-approval-actions {
+  display: flex;
+  gap: 10px;
+}
+.remodex-approval-btn {
+  flex: 1;
+  padding: 12px 0;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: transform 0.1s, opacity 0.1s;
+  -webkit-tap-highlight-color: transparent;
+}
+.remodex-approval-btn:active {
+  transform: scale(0.97);
+}
+.remodex-approval-btn-approve {
+  background: #34c759;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(52,199,89,0.3);
+}
+.remodex-approval-btn-reject {
+  background: #f5f5f7;
+  color: #636366;
+}
+.remodex-approval-btn-reject:active {
+  background: #e8e8ed;
+}
+
+/* Resolved state */
+.remodex-approval-resolved-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 0;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.remodex-approval-resolved-approved {
+  background: rgba(52,199,89,0.12);
+  color: #34c759;
+}
+.remodex-approval-resolved-rejected {
+  background: rgba(255,59,48,0.08);
+  color: #ff3b30;
+}
+
+/* Notification badge on hamburger */
+.remodex-approval-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: #ff9f0a;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  pointer-events: none;
 }
 
 /* ── Cost Dashboard ── */
