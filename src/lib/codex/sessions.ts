@@ -397,6 +397,43 @@ async function buildActivityMap(threads: CodexThreadRow[]) {
     });
   }
 
+  // Fallback: find ALL live Codex processes via ps and match by CWD
+  // This catches new sessions that haven't written process_uuid to the DB yet
+  try {
+    const { stdout: psOut } = await execFileAsync(
+      'bash', ['-c', 'ps -eo pid=,command= | grep codex | grep -v grep'],
+      { maxBuffer: 256 * 1024 },
+    );
+    const allPids: number[] = [];
+    for (const line of psOut.split('\n').map((l) => l.trim()).filter(Boolean)) {
+      const pidMatch = line.match(/^(\d+)/);
+      if (pidMatch) {
+        const pid = Number(pidMatch[1]);
+        if (Number.isFinite(pid) && line.includes('/codex')) allPids.push(pid);
+      }
+    }
+    const allLive = await queryLiveCodexProcesses(allPids);
+    for (const [pid, proc] of allLive) {
+      if (!proc.cwd) continue;
+      const normalizedCwd = normalizeFsPath(proc.cwd);
+      // Find threads in this CWD that aren't already marked active
+      for (const thread of threads) {
+        if (normalizeFsPath(thread.cwd) !== normalizedCwd) continue;
+        const existing = byThreadId.get(thread.id);
+        if (existing?.active) continue;
+        // Match the most recently updated thread for this CWD
+        byThreadId.set(thread.id, {
+          ...existing,
+          active: true,
+          pid,
+          tty: proc.tty,
+          lastLogTs: existing?.lastLogTs ?? thread.updated_at,
+        });
+        break; // One process per CWD match
+      }
+    }
+  } catch { /* ps fallback not available */ }
+
   return byThreadId;
 }
 

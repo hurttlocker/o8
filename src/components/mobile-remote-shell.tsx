@@ -33,6 +33,10 @@ import {
   Square,
   X,
 } from 'lucide-react';
+import { Renderer } from '@json-render/react';
+import { registry } from '@/lib/json-render/registry';
+import { deployApprovalSpec, decisionSpec, dashboardSpec } from '@/lib/json-render/demo-specs';
+import type { Spec } from '@json-render/core';
 import type { ReviewChangedFile, RuntimeReviewPacket } from '@/lib/fleet/types';
 import type {
   MobileActionRequest,
@@ -442,6 +446,7 @@ export function MobileRemoteShell({
 }) {
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot>(initialSnapshot);
   const [selectedId, setSelectedId] = useState(() => pickCurrentSession(initialSnapshot)?.id ?? '');
+  const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs'>('squad');
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [surfaceNote, setSurfaceNote] = useState<string | null>(null);
   const [historyBySession, setHistoryBySession] = useState<Record<string, MobileTranscriptEntry[]>>(() => (
@@ -470,6 +475,7 @@ export function MobileRemoteShell({
   const [reviewFileError, setReviewFileError] = useState<string | null>(null);
   const [diffOpen, setDiffOpen] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState<Spec[]>([]);
   const [surfaceRefreshing, setSurfaceRefreshing] = useState(false);
   const [expandedMedia, setExpandedMedia] = useState<MobileTranscriptMedia | null>(null);
   const [scrollY, setScrollY] = useState(0);
@@ -503,7 +509,7 @@ export function MobileRemoteShell({
   const stickToBottomRef = useRef(true);
 
   const refreshInbox = useCallback(async () => {
-    const response = await fetch('/api/mobile/inbox', { cache: 'no-store' });
+    const response = await fetch(`/api/mobile/inbox?_t=${Date.now()}`, { cache: 'no-store', headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
@@ -700,6 +706,8 @@ export function MobileRemoteShell({
 
   const selectedSessionKey = selectedSession?.sessionKey;
   const isOpenClawSession = selectedSession?.runtime === 'openclaw';
+  // Discovered Codex sessions use the same chat UI as OpenClaw sessions
+  const isChatSession = isOpenClawSession || selectedSession?.runtime === 'codex';
   const isOwnedCodexSession = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'owned';
   const selectedReviewPacket = selectedSessionKey && isOwnedCodexSession ? reviewPacketBySession[selectedSessionKey] ?? null : null;
   const selectedReviewPacketLoading = selectedSessionKey && isOwnedCodexSession ? reviewPacketLoadingBySession[selectedSessionKey] ?? false : false;
@@ -833,8 +841,9 @@ export function MobileRemoteShell({
 
     setHistoryLoading((current) => ({ ...current, [sessionKey]: true }));
     try {
-      const response = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=18`, {
+      const response = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=18&_t=${Date.now()}`, {
         cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
       });
       const payload = await readJson<MobileHistoryResponse>(response);
       // Diff-and-patch: only update state if transcript actually changed.
@@ -1027,8 +1036,47 @@ export function MobileRemoteShell({
     };
   }, [actionStateBySession, diffOpen, loadHistory, loadOwnedReviewPacket, loadReviewFile, pendingOwnedTurnBySession, refreshInbox, selectedReviewFilePath, selectedSession?.runtimeSurface?.lifecycle?.availability, selectedSession?.status, selectedSessionKey, waitingForResponse]);
 
-  const transcriptEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
-  const transcriptGroups = selectedSessionKey ? historyGroupsBySession[selectedSessionKey] ?? [] : [];
+  // For discovered Codex sessions, find the linked owned session and show its history
+  // This makes the chat seamless — user sees Codex responses without knowing about the owned/discovered split
+  const linkedOwnedKey = useMemo(() => {
+    if (!selectedSession || selectedSession.runtime !== 'codex' || selectedSession.runtimeSurface?.ownership !== 'discovered') return null;
+    const cwd = selectedSession.runtimeSurface?.cwd ?? selectedSession.workspace ?? '';
+    const owned = snapshot.sessions.find((s) =>
+      s.runtime === 'codex' &&
+      s.runtimeSurface?.ownership === 'owned' &&
+      (s.runtimeSurface?.cwd === cwd || s.workspace === cwd),
+    );
+    return owned?.sessionKey ?? null;
+  }, [selectedSession, snapshot.sessions]);
+
+  // Load linked owned session history when it exists
+  useEffect(() => {
+    if (linkedOwnedKey && !historyBySession[linkedOwnedKey] && !historyLoading[linkedOwnedKey]) {
+      void loadHistory(linkedOwnedKey, true).catch(() => undefined);
+    }
+  }, [linkedOwnedKey, historyBySession, historyLoading, loadHistory]);
+
+  // Poll linked owned session too
+  useEffect(() => {
+    if (!linkedOwnedKey) return;
+    const timer = window.setInterval(() => {
+      if (!documentVisibleRef.current) return;
+      void loadHistory(linkedOwnedKey, true).catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [linkedOwnedKey, loadHistory]);
+
+  // Merge discovered + owned history for seamless display
+  const effectiveHistoryKey = linkedOwnedKey && historyBySession[linkedOwnedKey]?.length ? linkedOwnedKey : selectedSessionKey;
+  const discoveredEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
+  const ownedEntries = linkedOwnedKey ? historyBySession[linkedOwnedKey] ?? [] : [];
+  // Show discovered session's history PLUS owned session's history (which has the responses)
+  const mergedEntries = linkedOwnedKey && ownedEntries.length > 0
+    ? [...discoveredEntries, ...ownedEntries]
+    : discoveredEntries;
+
+  const transcriptEntries = mergedEntries;
+  const transcriptGroups = effectiveHistoryKey ? historyGroupsBySession[effectiveHistoryKey] ?? [] : [];
   const transcriptLoading = selectedSessionKey ? historyLoading[selectedSessionKey] ?? false : false;
   const transcriptError = selectedSessionKey ? historyError[selectedSessionKey] ?? null : null;
   const transcriptDraft = selectedSessionKey ? draftBySession[selectedSessionKey] ?? '' : '';
@@ -1047,42 +1095,160 @@ export function MobileRemoteShell({
   const latestTranscriptMarker = transcriptEntries[transcriptEntries.length - 1]?.id ?? 'empty';
   const scrollMarker = pendingOwnedTurn ? `${latestTranscriptMarker}:${pendingOwnedTurn.id}` : latestTranscriptMarker;
   const selectedReviewFile = selectedReviewFilePath ? reviewFileByPath[selectedReviewFilePath] : undefined;
-  const threadSwitcher = useMemo(() => {
-    // Filter: only show sessions that are active/recent or currently selected
+  // ── Project-grouped squad rail ──
+  interface ProjectGroup {
+    projectName: string;
+    workspace: string;
+    sessions: MobileInboxSnapshot['sessions'];
+    hasPrimary: boolean;
+    summary: string; // e.g. "4 Codex · 1 running"
+    mostRecentTime?: string;
+    bestContextPct: number;
+    hasRunning: boolean;
+  }
+
+  /** Derive a human name for an agent session */
+  function agentDisplayName(session: MobileInboxSnapshot['sessions'][number]): string {
+    if (session.isCurrentSession) return 'Mister';
+    if (session.runtime === 'codex') return 'Codex';
+    // OpenClaw sessions: extract the agent name from the session name
+    const n = session.name || '';
+    if (n.startsWith('Hawk')) return 'Hawk';
+    if (n.startsWith('Niot')) return 'Niot';
+    if (n.includes('automation') || n.includes('cron')) return 'Cron';
+    if (n.includes('Telegram')) return 'Telegram';
+    if (n.includes('Discord')) return 'Discord';
+    if (n.includes('Mister')) return 'Mister';
+    return n.split(/[\s·•/]/)[0] || 'Agent';
+  }
+
+  /** Derive a readable project name from a workspace path */
+  function projectDisplayName(ws: string, sessions: MobileInboxSnapshot['sessions']): string {
+    // Named agent workspaces → use agent name
+    if (ws.includes('workspace-ace')) return 'Niot';
+    if (ws.includes('workspace-hawk')) return 'Hawk';
+    // Repo workspaces → use repo name
+    const segments = ws.replace(/^~\//, '').split('/');
+    const last = segments[segments.length - 1] || segments[0] || 'workspace';
+    // If this is the main clawd workspace with the primary session, call it "Main"
+    if (last === 'clawd' && sessions.some((s) => s.isCurrentSession)) return 'Main';
+    return last;
+  }
+
+  /** Build a summary like "4 Codex · 2 running" */
+  function projectSummary(sessions: MobileInboxSnapshot['sessions']): string {
+    const runtimeCounts = new Map<string, number>();
+    let runningCount = 0;
+    for (const s of sessions) {
+      const label = s.runtime === 'codex' ? 'Codex' : 'OpenClaw';
+      runtimeCounts.set(label, (runtimeCounts.get(label) ?? 0) + 1);
+      if (s.status === 'running' || s.status === 'reviewing') runningCount++;
+    }
+    const parts: string[] = [];
+    for (const [label, count] of runtimeCounts) {
+      parts.push(`${count} ${label}`);
+    }
+    if (runningCount > 0) parts.push(`${runningCount} active`);
+    return parts.join(' · ');
+  }
+
+  const projectGroups = useMemo(() => {
     const isRelevant = (session: MobileInboxSnapshot['sessions'][number]) => {
       if (session.isCurrentSession) return true;
       if (session.id === selectedSession?.id) return true;
+
+      // Parse age once — used by both Codex and OpenClaw filters
+      const ageText = session.lastEventAt ?? '';
+      const hoursMatch = ageText.match(/^(\d+)h/);
+      const daysMatch = ageText.match(/^(\d+)d/);
+      const ageHours = daysMatch ? parseInt(daysMatch[1], 10) * 24
+        : hoursMatch ? parseInt(hoursMatch[1], 10)
+        : 0;
+      const isStale = ageHours > 4;
+
+      // Codex sessions: show live/recent discovered sessions and active owned sessions.
+      if (session.runtime === 'codex') {
+        const src = session.runtimeSurface?.sourceLabel ?? '';
+        const ownership = session.runtimeSurface?.ownership ?? '';
+        // Discovered sessions: only show if a live desktop process is verified
+        if (ownership === 'discovered') {
+          if (src.includes('live pid')) return true;
+          return false;
+        }
+        // Owned sessions: show only if actively running or very recently finished (under 1h)
+        if (ownership === 'owned') {
+          if (src.includes('active pid')) return true;
+          const minsMatch = ageText.match(/^(\d+)m/);
+          const recentMins = minsMatch ? parseInt(minsMatch[1], 10) : 999;
+          if (ageText === 'just now' || recentMins < 60) return true;
+          return false;
+        }
+        return false;
+      }
+
+      // OpenClaw sessions: filter stale ones
+      if (isStale) return false;
+
       if (['running', 'reviewing', 'blocked'].includes(session.status)) return true;
-      // Filter out stale sessions — "Xh ago" with X > 4
-      const ageMatch = session.lastEventAt?.match(/^(\d+)h/);
-      if (ageMatch && parseInt(ageMatch[1], 10) > 4) return false;
-      // Keep sessions with activity or alerts
       if (session.activity || session.alerts > 0) return true;
-      // Keep owned Codex sessions that aren't ancient
-      if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') return true;
       return false;
     };
 
-    const candidates = [
-      selectedSession,
-      ...snapshot.sessions.filter((session) => session.isCurrentSession),
-      ...snapshot.sessions.filter((session) => isRelevant(session)),
-    ].filter(Boolean) as MobileInboxSnapshot['sessions'];
-
-    const seen = new Set<string>();
-    const deduped = [] as MobileInboxSnapshot['sessions'];
-    for (const session of candidates) {
-      if (seen.has(session.id)) {
-        continue;
-      }
-      seen.add(session.id);
-      deduped.push(session);
-      if (deduped.length >= 6) {
-        break;
-      }
+    const relevant = snapshot.sessions.filter(isRelevant);
+    const groupMap = new Map<string, MobileInboxSnapshot['sessions']>();
+    for (const session of relevant) {
+      const ws = session.workspace || '~/clawd';
+      const existing = groupMap.get(ws) ?? [];
+      existing.push(session);
+      groupMap.set(ws, existing);
     }
-    return deduped;
+
+    const groups: ProjectGroup[] = [];
+    for (const [ws, rawSessions] of groupMap) {
+      // Deduplicate: only collapse truly dead duplicates (same session id).
+      // Never dedup by branch — user may have multiple Codex agents on the same branch.
+      const deduped: typeof rawSessions = [];
+      const seenIds = new Set<string>();
+      for (const s of rawSessions) {
+        if (seenIds.has(s.id)) continue;
+        seenIds.add(s.id);
+        deduped.push(s);
+      }
+      const sessions = deduped;
+      const running = sessions.some((s) => s.status === 'running' || s.status === 'reviewing');
+      const bestCtx = Math.max(...sessions.map((s) => s.context?.usedPercent ?? 0));
+      let mostRecentTime: string | undefined;
+      for (const s of sessions) {
+        if (s.activity?.headline || s.lastEventAt) {
+          mostRecentTime = s.lastEventAt;
+          break;
+        }
+      }
+
+      groups.push({
+        projectName: projectDisplayName(ws, sessions),
+        workspace: ws,
+        sessions,
+        hasPrimary: sessions.some((s) => s.isCurrentSession),
+        summary: projectSummary(sessions),
+        mostRecentTime: mostRecentTime ?? sessions[0]?.lastEventAt,
+        bestContextPct: bestCtx,
+        hasRunning: running,
+      });
+    }
+
+    groups.sort((a, b) => {
+      if (a.hasPrimary && !b.hasPrimary) return -1;
+      if (!a.hasPrimary && b.hasPrimary) return 1;
+      if (a.hasRunning && !b.hasRunning) return -1;
+      if (!a.hasRunning && b.hasRunning) return 1;
+      return 0;
+    });
+
+    return groups;
   }, [selectedSession, snapshot.sessions]);
+
+  const [expandedProject, setExpandedProject] = useState<string | null>(null);
   const selectedReviewFileIndex = selectedReviewFilePath
     ? reviewFiles.findIndex((file) => file.path === selectedReviewFilePath)
     : -1;
@@ -1110,14 +1276,16 @@ export function MobileRemoteShell({
   );
   const headerLabel = isOwnedCodexSession
     ? (selectedSession?.runtimeSurface?.capabilities.interrupt ? 'Codex live' : selectedSession?.runtimeSurface?.capabilities.sendInput ? 'Codex chat' : 'Codex watch')
-    : selectedSession?.status === 'running'
-      ? 'Live'
-      : snapshot.review?.pullRequest
-        ? 'Review'
-        : 'Session';
+    : selectedSession?.runtime === 'codex'
+      ? 'Codex'
+      : selectedSession?.status === 'running'
+        ? 'Live'
+        : snapshot.review?.pullRequest
+          ? 'Review'
+          : 'Session';
   const headerProgress = Math.min(scrollY / 88, 1);
   const isHeaderCompact = headerProgress > 0.12;
-  const isComposerPrimed = isOpenClawSession && (composeFocused || transcriptAttachments.length > 0);
+  const isComposerPrimed = isChatSession && (composeFocused || transcriptAttachments.length > 0);
   const dockMotionProgress = !isComposerPrimed && isScrolling ? 1 : 0;
   const dockFadeProgress = dockMotionProgress;
   const diffFileLabel = reviewFiles.length === 1 ? 'file' : 'files';
@@ -1220,8 +1388,8 @@ export function MobileRemoteShell({
     if (!selectedSessionKey || !files?.length) {
       return;
     }
-    if (!isOpenClawSession) {
-      setSurfaceNote('Image attachments are only available on the Mister lane right now.');
+    if (!isChatSession) {
+      setSurfaceNote('Image attachments are only available for chat sessions right now.');
       return;
     }
 
@@ -1329,10 +1497,13 @@ export function MobileRemoteShell({
     if (actionStateBySession[sessionKey] === 'steering') return;
 
     const targetSession = snapshot.sessions.find((session) => session.sessionKey === sessionKey);
-    if (targetSession?.runtime !== 'openclaw') {
+    const isDiscoveredCodex = targetSession?.runtime === 'codex' && targetSession?.runtimeSurface?.ownership === 'discovered';
+    const isOwnedCodex = targetSession?.runtime === 'codex' && targetSession?.runtimeSurface?.ownership === 'owned';
+    const isChat = targetSession?.runtime === 'openclaw' || isDiscoveredCodex || isOwnedCodex;
+    if (!isChat) {
       setActionNoteBySession((current) => ({
         ...current,
-        [sessionKey]: 'Use the Codex resume lane instead — steer is for the Mister lane only.',
+        [sessionKey]: 'Cannot send to this session type.',
       }));
       return;
     }
@@ -1378,17 +1549,72 @@ export function MobileRemoteShell({
     );
 
     try {
-      await runAction({
-        action: 'steer',
-        sessionKey,
-        message,
-        attachments: attachments.map((item) => ({
-          type: 'image',
-          mimeType: item.mimeType,
-          fileName: item.fileName,
-          content: item.content,
-        })),
-      });
+      if (isDiscoveredCodex) {
+        // For discovered Codex: find or create ONE owned session for this workspace,
+        // then resume it. Never create multiple owned sessions for the same cwd.
+        const cwd = targetSession?.runtimeSurface?.cwd ?? targetSession?.workspace ?? '';
+
+        // Check if an owned session already exists for this workspace
+        const existingOwned = snapshot.sessions.find((s) =>
+          s.runtime === 'codex' &&
+          s.runtimeSurface?.ownership === 'owned' &&
+          (s.runtimeSurface?.cwd === cwd || s.workspace === cwd) &&
+          s.runtimeSurface?.lifecycle?.availability === 'ready-for-resume',
+        );
+
+        if (existingOwned) {
+          // Resume the existing owned session
+          await runAction({
+            action: 'resume' as MobileActionRequest['action'],
+            sessionKey: existingOwned.sessionKey,
+            message,
+          });
+          // Switch to the owned session
+          setSelectedId(existingOwned.id);
+          setSurfaceNote('Resuming Codex session…');
+          await loadHistory(existingOwned.sessionKey, true).catch(() => undefined);
+        } else {
+          // No owned session exists — launch a new one
+          const launchResult = await runAction({
+            action: 'launch' as MobileActionRequest['action'],
+            sessionKey,
+            message,
+            cwd,
+          });
+          if (launchResult?.ok && launchResult.sessionKey && launchResult.sessionKey !== sessionKey) {
+            setSurfaceNote('Codex launched — switching to session…');
+            await new Promise((r) => setTimeout(r, 2000));
+            const freshInbox = await refreshInbox();
+            const newSession = freshInbox?.sessions?.find((s: { sessionKey?: string }) => s.sessionKey === launchResult.sessionKey);
+            if (newSession) {
+              setSelectedId(newSession.id);
+              await loadHistory(launchResult.sessionKey, true).catch(() => undefined);
+            }
+          } else {
+            setSurfaceNote('Codex session launched.');
+          }
+        }
+      } else if (isOwnedCodex) {
+        // Owned Codex: resume the session directly
+        await runAction({
+          action: 'resume' as MobileActionRequest['action'],
+          sessionKey,
+          message,
+        });
+        setSurfaceNote('Sent to Codex…');
+      } else {
+        await runAction({
+          action: 'steer',
+          sessionKey,
+          message,
+          attachments: attachments.map((item) => ({
+            type: 'image',
+            mimeType: item.mimeType,
+            fileName: item.fileName,
+            content: item.content,
+          })),
+        });
+      }
     } catch (error) {
       // Restore draft on failure so the user doesn't lose their message
       setDraftBySession((current) => ({ ...current, [sessionKey]: message ?? '' }));
@@ -1578,6 +1804,7 @@ export function MobileRemoteShell({
     }
 
     setSelectedId(sessionId);
+    setActiveView('chat');
     setControlsOpen(false);
     setDiffOpen(false);
     setSurfaceNote(`Focused ${compactLine(nextSession.name, 'the selected session', 40)}.`);
@@ -1601,7 +1828,7 @@ export function MobileRemoteShell({
     if (!selectedSessionKey) {
       return;
     }
-    if (!isOpenClawSession && !canInterruptOwnedCodex) {
+    if (!isChatSession && !canInterruptOwnedCodex) {
       setSurfaceNote('No active run to interrupt right now.');
       return;
     }
@@ -1759,40 +1986,228 @@ export function MobileRemoteShell({
 
         <div className="remodex-scroll-view">
 
-          {threadSwitcher.length > 0 ? (
-            <div className="remodex-squad-rail">
-              {threadSwitcher.map((session) => {
-                const active = session.id === selectedSession?.id;
-                const isRunning = session.status === 'running' || session.status === 'reviewing';
-                const ctxPct = Math.round(session.context?.usedPercent ?? 0);
-                const ctxTone = ctxPct >= 85 ? 'critical' : ctxPct >= 75 ? 'high' : ctxPct >= 65 ? 'watch' : 'calm';
-                const agentName = session.isCurrentSession ? 'Mister' : session.name?.split(/[\s/]/)[0] ?? 'Agent';
-                const activityLine = session.activity?.headline;
-                const taskLine = activityLine
-                  ? activityLine
-                  : session.isCurrentSession
-                    ? 'Main session'
-                    : session.status;
-                return (
-                  <button
-                    key={session.id}
-                    type="button"
-                    className={`remodex-squad-card ${active ? 'remodex-squad-card-active' : ''}`}
-                    onClick={() => handleSessionFocus(session.id)}
-                  >
-                    <div className="remodex-squad-card-head">
-                      <span className={`remodex-squad-dot ${isRunning ? 'remodex-squad-dot-live' : ''} remodex-squad-dot-${ctxTone}`} />
-                      <strong className="remodex-squad-name">{agentName}</strong>
-                      <span className="remodex-squad-time">{session.lastEventAt ?? 'idle'}</span>
+          {/* ── Cost Dashboard View ── */}
+          {activeView === 'costs' ? (() => {
+            const openClawSessions = snapshot.sessions.filter(
+              (s) => s.runtime === 'openclaw' && s.tokenUsage,
+            );
+            const totalTokens = openClawSessions.reduce((sum, s) => sum + (s.tokenUsage?.totalTokens ?? 0), 0);
+            const totalRemaining = openClawSessions.reduce((sum, s) => sum + (s.tokenUsage?.remainingTokens ?? 0), 0);
+            const totalCapacity = totalTokens + totalRemaining;
+
+            // Group by model
+            const byModel = new Map<string, { sessions: typeof openClawSessions; tokens: number; capacity: number }>();
+            for (const s of openClawSessions) {
+              const model = s.model ?? 'unknown';
+              const existing = byModel.get(model) ?? { sessions: [], tokens: 0, capacity: 0 };
+              existing.sessions.push(s);
+              existing.tokens += s.tokenUsage?.totalTokens ?? 0;
+              existing.capacity += (s.tokenUsage?.totalTokens ?? 0) + (s.tokenUsage?.remainingTokens ?? 0);
+              byModel.set(model, existing);
+            }
+
+            const modelColor: Record<string, string> = {
+              'claude-opus-4-6': '#ff3b30',
+              'claude-sonnet-4-20250514': '#ff9f0a',
+              'claude-haiku-4-5-20251001': '#34c759',
+            };
+
+            return (
+              <div className="remodex-costs-view">
+                <button
+                  type="button"
+                  className="remodex-costs-back"
+                  onClick={() => setActiveView('squad')}
+                >
+                  ‹ Squad
+                </button>
+
+                {/* ── Aggregate overview ── */}
+                <div className="remodex-costs-hero">
+                  <span className="remodex-costs-hero-kicker">Token Usage</span>
+                  <strong className="remodex-costs-hero-value">{totalTokens.toLocaleString()}</strong>
+                  <span className="remodex-costs-hero-sub">
+                    {totalCapacity.toLocaleString()} total capacity · {openClawSessions.length} active session{openClawSessions.length === 1 ? '' : 's'}
+                  </span>
+                  <div className="remodex-costs-hero-bar">
+                    <div
+                      className="remodex-costs-hero-fill"
+                      style={{ width: `${totalCapacity > 0 ? Math.round((totalTokens / totalCapacity) * 100) : 0}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* ── Per-model breakdown ── */}
+                <span className="remodex-costs-section-label">By Model</span>
+                {Array.from(byModel.entries()).map(([model, data]) => {
+                  const pct = data.capacity > 0 ? Math.round((data.tokens / data.capacity) * 100) : 0;
+                  const color = modelColor[model] ?? '#6366f1';
+                  const shortModel = model.replace('claude-', '').replace(/-20\d{6}$/, '');
+                  return (
+                    <div key={model} className="remodex-costs-model-card">
+                      <div className="remodex-costs-model-head">
+                        <span className="remodex-costs-model-dot" style={{ background: color }} />
+                        <strong className="remodex-costs-model-name">{shortModel}</strong>
+                        <span className="remodex-costs-model-pct">{pct}%</span>
+                      </div>
+                      <div className="remodex-costs-model-bar">
+                        <div className="remodex-costs-model-fill" style={{ width: `${pct}%`, background: color }} />
+                      </div>
+                      <div className="remodex-costs-model-meta">
+                        <span>{data.tokens.toLocaleString()} tokens used</span>
+                        <span>{data.sessions.length} session{data.sessions.length === 1 ? '' : 's'}</span>
+                      </div>
+
+                      {/* Per-session rows */}
+                      {data.sessions.map((s) => {
+                        const sPct = s.context?.usedPercent ?? 0;
+                        const tone = sPct >= 85 ? 'critical' : sPct >= 75 ? 'high' : sPct >= 65 ? 'watch' : 'calm';
+                        return (
+                          <button
+                            key={s.id}
+                            type="button"
+                            className="remodex-costs-session-row"
+                            onClick={() => { setSelectedId(s.id); setActiveView('chat'); }}
+                          >
+                            <span className={`remodex-costs-session-dot remodex-squad-dot-${tone}`} />
+                            <span className="remodex-costs-session-name">{s.isCurrentSession ? 'This chat' : compactLine(s.name, 'Session', 28)}</span>
+                            <span className="remodex-costs-session-tokens">{(s.tokenUsage?.totalTokens ?? 0).toLocaleString()}</span>
+                            <span className="remodex-costs-session-pct">{sPct}%</span>
+                          </button>
+                        );
+                      })}
                     </div>
-                    <span className="remodex-squad-task">{taskLine}</span>
-                    <div className="remodex-squad-bar-track">
-                      <div
-                        className={`remodex-squad-bar-fill remodex-squad-bar-${ctxTone}`}
-                        style={{ width: `${ctxPct}%` }}
+                  );
+                })}
+
+                {/* ── Codex sessions (no token data) ── */}
+                {(() => {
+                  const codexSessions = snapshot.sessions.filter((s) => s.runtime === 'codex');
+                  if (!codexSessions.length) return null;
+                  return (
+                    <div className="remodex-costs-model-card remodex-costs-model-card-muted">
+                      <div className="remodex-costs-model-head">
+                        <span className="remodex-costs-model-dot" style={{ background: '#6366f1' }} />
+                        <strong className="remodex-costs-model-name">Codex</strong>
+                        <span className="remodex-costs-model-pct">{codexSessions.length} session{codexSessions.length === 1 ? '' : 's'}</span>
+                      </div>
+                      <p className="remodex-costs-codex-note">Billed through ChatGPT Pro — token-level usage not available.</p>
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })() : null}
+
+          {/* ── Squad Rail ── */}
+          {/* ── Token usage summary — full-width above squad grid ── */}
+          {activeView !== 'costs' ? (() => {
+            const tracked = snapshot.sessions.filter((s) => s.runtime === 'openclaw' && s.tokenUsage);
+            const total = tracked.reduce((sum, s) => sum + (s.tokenUsage?.totalTokens ?? 0), 0);
+            const cap = tracked.reduce((sum, s) => sum + (s.tokenUsage?.totalTokens ?? 0) + (s.tokenUsage?.remainingTokens ?? 0), 0);
+            const pct = cap > 0 ? Math.round((total / cap) * 100) : 0;
+            if (!tracked.length) return null;
+            return (
+              <button
+                type="button"
+                className="remodex-costs-summary-card"
+                onClick={() => setActiveView('costs')}
+              >
+                <div className="remodex-costs-summary-left">
+                  <span className="remodex-costs-summary-kicker">Token Usage · {tracked.length} session{tracked.length === 1 ? '' : 's'}</span>
+                  <strong className="remodex-costs-summary-value">{total.toLocaleString()} <span className="remodex-costs-summary-unit">tokens</span></strong>
+                </div>
+                <div className="remodex-costs-summary-right">
+                  <div className="remodex-costs-summary-ring">
+                    <svg viewBox="0 0 36 36" className="remodex-costs-ring-svg">
+                      <path
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                        fill="none"
+                        stroke="#f5f5f7"
+                        strokeWidth="3"
                       />
-                    </div>
-                  </button>
+                      <path
+                        d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                        fill="none"
+                        stroke={pct >= 75 ? '#ff3b30' : pct >= 50 ? '#ff9f0a' : '#34c759'}
+                        strokeWidth="3"
+                        strokeDasharray={`${pct}, 100`}
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <span className="remodex-costs-ring-label">{pct}%</span>
+                  </div>
+                </div>
+                <ChevronRight size={16} strokeWidth={1.8} className="remodex-costs-summary-chevron" />
+              </button>
+            );
+          })() : null}
+
+          {activeView !== 'costs' && projectGroups.length > 0 ? (
+            <div className="remodex-squad-rail">
+              {projectGroups.map((group) => {
+                const isExpanded = expandedProject === group.workspace;
+                const ctxPct = Math.round(group.bestContextPct);
+                const ctxTone = ctxPct >= 85 ? 'critical' : ctxPct >= 75 ? 'high' : ctxPct >= 65 ? 'watch' : 'calm';
+                const containsSelected = group.sessions.some((s) => s.id === selectedSession?.id);
+                const isSingleAgent = group.sessions.length === 1;
+
+                // Single-agent projects: tap goes directly to chat (no expand)
+                const handleProjectTap = () => {
+                  if (isSingleAgent) {
+                    handleSessionFocus(group.sessions[0].id);
+                  } else {
+                    setExpandedProject(isExpanded ? null : group.workspace);
+                  }
+                };
+
+                return (
+                  <div key={group.workspace} className="remodex-project-group">
+                    <button
+                      type="button"
+                      className={`remodex-squad-card remodex-project-card ${containsSelected ? 'remodex-squad-card-active' : ''} ${isExpanded ? 'remodex-project-card-expanded' : ''}`}
+                      onClick={handleProjectTap}
+                    >
+                      <div className="remodex-squad-card-head">
+                        <span className={`remodex-squad-dot ${group.hasRunning ? 'remodex-squad-dot-live' : ''} remodex-squad-dot-${ctxTone}`} />
+                        <strong className="remodex-squad-name">{group.projectName}</strong>
+                        <span className="remodex-squad-time">{group.mostRecentTime ?? 'idle'}</span>
+                      </div>
+                      <span className="remodex-project-summary">{group.summary}</span>
+                      {!isSingleAgent ? (
+                        <ChevronRight size={11} className={`remodex-project-chevron ${isExpanded ? 'remodex-project-chevron-open' : ''}`} />
+                      ) : null}
+                    </button>
+
+                    {isExpanded && !isSingleAgent ? (
+                      <div className="remodex-project-agents">
+                        {group.sessions.map((session) => {
+                          const active = session.id === selectedSession?.id;
+                          const isRunning = session.status === 'running' || session.status === 'reviewing';
+                          const sCtxTone = (() => { const p = Math.round(session.context?.usedPercent ?? 0); return p >= 85 ? 'critical' : p >= 75 ? 'high' : p >= 65 ? 'watch' : 'calm'; })();
+                          const name = agentDisplayName(session);
+                          // For Codex: show branch name. For OpenClaw: show activity/status.
+                          const branchShort = session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '') ?? '';
+                          const statusLabel = session.runtime === 'codex' && branchShort
+                            ? branchShort
+                            : (session.activity?.headline ?? session.status);
+                          return (
+                            <button
+                              key={session.id}
+                              type="button"
+                              className={`remodex-agent-pill ${active ? 'remodex-agent-pill-active' : ''}`}
+                              onClick={() => handleSessionFocus(session.id)}
+                            >
+                              <span className={`remodex-squad-dot ${isRunning ? 'remodex-squad-dot-live' : ''} remodex-squad-dot-${sCtxTone}`} />
+                              <span className="remodex-agent-pill-name">{name}</span>
+                              <span className="remodex-agent-pill-sep">·</span>
+                              <span className="remodex-agent-pill-status">{statusLabel}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
                 );
               })}
             </div>
@@ -1815,57 +2230,7 @@ export function MobileRemoteShell({
             </div>
           ) : null}
 
-          {isOwnedCodexSession && (selectedReviewPacket || selectedReviewPacketLoading || selectedReviewPacketError) ? (
-            <div className={`remodex-owned-review-card remodex-context-card remodex-context-card-${ownedReviewDispositionTone(ownedReviewDisposition)}`}>
-              <div className="remodex-owned-review-head">
-                <div className="remodex-context-card-copy">
-                  <span className="remodex-context-card-kicker">Review packet</span>
-                  <strong>{ownedReviewDispositionLabel(ownedReviewDisposition)}</strong>
-                </div>
-                <span className="remodex-context-card-trend">
-                  {selectedReviewPacket?.reviewDispositionUpdatedAtLabel
-                    ? `Updated ${selectedReviewPacket.reviewDispositionUpdatedAtLabel}`
-                    : selectedReviewPacketLoading
-                      ? 'Loading…'
-                      : `${reviewFiles.length} file${reviewFiles.length === 1 ? '' : 's'}`}
-                </span>
-              </div>
-              {selectedReviewPacket ? (
-                <>
-                  <p className="remodex-owned-review-copy">{selectedReviewPacket.summary}</p>
-                  <div className="remodex-owned-review-actions">
-                    <button
-                      type="button"
-                      className="remodex-controls-action"
-                      onClick={() => openDiffViewer()}
-                      disabled={!reviewFiles.length}
-                    >
-                      <FileDiff size={16} strokeWidth={2.1} />
-                      Open exact diff
-                    </button>
-                    <button
-                      type="button"
-                      className="remodex-controls-action"
-                      onClick={() => selectedSessionKey && handleLoadOwnedCorrectionDraft(selectedSessionKey)}
-                      disabled={!selectedSessionKey || !canResumeOwnedCodex}
-                    >
-                      <ArrowUp size={16} strokeWidth={2.1} />
-                      Draft reply
-                    </button>
-                    <button
-                      type="button"
-                      className="remodex-controls-action"
-                      onClick={() => selectedSessionKey && void handleOwnedReviewDisposition(selectedReviewPacket.reviewDisposition === 'resolved' ? 'watch' : 'resolve', selectedSessionKey)}
-                      disabled={!selectedSessionKey || transcriptActionState !== 'idle'}
-                    >
-                      {selectedReviewPacket.reviewDisposition === 'resolved' ? <Eye size={16} strokeWidth={2.1} /> : <Check size={16} strokeWidth={2.1} />}
-                      {selectedReviewPacket.reviewDisposition === 'resolved' ? 'Keep watching' : 'Mark resolved'}
-                    </button>
-                  </div>
-                </>
-              ) : null}
-            </div>
-          ) : null}
+          {/* Review packet kept but collapsed for owned Codex — available via diff viewer */}
 
           {refreshError ? <p className="remodex-banner-note">{refreshError}</p> : null}
           {surfaceNote ? <p className="remodex-banner-note">{surfaceNote}</p> : null}
@@ -1873,108 +2238,7 @@ export function MobileRemoteShell({
           {selectedReviewPacketError ? <p className="remodex-banner-note">{selectedReviewPacketError}</p> : null}
 
           <div className="remodex-message-stack">
-            {isOwnedCodexSession && (transcriptGroups.length || pendingOwnedTurn) ? (
-              <>
-                {transcriptGroups.map((group) => {
-                  const promptText = group.prompt.trim();
-                  const visibleEntries = group.entries.filter((entry) => {
-                    const text = entry.text.trim();
-                    if (!text) {
-                      return false;
-                    }
-                    if (promptText && text === promptText) {
-                      return false;
-                    }
-                    return true;
-                  });
-
-                  return (
-                    <article key={group.id} className="remodex-message-card remodex-message-card-assistant remodex-owned-turn-card">
-                  <div className="remodex-owned-turn-head">
-                    <div className="remodex-owned-turn-head-copy">
-                      <span className="remodex-owned-turn-kicker">{group.mode === 'launch' ? 'Launch turn' : 'Reply turn'}</span>
-                      <strong>{group.title}</strong>
-                    </div>
-                    <div className="remodex-owned-turn-chip-row">
-                      <span className="remodex-compose-chip remodex-compose-pill">{group.mode}</span>
-                      <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{group.outcome}</span>
-                    </div>
-                  </div>
-
-                  {promptText ? (
-                    <div className="remodex-user-turn-wrap">
-                      <div className="remodex-user-bubble">{renderMessageBody(promptText, `${group.id}-prompt`)}</div>
-                      <span className="remodex-turn-time">{group.startedAtLabel ?? 'now'}</span>
-                    </div>
-                  ) : null}
-
-                  <div className="remodex-owned-turn-note">
-                    <span className="remodex-owned-turn-note-kicker">Codex status</span>
-                    <p>{group.summary}</p>
-                  </div>
-
-                  <div className="remodex-owned-chat-list">
-                    {visibleEntries.map((entry) => {
-                      const hasText = Boolean(entry.text.trim());
-                      if (!hasText) {
-                        return null;
-                      }
-
-                      if (entry.role === 'user') {
-                        return (
-                          <div key={entry.id} className="remodex-user-turn-wrap">
-                            <div className="remodex-user-bubble">{renderMessageBody(entry.text, `${entry.id}-user`)}</div>
-                            <span className="remodex-turn-time">{entry.timestampLabel ?? group.finishedAtLabel ?? group.startedAtLabel ?? 'now'}</span>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <article
-                          key={entry.id}
-                          className={`remodex-message-card remodex-message-card-assistant remodex-owned-chat-bubble ${entry.role !== 'assistant' ? 'remodex-owned-chat-bubble-muted' : ''}`}
-                        >
-                          <div className="remodex-message-head">
-                            <span>{entry.role === 'assistant' ? 'Codex' : roleLabel(entry.role)}</span>
-                            <div className="remodex-message-tools">
-                              <span className="remodex-turn-time">{entry.timestampLabel ?? group.finishedAtLabel ?? group.startedAtLabel ?? 'now'}</span>
-                              <button type="button" className="remodex-icon-link" onClick={() => handleCopy(entry.text)} aria-label="Copy message">
-                                <Copy size={16} strokeWidth={2.1} />
-                              </button>
-                            </div>
-                          </div>
-                          {renderMessageBody(entry.text, `${entry.id}-owned`)}
-                        </article>
-                      );
-                    })}
-                  </div>
-                    </article>
-                  );
-                })}
-                {pendingOwnedTurn ? (
-                  <article className="remodex-message-card remodex-message-card-assistant remodex-owned-turn-card remodex-owned-turn-card-pending">
-                    <div className="remodex-owned-turn-head">
-                      <div className="remodex-owned-turn-head-copy">
-                        <span className="remodex-owned-turn-kicker">Queued turn</span>
-                        <strong>Codex is starting this turn</strong>
-                      </div>
-                      <div className="remodex-owned-turn-chip-row">
-                        <span className="remodex-compose-chip remodex-compose-pill">resume</span>
-                        <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">queued</span>
-                      </div>
-                    </div>
-                    <div className="remodex-user-turn-wrap">
-                      <div className="remodex-user-bubble">{renderMessageBody(pendingOwnedTurn.prompt, `${pendingOwnedTurn.id}-pending-prompt`)}</div>
-                      <span className="remodex-turn-time">{pendingOwnedTurn.timestampLabel}</span>
-                    </div>
-                    <div className="remodex-owned-turn-note">
-                      <span className="remodex-owned-turn-note-kicker">Codex status</span>
-                      <p>Starting up — interrupt will appear once the run is active.</p>
-                    </div>
-                  </article>
-                ) : null}
-              </>
-            ) : transcriptEntries.length ? transcriptEntries.map((entry, index) => {
+            {transcriptEntries.length ? transcriptEntries.map((entry, index) => {
               const isUser = entry.role === 'user';
               const isLatest = !transcriptEntries.slice(index + 1).some((e) => e.role === 'assistant');
               const hasText = Boolean(entry.text.trim());
@@ -2059,7 +2323,7 @@ export function MobileRemoteShell({
           {streamingText ? (
             <article className="remodex-message-card remodex-message-card-assistant remodex-streaming-card">
               <div className="remodex-message-header">
-                <span className="remodex-speaker-label">{isOwnedCodexSession ? 'Codex' : (selectedSession?.name ?? 'Mister')}</span>
+                <span className="remodex-speaker-label">{selectedSession ? agentDisplayName(selectedSession) : 'Mister'}</span>
                 <div className="remodex-typing-bubble-dots" style={{ display: 'inline-flex', marginLeft: 6 }}>
                   <span className="remodex-typing-dot" />
                   <span className="remodex-typing-dot" />
@@ -2070,7 +2334,7 @@ export function MobileRemoteShell({
             </article>
           ) : (waitingForResponse || actionStateBySession[selectedSessionKey ?? ''] === 'steering') ? (
             <div className="remodex-typing-bubble">
-              <span className="remodex-typing-bubble-label">{isOwnedCodexSession ? 'Codex' : 'Mister'}</span>
+              <span className="remodex-typing-bubble-label">{selectedSession ? agentDisplayName(selectedSession) : 'Mister'}</span>
               <div className="remodex-typing-bubble-dots">
                 <span className="remodex-typing-dot" />
                 <span className="remodex-typing-dot" />
@@ -2079,12 +2343,23 @@ export function MobileRemoteShell({
             </div>
           ) : null}
 
+          {/* ── json-render approval cards ── */}
+          {pendingApprovals.length > 0 ? (
+            <div className="remodex-approval-stack">
+              {pendingApprovals.map((spec, i) => (
+                <div key={`approval-${i}`} className="remodex-approval-card-wrap">
+                  <Renderer spec={spec} registry={registry} />
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
 
         <div className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
           <div className="remodex-compose-shell">
-            {isOpenClawSession ? (
+            {isChatSession ? (
               <>
                 <input
                   ref={fileInputRef}
@@ -2144,7 +2419,7 @@ export function MobileRemoteShell({
                     }}
                     onFocus={() => setComposeFocused(true)}
                     onBlur={() => setComposeFocused(false)}
-                    placeholder={transcriptAttachments.length ? 'Add context for the image…' : 'Message Mister…'}
+                    placeholder={transcriptAttachments.length ? 'Add context for the image…' : `Message ${selectedSession ? agentDisplayName(selectedSession) : 'Mister'}…`}
                   />
                   <div className="remodex-compose-row">
                     <button
@@ -2194,7 +2469,7 @@ export function MobileRemoteShell({
                         if (!selectedSessionKey) return;
                         void handleSteerSubmit(selectedSessionKey);
                       }}
-                      aria-label="Send message to Mister"
+                      aria-label={`Send message to ${selectedSession ? agentDisplayName(selectedSession) : 'Mister'}`}
                     >
                       {transcriptActionState === 'steering' ? (
                         <>
@@ -2429,12 +2704,26 @@ export function MobileRemoteShell({
                 <span className="remodex-action-row-icon"><Copy size={18} strokeWidth={1.8} /></span>
                 <span className="remodex-action-row-label">Copy session key</span>
               </button>
+              <button
+                type="button"
+                className="remodex-controls-action-row"
+                onClick={() => {
+                  setPendingApprovals((cur) =>
+                    cur.length > 0 ? [] : [deployApprovalSpec, decisionSpec, dashboardSpec],
+                  );
+                  setControlsOpen(false);
+                }}
+              >
+                <span className="remodex-action-row-icon"><SlidersHorizontal size={18} strokeWidth={1.8} /></span>
+                <span className="remodex-action-row-label">{pendingApprovals.length ? 'Hide demo approvals' : 'Show demo approvals'}</span>
+                {pendingApprovals.length ? <span className="remodex-action-row-badge">{pendingApprovals.length}</span> : null}
+              </button>
               <Link href="/" className="remodex-controls-action-row remodex-controls-action-link" onClick={() => setControlsOpen(false)}>
                 <span className="remodex-action-row-icon"><Monitor size={18} strokeWidth={1.8} /></span>
                 <span className="remodex-action-row-label">Open on desktop</span>
                 <ChevronRight size={16} strokeWidth={1.8} className="remodex-action-row-chevron" />
               </Link>
-              {(isOpenClawSession && selectedSession?.status === 'running') || canInterruptOwnedCodex ? (
+              {(isChatSession && selectedSession?.status === 'running') || canInterruptOwnedCodex ? (
                 <button type="button" className="remodex-controls-action-row remodex-controls-action-row-danger" onClick={() => void handleStopActiveRun()}>
                   <span className="remodex-action-row-icon"><Square size={18} strokeWidth={1.8} /></span>
                   <span className="remodex-action-row-label">{isOwnedCodexSession ? 'Interrupt run' : 'Stop run'}</span>
