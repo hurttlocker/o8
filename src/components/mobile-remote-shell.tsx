@@ -677,6 +677,11 @@ export function MobileRemoteShell({
   const lastAssistantCountRef = useRef(0);
   const seenMessageIdsRef = useRef<Set<string> | null>(null);
   const [hydrated, setHydrated] = useState(false);
+
+  // ── Streaming state ──
+  const [streamingText, setStreamingText] = useState('');
+  const [streamingRunId, setStreamingRunId] = useState<string | null>(null);
+  const streamingTextRef = useRef(''); // avoid stale closures in EventSource handler
   useEffect(() => {
     // Seed with all current IDs so initial render doesn't animate everything
     if (!seenMessageIdsRef.current) {
@@ -684,6 +689,98 @@ export function MobileRemoteShell({
     }
     setHydrated(true);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── SSE streaming connection ──
+  useEffect(() => {
+    if (!selectedSessionKey || typeof window === 'undefined') return;
+    // Only stream OpenClaw sessions (not owned Codex which has its own tail)
+    const session = snapshot.sessions.find((s) => s.sessionKey === selectedSessionKey);
+    if (session?.runtime !== 'openclaw') return;
+
+    let es: EventSource | null = null;
+    let disposed = false;
+
+    const connect = () => {
+      if (disposed) return;
+      es = new EventSource(`/api/mobile/stream?sessionKey=${encodeURIComponent(selectedSessionKey)}`);
+
+      es.addEventListener('chat-delta', (event) => {
+        if (disposed) return;
+        try {
+          const data = JSON.parse(event.data);
+          if (data.text) {
+            streamingTextRef.current = data.text;
+            setStreamingText(data.text);
+            setStreamingRunId(data.runId ?? null);
+          }
+        } catch { /* ignore malformed events */ }
+      });
+
+      es.addEventListener('chat-done', (event) => {
+        if (disposed) return;
+        // Response complete — clear streaming state, force poll for final transcript
+        streamingTextRef.current = '';
+        setStreamingText('');
+        setStreamingRunId(null);
+        try {
+          const data = JSON.parse(event.data);
+          // Inline the final text immediately for zero-latency display
+          if (data.text && selectedSessionKey) {
+            setHistoryBySession((current) => {
+              const prev = current[selectedSessionKey] ?? [];
+              // Don't add if the last message already matches (poll caught up)
+              if (prev.length > 0 && prev[prev.length - 1]?.text === data.text) {
+                return current;
+              }
+              // Append a synthetic entry — the next poll will reconcile with the real one
+              const syntheticEntry: MobileTranscriptEntry = {
+                id: `stream:${data.runId ?? Date.now()}`,
+                role: 'assistant',
+                text: data.text,
+                timestampLabel: new Date(data.timestamp ?? Date.now()).toLocaleTimeString('en-US', {
+                  hour: 'numeric',
+                  minute: '2-digit',
+                }),
+              };
+              return { ...current, [selectedSessionKey]: [...prev, syntheticEntry] };
+            });
+          }
+        } catch { /* ignore */ }
+        // Force a fresh poll to get the authoritative transcript
+        void loadHistory(selectedSessionKey, true).catch(() => undefined);
+      });
+
+      es.addEventListener('chat-error', () => {
+        if (disposed) return;
+        streamingTextRef.current = '';
+        setStreamingText('');
+        setStreamingRunId(null);
+      });
+
+      es.onerror = () => {
+        // EventSource auto-reconnects on error — just clean up streaming state
+        if (!disposed) {
+          streamingTextRef.current = '';
+          setStreamingText('');
+          setStreamingRunId(null);
+        }
+      };
+    };
+
+    connect();
+
+    return () => {
+      disposed = true;
+      if (es) {
+        es.close();
+        es = null;
+      }
+      streamingTextRef.current = '';
+      setStreamingText('');
+      setStreamingRunId(null);
+    };
+  }, [selectedSessionKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const reviewFiles = useMemo(() => {
     const next = isOwnedCodexSession
       ? selectedReviewPacket?.changedFiles ?? []
@@ -1927,7 +2024,19 @@ export function MobileRemoteShell({
             )}
           </div>
 
-          {(waitingForResponse || actionStateBySession[selectedSessionKey ?? ''] === 'steering') ? (
+          {streamingText ? (
+            <article className="remodex-message-card remodex-message-card-assistant remodex-streaming-card">
+              <div className="remodex-message-header">
+                <span className="remodex-speaker-label">{isOwnedCodexSession ? 'Codex' : (selectedSession?.name ?? 'Mister')}</span>
+                <div className="remodex-typing-bubble-dots" style={{ display: 'inline-flex', marginLeft: 6 }}>
+                  <span className="remodex-typing-dot" />
+                  <span className="remodex-typing-dot" />
+                  <span className="remodex-typing-dot" />
+                </div>
+              </div>
+              <div className="remodex-message-text">{streamingText}</div>
+            </article>
+          ) : (waitingForResponse || actionStateBySession[selectedSessionKey ?? ''] === 'steering') ? (
             <div className="remodex-typing-bubble">
               <span className="remodex-typing-bubble-label">{isOwnedCodexSession ? 'Codex' : 'Mister'}</span>
               <div className="remodex-typing-bubble-dots">
