@@ -1124,15 +1124,17 @@ export function MobileRemoteShell({
       if (session.runtime === 'codex') {
         const src = session.runtimeSurface?.sourceLabel ?? '';
         const ownership = session.runtimeSurface?.ownership ?? '';
-        // Discovered sessions: show if process is alive
+        // Discovered sessions: only show if a live desktop process is verified
         if (ownership === 'discovered') {
-          if (src.includes('live pid') || src.includes('recent session')) return true;
+          if (src.includes('live pid')) return true;
           return false;
         }
-        // Owned sessions: show if recently active (not stale) or currently running
+        // Owned sessions: show only if actively running or very recently finished (under 1h)
         if (ownership === 'owned') {
           if (src.includes('active pid')) return true;
-          if (!isStale) return true; // Show owned sessions under 4h old
+          const minsMatch = ageText.match(/^(\d+)m/);
+          const recentMins = minsMatch ? parseInt(minsMatch[1], 10) : 999;
+          if (ageText === 'just now' || recentMins < 60) return true;
           return false;
         }
         return false;
@@ -1501,26 +1503,49 @@ export function MobileRemoteShell({
 
     try {
       if (isDiscoveredCodex) {
-        // Launch an owned Codex session in the same workspace as the discovered one
-        const launchResult = await runAction({
-          action: 'launch' as MobileActionRequest['action'],
-          sessionKey,
-          message,
-          cwd: targetSession?.runtimeSurface?.cwd ?? targetSession?.workspace ?? '',
-        });
-        // Switch to the newly created owned session so the user sees the response
-        if (launchResult?.ok && launchResult.sessionKey && launchResult.sessionKey !== sessionKey) {
-          setSurfaceNote('Codex launched — switching to live session…');
-          // Give the session a moment to appear in the inbox
-          await new Promise((r) => setTimeout(r, 2000));
-          const freshInbox = await refreshInbox();
-          const newSession = freshInbox?.sessions?.find((s: { sessionKey?: string }) => s.sessionKey === launchResult.sessionKey);
-          if (newSession) {
-            setSelectedId(newSession.id);
-            await loadHistory(launchResult.sessionKey, true).catch(() => undefined);
-          }
+        // For discovered Codex: find or create ONE owned session for this workspace,
+        // then resume it. Never create multiple owned sessions for the same cwd.
+        const cwd = targetSession?.runtimeSurface?.cwd ?? targetSession?.workspace ?? '';
+
+        // Check if an owned session already exists for this workspace
+        const existingOwned = snapshot.sessions.find((s) =>
+          s.runtime === 'codex' &&
+          s.runtimeSurface?.ownership === 'owned' &&
+          (s.runtimeSurface?.cwd === cwd || s.workspace === cwd) &&
+          s.runtimeSurface?.lifecycle?.availability === 'ready-for-resume',
+        );
+
+        if (existingOwned) {
+          // Resume the existing owned session
+          await runAction({
+            action: 'resume' as MobileActionRequest['action'],
+            sessionKey: existingOwned.sessionKey,
+            message,
+          });
+          // Switch to the owned session
+          setSelectedId(existingOwned.id);
+          setSurfaceNote('Resuming Codex session…');
+          await loadHistory(existingOwned.sessionKey, true).catch(() => undefined);
         } else {
-          setSurfaceNote('Codex session launched.');
+          // No owned session exists — launch a new one
+          const launchResult = await runAction({
+            action: 'launch' as MobileActionRequest['action'],
+            sessionKey,
+            message,
+            cwd,
+          });
+          if (launchResult?.ok && launchResult.sessionKey && launchResult.sessionKey !== sessionKey) {
+            setSurfaceNote('Codex launched — switching to session…');
+            await new Promise((r) => setTimeout(r, 2000));
+            const freshInbox = await refreshInbox();
+            const newSession = freshInbox?.sessions?.find((s: { sessionKey?: string }) => s.sessionKey === launchResult.sessionKey);
+            if (newSession) {
+              setSelectedId(newSession.id);
+              await loadHistory(launchResult.sessionKey, true).catch(() => undefined);
+            }
+          } else {
+            setSurfaceNote('Codex session launched.');
+          }
         }
       } else {
         await runAction({
