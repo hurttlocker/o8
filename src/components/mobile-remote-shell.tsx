@@ -1047,42 +1047,95 @@ export function MobileRemoteShell({
   const latestTranscriptMarker = transcriptEntries[transcriptEntries.length - 1]?.id ?? 'empty';
   const scrollMarker = pendingOwnedTurn ? `${latestTranscriptMarker}:${pendingOwnedTurn.id}` : latestTranscriptMarker;
   const selectedReviewFile = selectedReviewFilePath ? reviewFileByPath[selectedReviewFilePath] : undefined;
-  const threadSwitcher = useMemo(() => {
-    // Filter: only show sessions that are active/recent or currently selected
+  // ── Project-grouped squad rail ──
+  // Group sessions by workspace path into "project cards"
+  interface ProjectGroup {
+    projectName: string;
+    workspace: string;
+    sessions: MobileInboxSnapshot['sessions'];
+    hasPrimary: boolean; // contains the main Mister session
+    mostRecentActivity?: string;
+    mostRecentTime?: string;
+    bestContextPct: number;
+    hasRunning: boolean;
+  }
+
+  const projectGroups = useMemo(() => {
+    // Relevancy filter — keep interesting sessions
     const isRelevant = (session: MobileInboxSnapshot['sessions'][number]) => {
       if (session.isCurrentSession) return true;
       if (session.id === selectedSession?.id) return true;
       if (['running', 'reviewing', 'blocked'].includes(session.status)) return true;
-      // Filter out stale sessions — "Xh ago" with X > 4
       const ageMatch = session.lastEventAt?.match(/^(\d+)h/);
       if (ageMatch && parseInt(ageMatch[1], 10) > 4) return false;
-      // Keep sessions with activity or alerts
       if (session.activity || session.alerts > 0) return true;
-      // Keep owned Codex sessions that aren't ancient
       if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') return true;
       return false;
     };
 
-    const candidates = [
-      selectedSession,
-      ...snapshot.sessions.filter((session) => session.isCurrentSession),
-      ...snapshot.sessions.filter((session) => isRelevant(session)),
-    ].filter(Boolean) as MobileInboxSnapshot['sessions'];
+    const relevant = snapshot.sessions.filter(isRelevant);
 
-    const seen = new Set<string>();
-    const deduped = [] as MobileInboxSnapshot['sessions'];
-    for (const session of candidates) {
-      if (seen.has(session.id)) {
-        continue;
-      }
-      seen.add(session.id);
-      deduped.push(session);
-      if (deduped.length >= 6) {
-        break;
-      }
+    // Group by workspace path
+    const groupMap = new Map<string, MobileInboxSnapshot['sessions']>();
+    for (const session of relevant) {
+      const ws = session.workspace || '~/clawd';
+      const existing = groupMap.get(ws) ?? [];
+      existing.push(session);
+      groupMap.set(ws, existing);
     }
-    return deduped;
+
+    // Build project group objects
+    const groups: ProjectGroup[] = [];
+    for (const [ws, sessions] of groupMap) {
+      // Extract project name from path: ~/clawd/repos/cortex-ide → cortex-ide
+      const segments = ws.replace(/^~\//, '').split('/');
+      const projectName = segments[segments.length - 1] || segments[0] || 'workspace';
+      const hasPrimary = sessions.some((s) => s.isCurrentSession);
+      const running = sessions.some((s) => s.status === 'running' || s.status === 'reviewing');
+      const bestCtx = Math.max(...sessions.map((s) => s.context?.usedPercent ?? 0));
+
+      // Find most recent activity across all sessions in this group
+      let mostRecentActivity: string | undefined;
+      let mostRecentTime: string | undefined;
+      for (const s of sessions) {
+        if (s.activity?.headline) {
+          mostRecentActivity = s.activity.headline;
+          mostRecentTime = s.lastEventAt;
+          break; // first active session wins (they're already sorted by recency from inbox)
+        }
+      }
+      if (!mostRecentActivity) {
+        // Fall back to the most recent session's status
+        mostRecentActivity = sessions[0]?.status ?? 'idle';
+        mostRecentTime = sessions[0]?.lastEventAt;
+      }
+
+      groups.push({
+        projectName,
+        workspace: ws,
+        sessions,
+        hasPrimary,
+        mostRecentActivity,
+        mostRecentTime,
+        bestContextPct: bestCtx,
+        hasRunning: running,
+      });
+    }
+
+    // Sort: primary group first, then by most recently active
+    groups.sort((a, b) => {
+      if (a.hasPrimary && !b.hasPrimary) return -1;
+      if (!a.hasPrimary && b.hasPrimary) return 1;
+      if (a.hasRunning && !b.hasRunning) return -1;
+      if (!a.hasRunning && b.hasRunning) return 1;
+      return 0;
+    });
+
+    return groups;
   }, [selectedSession, snapshot.sessions]);
+
+  // Track which project group is expanded (null = none)
+  const [expandedProject, setExpandedProject] = useState<string | null>(null);
   const selectedReviewFileIndex = selectedReviewFilePath
     ? reviewFiles.findIndex((file) => file.path === selectedReviewFilePath)
     : -1;
@@ -1759,40 +1812,68 @@ export function MobileRemoteShell({
 
         <div className="remodex-scroll-view">
 
-          {threadSwitcher.length > 0 ? (
+          {projectGroups.length > 0 ? (
             <div className="remodex-squad-rail">
-              {threadSwitcher.map((session) => {
-                const active = session.id === selectedSession?.id;
-                const isRunning = session.status === 'running' || session.status === 'reviewing';
-                const ctxPct = Math.round(session.context?.usedPercent ?? 0);
+              {projectGroups.map((group) => {
+                const isExpanded = expandedProject === group.workspace;
+                const ctxPct = Math.round(group.bestContextPct);
                 const ctxTone = ctxPct >= 85 ? 'critical' : ctxPct >= 75 ? 'high' : ctxPct >= 65 ? 'watch' : 'calm';
-                const agentName = session.isCurrentSession ? 'Mister' : session.name?.split(/[\s/]/)[0] ?? 'Agent';
-                const activityLine = session.activity?.headline;
-                const taskLine = activityLine
-                  ? activityLine
-                  : session.isCurrentSession
-                    ? 'Main session'
-                    : session.status;
+                const agentCount = group.sessions.length;
+                const containsSelected = group.sessions.some((s) => s.id === selectedSession?.id);
+
                 return (
-                  <button
-                    key={session.id}
-                    type="button"
-                    className={`remodex-squad-card ${active ? 'remodex-squad-card-active' : ''}`}
-                    onClick={() => handleSessionFocus(session.id)}
-                  >
-                    <div className="remodex-squad-card-head">
-                      <span className={`remodex-squad-dot ${isRunning ? 'remodex-squad-dot-live' : ''} remodex-squad-dot-${ctxTone}`} />
-                      <strong className="remodex-squad-name">{agentName}</strong>
-                      <span className="remodex-squad-time">{session.lastEventAt ?? 'idle'}</span>
-                    </div>
-                    <span className="remodex-squad-task">{taskLine}</span>
-                    <div className="remodex-squad-bar-track">
-                      <div
-                        className={`remodex-squad-bar-fill remodex-squad-bar-${ctxTone}`}
-                        style={{ width: `${ctxPct}%` }}
-                      />
-                    </div>
-                  </button>
+                  <div key={group.workspace} className="remodex-project-group">
+                    <button
+                      type="button"
+                      className={`remodex-squad-card remodex-project-card ${containsSelected ? 'remodex-squad-card-active' : ''} ${isExpanded ? 'remodex-project-card-expanded' : ''}`}
+                      onClick={() => setExpandedProject(isExpanded ? null : group.workspace)}
+                    >
+                      <div className="remodex-squad-card-head">
+                        <span className={`remodex-squad-dot ${group.hasRunning ? 'remodex-squad-dot-live' : ''} remodex-squad-dot-${ctxTone}`} />
+                        <strong className="remodex-squad-name">{group.projectName}</strong>
+                        <span className="remodex-squad-time">{group.mostRecentTime ?? 'idle'}</span>
+                      </div>
+                      <span className="remodex-squad-task">{group.mostRecentActivity}</span>
+                      <div className="remodex-project-meta">
+                        <span className="remodex-project-count">{agentCount} agent{agentCount !== 1 ? 's' : ''}</span>
+                        <ChevronRight size={12} className={`remodex-project-chevron ${isExpanded ? 'remodex-project-chevron-open' : ''}`} />
+                      </div>
+                    </button>
+
+                    {isExpanded ? (
+                      <div className="remodex-project-agents">
+                        {group.sessions.map((session) => {
+                          const active = session.id === selectedSession?.id;
+                          const isRunning = session.status === 'running' || session.status === 'reviewing';
+                          const sCtxPct = Math.round(session.context?.usedPercent ?? 0);
+                          const sCtxTone = sCtxPct >= 85 ? 'critical' : sCtxPct >= 75 ? 'high' : sCtxPct >= 65 ? 'watch' : 'calm';
+                          const agentName = session.isCurrentSession ? 'Mister' : session.name?.split(/[\s/]/)[0] ?? 'Agent';
+                          const taskLine = session.activity?.headline ?? (session.isCurrentSession ? 'Main session' : session.status);
+                          return (
+                            <button
+                              key={session.id}
+                              type="button"
+                              className={`remodex-squad-card remodex-agent-card ${active ? 'remodex-squad-card-active' : ''}`}
+                              onClick={() => handleSessionFocus(session.id)}
+                            >
+                              <div className="remodex-squad-card-head">
+                                <span className={`remodex-squad-dot ${isRunning ? 'remodex-squad-dot-live' : ''} remodex-squad-dot-${sCtxTone}`} />
+                                <strong className="remodex-squad-name">{agentName}</strong>
+                                <span className="remodex-squad-time">{session.lastEventAt ?? 'idle'}</span>
+                              </div>
+                              <span className="remodex-squad-task">{taskLine}</span>
+                              <div className="remodex-squad-bar-track">
+                                <div
+                                  className={`remodex-squad-bar-fill remodex-squad-bar-${sCtxTone}`}
+                                  style={{ width: `${sCtxPct}%` }}
+                                />
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
                 );
               })}
             </div>
