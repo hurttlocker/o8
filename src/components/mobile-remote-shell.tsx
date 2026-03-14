@@ -51,6 +51,35 @@ function pickCurrentSession(snapshot: MobileInboxSnapshot) {
     ?? snapshot.sessions[0];
 }
 
+/**
+ * Strip markdown syntax and truncate to the last ~6 readable lines for
+ * the streaming preview. Shows the "live tail" of the response.
+ */
+function formatStreamingPreview(raw: string): string {
+  let text = raw;
+  // Strip markdown tables (lines starting with |)
+  text = text.replace(/^\|.*\|$/gm, '');
+  // Strip markdown bold/italic
+  text = text.replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1');
+  // Strip markdown headers
+  text = text.replace(/^#{1,4}\s+/gm, '');
+  // Strip inline code backticks
+  text = text.replace(/`([^`]+)`/g, '$1');
+  // Strip code block fences
+  text = text.replace(/^```[\s\S]*?```$/gm, '');
+  // Strip markdown links [text](url) → text
+  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+  // Strip horizontal rules
+  text = text.replace(/^[-*_]{3,}$/gm, '');
+  // Collapse multiple newlines
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
+
+  // Take the last ~6 non-empty lines (the "live tail")
+  const lines = text.split('\n').filter((l) => l.trim());
+  const tail = lines.slice(-6).join('\n');
+  return tail || text.slice(-300);
+}
+
 function roleLabel(role: MobileTranscriptEntry['role'], agentName?: string) {
   switch (role) {
     case 'assistant':
@@ -2034,7 +2063,7 @@ export function MobileRemoteShell({
                   <span className="remodex-typing-dot" />
                 </div>
               </div>
-              <div className="remodex-message-text">{streamingText}</div>
+              <div className="remodex-streaming-preview">{formatStreamingPreview(streamingText)}</div>
             </article>
           ) : (waitingForResponse || actionStateBySession[selectedSessionKey ?? ''] === 'steering') ? (
             <div className="remodex-typing-bubble">
