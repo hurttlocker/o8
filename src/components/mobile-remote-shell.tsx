@@ -1148,10 +1148,21 @@ export function MobileRemoteShell({
 
     const groups: ProjectGroup[] = [];
     for (const [ws, rawSessions] of groupMap) {
+      // Sort by recency so dedup keeps the newest session per branch
+      const sorted = [...rawSessions].sort((a, b) => {
+        // Parse "Xm ago", "Xh ago", "Xd ago" to compare recency
+        const ageMinutes = (text: string) => {
+          const m = text.match(/^(\d+)m/); if (m) return parseInt(m[1], 10);
+          const h = text.match(/^(\d+)h/); if (h) return parseInt(h[1], 10) * 60;
+          const d = text.match(/^(\d+)d/); if (d) return parseInt(d[1], 10) * 1440;
+          return 0;
+        };
+        return ageMinutes(a.lastEventAt ?? '') - ageMinutes(b.lastEventAt ?? '');
+      });
       // Deduplicate Codex sessions: keep only the most recent per branch
       const deduped: typeof rawSessions = [];
       const seenBranches = new Set<string>();
-      for (const s of rawSessions) {
+      for (const s of sorted) {
         if (s.runtime === 'codex' && s.branch) {
           if (seenBranches.has(s.branch)) continue;
           seenBranches.add(s.branch);
