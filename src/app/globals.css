@@ -2256,7 +2256,7 @@ button.workflow-file-item.workflow-file-item-active {
 
 /* ── Project group cards ── */
 .remodex-project-group {
-  display: contents; /* lets children participate in parent grid */
+  display: contents;
 }
 
 .remodex-project-card {
@@ -2264,29 +2264,23 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-project-card-expanded {
-  border-color: rgba(99, 102, 241, 0.2);
-  background: rgba(238, 242, 255, 0.6);
+  border-color: rgba(99, 102, 241, 0.18);
+  background: rgba(238, 242, 255, 0.5);
 }
 
-.remodex-project-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 0.1rem;
-}
-
-.remodex-project-count {
-  font-size: 0.65rem;
-  font-weight: 600;
-  color: rgba(17, 24, 39, 0.36);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+.remodex-project-summary {
+  font-size: 0.68rem;
+  font-weight: 500;
+  color: rgba(17, 24, 39, 0.4);
+  letter-spacing: 0.01em;
 }
 
 .remodex-project-chevron {
-  color: rgba(17, 24, 39, 0.3);
+  position: absolute;
+  right: 0.6rem;
+  bottom: 0.55rem;
+  color: rgba(17, 24, 39, 0.25);
   transition: transform 200ms ease;
-  flex-shrink: 0;
 }
 
 .remodex-project-chevron-open {
@@ -2294,23 +2288,54 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-project-agents {
-  grid-column: 1 / -1; /* span full width of the grid */
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 0.4rem;
-  padding: 0.5rem;
-  border-radius: 14px;
-  background: rgba(99, 102, 241, 0.04);
-  border: 1px solid rgba(99, 102, 241, 0.08);
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.4rem;
+  border-radius: 12px;
+  background: rgba(99, 102, 241, 0.03);
+  border: 1px solid rgba(99, 102, 241, 0.06);
   animation: remodex-fade-in 200ms ease-out both;
 }
 
-.remodex-agent-card {
-  padding: 0.6rem 0.7rem 0.5rem;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.92);
-  border-color: rgba(15, 23, 42, 0.04);
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+/* Agent pills — compact horizontal rows inside expanded project */
+.remodex-agent-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(15, 23, 42, 0.05);
+  text-align: left;
+  color: #111827;
+  transition: background 150ms ease, transform 100ms ease;
+}
+
+.remodex-agent-pill:active {
+  transform: scale(0.98);
+  background: rgba(255, 255, 255, 1);
+}
+
+.remodex-agent-pill-active {
+  border-color: rgba(239, 68, 68, 0.2);
+  background: rgba(254, 242, 242, 0.6);
+}
+
+.remodex-agent-pill-name {
+  font-size: 0.78rem;
+  font-weight: 700;
+  min-width: 48px;
+}
+
+.remodex-agent-pill-status {
+  font-size: 0.7rem;
+  color: rgba(17, 24, 39, 0.42);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Activity bar (observable agents) ── */
