@@ -446,6 +446,7 @@ export function MobileRemoteShell({
 }) {
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot>(initialSnapshot);
   const [selectedId, setSelectedId] = useState(() => pickCurrentSession(initialSnapshot)?.id ?? '');
+  const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs'>('squad');
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [surfaceNote, setSurfaceNote] = useState<string | null>(null);
   const [historyBySession, setHistoryBySession] = useState<Record<string, MobileTranscriptEntry[]>>(() => (
@@ -1803,6 +1804,7 @@ export function MobileRemoteShell({
     }
 
     setSelectedId(sessionId);
+    setActiveView('chat');
     setControlsOpen(false);
     setDiffOpen(false);
     setSurfaceNote(`Focused ${compactLine(nextSession.name, 'the selected session', 40)}.`);
@@ -1984,8 +1986,164 @@ export function MobileRemoteShell({
 
         <div className="remodex-scroll-view">
 
-          {projectGroups.length > 0 ? (
+          {/* ── Cost Dashboard View ── */}
+          {activeView === 'costs' ? (() => {
+            const openClawSessions = snapshot.sessions.filter(
+              (s) => s.runtime === 'openclaw' && s.tokenUsage,
+            );
+            const totalTokens = openClawSessions.reduce((sum, s) => sum + (s.tokenUsage?.totalTokens ?? 0), 0);
+            const totalRemaining = openClawSessions.reduce((sum, s) => sum + (s.tokenUsage?.remainingTokens ?? 0), 0);
+            const totalCapacity = totalTokens + totalRemaining;
+
+            // Group by model
+            const byModel = new Map<string, { sessions: typeof openClawSessions; tokens: number; capacity: number }>();
+            for (const s of openClawSessions) {
+              const model = s.model ?? 'unknown';
+              const existing = byModel.get(model) ?? { sessions: [], tokens: 0, capacity: 0 };
+              existing.sessions.push(s);
+              existing.tokens += s.tokenUsage?.totalTokens ?? 0;
+              existing.capacity += (s.tokenUsage?.totalTokens ?? 0) + (s.tokenUsage?.remainingTokens ?? 0);
+              byModel.set(model, existing);
+            }
+
+            const modelColor: Record<string, string> = {
+              'claude-opus-4-6': '#ef4444',
+              'claude-sonnet-4-20250514': '#f59e0b',
+              'claude-haiku-4-5-20251001': '#22c55e',
+            };
+
+            return (
+              <div className="remodex-costs-view">
+                <button
+                  type="button"
+                  className="remodex-costs-back"
+                  onClick={() => setActiveView('squad')}
+                >
+                  ← Squad
+                </button>
+
+                {/* ── Aggregate overview ── */}
+                <div className="remodex-costs-hero">
+                  <span className="remodex-costs-hero-kicker">Total Tokens Used</span>
+                  <strong className="remodex-costs-hero-value">{totalTokens.toLocaleString()}</strong>
+                  <span className="remodex-costs-hero-sub">
+                    of {totalCapacity.toLocaleString()} capacity across {openClawSessions.length} session{openClawSessions.length === 1 ? '' : 's'}
+                  </span>
+                  <div className="remodex-costs-hero-bar">
+                    <div
+                      className="remodex-costs-hero-fill"
+                      style={{ width: `${totalCapacity > 0 ? Math.round((totalTokens / totalCapacity) * 100) : 0}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* ── Per-model breakdown ── */}
+                {Array.from(byModel.entries()).map(([model, data]) => {
+                  const pct = data.capacity > 0 ? Math.round((data.tokens / data.capacity) * 100) : 0;
+                  const color = modelColor[model] ?? '#6366f1';
+                  const shortModel = model.replace('claude-', '').replace(/-20\d{6}$/, '');
+                  return (
+                    <div key={model} className="remodex-costs-model-card">
+                      <div className="remodex-costs-model-head">
+                        <span className="remodex-costs-model-dot" style={{ background: color }} />
+                        <strong className="remodex-costs-model-name">{shortModel}</strong>
+                        <span className="remodex-costs-model-pct">{pct}%</span>
+                      </div>
+                      <div className="remodex-costs-model-bar">
+                        <div className="remodex-costs-model-fill" style={{ width: `${pct}%`, background: color }} />
+                      </div>
+                      <div className="remodex-costs-model-meta">
+                        <span>{data.tokens.toLocaleString()} tokens</span>
+                        <span>{data.sessions.length} session{data.sessions.length === 1 ? '' : 's'}</span>
+                      </div>
+
+                      {/* Per-session rows */}
+                      {data.sessions.map((s) => {
+                        const sPct = s.context?.usedPercent ?? 0;
+                        const tone = sPct >= 85 ? 'critical' : sPct >= 75 ? 'high' : sPct >= 65 ? 'watch' : 'calm';
+                        return (
+                          <button
+                            key={s.id}
+                            type="button"
+                            className="remodex-costs-session-row"
+                            onClick={() => { setSelectedId(s.id); setActiveView('chat'); }}
+                          >
+                            <span className={`remodex-costs-session-dot remodex-squad-dot-${tone}`} />
+                            <span className="remodex-costs-session-name">{s.isCurrentSession ? 'This chat' : compactLine(s.name, 'Session', 28)}</span>
+                            <span className="remodex-costs-session-tokens">{(s.tokenUsage?.totalTokens ?? 0).toLocaleString()}</span>
+                            <span className="remodex-costs-session-pct">{sPct}%</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+
+                {/* ── Codex sessions (no token data) ── */}
+                {(() => {
+                  const codexSessions = snapshot.sessions.filter((s) => s.runtime === 'codex');
+                  if (!codexSessions.length) return null;
+                  return (
+                    <div className="remodex-costs-model-card remodex-costs-model-card-muted">
+                      <div className="remodex-costs-model-head">
+                        <span className="remodex-costs-model-dot" style={{ background: '#6366f1' }} />
+                        <strong className="remodex-costs-model-name">Codex</strong>
+                        <span className="remodex-costs-model-pct">{codexSessions.length} session{codexSessions.length === 1 ? '' : 's'}</span>
+                      </div>
+                      <p className="remodex-costs-codex-note">Token usage not tracked for Codex sessions — billed through ChatGPT Pro subscription.</p>
+                    </div>
+                  );
+                })()}
+              </div>
+            );
+          })() : null}
+
+          {/* ── Squad Rail ── */}
+          {activeView !== 'costs' && projectGroups.length > 0 ? (
             <div className="remodex-squad-rail">
+              {/* Usage summary tap target */}
+              {(() => {
+                const tracked = snapshot.sessions.filter((s) => s.runtime === 'openclaw' && s.tokenUsage);
+                const total = tracked.reduce((sum, s) => sum + (s.tokenUsage?.totalTokens ?? 0), 0);
+                const cap = tracked.reduce((sum, s) => sum + (s.tokenUsage?.totalTokens ?? 0) + (s.tokenUsage?.remainingTokens ?? 0), 0);
+                const pct = cap > 0 ? Math.round((total / cap) * 100) : 0;
+                if (!tracked.length) return null;
+                return (
+                  <button
+                    type="button"
+                    className="remodex-costs-summary-card"
+                    onClick={() => setActiveView('costs')}
+                  >
+                    <div className="remodex-costs-summary-left">
+                      <span className="remodex-costs-summary-kicker">Token Usage</span>
+                      <strong className="remodex-costs-summary-value">{total.toLocaleString()}</strong>
+                    </div>
+                    <div className="remodex-costs-summary-right">
+                      <div className="remodex-costs-summary-ring">
+                        <svg viewBox="0 0 36 36" className="remodex-costs-ring-svg">
+                          <path
+                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                            fill="none"
+                            stroke="#e5e7eb"
+                            strokeWidth="3"
+                          />
+                          <path
+                            d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                            fill="none"
+                            stroke={pct >= 75 ? '#ef4444' : pct >= 50 ? '#f59e0b' : '#22c55e'}
+                            strokeWidth="3"
+                            strokeDasharray={`${pct}, 100`}
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                        <span className="remodex-costs-ring-label">{pct}%</span>
+                      </div>
+                    </div>
+                    <ChevronRight size={16} strokeWidth={1.8} className="remodex-costs-summary-chevron" />
+                  </button>
+                );
+              })()}
+
               {projectGroups.map((group) => {
                 const isExpanded = expandedProject === group.workspace;
                 const ctxPct = Math.round(group.bestContextPct);
