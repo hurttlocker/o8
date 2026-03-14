@@ -2405,14 +2405,12 @@ button.workflow-file-item.workflow-file-item-active {
 
 .remodex-streaming-preview {
   white-space: pre-wrap;
-  font-size: 0.88rem;
-  line-height: 1.45;
-  color: #1e293b;
-  max-height: 120px;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  color: #475569;
+  max-height: 60px;
   overflow: hidden;
-  position: relative;
-  mask-image: linear-gradient(to bottom, transparent 0%, black 20%, black 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20%, black 100%);
+  flex-shrink: 0;
 }
 
 .remodex-typing-bubble {
