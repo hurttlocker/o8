@@ -2303,10 +2303,10 @@ button.workflow-file-item.workflow-file-item-active {
 .remodex-agent-pill {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.45rem 0.6rem;
+  gap: 0.5rem;
+  padding: 0.5rem 0.7rem;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.92);
   border: 1px solid rgba(15, 23, 42, 0.05);
   text-align: left;
   color: #111827;
@@ -2324,14 +2324,21 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-agent-pill-name {
-  font-size: 0.78rem;
+  font-size: 0.8rem;
   font-weight: 700;
-  min-width: 48px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.remodex-agent-pill-sep {
+  font-size: 0.75rem;
+  color: rgba(17, 24, 39, 0.2);
+  flex-shrink: 0;
 }
 
 .remodex-agent-pill-status {
-  font-size: 0.7rem;
-  color: rgba(17, 24, 39, 0.42);
+  font-size: 0.72rem;
+  color: rgba(17, 24, 39, 0.45);
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;

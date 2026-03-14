@@ -1890,6 +1890,7 @@ export function MobileRemoteShell({
                             >
                               <span className={`remodex-squad-dot ${isRunning ? 'remodex-squad-dot-live' : ''} remodex-squad-dot-${sCtxTone}`} />
                               <span className="remodex-agent-pill-name">{name}</span>
+                              <span className="remodex-agent-pill-sep">·</span>
                               <span className="remodex-agent-pill-status">{statusLabel}</span>
                             </button>
                           );
