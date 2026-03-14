@@ -700,6 +700,8 @@ export function MobileRemoteShell({
 
   const selectedSessionKey = selectedSession?.sessionKey;
   const isOpenClawSession = selectedSession?.runtime === 'openclaw';
+  // Discovered Codex sessions use the same chat UI as OpenClaw sessions
+  const isChatSession = isOpenClawSession || (selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'discovered');
   const isOwnedCodexSession = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'owned';
   const selectedReviewPacket = selectedSessionKey && isOwnedCodexSession ? reviewPacketBySession[selectedSessionKey] ?? null : null;
   const selectedReviewPacketLoading = selectedSessionKey && isOwnedCodexSession ? reviewPacketLoadingBySession[selectedSessionKey] ?? false : false;
@@ -1118,13 +1120,13 @@ export function MobileRemoteShell({
         : 0;
       const isStale = ageHours > 4;
 
-      // Codex sessions:
-      // - "discovered" = user opened from terminal → always show
-      // - "owned" = IDE/OpenClaw opened programmatically → filter if stale
+      // Codex sessions: only show if the process is alive.
+      // sourceLabel contains "live pid" or "recent session" when running;
+      // "persisted session" or "ready for resume" when dead/killed.
       if (session.runtime === 'codex') {
-        if (session.runtimeSurface?.ownership !== 'owned') return true;
-        if (isStale) return false;
-        return true;
+        const src = session.runtimeSurface?.sourceLabel ?? '';
+        if (src.includes('live pid') || src.includes('recent session')) return true;
+        return false;
       }
 
       // OpenClaw sessions: filter stale ones
@@ -1227,7 +1229,7 @@ export function MobileRemoteShell({
           : 'Session';
   const headerProgress = Math.min(scrollY / 88, 1);
   const isHeaderCompact = headerProgress > 0.12;
-  const isComposerPrimed = isOpenClawSession && (composeFocused || transcriptAttachments.length > 0);
+  const isComposerPrimed = isChatSession && (composeFocused || transcriptAttachments.length > 0);
   const dockMotionProgress = !isComposerPrimed && isScrolling ? 1 : 0;
   const dockFadeProgress = dockMotionProgress;
   const diffFileLabel = reviewFiles.length === 1 ? 'file' : 'files';
@@ -1330,8 +1332,8 @@ export function MobileRemoteShell({
     if (!selectedSessionKey || !files?.length) {
       return;
     }
-    if (!isOpenClawSession) {
-      setSurfaceNote('Image attachments are only available on the Mister lane right now.');
+    if (!isChatSession) {
+      setSurfaceNote('Image attachments are only available for chat sessions right now.');
       return;
     }
 
@@ -1712,7 +1714,7 @@ export function MobileRemoteShell({
     if (!selectedSessionKey) {
       return;
     }
-    if (!isOpenClawSession && !canInterruptOwnedCodex) {
+    if (!isChatSession && !canInterruptOwnedCodex) {
       setSurfaceNote('No active run to interrupt right now.');
       return;
     }
@@ -2212,7 +2214,7 @@ export function MobileRemoteShell({
             </article>
           ) : (waitingForResponse || actionStateBySession[selectedSessionKey ?? ''] === 'steering') ? (
             <div className="remodex-typing-bubble">
-              <span className="remodex-typing-bubble-label">{isOwnedCodexSession ? 'Codex' : 'Mister'}</span>
+              <span className="remodex-typing-bubble-label">{selectedSession ? agentDisplayName(selectedSession) : 'Mister'}</span>
               <div className="remodex-typing-bubble-dots">
                 <span className="remodex-typing-dot" />
                 <span className="remodex-typing-dot" />
@@ -2226,7 +2228,7 @@ export function MobileRemoteShell({
 
         <div className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
           <div className="remodex-compose-shell">
-            {isOpenClawSession ? (
+            {isChatSession ? (
               <>
                 <input
                   ref={fileInputRef}
@@ -2576,7 +2578,7 @@ export function MobileRemoteShell({
                 <span className="remodex-action-row-label">Open on desktop</span>
                 <ChevronRight size={16} strokeWidth={1.8} className="remodex-action-row-chevron" />
               </Link>
-              {(isOpenClawSession && selectedSession?.status === 'running') || canInterruptOwnedCodex ? (
+              {(isChatSession && selectedSession?.status === 'running') || canInterruptOwnedCodex ? (
                 <button type="button" className="remodex-controls-action-row remodex-controls-action-row-danger" onClick={() => void handleStopActiveRun()}>
                   <span className="remodex-action-row-icon"><Square size={18} strokeWidth={1.8} /></span>
                   <span className="remodex-action-row-label">{isOwnedCodexSession ? 'Interrupt run' : 'Stop run'}</span>
