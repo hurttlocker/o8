@@ -1,15 +1,16 @@
 import type { AgentSummary } from '@/lib/fleet/types';
-import { continueOwnedCodexSession, interruptOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
+import { continueOwnedCodexSession, interruptOwnedCodexSession, launchOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
 import { abortOpenClawSession, steerOpenClawSession } from '@/lib/openclaw/chat';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 
-export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt' | 'watch' | 'resolve';
+export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt' | 'watch' | 'resolve' | 'launch';
 
 export interface RuntimeActionRequest {
   action: RuntimeActionKind;
   surfaceId: string;
   message?: string;
   runId?: string;
+  cwd?: string;
   attachments?: Array<{
     type?: string;
     mimeType: string;
@@ -200,4 +201,20 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
     default:
       return unavailable(agent, payload.action, `Runtime action ${payload.action} is not supported for ${agent.runtime}.`);
   }
+}
+
+/**
+ * Launch a new owned Codex session from mobile.
+ * Doesn't require an existing surface — creates one from scratch.
+ */
+export async function launchCodexFromMobile(cwd: string, prompt: string): Promise<RuntimeActionResult> {
+  const result = await launchOwnedCodexSession({ cwd, prompt });
+  return {
+    ok: result.ok,
+    action: 'launch',
+    surfaceId: result.surfaceId,
+    runtime: 'codex',
+    status: 'queued',
+    note: result.note,
+  };
 }
