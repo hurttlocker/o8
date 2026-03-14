@@ -2403,11 +2403,16 @@ button.workflow-file-item.workflow-file-item-active {
   opacity: 0.92;
 }
 
-.remodex-streaming-card .remodex-message-text {
+.remodex-streaming-preview {
   white-space: pre-wrap;
-  max-height: 40vh;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #1e293b;
+  max-height: 120px;
+  overflow: hidden;
+  position: relative;
+  mask-image: linear-gradient(to bottom, transparent 0%, black 20%, black 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20%, black 100%);
 }
 
 .remodex-typing-bubble {
