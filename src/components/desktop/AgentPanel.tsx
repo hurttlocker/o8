@@ -27,6 +27,7 @@ import {
   MessageSquare,
   Monitor,
   PlayCircle,
+  Plus,
   Radio,
   Tag,
   Terminal,
@@ -1225,6 +1226,7 @@ export const AgentPanel = memo(function AgentPanel({
   onExpandWorkspace,
   onSelectFile,
   onOpenCI,
+  onCreateIssue,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
@@ -1233,6 +1235,7 @@ export const AgentPanel = memo(function AgentPanel({
   onExpandWorkspace?: (workspace: string, repo: string | null) => void;
   onSelectFile?: (filePath: string, workspace?: string) => void;
   onOpenCI?: (repo: string) => void;
+  onCreateIssue?: (repo?: string) => void;
 } = {}) {
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([]);
@@ -1527,7 +1530,49 @@ export const AgentPanel = memo(function AgentPanel({
         marginTop: expandedGroup && activeTab !== 'activity' ? 0 : 4,
       }}>
         {activeTab === 'activity' ? <ActivityFeed events={events} commits={commits} onSelectCommit={onSelectCommit} /> : null}
-        {activeTab === 'issues' ? <IssuesList issues={issues} onSelect={(num) => onSelectIssue ? onSelectIssue(num, activeRepo ?? undefined) : setSelectedIssue(num)} /> : null}
+        {activeTab === 'issues' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              paddingTop: 6,
+              paddingRight: 10,
+              paddingBottom: 4,
+              paddingLeft: 10,
+              flexShrink: 0,
+            }}>
+              <button
+                type="button"
+                onClick={() => onCreateIssue?.(activeRepo ?? undefined)}
+                title="Create new issue"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingTop: 4,
+                  paddingRight: 8,
+                  paddingBottom: 4,
+                  paddingLeft: 8,
+                  borderRadius: 6,
+                  border: '1px solid rgba(0,0,0,0.08)',
+                  background: 'rgba(255,255,255,0.6)',
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: '#64748b',
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}
+              >
+                <Plus size={12} strokeWidth={2.5} />
+                New
+              </button>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              <IssuesList issues={issues} onSelect={(num) => onSelectIssue ? onSelectIssue(num, activeRepo ?? undefined) : setSelectedIssue(num)} />
+            </div>
+          </div>
+        ) : null}
         {activeTab === 'prs' ? <PRList prs={prs} onSelect={(num) => onSelectPR?.(num, activeRepo ?? undefined)} /> : null}
         {activeTab === 'files' ? <FileTree tree={fileTree} changedFiles={changedFiles} onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)} /> : null}
         {activeTab === 'ci' ? <CIList repo={activeRepo} onOpenCI={onOpenCI} /> : null}

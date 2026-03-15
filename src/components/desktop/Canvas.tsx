@@ -28,15 +28,17 @@ import {
   FileText,
   GitCommit,
   MessageSquare,
+  Plus,
   Radio,
   Terminal,
   X,
 } from 'lucide-react';
 import { MarkdownBody } from './MarkdownBody';
+import { IssueCreator } from './IssueCreator';
 
 // ── Tab Types ──
 
-export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'welcome';
+export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'welcome';
 
 export interface CanvasTab {
   id: string;
@@ -191,6 +193,7 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
     case 'pr': return <GitCommit size={size} />;
     case 'readme': return <BookOpen size={size} />;
     case 'ci': return <AlertCircle size={size} />;
+    case 'new-issue': return <Plus size={size} />;
     case 'welcome': return <BookOpen size={size} />;
   }
 }
@@ -215,6 +218,8 @@ const TabContent = memo(function TabContent({ tab }: { tab: CanvasTab }) {
       return <ReadmeViewer workspace={tab.resourceId} />;
     case 'ci':
       return <CIViewer repo={tab.meta?.repo} />;
+    case 'new-issue':
+      return <IssueCreator repo={tab.meta?.repo} />;
     case 'welcome':
       return <CanvasEmpty />;
     default:
