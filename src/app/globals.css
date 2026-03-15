@@ -2785,8 +2785,8 @@ button.workflow-file-item.workflow-file-item-active {
 
 .remodex-rich-paragraph,
 .remodex-rich-list {
-  font-size: 1.08rem;
-  line-height: 1.58;
+  font-size: 0.94rem;
+  line-height: 1.55;
 }
 
 .remodex-rich-heading {
@@ -2795,7 +2795,7 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-rich-heading-1 {
-  font-size: 1.14rem;
+  font-size: 1.04rem;
 }
 
 .remodex-rich-heading-2,
@@ -2855,7 +2855,7 @@ button.workflow-file-item.workflow-file-item-active {
   border: 1px solid rgba(37, 99, 235, 0.08);
   box-shadow: 0 6px 16px rgba(37, 99, 235, 0.04);
   color: #111827;
-  font-size: 1rem;
+  font-size: 0.94rem;
   line-height: 1.35;
 }
 
@@ -2865,7 +2865,7 @@ button.workflow-file-item.workflow-file-item-active {
 
 .remodex-user-bubble .remodex-rich-paragraph,
 .remodex-user-bubble .remodex-rich-list {
-  font-size: 1rem;
+  font-size: 0.94rem;
   line-height: 1.4;
 }
 
