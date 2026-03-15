@@ -70,8 +70,8 @@ const MERMAID_THEME = {
 
 const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [svgHtml, setSvgHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [rendered, setRendered] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,15 +88,8 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
         const id = `mermaid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const { svg } = await mermaid.render(id, code);
 
-        if (!cancelled && containerRef.current) {
-          containerRef.current.innerHTML = svg;
-          // Style the SVG
-          const svgEl = containerRef.current.querySelector('svg');
-          if (svgEl) {
-            svgEl.style.maxWidth = '100%';
-            svgEl.style.height = 'auto';
-          }
-          setRendered(true);
+        if (!cancelled) {
+          setSvgHtml(svg);
         }
       } catch (err) {
         if (!cancelled) {
@@ -112,7 +105,10 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
   if (error) {
     return (
       <div style={{
-        padding: '12px 14px',
+        paddingTop: 12,
+        paddingRight: 14,
+        paddingBottom: 12,
+        paddingLeft: 14,
         fontSize: '0.8rem',
         color: '#ef4444',
         fontFamily: 'ui-monospace, monospace',
@@ -124,21 +120,29 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
 
   return (
     <div
-      ref={containerRef}
       style={{
-        padding: '20px 16px',
+        paddingTop: 20,
+        paddingRight: 16,
+        paddingBottom: 20,
+        paddingLeft: 16,
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
-        minHeight: rendered ? undefined : 60,
+        minHeight: svgHtml ? undefined : 60,
         backgroundColor: '#fafbfd',
         borderTop: '1px solid #e5e7eb',
         backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,0.8) 0%, rgba(240,247,255,0.4) 100%)',
       }}
     >
-      {!rendered ? (
+      {svgHtml ? (
+        <div
+          ref={containerRef}
+          dangerouslySetInnerHTML={{ __html: svgHtml }}
+          style={{ maxWidth: '100%', overflow: 'auto' }}
+        />
+      ) : (
         <span style={{ fontSize: 12, color: '#9ca3af' }}>Rendering diagram…</span>
-      ) : null}
+      )}
     </div>
   );
 });
