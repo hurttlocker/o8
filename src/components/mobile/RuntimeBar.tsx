@@ -1,8 +1,9 @@
+import { memo } from 'react';
 import { GitBranch } from 'lucide-react';
 import type { RuntimeBarProps } from './types';
 import { sessionStatusSummary } from './utils';
 
-export function RuntimeBar({
+export const RuntimeBar = memo(function RuntimeBar({
   snapshot,
   selectedSession,
   selectedReviewPacket,
@@ -24,4 +25,4 @@ export function RuntimeBar({
       </div>
     </div>
   );
-}
+});

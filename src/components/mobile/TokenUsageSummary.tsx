@@ -1,8 +1,9 @@
 'use client';
 
+import { memo } from 'react';
 import type { TokenUsageSummaryProps } from './types';
 
-export function TokenUsageSummary({ snapshot, onViewCosts }: TokenUsageSummaryProps) {
+export const TokenUsageSummary = memo(function TokenUsageSummary({ snapshot, onViewCosts }: TokenUsageSummaryProps) {
   const tracked = snapshot.sessions.filter((session) => session.runtime === 'openclaw' && session.tokenUsage);
   const total = tracked.reduce((sum, session) => sum + (session.tokenUsage?.totalTokens ?? 0), 0);
   const cap = tracked.reduce(
@@ -52,4 +53,4 @@ export function TokenUsageSummary({ snapshot, onViewCosts }: TokenUsageSummaryPr
       </div>
     </button>
   );
-}
+});
