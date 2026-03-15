@@ -165,7 +165,7 @@ function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
     const segments = workspace.replace(/^~\//, '').split('/');
     const last = segments[segments.length - 1] || segments[0] || 'workspace';
     let displayName = last;
-    if (last === 'clawd' && wsAgents.some(a => a.isCurrentSession)) displayName = 'Main';
+    if (last === 'clawd' && wsAgents.some(a => a.isCurrentSession)) displayName = 'OpenClaw';
     if (workspace.includes('workspace-ace')) displayName = 'Niot';
     if (workspace.includes('workspace-hawk')) displayName = 'Hawk';
 
