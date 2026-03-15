@@ -169,6 +169,7 @@ function MediaGrid({
 export function ChatView({
   transcriptEntries,
   transcriptLoading,
+  isRefreshing,
   selectedSession,
   selectedReviewFile,
   streamingText,
@@ -246,7 +247,13 @@ export function ChatView({
 
   return (
     <>
-      <div ref={listRef} className="remodex-message-stack">
+      <style>{`@keyframes session-fade-in { from { opacity: 0.4; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }`}</style>
+      <div
+        ref={listRef}
+        className="remodex-message-stack"
+        key={selectedSession?.sessionKey ?? 'none'}
+        style={{ animation: 'session-fade-in 0.2s ease-out' }}
+      >
         {hasEntries ? (
           <div style={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
             {virtualItems.map((virtualRow) => {
@@ -323,6 +330,23 @@ export function ChatView({
             <span className="remodex-typing-dot" />
             <span className="remodex-typing-dot" />
           </div>
+        </div>
+      ) : null}
+
+      {isRefreshing && transcriptEntries.length > 0 ? (
+        <div
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: '3px',
+            background: 'linear-gradient(90deg, transparent, #007aff, transparent)',
+            animation: 'stale-slide 1.5s ease-in-out infinite',
+            zIndex: 10,
+          }}
+        >
+          <style>{`@keyframes stale-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }`}</style>
         </div>
       ) : null}
 
