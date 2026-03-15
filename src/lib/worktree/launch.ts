@@ -150,12 +150,14 @@ export async function getActiveWorktreeSummary(repoRoot: string): Promise<{
     mgr.detectConflicts(),
   ]);
 
+  const totalDiskUsage = worktrees.reduce((sum, wt) => sum + (wt.diskUsageBytes ?? 0), 0);
+
   return {
     worktrees,
     conflicts: {
       safe: conflicts.safe,
       count: conflicts.overlapping.length,
     },
-    totalDiskUsage: 0, // Lazy — computed on demand, not at list time
+    totalDiskUsage,
   };
 }

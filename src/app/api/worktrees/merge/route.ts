@@ -16,6 +16,17 @@ import type { MergeResult } from '@/lib/worktree/types';
 
 const execFileAsync = promisify(execFile);
 
+const API_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
+
+function checkAuth(req: NextRequest): NextResponse | null {
+  const auth = req.headers.get('authorization');
+  const token = auth?.startsWith('Bearer ') ? auth.slice(7) : req.nextUrl.searchParams.get('token');
+  if (token !== API_TOKEN) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  return null;
+}
+
 interface MergeBody {
   repo: string;
   worktreeId: string;
@@ -29,6 +40,9 @@ interface MergeBody {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = checkAuth(req);
+  if (denied) return denied;
+
   let body: MergeBody;
   try {
     body = (await req.json()) as MergeBody;
@@ -174,9 +188,29 @@ async function mergeToTarget(
     // Already committed
   }
 
-  // Check for conflicts before merging
+  // Safety: refuse to merge if repo root has uncommitted changes
   try {
-    // Dry run: attempt merge in the repo root
+    const { stdout: dirtyCheck } = await execFileAsync('git', ['status', '--porcelain'], {
+      cwd: repoRoot,
+      timeout: 5000,
+    });
+    if (dirtyCheck.trim().length > 0) {
+      return {
+        action: 'merge',
+        ok: false,
+        note: 'Repo root has uncommitted changes. Commit or stash first, or use "Create PR" instead.',
+      };
+    }
+  } catch {
+    return {
+      action: 'merge',
+      ok: false,
+      note: 'Could not verify repo root is clean. Use "Create PR" instead.',
+    };
+  }
+
+  // Check for conflicts before merging using merge-tree (no working tree mutation)
+  try {
     const { stdout: mergeCheck } = await execFileAsync('git', [
       'merge-tree', '--write-tree', targetBranch, branch,
     ], { cwd: repoRoot, timeout: 10_000 });
@@ -192,7 +226,17 @@ async function mergeToTarget(
     // merge-tree may not be available; fall through to try merge
   }
 
-  // Perform the actual merge from the repo root
+  // Save current branch to restore after merge
+  let originalBranch: string | null = null;
+  try {
+    const { stdout } = await execFileAsync('git', ['branch', '--show-current'], {
+      cwd: repoRoot,
+      timeout: 5000,
+    });
+    originalBranch = stdout.trim() || null;
+  } catch { /* best effort */ }
+
+  // Perform the merge
   try {
     await execFileAsync('git', ['checkout', targetBranch], {
       cwd: repoRoot,
@@ -204,6 +248,14 @@ async function mergeToTarget(
       timeout: 15_000,
     });
 
+    // Restore original branch if it was different from target
+    if (originalBranch && originalBranch !== targetBranch) {
+      await execFileAsync('git', ['checkout', originalBranch], {
+        cwd: repoRoot,
+        timeout: 10_000,
+      }).catch(() => { /* best effort restore */ });
+    }
+
     return {
       action: 'merge',
       ok: true,
@@ -212,6 +264,13 @@ async function mergeToTarget(
   } catch (err) {
     // Abort any partial merge
     await execFileAsync('git', ['merge', '--abort'], { cwd: repoRoot, timeout: 5000 }).catch(() => {});
+    // Restore original branch
+    if (originalBranch) {
+      await execFileAsync('git', ['checkout', originalBranch], {
+        cwd: repoRoot,
+        timeout: 10_000,
+      }).catch(() => {});
+    }
     return {
       action: 'merge',
       ok: false,
