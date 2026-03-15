@@ -1745,6 +1745,11 @@ button.workflow-file-item.workflow-file-item-active {
   max-height: 154px;
 }
 
+.remodex-topbar[data-picker-open='true'] {
+  overflow: visible;
+  max-height: none;
+}
+
 .remodex-topbar[data-visible='false'] {
   max-height: 0;
   opacity: 0;
