@@ -7,12 +7,12 @@
  *   Top: Agent status cards (always visible, never scroll)
  *   Middle: Tabbed content area (Activity / Issues / Files)
  *
- * Glass frost on dark aesthetic. Agent-first, file-tree secondary.
+ * Light theme — glass frost on white, matching chat sidebar.
  */
 
 import { memo, useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
-  Activity,
   AlertCircle,
   BookOpen,
   ChevronDown,
@@ -21,8 +21,8 @@ import {
   Folder,
   FolderOpen,
   GitCommit,
-  GitPullRequest,
   Tag,
+  X,
   Zap,
 } from 'lucide-react';
 
@@ -48,6 +48,18 @@ interface GHIssue {
   title: string;
   labels: { name: string; color: string }[];
   state?: string;
+}
+
+interface GHIssueDetail {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  labels: { name: string; color: string }[];
+  author: string;
+  createdAt: string;
+  comments: number;
+  url: string;
 }
 
 interface FileNode {
@@ -78,7 +90,7 @@ const statusLabel: Record<string, string> = {
   unhealthy: 'error',
 };
 
-// ── Agent Card ──
+// ── Agent Card (light theme) ──
 
 const AgentCard = memo(function AgentCard({ squad }: { squad: Squad }) {
   const dotColor = statusDotColor[squad.status] ?? '#6b7280';
@@ -86,8 +98,8 @@ const AgentCard = memo(function AgentCard({ squad }: { squad: Squad }) {
 
   return (
     <div style={{
-      background: 'rgba(255, 255, 255, 0.06)',
-      border: '1px solid rgba(255, 255, 255, 0.08)',
+      background: 'rgba(255, 255, 255, 0.7)',
+      border: '1px solid rgba(0, 0, 0, 0.06)',
       borderRadius: 14,
       paddingTop: 12,
       paddingRight: 14,
@@ -95,6 +107,7 @@ const AgentCard = memo(function AgentCard({ squad }: { squad: Squad }) {
       paddingLeft: 14,
       backdropFilter: 'blur(20px)',
       WebkitBackdropFilter: 'blur(20px)',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
       transition: 'all 200ms ease',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -103,7 +116,7 @@ const AgentCard = memo(function AgentCard({ squad }: { squad: Squad }) {
           width: 32,
           height: 32,
           borderRadius: '50%',
-          background: `linear-gradient(135deg, ${dotColor}33 0%, ${dotColor}11 100%)`,
+          background: `linear-gradient(135deg, ${dotColor}22 0%, ${dotColor}0a 100%)`,
           border: `1.5px solid ${dotColor}44`,
           display: 'flex',
           alignItems: 'center',
@@ -122,7 +135,7 @@ const AgentCard = memo(function AgentCard({ squad }: { squad: Squad }) {
             <span style={{
               fontSize: 14,
               fontWeight: 600,
-              color: '#f2f2f7',
+              color: '#1e293b',
               letterSpacing: '-0.01em',
             }}>{squad.name}</span>
             <span style={{
@@ -137,7 +150,7 @@ const AgentCard = memo(function AgentCard({ squad }: { squad: Squad }) {
               paddingBottom: 2,
               paddingLeft: 6,
               borderRadius: 99,
-              background: `${dotColor}15`,
+              background: `${dotColor}12`,
             }}>
               <span style={{
                 width: 6,
@@ -151,7 +164,7 @@ const AgentCard = memo(function AgentCard({ squad }: { squad: Squad }) {
           </div>
           <div style={{
             fontSize: 12,
-            color: '#64748b',
+            color: '#94a3b8',
             marginTop: 3,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -180,11 +193,11 @@ const AgentCard = memo(function AgentCard({ squad }: { squad: Squad }) {
   );
 });
 
-// ── Activity Feed ──
+// ── Activity Feed (light theme) ──
 
 const ActivityFeed = memo(function ActivityFeed({ commits }: { commits: CommitEntry[] }) {
   if (!commits.length) {
-    return <div style={{ padding: 20, fontSize: 13, color: '#475569' }}>No recent activity</div>;
+    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>No recent activity</div>;
   }
 
   return (
@@ -198,20 +211,20 @@ const ActivityFeed = memo(function ActivityFeed({ commits }: { commits: CommitEn
           paddingRight: 14,
           paddingBottom: 10,
           paddingLeft: 14,
-          borderBottom: '1px solid rgba(255,255,255,0.04)',
+          borderBottom: '1px solid rgba(0,0,0,0.04)',
         }}>
           <GitCommit size={14} strokeWidth={1.8} style={{ color: '#22c55e', marginTop: 2, flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{
               fontSize: 13,
-              color: '#e2e8f0',
+              color: '#1e293b',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}>
               {c.message}
             </div>
-            <div style={{ fontSize: 11, color: '#475569', marginTop: 2 }}>
+            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
               <span style={{ fontFamily: 'SF Mono, ui-monospace, monospace', color: '#64748b' }}>{c.hash}</span>
               {' · '}{c.age}
             </div>
@@ -222,35 +235,39 @@ const ActivityFeed = memo(function ActivityFeed({ commits }: { commits: CommitEn
   );
 });
 
-// ── Issues List ──
+// ── Issues List (light theme, clickable) ──
 
-const IssuesList = memo(function IssuesList({ issues }: { issues: GHIssue[] }) {
+const IssuesList = memo(function IssuesList({ issues, onSelect }: { issues: GHIssue[]; onSelect: (num: number) => void }) {
   if (!issues.length) {
-    return <div style={{ padding: 20, fontSize: 13, color: '#475569' }}>No open issues</div>;
+    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>No open issues</div>;
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
       {issues.map((issue) => (
-        <div key={issue.number} style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: 10,
-          paddingTop: 10,
-          paddingRight: 14,
-          paddingBottom: 10,
-          paddingLeft: 14,
-          borderBottom: '1px solid rgba(255,255,255,0.04)',
-          cursor: 'pointer',
-          transition: 'background 100ms ease',
-        }}>
-          <BookOpen size={14} strokeWidth={1.8} style={{ color: '#64748b', marginTop: 2, flexShrink: 0 }} />
+        <div
+          key={issue.number}
+          onClick={() => onSelect(issue.number)}
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+            paddingTop: 10,
+            paddingRight: 14,
+            paddingBottom: 10,
+            paddingLeft: 14,
+            borderBottom: '1px solid rgba(0,0,0,0.04)',
+            cursor: 'pointer',
+            transition: 'background 100ms ease',
+          }}
+        >
+          <BookOpen size={14} strokeWidth={1.8} style={{ color: '#94a3b8', marginTop: 2, flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 12, color: '#475569', fontWeight: 500 }}>#{issue.number}</span>
+              <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 500 }}>#{issue.number}</span>
               <span style={{
                 fontSize: 13,
-                color: '#e2e8f0',
+                color: '#1e293b',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -271,8 +288,8 @@ const IssuesList = memo(function IssuesList({ issues }: { issues: GHIssue[] }) {
                     paddingLeft: 6,
                     borderRadius: 99,
                     color: `#${label.color}`,
-                    background: `#${label.color}18`,
-                    border: `1px solid #${label.color}30`,
+                    background: `#${label.color}10`,
+                    border: `1px solid #${label.color}25`,
                     textTransform: 'uppercase',
                     letterSpacing: '0.03em',
                   }}>
@@ -282,13 +299,222 @@ const IssuesList = memo(function IssuesList({ issues }: { issues: GHIssue[] }) {
               </div>
             ) : null}
           </div>
+          <ChevronRight size={13} strokeWidth={2} style={{ color: '#cbd5e1', marginTop: 3, flexShrink: 0 }} />
         </div>
       ))}
     </div>
   );
 });
 
-// ── File Tree ──
+// ── Issue Detail Modal (glass) ──
+
+const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNumber: number; onClose: () => void }) {
+  const [detail, setDetail] = useState<GHIssueDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch(`/api/panel/issues/${issueNumber}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        setDetail(data.issue ?? null);
+      } catch { /* silent */ }
+      finally { setLoading(false); }
+    }
+    void load();
+  }, [issueNumber]);
+
+  return createPortal(
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 99999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backdropFilter: 'blur(40px) saturate(200%) brightness(1.05)',
+        WebkitBackdropFilter: 'blur(40px) saturate(200%) brightness(1.05)',
+        backgroundColor: 'rgba(255, 255, 255, 0.15)',
+        animation: 'fadeIn 200ms ease',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: 'relative',
+          width: '85vw',
+          height: '82vh',
+          maxWidth: 1100,
+          borderRadius: 20,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'linear-gradient(135deg, rgba(255,255,255,0.45) 0%, rgba(240,247,255,0.25) 100%)',
+          border: '1px solid rgba(255,255,255,0.35)',
+          boxShadow: '0 32px 80px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.6)',
+          backdropFilter: 'blur(60px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(60px) saturate(180%)',
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingTop: 16,
+          paddingRight: 20,
+          paddingBottom: 16,
+          paddingLeft: 24,
+          borderBottom: '1px solid rgba(0,0,0,0.06)',
+          background: 'rgba(255,255,255,0.2)',
+          flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {loading ? (
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#64748b' }}>Loading issue…</span>
+            ) : detail ? (
+              <>
+                <span style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: '#ef4444',
+                  fontFamily: 'SF Mono, ui-monospace, monospace',
+                }}>#{detail.number}</span>
+                <span style={{
+                  fontSize: 15,
+                  fontWeight: 700,
+                  color: '#0f172a',
+                  letterSpacing: '-0.01em',
+                }}>{detail.title}</span>
+                <span style={{
+                  fontSize: 11,
+                  fontWeight: 500,
+                  paddingTop: 2,
+                  paddingRight: 8,
+                  paddingBottom: 2,
+                  paddingLeft: 8,
+                  borderRadius: 99,
+                  background: detail.state === 'OPEN' ? 'rgba(34,197,94,0.1)' : 'rgba(139,92,246,0.1)',
+                  color: detail.state === 'OPEN' ? '#16a34a' : '#7c3aed',
+                }}>
+                  {detail.state?.toLowerCase()}
+                </span>
+              </>
+            ) : (
+              <span style={{ fontSize: 14, color: '#ef4444' }}>Issue not found</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            title="Close (Esc)"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 30,
+              height: 30,
+              borderRadius: 8,
+              border: '1px solid rgba(0,0,0,0.08)',
+              background: 'rgba(255,255,255,0.7)',
+              color: '#ef4444',
+              cursor: 'pointer',
+              paddingTop: 0,
+              paddingRight: 0,
+              paddingBottom: 0,
+              paddingLeft: 0,
+            }}
+          >
+            <X size={15} strokeWidth={2} />
+          </button>
+        </div>
+
+        {/* Body */}
+        {detail ? (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {/* Meta row */}
+            <div style={{
+              paddingTop: 12,
+              paddingRight: 24,
+              paddingBottom: 12,
+              paddingLeft: 24,
+              borderBottom: '1px solid rgba(0,0,0,0.04)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              flexWrap: 'wrap',
+              fontSize: 12,
+              color: '#64748b',
+            }}>
+              <span>by <strong style={{ color: '#1e293b' }}>{detail.author}</strong></span>
+              <span>·</span>
+              <span>{new Date(detail.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+              <span>·</span>
+              <span>{detail.comments} comment{detail.comments !== 1 ? 's' : ''}</span>
+              {detail.labels.length > 0 ? (
+                <>
+                  <span>·</span>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {detail.labels.map((l) => (
+                      <span key={l.name} style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        paddingTop: 1,
+                        paddingRight: 6,
+                        paddingBottom: 1,
+                        paddingLeft: 6,
+                        borderRadius: 99,
+                        color: `#${l.color}`,
+                        background: `#${l.color}10`,
+                        border: `1px solid #${l.color}25`,
+                      }}>
+                        {l.name}
+                      </span>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </div>
+
+            {/* Issue body (rendered as preformatted markdown-ish) */}
+            <div style={{
+              paddingTop: 20,
+              paddingRight: 24,
+              paddingBottom: 20,
+              paddingLeft: 24,
+            }}>
+              <pre style={{
+                margin: 0,
+                fontSize: '0.85rem',
+                lineHeight: 1.7,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                color: '#1e293b',
+              }}>
+                {detail.body || 'No description provided.'}
+              </pre>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>,
+    document.body,
+  );
+});
+
+// ── File Tree (light theme) ──
 
 function FileTreeNode({ node, depth = 0 }: { node: FileNode; depth?: number }) {
   const [open, setOpen] = useState(depth === 0 || node.name === 'src');
@@ -304,12 +530,12 @@ function FileTreeNode({ node, depth = 0 }: { node: FileNode; depth?: number }) {
         paddingBottom: 4,
         paddingLeft: 14 + depth * 16,
         fontSize: 12,
-        color: '#94a3b8',
+        color: '#64748b',
         fontFamily: '"SF Mono", ui-monospace, monospace',
         cursor: 'pointer',
         transition: 'color 100ms',
       }}>
-        <FileText size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: '#475569' }} />
+        <FileText size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: '#94a3b8' }} />
         {node.name}
       </div>
     );
@@ -329,7 +555,7 @@ function FileTreeNode({ node, depth = 0 }: { node: FileNode; depth?: number }) {
           paddingLeft: 14 + depth * 16,
           fontSize: 12,
           fontWeight: 500,
-          color: '#cbd5e1',
+          color: '#1e293b',
           cursor: 'pointer',
           transition: 'color 100ms',
         }}
@@ -340,8 +566,8 @@ function FileTreeNode({ node, depth = 0 }: { node: FileNode; depth?: number }) {
         }
         {node.name}
         {open
-          ? <ChevronDown size={11} strokeWidth={2} style={{ color: '#475569' }} />
-          : <ChevronRight size={11} strokeWidth={2} style={{ color: '#475569' }} />
+          ? <ChevronDown size={11} strokeWidth={2} style={{ color: '#94a3b8' }} />
+          : <ChevronRight size={11} strokeWidth={2} style={{ color: '#94a3b8' }} />
         }
       </div>
       {open && node.children ? (
@@ -355,7 +581,7 @@ function FileTreeNode({ node, depth = 0 }: { node: FileNode; depth?: number }) {
 
 const FileTree = memo(function FileTree({ tree }: { tree: FileNode[] }) {
   if (!tree.length) {
-    return <div style={{ padding: 20, fontSize: 13, color: '#475569' }}>No files found</div>;
+    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>No files found</div>;
   }
 
   return (
@@ -375,7 +601,7 @@ const tabs: { id: Tab; icon: typeof Zap; label: string }[] = [
   { id: 'files', icon: Folder, label: 'Files' },
 ];
 
-// ── Main Panel ──
+// ── Main Panel (light theme) ──
 
 export const AgentPanel = memo(function AgentPanel() {
   const [squads, setSquads] = useState<Squad[]>([]);
@@ -383,6 +609,7 @@ export const AgentPanel = memo(function AgentPanel() {
   const [issues, setIssues] = useState<GHIssue[]>([]);
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>('activity');
+  const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
 
   // Fetch agent inventory
   useEffect(() => {
@@ -391,7 +618,6 @@ export const AgentPanel = memo(function AgentPanel() {
         const res = await fetch('/api/runtime/inventory');
         if (!res.ok) return;
         const data = await res.json();
-        // Filter to main agents only (not codex-local etc)
         const mainSquads = (data.squads ?? []).filter((s: Squad) =>
           !s.id.includes('codex-local') && !s.id.includes('codex-owned')
         );
@@ -457,6 +683,7 @@ export const AgentPanel = memo(function AgentPanel() {
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
+      background: '#f5f7fb',
     }}>
       {/* ── Agent Cards (pinned top) ── */}
       <div style={{
@@ -472,7 +699,7 @@ export const AgentPanel = memo(function AgentPanel() {
         <div style={{
           fontSize: 11,
           fontWeight: 700,
-          color: '#475569',
+          color: '#94a3b8',
           textTransform: 'uppercase',
           letterSpacing: '0.08em',
           paddingLeft: 2,
@@ -481,7 +708,7 @@ export const AgentPanel = memo(function AgentPanel() {
           Agents
         </div>
         {squads.length === 0 ? (
-          <div style={{ fontSize: 13, color: '#475569', padding: '8px 2px' }}>Loading agents…</div>
+          <div style={{ fontSize: 13, color: '#94a3b8', padding: '8px 2px' }}>Loading agents…</div>
         ) : (
           squads.map((squad) => (
             <AgentCard key={squad.id} squad={squad} />
@@ -520,7 +747,7 @@ export const AgentPanel = memo(function AgentPanel() {
                 border: 'none',
                 borderBottom: isActive ? '2px solid #ef4444' : '2px solid transparent',
                 background: 'transparent',
-                color: isActive ? '#f2f2f7' : '#475569',
+                color: isActive ? '#1e293b' : '#94a3b8',
                 fontSize: 12,
                 fontWeight: isActive ? 600 : 400,
                 cursor: 'pointer',
@@ -539,13 +766,18 @@ export const AgentPanel = memo(function AgentPanel() {
       <div style={{
         flex: 1,
         overflowY: 'auto',
-        borderTop: '1px solid rgba(255,255,255,0.04)',
+        borderTop: '1px solid rgba(0,0,0,0.04)',
         marginTop: 4,
       }}>
         {activeTab === 'activity' ? <ActivityFeed commits={commits} /> : null}
-        {activeTab === 'issues' ? <IssuesList issues={issues} /> : null}
+        {activeTab === 'issues' ? <IssuesList issues={issues} onSelect={setSelectedIssue} /> : null}
         {activeTab === 'files' ? <FileTree tree={fileTree} /> : null}
       </div>
+
+      {/* ── Issue Detail Modal ── */}
+      {selectedIssue !== null ? (
+        <IssueModal issueNumber={selectedIssue} onClose={() => setSelectedIssue(null)} />
+      ) : null}
     </div>
   );
 });
