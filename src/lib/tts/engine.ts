@@ -136,8 +136,9 @@ class TTSEngineImpl {
 
       await this.audio.play();
       return;
-    } catch {
+    } catch (err) {
       // Edge TTS failed — fall back to SpeechSynthesis
+      console.warn('[TTSEngine] Edge TTS failed, using fallback:', err);
       this.playFallback(cleanText, messageId);
     }
   }
