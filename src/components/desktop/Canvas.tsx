@@ -36,7 +36,7 @@ import { MarkdownBody } from './MarkdownBody';
 
 // ── Tab Types ──
 
-export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'welcome';
+export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'welcome';
 
 export interface CanvasTab {
   id: string;
@@ -186,6 +186,7 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
     case 'file': return <FileText size={size} />;
     case 'diff': return <GitCommit size={size} />;
     case 'commit': return <GitCommit size={size} />;
+    case 'pr': return <GitCommit size={size} />;
     case 'welcome': return <BookOpen size={size} />;
   }
 }
@@ -204,6 +205,8 @@ const TabContent = memo(function TabContent({ tab }: { tab: CanvasTab }) {
       return <DiffViewer />;
     case 'commit':
       return <CommitViewer commitHash={tab.resourceId} />;
+    case 'pr':
+      return <PRViewer prNumber={parseInt(tab.resourceId, 10)} />;
     case 'welcome':
       return <CanvasEmpty />;
     default:
@@ -523,6 +526,355 @@ function CanvasEmpty() {
       }}>
         Select an issue, agent, or file to open here
       </p>
+    </div>
+  );
+}
+
+// ── PR Viewer ──
+
+interface PRDetail {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  author: { login: string };
+  headRefName: string;
+  baseRefName: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  createdAt: string;
+  mergedAt: string | null;
+  closedAt: string | null;
+  mergedBy: { login: string } | null;
+  labels: { name: string; color: string }[];
+  reviews: { author: { login: string }; state: string; body: string }[];
+  files: { path: string; additions: number; deletions: number }[];
+  statusCheckRollup: { name: string; status: string; conclusion: string }[];
+  reviewComments: { id: number; body: string; user: string; path: string; line: number | null; created_at: string }[];
+  issueComments: { id: number; body: string; user: string; created_at: string }[];
+  diffStat: string;
+  url: string;
+}
+
+const prStateStyles: Record<string, { color: string; label: string; bg: string }> = {
+  OPEN: { color: '#22c55e', label: 'Open', bg: 'rgba(34,197,94,0.08)' },
+  MERGED: { color: '#8b5cf6', label: 'Merged', bg: 'rgba(139,92,246,0.08)' },
+  CLOSED: { color: '#ef4444', label: 'Closed', bg: 'rgba(239,68,68,0.08)' },
+};
+
+function PRViewer({ prNumber }: { prNumber: number }) {
+  const [pr, setPr] = useState<PRDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<'overview' | 'files' | 'comments'>('overview');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    fetch(`/api/panel/prs/${prNumber}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        if (!cancelled) {
+          setPr(data.pr);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message);
+          setLoading(false);
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [prNumber]);
+
+  if (loading) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading PR…</div>;
+  }
+
+  if (error || !pr) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#ef4444' }}>Failed to load PR: {error || 'Unknown'}</div>;
+  }
+
+  const stateStyle = prStateStyles[pr.state] ?? { color: '#6b7280', label: pr.state, bg: 'rgba(0,0,0,0.04)' };
+  const allComments = [
+    ...pr.issueComments.map(c => ({ ...c, kind: 'comment' as const })),
+    ...pr.reviewComments.map(c => ({ ...c, kind: 'review' as const })),
+  ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+  const ciChecks = pr.statusCheckRollup ?? [];
+  const passedChecks = ciChecks.filter(c => c.conclusion === 'SUCCESS' || c.conclusion === 'success').length;
+
+  const sections: { id: 'overview' | 'files' | 'comments'; label: string; count?: number }[] = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'files', label: 'Files', count: pr.changedFiles },
+    { id: 'comments', label: 'Comments', count: allComments.length },
+  ];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Header */}
+      <div style={{
+        paddingTop: 16,
+        paddingRight: 20,
+        paddingBottom: 12,
+        paddingLeft: 20,
+        borderBottom: '1px solid rgba(0,0,0,0.06)',
+        background: 'rgba(255,255,255,0.4)',
+        flexShrink: 0,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            paddingTop: 3,
+            paddingRight: 8,
+            paddingBottom: 3,
+            paddingLeft: 8,
+            borderRadius: 99,
+            fontSize: 11,
+            fontWeight: 600,
+            color: stateStyle.color,
+            background: stateStyle.bg,
+          }}>
+            {stateStyle.label}
+          </span>
+          <span style={{ fontSize: 15, fontWeight: 600, color: '#0f172a' }}>
+            #{pr.number} {pr.title}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 12, color: '#64748b' }}>
+          <span>{pr.author.login}</span>
+          <span>wants to merge</span>
+          <span style={{
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+            fontSize: 11,
+            paddingTop: 1,
+            paddingRight: 5,
+            paddingBottom: 1,
+            paddingLeft: 5,
+            borderRadius: 4,
+            background: 'rgba(0,0,0,0.04)',
+          }}>{pr.headRefName}</span>
+          <span>→</span>
+          <span style={{
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+            fontSize: 11,
+            paddingTop: 1,
+            paddingRight: 5,
+            paddingBottom: 1,
+            paddingLeft: 5,
+            borderRadius: 4,
+            background: 'rgba(0,0,0,0.04)',
+          }}>{pr.baseRefName}</span>
+          <span>·</span>
+          <span style={{ color: '#22c55e', fontWeight: 600 }}>+{pr.additions}</span>
+          <span style={{ color: '#ef4444', fontWeight: 600 }}>-{pr.deletions}</span>
+          <span>·</span>
+          <span>{formatAge(pr.createdAt)}</span>
+        </div>
+        {pr.mergedBy ? (
+          <div style={{ fontSize: 12, color: '#8b5cf6', marginTop: 4 }}>
+            Merged by {pr.mergedBy.login} {pr.mergedAt ? formatAge(pr.mergedAt) : ''}
+          </div>
+        ) : null}
+
+        {/* Section tabs */}
+        <div style={{ display: 'flex', gap: 2, marginTop: 10 }}>
+          {sections.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setActiveSection(s.id)}
+              style={{
+                paddingTop: 5,
+                paddingRight: 12,
+                paddingBottom: 5,
+                paddingLeft: 12,
+                borderRadius: 8,
+                border: 'none',
+                fontSize: 12,
+                fontWeight: activeSection === s.id ? 600 : 400,
+                color: activeSection === s.id ? '#2563eb' : '#64748b',
+                background: activeSection === s.id ? 'rgba(37,99,235,0.08)' : 'transparent',
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              {s.label}{s.count !== undefined ? ` (${s.count})` : ''}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1, overflowY: 'auto', paddingTop: 16, paddingRight: 20, paddingBottom: 16, paddingLeft: 20 }}>
+        {activeSection === 'overview' ? (
+          <div>
+            {/* CI Status */}
+            {ciChecks.length > 0 ? (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  CI Checks ({passedChecks}/{ciChecks.length} passed)
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {ciChecks.map((check, i) => {
+                    const passed = check.conclusion === 'SUCCESS' || check.conclusion === 'success';
+                    return (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                        <span style={{ color: passed ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
+                          {passed ? '✓' : '✗'}
+                        </span>
+                        <span style={{ color: '#1e293b' }}>{check.name}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            {/* Reviews */}
+            {pr.reviews.length > 0 ? (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Reviews
+                </div>
+                {pr.reviews.map((review, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginBottom: 4 }}>
+                    <span style={{
+                      color: review.state === 'APPROVED' ? '#22c55e' : review.state === 'CHANGES_REQUESTED' ? '#ef4444' : '#f59e0b',
+                      fontWeight: 600,
+                    }}>
+                      {review.state === 'APPROVED' ? '✓' : review.state === 'CHANGES_REQUESTED' ? '✗' : '○'}
+                    </span>
+                    <span style={{ color: '#1e293b' }}>{review.author.login}</span>
+                    <span style={{ color: '#94a3b8' }}>{review.state.toLowerCase().replace('_', ' ')}</span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {/* Labels */}
+            {pr.labels.length > 0 ? (
+              <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                {pr.labels.map((label) => (
+                  <span key={label.name} style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    paddingTop: 2,
+                    paddingRight: 8,
+                    paddingBottom: 2,
+                    paddingLeft: 8,
+                    borderRadius: 99,
+                    color: `#${label.color}`,
+                    background: `#${label.color}10`,
+                    border: `1px solid #${label.color}25`,
+                  }}>
+                    {label.name}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+
+            {/* Body */}
+            {pr.body ? (
+              <div style={{ marginTop: 8 }}>
+                <MarkdownBody text={pr.body} />
+              </div>
+            ) : (
+              <div style={{ fontSize: 13, color: '#94a3b8', fontStyle: 'italic' }}>No description provided</div>
+            )}
+          </div>
+        ) : null}
+
+        {activeSection === 'files' ? (
+          <div>
+            {pr.files?.length > 0 ? (
+              pr.files.map((file) => (
+                <div key={file.path} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  paddingTop: 6,
+                  paddingBottom: 6,
+                  borderBottom: '1px solid rgba(0,0,0,0.04)',
+                  fontSize: 13,
+                }}>
+                  <FileText size={14} strokeWidth={1.8} style={{ color: '#94a3b8', flexShrink: 0 }} />
+                  <span style={{ flex: 1, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {file.path}
+                  </span>
+                  <div style={{ display: 'flex', gap: 4, flexShrink: 0, fontSize: 11, fontWeight: 600 }}>
+                    {file.additions > 0 ? <span style={{ color: '#22c55e' }}>+{file.additions}</span> : null}
+                    {file.deletions > 0 ? <span style={{ color: '#ef4444' }}>-{file.deletions}</span> : null}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div style={{ fontSize: 13, color: '#94a3b8' }}>No changed files data</div>
+            )}
+            {pr.diffStat ? (
+              <pre style={{
+                marginTop: 12,
+                fontSize: '0.75rem',
+                lineHeight: 1.5,
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                color: '#64748b',
+                whiteSpace: 'pre-wrap',
+              }}>
+                {pr.diffStat}
+              </pre>
+            ) : null}
+          </div>
+        ) : null}
+
+        {activeSection === 'comments' ? (
+          <div>
+            {allComments.length === 0 ? (
+              <div style={{ fontSize: 13, color: '#94a3b8' }}>No comments</div>
+            ) : (
+              allComments.map((comment) => (
+                <div key={`${comment.kind}-${comment.id}`} style={{
+                  marginBottom: 16,
+                  paddingBottom: 16,
+                  borderBottom: '1px solid rgba(0,0,0,0.06)',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12 }}>
+                    <span style={{ fontWeight: 600, color: '#1e293b' }}>{comment.user}</span>
+                    {comment.kind === 'review' ? (
+                      <span style={{
+                        fontSize: 10,
+                        paddingTop: 1,
+                        paddingRight: 5,
+                        paddingBottom: 1,
+                        paddingLeft: 5,
+                        borderRadius: 4,
+                        background: 'rgba(139,92,246,0.08)',
+                        color: '#8b5cf6',
+                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                      }}>
+                        {'path' in comment ? (comment as { path: string }).path : 'review'}
+                      </span>
+                    ) : null}
+                    <span style={{ color: '#94a3b8' }}>{formatAge(comment.created_at)}</span>
+                  </div>
+                  <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                    <MarkdownBody text={comment.body} />
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

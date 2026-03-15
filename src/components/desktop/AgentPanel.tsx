@@ -92,6 +92,19 @@ interface GHIssueDetail {
   url: string;
 }
 
+interface GHPullRequest {
+  number: number;
+  title: string;
+  state: string;
+  author: { login: string };
+  headRefName: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  createdAt: string;
+  labels: { name: string; color: string }[];
+}
+
 interface FileNode {
   name: string;
   path: string;
@@ -99,7 +112,7 @@ interface FileNode {
   children?: FileNode[];
 }
 
-type Tab = 'activity' | 'issues' | 'files';
+type Tab = 'activity' | 'issues' | 'prs' | 'files';
 
 // ── Status colors ──
 
@@ -626,6 +639,112 @@ const IssuesList = memo(function IssuesList({ issues, onSelect }: { issues: GHIs
   );
 });
 
+// ── PR List ──
+
+const prStateColor: Record<string, string> = {
+  OPEN: '#22c55e',
+  MERGED: '#8b5cf6',
+  CLOSED: '#ef4444',
+};
+
+const PRList = memo(function PRList({ prs, onSelect }: { prs: GHPullRequest[]; onSelect?: (num: number) => void }) {
+  if (!prs.length) {
+    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>No pull requests</div>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {prs.map((pr) => {
+        const stateColor = prStateColor[pr.state] ?? '#6b7280';
+        return (
+          <div
+            key={pr.number}
+            onClick={() => onSelect?.(pr.number)}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              paddingTop: 10,
+              paddingRight: 14,
+              paddingBottom: 10,
+              paddingLeft: 14,
+              borderBottom: '1px solid rgba(0,0,0,0.04)',
+              cursor: onSelect ? 'pointer' : 'default',
+              transition: 'background 100ms ease',
+            }}
+            onMouseEnter={(e) => { if (onSelect) (e.currentTarget as HTMLDivElement).style.background = 'rgba(37,99,235,0.04)'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+          >
+            <div style={{
+              width: 20,
+              height: 20,
+              borderRadius: '50%',
+              border: `2px solid ${stateColor}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              marginTop: 1,
+            }}>
+              {pr.state === 'MERGED' ? (
+                <GitCommit size={10} strokeWidth={2.5} style={{ color: stateColor }} />
+              ) : (
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: stateColor }} />
+              )}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 12, color: stateColor, fontWeight: 600, fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                  #{pr.number}
+                </span>
+                <span style={{
+                  fontSize: 13,
+                  color: '#1e293b',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  flex: 1,
+                }}>
+                  {pr.title}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, fontSize: 11, color: '#94a3b8' }}>
+                <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{pr.headRefName}</span>
+                <span>·</span>
+                <span style={{ color: '#22c55e', fontWeight: 600 }}>+{pr.additions}</span>
+                <span style={{ color: '#ef4444', fontWeight: 600 }}>-{pr.deletions}</span>
+                <span>·</span>
+                <span>{pr.changedFiles} file{pr.changedFiles !== 1 ? 's' : ''}</span>
+              </div>
+              {pr.labels.length > 0 ? (
+                <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                  {pr.labels.slice(0, 3).map((label) => (
+                    <span key={label.name} style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      paddingTop: 1,
+                      paddingRight: 6,
+                      paddingBottom: 1,
+                      paddingLeft: 6,
+                      borderRadius: 99,
+                      color: `#${label.color}`,
+                      background: `#${label.color}10`,
+                      border: `1px solid #${label.color}25`,
+                    }}>
+                      {label.name}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <ChevronRight size={13} strokeWidth={2} style={{ color: '#cbd5e1', marginTop: 3, flexShrink: 0 }} />
+          </div>
+        );
+      })}
+    </div>
+  );
+});
+
 // ── Issue Detail Modal (glass) ──
 
 const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNumber: number; onClose: () => void }) {
@@ -911,6 +1030,7 @@ const FileTree = memo(function FileTree({ tree }: { tree: FileNode[] }) {
 const tabs: { id: Tab; icon: typeof Zap; label: string }[] = [
   { id: 'activity', icon: Zap, label: 'Activity' },
   { id: 'issues', icon: Tag, label: 'Issues' },
+  { id: 'prs', icon: GitCommit, label: 'PRs' },
   { id: 'files', icon: Folder, label: 'Files' },
 ];
 
@@ -920,15 +1040,18 @@ export const AgentPanel = memo(function AgentPanel({
   onSelectSession,
   onSelectIssue,
   onSelectCommit,
+  onSelectPR,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number) => void;
   onSelectCommit?: (hash: string) => void;
+  onSelectPR?: (prNumber: number) => void;
 } = {}) {
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([]);
   const [commits, setCommits] = useState<{ hash: string; message: string; age: string }[]>([]);
   const [issues, setIssues] = useState<GHIssue[]>([]);
+  const [prs, setPrs] = useState<GHPullRequest[]>([]);
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>('activity');
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
@@ -992,6 +1115,22 @@ export const AgentPanel = memo(function AgentPanel({
     }
     void fetchIssues();
     const id = setInterval(fetchIssues, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Fetch PRs (every 60s)
+  useEffect(() => {
+    async function fetchPrs() {
+      try {
+        const res = await fetch('/api/panel/prs');
+        if (!res.ok) return;
+        const data = await res.json();
+        const fresh = data.prs ?? [];
+        setPrs(prev => JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh);
+      } catch { /* silent */ }
+    }
+    void fetchPrs();
+    const id = setInterval(fetchPrs, 60_000);
     return () => clearInterval(id);
   }, []);
 
@@ -1118,6 +1257,7 @@ export const AgentPanel = memo(function AgentPanel({
       }}>
         {activeTab === 'activity' ? <ActivityFeed events={events} commits={commits} onSelectCommit={onSelectCommit} /> : null}
         {activeTab === 'issues' ? <IssuesList issues={issues} onSelect={onSelectIssue || setSelectedIssue} /> : null}
+        {activeTab === 'prs' ? <PRList prs={prs} onSelect={onSelectPR} /> : null}
         {activeTab === 'files' ? <FileTree tree={fileTree} /> : null}
       </div>
 
