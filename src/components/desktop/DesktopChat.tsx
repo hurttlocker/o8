@@ -322,32 +322,45 @@ function SessionPicker({
 
       {open ? (
         <>
-          <div onClick={onToggle} style={{ position: 'fixed', inset: 0, zIndex: 99 }} />
+          {/* Backdrop — clicking anywhere outside closes the picker */}
+          <div
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(); }}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 9998,
+              background: 'rgba(0,0,0,0.15)',
+            }}
+          />
+          {/* Dropdown menu */}
           <div style={{
             position: 'absolute',
             top: '100%',
             left: 0,
-            marginTop: 4,
-            width: 260,
-            background: 'rgba(255, 255, 255, 0.92)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
+            marginTop: 6,
+            width: 280,
+            background: '#ffffff',
             borderRadius: 12,
-            border: '1px solid rgba(0,0,0,0.08)',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
-            zIndex: 100,
-            padding: 4,
-            maxHeight: 320,
+            border: '1px solid rgba(0,0,0,0.1)',
+            boxShadow: '0 12px 40px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.08)',
+            zIndex: 9999,
+            padding: 6,
+            maxHeight: 360,
             overflowY: 'auto',
           }}>
             {sessions.map(s => (
               <button
                 key={s.sessionKey}
-                onClick={() => { onSelect(s.sessionKey); onToggle(); }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onSelect(s.sessionKey);
+                  onToggle();
+                }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: 8,
+                  gap: 10,
                   width: '100%',
                   padding: '10px 12px',
                   background: s.sessionKey === selectedKey ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
@@ -358,11 +371,18 @@ function SessionPicker({
                   fontWeight: 500,
                   cursor: 'pointer',
                   textAlign: 'left',
+                  transition: 'background 0.15s ease',
+                }}
+                onMouseEnter={(e) => {
+                  if (s.sessionKey !== selectedKey) e.currentTarget.style.background = 'rgba(0,0,0,0.04)';
+                }}
+                onMouseLeave={(e) => {
+                  if (s.sessionKey !== selectedKey) e.currentTarget.style.background = 'transparent';
                 }}
               >
                 <span style={{
-                  width: 7,
-                  height: 7,
+                  width: 8,
+                  height: 8,
                   borderRadius: '50%',
                   background: s.status === 'running' ? '#34c759' : s.status === 'idle' ? '#ff9f0a' : '#636366',
                   flexShrink: 0,
@@ -371,7 +391,7 @@ function SessionPicker({
                   {getAgentName(s)}
                 </span>
                 {s.sessionKey === selectedKey ? (
-                  <span style={{ color: '#2563eb', fontSize: 12 }}>✓</span>
+                  <span style={{ color: '#2563eb', fontSize: 13, fontWeight: 600 }}>✓</span>
                 ) : null}
               </button>
             ))}
