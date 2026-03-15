@@ -416,7 +416,9 @@ export function DesktopChat() {
       const data = (await res.json()) as MobileInboxSnapshot;
       setSessions(data.sessions);
       if (!selectedKey && data.sessions.length > 0) {
-        const primary = data.sessions.find(s => s.isCurrentSession) ?? data.sessions[0];
+        // Default to the Telegram group session (our live chat) if available
+        const telegramGroup = data.sessions.find(s => s.sessionKey.includes('telegram:group'));
+        const primary = telegramGroup ?? data.sessions.find(s => s.isCurrentSession) ?? data.sessions[0];
         setSelectedKey(primary.sessionKey);
       }
     } catch { /* silent */ }
@@ -429,7 +431,7 @@ export function DesktopChat() {
       const res = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(key)}&limit=50`);
       if (!res.ok) return;
       const data = await res.json();
-      setTranscript(data.entries ?? []);
+      setTranscript(data.transcript ?? data.entries ?? []);
       setLoading(false);
       scrollToBottom(true);
     } catch {
@@ -526,25 +528,87 @@ export function DesktopChat() {
       ['--remodex-dock-fade-progress' as string]: '0',
       ['--remodex-dock-motion-progress' as string]: '0',
     }}>
-      {/* ── Header ── */}
+      {/* ── Header (matches mobile TopBar) ── */}
       <div style={{
-        padding: '12px 16px',
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
         flexShrink: 0,
-        background: 'rgba(255,255,255,0.8)',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
+        background: 'rgba(255,255,255,0.82)',
+        backdropFilter: 'blur(20px) saturate(1.4)',
+        WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
+        borderBottom: '1px solid rgba(0,0,0,0.06)',
       }}>
-        <SessionPicker
-          sessions={sessions}
-          selectedKey={selectedKey}
-          onSelect={setSelectedKey}
-          open={pickerOpen}
-          onToggle={() => setPickerOpen(p => !p)}
-        />
+        {/* Top row: session name + status */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '14px 16px 6px',
+        }}>
+          <SessionPicker
+            sessions={sessions}
+            selectedKey={selectedKey}
+            onSelect={setSelectedKey}
+            open={pickerOpen}
+            onToggle={() => setPickerOpen(p => !p)}
+          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {(selectedSession as unknown as Record<string, unknown>)?.context ? (() => {
+              const ctx = (selectedSession as unknown as Record<string, unknown>).context as { usedPercent?: number } | undefined;
+              const pct = ctx?.usedPercent;
+              if (pct == null) return null;
+              return (
+                <span style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  padding: '2px 8px',
+                  borderRadius: 6,
+                  background: pct > 70 ? 'rgba(239, 68, 68, 0.1)' : 'rgba(0,0,0,0.04)',
+                  color: pct > 70 ? '#ef4444' : '#8e8e93',
+                }}>
+                  {pct}% used
+                </span>
+              );
+            })() : null}
+          </div>
+        </div>
+
+        {/* Bottom row: runtime info strip */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '4px 16px 10px',
+          fontSize: 12,
+          color: '#8e8e93',
+          overflow: 'hidden',
+        }}>
+          {(selectedSession as unknown as Record<string, unknown> | undefined)?.runtimeSurface ? (
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '2px 8px',
+              borderRadius: 6,
+              background: 'rgba(0,0,0,0.04)',
+              fontSize: 11,
+              fontWeight: 500,
+              color: '#5b6475',
+              whiteSpace: 'nowrap',
+            }}>
+              ⎇ {((selectedSession as unknown as Record<string, unknown>)?.runtimeSurface as { branch?: string } | undefined)?.branch ?? 'main'}
+            </span>
+          ) : null}
+          {selectedSession?.name ? (
+            <span style={{
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              fontSize: 11,
+              color: '#94a3b8',
+            }}>
+              {selectedSession.name}
+            </span>
+          ) : null}
+        </div>
       </div>
 
       {/* ── Messages ── */}
