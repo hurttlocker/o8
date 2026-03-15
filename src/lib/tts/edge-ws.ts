@@ -83,18 +83,22 @@ export async function synthesize(
 
     let ws: WebSocket;
     try {
+      console.log('[EdgeTTS] Creating WebSocket to:', url.substring(0, 80) + '...');
       ws = new WebSocket(url);
     } catch (err) {
+      console.error('[EdgeTTS] WebSocket constructor failed:', err);
       reject(new Error(`Edge TTS: failed to create WebSocket: ${err}`));
       return;
     }
 
     // Receive binary data as ArrayBuffer (not Blob)
     ws.binaryType = 'arraybuffer';
+    console.log('[EdgeTTS] WebSocket created, binaryType=arraybuffer, waiting for open...');
 
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true;
+        console.error('[EdgeTTS] TIMEOUT after 12s. readyState:', ws.readyState);
         try { ws.close(); } catch {}
         reject(new Error('Edge TTS: timeout (12s)'));
       }
@@ -106,21 +110,27 @@ export async function synthesize(
         resolved = true;
         try { ws.close(); } catch {}
         if (audioChunks.length > 0) {
+          console.log(`[EdgeTTS] SUCCESS: ${audioChunks.length} chunks, building blob`);
           const blob = new Blob(audioChunks, { type: 'audio/mpeg' });
+          console.log(`[EdgeTTS] Blob size: ${blob.size} bytes`);
           resolve(URL.createObjectURL(blob));
         } else {
+          console.error('[EdgeTTS] FAILED: connection closed with 0 audio chunks');
           reject(new Error('Edge TTS: no audio received'));
         }
       }
     };
 
     ws.onopen = () => {
+      console.log('[EdgeTTS] WebSocket OPEN. Sending config + SSML...');
+
       // 1. Send speech config
       const configMsg =
         `Content-Type:application/json; charset=utf-8\r\n` +
         `Path:speech.config\r\n\r\n` +
         buildConfigPayload();
       ws.send(configMsg);
+      console.log('[EdgeTTS] Config sent');
 
       // 2. Send SSML synthesis request
       const ssmlMsg =
@@ -130,32 +140,45 @@ export async function synthesize(
         `Path:ssml\r\n\r\n` +
         buildSSML(text, voice, rate);
       ws.send(ssmlMsg);
+      console.log('[EdgeTTS] SSML sent, voice:', voice, 'text length:', text.length);
     };
 
     ws.onmessage = (event: MessageEvent) => {
       if (typeof event.data === 'string') {
-        // Text message — check for turn.end
+        const preview = event.data.substring(0, 120);
+        console.log('[EdgeTTS] Text message:', preview);
         if (event.data.includes('Path:turn.end')) {
+          console.log('[EdgeTTS] Got turn.end — finishing');
           finish();
         }
       } else if (event.data instanceof ArrayBuffer) {
-        // Binary message — extract audio after header
         const buf = event.data as ArrayBuffer;
+        if (buf.byteLength < 2) {
+          console.log('[EdgeTTS] Binary message too small:', buf.byteLength);
+          return;
+        }
+
         const view = new DataView(buf);
-
-        if (buf.byteLength < 2) return;
-
         // First 2 bytes = header length (big-endian uint16)
         const headerLen = view.getUint16(0);
         const audioStart = 2 + headerLen;
 
         if (audioStart < buf.byteLength) {
-          audioChunks.push(buf.slice(audioStart));
+          const audioSlice = buf.slice(audioStart);
+          audioChunks.push(audioSlice);
+          if (audioChunks.length <= 3) {
+            console.log(`[EdgeTTS] Audio chunk #${audioChunks.length}: headerLen=${headerLen}, audioBytes=${audioSlice.byteLength}`);
+          }
+        } else {
+          console.log(`[EdgeTTS] Binary frame: headerLen=${headerLen} >= bufLen=${buf.byteLength}, no audio`);
         }
+      } else {
+        console.log('[EdgeTTS] Unknown message type:', typeof event.data, event.data);
       }
     };
 
-    ws.onerror = () => {
+    ws.onerror = (ev) => {
+      console.error('[EdgeTTS] WebSocket ERROR:', ev);
       clearTimeout(timeout);
       if (!resolved) {
         resolved = true;
@@ -163,7 +186,8 @@ export async function synthesize(
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
+      console.log('[EdgeTTS] WebSocket CLOSED. code:', ev.code, 'reason:', ev.reason, 'wasClean:', ev.wasClean);
       finish();
     };
   });
