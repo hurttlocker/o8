@@ -11,7 +11,8 @@
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, Copy } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Check, ChevronDown, Copy, Expand, Minus, Plus, X } from 'lucide-react';
 
 interface CodeBlockProps {
   code: string;
@@ -68,10 +69,215 @@ const MERMAID_THEME = {
   },
 };
 
+// ── Glass Modal for Mermaid Zoom ──
+
+function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => void }) {
+  const [scale, setScale] = useState(1);
+  const [translate, setTranslate] = useState({ x: 0, y: 0 });
+  const dragging = useRef(false);
+  const lastPos = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === '=' || e.key === '+') setScale(s => Math.min(s + 0.25, 5));
+      if (e.key === '-') setScale(s => Math.max(s - 0.25, 0.25));
+      if (e.key === '0') { setScale(1); setTranslate({ x: 0, y: 0 }); }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.1 : 0.1;
+    setScale(s => Math.min(Math.max(s + delta, 0.25), 5));
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    dragging.current = true;
+    lastPos.current = { x: e.clientX, y: e.clientY };
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!dragging.current) return;
+    const dx = e.clientX - lastPos.current.x;
+    const dy = e.clientY - lastPos.current.y;
+    lastPos.current = { x: e.clientX, y: e.clientY };
+    setTranslate(t => ({ x: t.x + dx, y: t.y + dy }));
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    dragging.current = false;
+  }, []);
+
+  return createPortal(
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 99999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backdropFilter: 'blur(24px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+        backgroundColor: 'rgba(248, 250, 252, 0.72)',
+        animation: 'fadeIn 200ms ease',
+      }}
+    >
+      {/* Glass panel */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: 'relative',
+          width: '90vw',
+          height: '85vh',
+          maxWidth: 1400,
+          borderRadius: 20,
+          overflow: 'hidden',
+          background: 'linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(240,247,255,0.6) 100%)',
+          border: '1px solid rgba(255,255,255,0.6)',
+          boxShadow: '0 32px 80px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.9)',
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingTop: 14,
+          paddingRight: 16,
+          paddingBottom: 14,
+          paddingLeft: 20,
+          borderBottom: '1px solid rgba(0,0,0,0.06)',
+          background: 'rgba(255,255,255,0.5)',
+        }}>
+          <span style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: '#ef4444',
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            fontFamily: '-apple-system, system-ui, sans-serif',
+          }}>
+            ◆ Mermaid Diagram
+          </span>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {/* Zoom controls */}
+            <button
+              type="button"
+              onClick={() => setScale(s => Math.max(s - 0.25, 0.25))}
+              style={modalBtnStyle}
+              title="Zoom out (−)"
+            >
+              <Minus size={14} strokeWidth={2} />
+            </button>
+
+            <span style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: '#64748b',
+              minWidth: 40,
+              textAlign: 'center',
+              fontFamily: 'SF Mono, ui-monospace, monospace',
+            }}>
+              {Math.round(scale * 100)}%
+            </span>
+
+            <button
+              type="button"
+              onClick={() => setScale(s => Math.min(s + 0.25, 5))}
+              style={modalBtnStyle}
+              title="Zoom in (+)"
+            >
+              <Plus size={14} strokeWidth={2} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { setScale(1); setTranslate({ x: 0, y: 0 }); }}
+              style={{ ...modalBtnStyle, marginLeft: 4, fontSize: 11, width: 'auto', paddingLeft: 8, paddingRight: 8 }}
+              title="Reset (0)"
+            >
+              Fit
+            </button>
+
+            <div style={{ width: 1, height: 20, background: 'rgba(0,0,0,0.08)', marginLeft: 8, marginRight: 8 }} />
+
+            <button
+              type="button"
+              onClick={onClose}
+              style={{ ...modalBtnStyle, color: '#ef4444' }}
+              title="Close (Esc)"
+            >
+              <X size={15} strokeWidth={2} />
+            </button>
+          </div>
+        </div>
+
+        {/* Diagram area — zoomable/pannable */}
+        <div
+          onWheel={handleWheel}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseUp}
+          style={{
+            width: '100%',
+            height: 'calc(100% - 52px)',
+            overflow: 'hidden',
+            cursor: dragging.current ? 'grabbing' : 'grab',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <div
+            dangerouslySetInnerHTML={{ __html: svgHtml }}
+            style={{
+              transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
+              transformOrigin: 'center center',
+              transition: dragging.current ? 'none' : 'transform 100ms ease',
+            }}
+          />
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+const modalBtnStyle: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 30,
+  height: 30,
+  borderRadius: 8,
+  border: '1px solid rgba(0,0,0,0.08)',
+  background: 'rgba(255,255,255,0.7)',
+  color: '#475569',
+  cursor: 'pointer',
+  fontSize: 13,
+  fontWeight: 600,
+  fontFamily: '-apple-system, system-ui, sans-serif',
+  transition: 'all 150ms ease',
+  paddingTop: 0,
+  paddingRight: 0,
+  paddingBottom: 0,
+  paddingLeft: 0,
+};
+
+// ── Mermaid Diagram (inline + expand) ──
+
 const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) {
-  const containerRef = useRef<HTMLDivElement>(null);
   const [svgHtml, setSvgHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -121,6 +327,7 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
   return (
     <div
       style={{
+        position: 'relative',
         paddingTop: 20,
         paddingRight: 16,
         paddingBottom: 20,
@@ -135,11 +342,43 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
       }}
     >
       {svgHtml ? (
-        <div
-          ref={containerRef}
-          dangerouslySetInnerHTML={{ __html: svgHtml }}
-          style={{ maxWidth: '100%', overflow: 'auto' }}
-        />
+        <>
+          <div
+            dangerouslySetInnerHTML={{ __html: svgHtml }}
+            style={{ maxWidth: '100%', overflow: 'auto' }}
+          />
+          {/* Expand button */}
+          <button
+            type="button"
+            onClick={() => setModalOpen(true)}
+            title="Expand diagram"
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              border: '1px solid rgba(0,0,0,0.08)',
+              background: 'rgba(255,255,255,0.85)',
+              backdropFilter: 'blur(8px)',
+              color: '#64748b',
+              cursor: 'pointer',
+              transition: 'all 150ms ease',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+              paddingTop: 0,
+              paddingRight: 0,
+              paddingBottom: 0,
+              paddingLeft: 0,
+            }}
+          >
+            <Expand size={14} strokeWidth={2} />
+          </button>
+          {modalOpen ? <MermaidModal svgHtml={svgHtml} onClose={() => setModalOpen(false)} /> : null}
+        </>
       ) : (
         <span style={{ fontSize: 12, color: '#9ca3af' }}>Rendering diagram…</span>
       )}
