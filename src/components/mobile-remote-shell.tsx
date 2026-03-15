@@ -59,9 +59,6 @@ import {
 import {
   connectTranscriptStream,
   pinTranscriptToBottom,
-  startLinkedOwnedPolling,
-  startLiveInboxRefresh,
-  startSessionPolling,
   startUnifiedSyncPolling,
   trackScrollChrome,
   trackViewportTopOffset,
@@ -167,10 +164,7 @@ export function MobileRemoteShell({
   useEffect(() => {
     return trackViewportTopOffset({ setViewportTopOffset });
   }, []);
-  // Legacy inbox refresh kept as fallback — unified sync polling below handles primary data loading
-  useEffect(() => {
-    return startLiveInboxRefresh({ setSnapshot, setRefreshError });
-  }, []);
+  // Inbox refresh handled by unified sync polling below
   useEffect(() => {
     return trackScrollChrome({
       setScrollY,
