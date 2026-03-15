@@ -2,6 +2,7 @@ import type { AgentSummary } from '@/lib/fleet/types';
 import { continueOwnedCodexSession, interruptOwnedCodexSession, launchOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
 import { abortOpenClawSession, steerOpenClawSession } from '@/lib/openclaw/chat';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
+import { getRuntime } from '@/lib/runtimes/registry';
 
 export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt' | 'watch' | 'resolve' | 'launch';
 
@@ -198,8 +199,48 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
         'This IDE-owned Codex surface supports launch/resume/interrupt and review-state disposition changes only in the bounded owned-session lane for now.',
       );
     }
-    default:
-      return unavailable(agent, payload.action, `Runtime action ${payload.action} is not supported for ${agent.runtime}.`);
+    default: {
+      // Registry-based dispatch for all other runtimes (claude-code, aider, etc.)
+      const runtime = getRuntime(agent.runtime);
+      if (!runtime) {
+        return unavailable(agent, payload.action, `Runtime action ${payload.action} is not supported for ${agent.runtime}.`);
+      }
+
+      if (payload.action === 'steer' || payload.action === 'send_input') {
+        const message = payload.message?.trim();
+        if (!message) throw new Error('message is required');
+        if (!runtime.capabilities.resume) {
+          return unavailable(agent, payload.action, `${agent.runtime} does not support resume/steer.`);
+        }
+        const result = await runtime.resume(agent.sessionKey, message);
+        return {
+          ok: result.ok,
+          action: payload.action,
+          surfaceId: runtimeSurface.id,
+          runtime: agent.runtime,
+          status: 'queued',
+          note: result.note,
+        };
+      }
+
+      if (payload.action === 'stop' || payload.action === 'interrupt') {
+        if (!runtime.capabilities.interrupt) {
+          return unavailable(agent, payload.action, `${agent.runtime} does not support interrupt.`);
+        }
+        const result = await runtime.interrupt(agent.sessionKey);
+        return {
+          ok: result.ok,
+          action: payload.action,
+          surfaceId: runtimeSurface.id,
+          runtime: agent.runtime,
+          status: 'completed',
+          note: result.note,
+          aborted: result.ok,
+        };
+      }
+
+      return unavailable(agent, payload.action, `Runtime action ${payload.action} is not wired for ${agent.runtime} yet.`);
+    }
   }
 }
 
