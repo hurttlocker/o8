@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useCallback, useEffect, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import Image from 'next/image';
 import { ChevronRight, FileDiff, FileText, Image as ImageIcon } from 'lucide-react';
@@ -236,6 +236,14 @@ export function ChatView({
   const hasEntries = transcriptEntries.length > 0;
   const virtualItems = virtualizer.getVirtualItems();
 
+  // Pre-compute once: index of last assistant message (O(1) per item instead of O(n))
+  const lastAssistantIndex = useMemo(() => {
+    for (let i = transcriptEntries.length - 1; i >= 0; i--) {
+      if (transcriptEntries[i].role === 'assistant') return i;
+    }
+    return -1;
+  }, [transcriptEntries]);
+
   return (
     <>
       <div ref={listRef} className="remodex-message-stack">
@@ -244,7 +252,7 @@ export function ChatView({
             {virtualItems.map((virtualRow) => {
               const entry = transcriptEntries[virtualRow.index];
               const previousEntry = virtualRow.index > 0 ? transcriptEntries[virtualRow.index - 1] : null;
-              const isLatest = !transcriptEntries.slice(virtualRow.index + 1).some((item) => item.role === 'assistant');
+              const isLatest = virtualRow.index === lastAssistantIndex;
               const isNew = getIsNew(entry.id);
               if (isNew) markSeen(entry.id);
 
