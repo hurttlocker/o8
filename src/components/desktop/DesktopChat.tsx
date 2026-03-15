@@ -20,6 +20,7 @@ import {
   Brain,
   ChevronDown,
   ChevronRight,
+  GitBranch,
   Loader2,
   Plus,
   RefreshCw,
@@ -492,80 +493,78 @@ export function DesktopChat() {
           zIndex: 10,
         }}
       >
-        {/* Title area — clickable to open squad picker */}
+        {/* Session selector — Apple-style pill button */}
         <div ref={pickerRef} style={{ minWidth: 0, flex: 1, position: 'relative' }}>
           <button
             type="button"
             onClick={() => setPickerOpen(p => !p)}
+            className="desktop-session-pill"
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '4px',
+              gap: 10,
               width: '100%',
-              padding: 0,
+              padding: '8px 12px',
               margin: 0,
-              border: 'none',
-              background: 'transparent',
+              border: '1px solid rgba(0,0,0,0.06)',
+              borderRadius: 12,
+              background: pickerOpen ? 'rgba(0,0,0,0.04)' : 'rgba(0,0,0,0.02)',
               cursor: 'pointer',
               textAlign: 'left',
               WebkitTapHighlightColor: 'transparent',
+              transition: 'background 180ms ease, border-color 180ms ease',
             }}
+            onMouseEnter={(e) => { if (!pickerOpen) e.currentTarget.style.background = 'rgba(0,0,0,0.04)'; }}
+            onMouseLeave={(e) => { if (!pickerOpen) e.currentTarget.style.background = 'rgba(0,0,0,0.02)'; }}
             aria-label="Switch session"
             aria-expanded={pickerOpen}
           >
+            {/* Status dot */}
+            <span
+              style={{
+                width: 10,
+                height: 10,
+                borderRadius: '50%',
+                backgroundColor: connectionDotColor,
+                flexShrink: 0,
+                boxShadow: connectionDotColor === '#34c759' ? '0 0 8px rgba(52, 199, 89, 0.5)' : 'none',
+              }}
+            />
+
+            {/* Title block */}
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
-                <span
-                  style={{
-                    width: 7,
-                    height: 7,
-                    borderRadius: '50%',
-                    backgroundColor: connectionDotColor,
-                    flexShrink: 0,
-                    boxShadow: connectionDotColor === '#34c759' ? '0 0 6px #34c759' : 'none',
-                  }}
-                />
-                <span style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  textTransform: 'uppercase' as const,
-                  letterSpacing: '0.08em',
-                  color: 'rgba(17, 24, 39, 0.42)',
-                }}>
-                  {headerLabel}
-                </span>
-              </div>
-              <h1 style={{
-                fontSize: 15,
-                fontWeight: 700,
+              <div style={{
+                fontSize: 14,
+                fontWeight: 600,
                 color: '#111827',
-                letterSpacing: '-0.02em',
-                margin: 0,
+                letterSpacing: '-0.01em',
                 lineHeight: 1.3,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}>
                 {activeTitle}
-              </h1>
-              <p style={{
-                fontSize: 12,
+              </div>
+              <div style={{
+                fontSize: 11.5,
                 color: '#8e8e93',
-                margin: '2px 0 0',
                 lineHeight: 1.3,
+                marginTop: 1,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}>
-                {activeSubtitle}
-              </p>
+                {headerLabel} · {activeSubtitle}
+              </div>
             </div>
+
+            {/* Chevron */}
             <ChevronDown
-              size={14}
-              strokeWidth={2.2}
+              size={15}
+              strokeWidth={2}
               style={{
                 flexShrink: 0,
-                color: '#8e8e93',
+                color: '#c7c7cc',
                 transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
                 transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
               }}
@@ -941,6 +940,62 @@ export function DesktopChat() {
               )}
             </button>
           </div>
+        </div>
+
+        {/* Runtime bar — context %, branch, status (matches mobile RuntimeBar) */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: 8,
+          padding: '6px 12px',
+          marginTop: 6,
+          background: 'rgba(255, 255, 255, 0.72)',
+          backdropFilter: 'blur(20px) saturate(1.4)',
+          WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
+          borderRadius: 999,
+          border: '1px solid rgba(0,0,0,0.04)',
+        }}>
+          {/* Context pressure */}
+          {(() => {
+            const pct = Math.round((selectedSession as unknown as Record<string, unknown>)?.context
+              ? ((selectedSession as unknown as Record<string, unknown>).context as { usedPercent?: number })?.usedPercent ?? 0
+              : 0);
+            const tone = pct >= 70 ? '#ef4444' : pct >= 50 ? '#f59e0b' : '#34c759';
+            return (
+              <>
+                <span style={{
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: tone,
+                  flexShrink: 0,
+                }} />
+                <span style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: 'rgba(17, 24, 39, 0.72)',
+                }}>
+                  {pct}% used
+                </span>
+              </>
+            );
+          })()}
+
+          <span style={{ color: 'rgba(17, 24, 39, 0.24)', fontSize: 12 }}>·</span>
+
+          {/* Branch */}
+          <GitBranch size={12} strokeWidth={1.6} style={{ color: 'rgba(17, 24, 39, 0.42)', flexShrink: 0 }} />
+          <span style={{
+            fontSize: 12,
+            fontWeight: 500,
+            color: 'rgba(17, 24, 39, 0.52)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
+            {compactLine(selectedSession?.branch ?? 'main', 'main', 18)}
+          </span>
         </div>
       </div>
     </div>
