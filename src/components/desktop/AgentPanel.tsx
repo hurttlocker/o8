@@ -1227,6 +1227,7 @@ export const AgentPanel = memo(function AgentPanel({
   onSelectFile,
   onOpenCI,
   onCreateIssue,
+  onOpenGitLog,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
@@ -1236,6 +1237,7 @@ export const AgentPanel = memo(function AgentPanel({
   onSelectFile?: (filePath: string, workspace?: string) => void;
   onOpenCI?: (repo: string) => void;
   onCreateIssue?: (repo?: string) => void;
+  onOpenGitLog?: (workspace?: string) => void;
 } = {}) {
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([]);
@@ -1491,6 +1493,32 @@ export const AgentPanel = memo(function AgentPanel({
             <>
               <span>·</span>
               <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{activeRepo}</span>
+              <button
+                type="button"
+                onClick={() => onOpenGitLog?.(activeWorkspace ?? undefined)}
+                title="View git history"
+                style={{
+                  marginLeft: 'auto',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  paddingTop: 2,
+                  paddingRight: 6,
+                  paddingBottom: 2,
+                  paddingLeft: 6,
+                  borderRadius: 4,
+                  border: '1px solid rgba(0,0,0,0.08)',
+                  background: 'rgba(255,255,255,0.6)',
+                  fontSize: 10,
+                  color: '#64748b',
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontWeight: 500,
+                }}
+              >
+                <GitCommit size={11} strokeWidth={2} />
+                Log
+              </button>
               <button
                 type="button"
                 onClick={() => onOpenCI?.(activeRepo)}

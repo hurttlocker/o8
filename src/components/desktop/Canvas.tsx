@@ -38,7 +38,7 @@ import { IssueCreator } from './IssueCreator';
 
 // ── Tab Types ──
 
-export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'welcome';
+export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'git-log' | 'image' | 'welcome';
 
 export interface CanvasTab {
   id: string;
@@ -55,6 +55,7 @@ export interface CanvasProps {
   activeTabId: string | null;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
+  onSelectCommit?: (hash: string) => void;
 }
 
 // ── Main Canvas ──
@@ -64,6 +65,7 @@ export const Canvas = memo(function Canvas({
   activeTabId,
   onSelectTab,
   onCloseTab,
+  onSelectCommit,
 }: CanvasProps) {
   const activeTab = tabs.find((t) => t.id === activeTabId) || null;
 
@@ -172,7 +174,7 @@ export const Canvas = memo(function Canvas({
         overflow: 'auto',
       }}>
         {activeTab ? (
-          <TabContent tab={activeTab} />
+          <TabContent tab={activeTab} onSelectCommit={onSelectCommit} />
         ) : (
           <CanvasEmpty />
         )}
@@ -194,13 +196,15 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
     case 'readme': return <BookOpen size={size} />;
     case 'ci': return <AlertCircle size={size} />;
     case 'new-issue': return <Plus size={size} />;
+    case 'git-log': return <GitCommit size={size} />;
+    case 'image': return <FileText size={size} />;
     case 'welcome': return <BookOpen size={size} />;
   }
 }
 
 // ── Tab Content Router ──
 
-const TabContent = memo(function TabContent({ tab }: { tab: CanvasTab }) {
+const TabContent = memo(function TabContent({ tab, onSelectCommit }: { tab: CanvasTab; onSelectCommit?: (hash: string) => void }) {
   switch (tab.kind) {
     case 'issue':
       return <IssueViewer issueNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} />;
@@ -220,6 +224,10 @@ const TabContent = memo(function TabContent({ tab }: { tab: CanvasTab }) {
       return <CIViewer repo={tab.meta?.repo} />;
     case 'new-issue':
       return <IssueCreator repo={tab.meta?.repo} />;
+    case 'git-log':
+      return <GitLogViewer workspace={tab.resourceId} onSelectCommit={onSelectCommit} />;
+    case 'image':
+      return <ImagePreview filePath={tab.resourceId} workspace={tab.meta?.workspace} />;
     case 'welcome':
       return <CanvasEmpty />;
     default:
@@ -646,6 +654,304 @@ function CanvasEmpty() {
       }}>
         Select an issue, agent, or file to open here
       </p>
+    </div>
+  );
+}
+
+// ── Git Log Viewer ──
+
+interface GitLogCommit {
+  hash: string;
+  shortHash: string;
+  author: string;
+  authorEmail: string;
+  date: string;
+  subject: string;
+  refs: { type: string; name: string }[];
+}
+
+function GitLogViewer({ workspace, onSelectCommit }: { workspace: string; onSelectCommit?: (hash: string) => void }) {
+  const [commits, setCommits] = useState<GitLogCommit[]>([]);
+  const [currentBranch, setCurrentBranch] = useState('main');
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const wsParam = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
+    fetch(`/api/panel/git-log${wsParam}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!cancelled) {
+          setCommits(data.commits ?? []);
+          setCurrentBranch(data.currentBranch ?? 'main');
+          setLoading(false);
+        }
+      })
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [workspace]);
+
+  if (loading) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading git log…</div>;
+  }
+
+  if (commits.length === 0) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#94a3b8' }}>No commits found</div>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Header */}
+      <div style={{
+        paddingTop: 12,
+        paddingRight: 20,
+        paddingBottom: 10,
+        paddingLeft: 20,
+        borderBottom: '1px solid rgba(0,0,0,0.06)',
+        background: 'rgba(255,255,255,0.4)',
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+      }}>
+        <GitCommit size={16} strokeWidth={1.8} style={{ color: '#64748b' }} />
+        <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>Git History</span>
+        <span style={{
+          fontSize: 11,
+          fontFamily: '"SF Mono", ui-monospace, monospace',
+          paddingTop: 2,
+          paddingRight: 8,
+          paddingBottom: 2,
+          paddingLeft: 8,
+          borderRadius: 99,
+          background: 'rgba(59,130,246,0.08)',
+          color: '#3b82f6',
+          fontWeight: 600,
+        }}>{currentBranch}</span>
+        <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>{commits.length} commits</span>
+      </div>
+
+      {/* Commit list */}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {commits.map((commit, i) => (
+          <button
+            key={commit.hash}
+            type="button"
+            onClick={() => onSelectCommit?.(commit.hash)}
+            style={{
+              display: 'flex',
+              gap: 12,
+              width: '100%',
+              paddingTop: 10,
+              paddingRight: 20,
+              paddingBottom: 10,
+              paddingLeft: 20,
+              border: 'none',
+              borderBottom: '1px solid rgba(0,0,0,0.03)',
+              background: 'transparent',
+              cursor: 'pointer',
+              textAlign: 'left',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+              transition: 'background 80ms ease',
+              position: 'relative',
+            }}
+          >
+            {/* Graph line */}
+            <div style={{
+              width: 20,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              flexShrink: 0,
+              position: 'relative',
+            }}>
+              {i > 0 ? (
+                <div style={{
+                  position: 'absolute',
+                  top: 0,
+                  width: 2,
+                  height: 10,
+                  background: 'rgba(148, 163, 184, 0.3)',
+                }} />
+              ) : null}
+              <div style={{
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                background: commit.refs.some(r => r.type === 'head') ? '#3b82f6' : '#cbd5e1',
+                border: commit.refs.some(r => r.type === 'head') ? '2px solid rgba(59,130,246,0.3)' : '2px solid rgba(0,0,0,0.04)',
+                marginTop: 6,
+                flexShrink: 0,
+                zIndex: 1,
+              }} />
+              {i < commits.length - 1 ? (
+                <div style={{
+                  width: 2,
+                  flex: 1,
+                  background: 'rgba(148, 163, 184, 0.3)',
+                  marginTop: 2,
+                }} />
+              ) : null}
+            </div>
+
+            {/* Content */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span style={{
+                  fontSize: 13,
+                  fontWeight: 400,
+                  color: '#1e293b',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  flex: 1,
+                  minWidth: 0,
+                }}>{commit.subject}</span>
+
+                {/* Ref badges */}
+                {commit.refs.map((ref, j) => (
+                  <span key={j} style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    paddingTop: 1,
+                    paddingRight: 6,
+                    paddingBottom: 1,
+                    paddingLeft: 6,
+                    borderRadius: 4,
+                    flexShrink: 0,
+                    ...(ref.type === 'head'
+                      ? { color: '#3b82f6', background: 'rgba(59,130,246,0.08)' }
+                      : ref.type === 'tag'
+                        ? { color: '#f59e0b', background: 'rgba(245,158,11,0.08)' }
+                        : { color: '#94a3b8', background: 'rgba(0,0,0,0.03)' }
+                    ),
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                  }}>
+                    {ref.name}
+                  </span>
+                ))}
+              </div>
+
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                marginTop: 3,
+                fontSize: 11,
+                color: '#94a3b8',
+              }}>
+                <span style={{
+                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                  fontSize: 11,
+                  color: '#64748b',
+                  fontWeight: 500,
+                }}>{commit.shortHash}</span>
+                <span>{commit.author}</span>
+                <span>·</span>
+                <span>{formatAge(commit.date)}</span>
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Image Preview ──
+
+function ImagePreview({ filePath, workspace }: { filePath: string; workspace?: string }) {
+  const [imageData, setImageData] = useState<{ type: string; dataUrl?: string; content?: string; mimeType: string; size: number } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    const wsParam = workspace ? `&workspace=${encodeURIComponent(workspace)}` : '';
+    fetch(`/api/panel/file-preview?path=${encodeURIComponent(filePath)}${wsParam}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!cancelled) {
+          if (data.error) {
+            setError(data.error);
+          } else {
+            setImageData(data);
+          }
+          setLoading(false);
+        }
+      })
+      .catch(() => { if (!cancelled) { setError('Failed to load image'); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [filePath, workspace]);
+
+  const fileName = filePath.split('/').pop() ?? filePath;
+
+  if (loading) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading image…</div>;
+  }
+
+  if (error || !imageData) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#ef4444' }}>{error || 'Could not load image'}</div>;
+  }
+
+  const sizeLabel = imageData.size < 1024
+    ? `${imageData.size} B`
+    : imageData.size < 1024 * 1024
+      ? `${(imageData.size / 1024).toFixed(1)} KB`
+      : `${(imageData.size / (1024 * 1024)).toFixed(1)} MB`;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Header */}
+      <div style={{
+        paddingTop: 12,
+        paddingRight: 20,
+        paddingBottom: 10,
+        paddingLeft: 20,
+        borderBottom: '1px solid rgba(0,0,0,0.06)',
+        background: 'rgba(255,255,255,0.4)',
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+      }}>
+        <FileText size={16} strokeWidth={1.8} style={{ color: '#94a3b8' }} />
+        <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{fileName}</span>
+        <span style={{ fontSize: 11, color: '#94a3b8' }}>{imageData.mimeType} · {sizeLabel}</span>
+      </div>
+
+      {/* Image */}
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'auto',
+        padding: 24,
+        background: 'repeating-conic-gradient(rgba(0,0,0,0.04) 0% 25%, transparent 0% 50%) 50% / 16px 16px',
+      }}>
+        {imageData.type === 'svg' && imageData.content ? (
+          <div
+            dangerouslySetInnerHTML={{ __html: imageData.content }}
+            style={{ maxWidth: '100%', maxHeight: '100%' }}
+          />
+        ) : imageData.dataUrl ? (
+          <img
+            src={imageData.dataUrl}
+            alt={fileName}
+            style={{
+              maxWidth: '100%',
+              maxHeight: '100%',
+              objectFit: 'contain',
+              borderRadius: 4,
+              boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+            }}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
