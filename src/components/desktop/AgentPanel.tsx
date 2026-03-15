@@ -138,26 +138,81 @@ function ctxColor(pct: number) {
   return '#22c55e';
 }
 
-// ── Agent Card (expandable) ──
+// ── Workspace grouping (matches chat session picker) ──
+
+interface WorkspaceGroup {
+  workspace: string;
+  displayName: string;
+  agents: AgentDetail[];
+  hasRunning: boolean;
+  bestContextPct: number;
+  primaryModel: string;
+  totalAlerts: number;
+}
+
+function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
+  const groupMap = new Map<string, AgentDetail[]>();
+  for (const agent of agents) {
+    const ws = agent.workspace || '~/clawd';
+    const existing = groupMap.get(ws) ?? [];
+    existing.push(agent);
+    groupMap.set(ws, existing);
+  }
+
+  const groups: WorkspaceGroup[] = [];
+  for (const [workspace, wsAgents] of groupMap) {
+    // Derive display name from workspace path
+    const segments = workspace.replace(/^~\//, '').split('/');
+    const last = segments[segments.length - 1] || segments[0] || 'workspace';
+    let displayName = last;
+    if (last === 'clawd' && wsAgents.some(a => a.isCurrentSession)) displayName = 'Main';
+    if (workspace.includes('workspace-ace')) displayName = 'Niot';
+    if (workspace.includes('workspace-hawk')) displayName = 'Hawk';
+
+    const hasRunning = wsAgents.some(a => a.status === 'running' || a.status === 'watching' || a.status === 'healthy');
+    const bestContextPct = Math.max(0, ...wsAgents.map(a => a.context?.usedPercent ?? 0));
+    const primary = wsAgents.find(a => !a.id.includes('cron') && !a.id.includes('discord') && !a.id.includes('telegram'));
+    const totalAlerts = wsAgents.reduce((sum, a) => sum + (a.alerts ?? 0), 0);
+
+    groups.push({
+      workspace,
+      displayName,
+      agents: wsAgents,
+      hasRunning,
+      bestContextPct,
+      primaryModel: primary?.model ?? '',
+      totalAlerts,
+    });
+  }
+
+  // Sort: Main first, then running groups, then alphabetical
+  groups.sort((a, b) => {
+    if (a.displayName === 'Main') return -1;
+    if (b.displayName === 'Main') return 1;
+    if (a.hasRunning && !b.hasRunning) return -1;
+    if (!a.hasRunning && b.hasRunning) return 1;
+    return a.displayName.localeCompare(b.displayName);
+  });
+
+  return groups;
+}
+
+// ── Agent Card (expandable, workspace-grouped) ──
 
 const AgentCard = memo(function AgentCard({
-  squad,
-  agents,
+  group,
   expanded,
   onToggle,
   onSelectSession,
 }: {
-  squad: Squad;
-  agents: AgentDetail[];
+  group: WorkspaceGroup;
   expanded: boolean;
   onToggle: () => void;
   onSelectSession?: (sessionKey: string) => void;
 }) {
-  const dotColor = statusDotColor[squad.status] ?? '#6b7280';
-  // Get the primary agent's model
-  const primaryAgent = agents.find(a => a.squadId === squad.id && !a.id.includes('cron') && !a.id.includes('discord') && !a.id.includes('telegram'));
-  const model = primaryAgent?.model ?? '';
-  const ctx = primaryAgent?.context;
+  const dotColor = group.hasRunning ? '#22c55e' : '#6b7280';
+  const model = group.primaryModel;
+  const ctx = group.bestContextPct > 0 ? { usedPercent: group.bestContextPct } : null;
 
   return (
     <div style={{
@@ -199,7 +254,7 @@ const AgentCard = memo(function AgentCard({
           color: dotColor,
           flexShrink: 0,
         }}>
-          {squad.name[0]}
+          {group.displayName[0]}
         </div>
 
         {/* Name + model + status */}
@@ -210,7 +265,7 @@ const AgentCard = memo(function AgentCard({
               fontWeight: 600,
               color: '#1e293b',
               letterSpacing: '-0.01em',
-            }}>{squad.name}</span>
+            }}>{group.displayName}</span>
             <span style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -230,9 +285,9 @@ const AgentCard = memo(function AgentCard({
                 height: 5,
                 borderRadius: '50%',
                 background: dotColor,
-                boxShadow: squad.status === 'watching' || squad.status === 'healthy' ? `0 0 6px ${dotColor}` : 'none',
+                boxShadow: group.hasRunning ? `0 0 6px ${dotColor}` : 'none',
               }} />
-              {squad.status === 'watching' ? 'running' : squad.status}
+              {group.hasRunning ? 'running' : 'idle'}
             </span>
           </div>
           <div style={{
@@ -255,14 +310,14 @@ const AgentCard = memo(function AgentCard({
             ) : null}
             <span style={{ fontSize: 11, color: '#cbd5e1' }}>·</span>
             <span style={{ fontSize: 11, color: '#94a3b8' }}>
-              {squad.liveSessions} surface{squad.liveSessions !== 1 ? 's' : ''}
+              {group.agents.length} session{group.agents.length !== 1 ? 's' : ''}
             </span>
           </div>
         </div>
 
         {/* Alerts + expand chevron */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {squad.alerts > 0 ? (
+          {group.totalAlerts > 0 ? (
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -272,7 +327,7 @@ const AgentCard = memo(function AgentCard({
               color: '#ef4444',
             }}>
               <AlertCircle size={13} strokeWidth={2} />
-              {squad.alerts}
+              {group.totalAlerts}
             </div>
           ) : null}
           {expanded
@@ -312,21 +367,18 @@ const AgentCard = memo(function AgentCard({
             justifyContent: 'space-between',
           }}>
             <span>ctx {ctx.usedPercent}%</span>
-            <span>{ctx.trend}</span>
           </div>
         </div>
       ) : null}
 
-      {/* Expanded: surface list */}
+      {/* Expanded: agent list */}
       {expanded ? (
         <div style={{
           borderTop: '1px solid rgba(0,0,0,0.04)',
           paddingTop: 6,
           paddingBottom: 6,
         }}>
-          {agents
-            .filter(a => a.squadId === squad.id)
-            .map(agent => (
+          {group.agents.map(agent => (
               <div
                 key={agent.id}
                 onClick={(e) => {
@@ -863,7 +915,6 @@ export const AgentPanel = memo(function AgentPanel({
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number) => void;
 } = {}) {
-  const [squads, setSquads] = useState<Squad[]>([]);
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([]);
   const [commits, setCommits] = useState<{ hash: string; message: string; age: string }[]>([]);
@@ -871,9 +922,12 @@ export const AgentPanel = memo(function AgentPanel({
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>('activity');
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
-  const [expandedSquad, setExpandedSquad] = useState<string | null>(null);
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
 
-  // Fetch agent inventory (agents + events + squads)
+  // Build workspace groups from agents
+  const workspaceGroups = buildWorkspaceGroups(agents);
+
+  // Fetch agent inventory (agents + events)
   // Only update state when data actually changed (prevents flicker)
   useEffect(() => {
     async function fetchInventory() {
@@ -881,8 +935,6 @@ export const AgentPanel = memo(function AgentPanel({
         const res = await fetch('/api/runtime/inventory');
         if (!res.ok) return;
         const data = await res.json();
-        const allSquads = data.squads ?? [];
-        setSquads(prev => JSON.stringify(prev) === JSON.stringify(allSquads) ? prev : allSquads);
         setAgents(prev => JSON.stringify(prev) === JSON.stringify(data.agents ?? []) ? prev : (data.agents ?? []));
         setEvents(prev => JSON.stringify(prev) === JSON.stringify(data.events ?? []) ? prev : (data.events ?? []));
       } catch { /* silent */ }
@@ -986,16 +1038,15 @@ export const AgentPanel = memo(function AgentPanel({
         }}>
           Agents
         </div>
-        {squads.length === 0 ? (
+        {workspaceGroups.length === 0 ? (
           <div style={{ fontSize: 13, color: '#94a3b8', padding: '8px 2px' }}>Loading agents…</div>
         ) : (
-          squads.map((squad) => (
+          workspaceGroups.map((group) => (
             <AgentCard
-              key={squad.id}
-              squad={squad}
-              agents={agents}
-              expanded={expandedSquad === squad.id}
-              onToggle={() => setExpandedSquad(expandedSquad === squad.id ? null : squad.id)}
+              key={group.workspace}
+              group={group}
+              expanded={expandedGroup === group.workspace}
+              onToggle={() => setExpandedGroup(expandedGroup === group.workspace ? null : group.workspace)}
               onSelectSession={onSelectSession}
             />
           ))
