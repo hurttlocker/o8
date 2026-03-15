@@ -1,9 +1,9 @@
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { ChevronRight } from 'lucide-react';
 import type { SquadRailProps } from './types';
 import { buildProjectGroups } from './utils';
 
-export function SquadRail({
+export const SquadRail = memo(function SquadRail({
   snapshot,
   expandedProject,
   selectedSession,
@@ -91,4 +91,4 @@ export function SquadRail({
       })}
     </div>
   );
-}
+});

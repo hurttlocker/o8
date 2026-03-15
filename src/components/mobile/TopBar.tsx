@@ -11,10 +11,16 @@ export function TopBar({
   isHeaderCompact,
   headerVisible,
   pendingApprovalsCount,
+  wsConnectionState,
   compactLine,
   onOpenControls,
   onOpenDiff,
 }: TopBarProps) {
+  const connectionDotColor = wsConnectionState === 'connected'
+    ? '#34c759'
+    : wsConnectionState === 'connecting'
+      ? '#ff9f0a'
+      : '#ff3b30';
   const totalAdditions = reviewFiles.reduce((sum, file) => sum + (file.additions ?? 0), 0);
   const totalDeletions = reviewFiles.reduce((sum, file) => sum + (file.deletions ?? 0), 0);
   const focusedAdditions = selectedReviewFile?.additions ?? totalAdditions;
@@ -67,7 +73,21 @@ export function TopBar({
       </div>
       <div className="remodex-title-shell">
         <div className="remodex-title-stack">
-          <span className="remodex-title-kicker">{headerLabel}</span>
+          <span className="remodex-title-kicker">
+            <span
+              style={{
+                display: 'inline-block',
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                backgroundColor: connectionDotColor,
+                marginRight: '5px',
+                verticalAlign: 'middle',
+              }}
+              title={`WebSocket: ${wsConnectionState ?? 'unknown'}`}
+            />
+            {headerLabel}
+          </span>
           <h1>{activeTitle}</h1>
           <p>{activeSubtitle}</p>
         </div>

@@ -1,6 +1,7 @@
 'use client';
 
 import Image from 'next/image';
+import { memo } from 'react';
 import {
   ArrowUp,
   Check,
@@ -16,7 +17,7 @@ import type { CSSProperties } from 'react';
 import type { ComposeBarProps } from './types';
 import { ownedLifecycleLabel, ownedReviewDispositionLabel } from './utils';
 
-export function ComposeBar({
+export const ComposeBar = memo(function ComposeBar({
   session,
   sessionKey,
   draft,
@@ -345,4 +346,4 @@ export function ComposeBar({
       {actionNote ? <p className="remodex-inline-action-note">{actionNote}</p> : null}
     </>
   );
-}
+});
