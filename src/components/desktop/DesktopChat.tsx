@@ -513,12 +513,30 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
     }
   }, [scrollToBottom]);
 
+  // ── Send sound ──
+  const playSendSound = useCallback(() => {
+    try {
+      const ctx = new AudioContext();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.frequency.setValueAtTime(1200, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.12, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.12);
+    } catch { /* silent — no audio context available */ }
+  }, []);
+
   // ── Send message ──
   const send = useCallback(async () => {
     if (!draft.trim() || !selectedKey || sending) return;
     const text = draft.trim();
     setDraft('');
     setSending(true);
+    playSendSound();
 
     const optimistic: MobileTranscriptEntry = {
       id: `local-${Date.now()}`,
@@ -530,15 +548,19 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
     scrollToBottom(true);
 
     try {
-      await fetch('/api/mobile/action', {
+      // Fire and don't wait — optimistic UI already shows the message
+      fetch('/api/mobile/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionKey: selectedKey, action: 'steer', message: text }),
-      });
-      setTimeout(() => void fetchTranscript(selectedKey), 2000);
+      }).catch(() => {});
+      // Quick poll for response (500ms, 1.5s, 3s)
+      setTimeout(() => void fetchTranscript(selectedKey), 500);
+      setTimeout(() => void fetchTranscript(selectedKey), 1500);
+      setTimeout(() => void fetchTranscript(selectedKey), 3000);
     } catch { /* silent */ }
     finally { setSending(false); }
-  }, [draft, selectedKey, sending, fetchTranscript, scrollToBottom]);
+  }, [draft, selectedKey, sending, fetchTranscript, scrollToBottom, playSendSound]);
 
   // ── Diff stats (poll every 30s) ──
   useEffect(() => {
