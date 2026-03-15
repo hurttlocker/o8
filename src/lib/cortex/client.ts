@@ -116,13 +116,11 @@ export async function cortexStats(): Promise<CortexStats | null> {
 
 /**
  * Get stale (decaying) facts.
- * NOTE: `cortex stale` doesn't support --limit or --json yet (see hurttlocker/cortex#337).
- * We get all results and slice client-side until Cortex ships those flags.
+ * Uses `--limit` and `--json` flags (shipped in cortex#337).
  */
 export async function cortexStale(limit = 10): Promise<CortexStaleFact[]> {
-  const results = await runCortex<CortexStaleFact[]>(['stale']);
-  if (!results) return [];
-  return results.slice(0, limit);
+  const results = await runCortex<CortexStaleFact[]>(['stale', '--limit', String(limit), '--json']);
+  return results ?? [];
 }
 
 /**
@@ -135,10 +133,7 @@ export async function cortexConflicts(limit = 10): Promise<CortexConflict[]> {
 
 /**
  * Reinforce a fact (reset decay timer).
- *
- * ⚠️ ID MISMATCH WARNING: Search returns memory_id but reinforce expects fact_id.
- * These are different ID spaces. Until Cortex ships fact_ids in search results
- * (hurttlocker/cortex#336), this may reinforce the wrong fact.
+ * Pass a fact_id (from search results' fact_ids array, not memory_id).
  */
 export async function cortexReinforce(factId: number): Promise<boolean> {
   const result = await runCortex<{ ok?: boolean }>(['reinforce', String(factId)]);
@@ -161,8 +156,7 @@ export async function cortexSupersede(oldFactId: number, newFactId: number): Pro
 /**
  * Retire a fact (mark as no longer relevant).
  * Uses `beliefs set retired` which is the correct syntax.
- *
- * ⚠️ Same ID mismatch warning as cortexReinforce — see hurttlocker/cortex#336.
+ * Pass a fact_id (from search results' fact_ids array, not memory_id).
  */
 export async function cortexRetire(factId: number): Promise<boolean> {
   const result = await runCortex<{ ok?: boolean }>(['beliefs', 'set', 'retired', String(factId)]);
@@ -212,9 +206,13 @@ export async function getRecallCards(query: string, limit = 5): Promise<RecallCa
     }
 
     seenTexts.push(normalized);
+    // Use first fact_id as the card's primary ID for mutations (reinforce/retire/supersede).
+    // fact_ids comes from cortex#336 — maps memory_id → fact_ids correctly.
+    const factIds = r.fact_ids ?? [];
     cards.push({
-      id: r.memory_id,
+      id: factIds[0] ?? r.memory_id,
       memoryId: r.memory_id,
+      factIds,
       text,
       // Search results expose 'class' (memory class like "note"/"log"), not fact type.
       // Default to 'state' — accurate type requires fact-level metadata not in search output.
