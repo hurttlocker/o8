@@ -82,9 +82,10 @@ interface BubbleProps {
   previousEntry: MobileTranscriptEntry | null;
   isLatest: boolean;
   agentName: string;
+  isNew?: boolean;
 }
 
-const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName }: BubbleProps) {
+const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName, isNew }: BubbleProps) {
   const isUser = entry.role === 'user';
   const hasText = Boolean(entry.text.trim());
   const hasMedia = Boolean(entry.media?.length);
@@ -109,7 +110,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
 
   if (isUser) {
     return (
-      <div className="remodex-user-turn-wrap">
+      <div className={`remodex-user-turn-wrap${isNew ? ' remodex-turn-new' : ''}`}>
         {hasText ? (
           <div className="remodex-user-bubble">
             <div className="remodex-rich-text">
@@ -185,7 +186,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
   }, [mdBlocks, entry.id]);
 
   return (
-    <article className="remodex-message-card remodex-message-card-assistant">
+    <article className={`remodex-message-card remodex-message-card-assistant${isNew ? ' remodex-turn-new' : ''}`}>
       {speakerChanged ? (
         <div className="remodex-message-head">
           <span>{roleLabel(entry.role, agentName)}</span>
@@ -431,6 +432,7 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
   const [enhancing, setEnhancing] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const seenIdsRef = useRef<Set<string>>(new Set());
   const composeRef = useRef<HTMLTextAreaElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -496,8 +498,8 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
       const res = await fetch('/api/mobile/inbox');
       if (!res.ok) return;
       const data = (await res.json()) as MobileInboxSnapshot;
-      setSnapshot(data);
-      setSessions(data.sessions);
+      setSnapshot(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
+      setSessions(prev => JSON.stringify(prev) === JSON.stringify(data.sessions) ? prev : data.sessions);
       if (!selectedKey && data.sessions.length > 0) {
         const telegramGroup = data.sessions.find(s => s.sessionKey.includes('telegram:group'));
         const primary = telegramGroup ?? data.sessions.find(s => s.isCurrentSession) ?? data.sessions[0];
@@ -516,21 +518,35 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
       const serverEntries: MobileTranscriptEntry[] = data.transcript ?? data.entries ?? [];
 
       // Preserve optimistic (local-*) messages that the server hasn't echoed yet.
-      // An optimistic message is "confirmed" when the server has a user message
-      // with matching text in roughly the same position (last N entries).
+      // Only update state when data actually changed (prevents flicker/scroll jump).
       setTranscript(prev => {
         const optimistic = prev.filter(m => m.id.startsWith('local-'));
+        const realPrev = prev.filter(m => !m.id.startsWith('local-'));
+
+        // Check if server data actually changed
+        const serverChanged = realPrev.length !== serverEntries.length
+          || serverEntries.some((e, i) => realPrev[i]?.id !== e.id || realPrev[i]?.text !== e.text);
+
+        if (!serverChanged && !optimistic.length) return prev; // no change
+        if (!serverChanged && optimistic.length) {
+          // Server same, but check if optimistic messages were confirmed
+          const serverUserTexts = new Set(
+            serverEntries.filter(e => e.role === 'user').map(e => e.text)
+          );
+          const pending = optimistic.filter(m => !serverUserTexts.has(m.text));
+          if (pending.length === optimistic.length) return prev; // nothing changed
+          if (!pending.length) return serverEntries;
+          return [...serverEntries, ...pending];
+        }
+
+        // Server changed — merge with any pending optimistic
         if (!optimistic.length) return serverEntries;
 
-        // Check which optimistic messages the server already has
         const serverUserTexts = new Set(
           serverEntries.filter(e => e.role === 'user').map(e => e.text)
         );
         const pending = optimistic.filter(m => !serverUserTexts.has(m.text));
-
         if (!pending.length) return serverEntries;
-
-        // Append pending optimistic messages after server entries
         return [...serverEntries, ...pending];
       });
       setLoading(false);
@@ -647,6 +663,7 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
     if (selectedKey) {
       setLoading(true);
       setTranscript([]);
+      seenIdsRef.current.clear();
       void fetchTranscript(selectedKey);
     }
   }, [selectedKey, fetchTranscript]);
@@ -1048,15 +1065,23 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
             No transcript visible yet — waiting for activity.
           </div>
         ) : (
-          transcript.map((entry, i) => (
-            <Bubble
-              key={entry.id}
-              entry={entry}
-              previousEntry={i > 0 ? transcript[i - 1] : null}
-              isLatest={i === transcript.length - 1 && entry.role === 'assistant'}
-              agentName={currentAgentName}
-            />
-          ))
+          transcript.map((entry, i) => {
+            const isNew = !seenIdsRef.current.has(entry.id);
+            if (!isNew) { /* already seen */ } else {
+              // Mark as seen after first render via microtask
+              queueMicrotask(() => seenIdsRef.current.add(entry.id));
+            }
+            return (
+              <Bubble
+                key={entry.id}
+                entry={entry}
+                previousEntry={i > 0 ? transcript[i - 1] : null}
+                isLatest={i === transcript.length - 1 && entry.role === 'assistant'}
+                agentName={currentAgentName}
+                isNew={isNew}
+              />
+            );
+          })
         )}
       </div>
 
