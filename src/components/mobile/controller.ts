@@ -28,6 +28,145 @@ const mobileClockFormatter = new Intl.DateTimeFormat('en-US', {
   minute: '2-digit',
 });
 
+// ── Consolidated sync ──
+
+interface SyncRequest {
+  inbox?: { etag?: string };
+  history?: { sessionKey: string; sinceId?: string; limit?: number };
+  review?: { sessionKey?: string; includeFile?: string };
+  linked?: { sessionKey: string; sinceId?: string };
+}
+
+interface SyncResponse {
+  inbox?: MobileInboxSnapshot | null;
+  inboxEtag?: string;
+  history?: { sessionKey: string; entries: MobileTranscriptEntry[] };
+  review?: { file?: MobileReviewFileResponse['file'] };
+  linked?: { sessionKey: string; entries: MobileTranscriptEntry[] };
+  serverTime: string;
+  errors?: Record<string, string>;
+}
+
+let cachedInboxEtag: string | undefined;
+
+interface MobileSyncArgs {
+  // What to request
+  wantInbox: boolean;
+  historySessionKey?: string;
+  historyLastId?: string;
+  reviewFilePath?: string;
+  linkedSessionKey?: string;
+  linkedLastId?: string;
+  // State setters
+  setSnapshot: Dispatch<SetStateAction<MobileInboxSnapshot>>;
+  setRefreshError: Dispatch<SetStateAction<string | null>>;
+  setHistoryBySession: Dispatch<SetStateAction<Record<string, MobileTranscriptEntry[]>>>;
+  setHistoryGroupsBySession: Dispatch<SetStateAction<Record<string, MobileRuntimeTailGroup[]>>>;
+  setReviewFileByPath: Dispatch<SetStateAction<Record<string, MobileReviewFileResponse['file']>>>;
+}
+
+export async function mobileSyncOnce({
+  wantInbox,
+  historySessionKey,
+  historyLastId,
+  reviewFilePath,
+  linkedSessionKey,
+  linkedLastId,
+  setSnapshot,
+  setRefreshError,
+  setHistoryBySession,
+  setHistoryGroupsBySession,
+  setReviewFileByPath,
+}: MobileSyncArgs): Promise<SyncResponse | null> {
+  const body: SyncRequest = {};
+  if (wantInbox) body.inbox = { etag: cachedInboxEtag };
+  if (historySessionKey) body.history = { sessionKey: historySessionKey, sinceId: historyLastId, limit: 18 };
+  if (reviewFilePath) body.review = { includeFile: reviewFilePath };
+  if (linkedSessionKey) body.linked = { sessionKey: linkedSessionKey, sinceId: linkedLastId };
+
+  // Nothing to sync
+  if (!body.inbox && !body.history && !body.review && !body.linked) return null;
+
+  try {
+    const response = await fetch('/api/mobile/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) throw new Error(`sync HTTP ${response.status}`);
+    const data = (await response.json()) as SyncResponse;
+
+    // Apply inbox
+    if (data.inboxEtag) cachedInboxEtag = data.inboxEtag;
+    if (data.inbox) {
+      setSnapshot((prev) => {
+        const prevKey = prev.sessions.map((s) => `${s.sessionKey}:${s.status}:${Math.round(s.context?.usedPercent ?? 0)}`).join('|');
+        const nextKey = data.inbox!.sessions.map((s) => `${s.sessionKey}:${s.status}:${Math.round(s.context?.usedPercent ?? 0)}`).join('|');
+        if (prevKey === nextKey && prev.summary.alerts === data.inbox!.summary.alerts) return prev;
+        return data.inbox!;
+      });
+      setRefreshError(null);
+    }
+
+    // Apply history
+    if (data.history && data.history.entries.length > 0) {
+      const sk = data.history.sessionKey;
+      const newEntries = data.history.entries;
+      setHistoryBySession((current) => {
+        const prev = current[sk] ?? [];
+        if (historyLastId) {
+          // Delta mode: append new entries
+          const existingIds = new Set(prev.map((e) => e.id));
+          const genuinelyNew = newEntries.filter((e) => !existingIds.has(e.id));
+          if (genuinelyNew.length === 0) return current;
+          return { ...current, [sk]: [...prev, ...genuinelyNew] };
+        }
+        // Full mode
+        if (
+          prev.length === newEntries.length
+          && prev.length > 0
+          && prev[prev.length - 1]?.id === newEntries[newEntries.length - 1]?.id
+          && prev[prev.length - 1]?.text === newEntries[newEntries.length - 1]?.text
+        ) return current;
+        return { ...current, [sk]: newEntries };
+      });
+    }
+
+    // Apply review file
+    if (data.review?.file && reviewFilePath) {
+      setReviewFileByPath((current) => ({ ...current, [reviewFilePath]: data.review!.file as MobileReviewFileResponse['file'] }));
+    }
+
+    // Apply linked history
+    if (data.linked && data.linked.entries.length > 0 && linkedSessionKey) {
+      const sk = data.linked.sessionKey;
+      const newEntries = data.linked.entries;
+      setHistoryBySession((current) => {
+        const prev = current[sk] ?? [];
+        if (linkedLastId) {
+          const existingIds = new Set(prev.map((e) => e.id));
+          const genuinelyNew = newEntries.filter((e) => !existingIds.has(e.id));
+          if (genuinelyNew.length === 0) return current;
+          return { ...current, [sk]: [...prev, ...genuinelyNew] };
+        }
+        if (
+          prev.length === newEntries.length
+          && prev.length > 0
+          && prev[prev.length - 1]?.id === newEntries[newEntries.length - 1]?.id
+        ) return current;
+        return { ...current, [sk]: newEntries };
+      });
+    }
+
+    return data;
+  } catch (error) {
+    if (wantInbox) {
+      setRefreshError(error instanceof Error ? error.message : 'sync failed');
+    }
+    return null;
+  }
+}
+
 interface RefreshInboxArgs {
   setSnapshot: Dispatch<SetStateAction<MobileInboxSnapshot>>;
   setRefreshError: Dispatch<SetStateAction<string | null>>;

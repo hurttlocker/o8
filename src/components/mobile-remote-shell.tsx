@@ -62,6 +62,7 @@ import {
   startLinkedOwnedPolling,
   startLiveInboxRefresh,
   startSessionPolling,
+  startUnifiedSyncPolling,
   trackScrollChrome,
   trackViewportTopOffset,
   trackVisibilityRefresh,
@@ -166,6 +167,7 @@ export function MobileRemoteShell({
   useEffect(() => {
     return trackViewportTopOffset({ setViewportTopOffset });
   }, []);
+  // Legacy inbox refresh kept as fallback — unified sync polling below handles primary data loading
   useEffect(() => {
     return startLiveInboxRefresh({ setSnapshot, setRefreshError });
   }, []);
@@ -306,34 +308,6 @@ export function MobileRemoteShell({
       refreshInbox,
     });
   }, [loadHistory, refreshInbox, selectedSessionKey]);
-  useEffect(() => {
-    return startSessionPolling({
-      selectedSessionKey,
-      selectedSession,
-      pendingOwnedTurnBySession,
-      actionStateBySession,
-      waitingForResponse,
-      diffOpen,
-      selectedReviewFilePath,
-      documentVisibleRef,
-      loadHistory,
-      refreshInbox,
-      loadOwnedReviewPacket,
-      loadReviewFile,
-    });
-  }, [
-    actionStateBySession,
-    diffOpen,
-    loadHistory,
-    loadOwnedReviewPacket,
-    loadReviewFile,
-    pendingOwnedTurnBySession,
-    refreshInbox,
-    selectedReviewFilePath,
-    selectedSession,
-    selectedSessionKey,
-    waitingForResponse,
-  ]);
   const linkedOwnedKey = useMemo(() => {
     if (!selectedSession || selectedSession.runtime !== 'codex' || selectedSession.runtimeSurface?.ownership !== 'discovered') return null;
     const cwd = selectedSession.runtimeSurface?.cwd ?? selectedSession.workspace ?? '';
@@ -344,18 +318,44 @@ export function MobileRemoteShell({
     );
     return owned?.sessionKey ?? null;
   }, [selectedSession, snapshot.sessions]);
+  // Initial linked history load
   useEffect(() => {
     if (linkedOwnedKey && !historyBySession[linkedOwnedKey] && !historyLoading[linkedOwnedKey]) {
       void loadHistory(linkedOwnedKey, true).catch(() => undefined);
     }
   }, [linkedOwnedKey, historyBySession, historyLoading, loadHistory]);
+  // Unified sync polling — replaces separate session + linked + review file polling (5 requests → 1)
   useEffect(() => {
-    return startLinkedOwnedPolling({
+    return startUnifiedSyncPolling({
+      selectedSessionKey,
+      selectedSession,
       linkedOwnedKey,
+      pendingOwnedTurnBySession,
+      actionStateBySession,
+      waitingForResponse,
+      diffOpen,
+      selectedReviewFilePath,
       documentVisibleRef,
-      loadHistory,
+      historyBySession,
+      setSnapshot,
+      setRefreshError,
+      setHistoryBySession,
+      setHistoryGroupsBySession,
+      setReviewFileByPath,
+      loadOwnedReviewPacket,
     });
-  }, [linkedOwnedKey, loadHistory]);
+  }, [
+    actionStateBySession,
+    diffOpen,
+    historyBySession,
+    linkedOwnedKey,
+    loadOwnedReviewPacket,
+    pendingOwnedTurnBySession,
+    selectedReviewFilePath,
+    selectedSession,
+    selectedSessionKey,
+    waitingForResponse,
+  ]);
   const effectiveHistoryKey = linkedOwnedKey && historyBySession[linkedOwnedKey]?.length ? linkedOwnedKey : selectedSessionKey;
   const discoveredEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
   const ownedEntries = linkedOwnedKey ? historyBySession[linkedOwnedKey] ?? [] : [];
