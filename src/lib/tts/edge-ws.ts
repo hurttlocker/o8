@@ -2,7 +2,7 @@
  * Edge TTS WebSocket Client — browser-direct, no server needed.
  *
  * Connects to Microsoft's public TTS WebSocket endpoint (same one Edge browser uses).
- * Sends SSML, receives streaming audio chunks, returns a playable Blob.
+ * Sends SSML, receives streaming audio chunks, returns a playable Blob URL.
  *
  * Voice: en-US-SteffanNeural (Mister's canonical voice)
  * Cost: Free (public endpoint)
@@ -10,148 +10,152 @@
  */
 
 const TRUSTED_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
-const WSS_URL = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TRUSTED_TOKEN}`;
 const OUTPUT_FORMAT = 'audio-24khz-96kbitrate-mono-mp3';
 
-function generateRequestId(): string {
-  return crypto.randomUUID().replace(/-/g, '');
+function generateId(): string {
+  // 32 hex chars, no dashes
+  const arr = new Uint8Array(16);
+  crypto.getRandomValues(arr);
+  return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
 }
 
-function buildConfigMessage(requestId: string): string {
-  return [
-    `X-Timestamp:${new Date().toISOString()}`,
-    'Content-Type:application/json; charset=utf-8',
-    `Path:speech.config`,
-    '',
-    JSON.stringify({
-      context: {
-        synthesis: {
-          audio: {
-            metadataoptions: { sentenceBoundaryEnabled: 'false', wordBoundaryEnabled: 'true' },
-            outputFormat: OUTPUT_FORMAT,
+function dateToString(): string {
+  return new Date().toUTCString();
+}
+
+function buildConfigPayload(): string {
+  return JSON.stringify({
+    context: {
+      synthesis: {
+        audio: {
+          metadataoptions: {
+            sentenceBoundaryEnabled: 'false',
+            wordBoundaryEnabled: 'true',
           },
+          outputFormat: OUTPUT_FORMAT,
         },
       },
-    }),
-  ].join('\r\n');
+    },
+  });
 }
 
-function buildSSMLMessage(requestId: string, text: string, voice: string, rate: string): string {
-  // Escape XML special characters
+function buildSSML(text: string, voice: string, rate: string): string {
   const escaped = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 
-  const ssml = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>` +
+  return (
+    `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>` +
     `<voice name='${voice}'>` +
     `<prosody pitch='+0Hz' rate='${rate}' volume='+0%'>` +
     escaped +
-    `</prosody></voice></speak>`;
-
-  return [
-    `X-RequestId:${requestId}`,
-    `Content-Type:application/ssml+xml`,
-    `X-Timestamp:${new Date().toISOString()}`,
-    `Path:ssml`,
-    '',
-    ssml,
-  ].join('\r\n');
+    `</prosody></voice></speak>`
+  );
 }
 
 export interface EdgeTTSOptions {
   voice?: string;
   rate?: string;
-  onChunk?: (chunk: ArrayBuffer) => void;
-  onWordBoundary?: (offset: number, text: string) => void;
 }
 
 /**
- * Synthesize text to MP3 audio via Microsoft's Edge TTS WebSocket.
- * Returns a Blob URL that can be played with HTMLAudioElement.
+ * Synthesize text to audio via Edge TTS WebSocket.
+ * Returns a Blob URL playable with HTMLAudioElement.
  */
 export async function synthesize(
   text: string,
   options: EdgeTTSOptions = {},
 ): Promise<string> {
-  const {
-    voice = 'en-US-SteffanNeural',
-    rate = '+0%',
-    onChunk,
-    onWordBoundary,
-  } = options;
+  const { voice = 'en-US-SteffanNeural', rate = '+0%' } = options;
 
   return new Promise<string>((resolve, reject) => {
-    const requestId = generateRequestId();
+    const requestId = generateId();
+    const connectionId = generateId();
     const audioChunks: ArrayBuffer[] = [];
     let resolved = false;
 
-    const ws = new WebSocket(WSS_URL);
+    const url =
+      `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1` +
+      `?TrustedClientToken=${TRUSTED_TOKEN}` +
+      `&ConnectionId=${connectionId}`;
+
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(url);
+    } catch (err) {
+      reject(new Error(`Edge TTS: failed to create WebSocket: ${err}`));
+      return;
+    }
+
+    // Receive binary data as ArrayBuffer (not Blob)
+    ws.binaryType = 'arraybuffer';
 
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true;
-        ws.close();
-        reject(new Error('Edge TTS: connection timeout (10s)'));
+        try { ws.close(); } catch {}
+        reject(new Error('Edge TTS: timeout (12s)'));
       }
-    }, 10_000);
+    }, 12_000);
+
+    const finish = () => {
+      clearTimeout(timeout);
+      if (!resolved) {
+        resolved = true;
+        try { ws.close(); } catch {}
+        if (audioChunks.length > 0) {
+          const blob = new Blob(audioChunks, { type: 'audio/mpeg' });
+          resolve(URL.createObjectURL(blob));
+        } else {
+          reject(new Error('Edge TTS: no audio received'));
+        }
+      }
+    };
 
     ws.onopen = () => {
-      // Send config
-      ws.send(buildConfigMessage(requestId));
-      // Send SSML
-      ws.send(buildSSMLMessage(requestId, text, voice, rate));
+      // 1. Send speech config
+      const configMsg =
+        `Content-Type:application/json; charset=utf-8\r\n` +
+        `Path:speech.config\r\n\r\n` +
+        buildConfigPayload();
+      ws.send(configMsg);
+
+      // 2. Send SSML synthesis request
+      const ssmlMsg =
+        `X-RequestId:${requestId}\r\n` +
+        `Content-Type:application/ssml+xml\r\n` +
+        `X-Timestamp:${dateToString()}\r\n` +
+        `Path:ssml\r\n\r\n` +
+        buildSSML(text, voice, rate);
+      ws.send(ssmlMsg);
     };
 
-    ws.onmessage = (event) => {
+    ws.onmessage = (event: MessageEvent) => {
       if (typeof event.data === 'string') {
-        // Text message — check for turn.end or word boundaries
+        // Text message — check for turn.end
         if (event.data.includes('Path:turn.end')) {
-          // Synthesis complete — build blob
-          clearTimeout(timeout);
-          if (!resolved) {
-            resolved = true;
-            ws.close();
-            const blob = new Blob(audioChunks, { type: 'audio/mpeg' });
-            const url = URL.createObjectURL(blob);
-            resolve(url);
-          }
-        } else if (event.data.includes('Path:audio.metadata') && onWordBoundary) {
-          // Parse word boundary metadata
-          try {
-            const jsonStart = event.data.indexOf('{');
-            if (jsonStart >= 0) {
-              const json = JSON.parse(event.data.slice(jsonStart));
-              const items = json?.Metadata ?? [];
-              for (const item of items) {
-                if (item.Type === 'WordBoundary') {
-                  onWordBoundary(
-                    item.Data?.Offset ?? 0,
-                    item.Data?.text?.Text ?? '',
-                  );
-                }
-              }
-            }
-          } catch {
-            // Ignore parse errors in metadata
-          }
+          finish();
         }
-      } else if (event.data instanceof Blob) {
-        // Binary message — audio chunk
-        event.data.arrayBuffer().then((buf) => {
-          // Strip the header (everything before "Path:audio\r\n")
-          const headerEnd = findAudioHeader(buf);
-          const audioData = headerEnd >= 0 ? buf.slice(headerEnd) : buf;
-          if (audioData.byteLength > 0) {
-            audioChunks.push(audioData);
-            onChunk?.(audioData);
-          }
-        });
+      } else if (event.data instanceof ArrayBuffer) {
+        // Binary message — extract audio after header
+        const buf = event.data as ArrayBuffer;
+        const view = new DataView(buf);
+
+        if (buf.byteLength < 2) return;
+
+        // First 2 bytes = header length (big-endian uint16)
+        const headerLen = view.getUint16(0);
+        const audioStart = 2 + headerLen;
+
+        if (audioStart < buf.byteLength) {
+          audioChunks.push(buf.slice(audioStart));
+        }
       }
     };
 
-    ws.onerror = (event) => {
+    ws.onerror = () => {
       clearTimeout(timeout);
       if (!resolved) {
         resolved = true;
@@ -160,41 +164,7 @@ export async function synthesize(
     };
 
     ws.onclose = () => {
-      clearTimeout(timeout);
-      if (!resolved) {
-        resolved = true;
-        if (audioChunks.length > 0) {
-          const blob = new Blob(audioChunks, { type: 'audio/mpeg' });
-          const url = URL.createObjectURL(blob);
-          resolve(url);
-        } else {
-          reject(new Error('Edge TTS: connection closed with no audio'));
-        }
-      }
+      finish();
     };
   });
-}
-
-/**
- * Find the end of the binary message header.
- * Edge TTS binary messages have a text header ending with "Path:audio\r\n"
- * followed by a 2-byte separator, then the actual audio data.
- */
-function findAudioHeader(buffer: ArrayBuffer): number {
-  const view = new Uint8Array(buffer);
-  // Look for the pattern: "Path:audio\r\n" in ASCII
-  const needle = [0x50, 0x61, 0x74, 0x68, 0x3A, 0x61, 0x75, 0x64, 0x69, 0x6F, 0x0D, 0x0A];
-  for (let i = 0; i <= view.length - needle.length; i++) {
-    let match = true;
-    for (let j = 0; j < needle.length; j++) {
-      if (view[i + j] !== needle[j]) {
-        match = false;
-        break;
-      }
-    }
-    if (match) {
-      return i + needle.length;
-    }
-  }
-  return -1;
 }
