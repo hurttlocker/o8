@@ -51,6 +51,7 @@ export interface CortexSearchResult {
   snippet: string;
   match_type: 'bm25' | 'semantic' | 'hybrid' | 'rrf';
   memory_id: number;
+  fact_ids: number[];
   imported_at: string;
   metadata?: Record<string, unknown>;
 }
@@ -151,6 +152,7 @@ export interface CortexHealthSummary {
 export interface RecallCard {
   id: number;
   memoryId: number;
+  factIds: number[];
   text: string;
   factType: FactType;
   confidence: number;
