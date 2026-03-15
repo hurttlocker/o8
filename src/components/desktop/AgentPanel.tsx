@@ -383,11 +383,9 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits }: { events: E
   // Merge events + commits into a unified feed
   const items: { type: 'event' | 'commit'; data: EventEntry | { hash: string; message: string; age: string } }[] = [];
 
-  // Add events (non-codex only)
+  // Add all agent events
   for (const e of events) {
-    if (!e.agentId.includes('codex')) {
-      items.push({ type: 'event', data: e });
-    }
+    items.push({ type: 'event', data: e });
   }
 
   // Add commits
@@ -883,10 +881,8 @@ export const AgentPanel = memo(function AgentPanel({
         const res = await fetch('/api/runtime/inventory');
         if (!res.ok) return;
         const data = await res.json();
-        const mainSquads = (data.squads ?? []).filter((s: Squad) =>
-          !s.id.includes('codex-local') && !s.id.includes('codex-owned')
-        );
-        setSquads(prev => JSON.stringify(prev) === JSON.stringify(mainSquads) ? prev : mainSquads);
+        const allSquads = data.squads ?? [];
+        setSquads(prev => JSON.stringify(prev) === JSON.stringify(allSquads) ? prev : allSquads);
         setAgents(prev => JSON.stringify(prev) === JSON.stringify(data.agents ?? []) ? prev : (data.agents ?? []));
         setEvents(prev => JSON.stringify(prev) === JSON.stringify(data.events ?? []) ? prev : (data.events ?? []));
       } catch { /* silent */ }
