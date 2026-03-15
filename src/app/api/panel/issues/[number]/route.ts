@@ -5,13 +5,15 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const REPO = process.env.CORTEX_IDE_REVIEW_REPO || 'hurttlocker/cortex-ide';
+const DEFAULT_REPO = process.env.CORTEX_IDE_REVIEW_REPO || 'hurttlocker/cortex-ide';
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ number: string }> },
 ) {
   const { number: num } = await params;
+  const { searchParams } = new URL(request.url);
+  const REPO = searchParams.get('repo') || DEFAULT_REPO;
   const issueNumber = parseInt(num, 10);
 
   if (!Number.isFinite(issueNumber) || issueNumber < 1) {

@@ -1043,9 +1043,9 @@ export const AgentPanel = memo(function AgentPanel({
   onSelectPR,
 }: {
   onSelectSession?: (sessionKey: string) => void;
-  onSelectIssue?: (issueNumber: number) => void;
+  onSelectIssue?: (issueNumber: number, repo?: string) => void;
   onSelectCommit?: (hash: string) => void;
-  onSelectPR?: (prNumber: number) => void;
+  onSelectPR?: (prNumber: number, repo?: string) => void;
 } = {}) {
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([]);
@@ -1056,9 +1056,29 @@ export const AgentPanel = memo(function AgentPanel({
   const [activeTab, setActiveTab] = useState<Tab>('activity');
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
+  const [activeRepo, setActiveRepo] = useState<string | null>(null);
+  const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
 
   // Build workspace groups from agents
   const workspaceGroups = buildWorkspaceGroups(agents);
+
+  // Resolve workspace → GitHub repo when expanded group changes
+  useEffect(() => {
+    if (!expandedGroup) {
+      setActiveRepo(null);
+      setActiveWorkspace(null);
+      return;
+    }
+    setActiveWorkspace(expandedGroup);
+    // Resolve repo from workspace path
+    fetch(`/api/panel/repo-info?workspace=${encodeURIComponent(expandedGroup)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.repo) setActiveRepo(data.repo);
+        else setActiveRepo(null);
+      })
+      .catch(() => setActiveRepo(null));
+  }, [expandedGroup]);
 
   // Fetch agent inventory (agents + events)
   // Only update state when data actually changed (prevents flicker)
@@ -1102,11 +1122,12 @@ export const AgentPanel = memo(function AgentPanel({
     return () => clearInterval(id);
   }, []);
 
-  // Fetch GitHub issues (every 60s)
+  // Fetch GitHub issues (re-fetch when activeRepo changes)
   useEffect(() => {
     async function fetchIssues() {
       try {
-        const res = await fetch('/api/panel/issues');
+        const repoParam = activeRepo ? `?repo=${encodeURIComponent(activeRepo)}` : '';
+        const res = await fetch(`/api/panel/issues${repoParam}`);
         if (!res.ok) return;
         const data = await res.json();
         const fresh = data.issues ?? [];
@@ -1116,13 +1137,14 @@ export const AgentPanel = memo(function AgentPanel({
     void fetchIssues();
     const id = setInterval(fetchIssues, 60_000);
     return () => clearInterval(id);
-  }, []);
+  }, [activeRepo]);
 
-  // Fetch PRs (every 60s)
+  // Fetch PRs (re-fetch when activeRepo changes)
   useEffect(() => {
     async function fetchPrs() {
       try {
-        const res = await fetch('/api/panel/prs');
+        const repoParam = activeRepo ? `?repo=${encodeURIComponent(activeRepo)}` : '';
+        const res = await fetch(`/api/panel/prs${repoParam}`);
         if (!res.ok) return;
         const data = await res.json();
         const fresh = data.prs ?? [];
@@ -1132,13 +1154,14 @@ export const AgentPanel = memo(function AgentPanel({
     void fetchPrs();
     const id = setInterval(fetchPrs, 60_000);
     return () => clearInterval(id);
-  }, []);
+  }, [activeRepo]);
 
-  // Fetch file tree
+  // Fetch file tree (re-fetch when activeWorkspace changes)
   useEffect(() => {
     async function fetchFiles() {
       try {
-        const res = await fetch('/api/panel/files');
+        const wsParam = activeWorkspace ? `?workspace=${encodeURIComponent(activeWorkspace)}` : '';
+        const res = await fetch(`/api/panel/files${wsParam}`);
         if (!res.ok) return;
         const data = await res.json();
         const freshTree = data.tree ?? [];
@@ -1148,7 +1171,7 @@ export const AgentPanel = memo(function AgentPanel({
     void fetchFiles();
     const id = setInterval(fetchFiles, 60_000);
     return () => clearInterval(id);
-  }, []);
+  }, [activeWorkspace]);
 
   return (
     <div style={{
@@ -1248,16 +1271,43 @@ export const AgentPanel = memo(function AgentPanel({
         })}
       </div>
 
+      {/* ── Scoped Context Label ── */}
+      {activeTab !== 'activity' && expandedGroup ? (
+        <div style={{
+          paddingTop: 6,
+          paddingRight: 14,
+          paddingBottom: 4,
+          paddingLeft: 14,
+          fontSize: 11,
+          color: '#94a3b8',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          borderTop: '1px solid rgba(0,0,0,0.04)',
+          marginTop: 4,
+        }}>
+          <span style={{ fontWeight: 600, color: '#64748b' }}>
+            {workspaceGroups.find(g => g.workspace === expandedGroup)?.displayName ?? 'All'}
+          </span>
+          {activeRepo ? (
+            <>
+              <span>·</span>
+              <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{activeRepo}</span>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* ── Content Area ── */}
       <div style={{
         flex: 1,
         overflowY: 'auto',
-        borderTop: '1px solid rgba(0,0,0,0.04)',
-        marginTop: 4,
+        borderTop: expandedGroup && activeTab !== 'activity' ? 'none' : '1px solid rgba(0,0,0,0.04)',
+        marginTop: expandedGroup && activeTab !== 'activity' ? 0 : 4,
       }}>
         {activeTab === 'activity' ? <ActivityFeed events={events} commits={commits} onSelectCommit={onSelectCommit} /> : null}
-        {activeTab === 'issues' ? <IssuesList issues={issues} onSelect={onSelectIssue || setSelectedIssue} /> : null}
-        {activeTab === 'prs' ? <PRList prs={prs} onSelect={onSelectPR} /> : null}
+        {activeTab === 'issues' ? <IssuesList issues={issues} onSelect={(num) => onSelectIssue ? onSelectIssue(num, activeRepo ?? undefined) : setSelectedIssue(num)} /> : null}
+        {activeTab === 'prs' ? <PRList prs={prs} onSelect={(num) => onSelectPR?.(num, activeRepo ?? undefined)} /> : null}
         {activeTab === 'files' ? <FileTree tree={fileTree} /> : null}
       </div>
 
