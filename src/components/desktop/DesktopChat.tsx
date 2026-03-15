@@ -3,123 +3,67 @@
 /**
  * DesktopChat — Right-sidebar chat panel for Dashboard v1.
  *
- * Visually identical to the mobile chat. Uses the SAME remodex-* CSS classes
- * from globals.css, but is a completely independent component tree.
- * Editing this does NOT affect mobile, and vice versa.
+ * Visually identical to the mobile chat — uses the SAME remodex-* CSS
+ * classes from globals.css. Independent component tree: editing this
+ * does NOT affect mobile, and vice versa.
  *
  * Differences from mobile:
  *   - No hamburger menu
- *   - Scroll container is the sidebar div, not the window
+ *   - Fixed sidebar layout (not full-screen)
  *   - Session picker is a dropdown in the header
+ *   - Scroll container is the sidebar div, not the window
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import {
   ArrowUp,
   Brain,
   ChevronDown,
+  Loader2,
   Plus,
   RefreshCw,
   Sparkles,
+  X,
 } from 'lucide-react';
 import type {
   MobileInboxSnapshot,
   MobileTranscriptEntry,
+  MobileTranscriptMedia,
 } from '@/lib/mobile/types';
-import { CodeBlock } from '@/components/mobile/CodeBlock';
 
 // ── Types ──
 
 type SessionSummary = MobileInboxSnapshot['sessions'][number];
 
-// ── Message rendering (mirrors mobile renderMessageBody) ──
+// ── Agent name helper ──
 
-function renderText(text: string, keyPrefix: string) {
-  const blocks = text.split(/(```[\s\S]*?```)/g);
-
-  return (
-    <div className="remodex-rich-text">
-      {blocks.map((block, i) => {
-        if (block.startsWith('```') && block.endsWith('```')) {
-          const firstNewline = block.indexOf('\n');
-          const lang = firstNewline > 3 ? block.slice(3, firstNewline).trim() : '';
-          const code = block.slice(firstNewline + 1, -3).trim();
-          return <CodeBlock key={`${keyPrefix}-code-${i}`} code={code} language={lang || undefined} />;
-        }
-
-        const paragraphs = block.split('\n\n');
-        return paragraphs.map((p, j) => {
-          if (!p.trim()) return null;
-
-          // Headings
-          const headingMatch = p.match(/^(#{1,3})\s+(.+)$/m);
-          if (headingMatch) {
-            return (
-              <p key={`${keyPrefix}-h-${i}-${j}`} className="remodex-rich-heading" style={{
-                fontWeight: 700,
-                fontSize: headingMatch[1].length === 1 ? '1.1rem' : headingMatch[1].length === 2 ? '1rem' : '0.92rem',
-                margin: '8px 0 4px',
-              }}>
-                {renderInline(headingMatch[2])}
-              </p>
-            );
-          }
-
-          // List items
-          const lines = p.split('\n');
-          const isList = lines.every(l => /^[-*•]\s/.test(l.trim()) || !l.trim());
-          if (isList && lines.some(l => /^[-*•]\s/.test(l.trim()))) {
-            return (
-              <ul key={`${keyPrefix}-list-${i}-${j}`} className="remodex-rich-list" style={{
-                margin: '4px 0',
-                paddingLeft: 18,
-                listStyleType: 'disc',
-              }}>
-                {lines.filter(l => /^[-*•]\s/.test(l.trim())).map((l, k) => (
-                  <li key={k} style={{ fontSize: '0.88rem', lineHeight: 1.5, marginBottom: 2 }}>
-                    {renderInline(l.replace(/^[-*•]\s+/, ''))}
-                  </li>
-                ))}
-              </ul>
-            );
-          }
-
-          return (
-            <p key={`${keyPrefix}-p-${i}-${j}`} className="remodex-rich-paragraph" style={{ margin: '4px 0', lineHeight: 1.55 }}>
-              {renderInline(p.replace(/\n/g, ' '))}
-            </p>
-          );
-        });
-      })}
-    </div>
-  );
+function getAgentName(s: SessionSummary): string {
+  if (s.isCurrentSession) return 'Mister';
+  const name = s.name || s.sessionKey;
+  if (name.includes('codex-owned')) return 'Codex';
+  if (name.includes('ace')) return 'Niot';
+  if (name.includes('hawk')) return 'Hawk';
+  return name;
 }
 
-function renderInline(text: string) {
-  // Handle bold + inline code
-  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
-  return parts.map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={i}>{part.slice(2, -2)}</strong>;
-    }
-    if (part.startsWith('`') && part.endsWith('`')) {
-      return (
-        <code key={i} style={{
-          background: 'rgba(0,0,0,0.06)',
-          padding: '1px 5px',
-          borderRadius: 4,
-          fontSize: '0.86em',
-          fontFamily: '"SF Mono", "Fira Code", monospace',
-        }}>
-          {part.slice(1, -1)}
-        </code>
-      );
-    }
-    return <span key={i}>{part}</span>;
-  });
+function roleLabel(role: string, agentName?: string): string {
+  if (role === 'user') return 'You';
+  if (role === 'system') return 'System';
+  return agentName ?? 'Assistant';
 }
 
-// ── Message Bubble (memoized, uses exact mobile CSS classes) ──
+// ── Media helpers ──
+
+function mediaHref(path: string): string {
+  return `/api/mobile/media?path=${encodeURIComponent(path)}`;
+}
+
+function isImageMedia(item: MobileTranscriptMedia): boolean {
+  return item.kind !== 'pdf' && item.kind !== 'file';
+}
+
+// ── Memoized Message Bubble ──
 
 interface BubbleProps {
   entry: MobileTranscriptEntry;
@@ -130,13 +74,15 @@ interface BubbleProps {
 
 const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName }: BubbleProps) {
   const isUser = entry.role === 'user';
+  const hasText = Boolean(entry.text.trim());
+  const hasMedia = Boolean(entry.media?.length);
   const speakerChanged = !previousEntry || previousEntry.role !== entry.role;
   const showTimestamp = (() => {
     if (!previousEntry?.timestampLabel || !entry.timestampLabel) return speakerChanged;
-    const previous = new Date(`1970-01-01 ${previousEntry.timestampLabel}`).getTime();
-    const current = new Date(`1970-01-01 ${entry.timestampLabel}`).getTime();
-    if (Number.isNaN(previous) || Number.isNaN(current)) return speakerChanged;
-    return Math.abs(current - previous) >= 15 * 60 * 1000;
+    const prev = new Date(`1970-01-01 ${previousEntry.timestampLabel}`).getTime();
+    const curr = new Date(`1970-01-01 ${entry.timestampLabel}`).getTime();
+    if (Number.isNaN(prev) || Number.isNaN(curr)) return speakerChanged;
+    return Math.abs(curr - prev) >= 15 * 60 * 1000;
   })();
 
   // Compaction marker
@@ -153,9 +99,24 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
   if (isUser) {
     return (
       <div className="remodex-user-turn-wrap">
-        {entry.text.trim() ? (
+        {hasText ? (
           <div className="remodex-user-bubble">
-            {renderText(entry.text, `${entry.id}-user`)}
+            <div className="remodex-rich-text">
+              {entry.text.split('\n').map((line, i) => (
+                <p key={i} className="remodex-rich-paragraph">{line}</p>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {hasMedia ? (
+          <div className="remodex-media-grid remodex-media-grid-right">
+            {entry.media!.map((item) =>
+              isImageMedia(item) ? (
+                <div key={item.path} className="remodex-media-card remodex-media-card-image">
+                  <Image src={mediaHref(item.path)} alt={item.name} width={1200} height={900} unoptimized loading="lazy" />
+                </div>
+              ) : null
+            )}
           </div>
         ) : null}
         {showTimestamp ? <span className="remodex-turn-time">{entry.timestampLabel ?? 'now'}</span> : null}
@@ -167,26 +128,158 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
     <article className="remodex-message-card remodex-message-card-assistant">
       {speakerChanged ? (
         <div className="remodex-message-head">
-          <span>{agentName}</span>
+          <span>{roleLabel(entry.role, agentName)}</span>
         </div>
       ) : null}
-      {entry.text.trim() ? renderText(entry.text, `${entry.id}-assistant`) : null}
+      {hasText ? (
+        <div className="remodex-rich-text">
+          {renderMarkdown(entry.text)}
+        </div>
+      ) : null}
+      {hasMedia ? (
+        <div className="remodex-media-grid">
+          {entry.media!.map((item) =>
+            isImageMedia(item) ? (
+              <div key={item.path} className="remodex-media-card remodex-media-card-image">
+                <Image src={mediaHref(item.path)} alt={item.name} width={1200} height={900} unoptimized loading="lazy" />
+              </div>
+            ) : null
+          )}
+        </div>
+      ) : null}
     </article>
   );
 });
 
-// ── Session Picker ──
+// ── Markdown renderer (matches mobile renderMessageBody) ──
 
-interface SessionPickerProps {
+function renderMarkdown(text: string): React.ReactNode[] {
+  const lines = text.split('\n');
+  const elements: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Code block
+    if (line.startsWith('```')) {
+      const lang = line.slice(3).trim();
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].startsWith('```')) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // skip closing ```
+      elements.push(
+        <pre key={`code-${i}`} className="remodex-rich-codeblock">
+          {lang ? <div className="remodex-rich-codeblock-lang">{lang}</div> : null}
+          <code>{codeLines.join('\n')}</code>
+        </pre>
+      );
+      continue;
+    }
+
+    // Heading
+    if (line.startsWith('## ')) {
+      elements.push(<h3 key={`h-${i}`} className="remodex-rich-heading">{line.slice(3)}</h3>);
+      i++;
+      continue;
+    }
+    if (line.startsWith('# ')) {
+      elements.push(<h2 key={`h-${i}`} className="remodex-rich-heading">{line.slice(2)}</h2>);
+      i++;
+      continue;
+    }
+
+    // List item
+    if (line.startsWith('- ') || line.startsWith('* ')) {
+      elements.push(
+        <div key={`li-${i}`} className="remodex-rich-list-item">
+          <span className="remodex-rich-list-bullet">•</span>
+          <span>{renderInline(line.slice(2))}</span>
+        </div>
+      );
+      i++;
+      continue;
+    }
+
+    // Table row (pipe-delimited)
+    if (line.includes('|') && line.trim().startsWith('|')) {
+      const tableRows: string[] = [];
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim().startsWith('|')) {
+        if (!lines[i].match(/^\s*\|[\s-|]+\|\s*$/)) { // skip separator rows
+          tableRows.push(lines[i]);
+        }
+        i++;
+      }
+      if (tableRows.length > 0) {
+        elements.push(
+          <div key={`table-${i}`} className="remodex-rich-table-wrap">
+            <table className="remodex-rich-table">
+              <tbody>
+                {tableRows.map((row, ri) => (
+                  <tr key={ri}>
+                    {row.split('|').filter(c => c.trim()).map((cell, ci) => (
+                      ri === 0
+                        ? <th key={ci}>{renderInline(cell.trim())}</th>
+                        : <td key={ci}>{renderInline(cell.trim())}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      }
+      continue;
+    }
+
+    // Empty line
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
+
+    // Regular paragraph
+    elements.push(<p key={`p-${i}`} className="remodex-rich-paragraph">{renderInline(line)}</p>);
+    i++;
+  }
+
+  return elements;
+}
+
+// ── Inline formatting (bold, code, links) ──
+
+function renderInline(text: string): React.ReactNode {
+  // Split by inline code, bold, and plain text
+  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code key={i} className="remodex-rich-inline-code">{part.slice(1, -1)}</code>;
+    }
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
+// ── Session Picker Dropdown ──
+
+function SessionPicker({
+  sessions,
+  selectedKey,
+  onSelect,
+  open,
+  onToggle,
+}: {
   sessions: SessionSummary[];
   selectedKey: string;
   onSelect: (key: string) => void;
   open: boolean;
   onToggle: () => void;
-  agentName: (s: SessionSummary) => string;
-}
-
-function SessionPicker({ sessions, selectedKey, onSelect, open, onToggle, agentName }: SessionPickerProps) {
+}) {
   const selected = sessions.find(s => s.sessionKey === selectedKey);
 
   return (
@@ -215,7 +308,7 @@ function SessionPicker({ sessions, selectedKey, onSelect, open, onToggle, agentN
           background: selected?.status === 'running' ? '#34c759' : selected?.status === 'idle' ? '#ff9f0a' : '#636366',
           flexShrink: 0,
         }} />
-        {selected ? agentName(selected) : 'Select session'}
+        {selected ? getAgentName(selected) : 'Select session'}
         <ChevronDown
           size={14}
           strokeWidth={2}
@@ -229,25 +322,22 @@ function SessionPicker({ sessions, selectedKey, onSelect, open, onToggle, agentN
 
       {open ? (
         <>
-          <div
-            onClick={onToggle}
-            style={{ position: 'fixed', inset: 0, zIndex: 99 }}
-          />
+          <div onClick={onToggle} style={{ position: 'fixed', inset: 0, zIndex: 99 }} />
           <div style={{
             position: 'absolute',
             top: '100%',
             left: 0,
             marginTop: 4,
-            width: 280,
+            width: 260,
             background: 'rgba(255, 255, 255, 0.92)',
             backdropFilter: 'blur(20px)',
             WebkitBackdropFilter: 'blur(20px)',
-            borderRadius: 14,
+            borderRadius: 12,
             border: '1px solid rgba(0,0,0,0.08)',
-            boxShadow: '0 8px 40px rgba(0,0,0,0.12)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
             zIndex: 100,
             padding: 4,
-            maxHeight: 360,
+            maxHeight: 320,
             overflowY: 'auto',
           }}>
             {sessions.map(s => (
@@ -262,7 +352,7 @@ function SessionPicker({ sessions, selectedKey, onSelect, open, onToggle, agentN
                   padding: '10px 12px',
                   background: s.sessionKey === selectedKey ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
                   border: 'none',
-                  borderRadius: 10,
+                  borderRadius: 8,
                   color: '#111827',
                   fontSize: 13,
                   fontWeight: 500,
@@ -278,10 +368,10 @@ function SessionPicker({ sessions, selectedKey, onSelect, open, onToggle, agentN
                   flexShrink: 0,
                 }} />
                 <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {agentName(s)}
+                  {getAgentName(s)}
                 </span>
                 {s.sessionKey === selectedKey ? (
-                  <span style={{ color: '#2563eb', fontSize: 12, fontWeight: 600 }}>✓</span>
+                  <span style={{ color: '#2563eb', fontSize: 12 }}>✓</span>
                 ) : null}
               </button>
             ))}
@@ -302,19 +392,11 @@ export function DesktopChat() {
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const composeRef = useRef<HTMLTextAreaElement>(null);
   const stickToBottomRef = useRef(true);
-
-  const agentName = useCallback((s: SessionSummary) => {
-    if (s.isCurrentSession) return 'Mister';
-    const name = s.name || s.sessionKey;
-    if (name.includes('codex-owned')) return 'Codex';
-    if (name.includes('ace')) return 'Niot';
-    if (name.includes('hawk')) return 'Hawk';
-    return name;
-  }, []);
 
   const scrollToBottom = useCallback((force = false) => {
     if (!scrollRef.current) return;
@@ -326,6 +408,7 @@ export function DesktopChat() {
     });
   }, []);
 
+  // ── Fetch sessions ──
   const fetchSessions = useCallback(async () => {
     try {
       const res = await fetch('/api/mobile/inbox');
@@ -339,6 +422,7 @@ export function DesktopChat() {
     } catch { /* silent */ }
   }, [selectedKey]);
 
+  // ── Fetch transcript ──
   const fetchTranscript = useCallback(async (key: string) => {
     if (!key) return;
     try {
@@ -353,6 +437,7 @@ export function DesktopChat() {
     }
   }, [scrollToBottom]);
 
+  // ── Send message ──
   const send = useCallback(async () => {
     if (!draft.trim() || !selectedKey || sending) return;
     const text = draft.trim();
@@ -379,7 +464,25 @@ export function DesktopChat() {
     finally { setSending(false); }
   }, [draft, selectedKey, sending, fetchTranscript, scrollToBottom]);
 
-  // Init
+  // ── Enhance draft ──
+  const enhance = useCallback(async () => {
+    if (!draft.trim() || enhancing) return;
+    setEnhancing(true);
+    try {
+      const res = await fetch('/api/mobile/enhance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: draft }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.enhanced) setDraft(data.enhanced);
+      }
+    } catch { /* silent */ }
+    finally { setEnhancing(false); }
+  }, [draft, enhancing]);
+
+  // ── Init ──
   useEffect(() => { void fetchSessions(); }, [fetchSessions]);
 
   useEffect(() => {
@@ -390,7 +493,7 @@ export function DesktopChat() {
     }
   }, [selectedKey, fetchTranscript]);
 
-  // Poll
+  // Poll for new messages
   useEffect(() => {
     if (!selectedKey) return;
     const interval = setInterval(() => void fetchTranscript(selectedKey), 5000);
@@ -401,22 +504,27 @@ export function DesktopChat() {
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
     const el = scrollRef.current;
-    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distFromBottom < 80;
   }, []);
 
   useEffect(() => { scrollToBottom(); }, [transcript.length, scrollToBottom]);
 
   const selectedSession = sessions.find(s => s.sessionKey === selectedKey);
-  const currentAgentName = selectedSession ? agentName(selectedSession) : 'Mister';
+  const currentAgentName = selectedSession ? getAgentName(selectedSession) : 'Mister';
   const chatSendDisabled = !selectedKey || sending || !draft.trim();
 
   return (
-    <div className="remodex-desktop-chat-root" style={{
+    <div className="remodex-desktop-chat" style={{
       display: 'flex',
       flexDirection: 'column',
       height: '100%',
-      background: 'linear-gradient(180deg, #fbfcff 0%, #f5f7fb 100%)',
+      background: '#f5f7fb',
       borderLeft: '1px solid rgba(0,0,0,0.06)',
+      /* Set CSS vars for remodex compose classes */
+      ['--remodex-compose-active' as string]: '0',
+      ['--remodex-dock-fade-progress' as string]: '0',
+      ['--remodex-dock-motion-progress' as string]: '0',
     }}>
       {/* ── Header ── */}
       <div style={{
@@ -426,7 +534,7 @@ export function DesktopChat() {
         alignItems: 'center',
         justifyContent: 'space-between',
         flexShrink: 0,
-        background: 'rgba(255,255,255,0.82)',
+        background: 'rgba(255,255,255,0.8)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
       }}>
@@ -436,7 +544,6 @@ export function DesktopChat() {
           onSelect={setSelectedKey}
           open={pickerOpen}
           onToggle={() => setPickerOpen(p => !p)}
-          agentName={agentName}
         />
       </div>
 
@@ -444,13 +551,11 @@ export function DesktopChat() {
       <div
         ref={scrollRef}
         onScroll={handleScroll}
+        className="remodex-message-stack"
         style={{
           flex: 1,
           overflowY: 'auto',
           padding: '12px 14px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 2,
         }}
       >
         {loading ? (
@@ -462,7 +567,7 @@ export function DesktopChat() {
           </div>
         ) : transcript.length === 0 ? (
           <div className="remodex-loading-card">
-            No transcript turns visible yet — latest activity may have been tool-heavy or compacted.
+            No transcript visible yet — waiting for activity.
           </div>
         ) : (
           transcript.map((entry, i) => (
@@ -477,7 +582,7 @@ export function DesktopChat() {
         )}
       </div>
 
-      {/* ── Compose Bar (mirrors mobile exactly) ── */}
+      {/* ── Compose Bar (identical structure to mobile) ── */}
       <div style={{
         padding: '10px 14px 14px',
         flexShrink: 0,
@@ -539,13 +644,18 @@ export function DesktopChat() {
                 type="button"
                 className="remodex-compose-chip remodex-compose-chip-icon"
                 aria-label="Enhance prompt"
-                style={{ color: '#ff9f0a' }}
+                disabled={enhancing}
+                onClick={() => void enhance()}
+                style={{ color: enhancing ? '#d1d5db' : '#ff9f0a' }}
               >
-                <Sparkles size={18} strokeWidth={2} />
+                <Sparkles size={18} strokeWidth={2} className={enhancing ? 'spin' : undefined} />
               </button>
             ) : null}
             <button
               type="button"
+              disabled={chatSendDisabled}
+              onClick={() => void send()}
+              aria-label={`Send message to ${currentAgentName}`}
               style={{
                 marginLeft: 'auto',
                 display: 'inline-flex',
@@ -564,12 +674,9 @@ export function DesktopChat() {
                 boxShadow: chatSendDisabled ? 'none' : '0 4px 14px rgba(239, 68, 68, 0.4)',
                 cursor: chatSendDisabled ? 'default' : 'pointer',
               }}
-              disabled={chatSendDisabled}
-              onClick={() => void send()}
-              aria-label={`Send message to ${currentAgentName}`}
             >
               {sending ? (
-                <RefreshCw size={17} className="spin" />
+                <Loader2 size={17} className="spin" />
               ) : (
                 <>
                   <ArrowUp size={17} strokeWidth={2.2} />
