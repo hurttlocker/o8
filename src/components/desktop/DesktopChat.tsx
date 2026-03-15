@@ -412,6 +412,7 @@ export function DesktopChat() {
   const [selectedKey, setSelectedKey] = useState<string>('');
   const [transcript, setTranscript] = useState<MobileTranscriptEntry[]>([]);
   const [draft, setDraft] = useState('');
+  const [composeHeight, setComposeHeight] = useState(60);
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -976,6 +977,41 @@ export function DesktopChat() {
         )}
       </div>
 
+      {/* ── Resize Handle ── */}
+      <div
+        onMouseDown={(e) => {
+          e.preventDefault();
+          const startY = e.clientY;
+          const startH = composeHeight;
+          const onMove = (ev: MouseEvent) => {
+            const delta = startY - ev.clientY;
+            setComposeHeight(Math.min(Math.max(startH + delta, 60), 400));
+          };
+          const onUp = () => {
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+          };
+          document.addEventListener('mousemove', onMove);
+          document.addEventListener('mouseup', onUp);
+        }}
+        style={{
+          height: 8,
+          cursor: 'row-resize',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        <div style={{
+          width: 36,
+          height: 4,
+          borderRadius: 2,
+          backgroundColor: 'rgba(0,0,0,0.1)',
+          transition: 'background-color 150ms',
+        }} />
+      </div>
+
       {/* ── Compose Bar (matches mobile exactly) ── */}
       <div style={{
         padding: '10px 14px 14px',
@@ -996,7 +1032,6 @@ export function DesktopChat() {
           <textarea
             ref={composeRef}
             className="remodex-compose-input"
-            rows={2}
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => {
@@ -1006,6 +1041,13 @@ export function DesktopChat() {
               }
             }}
             placeholder={`Message ${currentAgentName}…`}
+            style={{
+              height: composeHeight,
+              minHeight: 60,
+              maxHeight: 400,
+              resize: 'none',
+              transition: 'none',
+            }}
           />
 
           {/* Action row */}
