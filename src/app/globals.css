@@ -1,6 +1,12 @@
 html {
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
+  /* Hide scrollbar on mobile — page still scrolls, no visual bar stealing width */
+  scrollbar-width: none; /* Firefox */
+}
+
+html::-webkit-scrollbar {
+  display: none; /* Safari / Chrome */
 }
 
 :root {
@@ -1722,7 +1728,7 @@ button.workflow-file-item.workflow-file-item-active {
   left: 50%;
   top: calc(env(safe-area-inset-top, 0px) + var(--remodex-viewport-top-offset, 0px) + 8px);
   z-index: 8;
-  width: min(calc(100vw - 16px), 422px);
+  width: min(calc(100dvw - 16px), 422px);
   display: grid;
   grid-template-columns: 46px minmax(0, 1fr) auto;
   gap: calc(0.66rem - (var(--remodex-header-progress) * 0.1rem));
@@ -3031,7 +3037,7 @@ button.workflow-file-item.workflow-file-item-active {
   left: 50%;
   bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
   z-index: 6;
-  width: min(calc(100vw - 16px), 422px);
+  width: min(calc(100dvw - 16px), 422px);
   display: grid;
   gap: calc(0.34rem - (var(--remodex-dock-fade-progress) * 0.1rem) - (var(--remodex-dock-motion-progress) * 0.08rem));
   padding: 0.08rem 0.25rem 0;
