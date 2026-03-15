@@ -116,10 +116,13 @@ export async function cortexStats(): Promise<CortexStats | null> {
 
 /**
  * Get stale (decaying) facts.
+ * NOTE: `cortex stale` doesn't support --limit or --json yet (see hurttlocker/cortex#337).
+ * We get all results and slice client-side until Cortex ships those flags.
  */
 export async function cortexStale(limit = 10): Promise<CortexStaleFact[]> {
-  const results = await runCortex<CortexStaleFact[]>(['stale', '--limit', String(limit), '--json']);
-  return results ?? [];
+  const results = await runCortex<CortexStaleFact[]>(['stale']);
+  if (!results) return [];
+  return results.slice(0, limit);
 }
 
 /**
@@ -132,28 +135,39 @@ export async function cortexConflicts(limit = 10): Promise<CortexConflict[]> {
 
 /**
  * Reinforce a fact (reset decay timer).
+ *
+ * ⚠️ ID MISMATCH WARNING: Search returns memory_id but reinforce expects fact_id.
+ * These are different ID spaces. Until Cortex ships fact_ids in search results
+ * (hurttlocker/cortex#336), this may reinforce the wrong fact.
  */
 export async function cortexReinforce(factId: number): Promise<boolean> {
   const result = await runCortex<{ ok?: boolean }>(['reinforce', String(factId)]);
-  cache.delete('stats'); // Invalidate stats cache
+  cache.delete('stats');
+  cache.delete('health');
   return result !== null;
 }
 
 /**
- * Supersede a fact (mark as replaced by a newer fact).
+ * Supersede a fact (mark old fact as replaced by a newer one).
+ * Correct syntax: `cortex supersede <old_id> --by <new_id>`
  */
-export async function cortexSupersede(factId: number): Promise<boolean> {
-  const result = await runCortex<{ ok?: boolean }>(['beliefs', 'set', 'superseded', String(factId)]);
+export async function cortexSupersede(oldFactId: number, newFactId: number): Promise<boolean> {
+  const result = await runCortex<{ ok?: boolean }>(['supersede', String(oldFactId), '--by', String(newFactId)]);
   cache.delete('stats');
+  cache.delete('health');
   return result !== null;
 }
 
 /**
  * Retire a fact (mark as no longer relevant).
+ * Uses `beliefs set retired` which is the correct syntax.
+ *
+ * ⚠️ Same ID mismatch warning as cortexReinforce — see hurttlocker/cortex#336.
  */
 export async function cortexRetire(factId: number): Promise<boolean> {
   const result = await runCortex<{ ok?: boolean }>(['beliefs', 'set', 'retired', String(factId)]);
   cache.delete('stats');
+  cache.delete('health');
   return result !== null;
 }
 

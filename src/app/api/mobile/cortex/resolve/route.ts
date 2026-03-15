@@ -25,12 +25,11 @@ export async function POST(request: Request) {
         if (!supersededId) {
           return NextResponse.json({ error: 'supersededId is required for supersede' }, { status: 400 });
         }
-        const [okSupersede, okReinforce] = await Promise.all([
-          cortexSupersede(supersededId),
-          cortexReinforce(factId),
-        ]);
+        // cortex supersede <old_id> --by <new_id>
+        // old = the one being superseded, new = the one being kept
+        const ok = await cortexSupersede(supersededId, factId);
         return NextResponse.json({
-          ok: okSupersede && okReinforce,
+          ok,
           action: 'resolved',
           kept: factId,
           superseded: supersededId,
