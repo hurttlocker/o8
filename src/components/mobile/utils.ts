@@ -5,7 +5,7 @@ import type {
   MobileTranscriptEntry,
   MobileTranscriptMedia,
 } from '@/lib/mobile/types';
-import type { SessionSummary } from './types';
+import type { ProjectGroup, SessionSummary } from './types';
 
 export function pickCurrentSession(snapshot: MobileInboxSnapshot) {
   return snapshot.sessions.find((session) => session.isCurrentSession)
@@ -123,6 +123,27 @@ export function ownedReviewDispositionLabel(disposition?: RuntimeReviewPacket['r
 
 export function ownedReviewDispositionTone(disposition?: RuntimeReviewPacket['reviewDisposition']) {
   return disposition === 'resolved' ? 'calm' : 'watch';
+}
+
+export function sessionStatusSummary(
+  selectedSession: SessionSummary | undefined,
+  selectedReviewPacket: RuntimeReviewPacket | null | undefined,
+  isOwnedCodexSession: boolean,
+) {
+  const contextUsedPercent = Math.round(selectedSession?.context.usedPercent ?? 0);
+  const ownedAvailability = selectedSession?.runtimeSurface?.lifecycle?.availability;
+  const ownedLastOutcome = selectedSession?.runtimeSurface?.lifecycle?.lastOutcome;
+  const ownedReviewDisposition = selectedReviewPacket?.reviewDisposition;
+
+  return {
+    tone: isOwnedCodexSession
+      ? ownedLifecycleTone(ownedAvailability, ownedLastOutcome)
+      : contextPressureTone(contextUsedPercent),
+    headline: isOwnedCodexSession ? ownedLifecycleLabel(ownedAvailability) : `${contextUsedPercent}% used`,
+    meta: isOwnedCodexSession
+      ? [ownedOutcomeLabel(ownedLastOutcome), ownedReviewDispositionLabel(ownedReviewDisposition)].join(' • ')
+      : contextTrendLabel(selectedSession?.context.trend),
+  };
 }
 
 export function threadLaneLabel(session: SessionSummary) {
@@ -409,4 +430,91 @@ export function projectSummary(sessions: SessionSummary[]): string {
     parts.push(`${runningCount} active`);
   }
   return parts.join(' · ');
+}
+
+export function buildProjectGroups(
+  snapshot: MobileInboxSnapshot,
+  selectedSession: SessionSummary | undefined,
+): ProjectGroup[] {
+  const isRelevant = (session: SessionSummary) => {
+    if (session.isCurrentSession) return true;
+    if (session.id === selectedSession?.id) return true;
+
+    const ageText = session.lastEventAt ?? '';
+    const hoursMatch = ageText.match(/^(\d+)h/);
+    const daysMatch = ageText.match(/^(\d+)d/);
+    const ageHours = daysMatch ? parseInt(daysMatch[1], 10) * 24 : hoursMatch ? parseInt(hoursMatch[1], 10) : 0;
+    const isStale = ageHours > 4;
+
+    if (session.runtime === 'codex') {
+      const sourceLabel = session.runtimeSurface?.sourceLabel ?? '';
+      const ownership = session.runtimeSurface?.ownership ?? '';
+      if (ownership === 'discovered') {
+        return sourceLabel.includes('live pid');
+      }
+      if (ownership === 'owned') {
+        if (sourceLabel.includes('active pid')) return true;
+        const minsMatch = ageText.match(/^(\d+)m/);
+        const recentMins = minsMatch ? parseInt(minsMatch[1], 10) : 999;
+        return ageText === 'just now' || recentMins < 60;
+      }
+      return false;
+    }
+
+    if (isStale) return false;
+    if (['running', 'reviewing', 'blocked'].includes(session.status)) return true;
+    if (session.activity || session.alerts > 0) return true;
+    return false;
+  };
+
+  const relevant = snapshot.sessions.filter(isRelevant);
+  const groupMap = new Map<string, SessionSummary[]>();
+  for (const session of relevant) {
+    const workspace = session.workspace || '~/clawd';
+    const existing = groupMap.get(workspace) ?? [];
+    existing.push(session);
+    groupMap.set(workspace, existing);
+  }
+
+  const groups: ProjectGroup[] = [];
+  for (const [workspace, rawSessions] of groupMap) {
+    const sessions: SessionSummary[] = [];
+    const seenIds = new Set<string>();
+    for (const session of rawSessions) {
+      if (seenIds.has(session.id)) continue;
+      seenIds.add(session.id);
+      sessions.push(session);
+    }
+
+    const hasRunning = sessions.some((session) => session.status === 'running' || session.status === 'reviewing');
+    const bestContextPct = Math.max(...sessions.map((session) => session.context?.usedPercent ?? 0));
+    let mostRecentTime: string | undefined;
+    for (const session of sessions) {
+      if (session.activity?.headline || session.lastEventAt) {
+        mostRecentTime = session.lastEventAt;
+        break;
+      }
+    }
+
+    groups.push({
+      projectName: projectDisplayName(workspace, sessions),
+      workspace,
+      sessions,
+      hasPrimary: sessions.some((session) => session.isCurrentSession),
+      summary: projectSummary(sessions),
+      mostRecentTime: mostRecentTime ?? sessions[0]?.lastEventAt,
+      bestContextPct,
+      hasRunning,
+    });
+  }
+
+  groups.sort((left, right) => {
+    if (left.hasPrimary && !right.hasPrimary) return -1;
+    if (!left.hasPrimary && right.hasPrimary) return 1;
+    if (left.hasRunning && !right.hasRunning) return -1;
+    if (!left.hasRunning && right.hasRunning) return 1;
+    return 0;
+  });
+
+  return groups;
 }
