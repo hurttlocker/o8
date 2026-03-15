@@ -37,7 +37,7 @@ const RecallPanel = dynamic(() => import('./mobile/RecallPanel'), { ssr: false }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const MemoryHealth = dynamic(() => import('./mobile/MemoryHealth'), { ssr: false });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const MemoryContext = dynamic(() => import('./mobile/MemoryContext'), { ssr: false });
+// MemoryContext removed — recall trigger moved to ComposeBar action row
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const GraphExplorer = dynamic(() => import('./mobile/GraphExplorer'), { ssr: false });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -111,8 +111,7 @@ export function MobileRemoteShell({
     cortexRecallOpen, setCortexRecallOpen,
     cortexHealthOpen, setCortexHealthOpen,
     cortexGraphOpen, setCortexGraphOpen,
-    cortexContextEnabled, setCortexContextEnabled,
-    cortexContextBlock, setCortexContextBlock,
+    // cortexContextEnabled/Block removed — recall moved to ComposeBar
   } = state;
 
   // Lock body scroll when diff overlay is open
@@ -316,15 +315,6 @@ export function MobileRemoteShell({
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
         <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
-          <MemoryContext
-            prompt={transcriptDraft}
-            cwd={selectedSession?.runtimeSurface?.cwd}
-            branch={selectedSession?.runtimeSurface?.branch}
-            enabled={cortexContextEnabled}
-            onToggle={setCortexContextEnabled}
-            onContextReady={setCortexContextBlock}
-            onOpenRecall={() => setCortexRecallOpen(true)}
-          />
           <div className="remodex-compose-shell">
             <ComposeBar
               session={selectedSession}
@@ -349,6 +339,7 @@ export function MobileRemoteShell({
               composeRef={composeRef}
               fileInputRef={fileInputRef}
               handlers={actions.composeBarHandlers}
+              onOpenRecall={() => setCortexRecallOpen(true)}
             />
           </div>
           <RuntimeBar
