@@ -516,17 +516,17 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
   // ── Send sound ──
   const playSendSound = useCallback(() => {
     try {
-      const ctx = new AudioContext();
+      const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.connect(gain);
       gain.connect(ctx.destination);
-      osc.frequency.setValueAtTime(1200, ctx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.08);
-      gain.gain.setValueAtTime(0.12, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+      osc.frequency.setValueAtTime(1800, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(600, ctx.currentTime + 0.04);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
       osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.12);
+      osc.stop(ctx.currentTime + 0.06);
     } catch { /* silent — no audio context available */ }
   }, []);
 
