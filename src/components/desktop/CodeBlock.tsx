@@ -124,9 +124,9 @@ function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => vo
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        backdropFilter: 'blur(24px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(24px) saturate(180%)',
-        backgroundColor: 'rgba(248, 250, 252, 0.72)',
+        backdropFilter: 'blur(40px) saturate(200%) brightness(1.05)',
+        WebkitBackdropFilter: 'blur(40px) saturate(200%) brightness(1.05)',
+        backgroundColor: 'rgba(255, 255, 255, 0.15)',
         animation: 'fadeIn 200ms ease',
       }}
     >
@@ -140,9 +140,11 @@ function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => vo
           maxWidth: 1400,
           borderRadius: 20,
           overflow: 'hidden',
-          background: 'linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(240,247,255,0.6) 100%)',
-          border: '1px solid rgba(255,255,255,0.6)',
-          boxShadow: '0 32px 80px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.9)',
+          background: 'linear-gradient(135deg, rgba(255,255,255,0.45) 0%, rgba(240,247,255,0.25) 100%)',
+          border: '1px solid rgba(255,255,255,0.35)',
+          boxShadow: '0 32px 80px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.6)',
+          backdropFilter: 'blur(60px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(60px) saturate(180%)',
         }}
       >
         {/* Header */}
@@ -155,7 +157,7 @@ function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => vo
           paddingBottom: 14,
           paddingLeft: 20,
           borderBottom: '1px solid rgba(0,0,0,0.06)',
-          background: 'rgba(255,255,255,0.5)',
+          background: 'rgba(255,255,255,0.2)',
         }}>
           <span style={{
             fontSize: 13,
