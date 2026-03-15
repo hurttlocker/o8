@@ -416,7 +416,7 @@ function renderInline(text: string): React.ReactNode {
 
 // ── Main Component ──
 
-export function DesktopChat({ externalSessionKey }: { externalSessionKey?: string } = {}) {
+export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessionKey?: string; onOpenDiff?: () => void } = {}) {
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedKey, setSelectedKey] = useState<string>('');
@@ -1160,7 +1160,7 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
         {/* Diff pill (right side) */}
         <button
           type="button"
-          onClick={() => setDiffOpen(true)}
+          onClick={() => onOpenDiff ? onOpenDiff() : setDiffOpen(true)}
           style={{
             flexShrink: 0,
             display: 'inline-flex',
