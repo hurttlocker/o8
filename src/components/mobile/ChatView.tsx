@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import Image from 'next/image';
 import { ChevronRight, FileDiff, FileText, Image as ImageIcon } from 'lucide-react';
@@ -187,6 +187,8 @@ export function ChatView({
 }: ChatViewProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
+  const prevEntryCountRef = useRef(transcriptEntries.length);
 
   const getIsNew = useCallback((entryId: string) => {
     return hydrated
@@ -224,15 +226,29 @@ export function ChatView({
     });
   }, [transcriptEntries.length]);
 
-  // Track scroll position to determine stick-to-bottom
+  // Track scroll position to determine stick-to-bottom + new message pill
   useEffect(() => {
     const handleScroll = () => {
       const distanceFromBottom = document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
-      stickToBottomRef.current = distanceFromBottom < 120;
+      const atBottom = distanceFromBottom < 120;
+      stickToBottomRef.current = atBottom;
+      if (atBottom) setHasNewMessages(false);
     };
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  // Detect new assistant messages while scrolled up
+  useEffect(() => {
+    const prevCount = prevEntryCountRef.current;
+    prevEntryCountRef.current = transcriptEntries.length;
+    if (transcriptEntries.length > prevCount && !stickToBottomRef.current) {
+      const newEntries = transcriptEntries.slice(prevCount);
+      if (newEntries.some((e) => e.role === 'assistant')) {
+        setHasNewMessages(true);
+      }
+    }
+  }, [transcriptEntries]);
 
   const hasEntries = transcriptEntries.length > 0;
   const virtualItems = virtualizer.getVirtualItems();
@@ -331,6 +347,39 @@ export function ChatView({
             <span className="remodex-typing-dot" />
           </div>
         </div>
+      ) : null}
+
+      {hasNewMessages ? (
+        <button
+          type="button"
+          onClick={() => {
+            setHasNewMessages(false);
+            onScrollToLatestMessage(true);
+          }}
+          style={{
+            position: 'fixed',
+            bottom: '120px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 20,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            padding: '8px 16px',
+            borderRadius: '20px',
+            backgroundColor: '#007aff',
+            color: '#ffffff',
+            fontSize: '13px',
+            fontWeight: 600,
+            border: 'none',
+            boxShadow: '0 4px 16px rgba(0,122,255,0.35)',
+            cursor: 'pointer',
+            animation: 'pill-bounce-in 0.3s ease-out',
+          }}
+        >
+          <span style={{ fontSize: '14px' }}>↓</span> New messages
+          <style>{`@keyframes pill-bounce-in { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }`}</style>
+        </button>
       ) : null}
 
       {isRefreshing && transcriptEntries.length > 0 ? (
