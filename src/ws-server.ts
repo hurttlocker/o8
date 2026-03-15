@@ -344,6 +344,7 @@ function startPollingLoops() {
   }, SAFETY_NET_HISTORY_MS);
 
   // Conflict scan — poll every 5s, push updates to all clients when conflicts change
+  // TODO: Track repo per client session for multi-repo support (currently uses process.cwd())
   let lastConflictHash = '';
   setInterval(async () => {
     const activeClients = [...clients.values()].filter((c) => c.ws.readyState === WebSocket.OPEN);
@@ -351,8 +352,11 @@ function startPollingLoops() {
 
     try {
       const res = await fetch(`${NEXT_ORIGIN}/api/worktrees/conflicts?repo=${encodeURIComponent(process.cwd())}`, {
-        headers: { 'Cache-Control': 'no-cache' },
-        signal: AbortSignal.timeout(4000),
+        headers: {
+          'Cache-Control': 'no-cache',
+          'Authorization': `Bearer ${WS_TOKEN}`,
+        },
+        signal: AbortSignal.timeout(3000),
       });
 
       if (!res.ok) return;

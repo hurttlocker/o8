@@ -303,12 +303,11 @@ export async function recommendMergeOrder(
   const scored = active.map((wt, i) => {
     const changeSize = sizes[i] ?? 0;
     const conflictCount = conflictCounts.get(wt.id) ?? 0;
-    const ageMs = Date.now() - wt.createdAt;
 
-    // Scoring: larger changes first (weight 3), older first (weight 1), fewer conflicts first (weight 2)
+    // Scoring: larger changes first (weight 3), fewer conflicts first (weight 2)
+    // Age removed — it's noise at typical worktree lifetimes (minutes-hours)
     const score =
       (changeSize * 3) +
-      (ageMs / 3_600_000 * 1) + // Hours old
       ((10 - Math.min(conflictCount, 10)) * 2); // Inverse conflict count
 
     return {
