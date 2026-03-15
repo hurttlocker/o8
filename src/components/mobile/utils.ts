@@ -268,12 +268,121 @@ export function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode
   return nodes;
 }
 
+function isTableRow(line: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.startsWith('|') && trimmed.endsWith('|') && trimmed.length > 2;
+}
+
+function isTableSeparator(line: string): boolean {
+  const trimmed = line.trim();
+  return /^\|[\s:]*-{2,}[\s:]*(\|[\s:]*-{2,}[\s:]*)*\|$/.test(trimmed);
+}
+
+function parseTableCells(line: string): string[] {
+  return line.trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+function parseTableAlignment(separatorLine: string): Array<'left' | 'center' | 'right'> {
+  return parseTableCells(separatorLine).map((cell) => {
+    const trimmed = cell.replace(/\s/g, '');
+    if (trimmed.startsWith(':') && trimmed.endsWith(':')) return 'center';
+    if (trimmed.endsWith(':')) return 'right';
+    return 'left';
+  });
+}
+
 export function renderMessageBody(text: string, keyPrefix: string) {
   const blocks: ReactNode[] = [];
   const lines = text.replace(/\r/g, '').split('\n');
   let paragraphLines: string[] = [];
   let listType: 'ul' | 'ol' | null = null;
   let listItems: string[] = [];
+  let tableLines: string[] = [];
+
+  const flushTable = () => {
+    if (tableLines.length < 2) {
+      // Not enough lines for a real table — dump as paragraphs
+      for (const tl of tableLines) paragraphLines.push(tl);
+      tableLines = [];
+      return;
+    }
+
+    // Determine if line 1 is a separator (header row + separator)
+    const hasSeparator = tableLines.length >= 2 && isTableSeparator(tableLines[1]);
+    const headerCells = parseTableCells(tableLines[0]);
+    const alignments = hasSeparator ? parseTableAlignment(tableLines[1]) : headerCells.map(() => 'left' as const);
+    const bodyStartIndex = hasSeparator ? 2 : 1;
+    const bodyRows = tableLines.slice(bodyStartIndex).filter((l) => !isTableSeparator(l));
+
+    const tableKey = `${keyPrefix}-tbl-${blocks.length}`;
+
+    const headerRow = createElement('tr', { key: `${tableKey}-hdr` },
+      headerCells.map((cell, ci) => createElement('th', {
+        key: `${tableKey}-th-${ci}`,
+        style: {
+          textAlign: alignments[ci] ?? 'left',
+          padding: '10px 14px',
+          fontSize: '0.8rem',
+          fontWeight: 600,
+          color: '#6b7280',
+          textTransform: 'uppercase' as const,
+          letterSpacing: '0.04em',
+          borderBottom: '2px solid #e5e7eb',
+          whiteSpace: 'nowrap' as const,
+        },
+      }, renderInlineMarkdown(cell, `${tableKey}-th-${ci}`))),
+    );
+
+    const bodyRowElements = bodyRows.map((row, ri) => {
+      const cells = parseTableCells(row);
+      return createElement('tr', {
+        key: `${tableKey}-tr-${ri}`,
+        style: {
+          backgroundColor: ri % 2 === 0 ? '#ffffff' : '#f9fafb',
+        },
+      },
+        cells.map((cell, ci) => createElement('td', {
+          key: `${tableKey}-td-${ri}-${ci}`,
+          style: {
+            textAlign: alignments[ci] ?? 'left',
+            padding: '10px 14px',
+            fontSize: '0.85rem',
+            color: '#1f2937',
+            borderBottom: '1px solid #f3f4f6',
+          },
+        }, renderInlineMarkdown(cell, `${tableKey}-td-${ri}-${ci}`))),
+      );
+    });
+
+    blocks.push(createElement('div', {
+      key: tableKey,
+      style: {
+        overflowX: 'auto' as const,
+        margin: '12px 0',
+        borderRadius: '12px',
+        border: '1px solid #e5e7eb',
+        backgroundColor: '#ffffff',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+      },
+    },
+      createElement('table', {
+        style: {
+          width: '100%',
+          borderCollapse: 'collapse' as const,
+          fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+        },
+      },
+        createElement('thead', null, headerRow),
+        createElement('tbody', null, bodyRowElements),
+      ),
+    ));
+
+    tableLines = [];
+  };
 
   const flushParagraph = () => {
     if (!paragraphLines.length) {
@@ -327,6 +436,19 @@ export function renderMessageBody(text: string, keyPrefix: string) {
     const orderedMatch = trimmed.match(/^\d+\.\s+(.*)$/);
     const unorderedMatch = trimmed.match(/^[-*]\s+(.*)$/);
 
+    // Table row detection — accumulate consecutive | lines
+    if (isTableRow(trimmed)) {
+      flushParagraph();
+      flushList();
+      tableLines.push(trimmed);
+      continue;
+    }
+
+    // If we were accumulating table lines and hit a non-table line, flush
+    if (tableLines.length > 0) {
+      flushTable();
+    }
+
     if (!trimmed) {
       flushParagraph();
       flushList();
@@ -371,6 +493,7 @@ export function renderMessageBody(text: string, keyPrefix: string) {
     paragraphLines.push(line);
   }
 
+  flushTable();
   flushParagraph();
   flushList();
 
