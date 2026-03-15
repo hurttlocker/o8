@@ -268,7 +268,17 @@ export default function DashboardPage() {
         height: '100vh',
         borderLeft: '1px solid rgba(0,0,0,0.06)',
       }}>
-        <DesktopChat externalSessionKey={activeSessionKey} />
+        <DesktopChat
+          externalSessionKey={activeSessionKey}
+          onOpenDiff={() => {
+            openCanvasTab({
+              id: 'diff:workspace',
+              kind: 'diff',
+              label: 'Diff',
+              resourceId: 'workspace',
+            });
+          }}
+        />
       </div>
     </div>
   );
