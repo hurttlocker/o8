@@ -1,6 +1,9 @@
 /// <reference lib="webworker" />
 
-const CACHE_NAME = 'cortex-ide-v1';
+// Cache version — bumped automatically on each deploy via BUILD_ID
+// The SW file itself changes (new hash) so the browser re-registers it
+const CACHE_VERSION = '2026031421';
+const CACHE_NAME = `cortex-ide-${CACHE_VERSION}`;
 const SHELL_ASSETS = [
   '/mobile',
   '/icons/icon-192x192.png',
@@ -15,7 +18,7 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Activate: clean old caches
+// Activate: clean ALL old caches (any name that isn't current)
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
@@ -25,22 +28,42 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Fetch: network-first for API + pages, cache-first for static assets
+// Fetch strategy
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Never cache API calls, SSE streams, or sync requests
+  // Never cache API calls or WebSocket upgrades
   if (
     url.pathname.startsWith('/api/') ||
-    event.request.headers.get('accept')?.includes('text/event-stream')
+    event.request.headers.get('accept')?.includes('text/event-stream') ||
+    event.request.headers.get('upgrade')?.includes('websocket')
   ) {
     return;
   }
 
-  // Static assets (icons, JS, CSS): cache-first
+  // _next/static/ chunks: stale-while-revalidate
+  // Serve from cache immediately, fetch update in background
+  if (url.pathname.startsWith('/_next/static/')) {
+    event.respondWith(
+      caches.open(CACHE_NAME).then((cache) =>
+        cache.match(event.request).then((cached) => {
+          const fetchPromise = fetch(event.request).then((response) => {
+            if (response.ok) {
+              cache.put(event.request, response.clone());
+            }
+            return response;
+          }).catch(() => cached);
+
+          return cached || fetchPromise;
+        })
+      )
+    );
+    return;
+  }
+
+  // Other static assets (icons, loose JS/CSS): cache-first
   if (
     url.pathname.startsWith('/icons/') ||
-    url.pathname.startsWith('/_next/static/') ||
     url.pathname.endsWith('.js') ||
     url.pathname.endsWith('.css')
   ) {
