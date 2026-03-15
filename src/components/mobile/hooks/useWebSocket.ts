@@ -68,6 +68,19 @@ export function useWebSocket({
   const disposedRef = useRef(false);
   const sessionKeyRef = useRef(selectedSessionKey);
 
+  // Stable refs for state setters so the connection effect never re-fires
+  const setSnapshotRef = useRef(setSnapshot);
+  const setRefreshErrorRef = useRef(setRefreshError);
+  const setHistoryBySessionRef = useRef(setHistoryBySession);
+  const setStreamingTextRef = useRef(setStreamingText);
+  const streamingTextRefRef = useRef(streamingTextRef);
+
+  useEffect(() => { setSnapshotRef.current = setSnapshot; }, [setSnapshot]);
+  useEffect(() => { setRefreshErrorRef.current = setRefreshError; }, [setRefreshError]);
+  useEffect(() => { setHistoryBySessionRef.current = setHistoryBySession; }, [setHistoryBySession]);
+  useEffect(() => { setStreamingTextRef.current = setStreamingText; }, [setStreamingText]);
+  useEffect(() => { streamingTextRefRef.current = streamingTextRef; }, [streamingTextRef]);
+
   // Keep session key ref current
   useEffect(() => {
     sessionKeyRef.current = selectedSessionKey;
@@ -80,94 +93,94 @@ export function useWebSocket({
     }
   }, [selectedSessionKey]);
 
-  const handleMessage = useCallback((event: MessageEvent) => {
-    let msg: Record<string, unknown>;
-    try { msg = JSON.parse(typeof event.data === 'string' ? event.data : ''); } catch { return; }
-
-    const channel = msg.channel as string;
-    const eventType = msg.event as string;
-    const data = msg.data as Record<string, unknown> | undefined;
-
-    switch (channel) {
-      case 'system':
-        if (eventType === 'connected') {
-          setConnectionState('connected');
-          setRefreshError(null);
-          backoffRef.current = INITIAL_BACKOFF;
-        }
-        break;
-
-      case 'inbox':
-        if (eventType === 'update' && data) {
-          const inbox = data as unknown as MobileInboxSnapshot;
-          setSnapshot((prev) => {
-            const prevKey = prev.sessions.map((s) =>
-              `${s.sessionKey}:${s.status}:${Math.round(s.context?.usedPercent ?? 0)}`
-            ).join('|');
-            const nextKey = inbox.sessions.map((s) =>
-              `${s.sessionKey}:${s.status}:${Math.round(s.context?.usedPercent ?? 0)}`
-            ).join('|');
-            if (prevKey === nextKey && prev.summary.alerts === inbox.summary.alerts) return prev;
-            return inbox;
-          });
-        }
-        break;
-
-      case 'history':
-        if (eventType === 'update' && data) {
-          const { sessionKey, entries } = data as { sessionKey: string; entries: MobileTranscriptEntry[] };
-          if (entries?.length > 0) {
-            setHistoryBySession((current) => {
-              const prev = current[sessionKey] ?? [];
-              const existingIds = new Set(prev.map((e) => e.id));
-              const genuinelyNew = entries.filter((e) => !existingIds.has(e.id));
-              if (genuinelyNew.length === 0) return current;
-              return { ...current, [sessionKey]: [...prev, ...genuinelyNew] };
-            });
-          }
-        }
-        break;
-
-      case 'chat':
-        if (eventType === 'delta' && data?.text) {
-          streamingTextRef.current = data.text as string;
-          setStreamingText(data.text as string);
-        } else if (eventType === 'done') {
-          const doneText = (data?.text as string) ?? '';
-          streamingTextRef.current = '';
-          setStreamingText('');
-          // Inject final message into history
-          if (doneText && sessionKeyRef.current) {
-            const sk = sessionKeyRef.current;
-            setHistoryBySession((current) => {
-              const prev = current[sk] ?? [];
-              if (prev.length > 0 && prev[prev.length - 1]?.text === doneText) return current;
-              const entry: MobileTranscriptEntry = {
-                id: `stream:${(data?.runId as string) ?? Date.now()}`,
-                role: 'assistant',
-                text: doneText,
-                timestampLabel: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
-              };
-              return { ...current, [sk]: [...prev, entry] };
-            });
-          }
-        } else if (eventType === 'error') {
-          streamingTextRef.current = '';
-          setStreamingText('');
-        }
-        break;
-
-      case 'pong':
-        // Keepalive acknowledged
-        break;
-    }
-  }, [setSnapshot, setRefreshError, setHistoryBySession, setStreamingText, streamingTextRef]);
-
-  // Main connection effect
+  // Main connection effect — runs once on mount, never re-fires
   useEffect(() => {
     disposedRef.current = false;
     const url = getWsUrl();
     if (!url) return;
+
+    function handleMessage(event: MessageEvent) {
+      let msg: Record<string, unknown>;
+      try { msg = JSON.parse(typeof event.data === 'string' ? event.data : ''); } catch { return; }
+
+      const channel = msg.channel as string;
+      const eventType = msg.event as string;
+      const data = msg.data as Record<string, unknown> | undefined;
+
+      switch (channel) {
+        case 'system':
+          if (eventType === 'connected') {
+            setConnectionState('connected');
+            setRefreshErrorRef.current(null);
+            backoffRef.current = INITIAL_BACKOFF;
+          }
+          break;
+
+        case 'inbox':
+          if (eventType === 'update' && data) {
+            const inbox = data as unknown as MobileInboxSnapshot;
+            setSnapshotRef.current((prev) => {
+              const prevKey = prev.sessions.map((s) =>
+                `${s.sessionKey}:${s.status}:${Math.round(s.context?.usedPercent ?? 0)}`
+              ).join('|');
+              const nextKey = inbox.sessions.map((s) =>
+                `${s.sessionKey}:${s.status}:${Math.round(s.context?.usedPercent ?? 0)}`
+              ).join('|');
+              if (prevKey === nextKey && prev.summary.alerts === inbox.summary.alerts) return prev;
+              return inbox;
+            });
+          }
+          break;
+
+        case 'history':
+          if (eventType === 'update' && data) {
+            const { sessionKey, entries } = data as { sessionKey: string; entries: MobileTranscriptEntry[] };
+            if (entries?.length > 0) {
+              setHistoryBySessionRef.current((current) => {
+                const prev = current[sessionKey] ?? [];
+                const existingIds = new Set(prev.map((e) => e.id));
+                const genuinelyNew = entries.filter((e) => !existingIds.has(e.id));
+                if (genuinelyNew.length === 0) return current;
+                return { ...current, [sessionKey]: [...prev, ...genuinelyNew] };
+              });
+            }
+          }
+          break;
+
+        case 'chat':
+          if (eventType === 'delta' && data?.text) {
+            streamingTextRefRef.current.current = data.text as string;
+            setStreamingTextRef.current(data.text as string);
+          } else if (eventType === 'done') {
+            const doneText = (data?.text as string) ?? '';
+            streamingTextRefRef.current.current = '';
+            setStreamingTextRef.current('');
+            // Inject final message into history
+            if (doneText && sessionKeyRef.current) {
+              const sk = sessionKeyRef.current;
+              setHistoryBySessionRef.current((current) => {
+                const prev = current[sk] ?? [];
+                if (prev.length > 0 && prev[prev.length - 1]?.text === doneText) return current;
+                const entry: MobileTranscriptEntry = {
+                  id: `stream:${(data?.runId as string) ?? Date.now()}`,
+                  role: 'assistant',
+                  text: doneText,
+                  timestampLabel: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+                };
+                return { ...current, [sk]: [...prev, entry] };
+              });
+            }
+          } else if (eventType === 'error') {
+            streamingTextRefRef.current.current = '';
+            setStreamingTextRef.current('');
+          }
+          break;
+
+        case 'pong':
+          // Keepalive acknowledged
+          break;
+      }
+    }
 
     function connect() {
       if (disposedRef.current) return;
@@ -197,8 +210,8 @@ export function useWebSocket({
         if (pingTimerRef.current) { clearInterval(pingTimerRef.current); pingTimerRef.current = null; }
         if (!disposedRef.current) {
           setConnectionState('reconnecting');
-          streamingTextRef.current = '';
-          setStreamingText('');
+          streamingTextRefRef.current.current = '';
+          setStreamingTextRef.current('');
           // Exponential backoff reconnect
           reconnectTimerRef.current = setTimeout(() => {
             reconnectTimerRef.current = null;
@@ -222,7 +235,7 @@ export function useWebSocket({
       if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
       setConnectionState('disconnected');
     };
-  }, [handleMessage, setStreamingText, streamingTextRef]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- stable refs used internally
 
   return {
     connectionState,
