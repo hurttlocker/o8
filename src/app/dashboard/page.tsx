@@ -41,15 +41,9 @@ export default function DashboardPage() {
 
   // ── Routing callbacks for AgentPanel ──
   const handleSelectSession = useCallback((sessionKey: string) => {
-    // Open transcript in canvas AND switch chat
+    // Switch chat to selected session (no auto-transcript popup)
     setActiveSessionKey(sessionKey);
-    openCanvasTab({
-      id: `transcript:${sessionKey}`,
-      kind: 'transcript',
-      label: sessionKey.split(':').pop() || 'Session',
-      resourceId: sessionKey,
-    });
-  }, [openCanvasTab]);
+  }, []);
 
   const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
     openCanvasTab({
