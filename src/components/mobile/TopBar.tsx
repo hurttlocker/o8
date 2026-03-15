@@ -1,7 +1,8 @@
-import { Menu, SlidersHorizontal } from 'lucide-react';
+import { memo, useCallback, useEffect, useRef } from 'react';
+import { ChevronDown, Menu, SlidersHorizontal } from 'lucide-react';
 import type { TopBarProps } from './types';
 
-export function TopBar({
+export const TopBar = memo(function TopBar({
   snapshot,
   selectedSession,
   selectedReviewPacket,
@@ -13,9 +14,32 @@ export function TopBar({
   pendingApprovalsCount,
   wsConnectionState,
   compactLine,
+  squadPickerOpen,
   onOpenControls,
   onOpenDiff,
+  onToggleSquadPicker,
+  onSessionFocus,
 }: TopBarProps) {
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  // Close picker on outside tap
+  const handleOutsideTap = useCallback((e: MouseEvent | TouchEvent) => {
+    if (squadPickerOpen && pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+      onToggleSquadPicker();
+    }
+  }, [squadPickerOpen, onToggleSquadPicker]);
+
+  useEffect(() => {
+    if (squadPickerOpen) {
+      document.addEventListener('touchstart', handleOutsideTap, { passive: true });
+      document.addEventListener('mousedown', handleOutsideTap);
+      return () => {
+        document.removeEventListener('touchstart', handleOutsideTap);
+        document.removeEventListener('mousedown', handleOutsideTap);
+      };
+    }
+  }, [squadPickerOpen, handleOutsideTap]);
+
   const connectionDotColor = wsConnectionState === 'connected'
     ? '#34c759'
     : wsConnectionState === 'connecting'
@@ -71,27 +95,170 @@ export function TopBar({
           <span className="remodex-approval-badge">{pendingApprovalsCount}</span>
         ) : null}
       </div>
-      <div className="remodex-title-shell" style={{ minWidth: 0, flex: 1 }}>
-        <div className="remodex-title-stack">
-          <span className="remodex-title-kicker">
-            <span
-              style={{
-                display: 'inline-block',
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                backgroundColor: connectionDotColor,
-                marginRight: '5px',
-                verticalAlign: 'middle',
-              }}
-              title={`WebSocket: ${wsConnectionState ?? 'unknown'}`}
-            />
-            {headerLabel}
-          </span>
-          <h1>{activeTitle}</h1>
-          <p>{activeSubtitle}</p>
+
+      {/* Tappable title area — opens squad picker */}
+      <div ref={pickerRef} style={{ minWidth: 0, flex: 1, position: 'relative' }}>
+        <button
+          type="button"
+          onClick={onToggleSquadPicker}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            width: '100%',
+            padding: 0,
+            margin: 0,
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            textAlign: 'left',
+            WebkitTapHighlightColor: 'transparent',
+          }}
+          aria-label="Switch session"
+          aria-expanded={squadPickerOpen}
+        >
+          <div className="remodex-title-shell" style={{ minWidth: 0, flex: 1 }}>
+            <div className="remodex-title-stack">
+              <span className="remodex-title-kicker">
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: '6px',
+                    height: '6px',
+                    borderRadius: '50%',
+                    backgroundColor: connectionDotColor,
+                    marginRight: '5px',
+                    verticalAlign: 'middle',
+                  }}
+                  title={`WebSocket: ${wsConnectionState ?? 'unknown'}`}
+                />
+                {headerLabel}
+              </span>
+              <h1>{activeTitle}</h1>
+              <p>{activeSubtitle}</p>
+            </div>
+          </div>
+          <ChevronDown
+            size={14}
+            strokeWidth={2.2}
+            style={{
+              flexShrink: 0,
+              color: '#8e8e93',
+              transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
+              transform: squadPickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+            }}
+          />
+        </button>
+
+        {/* Squad picker dropdown */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 8px)',
+            left: '-12px',
+            right: '-12px',
+            zIndex: 100,
+            borderRadius: '14px',
+            background: 'rgba(255, 255, 255, 0.96)',
+            backdropFilter: 'blur(40px) saturate(1.8)',
+            WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
+            boxShadow: '0 20px 60px rgba(15, 23, 42, 0.18), 0 1px 3px rgba(15, 23, 42, 0.08)',
+            padding: '8px',
+            maxHeight: '60vh',
+            overflowY: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            opacity: squadPickerOpen ? 1 : 0,
+            transform: squadPickerOpen ? 'translateY(0) scale(1)' : 'translateY(-8px) scale(0.97)',
+            pointerEvents: squadPickerOpen ? 'auto' : 'none',
+            transition: 'opacity 220ms cubic-bezier(0.32, 0.72, 0, 1), transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+          }}
+        >
+          {snapshot.sessions.map((session) => {
+            const isActive = session.id === selectedSession?.id;
+            const isRunning = session.status === 'running' || session.status === 'reviewing';
+            const sessionPercent = Math.round(session.context?.usedPercent ?? 0);
+            const dotColor = isRunning ? '#34c759' : sessionPercent >= 75 ? '#ff9f0a' : '#8e8e93';
+            const name = session.name ?? session.sessionKey ?? session.id;
+            const subtitle = session.currentTask
+              ?? session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '')
+              ?? session.sessionKey
+              ?? '';
+
+            return (
+              <button
+                key={session.id}
+                type="button"
+                onClick={() => {
+                  onSessionFocus(session.id);
+                  onToggleSquadPicker();
+                }}
+                data-session-id={session.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  width: '100%',
+                  padding: '10px 12px',
+                  border: 'none',
+                  borderRadius: '10px',
+                  background: isActive ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'background 120ms ease',
+                  WebkitTapHighlightColor: 'transparent',
+                  minHeight: '44px',
+                }}
+              >
+                <span style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: dotColor,
+                  flexShrink: 0,
+                  boxShadow: isRunning ? `0 0 6px ${dotColor}` : 'none',
+                }} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{
+                    fontSize: '14px',
+                    fontWeight: isActive ? 600 : 500,
+                    color: isActive ? '#2563eb' : '#111827',
+                    lineHeight: 1.3,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {name}
+                  </div>
+                  {subtitle ? (
+                    <div style={{
+                      fontSize: '12px',
+                      color: '#8e8e93',
+                      lineHeight: 1.3,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      marginTop: '1px',
+                    }}>
+                      {subtitle}
+                    </div>
+                  ) : null}
+                </div>
+                {isActive ? (
+                  <span style={{
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    color: '#2563eb',
+                    flexShrink: 0,
+                  }}>
+                    ✓
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
       </div>
+
       <button
         type="button"
         className="remodex-diff-pill"
@@ -112,4 +279,4 @@ export function TopBar({
       </button>
     </header>
   );
-}
+});
