@@ -69,7 +69,7 @@ export class WorktreeManager {
     const baseBranch = opts.baseBranch ?? await this.getCurrentBranch();
     const now = Date.now();
 
-    // Avoid ID collisions (e.g. "fix auth" and "fix-auth" both sanitize to "fix-auth")
+    // Avoid ID collisions — append suffix if already exists
     const existingMeta = await this.loadAllMeta();
     if (existingMeta[taskId]) {
       const suffix = Math.random().toString(36).slice(2, 6);
@@ -114,6 +114,17 @@ export class WorktreeManager {
     // Ensure worktree base directory exists
     await mkdir(this.worktreeBase, { recursive: true });
 
+    // Save metadata with 'creating' status before git operation
+    await this.saveMeta(taskId, {
+      id: taskId,
+      agentType: opts.agentType,
+      baseBranch,
+      createdAt: now,
+      claudeManaged: false,
+      taskName: opts.taskName,
+      status: 'creating',
+    });
+
     // Create the worktree + branch
     await execFileAsync('git', [
       'worktree', 'add',
@@ -135,16 +146,6 @@ export class WorktreeManager {
       claudeManaged: false,
     };
 
-    // Save metadata with 'creating' status before setup
-    await this.saveMeta(taskId, {
-      id: taskId,
-      agentType: opts.agentType,
-      baseBranch,
-      createdAt: now,
-      claudeManaged: false,
-      taskName: opts.taskName,
-      status: 'creating',
-    });
 
     // Run project setup unless skipped
     if (!opts.skipSetup) {

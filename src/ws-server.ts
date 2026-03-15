@@ -324,6 +324,8 @@ function pushHistoryForSession(sessionKey: string) {
   void Promise.allSettled(matchingClients.map((c) => syncClientHistory(c)));
 }
 
+const CONFLICT_SCAN_MS = 5_000; // 5s conflict scan interval
+
 function startPollingLoops() {
   // Safety-net inbox poll — reduced frequency since event-driven push handles most updates
   setInterval(() => {
@@ -340,6 +342,35 @@ function startPollingLoops() {
     if (activeClients.length === 0) return;
     void Promise.allSettled(activeClients.map((c) => syncClientHistory(c)));
   }, SAFETY_NET_HISTORY_MS);
+
+  // Conflict scan — poll every 5s, push updates to all clients when conflicts change
+  let lastConflictHash = '';
+  setInterval(async () => {
+    const activeClients = [...clients.values()].filter((c) => c.ws.readyState === WebSocket.OPEN);
+    if (activeClients.length === 0) return;
+
+    try {
+      const res = await fetch(`${NEXT_ORIGIN}/api/worktrees/conflicts?repo=${encodeURIComponent(process.cwd())}`, {
+        headers: { 'Cache-Control': 'no-cache' },
+        signal: AbortSignal.timeout(4000),
+      });
+
+      if (!res.ok) return;
+      const report = await res.json();
+
+      // Only push if conflicts changed (compare hash of file list)
+      const hash = JSON.stringify(report.files?.map((f: { file: string; severity: string }) => `${f.file}:${f.severity}`).sort());
+      if (hash === lastConflictHash) return;
+      lastConflictHash = hash;
+
+      // Push to all clients
+      for (const client of activeClients) {
+        send(client, { channel: 'conflicts', event: 'update', data: report });
+      }
+    } catch {
+      // Non-critical — conflict scanning is best-effort
+    }
+  }, CONFLICT_SCAN_MS);
 }
 
 // ── Server startup ──
