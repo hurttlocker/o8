@@ -1041,11 +1041,13 @@ export const AgentPanel = memo(function AgentPanel({
   onSelectIssue,
   onSelectCommit,
   onSelectPR,
+  onExpandWorkspace,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
   onSelectCommit?: (hash: string) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
+  onExpandWorkspace?: (workspace: string, repo: string | null) => void;
 } = {}) {
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([]);
@@ -1074,11 +1076,12 @@ export const AgentPanel = memo(function AgentPanel({
     fetch(`/api/panel/repo-info?workspace=${encodeURIComponent(expandedGroup)}`)
       .then(r => r.json())
       .then(data => {
-        if (data.repo) setActiveRepo(data.repo);
-        else setActiveRepo(null);
+        const repo = data.repo ?? null;
+        setActiveRepo(repo);
+        onExpandWorkspace?.(expandedGroup, repo);
       })
       .catch(() => setActiveRepo(null));
-  }, [expandedGroup]);
+  }, [expandedGroup, onExpandWorkspace]);
 
   // Fetch agent inventory (agents + events)
   // Only update state when data actually changed (prevents flicker)
