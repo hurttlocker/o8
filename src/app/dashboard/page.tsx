@@ -1,12 +1,13 @@
 'use client';
 
-import { useRef, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { DesktopChat } from '@/components/desktop/DesktopChat';
 
 export default function DashboardPage() {
   const [leftWidth, setLeftWidth] = useState(300);
   const [rightWidth, setRightWidth] = useState(420);
+  const [activeSessionKey, setActiveSessionKey] = useState<string | undefined>();
 
   // ── Left drag handle ──
   const startLeftDrag = useCallback((e: React.MouseEvent) => {
@@ -60,7 +61,7 @@ export default function DashboardPage() {
         overflow: 'hidden',
         borderRight: '1px solid rgba(0,0,0,0.06)',
       }}>
-        <AgentPanel />
+        <AgentPanel onSelectSession={setActiveSessionKey} />
       </div>
 
       {/* ── Left drag handle ── */}
@@ -147,7 +148,7 @@ export default function DashboardPage() {
         height: '100vh',
         borderLeft: '1px solid rgba(0,0,0,0.06)',
       }}>
-        <DesktopChat />
+        <DesktopChat externalSessionKey={activeSessionKey} />
       </div>
     </div>
   );
