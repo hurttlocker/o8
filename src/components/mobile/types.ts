@@ -192,6 +192,7 @@ export interface TopBarProps {
   isHeaderCompact: boolean;
   headerVisible: boolean;
   pendingApprovalsCount: number;
+  wsConnectionState?: 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
   compactLine: CompactLine;
   onOpenControls: () => void;
   onOpenDiff: () => void;

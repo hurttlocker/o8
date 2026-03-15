@@ -27,12 +27,15 @@ import { SquadRail } from './mobile/SquadRail';
 import { SurfaceStatus } from './mobile/SurfaceStatus';
 import { TopBar } from './mobile/TopBar';
 
+import { ShimmerCard } from './mobile/ShimmerCard';
+
 // Lazy-loaded panels — only loaded when opened (#45)
-const ApprovalStack = dynamic(() => import('./mobile/ApprovalStack').then((m) => ({ default: m.ApprovalStack })), { ssr: false });
-const ControlsSheet = dynamic(() => import('./mobile/ControlsSheet').then((m) => ({ default: m.ControlsSheet })), { ssr: false });
-const CostsDashboard = dynamic(() => import('./mobile/CostsDashboard').then((m) => ({ default: m.CostsDashboard })), { ssr: false });
-const DiffOverlay = dynamic(() => import('./mobile/DiffOverlay').then((m) => ({ default: m.DiffOverlay })), { ssr: false });
-const TokenUsageSummary = dynamic(() => import('./mobile/TokenUsageSummary').then((m) => ({ default: m.TokenUsageSummary })), { ssr: false });
+const shimmerFallback = { loading: () => <ShimmerCard /> };
+const ApprovalStack = dynamic(() => import('./mobile/ApprovalStack').then((m) => ({ default: m.ApprovalStack })), { ssr: false, ...shimmerFallback });
+const ControlsSheet = dynamic(() => import('./mobile/ControlsSheet').then((m) => ({ default: m.ControlsSheet })), { ssr: false, ...shimmerFallback });
+const CostsDashboard = dynamic(() => import('./mobile/CostsDashboard').then((m) => ({ default: m.CostsDashboard })), { ssr: false, ...shimmerFallback });
+const DiffOverlay = dynamic(() => import('./mobile/DiffOverlay').then((m) => ({ default: m.DiffOverlay })), { ssr: false, ...shimmerFallback });
+const TokenUsageSummary = dynamic(() => import('./mobile/TokenUsageSummary').then((m) => ({ default: m.TokenUsageSummary })), { ssr: false, ...shimmerFallback });
 
 import {
   copyTextToClipboard,
@@ -71,7 +74,7 @@ export function MobileRemoteShell({
   const state = useMobileState({ initialSnapshot, initialTranscript, initialReviewFile, initialOwnedReviewPacket });
 
   // ── Streaming + WebSocket ──
-  const { wsConnected } = useMobileStreaming(state);
+  const { wsConnected, wsConnectionState } = useMobileStreaming(state);
 
   // ── Data fetching + polling ──
   const { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, linkedOwnedKey } = useMobilePolling(state, wsConnected);
@@ -434,6 +437,7 @@ export function MobileRemoteShell({
           isHeaderCompact={isHeaderCompact}
           headerVisible={headerVisible}
           pendingApprovalsCount={pendingApprovals.length}
+          wsConnectionState={wsConnectionState}
           compactLine={compactLine}
           onOpenControls={() => setControlsOpen(true)}
           onOpenDiff={openDiffViewer}
