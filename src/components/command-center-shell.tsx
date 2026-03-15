@@ -296,6 +296,9 @@ export function CommandCenterShell({
           <a href="/mobile" rel="noreferrer">
             <button className="button-primary">Mobile remote</button>
           </a>
+          <a href="/dashboard" rel="noreferrer">
+            <button className="button-primary" style={{ background: 'linear-gradient(135deg, #60a5fa, #a78bfa)' }}>Dashboard v1 →</button>
+          </a>
         </div>
       </header>
 
