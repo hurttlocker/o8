@@ -111,4 +111,6 @@ export interface WorktreeMetaEntry {
   createdAt: number;
   claudeManaged: boolean;
   taskName: string;
+  /** Explicit lifecycle status — preserved through inferStatus */
+  status?: WorktreeStatus;
 }
