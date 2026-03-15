@@ -226,14 +226,14 @@ const IssueViewer = memo(function IssueViewer({ issueNumber }: { issueNumber: nu
     setLoading(true);
     setError(null);
 
-    fetch(`/api/mobile/github/issue?number=${issueNumber}`)
+    fetch(`/api/panel/issues/${issueNumber}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
       .then((data) => {
         if (!cancelled) {
-          setDetail(data);
+          setDetail(data.issue ?? data);
           setLoading(false);
         }
       })
