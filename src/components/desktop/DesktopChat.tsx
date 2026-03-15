@@ -430,9 +430,12 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
   const [pickerOpen, setPickerOpen] = useState(false);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<{ name: string; mimeType: string; content: string; preview?: string }[]>([]);
+  const [dragOver, setDragOver] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const composeRef = useRef<HTMLTextAreaElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -556,6 +559,76 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
     }
   }, [scrollToBottom]);
 
+  // ── File handling ──
+  const processFiles = useCallback((files: FileList | File[]) => {
+    Array.from(files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = (reader.result as string).split(',')[1];
+        const preview = file.type.startsWith('image/')
+          ? URL.createObjectURL(file)
+          : undefined;
+        setPendingFiles(prev => [...prev, {
+          name: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          content: base64,
+          preview,
+        }]);
+      };
+      reader.readAsDataURL(file);
+    });
+  }, []);
+
+  const removePendingFile = useCallback((idx: number) => {
+    setPendingFiles(prev => {
+      const f = prev[idx];
+      if (f?.preview) URL.revokeObjectURL(f.preview);
+      return prev.filter((_, i) => i !== idx);
+    });
+  }, []);
+
+  // ── Drag and drop ──
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOver(false);
+    if (e.dataTransfer.files.length > 0) {
+      processFiles(e.dataTransfer.files);
+    }
+  }, [processFiles]);
+
+  // ── Paste images from clipboard ──
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      const files: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].kind === 'file') {
+          const file = items[i].getAsFile();
+          if (file) files.push(file);
+        }
+      }
+      if (files.length > 0) {
+        processFiles(files);
+      }
+    };
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [processFiles]);
+
   // ── Send sound ──
   const playSendSound = useCallback(() => {
     try {
@@ -575,35 +648,57 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
 
   // ── Send message ──
   const send = useCallback(async () => {
-    if (!draft.trim() || !selectedKey || sending) return;
+    if ((!draft.trim() && pendingFiles.length === 0) || !selectedKey || sending) return;
     const text = draft.trim();
+    const files = [...pendingFiles];
     setDraft('');
+    setPendingFiles([]);
     setSending(true);
     playSendSound();
+
+    const optimisticText = files.length > 0
+      ? `${text}${text ? '\n' : ''}📎 ${files.map(f => f.name).join(', ')}`
+      : text;
 
     const optimistic: MobileTranscriptEntry = {
       id: `local-${Date.now()}`,
       role: 'user',
-      text,
+      text: optimisticText,
       timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
     setTranscript(prev => [...prev, optimistic]);
     scrollToBottom(true);
 
     try {
+      const payload: Record<string, unknown> = {
+        sessionKey: selectedKey,
+        action: 'steer',
+        message: text || (files.length > 0 ? `[${files.map(f => f.name).join(', ')}]` : ''),
+      };
+      if (files.length > 0) {
+        payload.attachments = files.map(f => ({
+          mimeType: f.mimeType,
+          fileName: f.name,
+          content: f.content,
+        }));
+      }
       // Fire and don't wait — optimistic UI already shows the message
       fetch('/api/mobile/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionKey: selectedKey, action: 'steer', message: text }),
+        body: JSON.stringify(payload),
       }).catch(() => {});
       // Quick poll for response (500ms, 1.5s, 3s)
       setTimeout(() => void fetchTranscript(selectedKey), 500);
       setTimeout(() => void fetchTranscript(selectedKey), 1500);
       setTimeout(() => void fetchTranscript(selectedKey), 3000);
     } catch { /* silent */ }
-    finally { setSending(false); }
-  }, [draft, selectedKey, sending, fetchTranscript, scrollToBottom, playSendSound]);
+    finally {
+      // Revoke any preview URLs
+      files.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview); });
+      setSending(false);
+    }
+  }, [draft, pendingFiles, selectedKey, sending, fetchTranscript, scrollToBottom, playSendSound]);
 
   // ── Diff stats (poll every 30s) ──
   useEffect(() => {
@@ -703,16 +798,67 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
   const chatSendDisabled = !selectedKey || sending || !draft.trim();
 
   return (
-    <div className="remodex-desktop-chat" style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-      background: '#f5f7fb',
-      borderLeft: '1px solid rgba(0,0,0,0.06)',
+    <div
+      className="remodex-desktop-chat"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        background: '#f5f7fb',
+        borderLeft: '1px solid rgba(0,0,0,0.06)',
+        position: 'relative',
+        outline: dragOver ? '2px solid #3b82f6' : 'none',
+        outlineOffset: -2,
       ['--remodex-compose-active' as string]: '0',
       ['--remodex-dock-fade-progress' as string]: '0',
       ['--remodex-dock-motion-progress' as string]: '0',
     }}>
+      {/* Drag overlay */}
+      {dragOver && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          zIndex: 999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(59, 130, 246, 0.08)',
+          backdropFilter: 'blur(4px)',
+          pointerEvents: 'none',
+        }}>
+          <div style={{
+            paddingTop: 16,
+            paddingRight: 32,
+            paddingBottom: 16,
+            paddingLeft: 32,
+            borderRadius: 16,
+            background: 'rgba(255,255,255,0.9)',
+            border: '2px dashed #3b82f6',
+            fontSize: 15,
+            fontWeight: 600,
+            color: '#3b82f6',
+          }}>
+            Drop files here
+          </div>
+        </div>
+      )}
+
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="image/*,.pdf,.txt,.md,.json,.csv,.tsx,.ts,.js,.py"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          if (e.target.files) processFiles(e.target.files);
+          e.target.value = '';
+        }}
+      />
+
       {/* ── Header ── */}
       <header
         style={{
@@ -1125,6 +1271,78 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
         padding: '10px 14px 14px',
         flexShrink: 0,
       }}>
+        {/* Pending file previews */}
+        {pendingFiles.length > 0 && (
+          <div style={{
+            display: 'flex',
+            gap: 8,
+            paddingTop: 8,
+            paddingBottom: 8,
+            overflowX: 'auto',
+          }}>
+            {pendingFiles.map((f, idx) => (
+              <div key={idx} style={{
+                position: 'relative',
+                flexShrink: 0,
+                borderRadius: 10,
+                overflow: 'hidden',
+                border: '1px solid rgba(0,0,0,0.08)',
+                background: 'rgba(255,255,255,0.8)',
+              }}>
+                {f.preview ? (
+                  <img src={f.preview} alt={f.name} style={{
+                    width: 64,
+                    height: 64,
+                    objectFit: 'cover',
+                    display: 'block',
+                  }} />
+                ) : (
+                  <div style={{
+                    width: 64,
+                    height: 64,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 10,
+                    color: '#64748b',
+                    textAlign: 'center',
+                    padding: 4,
+                    wordBreak: 'break-all',
+                  }}>
+                    {f.name.slice(0, 12)}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removePendingFile(idx)}
+                  style={{
+                    position: 'absolute',
+                    top: 2,
+                    right: 2,
+                    width: 18,
+                    height: 18,
+                    borderRadius: '50%',
+                    border: 'none',
+                    background: 'rgba(0,0,0,0.5)',
+                    color: '#fff',
+                    fontSize: 11,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    paddingTop: 0,
+                    paddingRight: 0,
+                    paddingBottom: 0,
+                    paddingLeft: 0,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="remodex-compose-surface">
           {/* Status pills row */}
           <div className="remodex-compose-status-bar">
@@ -1164,6 +1382,7 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
               type="button"
               className="remodex-compose-chip remodex-compose-chip-icon"
               aria-label="Attach"
+              onClick={() => fileInputRef.current?.click()}
             >
               <Plus size={16} strokeWidth={2.2} />
             </button>
