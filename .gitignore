@@ -11,3 +11,4 @@ coverage/
 
 # Worktree isolation
 .cortex-worktrees/
+src-tauri/target/
