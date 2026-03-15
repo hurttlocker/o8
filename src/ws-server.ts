@@ -287,28 +287,37 @@ chatListeners.add(onChatDelta);
 // ── Polling loops (push changes to clients) ──
 
 function startPollingLoops() {
-  // Inbox poll — check for changes and push
-  setInterval(async () => {
+  // Inbox poll — check for changes and push (parallel across clients)
+  setInterval(() => {
     const activeClients = [...clients.values()].filter((c) => c.ws.readyState === WebSocket.OPEN);
-    for (const client of activeClients) {
-      await syncClientInbox(client);
-    }
+    if (activeClients.length === 0) return;
+    void Promise.allSettled(activeClients.map((c) => syncClientInbox(c)));
   }, INBOX_POLL_MS);
 
-  // History poll — check for new entries and push
-  setInterval(async () => {
+  // History poll — check for new entries and push (parallel across clients)
+  setInterval(() => {
     const activeClients = [...clients.values()].filter(
       (c) => c.ws.readyState === WebSocket.OPEN && c.sessionKey,
     );
-    for (const client of activeClients) {
-      await syncClientHistory(client);
-    }
+    if (activeClients.length === 0) return;
+    void Promise.allSettled(activeClients.map((c) => syncClientHistory(c)));
   }, HISTORY_POLL_MS);
 }
 
 // ── Server startup ──
 
 const httpServer = createServer((req, res) => {
+  // CORS headers for cross-origin WS upgrade
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
   // Health check endpoint
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
