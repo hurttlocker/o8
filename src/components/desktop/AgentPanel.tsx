@@ -876,6 +876,7 @@ export const AgentPanel = memo(function AgentPanel({
   const [expandedSquad, setExpandedSquad] = useState<string | null>(null);
 
   // Fetch agent inventory (agents + events + squads)
+  // Only update state when data actually changed (prevents flicker)
   useEffect(() => {
     async function fetchInventory() {
       try {
@@ -885,9 +886,9 @@ export const AgentPanel = memo(function AgentPanel({
         const mainSquads = (data.squads ?? []).filter((s: Squad) =>
           !s.id.includes('codex-local') && !s.id.includes('codex-owned')
         );
-        setSquads(mainSquads);
-        setAgents(data.agents ?? []);
-        setEvents(data.events ?? []);
+        setSquads(prev => JSON.stringify(prev) === JSON.stringify(mainSquads) ? prev : mainSquads);
+        setAgents(prev => JSON.stringify(prev) === JSON.stringify(data.agents ?? []) ? prev : (data.agents ?? []));
+        setEvents(prev => JSON.stringify(prev) === JSON.stringify(data.events ?? []) ? prev : (data.events ?? []));
       } catch { /* silent */ }
     }
     void fetchInventory();
@@ -903,7 +904,7 @@ export const AgentPanel = memo(function AgentPanel({
         if (!res.ok) return;
         const data = await res.json();
         const raw: string[] = data.recentCommits ?? [];
-        setCommits(raw.map((line) => {
+        const parsed = raw.map((line) => {
           const spaceIdx = line.indexOf(' ');
           const hash = line.slice(0, spaceIdx);
           const rest = line.slice(spaceIdx + 1);
@@ -911,7 +912,8 @@ export const AgentPanel = memo(function AgentPanel({
           const message = ageMatch ? rest.slice(0, ageMatch.index).trim() : rest;
           const age = ageMatch ? ageMatch[1] : '';
           return { hash, message, age };
-        }));
+        });
+        setCommits(prev => JSON.stringify(prev) === JSON.stringify(parsed) ? prev : parsed);
       } catch { /* silent */ }
     }
     void fetchCommits();
@@ -926,7 +928,8 @@ export const AgentPanel = memo(function AgentPanel({
         const res = await fetch('/api/panel/issues');
         if (!res.ok) return;
         const data = await res.json();
-        setIssues(data.issues ?? []);
+        const fresh = data.issues ?? [];
+        setIssues(prev => JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh);
       } catch { /* silent */ }
     }
     void fetchIssues();
@@ -941,7 +944,8 @@ export const AgentPanel = memo(function AgentPanel({
         const res = await fetch('/api/panel/files');
         if (!res.ok) return;
         const data = await res.json();
-        setFileTree(data.tree ?? []);
+        const freshTree = data.tree ?? [];
+        setFileTree(prev => JSON.stringify(prev) === JSON.stringify(freshTree) ? prev : freshTree);
       } catch { /* silent */ }
     }
     void fetchFiles();
