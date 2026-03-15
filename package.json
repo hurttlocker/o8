@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "productName": "Cortex IDE",
   "private": true,
-  "main": "electron/main.cjs",
+  "main": "src/app/layout.tsx",
   "scripts": {
     "dev": "next dev -p 3001",
     "dev:ws": "tsx src/ws-server.ts",
@@ -12,9 +12,7 @@
     "start": "next start -p 3001",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "electron:dev": "wait-on tcp:3001 && cross-env CORTEX_IDE_DEV_URL=http://localhost:3001 electron electron/main.cjs",
-    "desktop:open": "cross-env CORTEX_IDE_DEV_URL=http://localhost:3001 electron electron/main.cjs",
-    "desktop:dev": "concurrently -k -s first \"npm run dev\" \"npm run electron:dev\""
+    "desktop:dev": "concurrently -k -s first \"npm run dev\" \"npm run dev:ws\""
   },
   "dependencies": {
     "@json-render/core": "^0.14.0",
@@ -33,12 +31,9 @@
     "@types/react-dom": "19.0.4",
     "@types/ws": "^8.18.1",
     "concurrently": "^9.2.1",
-    "cross-env": "^10.1.0",
-    "electron": "^37.6.0",
     "eslint": "9.22.0",
     "eslint-config-next": "^16.1.6",
     "tsx": "^4.21.0",
-    "typescript": "5.8.2",
-    "wait-on": "^8.0.5"
+    "typescript": "5.8.2"
   }
 }

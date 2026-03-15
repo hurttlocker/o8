@@ -380,8 +380,12 @@ function startPollingLoops() {
 // ── Server startup ──
 
 const httpServer = createServer((req, res) => {
-  // CORS headers for cross-origin WS upgrade
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  // CORS headers — restrict to localhost + Tauri custom protocol origins
+  const allowedOrigins = ['http://localhost:3001', 'http://127.0.0.1:3001', 'tauri://localhost'];
+  const origin = req.headers.origin ?? '';
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 

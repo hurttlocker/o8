@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, createElement } from 'react';
+import { useState, createElement, memo } from 'react';
 
 interface CodeBlockProps {
   code: string;
@@ -19,7 +19,7 @@ function formatLanguageLabel(lang?: string): string {
   return aliases[lang.toLowerCase()] ?? lang;
 }
 
-export function CodeBlock({ code, language }: CodeBlockProps) {
+export const CodeBlock = memo(function CodeBlock({ code, language }: CodeBlockProps) {
   const lines = code.split('\n');
   const label = formatLanguageLabel(language);
   const [expanded, setExpanded] = useState(false);
@@ -97,4 +97,4 @@ export function CodeBlock({ code, language }: CodeBlockProps) {
       createElement('code', null, code),
     ) : null,
   );
-}
+});
