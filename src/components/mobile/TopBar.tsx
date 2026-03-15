@@ -99,13 +99,21 @@ export function TopBar({
           onClick={onOpenCortexRecall}
           aria-label="Cortex Memory Recall"
           style={{
-            background: 'none',
+            background: 'rgba(175, 82, 222, 0.12)',
             border: 'none',
             cursor: 'pointer',
-            padding: '4px 6px',
-            fontSize: 18,
+            padding: 0,
+            width: 32,
+            height: 32,
+            borderRadius: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 16,
             lineHeight: 1,
             flexShrink: 0,
+            minWidth: 44,
+            minHeight: 44,
           }}
         >
           🧠
