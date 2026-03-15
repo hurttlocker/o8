@@ -110,7 +110,7 @@ export function ControlsSheet({
         </div>
 
         {/* Cortex Memory status card (passed as children) */}
-        {children ? <div style={{ padding: '0 16px', marginTop: 4 }}>{children}</div> : null}
+        {children ? <div style={{ padding: '0 16px', marginTop: 12, marginBottom: 4 }}>{children}</div> : null}
 
         {sessionSwitcher.length > 1 ? (
           <div className="remodex-controls-session-list">
