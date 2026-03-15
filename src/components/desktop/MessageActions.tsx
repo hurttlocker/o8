@@ -43,7 +43,10 @@ const iconBtnBase: React.CSSProperties = {
   color: '#6b7280',
   cursor: 'pointer',
   transition: 'all 150ms ease',
-  padding: 0,
+  paddingTop: 0,
+  paddingRight: 0,
+  paddingBottom: 0,
+  paddingLeft: 0,
 };
 
 const RATES = [1, 1.25, 1.5, 2];
@@ -188,10 +191,20 @@ export const MessageActions = memo(function MessageActions({
           title={`Speed: ${rate}x (click to change)`}
           aria-label={`Playback speed ${rate}x`}
           style={{
-            ...iconBtnBase,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             width: 'auto',
-            paddingLeft: 6,
+            height: 32,
+            borderRadius: 8,
+            border: '1px solid transparent',
+            background: 'transparent',
+            cursor: 'pointer',
+            transition: 'all 150ms ease',
+            paddingTop: 0,
             paddingRight: 6,
+            paddingBottom: 0,
+            paddingLeft: 6,
             fontSize: 11,
             fontWeight: 700,
             fontFamily: '-apple-system, system-ui, sans-serif',
