@@ -113,7 +113,7 @@ interface FileNode {
   children?: FileNode[];
 }
 
-type Tab = 'activity' | 'issues' | 'prs' | 'files';
+type Tab = 'activity' | 'issues' | 'prs' | 'files' | 'ci';
 
 // ── Status colors ──
 
@@ -947,6 +947,143 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
   );
 });
 
+// ── CI List (light theme) ──
+
+interface CIRunSummary {
+  databaseId: number;
+  displayTitle: string;
+  headBranch: string;
+  status: string;
+  conclusion: string;
+  createdAt: string;
+  workflowName: string;
+}
+
+function ciStatusColor(conclusion: string, status: string): string {
+  if (status === 'in_progress' || status === 'queued') return '#f59e0b';
+  if (conclusion === 'success') return '#22c55e';
+  if (conclusion === 'failure') return '#ef4444';
+  if (conclusion === 'cancelled') return '#6b7280';
+  return '#94a3b8';
+}
+
+function ciStatusIcon(conclusion: string, status: string): string {
+  if (status === 'in_progress') return '◉';
+  if (status === 'queued') return '○';
+  if (conclusion === 'success') return '✓';
+  if (conclusion === 'failure') return '✗';
+  if (conclusion === 'cancelled') return '⊘';
+  return '○';
+}
+
+function ciTimeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+function CIList({ repo, onOpenCI }: { repo: string | null; onOpenCI?: (repo: string) => void }) {
+  const [runs, setRuns] = useState<CIRunSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
+    fetch(`/api/panel/ci${repoParam}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!cancelled) {
+          setRuns(data.runs ?? []);
+          setLoading(false);
+        }
+      })
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [repo]);
+
+  if (loading) {
+    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>Loading CI runs…</div>;
+  }
+
+  if (runs.length === 0) {
+    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>No workflow runs found</div>;
+  }
+
+  return (
+    <div style={{ paddingTop: 4, paddingBottom: 4 }}>
+      {runs.map((run) => {
+        const color = ciStatusColor(run.conclusion, run.status);
+        const icon = ciStatusIcon(run.conclusion, run.status);
+        return (
+          <button
+            key={run.databaseId}
+            type="button"
+            onClick={() => repo && onOpenCI?.(repo)}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+              width: '100%',
+              paddingTop: 8,
+              paddingRight: 14,
+              paddingBottom: 8,
+              paddingLeft: 14,
+              border: 'none',
+              borderBottom: '1px solid rgba(0,0,0,0.04)',
+              background: 'transparent',
+              cursor: 'pointer',
+              textAlign: 'left',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
+            <span style={{
+              fontSize: 14,
+              color,
+              fontWeight: 700,
+              lineHeight: 1.3,
+              flexShrink: 0,
+              marginTop: 1,
+            }}>{icon}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontSize: 12,
+                fontWeight: 400,
+                color: '#1e293b',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>{run.displayTitle}</div>
+              <div style={{
+                fontSize: 10,
+                color: '#94a3b8',
+                marginTop: 2,
+                display: 'flex',
+                gap: 4,
+                alignItems: 'center',
+              }}>
+                <span style={{
+                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                  fontSize: 10,
+                }}>{run.headBranch}</span>
+                <span>·</span>
+                <span>{run.workflowName}</span>
+                <span>·</span>
+                <span>{ciTimeAgo(run.createdAt)}</span>
+              </div>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── File Tree (light theme) ──
 
 function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
@@ -1075,6 +1212,7 @@ const tabs: { id: Tab; icon: typeof Zap; label: string }[] = [
   { id: 'issues', icon: Tag, label: 'Issues' },
   { id: 'prs', icon: GitCommit, label: 'PRs' },
   { id: 'files', icon: Folder, label: 'Files' },
+  { id: 'ci', icon: PlayCircle, label: 'CI' },
 ];
 
 // ── Main Panel ──
@@ -1392,6 +1530,7 @@ export const AgentPanel = memo(function AgentPanel({
         {activeTab === 'issues' ? <IssuesList issues={issues} onSelect={(num) => onSelectIssue ? onSelectIssue(num, activeRepo ?? undefined) : setSelectedIssue(num)} /> : null}
         {activeTab === 'prs' ? <PRList prs={prs} onSelect={(num) => onSelectPR?.(num, activeRepo ?? undefined)} /> : null}
         {activeTab === 'files' ? <FileTree tree={fileTree} changedFiles={changedFiles} onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)} /> : null}
+        {activeTab === 'ci' ? <CIList repo={activeRepo} onOpenCI={onOpenCI} /> : null}
       </div>
 
       {/* ── Issue Detail Modal ── */}
