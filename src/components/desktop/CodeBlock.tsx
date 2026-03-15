@@ -71,8 +71,10 @@ const MERMAID_THEME = {
 
 // ── Glass Modal for Mermaid Zoom ──
 
+const DEFAULT_ZOOM = 4; // 400% — diagrams render small, this fills the viewport
+
 function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => void }) {
-  const [scale, setScale] = useState(1);
+  const [scale, setScale] = useState(DEFAULT_ZOOM);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const dragging = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
@@ -80,9 +82,9 @@ function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => vo
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
-      if (e.key === '=' || e.key === '+') setScale(s => Math.min(s + 0.25, 5));
-      if (e.key === '-') setScale(s => Math.max(s - 0.25, 0.25));
-      if (e.key === '0') { setScale(1); setTranslate({ x: 0, y: 0 }); }
+      if (e.key === '=' || e.key === '+') setScale(s => Math.min(s + 0.25, 8));
+      if (e.key === '-') setScale(s => Math.max(s - 0.25, 0.5));
+      if (e.key === '0') { setScale(DEFAULT_ZOOM); setTranslate({ x: 0, y: 0 }); }
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
@@ -90,8 +92,8 @@ function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => vo
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    setScale(s => Math.min(Math.max(s + delta, 0.25), 5));
+    const delta = e.deltaY > 0 ? -0.2 : 0.2;
+    setScale(s => Math.min(Math.max(s + delta, 0.5), 8));
   }, []);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -170,7 +172,7 @@ function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => vo
             {/* Zoom controls */}
             <button
               type="button"
-              onClick={() => setScale(s => Math.max(s - 0.25, 0.25))}
+              onClick={() => setScale(s => Math.max(s - 0.5, 0.5))}
               style={modalBtnStyle}
               title="Zoom out (−)"
             >
@@ -190,7 +192,7 @@ function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => vo
 
             <button
               type="button"
-              onClick={() => setScale(s => Math.min(s + 0.25, 5))}
+              onClick={() => setScale(s => Math.min(s + 0.5, 8))}
               style={modalBtnStyle}
               title="Zoom in (+)"
             >
@@ -199,7 +201,7 @@ function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => vo
 
             <button
               type="button"
-              onClick={() => { setScale(1); setTranslate({ x: 0, y: 0 }); }}
+              onClick={() => { setScale(DEFAULT_ZOOM); setTranslate({ x: 0, y: 0 }); }}
               style={{ ...modalBtnStyle, marginLeft: 4, fontSize: 11, width: 'auto', paddingLeft: 8, paddingRight: 8 }}
               title="Reset (0)"
             >
@@ -350,7 +352,7 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
           {/* Expand button */}
           <button
             type="button"
-            onClick={() => setModalOpen(true)}
+            onClick={(e) => { e.stopPropagation(); setModalOpen(true); }}
             title="Expand diagram"
             style={{
               position: 'absolute',
