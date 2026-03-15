@@ -41,13 +41,22 @@ const PING_INTERVAL = 20_000;
 
 function getWsUrl(): string {
   if (typeof window === 'undefined') return '';
-  const host = window.location.hostname;
-  const port = 3002;
+  const { hostname, port, protocol } = window.location;
   // Auth token — prevents random network clients from connecting
-  const token = typeof window !== 'undefined'
-    ? (document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? 'cortex-ide')
-    : 'cortex-ide';
-  return `ws://${host}:${port}/ws?token=${encodeURIComponent(token)}`;
+  const token = document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? 'cortex-ide';
+
+  // When accessed via Tailscale / remote, use same-origin (proxied through
+  // Next.js rewrites on /ws). For local dev on localhost, fall back to the
+  // direct WS server port so hot-reload doesn't need the proxy running.
+  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
+  const wsProto = protocol === 'https:' ? 'wss' : 'ws';
+
+  if (isLocal) {
+    return `ws://${hostname}:3002/ws?token=${encodeURIComponent(token)}`;
+  }
+  // Remote: connect through the same host:port as the page (Next.js proxies /ws → 3002)
+  const wsPort = port ? `:${port}` : '';
+  return `${wsProto}://${hostname}${wsPort}/ws?token=${encodeURIComponent(token)}`;
 }
 
 export function useWebSocket({
