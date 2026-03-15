@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 import { NextResponse } from 'next/server';
 import { execFile } from 'node:child_process';
 import os from 'node:os';
@@ -10,7 +12,7 @@ const CORTEX_BINARY = process.env.CORTEX_BINARY || path.join(os.homedir(), 'bin'
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { subject, factId, mode } = body;
+    const { subject, factId } = body;
 
     if (!subject && !factId) {
       return NextResponse.json({ error: 'subject or factId is required' }, { status: 400 });
@@ -18,40 +20,7 @@ export async function POST(request: Request) {
 
     const query = subject ?? String(factId);
 
-    if (mode === 'impact') {
-      // Impact analysis — blast radius for a subject
-      const { stdout } = await execFileAsync(CORTEX_BINARY, [
-        'mcp', '--port', '0', // We'll use CLI subcommands instead
-      ], { timeout: 8000 });
-      // Fallback: use search to approximate graph exploration
-      const { stdout: searchOut } = await execFileAsync(CORTEX_BINARY, [
-        'search', query, '10', '--json',
-      ], { timeout: 8000, env: { ...process.env, NO_COLOR: '1' } });
-
-      const results = JSON.parse(searchOut.trim());
-      // Transform search results into graph-like nodes
-      const nodes = results.map((r: Record<string, unknown>, i: number) => ({
-        id: r.memory_id ?? i,
-        label: typeof r.content === 'string' ? (r.content as string).slice(0, 100) : '',
-        type: r.class ?? 'state',
-        score: r.score ?? 0,
-        source: r.source_section ?? r.source_file ?? '',
-      }));
-
-      return NextResponse.json({
-        center: query,
-        nodes,
-        edges: nodes.slice(1).map((n: { id: number }, i: number) => ({
-          source: nodes[0]?.id ?? 0,
-          target: n.id,
-          relation: 'related',
-          weight: 1 - (i * 0.1),
-        })),
-      });
-    }
-
-    // Default: explore graph around a subject
-    // Use fact query to find related facts
+    // Explore graph around a subject using search-based clustering
     const { stdout } = await execFileAsync(CORTEX_BINARY, [
       'search', query, '12', '--json',
     ], { timeout: 8000, env: { ...process.env, NO_COLOR: '1' } });
@@ -76,7 +45,8 @@ export async function POST(request: Request) {
       section: r.source_section ?? '',
     }));
 
-    // Create edges between facts in the same section (they're contextually related)
+    // Synthetic edges: facts in the same source section are assumed contextually related.
+    // These approximate graph structure until Cortex ships native graph queries.
     const edges: Array<{ source: number; target: number; relation: string }> = [];
     for (const [, group] of sectionMap) {
       for (let i = 0; i < group.length; i++) {

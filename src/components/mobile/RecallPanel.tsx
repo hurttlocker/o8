@@ -5,7 +5,6 @@ import type { RecallCard } from '@/lib/cortex/types';
 import FactCard from './FactCard';
 
 interface RecallPanelProps {
-  sessionKey: string;
   currentTask?: string;
   cwd?: string;
   branch?: string;
@@ -15,7 +14,6 @@ interface RecallPanelProps {
 }
 
 export default function RecallPanel({
-  sessionKey,
   currentTask,
   cwd,
   branch,

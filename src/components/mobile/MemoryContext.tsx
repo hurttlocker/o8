@@ -29,6 +29,12 @@ export default function MemoryContext({
   const [loading, setLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastPromptRef = useRef('');
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const fetchContext = useCallback(async (text: string) => {
     if (text.length < 10) {
@@ -45,6 +51,7 @@ export default function MemoryContext({
         body: JSON.stringify({ prompt: text, cwd, branch }),
       });
       const data = await res.json();
+      if (!mountedRef.current) return;
       setFacts(data.facts ?? []);
       if (enabled && data.contextBlock) {
         onContextReady(data.contextBlock);
@@ -52,10 +59,11 @@ export default function MemoryContext({
         onContextReady('');
       }
     } catch {
+      if (!mountedRef.current) return;
       setFacts([]);
       onContextReady('');
     } finally {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
   }, [cwd, branch, enabled, onContextReady]);
 

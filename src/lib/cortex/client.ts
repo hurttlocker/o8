@@ -33,20 +33,28 @@ const EXEC_TIMEOUT = 8_000; // 8s max for any Cortex call
 const CACHE_TTL_MS = 30_000; // 30s cache for stats/health
 
 let cortexAvailable: boolean | null = null;
+let cortexAvailableCheckedAt = 0;
+const AVAILABLE_TTL_MS = 60_000; // Re-check availability every 60s
 
 /**
  * Check if the Cortex binary exists and is executable.
- * Result is cached for the process lifetime.
+ * Result is cached with TTL — if user installs Cortex after IDE start,
+ * it will be detected within 60s without a restart.
  */
 export async function isCortexAvailable(): Promise<boolean> {
-  if (cortexAvailable !== null) return cortexAvailable;
+  const now = Date.now();
+  if (cortexAvailable !== null && now - cortexAvailableCheckedAt < AVAILABLE_TTL_MS) {
+    return cortexAvailable;
+  }
   try {
     await access(CORTEX_BINARY);
     const { stdout } = await execFileAsync(CORTEX_BINARY, ['stats'], { timeout: 5_000 });
     cortexAvailable = stdout.includes('"memories"');
+    cortexAvailableCheckedAt = now;
     return cortexAvailable;
   } catch {
     cortexAvailable = false;
+    cortexAvailableCheckedAt = now;
     return false;
   }
 }
@@ -132,10 +140,10 @@ export async function cortexReinforce(factId: number): Promise<boolean> {
 }
 
 /**
- * Supersede a fact with another.
+ * Supersede a fact (mark as replaced by a newer fact).
  */
 export async function cortexSupersede(factId: number): Promise<boolean> {
-  const result = await runCortex<{ ok?: boolean }>(['supersede', String(factId)]);
+  const result = await runCortex<{ ok?: boolean }>(['beliefs', 'set', 'superseded', String(factId)]);
   cache.delete('stats');
   return result !== null;
 }
@@ -177,7 +185,9 @@ export async function getRecallCards(query: string, limit = 5): Promise<RecallCa
     id: r.memory_id,
     memoryId: r.memory_id,
     text: r.snippet || r.content.slice(0, 200),
-    factType: (r.class as RecallCard['factType']) || 'state',
+    // Search results expose 'class' (memory class like "note"/"log"), not fact type.
+    // Default to 'state' — accurate type requires fact-level metadata not in search output.
+    factType: 'state' as RecallCard['factType'],
     confidence: r.score,
     source: shortenPath(r.source_file),
     sourceSection: r.source_section,
