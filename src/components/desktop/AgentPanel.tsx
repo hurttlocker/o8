@@ -858,7 +858,13 @@ const tabs: { id: Tab; icon: typeof Zap; label: string }[] = [
 
 // ── Main Panel ──
 
-export const AgentPanel = memo(function AgentPanel({ onSelectSession }: { onSelectSession?: (sessionKey: string) => void } = {}) {
+export const AgentPanel = memo(function AgentPanel({
+  onSelectSession,
+  onSelectIssue,
+}: {
+  onSelectSession?: (sessionKey: string) => void;
+  onSelectIssue?: (issueNumber: number) => void;
+} = {}) {
   const [squads, setSquads] = useState<Squad[]>([]);
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([]);
@@ -1050,7 +1056,7 @@ export const AgentPanel = memo(function AgentPanel({ onSelectSession }: { onSele
         marginTop: 4,
       }}>
         {activeTab === 'activity' ? <ActivityFeed events={events} commits={commits} /> : null}
-        {activeTab === 'issues' ? <IssuesList issues={issues} onSelect={setSelectedIssue} /> : null}
+        {activeTab === 'issues' ? <IssuesList issues={issues} onSelect={onSelectIssue || setSelectedIssue} /> : null}
         {activeTab === 'files' ? <FileTree tree={fileTree} /> : null}
       </div>
 
