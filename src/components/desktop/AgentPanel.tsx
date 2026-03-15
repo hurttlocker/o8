@@ -682,10 +682,17 @@ export const AgentPanel = memo(function AgentPanel() {
       overflow: 'hidden',
       background: '#f5f7fb',
     }}>
+      {/* ── Titlebar spacer (clears macOS traffic lights) ── */}
+      <div style={{
+        height: 38,
+        flexShrink: 0,
+        WebkitAppRegion: 'drag' as unknown as string,
+      } as React.CSSProperties} />
+
       {/* ── Agent Cards (pinned top) ── */}
       <div style={{
         flexShrink: 0,
-        paddingTop: 16,
+        paddingTop: 4,
         paddingRight: 14,
         paddingBottom: 8,
         paddingLeft: 14,
