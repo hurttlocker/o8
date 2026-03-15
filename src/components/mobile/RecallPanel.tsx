@@ -27,7 +27,6 @@ export default function RecallPanel({
   const lastQueryRef = useRef<string>('');
 
   const fetchRecall = useCallback(async () => {
-    // Build query from available context
     const queryParts: string[] = [];
     if (currentTask) queryParts.push(currentTask.slice(0, 100));
     if (cwd) queryParts.push(cwd.split('/').pop() ?? '');
@@ -47,12 +46,8 @@ export default function RecallPanel({
         body: JSON.stringify({ query, limit: 6 }),
       });
       const data = await res.json();
-      if (data.error) {
-        setError(data.error);
-        setCards([]);
-      } else {
-        setCards(data.cards ?? []);
-      }
+      if (data.error) { setError(data.error); setCards([]); }
+      else setCards(data.cards ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load recall');
       setCards([]);
@@ -61,15 +56,12 @@ export default function RecallPanel({
     }
   }, [currentTask, cwd, branch]);
 
-  useEffect(() => {
-    if (visible) fetchRecall();
-  }, [visible, fetchRecall]);
+  useEffect(() => { if (visible) fetchRecall(); }, [visible, fetchRecall]);
 
   const handleReinforce = useCallback(async (factId: number) => {
     try {
       await fetch('/api/mobile/cortex/resolve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'reinforce', factId }),
       });
     } catch { /* non-critical */ }
@@ -78,8 +70,7 @@ export default function RecallPanel({
   const handleRetire = useCallback(async (factId: number) => {
     try {
       await fetch('/api/mobile/cortex/resolve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'retire', factId }),
       });
     } catch { /* non-critical */ }
@@ -89,122 +80,101 @@ export default function RecallPanel({
 
   return (
     <div style={{
-      position: 'fixed',
-      top: 0,
-      right: 0,
-      bottom: 0,
-      width: '100%',
-      maxWidth: 380,
-      background: '#000000',
-      zIndex: 1000,
-      display: 'flex',
-      flexDirection: 'column',
+      position: 'fixed', top: 0, right: 0, bottom: 0, left: 0,
+      background: '#000000', zIndex: 1000,
+      display: 'flex', flexDirection: 'column',
       animation: 'slideInRight 0.25s cubic-bezier(0.32, 0.72, 0, 1)',
     }}>
-      {/* Header */}
+      {/* Nav bar */}
       <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '56px 16px 12px',
-        borderBottom: '1px solid #1c1c1e',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '60px 20px 14px',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 18 }}>🧠</span>
-          <span style={{ fontSize: 17, fontWeight: 600, color: '#ffffff', letterSpacing: '-0.02em' }}>
-            Cortex Recall
-          </span>
-          {cards.length > 0 && (
-            <span style={{
-              fontSize: 11,
-              fontWeight: 600,
-              background: '#af52de',
-              color: '#fff',
-              padding: '2px 7px',
-              borderRadius: 10,
-              minWidth: 18,
-              textAlign: 'center',
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 22, lineHeight: 1 }}>🧠</span>
+          <div>
+            <h2 style={{
+              fontSize: 20, fontWeight: 700, color: '#ffffff',
+              letterSpacing: '-0.03em', margin: 0, lineHeight: '24px',
             }}>
-              {cards.length}
-            </span>
-          )}
+              Recall
+            </h2>
+            {cards.length > 0 && (
+              <span style={{
+                fontSize: 12, color: '#8e8e93', fontWeight: 400,
+                letterSpacing: '-0.01em',
+              }}>
+                {cards.length} relevant memories
+              </span>
+            )}
+          </div>
         </div>
-        <button
-          onClick={onClose}
-          style={{
-            background: '#2c2c2e',
-            border: 'none',
-            borderRadius: 20,
-            width: 28,
-            height: 28,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#8e8e93',
-            fontSize: 16,
-            cursor: 'pointer',
-          }}
-        >
+        <button onClick={onClose} aria-label="Close" style={{
+          background: '#2c2c2e', border: 'none', borderRadius: 15,
+          width: 30, height: 30, display: 'flex', alignItems: 'center',
+          justifyContent: 'center', color: '#aeaeb2', fontSize: 14,
+          fontWeight: 700, cursor: 'pointer', minWidth: 44, minHeight: 44,
+        }}>
           ✕
         </button>
       </div>
 
+      <div style={{ height: 1, background: '#1c1c1e', margin: '0 20px' }} />
+
       {/* Content */}
       <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        padding: '12px 16px',
+        flex: 1, overflowY: 'auto', padding: '16px 20px 32px',
         WebkitOverflowScrolling: 'touch',
       }}>
         {loading && (
-          <div style={{ textAlign: 'center', padding: '40px 0', color: '#636366', fontSize: 13 }}>
-            Searching memory…
+          <div style={{ textAlign: 'center', padding: '60px 0' }}>
+            <div style={{
+              width: 24, height: 24, margin: '0 auto 16px',
+              border: '2px solid #3a3a3c', borderTopColor: '#af52de',
+              borderRadius: 12, animation: 'spin 0.8s linear infinite',
+            }} />
+            <div style={{ color: '#636366', fontSize: 14, letterSpacing: '-0.01em' }}>
+              Searching memory…
+            </div>
           </div>
         )}
 
         {error && (
           <div style={{
-            padding: '14px 16px',
-            background: 'rgba(255, 59, 48, 0.08)',
-            borderRadius: 12,
-            borderLeft: '3px solid #ff3b30',
-            color: '#ff3b30',
-            fontSize: 13,
+            padding: '16px', background: 'rgba(255, 69, 58, 0.06)',
+            borderRadius: 14, color: '#ff453a', fontSize: 14,
+            lineHeight: '20px', letterSpacing: '-0.01em',
           }}>
             {error}
           </div>
         )}
 
         {!loading && !error && cards.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '40px 0' }}>
-            <div style={{ fontSize: 32, marginBottom: 12 }}>🔍</div>
-            <div style={{ color: '#636366', fontSize: 13 }}>
-              No relevant memories found for this context.
+          <div style={{ textAlign: 'center', padding: '60px 24px' }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>🔍</div>
+            <div style={{
+              color: '#636366', fontSize: 15, lineHeight: '21px',
+              letterSpacing: '-0.01em',
+            }}>
+              No relevant memories for this session context.
             </div>
           </div>
         )}
 
         {cards.map((card) => (
-          <FactCard
-            key={card.id}
-            fact={card}
-            onReinforce={handleReinforce}
-            onRetire={handleRetire}
-            onInject={onInjectText}
+          <FactCard key={card.id} fact={card}
+            onReinforce={handleReinforce} onRetire={handleRetire} onInject={onInjectText}
           />
         ))}
       </div>
 
-      {/* Footer hint */}
       {cards.length > 0 && (
         <div style={{
-          padding: '10px 16px',
-          borderTop: '1px solid #1c1c1e',
-          fontSize: 11,
-          color: '#48484a',
-          textAlign: 'center',
+          padding: '12px 20px 28px', borderTop: '1px solid #1c1c1e',
+          fontSize: 12, color: '#3a3a3c', textAlign: 'center',
+          letterSpacing: '-0.01em',
         }}>
-          Tap a card to expand · Inject to add to compose
+          Tap to expand · Inject adds to compose
         </div>
       )}
     </div>
