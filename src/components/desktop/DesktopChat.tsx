@@ -407,7 +407,7 @@ function renderInline(text: string): React.ReactNode {
 
 // ── Main Component ──
 
-export function DesktopChat() {
+export function DesktopChat({ externalSessionKey }: { externalSessionKey?: string } = {}) {
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedKey, setSelectedKey] = useState<string>('');
@@ -559,6 +559,13 @@ export function DesktopChat() {
     const id = setInterval(fetchDiffStats, 30_000);
     return () => clearInterval(id);
   }, []);
+
+  // ── External session key (from Agent Panel click) ──
+  useEffect(() => {
+    if (externalSessionKey && externalSessionKey !== selectedKey) {
+      setSelectedKey(externalSessionKey);
+    }
+  }, [externalSessionKey]);
 
   // ── Enhance draft ──
   const enhance = useCallback(async () => {

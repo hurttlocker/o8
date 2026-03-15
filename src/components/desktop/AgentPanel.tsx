@@ -145,11 +145,13 @@ const AgentCard = memo(function AgentCard({
   agents,
   expanded,
   onToggle,
+  onSelectSession,
 }: {
   squad: Squad;
   agents: AgentDetail[];
   expanded: boolean;
   onToggle: () => void;
+  onSelectSession?: (sessionKey: string) => void;
 }) {
   const dotColor = statusDotColor[squad.status] ?? '#6b7280';
   // Get the primary agent's model
@@ -325,16 +327,28 @@ const AgentCard = memo(function AgentCard({
           {agents
             .filter(a => a.squadId === squad.id)
             .map(agent => (
-              <div key={agent.id} style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                paddingTop: 6,
-                paddingRight: 14,
-                paddingBottom: 6,
-                paddingLeft: 18,
-                fontSize: 12,
-              }}>
+              <div
+                key={agent.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (agent.sessionKey && onSelectSession) {
+                    onSelectSession(agent.sessionKey);
+                  }
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  paddingTop: 6,
+                  paddingRight: 14,
+                  paddingBottom: 6,
+                  paddingLeft: 18,
+                  fontSize: 12,
+                  cursor: agent.sessionKey ? 'pointer' : 'default',
+                  borderRadius: 8,
+                  transition: 'background 100ms ease',
+                }}
+              >
                 <span style={{ color: '#94a3b8', flexShrink: 0 }}>
                   {surfaceIcon(agent.surfaceLabel || agent.name)}
                 </span>
@@ -844,7 +858,7 @@ const tabs: { id: Tab; icon: typeof Zap; label: string }[] = [
 
 // ── Main Panel ──
 
-export const AgentPanel = memo(function AgentPanel() {
+export const AgentPanel = memo(function AgentPanel({ onSelectSession }: { onSelectSession?: (sessionKey: string) => void } = {}) {
   const [squads, setSquads] = useState<Squad[]>([]);
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([]);
@@ -970,6 +984,7 @@ export const AgentPanel = memo(function AgentPanel() {
               agents={agents}
               expanded={expandedSquad === squad.id}
               onToggle={() => setExpandedSquad(expandedSquad === squad.id ? null : squad.id)}
+              onSelectSession={onSelectSession}
             />
           ))
         )}
