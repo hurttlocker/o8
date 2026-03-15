@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { DesktopChat } from '@/components/desktop/DesktopChat';
 
 export default function DashboardPage() {
@@ -13,58 +13,17 @@ export default function DashboardPage() {
       fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif',
       overflow: 'hidden',
     }}>
-      {/* Left panel — future workspace area */}
+      {/* Left panel — Agent Command Center */}
       <div style={{
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
-        position: 'relative',
+        overflow: 'hidden',
       }}>
-        {/* Legacy view link — tucked in corner */}
-        <Link
-          href="/"
-          style={{
-            position: 'absolute',
-            top: 16,
-            left: 20,
-            fontSize: 12,
-            color: '#5b6475',
-            textDecoration: 'none',
-            padding: '4px 10px',
-            borderRadius: 6,
-            border: '1px solid rgba(255,255,255,0.06)',
-            transition: 'all 0.2s ease',
-          }}
-        >
-          ← Legacy View
-        </Link>
-
-        <div style={{ textAlign: 'center', maxWidth: 480 }}>
-          <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.15 }}>◇</div>
-          <h1 style={{
-            fontSize: 24,
-            fontWeight: 700,
-            letterSpacing: '-0.03em',
-            marginBottom: 8,
-            color: '#f2f2f7',
-          }}>
-            Workspace
-          </h1>
-          <p style={{
-            fontSize: 14,
-            color: '#5b6475',
-            lineHeight: 1.5,
-            letterSpacing: '-0.01em',
-          }}>
-            Agent activity, diffs, and project context will live here.
-          </p>
-        </div>
+        <AgentPanel />
       </div>
 
-      {/* Right panel — Chat sidebar (full height, no app-level header) */}
+      {/* Right panel — Chat sidebar */}
       <div style={{
         width: 420,
         flexShrink: 0,
