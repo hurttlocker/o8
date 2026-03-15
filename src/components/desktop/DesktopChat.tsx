@@ -214,27 +214,72 @@ function renderMarkdown(text: string): React.ReactNode[] {
     }
 
     if (line.includes('|') && line.trim().startsWith('|')) {
-      const tableRows: string[] = [];
+      const tableLines: string[] = [];
       while (i < lines.length && lines[i].includes('|') && lines[i].trim().startsWith('|')) {
-        if (!lines[i].match(/^\s*\|[\s-|]+\|\s*$/)) {
-          tableRows.push(lines[i]);
-        }
+        tableLines.push(lines[i]);
         i++;
       }
-      if (tableRows.length > 0) {
+      if (tableLines.length >= 2) {
+        const isSeparator = (l: string) => /^\s*\|[\s:_-|]+\|\s*$/.test(l);
+        const parseCells = (l: string) => l.split('|').slice(1, -1).map(c => c.trim());
+        const hasSep = tableLines.length >= 2 && isSeparator(tableLines[1]);
+        const headerCells = parseCells(tableLines[0]);
+        const bodyRows = tableLines.slice(hasSep ? 2 : 1).filter(l => !isSeparator(l));
+
         elements.push(
-          <div key={`table-${i}`} className="remodex-rich-table-wrap">
-            <table className="remodex-rich-table">
+          <div key={`table-${i}`} style={{
+            overflowX: 'auto',
+            margin: '12px 0',
+            borderRadius: 12,
+            border: '1px solid #e5e7eb',
+            backgroundColor: '#ffffff',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+          }}>
+            <table style={{
+              width: '100%',
+              borderCollapse: 'collapse',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+            }}>
+              <thead>
+                <tr>
+                  {headerCells.map((cell, ci) => (
+                    <th key={ci} style={{
+                      textAlign: 'left',
+                      padding: '10px 14px',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      color: '#6b7280',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                      borderBottom: '2px solid #e5e7eb',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {renderInline(cell)}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
               <tbody>
-                {tableRows.map((row, ri) => (
-                  <tr key={ri}>
-                    {row.split('|').filter(c => c.trim()).map((cell, ci) => (
-                      ri === 0
-                        ? <th key={ci}>{renderInline(cell.trim())}</th>
-                        : <td key={ci}>{renderInline(cell.trim())}</td>
-                    ))}
-                  </tr>
-                ))}
+                {bodyRows.map((row, ri) => {
+                  const cells = parseCells(row);
+                  return (
+                    <tr key={ri} style={{
+                      backgroundColor: ri % 2 === 0 ? '#ffffff' : '#f9fafb',
+                    }}>
+                      {cells.map((cell, ci) => (
+                        <td key={ci} style={{
+                          textAlign: 'left',
+                          padding: '10px 14px',
+                          fontSize: '0.85rem',
+                          color: '#1f2937',
+                          borderBottom: '1px solid #f3f4f6',
+                        }}>
+                          {renderInline(cell)}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
