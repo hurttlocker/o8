@@ -181,6 +181,41 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
     documentVisibleRef,
   ]);
 
+  // Pre-fetch adjacent session history during idle (#46 optimistic rendering)
+  useEffect(() => {
+    if (!selectedSessionKey || !snapshot.sessions.length) return;
+    const currentIndex = snapshot.sessions.findIndex((s) => s.sessionKey === selectedSessionKey);
+    if (currentIndex < 0) return;
+
+    // Gather up to 2 adjacent sessions that haven't been loaded yet
+    const adjacentKeys: string[] = [];
+    for (const offset of [1, -1]) {
+      const idx = currentIndex + offset;
+      if (idx >= 0 && idx < snapshot.sessions.length) {
+        const key = snapshot.sessions[idx].sessionKey;
+        if (key && !historyBySession[key]?.length && !historyLoading[key]) {
+          adjacentKeys.push(key);
+        }
+      }
+    }
+    if (adjacentKeys.length === 0) return;
+
+    // Use requestIdleCallback (or setTimeout fallback) to pre-fetch during idle
+    const idleCallback = typeof window.requestIdleCallback === 'function'
+      ? window.requestIdleCallback
+      : (cb: () => void) => window.setTimeout(cb, 2000);
+    const cancelIdle = typeof window.cancelIdleCallback === 'function'
+      ? window.cancelIdleCallback
+      : (id: number) => window.clearTimeout(id);
+
+    const id = idleCallback(() => {
+      for (const key of adjacentKeys) {
+        void loadHistory(key).catch(() => undefined);
+      }
+    });
+    return () => cancelIdle(id);
+  }, [selectedSessionKey, snapshot.sessions, historyBySession, historyLoading, loadHistory]);
+
   return {
     refreshInbox,
     loadHistory,
