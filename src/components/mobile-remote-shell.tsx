@@ -26,17 +26,20 @@ import {
   pickCurrentSession,
   renderMessageBody,
 } from './mobile/utils';
-import { ApprovalStack } from './mobile/ApprovalStack';
+import dynamic from 'next/dynamic';
 import { ChatView } from './mobile/ChatView';
 import { ComposeBar } from './mobile/ComposeBar';
-import { ControlsSheet } from './mobile/ControlsSheet';
-import { CostsDashboard } from './mobile/CostsDashboard';
-import { DiffOverlay } from './mobile/DiffOverlay';
 import { RuntimeBar } from './mobile/RuntimeBar';
 import { SquadRail } from './mobile/SquadRail';
 import { SurfaceStatus } from './mobile/SurfaceStatus';
-import { TokenUsageSummary } from './mobile/TokenUsageSummary';
 import { TopBar } from './mobile/TopBar';
+
+// Lazy-loaded panels — only loaded when opened (#45)
+const ApprovalStack = dynamic(() => import('./mobile/ApprovalStack').then((m) => ({ default: m.ApprovalStack })), { ssr: false });
+const ControlsSheet = dynamic(() => import('./mobile/ControlsSheet').then((m) => ({ default: m.ControlsSheet })), { ssr: false });
+const CostsDashboard = dynamic(() => import('./mobile/CostsDashboard').then((m) => ({ default: m.CostsDashboard })), { ssr: false });
+const DiffOverlay = dynamic(() => import('./mobile/DiffOverlay').then((m) => ({ default: m.DiffOverlay })), { ssr: false });
+const TokenUsageSummary = dynamic(() => import('./mobile/TokenUsageSummary').then((m) => ({ default: m.TokenUsageSummary })), { ssr: false });
 import {
   copyTextToClipboard,
   enhancePromptDraft,
@@ -57,7 +60,6 @@ import {
   updateOwnedReviewDisposition,
 } from './mobile/controller';
 import {
-  connectTranscriptStream,
   pinTranscriptToBottom,
   startUnifiedSyncPolling,
   trackScrollChrome,
@@ -209,8 +211,6 @@ export function MobileRemoteShell({
     setSnapshot,
     setRefreshError,
     setHistoryBySession,
-    setHistoryGroupsBySession,
-    setReviewFileByPath,
     setStreamingText,
     streamingTextRef,
   });
@@ -221,18 +221,7 @@ export function MobileRemoteShell({
     }
     setHydrated(true);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  // SSE streaming — fallback when WebSocket is not connected
-  useEffect(() => {
-    if (wsConnected) return; // WS handles chat deltas when connected
-    return connectTranscriptStream({
-      selectedSessionKey,
-      sessions: snapshot.sessions,
-      setHistoryBySession,
-      setStreamingText,
-      streamingTextRef,
-      loadHistory,
-    });
-  }, [selectedSessionKey, wsConnected]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Chat streaming is handled by useWebSocket — SSE removed (#44/#48)
   const reviewFiles = useMemo(() => {
     const next = isOwnedCodexSession
       ? selectedReviewPacket?.changedFiles ?? []
