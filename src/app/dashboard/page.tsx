@@ -45,8 +45,8 @@ export default function DashboardPage() {
     <div style={{
       height: '100vh',
       display: 'flex',
-      background: 'linear-gradient(135deg, #0a0a0a 0%, #111827 50%, #0a0a0a 100%)',
-      color: '#f2f2f7',
+      background: '#eef1f6',
+      color: '#1e293b',
       fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif',
       overflow: 'hidden',
     }}>
@@ -58,7 +58,7 @@ export default function DashboardPage() {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        borderRight: '1px solid rgba(255,255,255,0.06)',
+        borderRight: '1px solid rgba(0,0,0,0.06)',
       }}>
         <AgentPanel />
       </div>
@@ -80,7 +80,7 @@ export default function DashboardPage() {
           width: 3,
           height: 40,
           borderRadius: 2,
-          backgroundColor: 'rgba(255,255,255,0.08)',
+          backgroundColor: 'rgba(0,0,0,0.08)',
           transition: 'background-color 150ms',
         }} />
       </div>
@@ -94,21 +94,22 @@ export default function DashboardPage() {
         justifyContent: 'center',
         overflow: 'hidden',
         position: 'relative',
+        background: 'linear-gradient(180deg, #f0f4f8 0%, #e8edf4 100%)',
       }}>
         <div style={{ textAlign: 'center', maxWidth: 480 }}>
-          <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.15 }}>◇</div>
+          <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.12, color: '#94a3b8' }}>◇</div>
           <h1 style={{
             fontSize: 24,
             fontWeight: 700,
             letterSpacing: '-0.03em',
             marginBottom: 8,
-            color: '#f2f2f7',
+            color: '#1e293b',
           }}>
             Workspace
           </h1>
           <p style={{
             fontSize: 14,
-            color: '#5b6475',
+            color: '#94a3b8',
             lineHeight: 1.5,
             letterSpacing: '-0.01em',
           }}>
@@ -134,7 +135,7 @@ export default function DashboardPage() {
           width: 3,
           height: 40,
           borderRadius: 2,
-          backgroundColor: 'rgba(255,255,255,0.08)',
+          backgroundColor: 'rgba(0,0,0,0.08)',
           transition: 'background-color 150ms',
         }} />
       </div>
