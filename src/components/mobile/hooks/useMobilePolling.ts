@@ -26,7 +26,7 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
     snapshot, setSnapshot,
     selectedSessionKey, selectedSession,
     isOwnedCodexSession,
-    historyBySession, historyLoading,
+    historyBySession, historyBySessionRef, historyLoading,
     setHistoryLoading, setHistoryBySession, setHistoryGroupsBySession, setHistoryError,
     reviewPacketBySession, reviewPacketLoadingBySession,
     setReviewPacketLoadingBySession, setReviewPacketBySession, setReviewPacketErrorBySession,
@@ -153,6 +153,9 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
   }, [linkedOwnedKey, historyBySession, historyLoading, loadHistory]);
 
   // Unified sync polling
+  // IMPORTANT: historyBySession is accessed via historyBySessionRef (a stable ref)
+  // instead of directly in the dependency array. Putting historyBySession in deps
+  // caused a restart loop: poll → update history → effect restart → immediate poll.
   useEffect(() => {
     return startUnifiedSyncPolling({
       selectedSessionKey,
@@ -164,7 +167,7 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
       diffOpen,
       selectedReviewFilePath,
       documentVisibleRef,
-      historyBySession,
+      historyBySessionRef,
       wsConnected,
       setSnapshot,
       setRefreshError,
@@ -174,11 +177,11 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
       loadOwnedReviewPacket,
     });
   }, [
-    actionStateBySession, diffOpen, historyBySession, linkedOwnedKey,
+    actionStateBySession, diffOpen, linkedOwnedKey,
     loadOwnedReviewPacket, pendingOwnedTurnBySession, selectedReviewFilePath,
     selectedSession, selectedSessionKey, waitingForResponse, wsConnected,
     setSnapshot, setRefreshError, setHistoryBySession, setHistoryGroupsBySession, setReviewFileByPath,
-    documentVisibleRef,
+    documentVisibleRef, historyBySessionRef,
   ]);
 
   // Pre-fetch adjacent session history during idle (#46 optimistic rendering)
