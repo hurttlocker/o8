@@ -25,6 +25,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { MarkdownBody } from './MarkdownBody';
 
 // ── Types ──
 
@@ -487,24 +488,20 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
               ) : null}
             </div>
 
-            {/* Issue body (rendered as preformatted markdown-ish) */}
+            {/* Issue body (rendered markdown) */}
             <div style={{
               paddingTop: 20,
               paddingRight: 24,
               paddingBottom: 20,
               paddingLeft: 24,
             }}>
-              <pre style={{
-                margin: 0,
-                fontSize: '0.85rem',
-                lineHeight: 1.7,
-                fontFamily: '-apple-system, system-ui, sans-serif',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                color: '#1e293b',
-              }}>
-                {detail.body || 'No description provided.'}
-              </pre>
+              {detail.body ? (
+                <MarkdownBody text={detail.body} />
+              ) : (
+                <p style={{ fontSize: '0.9rem', color: '#94a3b8', fontStyle: 'italic' }}>
+                  No description provided.
+                </p>
+              )}
             </div>
           </div>
         ) : null}
