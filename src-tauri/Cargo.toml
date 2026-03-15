@@ -1,0 +1,27 @@
+[package]
+name = "cortex-ide"
+version = "0.1.0"
+description = "Agent-first coding IDE with persistent memory"
+authors = ["hurttlocker"]
+license = "MIT"
+repository = "https://github.com/hurttlocker/cortex-ide"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.6" }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.10.3", features = ["tray-icon"] }
+tauri-plugin-log = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-process = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-store = "2"
