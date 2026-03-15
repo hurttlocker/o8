@@ -140,19 +140,23 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
   );
 
   const [activeBlock, setActiveBlock] = useState<number | null>(null);
+  const activeBlockRef = useRef<number | null>(null);
 
-  // Subscribe to TTS state to track active block
+  // Subscribe to TTS state — only clear when playback fully ends
   useEffect(() => {
     if (entry.role !== 'assistant') return;
     return ttsEngine.subscribe((state) => {
-      if (state.activeMessageId !== entry.id) {
-        setActiveBlock(null);
+      // Only clear when TTS goes idle or switches to a different message
+      if (state.state === 'idle' || (state.activeMessageId !== null && state.activeMessageId !== entry.id)) {
+        if (activeBlockRef.current !== null) {
+          activeBlockRef.current = null;
+          setActiveBlock(null);
+        }
       }
     });
   }, [entry.id, entry.role]);
 
   const handleBlockClick = useCallback((blockIndex: number) => {
-    // Collect text from this block onward
     const textFromHere = mdBlocks
       .slice(blockIndex)
       .map(b => b.rawText)
@@ -160,6 +164,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
 
     if (!textFromHere.trim()) return;
 
+    activeBlockRef.current = blockIndex;
     setActiveBlock(blockIndex);
     void ttsEngine.play(textFromHere, entry.id);
   }, [mdBlocks, entry.id]);
