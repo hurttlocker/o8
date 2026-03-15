@@ -80,6 +80,7 @@ export const TopBar = memo(function TopBar({
       data-compact={isHeaderCompact ? 'true' : 'false'}
       data-context-visible="false"
       data-visible={headerVisible ? 'true' : 'false'}
+      data-picker-open={squadPickerOpen ? 'true' : 'false'}
     >
       <div style={{ position: 'relative', flexShrink: 0 }}>
         <button
