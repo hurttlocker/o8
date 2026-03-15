@@ -35,6 +35,7 @@ import type {
 } from '@/lib/mobile/types';
 import type { ProjectGroup } from '@/components/mobile/types';
 import { buildProjectGroups } from '@/components/mobile/utils';
+import { CodeBlock } from './CodeBlock';
 import { MessageActions } from './MessageActions';
 import { ttsEngine } from '@/lib/tts/engine';
 
@@ -254,13 +255,8 @@ function renderMarkdownBlocks(text: string): RenderedBlock[] {
       i++;
       const raw = codeLines.join('\n');
       blocks.push({
-        rawText: raw,
-        element: (
-          <pre key={`code-${i}`} className="remodex-rich-codeblock">
-            {lang ? <div className="remodex-rich-codeblock-lang">{lang}</div> : null}
-            <code>{raw}</code>
-          </pre>
-        ),
+        rawText: lang?.toLowerCase() === 'mermaid' ? 'diagram' : raw,
+        element: <CodeBlock key={`code-${i}`} code={raw} language={lang || undefined} />,
       });
       continue;
     }
