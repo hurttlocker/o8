@@ -166,6 +166,7 @@ export interface ControlsSheetProps {
   onCopyKey: () => void;
   onAbort: () => void | Promise<void>;
   onSessionFocus: (sessionId: string) => void;
+  children?: ReactNode;
 }
 
 export interface DiffOverlayProps {
@@ -198,6 +199,7 @@ export interface TopBarProps {
   compactLine: CompactLine;
   onOpenControls: () => void;
   onOpenDiff: () => void;
+  onOpenCortexRecall?: () => void;
 }
 
 export interface SurfaceStatusProps {

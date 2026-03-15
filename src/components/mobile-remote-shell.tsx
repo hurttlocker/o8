@@ -31,6 +31,18 @@ const CostsDashboard = dynamic(() => import('./mobile/CostsDashboard').then((m) 
 const DiffOverlay = dynamic(() => import('./mobile/DiffOverlay').then((m) => ({ default: m.DiffOverlay })), { ssr: false, ...shimmerFallback });
 const TokenUsageSummary = dynamic(() => import('./mobile/TokenUsageSummary').then((m) => ({ default: m.TokenUsageSummary })), { ssr: false, ...shimmerFallback });
 
+// Cortex memory surfaces (#78-#85) — typed via explicit generic param
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const RecallPanel = dynamic<any>(() => import('./mobile/RecallPanel'), { ssr: false });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const MemoryHealth = dynamic<any>(() => import('./mobile/MemoryHealth'), { ssr: false });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const MemoryContext = dynamic<any>(() => import('./mobile/MemoryContext'), { ssr: false });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const GraphExplorer = dynamic<any>(() => import('./mobile/GraphExplorer'), { ssr: false });
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const CortexStatus = dynamic<any>(() => import('./mobile/CortexStatus'), { ssr: false });
+
 // Extracted hooks (#43 — hooks extraction)
 import { useMobileState } from './mobile/hooks/useMobileState';
 import { useMobilePolling } from './mobile/hooks/useMobilePolling';
@@ -95,6 +107,12 @@ export function MobileRemoteShell({
     refreshError, surfaceNote,
     selectedId, activeView,
     setReviewPacketBySession,
+    // Cortex memory
+    cortexRecallOpen, setCortexRecallOpen,
+    cortexHealthOpen, setCortexHealthOpen,
+    cortexGraphOpen, setCortexGraphOpen,
+    cortexContextEnabled, setCortexContextEnabled,
+    cortexContextBlock, setCortexContextBlock,
   } = state;
 
   // Lock body scroll when diff overlay is open
@@ -232,6 +250,7 @@ export function MobileRemoteShell({
           compactLine={compactLine}
           onOpenControls={() => setControlsOpen(true)}
           onOpenDiff={actions.openDiffViewer}
+          onOpenCortexRecall={() => setCortexRecallOpen(true)}
         />
         <div className="remodex-scroll-view">
           {activeView === 'costs' ? (
@@ -298,6 +317,14 @@ export function MobileRemoteShell({
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
         <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
+          <MemoryContext
+            prompt={transcriptDraft}
+            cwd={selectedSession?.runtimeSurface?.cwd}
+            branch={selectedSession?.runtimeSurface?.branch}
+            enabled={cortexContextEnabled}
+            onToggle={setCortexContextEnabled}
+            onContextReady={setCortexContextBlock}
+          />
           <div className="remodex-compose-shell">
             <ComposeBar
               session={selectedSession}
@@ -352,7 +379,13 @@ export function MobileRemoteShell({
         onCopyKey={actions.handleCopySelectedSessionKey}
         onAbort={actions.handleStopActiveRun}
         onSessionFocus={actions.handleSessionFocus}
-      />
+      >
+        <CortexStatus
+          onRecallOpen={() => { setControlsOpen(false); setCortexRecallOpen(true); }}
+          onMemoryHealthOpen={() => { setControlsOpen(false); setCortexHealthOpen(true); }}
+          onGraphOpen={() => { setControlsOpen(false); setCortexGraphOpen(true); }}
+        />
+      </ControlsSheet>
       <DiffOverlay
         diffOpen={diffOpen}
         selectedFile={selectedReviewFile}
@@ -367,6 +400,32 @@ export function MobileRemoteShell({
         onFileSelect={actions.handleReviewFileFocus}
         onLoadFile={loadReviewFile}
         onRefresh={actions.handleDiffRefresh}
+      />
+      {/* Cortex Memory Surfaces */}
+      <RecallPanel
+        sessionKey={selectedSessionKey ?? ''}
+        currentTask={selectedSession?.currentTask ?? selectedSession?.name}
+        cwd={selectedSession?.runtimeSurface?.cwd}
+        branch={selectedSession?.runtimeSurface?.branch}
+        visible={cortexRecallOpen}
+        onClose={() => setCortexRecallOpen(false)}
+        onInjectText={(text: string) => {
+          if (!selectedSessionKey) return;
+          setDraftBySession((prev) => ({
+            ...prev,
+            [selectedSessionKey]: (prev[selectedSessionKey] ?? '') + (prev[selectedSessionKey] ? '\n' : '') + text,
+          }));
+          setCortexRecallOpen(false);
+        }}
+      />
+      <MemoryHealth
+        visible={cortexHealthOpen}
+        onClose={() => setCortexHealthOpen(false)}
+      />
+      <GraphExplorer
+        visible={cortexGraphOpen}
+        onClose={() => setCortexGraphOpen(false)}
+        initialSubject={selectedSession?.currentTask?.slice(0, 60)}
       />
     </div>
   );

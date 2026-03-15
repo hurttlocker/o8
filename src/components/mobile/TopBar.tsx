@@ -15,6 +15,7 @@ export function TopBar({
   compactLine,
   onOpenControls,
   onOpenDiff,
+  onOpenCortexRecall,
 }: TopBarProps) {
   const connectionDotColor = wsConnectionState === 'connected'
     ? '#34c759'
@@ -92,6 +93,24 @@ export function TopBar({
           <p>{activeSubtitle}</p>
         </div>
       </div>
+      {onOpenCortexRecall ? (
+        <button
+          type="button"
+          onClick={onOpenCortexRecall}
+          aria-label="Cortex Memory Recall"
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            padding: '4px 6px',
+            fontSize: 18,
+            lineHeight: 1,
+            flexShrink: 0,
+          }}
+        >
+          🧠
+        </button>
+      ) : null}
       <button
         type="button"
         className="remodex-diff-pill"
