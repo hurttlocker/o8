@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
-const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
 const IGNORE = new Set(['.git', 'node_modules', '.next', '.turbo', 'target', 'dist', '.DS_Store']);
 const MAX_DEPTH = 3;
 
@@ -47,7 +47,16 @@ async function buildTree(dir: string, relPath: string, depth: number): Promise<F
   }
 }
 
-export async function GET() {
-  const tree = await buildTree(REPO_ROOT, '', 0);
-  return NextResponse.json({ tree, root: REPO_ROOT });
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const workspaceParam = searchParams.get('workspace');
+
+  let root = DEFAULT_ROOT;
+  if (workspaceParam) {
+    const home = process.env.HOME || '/Users/marquisehurtt';
+    root = workspaceParam.startsWith('~') ? workspaceParam.replace('~', home) : workspaceParam;
+  }
+
+  const tree = await buildTree(root, '', 0);
+  return NextResponse.json({ tree, root });
 }

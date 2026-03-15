@@ -51,21 +51,23 @@ export default function DashboardPage() {
     });
   }, [openCanvasTab]);
 
-  const handleSelectIssue = useCallback((issueNumber: number) => {
+  const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
     openCanvasTab({
-      id: `issue:${issueNumber}`,
+      id: `issue:${issueNumber}${repo ? `:${repo}` : ''}`,
       kind: 'issue',
       label: `#${issueNumber}`,
       resourceId: String(issueNumber),
+      meta: repo ? { repo } : undefined,
     });
   }, [openCanvasTab]);
 
-  const handleSelectPR = useCallback((prNumber: number) => {
+  const handleSelectPR = useCallback((prNumber: number, repo?: string) => {
     openCanvasTab({
-      id: `pr:${prNumber}`,
+      id: `pr:${prNumber}${repo ? `:${repo}` : ''}`,
       kind: 'pr',
       label: `PR #${prNumber}`,
       resourceId: String(prNumber),
+      meta: repo ? { repo } : undefined,
     });
   }, [openCanvasTab]);
 

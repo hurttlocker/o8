@@ -44,6 +44,8 @@ export interface CanvasTab {
   label: string;
   /** Issue number, session key, file path, etc. */
   resourceId: string;
+  /** Optional metadata (e.g., repo for scoped issue/PR queries) */
+  meta?: Record<string, string>;
 }
 
 export interface CanvasProps {
@@ -196,7 +198,7 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
 const TabContent = memo(function TabContent({ tab }: { tab: CanvasTab }) {
   switch (tab.kind) {
     case 'issue':
-      return <IssueViewer issueNumber={parseInt(tab.resourceId, 10)} />;
+      return <IssueViewer issueNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} />;
     case 'transcript':
       return <TranscriptViewer sessionKey={tab.resourceId} />;
     case 'file':
@@ -206,7 +208,7 @@ const TabContent = memo(function TabContent({ tab }: { tab: CanvasTab }) {
     case 'commit':
       return <CommitViewer commitHash={tab.resourceId} />;
     case 'pr':
-      return <PRViewer prNumber={parseInt(tab.resourceId, 10)} />;
+      return <PRViewer prNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} />;
     case 'welcome':
       return <CanvasEmpty />;
     default:
@@ -228,7 +230,7 @@ interface IssueDetail {
   url: string;
 }
 
-const IssueViewer = memo(function IssueViewer({ issueNumber }: { issueNumber: number }) {
+const IssueViewer = memo(function IssueViewer({ issueNumber, repo }: { issueNumber: number; repo?: string }) {
   const [detail, setDetail] = useState<IssueDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -238,7 +240,8 @@ const IssueViewer = memo(function IssueViewer({ issueNumber }: { issueNumber: nu
     setLoading(true);
     setError(null);
 
-    fetch(`/api/panel/issues/${issueNumber}`)
+    const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
+    fetch(`/api/panel/issues/${issueNumber}${repoParam}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
@@ -563,7 +566,7 @@ const prStateStyles: Record<string, { color: string; label: string; bg: string }
   CLOSED: { color: '#ef4444', label: 'Closed', bg: 'rgba(239,68,68,0.08)' },
 };
 
-function PRViewer({ prNumber }: { prNumber: number }) {
+function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
   const [pr, setPr] = useState<PRDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -574,7 +577,8 @@ function PRViewer({ prNumber }: { prNumber: number }) {
     setLoading(true);
     setError(null);
 
-    fetch(`/api/panel/prs/${prNumber}`)
+    const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
+    fetch(`/api/panel/prs/${prNumber}${repoParam}`)
       .then((r) => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
