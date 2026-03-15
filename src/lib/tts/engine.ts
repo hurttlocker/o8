@@ -1,13 +1,11 @@
 /**
  * TTSEngine — unified TTS playback for Cortex IDE.
  *
- * Layer 1: Edge TTS WebSocket (browser-direct, en-US-SteffanNeural)
+ * Layer 1: Server-side edge-tts via /api/tts (en-US-SteffanNeural = Mister voice)
  * Layer 2: Browser SpeechSynthesis (offline fallback, device voice)
  *
  * Used by both desktop and mobile message action bars.
  */
-
-import { synthesize } from './edge-ws';
 
 export type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
 
@@ -37,7 +35,6 @@ class TTSEngineImpl {
   };
   private animFrameId: number | null = null;
 
-  /** Subscribe to state changes. Returns unsubscribe function. */
   subscribe(listener: StateListener): () => void {
     this.listeners.add(listener);
     listener(this._state);
@@ -75,9 +72,8 @@ class TTSEngineImpl {
     }
   }
 
-  /** Play a message. Tries Edge TTS first, falls back to SpeechSynthesis. */
+  /** Play a message. Tries server-side edge-tts first, falls back to SpeechSynthesis. */
   async play(text: string, messageId: string): Promise<void> {
-    // Stop any current playback
     this.stop();
 
     this.updateState({
@@ -88,21 +84,30 @@ class TTSEngineImpl {
       usingFallback: false,
     });
 
-    // Strip markdown formatting for cleaner speech
     const cleanText = stripMarkdown(text);
 
-    // Try Edge TTS first
+    // Try server-side edge-tts
     try {
-      const blobUrl = await synthesize(cleanText, {
-        voice: 'en-US-SteffanNeural',
+      console.log('[TTS] Requesting /api/tts...');
+      const resp = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: cleanText, voice: 'en-US-SteffanNeural' }),
       });
 
-      // Double-check we weren't stopped during synthesis
-      if (this._state.activeMessageId !== messageId) {
-        URL.revokeObjectURL(blobUrl);
-        return;
+      if (!resp.ok) {
+        const errText = await resp.text();
+        throw new Error(`TTS API ${resp.status}: ${errText}`);
       }
 
+      const blob = await resp.blob();
+      console.log(`[TTS] Got audio: ${blob.size} bytes`);
+
+      if (this._state.activeMessageId !== messageId) {
+        return; // Stopped during request
+      }
+
+      const blobUrl = URL.createObjectURL(blob);
       this.currentBlobUrl = blobUrl;
       this.audio = new Audio(blobUrl);
       this.audio.playbackRate = this._state.playbackRate;
@@ -129,16 +134,16 @@ class TTSEngineImpl {
       };
 
       this.audio.onerror = () => {
+        console.warn('[TTS] Audio playback error, trying fallback');
         this.cleanup();
-        // Fall through to SpeechSynthesis
         this.playFallback(cleanText, messageId);
       };
 
       await this.audio.play();
+      console.log('[TTS] Playing Mister voice (SteffanNeural)');
       return;
     } catch (err) {
-      // Edge TTS failed — fall back to SpeechSynthesis
-      console.warn('[TTSEngine] Edge TTS failed, using fallback:', err);
+      console.warn('[TTS] Server-side TTS failed, using fallback:', err);
       this.playFallback(cleanText, messageId);
     }
   }
@@ -150,6 +155,7 @@ class TTSEngineImpl {
       return;
     }
 
+    console.log('[TTS] Using SpeechSynthesis fallback');
     this.updateState({
       state: 'playing',
       activeMessageId: messageId,
@@ -160,7 +166,6 @@ class TTSEngineImpl {
     utterance.rate = this._state.playbackRate;
     utterance.lang = 'en-US';
 
-    // Try to pick a good voice
     const voices = speechSynthesis.getVoices();
     const preferred = voices.find(v => v.name.includes('Samantha'))
       ?? voices.find(v => v.name.includes('Daniel'))
@@ -226,13 +231,7 @@ class TTSEngineImpl {
 
   setRate(rate: number) {
     this.updateState({ playbackRate: rate });
-    if (this.audio) {
-      this.audio.playbackRate = rate;
-    }
-    if (this.utterance) {
-      // SpeechSynthesis rate can't be changed mid-utterance
-      // Will apply on next play
-    }
+    if (this.audio) this.audio.playbackRate = rate;
   }
 
   get state(): TTSEngineState {
@@ -241,7 +240,6 @@ class TTSEngineImpl {
 
   private cleanup() {
     this.stopTimeTracking();
-
     if (this.audio) {
       this.audio.pause();
       this.audio.onplay = null;
@@ -250,12 +248,10 @@ class TTSEngineImpl {
       this.audio.onerror = null;
       this.audio = null;
     }
-
     if (this.currentBlobUrl) {
       URL.revokeObjectURL(this.currentBlobUrl);
       this.currentBlobUrl = null;
     }
-
     if (this.utterance) {
       speechSynthesis.cancel();
       this.utterance = null;
@@ -263,31 +259,21 @@ class TTSEngineImpl {
   }
 }
 
-/** Strip markdown formatting for cleaner speech */
+/** Strip markdown for cleaner speech */
 function stripMarkdown(text: string): string {
   return text
-    // Remove code blocks
     .replace(/```[\s\S]*?```/g, ' code block omitted ')
-    // Remove inline code
     .replace(/`([^`]+)`/g, '$1')
-    // Remove bold/italic
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/\*([^*]+)\*/g, '$1')
-    // Remove headers
     .replace(/^#{1,6}\s+/gm, '')
-    // Remove table formatting
     .replace(/\|/g, ', ')
     .replace(/^[\s-:]+$/gm, '')
-    // Remove link formatting
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    // Remove horizontal rules
     .replace(/^[-*_]{3,}$/gm, '')
-    // Clean up model signatures
     .replace(/─\s*\w+$/gm, '')
-    // Collapse whitespace
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
-// Singleton instance
 export const ttsEngine = new TTSEngineImpl();
