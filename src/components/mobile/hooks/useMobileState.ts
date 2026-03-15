@@ -36,6 +36,12 @@ export function useMobileState(init: MobileStateInit) {
   const [historyBySession, setHistoryBySession] = useState<Record<string, MobileTranscriptEntry[]>>(() => (
     initialTranscript?.sessionKey ? { [initialTranscript.sessionKey]: initialTranscript.transcript } : {}
   ));
+  // Stable ref for historyBySession — used by polling to read latest state
+  // without putting historyBySession in the polling effect's dependency array
+  // (which would cause a restart loop: poll → update history → restart effect → immediate poll).
+  const historyBySessionRef = useRef(historyBySession);
+  historyBySessionRef.current = historyBySession;
+
   const [historyGroupsBySession, setHistoryGroupsBySession] = useState<Record<string, MobileRuntimeTailGroup[]>>({});
   const [historyLoading, setHistoryLoading] = useState<Record<string, boolean>>({});
   const [historyError, setHistoryError] = useState<Record<string, string | null>>({});
@@ -127,7 +133,7 @@ export function useMobileState(init: MobileStateInit) {
     surfaceNote, setSurfaceNote,
 
     // History
-    historyBySession, setHistoryBySession,
+    historyBySession, setHistoryBySession, historyBySessionRef,
     historyGroupsBySession, setHistoryGroupsBySession,
     historyLoading, setHistoryLoading,
     historyError, setHistoryError,
