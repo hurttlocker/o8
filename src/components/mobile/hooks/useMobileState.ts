@@ -83,6 +83,7 @@ export function useMobileState(init: MobileStateInit) {
   const [expandedProject, setExpandedProject] = useState<string | null>(null);
 
   // ── Cortex memory surfaces ──
+  const [squadPickerOpen, setSquadPickerOpen] = useState(false);
   const [cortexRecallOpen, setCortexRecallOpen] = useState(false);
   const [cortexHealthOpen, setCortexHealthOpen] = useState(false);
   const [cortexGraphOpen, setCortexGraphOpen] = useState(false);
@@ -165,6 +166,7 @@ export function useMobileState(init: MobileStateInit) {
     composeHeight, setComposeHeight,
     waitingForResponse, setWaitingForResponse,
     hydrated, setHydrated,
+    squadPickerOpen, setSquadPickerOpen,
     expandedProject, setExpandedProject,
 
     // Cortex memory

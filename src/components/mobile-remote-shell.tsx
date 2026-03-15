@@ -247,8 +247,11 @@ export function MobileRemoteShell({
           pendingApprovalsCount={pendingApprovals.length}
           wsConnectionState={wsConnectionState}
           compactLine={compactLine}
+          squadPickerOpen={state.squadPickerOpen}
           onOpenControls={() => setControlsOpen(true)}
           onOpenDiff={actions.openDiffViewer}
+          onToggleSquadPicker={() => state.setSquadPickerOpen(!state.squadPickerOpen)}
+          onSessionFocus={actions.handleSessionFocus}
         />
         <div className="remodex-scroll-view">
           {activeView === 'costs' ? (

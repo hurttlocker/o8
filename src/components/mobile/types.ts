@@ -198,8 +198,11 @@ export interface TopBarProps {
   pendingApprovalsCount: number;
   wsConnectionState?: 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
   compactLine: CompactLine;
+  squadPickerOpen: boolean;
   onOpenControls: () => void;
   onOpenDiff: () => void;
+  onToggleSquadPicker: () => void;
+  onSessionFocus: (sessionId: string) => void;
 }
 
 export interface SurfaceStatusProps {
