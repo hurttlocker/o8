@@ -4,12 +4,14 @@ import { useState, useCallback, useRef } from 'react';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { DesktopChat } from '@/components/desktop/DesktopChat';
 import { Canvas, CanvasTab } from '@/components/desktop/Canvas';
+import { WorkspaceSearch } from '@/components/desktop/WorkspaceSearch';
 
 export default function DashboardPage() {
   const [leftWidth, setLeftWidth] = useState(300);
   const [rightWidth, setRightWidth] = useState(420);
   const [canvasHeight, setCanvasHeight] = useState(50); // percentage of center column
   const [activeSessionKey, setActiveSessionKey] = useState<string | undefined>();
+  const [activeWorkspace, setActiveWorkspace] = useState<string | undefined>();
 
   // ── Canvas tab state ──
   const [canvasTabs, setCanvasTabs] = useState<CanvasTab[]>([]);
@@ -66,6 +68,7 @@ export default function DashboardPage() {
   }, [openCanvasTab]);
 
   const handleExpandWorkspace = useCallback((workspace: string, repo: string | null) => {
+    setActiveWorkspace(workspace);
     // Auto-open README tab for the expanded workspace
     openCanvasTab({
       id: `readme:${workspace}`,
@@ -219,35 +222,67 @@ export default function DashboardPage() {
         overflow: 'hidden',
         position: 'relative',
       }}>
-        {/* Top — workspace placeholder (future: editor, terminals) */}
+        {/* Top — workspace area with search */}
         <div style={{
           flex: canvasTabs.length > 0 ? `0 0 ${100 - canvasHeight}%` : 1,
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
           overflow: 'hidden',
           background: 'linear-gradient(180deg, #f0f4f8 0%, #e8edf4 100%)',
         }}>
-          <div style={{ textAlign: 'center', maxWidth: 480 }}>
-            <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.12, color: '#94a3b8' }}>◇</div>
-            <h1 style={{
-              fontSize: 24,
-              fontWeight: 700,
-              letterSpacing: '-0.03em',
-              marginBottom: 8,
-              color: '#1e293b',
-            }}>
-              Workspace
-            </h1>
-            <p style={{
-              fontSize: 14,
-              color: '#94a3b8',
-              lineHeight: 1.5,
-              letterSpacing: '-0.01em',
-            }}>
-              Editor, terminals, and diff views will live here.
-            </p>
+          {/* Search bar */}
+          <div style={{
+            paddingTop: 16,
+            paddingRight: 24,
+            paddingBottom: 12,
+            paddingLeft: 24,
+            flexShrink: 0,
+          }}>
+            <WorkspaceSearch
+              workspace={activeWorkspace}
+              onSelectFile={(filePath, line) => {
+                openCanvasTab({
+                  id: `file:${filePath}${activeWorkspace ? `:${activeWorkspace}` : ''}`,
+                  kind: 'file',
+                  label: filePath.split('/').pop() ?? filePath,
+                  resourceId: filePath,
+                  meta: {
+                    ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
+                    ...(line ? { line: String(line) } : {}),
+                  },
+                });
+              }}
+            />
+          </div>
+          {/* Workspace content area */}
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}>
+            {!canvasTabs.length ? (
+              <div style={{ textAlign: 'center', maxWidth: 480 }}>
+                <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.12, color: '#94a3b8' }}>◇</div>
+                <h1 style={{
+                  fontSize: 24,
+                  fontWeight: 700,
+                  letterSpacing: '-0.03em',
+                  marginBottom: 8,
+                  color: '#1e293b',
+                }}>
+                  Workspace
+                </h1>
+                <p style={{
+                  fontSize: 14,
+                  color: '#94a3b8',
+                  lineHeight: 1.5,
+                  letterSpacing: '-0.01em',
+                }}>
+                  Search files, explore code, and view diffs.
+                </p>
+              </div>
+            ) : null}
           </div>
         </div>
 
