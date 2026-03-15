@@ -82,6 +82,13 @@ export function useMobileState(init: MobileStateInit) {
   const [hydrated, setHydrated] = useState(false);
   const [expandedProject, setExpandedProject] = useState<string | null>(null);
 
+  // ── Cortex memory surfaces ──
+  const [cortexRecallOpen, setCortexRecallOpen] = useState(false);
+  const [cortexHealthOpen, setCortexHealthOpen] = useState(false);
+  const [cortexGraphOpen, setCortexGraphOpen] = useState(false);
+  const [cortexContextEnabled, setCortexContextEnabled] = useState(true);
+  const [cortexContextBlock, setCortexContextBlock] = useState('');
+
   // ── Streaming ──
   const [streamingText, setStreamingText] = useState('');
   const streamingTextRef = useRef('');
@@ -159,6 +166,13 @@ export function useMobileState(init: MobileStateInit) {
     waitingForResponse, setWaitingForResponse,
     hydrated, setHydrated,
     expandedProject, setExpandedProject,
+
+    // Cortex memory
+    cortexRecallOpen, setCortexRecallOpen,
+    cortexHealthOpen, setCortexHealthOpen,
+    cortexGraphOpen, setCortexGraphOpen,
+    cortexContextEnabled, setCortexContextEnabled,
+    cortexContextBlock, setCortexContextBlock,
 
     // Streaming
     streamingText, setStreamingText,
