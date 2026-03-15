@@ -1,4 +1,5 @@
-import { Fragment, createElement, type ReactNode } from 'react';
+import { Fragment, createElement, useState as useStateHook, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { CodeBlock } from './CodeBlock';
 import type { RuntimeReviewPacket } from '@/lib/fleet/types';
 import type {
@@ -7,6 +8,71 @@ import type {
   MobileTranscriptMedia,
 } from '@/lib/mobile/types';
 import type { ProjectGroup, SessionSummary } from './types';
+
+// ── Image helpers ──
+
+function resolveImageSrc(src: string): string {
+  if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:')) return src;
+  return `/api/panel/serve-image?path=${encodeURIComponent(src)}`;
+}
+
+function MobileChatImage({ src, alt }: { src: string; alt: string }) {
+  const [lightbox, setLightbox] = useStateHook(false);
+  const resolved = resolveImageSrc(src);
+  return createElement(Fragment, null,
+    createElement('img', {
+      src: resolved,
+      alt,
+      onClick: () => setLightbox(true),
+      style: {
+        maxWidth: '100%',
+        maxHeight: 300,
+        borderRadius: 10,
+        marginTop: 8,
+        marginBottom: 8,
+        cursor: 'zoom-in',
+        boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+        border: '1px solid rgba(0,0,0,0.06)',
+        display: 'block',
+      },
+    }),
+    lightbox && typeof document !== 'undefined'
+      ? createPortal(
+          createElement('div', {
+            onClick: () => setLightbox(false),
+            style: {
+              position: 'fixed' as const,
+              inset: 0,
+              zIndex: 99999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'rgba(0, 0, 0, 0.8)',
+              backdropFilter: 'blur(16px)',
+              WebkitBackdropFilter: 'blur(16px)',
+              cursor: 'zoom-out',
+            },
+          },
+            createElement('img', {
+              src: resolved,
+              alt,
+              onClick: (e: React.MouseEvent) => e.stopPropagation(),
+              style: {
+                maxWidth: '95vw',
+                maxHeight: '90vh',
+                objectFit: 'contain' as const,
+                borderRadius: 8,
+                cursor: 'default',
+              },
+            }),
+          ),
+          document.body,
+        )
+      : null,
+  );
+}
+
+const IMAGE_EXTENSIONS = /\.(png|jpg|jpeg|gif|webp|svg)$/i;
 
 export function pickCurrentSession(snapshot: MobileInboxSnapshot) {
   return snapshot.sessions.find((session) => session.isCurrentSession)
@@ -233,6 +299,35 @@ export function pushPlainInline(nodes: ReactNode[], text: string, keyPrefix: str
 }
 
 export function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
+  // Check for inline images first
+  const imgRegex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+  if (imgRegex.test(text)) {
+    const nodes: ReactNode[] = [];
+    let lastIdx = 0;
+    let mIdx = 0;
+    imgRegex.lastIndex = 0;
+    let match;
+    while ((match = imgRegex.exec(text)) !== null) {
+      if (match.index > lastIdx) {
+        nodes.push(...renderInlineMarkdownInner(text.slice(lastIdx, match.index), `${keyPrefix}-pre-${mIdx}`));
+      }
+      nodes.push(createElement(MobileChatImage, {
+        key: `${keyPrefix}-iimg-${mIdx}`,
+        alt: match[1],
+        src: match[2],
+      }));
+      lastIdx = match.index + match[0].length;
+      mIdx++;
+    }
+    if (lastIdx < text.length) {
+      nodes.push(...renderInlineMarkdownInner(text.slice(lastIdx), `${keyPrefix}-post`));
+    }
+    return nodes;
+  }
+  return renderInlineMarkdownInner(text, keyPrefix);
+}
+
+function renderInlineMarkdownInner(text: string, keyPrefix: string): ReactNode[] {
   const nodes: ReactNode[] = [];
   const tokenRegex = /(\*\*[^*][\s\S]*?\*\*|`[^`]+`|\*[^*][\s\S]*?\*)/g;
   let lastIndex = 0;
@@ -569,6 +664,46 @@ export function renderMessageBody(text: string, keyPrefix: string) {
       }
       listType = 'ul';
       listItems.push(unorderedMatch[1]);
+      continue;
+    }
+
+    // Block-level images: ![alt](url) on its own line
+    const blockImgMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (blockImgMatch) {
+      flushParagraph();
+      flushList();
+      blocks.push(createElement(MobileChatImage, {
+        key: `${keyPrefix}-img-${blocks.length}`,
+        alt: blockImgMatch[1],
+        src: blockImgMatch[2],
+      }));
+      continue;
+    }
+
+    // Bare image file paths on their own line
+    if (trimmed.startsWith('/') && IMAGE_EXTENSIONS.test(trimmed) && !trimmed.includes(' ')) {
+      flushParagraph();
+      flushList();
+      blocks.push(createElement(MobileChatImage, {
+        key: `${keyPrefix}-img-${blocks.length}`,
+        alt: trimmed.split('/').pop() ?? 'image',
+        src: trimmed,
+      }));
+      continue;
+    }
+
+    // MEDIA: lines
+    if (trimmed.startsWith('MEDIA:')) {
+      flushParagraph();
+      flushList();
+      const mediaPath = trimmed.slice(6).trim();
+      if (mediaPath) {
+        blocks.push(createElement(MobileChatImage, {
+          key: `${keyPrefix}-media-${blocks.length}`,
+          alt: 'Generated image',
+          src: mediaPath,
+        }));
+      }
       continue;
     }
 
