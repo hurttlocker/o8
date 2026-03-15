@@ -32,28 +32,37 @@ function formatLabel(lang?: string): string {
   return LANG_ALIASES[lang.toLowerCase()] ?? lang;
 }
 
-// Cortex IDE mermaid theme
+// Cortex IDE mermaid theme — glass white / frost with red accent
+// Brand: clear glass, super light blue frost, bright red accents
 const MERMAID_THEME = {
   theme: 'base' as const,
   themeVariables: {
-    primaryColor: '#2563eb',
-    primaryTextColor: '#ffffff',
-    primaryBorderColor: '#1d4ed8',
-    secondaryColor: '#f0f4ff',
-    secondaryTextColor: '#1e3a5f',
-    secondaryBorderColor: '#93c5fd',
-    tertiaryColor: '#f8fafc',
-    tertiaryTextColor: '#334155',
-    tertiaryBorderColor: '#cbd5e1',
-    lineColor: '#64748b',
+    // Primary: frost glass white with red accent borders
+    primaryColor: '#ffffff',
+    primaryTextColor: '#1e293b',
+    primaryBorderColor: '#e2e8f0',
+    // Secondary: super light blue frost
+    secondaryColor: '#f0f7ff',
+    secondaryTextColor: '#334155',
+    secondaryBorderColor: '#cbd5e1',
+    // Tertiary: bright red (Cortex accent)
+    tertiaryColor: '#fef2f2',
+    tertiaryTextColor: '#991b1b',
+    tertiaryBorderColor: '#ef4444',
+    // Lines and text
+    lineColor: '#94a3b8',
     textColor: '#1e293b',
-    mainBkg: '#2563eb',
-    nodeBorder: '#1d4ed8',
-    clusterBkg: '#f0f4ff',
-    clusterBorder: '#93c5fd',
+    // Node defaults
+    mainBkg: '#ffffff',
+    nodeBorder: '#e2e8f0',
+    clusterBkg: '#f8fafc',
+    clusterBorder: '#e2e8f0',
     titleColor: '#0f172a',
     edgeLabelBackground: '#ffffff',
-    nodeTextColor: '#ffffff',
+    nodeTextColor: '#1e293b',
+    // Decision nodes (diamonds)
+    cScale0: '#ef4444',
+    // Typography
     fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
     fontSize: '14px',
   },
@@ -73,7 +82,7 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
         mermaid.initialize({
           startOnLoad: false,
           ...MERMAID_THEME,
-          securityLevel: 'strict',
+          securityLevel: 'loose',
         });
 
         const id = `mermaid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -117,13 +126,14 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
     <div
       ref={containerRef}
       style={{
-        padding: '16px',
+        padding: '20px 16px',
         display: 'flex',
         justifyContent: 'center',
         alignItems: 'center',
         minHeight: rendered ? undefined : 60,
-        backgroundColor: '#ffffff',
+        backgroundColor: '#fafbfd',
         borderTop: '1px solid #e5e7eb',
+        backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,0.8) 0%, rgba(240,247,255,0.4) 100%)',
       }}
     >
       {!rendered ? (
