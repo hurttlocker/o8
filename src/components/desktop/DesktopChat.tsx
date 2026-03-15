@@ -142,15 +142,19 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
   const [activeBlock, setActiveBlock] = useState<number | null>(null);
   const playingRef = useRef(false);
 
-  // Subscribe to TTS state — clear highlight only when playback truly ends
+  // Subscribe to TTS state — show/clear blue highlight
   useEffect(() => {
     if (entry.role !== 'assistant') return;
     return ttsEngine.subscribe((state) => {
       const isOurs = state.activeMessageId === entry.id;
+
       if (isOurs && (state.state === 'playing' || state.state === 'loading')) {
         playingRef.current = true;
+        // If Play button was clicked (not point-to-play), highlight from top
+        setActiveBlock((prev) => prev ?? 0);
       }
-      // Only clear when: we WERE playing, and now we're idle or switched away
+
+      // Clear when playback ends or switches away
       if (playingRef.current && (state.state === 'idle' || state.state === 'error' || (!isOurs && state.activeMessageId !== null))) {
         playingRef.current = false;
         setActiveBlock(null);
