@@ -150,6 +150,17 @@ function connectGateway() {
         }
       }
     }
+
+    // Handle session events — push inbox on any session state change
+    if (parsed.type === 'event' && (
+      parsed.event === 'session.updated' ||
+      parsed.event === 'session.created' ||
+      parsed.event === 'session.deleted' ||
+      parsed.event === 'agent.status'
+    )) {
+      // Debounce: push inbox to all clients after a short delay
+      scheduleEventDrivenInboxPush();
+    }
   });
 
   ws.on('close', () => {
@@ -276,32 +287,59 @@ function onChatDelta(delta: ChatDelta) {
       send(client, { channel: 'chat', event: 'delta', data: { text, runId: delta.runId, seq: delta.seq } });
     } else if (delta.state === 'done') {
       send(client, { channel: 'chat', event: 'done', data: { text, runId: delta.runId, seq: delta.seq } });
+      // Event-driven push: immediately sync history + inbox on completion
+      setTimeout(() => pushHistoryForSession(delta.sessionKey), 500);
+      scheduleEventDrivenInboxPush();
     } else if (delta.state === 'error' || delta.state === 'aborted') {
       send(client, { channel: 'chat', event: 'error', data: { state: delta.state, error: delta.error, runId: delta.runId } });
+      scheduleEventDrivenInboxPush();
     }
   }
 }
 
 chatListeners.add(onChatDelta);
 
-// ── Polling loops (push changes to clients) ──
+// ── Event-driven push with safety-net polling ──
+
+let inboxPushTimer: ReturnType<typeof setTimeout> | null = null;
+const INBOX_PUSH_DEBOUNCE_MS = 300;
+const SAFETY_NET_INBOX_MS = 10_000; // 10s safety net (was 3s active poll)
+const SAFETY_NET_HISTORY_MS = 8_000; // 8s safety net (was 2s active poll)
+
+function scheduleEventDrivenInboxPush() {
+  if (inboxPushTimer) clearTimeout(inboxPushTimer);
+  inboxPushTimer = setTimeout(() => {
+    inboxPushTimer = null;
+    const activeClients = [...clients.values()].filter((c) => c.ws.readyState === WebSocket.OPEN);
+    if (activeClients.length === 0) return;
+    void Promise.allSettled(activeClients.map((c) => syncClientInbox(c)));
+  }, INBOX_PUSH_DEBOUNCE_MS);
+}
+
+function pushHistoryForSession(sessionKey: string) {
+  const matchingClients = [...clients.values()].filter(
+    (c) => c.ws.readyState === WebSocket.OPEN && c.sessionKey === sessionKey,
+  );
+  if (matchingClients.length === 0) return;
+  void Promise.allSettled(matchingClients.map((c) => syncClientHistory(c)));
+}
 
 function startPollingLoops() {
-  // Inbox poll — check for changes and push (parallel across clients)
+  // Safety-net inbox poll — reduced frequency since event-driven push handles most updates
   setInterval(() => {
     const activeClients = [...clients.values()].filter((c) => c.ws.readyState === WebSocket.OPEN);
     if (activeClients.length === 0) return;
     void Promise.allSettled(activeClients.map((c) => syncClientInbox(c)));
-  }, INBOX_POLL_MS);
+  }, SAFETY_NET_INBOX_MS);
 
-  // History poll — check for new entries and push (parallel across clients)
+  // Safety-net history poll — reduced frequency since chat.done triggers immediate push
   setInterval(() => {
     const activeClients = [...clients.values()].filter(
       (c) => c.ws.readyState === WebSocket.OPEN && c.sessionKey,
     );
     if (activeClients.length === 0) return;
     void Promise.allSettled(activeClients.map((c) => syncClientHistory(c)));
-  }, HISTORY_POLL_MS);
+  }, SAFETY_NET_HISTORY_MS);
 }
 
 // ── Server startup ──
