@@ -77,6 +77,7 @@ export function useMobileState(init: MobileStateInit) {
   const [headerVisible, setHeaderVisible] = useState(true);
   const [viewportTopOffset, setViewportTopOffset] = useState(0);
   const [composeFocused, setComposeFocused] = useState(false);
+  const [composeHeight, setComposeHeight] = useState(120);
   const [waitingForResponse, setWaitingForResponse] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [expandedProject, setExpandedProject] = useState<string | null>(null);
@@ -154,6 +155,7 @@ export function useMobileState(init: MobileStateInit) {
     headerVisible, setHeaderVisible,
     viewportTopOffset, setViewportTopOffset,
     composeFocused, setComposeFocused,
+    composeHeight, setComposeHeight,
     waitingForResponse, setWaitingForResponse,
     hydrated, setHydrated,
     expandedProject, setExpandedProject,
