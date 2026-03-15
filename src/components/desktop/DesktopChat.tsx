@@ -130,7 +130,15 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
             )}
           </div>
         ) : null}
-        {showTimestamp ? <span className="remodex-turn-time">{entry.timestampLabel ?? 'now'}</span> : null}
+        {showTimestamp ? (
+          <span className="remodex-turn-time">
+            {entry.id.startsWith('local-') ? (
+              <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Sending…</span>
+            ) : (
+              entry.timestampLabel ?? 'now'
+            )}
+          </span>
+        ) : null}
       </div>
     );
   }
@@ -505,7 +513,26 @@ export function DesktopChat({ externalSessionKey }: { externalSessionKey?: strin
       const res = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(key)}&limit=50`);
       if (!res.ok) return;
       const data = await res.json();
-      setTranscript(data.transcript ?? data.entries ?? []);
+      const serverEntries: MobileTranscriptEntry[] = data.transcript ?? data.entries ?? [];
+
+      // Preserve optimistic (local-*) messages that the server hasn't echoed yet.
+      // An optimistic message is "confirmed" when the server has a user message
+      // with matching text in roughly the same position (last N entries).
+      setTranscript(prev => {
+        const optimistic = prev.filter(m => m.id.startsWith('local-'));
+        if (!optimistic.length) return serverEntries;
+
+        // Check which optimistic messages the server already has
+        const serverUserTexts = new Set(
+          serverEntries.filter(e => e.role === 'user').map(e => e.text)
+        );
+        const pending = optimistic.filter(m => !serverUserTexts.has(m.text));
+
+        if (!pending.length) return serverEntries;
+
+        // Append pending optimistic messages after server entries
+        return [...serverEntries, ...pending];
+      });
       setLoading(false);
       scrollToBottom(true);
     } catch {
