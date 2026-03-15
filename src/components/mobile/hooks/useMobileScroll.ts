@@ -35,6 +35,7 @@ export function useMobileScroll(state: MobileState, transcriptEntries: MobileTra
   const scrollToLatestMessage = useCallback((force = false) => {
     if (typeof window === 'undefined') return;
     if (!force && !stickToBottomRef.current) return;
+    if (force) stickToBottomRef.current = true;
     transcriptBottomRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
   }, [stickToBottomRef, transcriptBottomRef]);
 

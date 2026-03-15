@@ -2,6 +2,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   type CSSProperties,
 } from 'react';
 import type { RuntimeReviewPacket } from '@/lib/fleet/types';
@@ -190,12 +191,27 @@ export function MobileRemoteShell({
   const canResumeOwnedCodex = Boolean(isOwnedCodexSession && selectedSession?.runtimeSurface?.capabilities.sendInput && !ownedQueuedTurn);
   const canInterruptOwnedCodex = Boolean(isOwnedCodexSession && selectedSession?.runtimeSurface?.capabilities.interrupt);
 
+  // Track compose bar height via ResizeObserver for dynamic pill positioning
+  const bottomDockRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = bottomDockRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) state.setComposeHeight(entry.contentRect.height);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [state.setComposeHeight]);
+
   const shellStyle = {
     '--remodex-header-progress': headerProgress.toFixed(3),
     '--remodex-dock-fade-progress': dockFadeProgress.toFixed(3),
     '--remodex-dock-motion-progress': dockMotionProgress.toFixed(3),
     '--remodex-compose-active': isComposerPrimed ? '1' : '0',
     '--remodex-viewport-top-offset': `${viewportTopOffset}px`,
+    '--remodex-compose-height': `${state.composeHeight}px`,
   } as CSSProperties;
 
   // ── Render ──
@@ -259,6 +275,7 @@ export function MobileRemoteShell({
             isOwnedCodexSession={isOwnedCodexSession}
             transcriptLoading={transcriptLoading}
             isRefreshing={surfaceRefreshing}
+            composeHeight={state.composeHeight}
             selectedReviewFile={selectedReviewFile}
             streamingText={streamingText}
             waitingForResponse={waitingForResponse}
@@ -280,7 +297,7 @@ export function MobileRemoteShell({
           />
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
-        <div className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
+        <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
           <div className="remodex-compose-shell">
             <ComposeBar
               session={selectedSession}

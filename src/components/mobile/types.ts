@@ -87,6 +87,7 @@ export interface ChatViewProps {
   transcriptEntries: MobileTranscriptEntry[];
   transcriptLoading: boolean;
   isRefreshing?: boolean;
+  composeHeight?: number;
   selectedSession?: SessionSummary;
   selectedReviewFile?: ReviewFileDetail;
   streamingText: string;
