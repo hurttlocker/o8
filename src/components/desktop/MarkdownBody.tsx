@@ -4,20 +4,124 @@
  * MarkdownBody — renders markdown text with proper formatting.
  *
  * Handles: headings, code blocks (with mermaid), lists, tables, blockquotes,
- * horizontal rules, numbered lists, inline code, bold, links.
+ * horizontal rules, numbered lists, inline code, bold, links, images.
  *
  * Reuses the same CodeBlock component (with mermaid support) as the chat.
  */
 
-import React, { memo } from 'react';
+import React, { memo, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
+import { X } from 'lucide-react';
 import { CodeBlock } from './CodeBlock';
+
+// ── Image URL resolver ──
+
+function resolveImageSrc(src: string): string {
+  // Already an HTTP URL or data URL
+  if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:')) return src;
+  // Local file path — serve through our API
+  return `/api/panel/serve-image?path=${encodeURIComponent(src)}`;
+}
+
+// ── Image Lightbox Modal ──
+
+function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+  return createPortal(
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 99999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'rgba(0, 0, 0, 0.75)',
+        backdropFilter: 'blur(16px)',
+        WebkitBackdropFilter: 'blur(16px)',
+        cursor: 'zoom-out',
+      }}
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        style={{
+          position: 'absolute',
+          top: 16,
+          right: 16,
+          width: 36,
+          height: 36,
+          borderRadius: 18,
+          border: 'none',
+          background: 'rgba(255,255,255,0.15)',
+          color: '#ffffff',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100000,
+        }}
+      >
+        <X size={18} strokeWidth={2} />
+      </button>
+      <img
+        src={src}
+        alt={alt}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          maxWidth: '92vw',
+          maxHeight: '90vh',
+          objectFit: 'contain',
+          borderRadius: 8,
+          boxShadow: '0 8px 40px rgba(0,0,0,0.4)',
+          cursor: 'default',
+        }}
+      />
+    </div>,
+    document.body
+  );
+}
+
+// ── Inline Image ──
+
+function InlineImage({ src, alt }: { src: string; alt: string }) {
+  const [lightbox, setLightbox] = useState(false);
+  const resolved = resolveImageSrc(src);
+
+  return (
+    <>
+      <img
+        src={resolved}
+        alt={alt}
+        onClick={() => setLightbox(true)}
+        style={{
+          maxWidth: '100%',
+          maxHeight: 400,
+          borderRadius: 10,
+          marginTop: 8,
+          marginBottom: 8,
+          cursor: 'zoom-in',
+          boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+          border: '1px solid rgba(0,0,0,0.06)',
+          display: 'block',
+        }}
+      />
+      {lightbox && <ImageLightbox src={resolved} alt={alt} onClose={() => setLightbox(false)} />}
+    </>
+  );
+}
 
 // ── Inline rendering ──
 
 function renderInline(text: string): React.ReactNode {
-  // Handle bold, inline code, and links
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g);
+  // Handle images, bold, inline code, and links
+  const parts = text.split(/(!\[[^\]]*\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g);
   return parts.map((part, i) => {
+    // Images: ![alt](url)
+    const imgMatch = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (imgMatch) {
+      return <InlineImage key={i} alt={imgMatch[1]} src={imgMatch[2]} />;
+    }
     if (part.startsWith('`') && part.endsWith('`')) {
       return (
         <code key={i} style={{
@@ -337,6 +441,38 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
           ))}
         </ul>
       );
+      continue;
+    }
+
+    // Block-level images: ![alt](url) on its own line
+    const blockImgMatch = line.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (blockImgMatch) {
+      elements.push(
+        <InlineImage key={key++} alt={blockImgMatch[1]} src={blockImgMatch[2]} />
+      );
+      i++;
+      continue;
+    }
+
+    // MEDIA: lines (from tool output)
+    if (line.trim().startsWith('MEDIA:')) {
+      const mediaPath = line.trim().slice(6).trim();
+      if (mediaPath) {
+        elements.push(
+          <InlineImage key={key++} alt="Generated image" src={mediaPath} />
+        );
+      }
+      i++;
+      continue;
+    }
+
+    // Bare image file paths on their own line
+    const bareImageMatch = line.trim().match(/^(\/[^\s]+\.(png|jpg|jpeg|gif|webp|svg))$/i);
+    if (bareImageMatch) {
+      elements.push(
+        <InlineImage key={key++} alt={bareImageMatch[1].split('/').pop() ?? 'image'} src={bareImageMatch[1]} />
+      );
+      i++;
       continue;
     }
 
