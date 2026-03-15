@@ -16,8 +16,6 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type {
   MobileInboxSnapshot,
-  MobileReviewFileResponse,
-  MobileRuntimeTailGroup,
   MobileTranscriptEntry,
 } from '@/lib/mobile/types';
 
@@ -28,8 +26,6 @@ interface UseWebSocketArgs {
   setSnapshot: Dispatch<SetStateAction<MobileInboxSnapshot>>;
   setRefreshError: Dispatch<SetStateAction<string | null>>;
   setHistoryBySession: Dispatch<SetStateAction<Record<string, MobileTranscriptEntry[]>>>;
-  setHistoryGroupsBySession: Dispatch<SetStateAction<Record<string, MobileRuntimeTailGroup[]>>>;
-  setReviewFileByPath: Dispatch<SetStateAction<Record<string, MobileReviewFileResponse['file']>>>;
   setStreamingText: Dispatch<SetStateAction<string>>;
   streamingTextRef: MutableRefObject<string>;
 }
@@ -47,7 +43,11 @@ function getWsUrl(): string {
   if (typeof window === 'undefined') return '';
   const host = window.location.hostname;
   const port = 3002;
-  return `ws://${host}:${port}/ws`;
+  // Auth token — prevents random network clients from connecting
+  const token = typeof window !== 'undefined'
+    ? (document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? 'cortex-ide')
+    : 'cortex-ide';
+  return `ws://${host}:${port}/ws?token=${encodeURIComponent(token)}`;
 }
 
 export function useWebSocket({
@@ -55,8 +55,6 @@ export function useWebSocket({
   setSnapshot,
   setRefreshError,
   setHistoryBySession,
-  setHistoryGroupsBySession: _setHistoryGroupsBySession,
-  setReviewFileByPath: _setReviewFileByPath,
   setStreamingText,
   streamingTextRef,
 }: UseWebSocketArgs): UseWebSocketResult {
