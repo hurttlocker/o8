@@ -60,6 +60,15 @@ export default function DashboardPage() {
     });
   }, [openCanvasTab]);
 
+  const handleSelectPR = useCallback((prNumber: number) => {
+    openCanvasTab({
+      id: `pr:${prNumber}`,
+      kind: 'pr',
+      label: `PR #${prNumber}`,
+      resourceId: String(prNumber),
+    });
+  }, [openCanvasTab]);
+
   const handleSelectCommit = useCallback((hash: string) => {
     openCanvasTab({
       id: `commit:${hash}`,
@@ -146,6 +155,7 @@ export default function DashboardPage() {
           onSelectSession={handleSelectSession}
           onSelectIssue={handleSelectIssue}
           onSelectCommit={handleSelectCommit}
+          onSelectPR={handleSelectPR}
         />
       </div>
 
