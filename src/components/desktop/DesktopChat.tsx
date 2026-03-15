@@ -36,6 +36,7 @@ import type {
 import type { ProjectGroup } from '@/components/mobile/types';
 import { buildProjectGroups } from '@/components/mobile/utils';
 import { MessageActions } from './MessageActions';
+import { ttsEngine } from '@/lib/tts/engine';
 
 // ── Types ──
 
@@ -132,6 +133,37 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
     );
   }
 
+  // Parse markdown into blocks for point-to-play
+  const mdBlocks = useMemo(
+    () => hasText ? renderMarkdownBlocks(entry.text) : [],
+    [entry.text, hasText],
+  );
+
+  const [activeBlock, setActiveBlock] = useState<number | null>(null);
+
+  // Subscribe to TTS state to track active block
+  useEffect(() => {
+    if (entry.role !== 'assistant') return;
+    return ttsEngine.subscribe((state) => {
+      if (state.activeMessageId !== entry.id) {
+        setActiveBlock(null);
+      }
+    });
+  }, [entry.id, entry.role]);
+
+  const handleBlockClick = useCallback((blockIndex: number) => {
+    // Collect text from this block onward
+    const textFromHere = mdBlocks
+      .slice(blockIndex)
+      .map(b => b.rawText)
+      .join('\n\n');
+
+    if (!textFromHere.trim()) return;
+
+    setActiveBlock(blockIndex);
+    void ttsEngine.play(textFromHere, entry.id);
+  }, [mdBlocks, entry.id]);
+
   return (
     <article className="remodex-message-card remodex-message-card-assistant">
       {speakerChanged ? (
@@ -141,7 +173,30 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
       ) : null}
       {hasText ? (
         <div className="remodex-rich-text">
-          {renderMarkdown(entry.text)}
+          {entry.role === 'assistant' ? (
+            mdBlocks.map((block, idx) => (
+              <div
+                key={idx}
+                onClick={() => handleBlockClick(idx)}
+                style={{
+                  cursor: 'pointer',
+                  borderLeft: activeBlock !== null && idx >= activeBlock
+                    ? '2px solid #2563eb'
+                    : '2px solid transparent',
+                  paddingLeft: 8,
+                  marginLeft: -10,
+                  borderRadius: 2,
+                  transition: 'border-color 200ms ease, background 200ms ease',
+                  background: activeBlock === idx ? 'rgba(37, 99, 235, 0.04)' : 'transparent',
+                }}
+                title="Click to play from here"
+              >
+                {block.element}
+              </div>
+            ))
+          ) : (
+            mdBlocks.map(b => b.element)
+          )}
         </div>
       ) : null}
       {hasMedia ? (
@@ -164,9 +219,15 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
 
 // ── Markdown renderer ──
 
-function renderMarkdown(text: string): React.ReactNode[] {
+/** Parsed block with its raw text for TTS point-to-play */
+interface RenderedBlock {
+  element: React.ReactNode;
+  rawText: string;
+}
+
+function renderMarkdownBlocks(text: string): RenderedBlock[] {
   const lines = text.split('\n');
-  const elements: React.ReactNode[] = [];
+  const blocks: RenderedBlock[] = [];
   let i = 0;
 
   while (i < lines.length) {
@@ -181,22 +242,34 @@ function renderMarkdown(text: string): React.ReactNode[] {
         i++;
       }
       i++;
-      elements.push(
-        <pre key={`code-${i}`} className="remodex-rich-codeblock">
-          {lang ? <div className="remodex-rich-codeblock-lang">{lang}</div> : null}
-          <code>{codeLines.join('\n')}</code>
-        </pre>
-      );
+      const raw = codeLines.join('\n');
+      blocks.push({
+        rawText: raw,
+        element: (
+          <pre key={`code-${i}`} className="remodex-rich-codeblock">
+            {lang ? <div className="remodex-rich-codeblock-lang">{lang}</div> : null}
+            <code>{raw}</code>
+          </pre>
+        ),
+      });
       continue;
     }
 
     if (line.startsWith('## ')) {
-      elements.push(<h3 key={`h-${i}`} className="remodex-rich-heading">{line.slice(3)}</h3>);
+      const raw = line.slice(3);
+      blocks.push({
+        rawText: raw,
+        element: <h3 key={`h-${i}`} className="remodex-rich-heading">{raw}</h3>,
+      });
       i++;
       continue;
     }
     if (line.startsWith('# ')) {
-      elements.push(<h2 key={`h-${i}`} className="remodex-rich-heading">{line.slice(2)}</h2>);
+      const raw = line.slice(2);
+      blocks.push({
+        rawText: raw,
+        element: <h2 key={`h-${i}`} className="remodex-rich-heading">{raw}</h2>,
+      });
       i++;
       continue;
     }
@@ -207,13 +280,17 @@ function renderMarkdown(text: string): React.ReactNode[] {
         listItems.push({ text: lines[i].slice(2), key: i });
         i++;
       }
-      elements.push(
-        <ul key={`ul-${listItems[0].key}`} className="remodex-rich-list">
-          {listItems.map(item => (
-            <li key={item.key}>{renderInline(item.text)}</li>
-          ))}
-        </ul>
-      );
+      const raw = listItems.map(item => item.text).join('. ');
+      blocks.push({
+        rawText: raw,
+        element: (
+          <ul key={`ul-${listItems[0].key}`} className="remodex-rich-list">
+            {listItems.map(item => (
+              <li key={item.key}>{renderInline(item.text)}</li>
+            ))}
+          </ul>
+        ),
+      });
       continue;
     }
 
@@ -229,76 +306,83 @@ function renderMarkdown(text: string): React.ReactNode[] {
         const hasSep = tableLines.length >= 2 && isSeparator(tableLines[1]);
         const headerCells = parseCells(tableLines[0]);
         const bodyRows = tableLines.slice(hasSep ? 2 : 1).filter(l => !isSeparator(l));
+        const raw = [headerCells.join(', '), ...bodyRows.map(r => parseCells(r).join(', '))].join('. ');
 
-        elements.push(
-          <div key={`table-${i}`} style={{
-            overflowX: 'auto',
-            margin: '12px 0',
-            borderRadius: 12,
-            border: '1px solid #e5e7eb',
-            backgroundColor: '#ffffff',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-          }}>
-            <table style={{
-              width: '100%',
-              borderCollapse: 'collapse',
-              fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+        blocks.push({
+          rawText: raw,
+          element: (
+            <div key={`table-${i}`} style={{
+              overflowX: 'auto',
+              margin: '12px 0',
+              borderRadius: 12,
+              border: '1px solid #e5e7eb',
+              backgroundColor: '#ffffff',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
             }}>
-              <thead>
-                <tr>
-                  {headerCells.map((cell, ci) => (
-                    <th key={ci} style={{
-                      textAlign: 'left',
-                      padding: '10px 14px',
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      color: '#6b7280',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.04em',
-                      borderBottom: '2px solid #e5e7eb',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {renderInline(cell)}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {bodyRows.map((row, ri) => {
-                  const cells = parseCells(row);
-                  return (
-                    <tr key={ri} style={{
-                      backgroundColor: ri % 2 === 0 ? '#ffffff' : '#f9fafb',
-                    }}>
-                      {cells.map((cell, ci) => (
-                        <td key={ci} style={{
-                          textAlign: 'left',
-                          padding: '10px 14px',
-                          fontSize: '0.85rem',
-                          color: '#1f2937',
-                          borderBottom: '1px solid #f3f4f6',
-                        }}>
-                          {renderInline(cell)}
-                        </td>
-                      ))}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        );
+              <table style={{
+                width: '100%',
+                borderCollapse: 'collapse',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+              }}>
+                <thead>
+                  <tr>
+                    {headerCells.map((cell, ci) => (
+                      <th key={ci} style={{
+                        textAlign: 'left',
+                        padding: '10px 14px',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        color: '#6b7280',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                        borderBottom: '2px solid #e5e7eb',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {renderInline(cell)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {bodyRows.map((row, ri) => {
+                    const cells = parseCells(row);
+                    return (
+                      <tr key={ri} style={{
+                        backgroundColor: ri % 2 === 0 ? '#ffffff' : '#f9fafb',
+                      }}>
+                        {cells.map((cell, ci) => (
+                          <td key={ci} style={{
+                            textAlign: 'left',
+                            padding: '10px 14px',
+                            fontSize: '0.85rem',
+                            color: '#1f2937',
+                            borderBottom: '1px solid #f3f4f6',
+                          }}>
+                            {renderInline(cell)}
+                          </td>
+                        ))}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ),
+        });
       }
       continue;
     }
 
     if (!line.trim()) { i++; continue; }
 
-    elements.push(<p key={`p-${i}`} className="remodex-rich-paragraph">{renderInline(line)}</p>);
+    blocks.push({
+      rawText: line.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/`([^`]+)`/g, '$1'),
+      element: <p key={`p-${i}`} className="remodex-rich-paragraph">{renderInline(line)}</p>,
+    });
     i++;
   }
 
-  return elements;
+  return blocks;
 }
 
 function renderInline(text: string): React.ReactNode {
