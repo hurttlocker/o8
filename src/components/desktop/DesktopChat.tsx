@@ -544,7 +544,7 @@ export function DesktopChat() {
       const res = await fetch('/api/mobile/enhance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: draft }),
+        body: JSON.stringify({ prompt: draft }),
       });
       if (res.ok) {
         const data = await res.json();
