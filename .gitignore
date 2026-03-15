@@ -8,3 +8,6 @@ build/
 coverage/
 *.log
 *.tsbuildinfo
+
+# Worktree isolation
+.cortex-worktrees/
