@@ -250,7 +250,6 @@ export function MobileRemoteShell({
           compactLine={compactLine}
           onOpenControls={() => setControlsOpen(true)}
           onOpenDiff={actions.openDiffViewer}
-          onOpenCortexRecall={() => setCortexRecallOpen(true)}
         />
         <div className="remodex-scroll-view">
           {activeView === 'costs' ? (
@@ -324,6 +323,7 @@ export function MobileRemoteShell({
             enabled={cortexContextEnabled}
             onToggle={setCortexContextEnabled}
             onContextReady={setCortexContextBlock}
+            onOpenRecall={() => setCortexRecallOpen(true)}
           />
           <div className="remodex-compose-shell">
             <ComposeBar

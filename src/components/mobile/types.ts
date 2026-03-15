@@ -199,7 +199,6 @@ export interface TopBarProps {
   compactLine: CompactLine;
   onOpenControls: () => void;
   onOpenDiff: () => void;
-  onOpenCortexRecall?: () => void;
 }
 
 export interface SurfaceStatusProps {
