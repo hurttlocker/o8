@@ -2,6 +2,7 @@ import Image from 'next/image';
 import { ChevronRight, FileDiff, FileText, Image as ImageIcon } from 'lucide-react';
 import type { MobileTranscriptMedia } from '@/lib/mobile/types';
 import type { ChatViewProps } from './types';
+import { MediaLightbox } from './MediaLightbox';
 import {
   formatStreamingPreview,
   isImageMedia,
@@ -27,8 +28,6 @@ export function ChatView({
   onOpenDiff,
   onScrollToLatestMessage,
 }: ChatViewProps) {
-  void expandedMedia;
-
   function renderMediaGrid(media: MobileTranscriptMedia[], align: 'left' | 'right' = 'left') {
     return (
       <div className={`remodex-media-grid ${align === 'right' ? 'remodex-media-grid-right' : ''}`}>
@@ -191,6 +190,8 @@ export function ChatView({
           </div>
         </div>
       ) : null}
+
+      <MediaLightbox media={expandedMedia} onClose={() => setExpandedMedia(null)} />
     </>
   );
 }
