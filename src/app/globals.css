@@ -2477,8 +2477,12 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-message-stack {
-  display: grid;
-  gap: 1rem;
+  display: block;
+  flex: 1;
+  min-height: 0;
+}
+.remodex-message-stack > [data-index] {
+  padding-bottom: 1rem;
 }
 
 .remodex-scroll-anchor {
