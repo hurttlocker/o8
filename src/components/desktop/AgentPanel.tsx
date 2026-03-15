@@ -114,7 +114,7 @@ interface FileNode {
   children?: FileNode[];
 }
 
-type Tab = 'activity' | 'issues' | 'prs' | 'files' | 'ci';
+type Tab = 'activity' | 'issues' | 'prs' | 'files' | 'ci' | 'deploy';
 
 // ── Status colors ──
 
@@ -1085,6 +1085,127 @@ function CIList({ repo, onOpenCI }: { repo: string | null; onOpenCI?: (repo: str
   );
 }
 
+// ── Deploy List ──
+
+interface DeploySummary {
+  uid: string;
+  name: string;
+  url: string;
+  state: string;
+  created: number;
+  target?: string;
+  meta?: { githubCommitMessage?: string; githubCommitRef?: string };
+}
+
+function deployStatusColor(state: string): string {
+  switch (state.toUpperCase()) {
+    case 'READY': return '#22c55e';
+    case 'BUILDING': case 'INITIALIZING': return '#f59e0b';
+    case 'ERROR': case 'CANCELED': return '#ef4444';
+    default: return '#94a3b8';
+  }
+}
+
+function deployStatusIcon(state: string): string {
+  switch (state.toUpperCase()) {
+    case 'READY': return '●';
+    case 'BUILDING': case 'INITIALIZING': return '◉';
+    case 'ERROR': return '✗';
+    case 'CANCELED': return '⊘';
+    default: return '○';
+  }
+}
+
+function DeployList({ onOpenDeploy }: { onOpenDeploy?: (project?: string) => void }) {
+  const [deploys, setDeploys] = useState<DeploySummary[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch('/api/panel/deployments')
+      .then(r => r.json())
+      .then(data => {
+        if (!cancelled) {
+          setDeploys(data.deployments ?? []);
+          setLoading(false);
+        }
+      })
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>Loading deployments…</div>;
+  }
+
+  if (deploys.length === 0) {
+    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>No deployments found</div>;
+  }
+
+  return (
+    <div style={{ paddingTop: 4, paddingBottom: 4 }}>
+      {deploys.map((d) => {
+        const color = deployStatusColor(d.state);
+        const icon = deployStatusIcon(d.state);
+        const age = ciTimeAgo(new Date(d.created).toISOString());
+        return (
+          <button
+            key={d.uid}
+            type="button"
+            onClick={() => onOpenDeploy?.(d.name)}
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+              width: '100%',
+              paddingTop: 8,
+              paddingRight: 14,
+              paddingBottom: 8,
+              paddingLeft: 14,
+              border: 'none',
+              borderBottom: '1px solid rgba(0,0,0,0.04)',
+              background: 'transparent',
+              cursor: 'pointer',
+              textAlign: 'left',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
+            <span style={{ fontSize: 14, color, fontWeight: 700, lineHeight: 1.3, flexShrink: 0, marginTop: 1 }}>
+              {icon}
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontSize: 12,
+                fontWeight: 400,
+                color: '#1e293b',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {d.meta?.githubCommitMessage || d.url}
+              </div>
+              <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2, display: 'flex', gap: 4, alignItems: 'center' }}>
+                <span style={{ fontWeight: 500, color: d.target === 'production' ? '#22c55e' : '#94a3b8' }}>
+                  {d.target === 'production' ? 'prod' : 'preview'}
+                </span>
+                {d.meta?.githubCommitRef ? (
+                  <>
+                    <span>·</span>
+                    <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{d.meta.githubCommitRef}</span>
+                  </>
+                ) : null}
+                <span>·</span>
+                <span>{age}</span>
+              </div>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── File Tree (light theme) ──
 
 function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
@@ -1214,6 +1335,7 @@ const tabs: { id: Tab; icon: typeof Zap; label: string }[] = [
   { id: 'prs', icon: GitCommit, label: 'PRs' },
   { id: 'files', icon: Folder, label: 'Files' },
   { id: 'ci', icon: PlayCircle, label: 'CI' },
+  { id: 'deploy', icon: Globe, label: 'Deploy' },
 ];
 
 // ── Main Panel ──
@@ -1228,6 +1350,7 @@ export const AgentPanel = memo(function AgentPanel({
   onOpenCI,
   onCreateIssue,
   onOpenGitLog,
+  onOpenDeploy,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
@@ -1238,6 +1361,7 @@ export const AgentPanel = memo(function AgentPanel({
   onOpenCI?: (repo: string) => void;
   onCreateIssue?: (repo?: string) => void;
   onOpenGitLog?: (workspace?: string) => void;
+  onOpenDeploy?: (project?: string) => void;
 } = {}) {
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([]);
@@ -1604,6 +1728,7 @@ export const AgentPanel = memo(function AgentPanel({
         {activeTab === 'prs' ? <PRList prs={prs} onSelect={(num) => onSelectPR?.(num, activeRepo ?? undefined)} /> : null}
         {activeTab === 'files' ? <FileTree tree={fileTree} changedFiles={changedFiles} onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)} /> : null}
         {activeTab === 'ci' ? <CIList repo={activeRepo} onOpenCI={onOpenCI} /> : null}
+        {activeTab === 'deploy' ? <DeployList onOpenDeploy={onOpenDeploy} /> : null}
       </div>
 
       {/* ── Issue Detail Modal ── */}
