@@ -86,6 +86,16 @@ export default function DashboardPage() {
     });
   }, [openCanvasTab]);
 
+  const handleSelectFile = useCallback((filePath: string, workspace?: string) => {
+    openCanvasTab({
+      id: `file:${filePath}${workspace ? `:${workspace}` : ''}`,
+      kind: 'file',
+      label: filePath.split('/').pop() ?? filePath,
+      resourceId: filePath,
+      meta: workspace ? { workspace } : undefined,
+    });
+  }, [openCanvasTab]);
+
   const handleSelectCommit = useCallback((hash: string) => {
     openCanvasTab({
       id: `commit:${hash}`,
@@ -174,6 +184,8 @@ export default function DashboardPage() {
           onSelectCommit={handleSelectCommit}
           onSelectPR={handleSelectPR}
           onExpandWorkspace={handleExpandWorkspace}
+          onSelectFile={handleSelectFile}
+          onOpenCI={handleOpenCI}
         />
       </div>
 
