@@ -961,7 +961,12 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
   const [pr, setPr] = useState<PRDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<'overview' | 'files' | 'comments'>('overview');
+  const [activeSection, setActiveSection] = useState<'overview' | 'files' | 'comments' | 'reviews'>('overview');
+  const [reviewComments, setReviewComments] = useState<{
+    id: number; author: string; body: string; path: string;
+    line: number | null; createdAt: string; diffHunk: string; inReplyTo: number | null;
+  }[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -990,6 +995,24 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
     return () => { cancelled = true; };
   }, [prNumber]);
 
+  // Fetch review comments when tab is activated
+  useEffect(() => {
+    if (activeSection !== 'reviews' || reviewComments.length > 0) return;
+    let cancelled = false;
+    setReviewsLoading(true);
+    const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
+    fetch(`/api/panel/prs/${prNumber}/comments${repoParam}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!cancelled) {
+          setReviewComments(data.comments ?? []);
+          setReviewsLoading(false);
+        }
+      })
+      .catch(() => { if (!cancelled) setReviewsLoading(false); });
+    return () => { cancelled = true; };
+  }, [activeSection, prNumber, repo, reviewComments.length]);
+
   if (loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading PR…</div>;
   }
@@ -1007,10 +1030,11 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
   const ciChecks = pr.statusCheckRollup ?? [];
   const passedChecks = ciChecks.filter(c => c.conclusion === 'SUCCESS' || c.conclusion === 'success').length;
 
-  const sections: { id: 'overview' | 'files' | 'comments'; label: string; count?: number }[] = [
+  const sections: { id: 'overview' | 'files' | 'comments' | 'reviews'; label: string; count?: number }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'files', label: 'Files', count: pr.changedFiles },
     { id: 'comments', label: 'Comments', count: allComments.length },
+    { id: 'reviews', label: 'Reviews' },
   ];
 
   return (
@@ -1266,6 +1290,115 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                   </div>
                 </div>
               ))
+            )}
+          </div>
+        ) : null}
+
+        {activeSection === 'reviews' ? (
+          <div>
+            {reviewsLoading ? (
+              <div style={{ fontSize: 13, color: '#94a3b8' }}>Loading review comments…</div>
+            ) : reviewComments.length === 0 ? (
+              <div style={{ fontSize: 13, color: '#94a3b8' }}>No inline review comments</div>
+            ) : (
+              (() => {
+                // Group comments into threads by file path
+                const threads = new Map<string, typeof reviewComments>();
+                for (const c of reviewComments) {
+                  const key = c.path;
+                  if (!threads.has(key)) threads.set(key, []);
+                  threads.get(key)!.push(c);
+                }
+
+                return Array.from(threads.entries()).map(([path, comments]) => (
+                  <div key={path} style={{ marginBottom: 20 }}>
+                    {/* File path header */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      paddingTop: 8,
+                      paddingRight: 12,
+                      paddingBottom: 8,
+                      paddingLeft: 12,
+                      borderRadius: 8,
+                      background: 'rgba(0,0,0,0.02)',
+                      marginBottom: 8,
+                    }}>
+                      <FileText size={13} strokeWidth={1.8} style={{ color: '#64748b', flexShrink: 0 }} />
+                      <span style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: '#1e293b',
+                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                      }}>{path}</span>
+                    </div>
+
+                    {/* Comments for this file */}
+                    {comments.map((comment) => (
+                      <div key={comment.id} style={{
+                        marginBottom: 12,
+                        paddingLeft: 16,
+                        borderLeft: '2px solid rgba(139, 92, 246, 0.2)',
+                      }}>
+                        {/* Diff context */}
+                        {comment.diffHunk ? (
+                          <pre style={{
+                            margin: 0,
+                            marginBottom: 8,
+                            paddingTop: 8,
+                            paddingRight: 12,
+                            paddingBottom: 8,
+                            paddingLeft: 12,
+                            fontSize: '0.7rem',
+                            lineHeight: 1.5,
+                            fontFamily: '"SF Mono", ui-monospace, monospace',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            color: '#475569',
+                            background: 'rgba(0,0,0,0.02)',
+                            borderRadius: 6,
+                            border: '1px solid rgba(0,0,0,0.04)',
+                            maxHeight: 120,
+                            overflowY: 'auto',
+                          }}>
+                            {renderDiffLines(comment.diffHunk)}
+                          </pre>
+                        ) : null}
+
+                        {/* Line reference */}
+                        {comment.line ? (
+                          <div style={{
+                            fontSize: 10,
+                            color: '#8b5cf6',
+                            fontFamily: '"SF Mono", ui-monospace, monospace',
+                            marginBottom: 4,
+                          }}>
+                            Line {comment.line}
+                          </div>
+                        ) : null}
+
+                        {/* Author + timestamp */}
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          marginBottom: 4,
+                          fontSize: 12,
+                        }}>
+                          <span style={{ fontWeight: 600, color: '#1e293b' }}>{comment.author}</span>
+                          <span style={{ color: '#94a3b8' }}>{formatAge(comment.createdAt)}</span>
+                        </div>
+
+                        {/* Comment body */}
+                        <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+                          <MarkdownBody text={comment.body} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ));
+              })()
             )}
           </div>
         ) : null}
