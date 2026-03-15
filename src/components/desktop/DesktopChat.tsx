@@ -26,6 +26,7 @@ import {
   RefreshCw,
   SlidersHorizontal,
   Sparkles,
+  Square,
   X,
 } from 'lucide-react';
 import type {
@@ -432,6 +433,8 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
   const [enhancing, setEnhancing] = useState(false);
   const [pendingFiles, setPendingFiles] = useState<{ name: string; mimeType: string; content: string; preview?: string }[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [agentRunning, setAgentRunning] = useState(false);
+  const [stopping, setStopping] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
@@ -699,6 +702,39 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
       setSending(false);
     }
   }, [draft, pendingFiles, selectedKey, sending, fetchTranscript, scrollToBottom, playSendSound]);
+
+  // ── Stop / Abort run ──
+  const stopRun = useCallback(async () => {
+    if (!selectedKey || stopping) return;
+    setStopping(true);
+    try {
+      await fetch('/api/mobile/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionKey: selectedKey, action: 'stop' }),
+      });
+      // Quick poll for updated transcript
+      setTimeout(() => void fetchTranscript(selectedKey), 500);
+      setTimeout(() => void fetchTranscript(selectedKey), 1500);
+    } catch { /* silent */ }
+    finally {
+      setStopping(false);
+      setAgentRunning(false);
+    }
+  }, [selectedKey, stopping, fetchTranscript]);
+
+  // ── Track agent running state ──
+  // Agent is "running" after user sends until an assistant message arrives
+  useEffect(() => {
+    if (transcript.length === 0) { setAgentRunning(false); return; }
+    const last = transcript[transcript.length - 1];
+    // If last message is user (or local optimistic) → agent is generating
+    if (last.role === 'user' || last.id.startsWith('local-')) {
+      setAgentRunning(true);
+    } else {
+      setAgentRunning(false);
+    }
+  }, [transcript]);
 
   // ── Diff stats (poll every 30s) ──
   useEffect(() => {
@@ -1414,39 +1450,75 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
                 <Sparkles size={18} strokeWidth={2} className={enhancing ? 'spin' : undefined} />
               </button>
             ) : null}
-            <button
-              type="button"
-              disabled={chatSendDisabled}
-              onClick={() => void send()}
-              aria-label={`Send message to ${currentAgentName}`}
-              style={{
-                marginLeft: 'auto',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.32rem',
-                minWidth: 42,
-                minHeight: 42,
-                padding: '0 0.82rem',
-                borderRadius: 999,
-                border: 'none',
-                background: chatSendDisabled ? '#d1d5db' : '#ef4444',
-                color: chatSendDisabled ? '#9ca3af' : '#ffffff',
-                fontSize: '0.84rem',
-                fontWeight: 700,
-                boxShadow: chatSendDisabled ? 'none' : '0 4px 14px rgba(239, 68, 68, 0.4)',
-                cursor: chatSendDisabled ? 'default' : 'pointer',
-              }}
-            >
-              {sending ? (
-                <Loader2 size={17} className="spin" />
-              ) : (
-                <>
-                  <ArrowUp size={17} strokeWidth={2.2} />
-                  <span>Send</span>
-                </>
-              )}
-            </button>
+            {agentRunning && !draft.trim() ? (
+              <button
+                type="button"
+                disabled={stopping}
+                onClick={() => void stopRun()}
+                aria-label="Stop agent run"
+                style={{
+                  marginLeft: 'auto',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.32rem',
+                  minWidth: 42,
+                  minHeight: 42,
+                  padding: '0 0.82rem',
+                  borderRadius: 999,
+                  border: '2px solid #ef4444',
+                  background: stopping ? '#fef2f2' : 'rgba(239, 68, 68, 0.06)',
+                  color: '#ef4444',
+                  fontSize: '0.84rem',
+                  fontWeight: 700,
+                  cursor: stopping ? 'default' : 'pointer',
+                  transition: 'all 150ms ease',
+                }}
+              >
+                {stopping ? (
+                  <Loader2 size={17} className="spin" />
+                ) : (
+                  <>
+                    <Square size={14} strokeWidth={2.5} fill="#ef4444" />
+                    <span>Stop</span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={chatSendDisabled}
+                onClick={() => void send()}
+                aria-label={`Send message to ${currentAgentName}`}
+                style={{
+                  marginLeft: 'auto',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.32rem',
+                  minWidth: 42,
+                  minHeight: 42,
+                  padding: '0 0.82rem',
+                  borderRadius: 999,
+                  border: 'none',
+                  background: chatSendDisabled ? '#d1d5db' : '#ef4444',
+                  color: chatSendDisabled ? '#9ca3af' : '#ffffff',
+                  fontSize: '0.84rem',
+                  fontWeight: 700,
+                  boxShadow: chatSendDisabled ? 'none' : '0 4px 14px rgba(239, 68, 68, 0.4)',
+                  cursor: chatSendDisabled ? 'default' : 'pointer',
+                }}
+              >
+                {sending ? (
+                  <Loader2 size={17} className="spin" />
+                ) : (
+                  <>
+                    <ArrowUp size={17} strokeWidth={2.2} />
+                    <span>Send</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
 
