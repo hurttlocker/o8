@@ -86,6 +86,7 @@ export interface ApprovalStackProps {
 export interface ChatViewProps {
   transcriptEntries: MobileTranscriptEntry[];
   transcriptLoading: boolean;
+  isRefreshing?: boolean;
   selectedSession?: SessionSummary;
   selectedReviewFile?: ReviewFileDetail;
   streamingText: string;
@@ -192,6 +193,7 @@ export interface TopBarProps {
   isHeaderCompact: boolean;
   headerVisible: boolean;
   pendingApprovalsCount: number;
+  wsConnectionState?: 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
   compactLine: CompactLine;
   onOpenControls: () => void;
   onOpenDiff: () => void;
