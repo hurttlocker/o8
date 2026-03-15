@@ -308,6 +308,8 @@ interface UnifiedSyncPollingArgs {
   selectedReviewFilePath: string | null;
   documentVisibleRef: MutableRefObject<boolean>;
   historyBySession: Record<string, MobileTranscriptEntry[]>;
+  /** When true, WebSocket is handling real-time push — polling backs off to safety-net interval */
+  wsConnected?: boolean;
   // State setters for sync
   setSnapshot: Dispatch<SetStateAction<MobileInboxSnapshot>>;
   setRefreshError: Dispatch<SetStateAction<string | null>>;
@@ -330,6 +332,7 @@ export function startUnifiedSyncPolling(args: UnifiedSyncPollingArgs) {
     selectedReviewFilePath,
     documentVisibleRef,
     historyBySession,
+    wsConnected,
     setSnapshot,
     setRefreshError,
     setHistoryBySession,
@@ -346,13 +349,18 @@ export function startUnifiedSyncPolling(args: UnifiedSyncPollingArgs) {
       || (selectedSessionKey && actionStateBySession[selectedSessionKey] === 'steering')
     );
   const isActive = ownedActive || selectedSession?.status === 'running' || waitingForResponse;
-  const intervalMs = ownedActive
-    ? 1500
-    : selectedSessionKey?.startsWith('codex-owned:')
-      ? 4000
-      : isActive
-        ? 2500
-        : 20000;
+
+  // When WS is connected, polling is just a safety net (30s).
+  // When WS is down, polling runs at normal speed.
+  const intervalMs = wsConnected
+    ? 30_000
+    : ownedActive
+      ? 1500
+      : selectedSessionKey?.startsWith('codex-owned:')
+        ? 4000
+        : isActive
+          ? 2500
+          : 20000;
 
   function getLastId(sessionKey: string): string | undefined {
     const entries = historyBySession[sessionKey];

@@ -64,6 +64,7 @@ import {
   trackViewportTopOffset,
   trackVisibilityRefresh,
 } from './mobile/effects';
+import { useWebSocket } from './mobile/hooks/useWebSocket';
 export function MobileRemoteShell({
   initialSnapshot,
   initialTranscript,
@@ -202,13 +203,27 @@ export function MobileRemoteShell({
   const [hydrated, setHydrated] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const streamingTextRef = useRef('');
+  // Unified WebSocket — real-time push for inbox, history, chat deltas
+  const { connectionState: wsConnectionState } = useWebSocket({
+    selectedSessionKey,
+    setSnapshot,
+    setRefreshError,
+    setHistoryBySession,
+    setHistoryGroupsBySession,
+    setReviewFileByPath,
+    setStreamingText,
+    streamingTextRef,
+  });
+  const wsConnected = wsConnectionState === 'connected';
   useEffect(() => {
     if (!seenMessageIdsRef.current) {
       seenMessageIdsRef.current = new Set(transcriptEntries.map((e) => e.id));
     }
     setHydrated(true);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // SSE streaming — fallback when WebSocket is not connected
   useEffect(() => {
+    if (wsConnected) return; // WS handles chat deltas when connected
     return connectTranscriptStream({
       selectedSessionKey,
       sessions: snapshot.sessions,
@@ -217,7 +232,7 @@ export function MobileRemoteShell({
       streamingTextRef,
       loadHistory,
     });
-  }, [selectedSessionKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedSessionKey, wsConnected]); // eslint-disable-line react-hooks/exhaustive-deps
   const reviewFiles = useMemo(() => {
     const next = isOwnedCodexSession
       ? selectedReviewPacket?.changedFiles ?? []
@@ -331,6 +346,7 @@ export function MobileRemoteShell({
       selectedReviewFilePath,
       documentVisibleRef,
       historyBySession,
+      wsConnected,
       setSnapshot,
       setRefreshError,
       setHistoryBySession,
@@ -349,6 +365,7 @@ export function MobileRemoteShell({
     selectedSession,
     selectedSessionKey,
     waitingForResponse,
+    wsConnected,
   ]);
   const effectiveHistoryKey = linkedOwnedKey && historyBySession[linkedOwnedKey]?.length ? linkedOwnedKey : selectedSessionKey;
   const discoveredEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
