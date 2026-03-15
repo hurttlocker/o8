@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { memo } from 'react';
 import {
   ArrowUp,
+  Brain,
   Check,
   Eye,
   FileDiff,
@@ -40,6 +41,7 @@ export const ComposeBar = memo(function ComposeBar({
   composeRef,
   fileInputRef,
   handlers,
+  onOpenRecall,
 }: ComposeBarProps) {
   const sendButtonStyle = (disabled: boolean): CSSProperties => ({
     marginLeft: 'auto',
@@ -139,6 +141,17 @@ export const ComposeBar = memo(function ComposeBar({
               >
                 <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
               </button>
+              {onOpenRecall ? (
+                <button
+                  type="button"
+                  className="remodex-compose-chip remodex-compose-chip-icon"
+                  aria-label="Memory recall"
+                  onClick={onOpenRecall}
+                  style={{ minWidth: 42, minHeight: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'none', border: 'none', cursor: 'pointer', color: '#2563eb' }}
+                >
+                  <Brain size={17} strokeWidth={2} />
+                </button>
+              ) : null}
               {draft.trim().length >= 3 ? (
                 preEnhanceDraft !== null ? (
                   <button

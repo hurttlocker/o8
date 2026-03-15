@@ -145,6 +145,7 @@ export interface ComposeBarProps {
   composeRef: RefObject<HTMLTextAreaElement | null>;
   fileInputRef: RefObject<HTMLInputElement | null>;
   handlers: ComposeBarHandlers;
+  onOpenRecall?: () => void;
 }
 
 export interface ControlsSheetProps {
