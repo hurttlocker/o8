@@ -332,7 +332,21 @@ const httpServer = createServer((req, res) => {
   res.end();
 });
 
-const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
+const WS_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
+
+const wss = new WebSocketServer({
+  server: httpServer,
+  path: '/ws',
+  verifyClient: (info, done) => {
+    const url = new URL(info.req.url ?? '', `http://${info.req.headers.host}`);
+    const token = url.searchParams.get('token');
+    if (token !== WS_TOKEN) {
+      done(false, 401, 'Unauthorized');
+      return;
+    }
+    done(true);
+  },
+});
 
 wss.on('connection', (ws) => {
   const client: ClientState = {
