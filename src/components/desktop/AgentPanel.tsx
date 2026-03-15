@@ -26,6 +26,7 @@ import {
   Globe,
   MessageSquare,
   Monitor,
+  PlayCircle,
   Radio,
   Tag,
   Terminal,
@@ -948,27 +949,51 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
 
 // ── File Tree (light theme) ──
 
-function FileTreeNode({ node, depth = 0 }: { node: FileNode; depth?: number }) {
+function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
+  node: FileNode;
+  depth?: number;
+  changedFiles: Set<string>;
+  onSelectFile?: (path: string) => void;
+}) {
   const [open, setOpen] = useState(depth === 0 || node.name === 'src');
+
+  const isChanged = node.type === 'file' && changedFiles.has(node.path);
+
+  // Check if any children (recursively) are changed
+  const hasChangedChild = node.type === 'dir' && hasChangedDescendant(node, changedFiles);
 
   if (node.type === 'file') {
     return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        paddingTop: 4,
-        paddingRight: 14,
-        paddingBottom: 4,
-        paddingLeft: 14 + depth * 16,
-        fontSize: 12,
-        color: '#64748b',
-        fontFamily: '"SF Mono", ui-monospace, monospace',
-        cursor: 'pointer',
-        transition: 'color 100ms',
-      }}>
-        <FileText size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: '#94a3b8' }} />
+      <div
+        onClick={() => onSelectFile?.(node.path)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          paddingTop: 4,
+          paddingRight: 14,
+          paddingBottom: 4,
+          paddingLeft: 14 + depth * 16,
+          fontSize: 12,
+          color: isChanged ? '#2563eb' : '#64748b',
+          fontWeight: isChanged ? 500 : 400,
+          fontFamily: '"SF Mono", ui-monospace, monospace',
+          cursor: 'pointer',
+          transition: 'color 100ms',
+        }}
+      >
+        <FileText size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: isChanged ? '#3b82f6' : '#94a3b8' }} />
         {node.name}
+        {isChanged ? (
+          <span style={{
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            background: '#3b82f6',
+            flexShrink: 0,
+            marginLeft: 'auto',
+          }} />
+        ) : null}
       </div>
     );
   }
@@ -987,31 +1012,49 @@ function FileTreeNode({ node, depth = 0 }: { node: FileNode; depth?: number }) {
           paddingLeft: 14 + depth * 16,
           fontSize: 12,
           fontWeight: 500,
-          color: '#1e293b',
+          color: hasChangedChild ? '#1e40af' : '#1e293b',
           cursor: 'pointer',
           transition: 'color 100ms',
         }}
       >
         {open
-          ? <FolderOpen size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: '#3b82f6' }} />
-          : <Folder size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: '#3b82f6' }} />
+          ? <FolderOpen size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: hasChangedChild ? '#3b82f6' : '#3b82f6' }} />
+          : <Folder size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: hasChangedChild ? '#3b82f6' : '#3b82f6' }} />
         }
         {node.name}
         {open
           ? <ChevronDown size={11} strokeWidth={2} style={{ color: '#94a3b8' }} />
           : <ChevronRight size={11} strokeWidth={2} style={{ color: '#94a3b8' }} />
         }
+        {hasChangedChild && !open ? (
+          <span style={{
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            background: '#3b82f6',
+            flexShrink: 0,
+          }} />
+        ) : null}
       </div>
       {open && node.children ? (
         node.children.map((child) => (
-          <FileTreeNode key={child.path} node={child} depth={depth + 1} />
+          <FileTreeNode key={child.path} node={child} depth={depth + 1} changedFiles={changedFiles} onSelectFile={onSelectFile} />
         ))
       ) : null}
     </div>
   );
 }
 
-const FileTree = memo(function FileTree({ tree }: { tree: FileNode[] }) {
+function hasChangedDescendant(node: FileNode, changedFiles: Set<string>): boolean {
+  if (node.type === 'file') return changedFiles.has(node.path);
+  return node.children?.some(c => hasChangedDescendant(c, changedFiles)) ?? false;
+}
+
+const FileTree = memo(function FileTree({ tree, changedFiles, onSelectFile }: {
+  tree: FileNode[];
+  changedFiles: Set<string>;
+  onSelectFile?: (path: string) => void;
+}) {
   if (!tree.length) {
     return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>No files found</div>;
   }
@@ -1019,7 +1062,7 @@ const FileTree = memo(function FileTree({ tree }: { tree: FileNode[] }) {
   return (
     <div style={{ paddingTop: 6, paddingBottom: 6 }}>
       {tree.map((node) => (
-        <FileTreeNode key={node.path} node={node} />
+        <FileTreeNode key={node.path} node={node} changedFiles={changedFiles} onSelectFile={onSelectFile} />
       ))}
     </div>
   );
@@ -1042,12 +1085,16 @@ export const AgentPanel = memo(function AgentPanel({
   onSelectCommit,
   onSelectPR,
   onExpandWorkspace,
+  onSelectFile,
+  onOpenCI,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
   onSelectCommit?: (hash: string) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
   onExpandWorkspace?: (workspace: string, repo: string | null) => void;
+  onSelectFile?: (filePath: string, workspace?: string) => void;
+  onOpenCI?: (repo: string) => void;
 } = {}) {
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([]);
@@ -1055,6 +1102,7 @@ export const AgentPanel = memo(function AgentPanel({
   const [issues, setIssues] = useState<GHIssue[]>([]);
   const [prs, setPrs] = useState<GHPullRequest[]>([]);
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
+  const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<Tab>('activity');
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
@@ -1169,6 +1217,12 @@ export const AgentPanel = memo(function AgentPanel({
         const data = await res.json();
         const freshTree = data.tree ?? [];
         setFileTree(prev => JSON.stringify(prev) === JSON.stringify(freshTree) ? prev : freshTree);
+        const freshChanged = new Set<string>(data.changedFiles ?? []);
+        setChangedFiles(prev => {
+          const prevArr = Array.from(prev).sort();
+          const newArr = Array.from(freshChanged).sort();
+          return JSON.stringify(prevArr) === JSON.stringify(newArr) ? prev : freshChanged;
+        });
       } catch { /* silent */ }
     }
     void fetchFiles();
@@ -1296,6 +1350,32 @@ export const AgentPanel = memo(function AgentPanel({
             <>
               <span>·</span>
               <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{activeRepo}</span>
+              <button
+                type="button"
+                onClick={() => onOpenCI?.(activeRepo)}
+                title="View CI / GitHub Actions"
+                style={{
+                  marginLeft: 'auto',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  paddingTop: 2,
+                  paddingRight: 6,
+                  paddingBottom: 2,
+                  paddingLeft: 6,
+                  borderRadius: 4,
+                  border: '1px solid rgba(0,0,0,0.08)',
+                  background: 'rgba(255,255,255,0.6)',
+                  fontSize: 10,
+                  color: '#64748b',
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontWeight: 500,
+                }}
+              >
+                <PlayCircle size={11} strokeWidth={2} />
+                CI
+              </button>
             </>
           ) : null}
         </div>
@@ -1311,7 +1391,7 @@ export const AgentPanel = memo(function AgentPanel({
         {activeTab === 'activity' ? <ActivityFeed events={events} commits={commits} onSelectCommit={onSelectCommit} /> : null}
         {activeTab === 'issues' ? <IssuesList issues={issues} onSelect={(num) => onSelectIssue ? onSelectIssue(num, activeRepo ?? undefined) : setSelectedIssue(num)} /> : null}
         {activeTab === 'prs' ? <PRList prs={prs} onSelect={(num) => onSelectPR?.(num, activeRepo ?? undefined)} /> : null}
-        {activeTab === 'files' ? <FileTree tree={fileTree} /> : null}
+        {activeTab === 'files' ? <FileTree tree={fileTree} changedFiles={changedFiles} onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)} /> : null}
       </div>
 
       {/* ── Issue Detail Modal ── */}

@@ -47,6 +47,26 @@ async function buildTree(dir: string, relPath: string, depth: number): Promise<F
   }
 }
 
+function getChangedFiles(root: string): Set<string> {
+  try {
+    const { execSync } = require('child_process');
+    const output = execSync('git status --porcelain', {
+      cwd: root,
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    const changed = new Set<string>();
+    for (const line of output.split('\n')) {
+      // Format: "XY path" or "XY path -> renamed"
+      const filePath = line.slice(3).split(' -> ')[0]?.trim();
+      if (filePath) changed.add(filePath);
+    }
+    return changed;
+  } catch {
+    return new Set();
+  }
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const workspaceParam = searchParams.get('workspace');
@@ -58,5 +78,6 @@ export async function GET(request: Request) {
   }
 
   const tree = await buildTree(root, '', 0);
-  return NextResponse.json({ tree, root });
+  const changedFiles = Array.from(getChangedFiles(root));
+  return NextResponse.json({ tree, root, changedFiles });
 }
