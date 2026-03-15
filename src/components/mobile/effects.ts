@@ -12,6 +12,7 @@ import type {
   MobileTranscriptEntry,
 } from '@/lib/mobile/types';
 import type { ActionState, PendingOwnedTurn, SessionSummary } from './types';
+import { mobileSyncOnce } from './controller';
 
 interface ViewportOffsetArgs {
   setViewportTopOffset: Dispatch<SetStateAction<number>>;
@@ -290,6 +291,108 @@ export function startLinkedOwnedPolling({
     if (!documentVisibleRef.current) return;
     void loadHistory(linkedOwnedKey, true).catch(() => undefined);
   }, 3000);
+
+  return () => window.clearInterval(timer);
+}
+
+// ── Unified sync polling (replaces inbox + session + linked polling) ──
+
+interface UnifiedSyncPollingArgs {
+  selectedSessionKey?: string;
+  selectedSession?: SessionSummary;
+  linkedOwnedKey: string | null;
+  pendingOwnedTurnBySession: Record<string, PendingOwnedTurn>;
+  actionStateBySession: Record<string, ActionState>;
+  waitingForResponse: boolean;
+  diffOpen: boolean;
+  selectedReviewFilePath: string | null;
+  documentVisibleRef: MutableRefObject<boolean>;
+  historyBySession: Record<string, MobileTranscriptEntry[]>;
+  // State setters for sync
+  setSnapshot: Dispatch<SetStateAction<MobileInboxSnapshot>>;
+  setRefreshError: Dispatch<SetStateAction<string | null>>;
+  setHistoryBySession: Dispatch<SetStateAction<Record<string, MobileTranscriptEntry[]>>>;
+  setHistoryGroupsBySession: Dispatch<SetStateAction<Record<string, MobileRuntimeTailGroup[]>>>;
+  setReviewFileByPath: Dispatch<SetStateAction<Record<string, MobileReviewFileResponse['file']>>>;
+  // Legacy loaders for owned review packet (stays separate — not in sync endpoint yet)
+  loadOwnedReviewPacket: (sessionKey: string, force?: boolean) => Promise<RuntimeReviewPacket | null | undefined>;
+}
+
+export function startUnifiedSyncPolling(args: UnifiedSyncPollingArgs) {
+  const {
+    selectedSessionKey,
+    selectedSession,
+    linkedOwnedKey,
+    pendingOwnedTurnBySession,
+    actionStateBySession,
+    waitingForResponse,
+    diffOpen,
+    selectedReviewFilePath,
+    documentVisibleRef,
+    historyBySession,
+    setSnapshot,
+    setRefreshError,
+    setHistoryBySession,
+    setHistoryGroupsBySession,
+    setReviewFileByPath,
+    loadOwnedReviewPacket,
+  } = args;
+
+  // Determine polling interval based on activity level
+  const ownedActive = selectedSessionKey?.startsWith('codex-owned:')
+    && (
+      selectedSession?.runtimeSurface?.lifecycle?.availability === 'running'
+      || Boolean(selectedSessionKey && pendingOwnedTurnBySession[selectedSessionKey])
+      || (selectedSessionKey && actionStateBySession[selectedSessionKey] === 'steering')
+    );
+  const isActive = ownedActive || selectedSession?.status === 'running' || waitingForResponse;
+  const intervalMs = ownedActive
+    ? 1500
+    : selectedSessionKey?.startsWith('codex-owned:')
+      ? 4000
+      : isActive
+        ? 2500
+        : 20000;
+
+  function getLastId(sessionKey: string): string | undefined {
+    const entries = historyBySession[sessionKey];
+    if (!entries?.length) return undefined;
+    const last = entries[entries.length - 1];
+    return last?.id?.startsWith('optimistic-') ? undefined : last?.id;
+  }
+
+  async function tick() {
+    if (!documentVisibleRef.current) return;
+
+    const wantReviewFile = !!(
+      selectedReviewFilePath
+      && diffOpen
+      && (isActive || selectedSessionKey?.startsWith('codex-owned:'))
+    );
+
+    await mobileSyncOnce({
+      wantInbox: isActive || !selectedSessionKey, // Always sync inbox when idle on squad view
+      historySessionKey: selectedSessionKey,
+      historyLastId: selectedSessionKey ? getLastId(selectedSessionKey) : undefined,
+      reviewFilePath: wantReviewFile ? selectedReviewFilePath ?? undefined : undefined,
+      linkedSessionKey: linkedOwnedKey ?? undefined,
+      linkedLastId: linkedOwnedKey ? getLastId(linkedOwnedKey) : undefined,
+      setSnapshot,
+      setRefreshError,
+      setHistoryBySession,
+      setHistoryGroupsBySession,
+      setReviewFileByPath,
+    });
+
+    // Owned review packet stays on the legacy endpoint (not consolidated yet)
+    if (selectedSessionKey?.startsWith('codex-owned:')) {
+      void loadOwnedReviewPacket(selectedSessionKey, true).catch(() => undefined);
+    }
+  }
+
+  // Initial sync
+  void tick();
+  const timer = window.setInterval(() => void tick(), intervalMs);
 
   return () => window.clearInterval(timer);
 }
