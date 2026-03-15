@@ -36,7 +36,7 @@ import { MarkdownBody } from './MarkdownBody';
 
 // ── Tab Types ──
 
-export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'welcome';
+export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'welcome';
 
 export interface CanvasTab {
   id: string;
@@ -185,6 +185,7 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
     case 'transcript': return <Terminal size={size} />;
     case 'file': return <FileText size={size} />;
     case 'diff': return <GitCommit size={size} />;
+    case 'commit': return <GitCommit size={size} />;
     case 'welcome': return <BookOpen size={size} />;
   }
 }
@@ -201,6 +202,8 @@ const TabContent = memo(function TabContent({ tab }: { tab: CanvasTab }) {
       return <FileViewer filePath={tab.resourceId} />;
     case 'diff':
       return <DiffViewer />;
+    case 'commit':
+      return <CommitViewer commitHash={tab.resourceId} />;
     case 'welcome':
       return <CanvasEmpty />;
     default:
@@ -520,6 +523,247 @@ function CanvasEmpty() {
       }}>
         Select an issue, agent, or file to open here
       </p>
+    </div>
+  );
+}
+
+// ── Commit Viewer ──
+
+interface CommitDetail {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  body: string;
+  author: string;
+  email: string;
+  date: string;
+  files: { path: string; additions: number | null; deletions: number | null }[];
+  totalAdditions: number;
+  totalDeletions: number;
+  diff: string;
+}
+
+function CommitViewer({ commitHash }: { commitHash: string }) {
+  const [commit, setCommit] = useState<CommitDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
+    fetch(`/api/panel/commits/${commitHash}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
+      .then((data) => {
+        if (!cancelled) {
+          setCommit(data.commit);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err.message);
+          setLoading(false);
+        }
+      });
+
+    return () => { cancelled = true; };
+  }, [commitHash]);
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>
+        Loading commit…
+      </div>
+    );
+  }
+
+  if (error || !commit) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#ef4444' }}>
+        Failed to load commit: {error || 'Unknown error'}
+      </div>
+    );
+  }
+
+  // Parse diff into per-file sections
+  const fileDiffs = new Map<string, string>();
+  if (commit.diff) {
+    const sections = commit.diff.split(/^diff --git /m).filter(Boolean);
+    for (const section of sections) {
+      const firstLine = section.split('\n')[0] ?? '';
+      const match = firstLine.match(/b\/(.+)$/);
+      if (match) {
+        fileDiffs.set(match[1], 'diff --git ' + section);
+      }
+    }
+  }
+
+  const activeDiff = selectedFile ? (fileDiffs.get(selectedFile) ?? '') : commit.diff;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Header */}
+      <div style={{
+        paddingTop: 16,
+        paddingRight: 20,
+        paddingBottom: 12,
+        paddingLeft: 20,
+        borderBottom: '1px solid rgba(0,0,0,0.06)',
+        background: 'rgba(255,255,255,0.4)',
+        flexShrink: 0,
+      }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: '#0f172a', lineHeight: 1.4 }}>
+          {commit.subject}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, fontSize: 12, color: '#64748b' }}>
+          <span style={{
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+            fontSize: 11,
+            paddingTop: 2,
+            paddingRight: 6,
+            paddingBottom: 2,
+            paddingLeft: 6,
+            borderRadius: 4,
+            background: 'rgba(0,0,0,0.04)',
+            color: '#475569',
+          }}>
+            {commit.shortHash}
+          </span>
+          <span>{commit.author}</span>
+          <span>·</span>
+          <span>{formatAge(commit.date)}</span>
+          <span>·</span>
+          <span style={{ color: '#22c55e', fontWeight: 600 }}>+{commit.totalAdditions}</span>
+          <span style={{ color: '#ef4444', fontWeight: 600 }}>-{commit.totalDeletions}</span>
+          <span>{commit.files.length} file{commit.files.length !== 1 ? 's' : ''}</span>
+        </div>
+        {commit.body ? (
+          <div style={{ marginTop: 8, fontSize: 13, color: '#475569', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+            {commit.body}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Body: file list + diff */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        {/* File list sidebar */}
+        <div style={{
+          width: 260,
+          flexShrink: 0,
+          borderRight: '1px solid rgba(0,0,0,0.06)',
+          overflowY: 'auto',
+          background: 'rgba(248, 250, 252, 0.6)',
+        }}>
+          {/* "All files" option */}
+          <button
+            type="button"
+            onClick={() => setSelectedFile(null)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              width: '100%',
+              paddingTop: 10,
+              paddingRight: 12,
+              paddingBottom: 10,
+              paddingLeft: 14,
+              border: 'none',
+              borderLeft: selectedFile === null ? '2px solid #2563eb' : '2px solid transparent',
+              background: selectedFile === null ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
+              cursor: 'pointer',
+              textAlign: 'left',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontSize: 13,
+              fontWeight: selectedFile === null ? 600 : 400,
+              color: '#1e293b',
+            }}
+          >
+            All files ({commit.files.length})
+          </button>
+
+          {commit.files.map((file) => {
+            const isActive = selectedFile === file.path;
+            const fileName = file.path.split('/').pop() ?? file.path;
+            const dirPath = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
+
+            return (
+              <button
+                key={file.path}
+                type="button"
+                onClick={() => setSelectedFile(file.path)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                  paddingTop: 8,
+                  paddingRight: 12,
+                  paddingBottom: 8,
+                  paddingLeft: 14,
+                  border: 'none',
+                  borderLeft: isActive ? '2px solid #2563eb' : '2px solid transparent',
+                  background: isActive ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  transition: 'all 100ms ease',
+                }}
+              >
+                <FileText size={14} strokeWidth={1.8} style={{ color: '#94a3b8', flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 13,
+                    fontWeight: isActive ? 600 : 400,
+                    color: '#1e293b',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>{fileName}</div>
+                  {dirPath ? (
+                    <div style={{
+                      fontSize: 11,
+                      color: '#94a3b8',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}>{dirPath}</div>
+                  ) : null}
+                </div>
+                <div style={{ display: 'flex', gap: 4, flexShrink: 0, fontSize: 11, fontWeight: 600 }}>
+                  {(file.additions ?? 0) > 0 ? <span style={{ color: '#22c55e' }}>+{file.additions}</span> : null}
+                  {(file.deletions ?? 0) > 0 ? <span style={{ color: '#ef4444' }}>-{file.deletions}</span> : null}
+                </div>
+                <ChevronRight size={12} strokeWidth={2} style={{ color: '#cbd5e1', flexShrink: 0 }} />
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Diff preview */}
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          <pre style={{
+            margin: 0,
+            paddingTop: 14,
+            paddingRight: 16,
+            paddingBottom: 14,
+            paddingLeft: 16,
+            fontSize: '0.8rem',
+            lineHeight: 1.65,
+            fontFamily: '"SF Mono", "Menlo", "Monaco", ui-monospace, monospace',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            color: '#1e293b',
+          }}>
+            {renderDiffLines(activeDiff)}
+          </pre>
+        </div>
+      </div>
     </div>
   );
 }
