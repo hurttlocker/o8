@@ -68,7 +68,6 @@ export interface CostsDashboardProps {
 
 export interface SquadRailProps {
   snapshot: MobileInboxSnapshot;
-  projectGroups: ProjectGroup[];
   expandedProject: string | null;
   selectedSession?: SessionSummary;
   onSessionFocus: (sessionId: string) => void;
@@ -181,4 +180,43 @@ export interface DiffOverlayProps {
   onFileSelect: (reviewPath: string) => void;
   onLoadFile: (reviewPath: string, force?: boolean) => void | Promise<unknown>;
   onRefresh: () => void | Promise<void>;
+}
+
+export interface TopBarProps {
+  snapshot: MobileInboxSnapshot;
+  selectedSession?: SessionSummary;
+  selectedReviewPacket?: RuntimeReviewPacket | null;
+  selectedReviewFile?: ReviewFileDetail;
+  reviewFiles: ReviewChangedFile[];
+  isOwnedCodexSession: boolean;
+  isHeaderCompact: boolean;
+  headerVisible: boolean;
+  pendingApprovalsCount: number;
+  compactLine: CompactLine;
+  onOpenControls: () => void;
+  onOpenDiff: () => void;
+}
+
+export interface SurfaceStatusProps {
+  snapshot: MobileInboxSnapshot;
+  selectedSession?: SessionSummary;
+  selectedReviewPacket?: RuntimeReviewPacket | null;
+  isOwnedCodexSession: boolean;
+  refreshError?: string | null;
+  surfaceNote?: string | null;
+  transcriptError?: string | null;
+  selectedReviewPacketError?: string | null;
+}
+
+export interface RuntimeBarProps {
+  snapshot: MobileInboxSnapshot;
+  selectedSession?: SessionSummary;
+  selectedReviewPacket?: RuntimeReviewPacket | null;
+  isOwnedCodexSession: boolean;
+  compactLine: CompactLine;
+}
+
+export interface MediaLightboxProps {
+  media: MobileTranscriptMedia | null;
+  onClose: () => void;
 }

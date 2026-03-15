@@ -1,8 +1,10 @@
+import { useMemo } from 'react';
 import { ChevronRight } from 'lucide-react';
 import type { SquadRailProps } from './types';
+import { buildProjectGroups } from './utils';
 
 export function SquadRail({
-  projectGroups,
+  snapshot,
   expandedProject,
   selectedSession,
   onSessionFocus,
@@ -11,6 +13,11 @@ export function SquadRail({
   agentDisplayName,
 }: SquadRailProps) {
   void onCostsView;
+
+  const projectGroups = useMemo(
+    () => buildProjectGroups(snapshot, selectedSession),
+    [selectedSession, snapshot],
+  );
 
   if (!projectGroups.length) {
     return null;
