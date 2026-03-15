@@ -1,8 +1,10 @@
+import { memo } from 'react';
+
 /**
  * ShimmerCard — Loading skeleton for lazy-loaded panels.
  * Pulse animation, Apple-style rounded card.
  */
-export function ShimmerCard() {
+export const ShimmerCard = memo(function ShimmerCard() {
   return (
     <div
       style={{
@@ -21,4 +23,4 @@ export function ShimmerCard() {
       `}</style>
     </div>
   );
-}
+});

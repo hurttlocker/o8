@@ -1,5 +1,12 @@
 /// <reference lib="webworker" />
 
+// Skip SW entirely inside Tauri — Tauri handles its own asset serving
+if (self.location.protocol === 'tauri:' || self.location.hostname === 'tauri.localhost') {
+  self.addEventListener('install', () => self.skipWaiting());
+  self.addEventListener('activate', () => self.clients.claim());
+  // No fetch handler — Tauri serves assets natively
+} else {
+
 // Cache version — bumped automatically on each deploy via BUILD_ID
 // The SW file itself changes (new hash) so the browser re-registers it
 const CACHE_VERSION = '2026031421';
@@ -98,3 +105,5 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 });
+
+} // end non-Tauri block

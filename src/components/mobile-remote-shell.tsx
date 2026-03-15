@@ -33,15 +33,15 @@ const TokenUsageSummary = dynamic(() => import('./mobile/TokenUsageSummary').the
 
 // Cortex memory surfaces (#78-#85) — typed via explicit generic param
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const RecallPanel = dynamic<any>(() => import('./mobile/RecallPanel'), { ssr: false });
+const RecallPanel = dynamic(() => import('./mobile/RecallPanel'), { ssr: false });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const MemoryHealth = dynamic<any>(() => import('./mobile/MemoryHealth'), { ssr: false });
+const MemoryHealth = dynamic(() => import('./mobile/MemoryHealth'), { ssr: false });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const MemoryContext = dynamic<any>(() => import('./mobile/MemoryContext'), { ssr: false });
+const MemoryContext = dynamic(() => import('./mobile/MemoryContext'), { ssr: false });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const GraphExplorer = dynamic<any>(() => import('./mobile/GraphExplorer'), { ssr: false });
+const GraphExplorer = dynamic(() => import('./mobile/GraphExplorer'), { ssr: false });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const CortexStatus = dynamic<any>(() => import('./mobile/CortexStatus'), { ssr: false });
+const CortexStatus = dynamic(() => import('./mobile/CortexStatus'), { ssr: false });
 
 // Extracted hooks (#43 — hooks extraction)
 import { useMobileState } from './mobile/hooks/useMobileState';
@@ -403,7 +403,6 @@ export function MobileRemoteShell({
       />
       {/* Cortex Memory Surfaces */}
       <RecallPanel
-        sessionKey={selectedSessionKey ?? ''}
         currentTask={selectedSession?.currentTask ?? selectedSession?.name}
         cwd={selectedSession?.runtimeSurface?.cwd}
         branch={selectedSession?.runtimeSurface?.branch}
