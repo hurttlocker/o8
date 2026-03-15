@@ -140,18 +140,20 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
   );
 
   const [activeBlock, setActiveBlock] = useState<number | null>(null);
-  const activeBlockRef = useRef<number | null>(null);
+  const playingRef = useRef(false);
 
-  // Subscribe to TTS state — only clear when playback fully ends
+  // Subscribe to TTS state — clear highlight only when playback truly ends
   useEffect(() => {
     if (entry.role !== 'assistant') return;
     return ttsEngine.subscribe((state) => {
-      // Only clear when TTS goes idle or switches to a different message
-      if (state.state === 'idle' || (state.activeMessageId !== null && state.activeMessageId !== entry.id)) {
-        if (activeBlockRef.current !== null) {
-          activeBlockRef.current = null;
-          setActiveBlock(null);
-        }
+      const isOurs = state.activeMessageId === entry.id;
+      if (isOurs && (state.state === 'playing' || state.state === 'loading')) {
+        playingRef.current = true;
+      }
+      // Only clear when: we WERE playing, and now we're idle or switched away
+      if (playingRef.current && (state.state === 'idle' || state.state === 'error' || (!isOurs && state.activeMessageId !== null))) {
+        playingRef.current = false;
+        setActiveBlock(null);
       }
     });
   }, [entry.id, entry.role]);
@@ -164,7 +166,6 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
 
     if (!textFromHere.trim()) return;
 
-    activeBlockRef.current = blockIndex;
     setActiveBlock(blockIndex);
     void ttsEngine.play(textFromHere, entry.id);
   }, [mdBlocks, entry.id]);
