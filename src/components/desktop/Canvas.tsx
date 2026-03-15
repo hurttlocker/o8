@@ -36,7 +36,7 @@ import { MarkdownBody } from './MarkdownBody';
 
 // ── Tab Types ──
 
-export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'welcome';
+export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'welcome';
 
 export interface CanvasTab {
   id: string;
@@ -189,6 +189,8 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
     case 'diff': return <GitCommit size={size} />;
     case 'commit': return <GitCommit size={size} />;
     case 'pr': return <GitCommit size={size} />;
+    case 'readme': return <BookOpen size={size} />;
+    case 'ci': return <AlertCircle size={size} />;
     case 'welcome': return <BookOpen size={size} />;
   }
 }
@@ -202,13 +204,17 @@ const TabContent = memo(function TabContent({ tab }: { tab: CanvasTab }) {
     case 'transcript':
       return <TranscriptViewer sessionKey={tab.resourceId} />;
     case 'file':
-      return <FileViewer filePath={tab.resourceId} />;
+      return <FileViewer filePath={tab.resourceId} workspace={tab.meta?.workspace} />;
     case 'diff':
       return <DiffViewer />;
     case 'commit':
       return <CommitViewer commitHash={tab.resourceId} />;
     case 'pr':
       return <PRViewer prNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} />;
+    case 'readme':
+      return <ReadmeViewer workspace={tab.resourceId} />;
+    case 'ci':
+      return <CIViewer repo={tab.meta?.repo} />;
     case 'welcome':
       return <CanvasEmpty />;
     default:
@@ -485,24 +491,130 @@ interface TranscriptMessage {
 
 // ── File Viewer ──
 
-const FileViewer = memo(function FileViewer({ filePath }: { filePath: string }) {
+const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath: string; workspace?: string }) {
+  const [content, setContent] = useState<string | null>(null);
+  const [diff, setDiff] = useState<string>('');
+  const [hasDiff, setHasDiff] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [activeView, setActiveView] = useState<'content' | 'diff'>('content');
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+
+    // Fetch file content
+    const wsParam = workspace ? `&workspace=${encodeURIComponent(workspace)}` : '';
+    Promise.all([
+      fetch(`/api/panel/file-content?path=${encodeURIComponent(filePath)}${wsParam}`)
+        .then(r => r.json()).catch(() => ({ content: null })),
+      fetch(`/api/panel/file-diff?path=${encodeURIComponent(filePath)}${wsParam}`)
+        .then(r => r.json()).catch(() => ({ diff: '', hasDiff: false })),
+    ]).then(([contentData, diffData]) => {
+      if (!cancelled) {
+        setContent(contentData.content ?? null);
+        setDiff(diffData.diff ?? '');
+        setHasDiff(diffData.hasDiff ?? false);
+        if (diffData.hasDiff) setActiveView('diff');
+        setLoading(false);
+      }
+    });
+
+    return () => { cancelled = true; };
+  }, [filePath, workspace]);
+
+  if (loading) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading file…</div>;
+  }
+
+  const fileName = filePath.split('/').pop() ?? filePath;
+
   return (
-    <div style={{
-      padding: '24px 32px',
-      color: '#64748b',
-      fontSize: 13,
-    }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Header */}
       <div style={{
-        fontFamily: 'SF Mono, Menlo, monospace',
-        fontSize: 12,
-        background: 'rgba(255,255,255,0.8)',
-        borderRadius: 14,
-        padding: '16px 20px',
-        border: '1px solid rgba(0,0,0,0.04)',
-        whiteSpace: 'pre',
-        overflow: 'auto',
+        paddingTop: 12,
+        paddingRight: 20,
+        paddingBottom: 10,
+        paddingLeft: 20,
+        borderBottom: '1px solid rgba(0,0,0,0.06)',
+        background: 'rgba(255,255,255,0.4)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        flexShrink: 0,
       }}>
-        File viewer coming soon: {filePath}
+        <FileText size={16} strokeWidth={1.8} style={{ color: '#94a3b8' }} />
+        <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{fileName}</span>
+        <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: '"SF Mono", ui-monospace, monospace' }}>{filePath}</span>
+
+        {hasDiff ? (
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
+            {(['content', 'diff'] as const).map((view) => (
+              <button
+                key={view}
+                type="button"
+                onClick={() => setActiveView(view)}
+                style={{
+                  paddingTop: 4,
+                  paddingRight: 10,
+                  paddingBottom: 4,
+                  paddingLeft: 10,
+                  borderRadius: 6,
+                  border: 'none',
+                  fontSize: 11,
+                  fontWeight: activeView === view ? 600 : 400,
+                  color: activeView === view ? '#2563eb' : '#64748b',
+                  background: activeView === view ? 'rgba(37,99,235,0.08)' : 'transparent',
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}
+              >
+                {view === 'content' ? 'Content' : 'Diff'}
+              </button>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      {/* Body */}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {activeView === 'diff' && hasDiff ? (
+          <pre style={{
+            margin: 0,
+            paddingTop: 14,
+            paddingRight: 16,
+            paddingBottom: 14,
+            paddingLeft: 16,
+            fontSize: '0.8rem',
+            lineHeight: 1.65,
+            fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            color: '#1e293b',
+          }}>
+            {renderDiffLines(diff)}
+          </pre>
+        ) : content !== null ? (
+          <pre style={{
+            margin: 0,
+            paddingTop: 14,
+            paddingRight: 16,
+            paddingBottom: 14,
+            paddingLeft: 16,
+            fontSize: '0.8rem',
+            lineHeight: 1.65,
+            fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            color: '#1e293b',
+          }}>
+            {content}
+          </pre>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#94a3b8' }}>
+            Could not load file content
+          </div>
+        )}
       </div>
     </div>
   );
@@ -529,6 +641,285 @@ function CanvasEmpty() {
       }}>
         Select an issue, agent, or file to open here
       </p>
+    </div>
+  );
+}
+
+// ── README Viewer ──
+
+function ReadmeViewer({ workspace }: { workspace: string }) {
+  const [content, setContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/panel/readme?workspace=${encodeURIComponent(workspace)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!cancelled) {
+          setContent(data.content);
+          setLoading(false);
+        }
+      })
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [workspace]);
+
+  if (loading) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading README…</div>;
+  }
+
+  if (!content) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#94a3b8' }}>No README found in this workspace</div>;
+  }
+
+  return (
+    <div style={{ padding: '24px 32px', overflowY: 'auto', height: '100%' }}>
+      <MarkdownBody text={content} />
+    </div>
+  );
+}
+
+// ── CI Viewer ──
+
+interface CIRun {
+  databaseId: number;
+  displayTitle: string;
+  event: string;
+  headBranch: string;
+  status: string;
+  conclusion: string;
+  createdAt: string;
+  updatedAt: string;
+  workflowName: string;
+  url: string;
+}
+
+interface CIRunDetail extends CIRun {
+  jobs: { name: string; status: string; conclusion: string; startedAt: string; completedAt: string }[];
+}
+
+function ciColor(conclusion: string, status: string): string {
+  if (status === 'in_progress' || status === 'queued') return '#f59e0b';
+  if (conclusion === 'success') return '#22c55e';
+  if (conclusion === 'failure') return '#ef4444';
+  if (conclusion === 'cancelled') return '#6b7280';
+  return '#94a3b8';
+}
+
+function ciIcon(conclusion: string, status: string): string {
+  if (status === 'in_progress') return '◉';
+  if (status === 'queued') return '○';
+  if (conclusion === 'success') return '✓';
+  if (conclusion === 'failure') return '✗';
+  if (conclusion === 'cancelled') return '⊘';
+  return '○';
+}
+
+function CIViewer({ repo }: { repo?: string }) {
+  const [runs, setRuns] = useState<CIRun[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedRun, setSelectedRun] = useState<number | null>(null);
+  const [runDetail, setRunDetail] = useState<CIRunDetail | null>(null);
+  const [logs, setLogs] = useState('');
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
+    fetch(`/api/panel/ci${repoParam}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!cancelled) {
+          setRuns(data.runs ?? []);
+          setLoading(false);
+        }
+      })
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [repo]);
+
+  useEffect(() => {
+    if (!selectedRun) { setRunDetail(null); setLogs(''); return; }
+    let cancelled = false;
+    setDetailLoading(true);
+    const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
+    fetch(`/api/panel/ci/${selectedRun}${repoParam}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!cancelled) {
+          setRunDetail(data.run ?? null);
+          setLogs(data.logs ?? '');
+          setDetailLoading(false);
+        }
+      })
+      .catch(() => { if (!cancelled) setDetailLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedRun, repo]);
+
+  if (loading) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading CI runs…</div>;
+  }
+
+  if (runs.length === 0) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#94a3b8' }}>No workflow runs found</div>;
+  }
+
+  return (
+    <div style={{ display: 'flex', height: '100%' }}>
+      {/* Run list */}
+      <div style={{
+        width: 340,
+        flexShrink: 0,
+        borderRight: '1px solid rgba(0,0,0,0.06)',
+        overflowY: 'auto',
+        background: 'rgba(248, 250, 252, 0.6)',
+      }}>
+        {runs.map((run) => {
+          const color = ciColor(run.conclusion, run.status);
+          const icon = ciIcon(run.conclusion, run.status);
+          const isActive = selectedRun === run.databaseId;
+          return (
+            <button
+              key={run.databaseId}
+              type="button"
+              onClick={() => setSelectedRun(run.databaseId)}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                width: '100%',
+                paddingTop: 10,
+                paddingRight: 14,
+                paddingBottom: 10,
+                paddingLeft: 14,
+                border: 'none',
+                borderLeft: isActive ? `3px solid ${color}` : '3px solid transparent',
+                background: isActive ? 'rgba(37, 99, 235, 0.04)' : 'transparent',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                borderBottom: '1px solid rgba(0,0,0,0.04)',
+              }}
+            >
+              <span style={{
+                fontSize: 16,
+                color,
+                fontWeight: 700,
+                lineHeight: 1.2,
+                flexShrink: 0,
+                marginTop: 1,
+              }}>{icon}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 13,
+                  fontWeight: isActive ? 600 : 400,
+                  color: '#1e293b',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>{run.displayTitle}</div>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{run.headBranch}</span>
+                  <span>·</span>
+                  <span>{run.workflowName}</span>
+                  <span>·</span>
+                  <span>{formatAge(run.createdAt)}</span>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Detail */}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {!selectedRun ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#94a3b8' }}>
+            Select a run to view details
+          </div>
+        ) : detailLoading ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>
+            Loading run details…
+          </div>
+        ) : runDetail ? (
+          <div style={{ paddingTop: 16, paddingRight: 20, paddingBottom: 16, paddingLeft: 20 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: '#0f172a', marginBottom: 8 }}>
+              {runDetail.displayTitle}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#64748b', marginBottom: 16 }}>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                paddingTop: 2,
+                paddingRight: 8,
+                paddingBottom: 2,
+                paddingLeft: 8,
+                borderRadius: 99,
+                fontSize: 11,
+                fontWeight: 600,
+                color: ciColor(runDetail.conclusion, runDetail.status),
+                background: `${ciColor(runDetail.conclusion, runDetail.status)}12`,
+              }}>
+                {ciIcon(runDetail.conclusion, runDetail.status)} {runDetail.conclusion || runDetail.status}
+              </span>
+              <span>{runDetail.workflowName}</span>
+              <span>·</span>
+              <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{runDetail.headBranch}</span>
+              <span>·</span>
+              <span>{runDetail.event}</span>
+            </div>
+
+            {/* Jobs */}
+            {runDetail.jobs?.length > 0 ? (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Jobs
+                </div>
+                {runDetail.jobs.map((job, i) => {
+                  const jColor = ciColor(job.conclusion, job.status);
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4 }}>
+                      <span style={{ color: jColor, fontWeight: 700 }}>{ciIcon(job.conclusion, job.status)}</span>
+                      <span style={{ color: '#1e293b' }}>{job.name}</span>
+                      <span style={{ fontSize: 11, color: '#94a3b8' }}>{job.conclusion || job.status}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
+
+            {/* Logs */}
+            {logs ? (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Logs
+                </div>
+                <pre style={{
+                  margin: 0,
+                  padding: 14,
+                  fontSize: '0.75rem',
+                  lineHeight: 1.5,
+                  fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  color: '#1e293b',
+                  background: 'rgba(0,0,0,0.02)',
+                  borderRadius: 8,
+                  border: '1px solid rgba(0,0,0,0.06)',
+                  maxHeight: 500,
+                  overflowY: 'auto',
+                }}>
+                  {logs}
+                </pre>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

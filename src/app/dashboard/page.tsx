@@ -65,6 +65,27 @@ export default function DashboardPage() {
     });
   }, [openCanvasTab]);
 
+  const handleExpandWorkspace = useCallback((workspace: string, repo: string | null) => {
+    // Auto-open README tab for the expanded workspace
+    openCanvasTab({
+      id: `readme:${workspace}`,
+      kind: 'readme',
+      label: 'README',
+      resourceId: workspace,
+      meta: repo ? { repo } : undefined,
+    });
+  }, [openCanvasTab]);
+
+  const handleOpenCI = useCallback((repo: string) => {
+    openCanvasTab({
+      id: `ci:${repo}`,
+      kind: 'ci',
+      label: `CI`,
+      resourceId: repo,
+      meta: { repo },
+    });
+  }, [openCanvasTab]);
+
   const handleSelectCommit = useCallback((hash: string) => {
     openCanvasTab({
       id: `commit:${hash}`,
@@ -152,6 +173,7 @@ export default function DashboardPage() {
           onSelectIssue={handleSelectIssue}
           onSelectCommit={handleSelectCommit}
           onSelectPR={handleSelectPR}
+          onExpandWorkspace={handleExpandWorkspace}
         />
       </div>
 
