@@ -19,8 +19,12 @@ import {
   AlertCircle,
   BookOpen,
   ChevronDown,
+  ChevronRight,
   Clock,
   ExternalLink,
+  FileEdit,
+  FileMinus,
+  FilePlus,
   FileText,
   GitCommit,
   MessageSquare,
@@ -195,6 +199,8 @@ const TabContent = memo(function TabContent({ tab }: { tab: CanvasTab }) {
       return <TranscriptViewer sessionKey={tab.resourceId} />;
     case 'file':
       return <FileViewer filePath={tab.resourceId} />;
+    case 'diff':
+      return <DiffViewer />;
     case 'welcome':
       return <CanvasEmpty />;
     default:
@@ -267,7 +273,7 @@ const IssueViewer = memo(function IssueViewer({ issueNumber }: { issueNumber: nu
   const age = formatAge(detail.createdAt);
 
   return (
-    <div style={{ padding: '24px 32px', maxWidth: 800 }}>
+    <div style={{ padding: '24px 32px' }}>
       {/* Header */}
       <div style={{
         display: 'flex',
@@ -514,6 +520,306 @@ function CanvasEmpty() {
       }}>
         Select an issue, agent, or file to open here
       </p>
+    </div>
+  );
+}
+
+// ── Diff Viewer (inline version of DiffModal) ──
+
+interface ChangedFile {
+  path: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked';
+  additions: number | null;
+  deletions: number | null;
+}
+
+interface FileDetail {
+  path: string;
+  status: string;
+  additions: number | null;
+  deletions: number | null;
+  preview: string;
+  note?: string;
+  commitSummary?: string;
+  commitAuthor?: string;
+  commitAge?: string;
+}
+
+const diffStatusColors: Record<string, string> = {
+  added: '#22c55e',
+  modified: '#f59e0b',
+  deleted: '#ef4444',
+  renamed: '#8b5cf6',
+  untracked: '#6b7280',
+};
+
+function DiffStatusIcon({ status }: { status: string }) {
+  const color = diffStatusColors[status] ?? '#6b7280';
+  const size = 15;
+  switch (status) {
+    case 'added': return <FilePlus size={size} strokeWidth={1.8} style={{ color, flexShrink: 0 }} />;
+    case 'deleted': return <FileMinus size={size} strokeWidth={1.8} style={{ color, flexShrink: 0 }} />;
+    case 'modified': return <FileEdit size={size} strokeWidth={1.8} style={{ color, flexShrink: 0 }} />;
+    default: return <FileText size={size} strokeWidth={1.8} style={{ color, flexShrink: 0 }} />;
+  }
+}
+
+function renderDiffLines(text: string) {
+  return text.split('\n').map((line, i) => {
+    let color = '#1e293b';
+    let bg = 'transparent';
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      color = '#166534';
+      bg = 'rgba(34, 197, 94, 0.08)';
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      color = '#991b1b';
+      bg = 'rgba(239, 68, 68, 0.08)';
+    } else if (line.startsWith('@@')) {
+      color = '#6366f1';
+      bg = 'rgba(99, 102, 241, 0.06)';
+    } else if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
+      color = '#64748b';
+    }
+    return (
+      <div key={i} style={{ color, background: bg, paddingTop: 1, paddingBottom: 1 }}>
+        {line || '\u00A0'}
+      </div>
+    );
+  });
+}
+
+function DiffViewer() {
+  const [files, setFiles] = useState<ChangedFile[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [fileDetail, setFileDetail] = useState<FileDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch('/api/review/workspace');
+        if (!res.ok) return;
+        const data = await res.json();
+        setFiles(data.changedFiles ?? []);
+      } catch { /* silent */ }
+      finally { setLoading(false); }
+    }
+    void load();
+  }, []);
+
+  const selectFile = useCallback(async (path: string) => {
+    setSelectedFile(path);
+    setDetailLoading(true);
+    setFileDetail(null);
+    try {
+      const res = await fetch(`/api/review/file?path=${encodeURIComponent(path)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setFileDetail(data.file ?? null);
+    } catch { /* silent */ }
+    finally { setDetailLoading(false); }
+  }, []);
+
+  const totalAdditions = files.reduce((sum, f) => sum + (f.additions ?? 0), 0);
+  const totalDeletions = files.reduce((sum, f) => sum + (f.deletions ?? 0), 0);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        paddingTop: 12,
+        paddingRight: 16,
+        paddingBottom: 12,
+        paddingLeft: 20,
+        borderBottom: '1px solid rgba(0,0,0,0.06)',
+        background: 'rgba(255,255,255,0.4)',
+        flexShrink: 0,
+      }}>
+        <span style={{
+          fontSize: 13,
+          fontWeight: 700,
+          color: '#0f172a',
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+        }}>
+          Workspace Diff
+        </span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#22c55e' }}>+{totalAdditions}</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#ef4444' }}>-{totalDeletions}</span>
+        <span style={{ fontSize: 12, color: '#64748b' }}>
+          {files.length} file{files.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      {/* Body: file list + diff preview */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        {/* File list sidebar */}
+        <div style={{
+          width: 260,
+          flexShrink: 0,
+          borderRight: '1px solid rgba(0,0,0,0.06)',
+          overflowY: 'auto',
+          background: 'rgba(248, 250, 252, 0.6)',
+        }}>
+          {loading ? (
+            <div style={{ padding: 20, fontSize: 13, color: '#9ca3af' }}>Loading…</div>
+          ) : files.length === 0 ? (
+            <div style={{ padding: 20, fontSize: 13, color: '#9ca3af' }}>Working tree clean</div>
+          ) : (
+            files.map((file) => {
+              const isActive = selectedFile === file.path;
+              const fileName = file.path.split('/').pop() ?? file.path;
+              const dirPath = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
+
+              return (
+                <button
+                  key={file.path}
+                  type="button"
+                  onClick={() => void selectFile(file.path)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    width: '100%',
+                    paddingTop: 10,
+                    paddingRight: 12,
+                    paddingBottom: 10,
+                    paddingLeft: 14,
+                    border: 'none',
+                    borderLeft: isActive ? '2px solid #2563eb' : '2px solid transparent',
+                    background: isActive ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    transition: 'all 100ms ease',
+                  }}
+                >
+                  <DiffStatusIcon status={file.status} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 13,
+                      fontWeight: isActive ? 600 : 400,
+                      color: '#1e293b',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}>{fileName}</div>
+                    {dirPath ? (
+                      <div style={{
+                        fontSize: 11,
+                        color: '#94a3b8',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>{dirPath}</div>
+                    ) : null}
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, flexShrink: 0, fontSize: 11, fontWeight: 600 }}>
+                    {(file.additions ?? 0) > 0 ? (
+                      <span style={{ color: '#22c55e' }}>+{file.additions}</span>
+                    ) : null}
+                    {(file.deletions ?? 0) > 0 ? (
+                      <span style={{ color: '#ef4444' }}>-{file.deletions}</span>
+                    ) : null}
+                  </div>
+                  <ChevronRight size={12} strokeWidth={2} style={{ color: '#cbd5e1', flexShrink: 0 }} />
+                </button>
+              );
+            })
+          )}
+        </div>
+
+        {/* Diff preview */}
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {!selectedFile ? (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              fontSize: 14,
+              color: '#94a3b8',
+            }}>
+              Select a file to see the diff
+            </div>
+          ) : detailLoading ? (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              fontSize: 13,
+              color: '#9ca3af',
+            }}>
+              Loading diff…
+            </div>
+          ) : fileDetail ? (
+            <div>
+              <div style={{
+                paddingTop: 12,
+                paddingRight: 16,
+                paddingBottom: 12,
+                paddingLeft: 16,
+                borderBottom: '1px solid rgba(0,0,0,0.06)',
+                background: 'rgba(255,255,255,0.3)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+              }}>
+                <DiffStatusIcon status={fileDetail.status} />
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{fileDetail.path}</span>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, fontSize: 11, fontWeight: 600 }}>
+                  <span style={{ color: '#22c55e' }}>+{fileDetail.additions ?? 0}</span>
+                  <span style={{ color: '#ef4444' }}>-{fileDetail.deletions ?? 0}</span>
+                </div>
+              </div>
+              {fileDetail.commitSummary ? (
+                <div style={{
+                  paddingTop: 8,
+                  paddingRight: 16,
+                  paddingBottom: 8,
+                  paddingLeft: 16,
+                  borderBottom: '1px solid rgba(0,0,0,0.04)',
+                  fontSize: 12,
+                  color: '#64748b',
+                }}>
+                  {fileDetail.commitSummary} — {fileDetail.commitAuthor} ({fileDetail.commitAge})
+                </div>
+              ) : null}
+              <pre style={{
+                margin: 0,
+                paddingTop: 14,
+                paddingRight: 16,
+                paddingBottom: 14,
+                paddingLeft: 16,
+                fontSize: '0.8rem',
+                lineHeight: 1.65,
+                fontFamily: '"SF Mono", "Menlo", "Monaco", ui-monospace, monospace',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                color: '#1e293b',
+              }}>
+                {renderDiffLines(fileDetail.preview)}
+              </pre>
+            </div>
+          ) : (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              fontSize: 13,
+              color: '#ef4444',
+            }}>
+              Could not load file diff
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
