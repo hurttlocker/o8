@@ -79,6 +79,15 @@ export default function DashboardPage() {
     });
   }, [openCanvasTab]);
 
+  const handleOpenGitLog = useCallback((workspace?: string) => {
+    openCanvasTab({
+      id: `git-log:${workspace ?? 'default'}`,
+      kind: 'git-log',
+      label: 'Git Log',
+      resourceId: workspace ?? '',
+    });
+  }, [openCanvasTab]);
+
   const handleOpenCI = useCallback((repo: string) => {
     openCanvasTab({
       id: `ci:${repo}`,
@@ -100,9 +109,12 @@ export default function DashboardPage() {
   }, [openCanvasTab]);
 
   const handleSelectFile = useCallback((filePath: string, workspace?: string) => {
+    const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+    const isImage = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp'].includes(ext);
+
     openCanvasTab({
-      id: `file:${filePath}${workspace ? `:${workspace}` : ''}`,
-      kind: 'file',
+      id: `${isImage ? 'image' : 'file'}:${filePath}${workspace ? `:${workspace}` : ''}`,
+      kind: isImage ? 'image' : 'file',
       label: filePath.split('/').pop() ?? filePath,
       resourceId: filePath,
       meta: workspace ? { workspace } : undefined,
@@ -200,6 +212,7 @@ export default function DashboardPage() {
           onSelectFile={handleSelectFile}
           onOpenCI={handleOpenCI}
           onCreateIssue={handleCreateIssue}
+          onOpenGitLog={handleOpenGitLog}
         />
       </div>
 
@@ -330,6 +343,7 @@ export default function DashboardPage() {
               activeTabId={activeCanvasTabId}
               onSelectTab={setActiveCanvasTabId}
               onCloseTab={closeCanvasTab}
+              onSelectCommit={handleSelectCommit}
             />
           </div>
         )}
