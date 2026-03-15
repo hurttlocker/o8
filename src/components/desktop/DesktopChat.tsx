@@ -35,6 +35,7 @@ import type {
 } from '@/lib/mobile/types';
 import type { ProjectGroup } from '@/components/mobile/types';
 import { buildProjectGroups } from '@/components/mobile/utils';
+import { MessageActions } from './MessageActions';
 
 // ── Types ──
 
@@ -153,6 +154,9 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
             ) : null
           )}
         </div>
+      ) : null}
+      {entry.role === 'assistant' && hasText ? (
+        <MessageActions messageId={entry.id} messageText={entry.text} />
       ) : null}
     </article>
   );
