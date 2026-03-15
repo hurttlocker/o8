@@ -6,6 +6,8 @@
   "main": "electron/main.cjs",
   "scripts": {
     "dev": "next dev -p 3001",
+    "dev:ws": "tsx src/ws-server.ts",
+    "dev:all": "npm run dev & npm run dev:ws &",
     "build": "next build",
     "start": "next start -p 3001",
     "lint": "eslint .",
@@ -22,17 +24,20 @@
     "lucide-react": "^0.577.0",
     "next": "^16.1.6",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@types/node": "22.13.10",
     "@types/react": "19.0.10",
     "@types/react-dom": "19.0.4",
+    "@types/ws": "^8.18.1",
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "electron": "^37.6.0",
     "eslint": "9.22.0",
     "eslint-config-next": "^16.1.6",
+    "tsx": "^4.21.0",
     "typescript": "5.8.2",
     "wait-on": "^8.0.5"
   }
