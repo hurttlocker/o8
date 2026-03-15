@@ -13,9 +13,23 @@ export const dynamic = 'force-dynamic';
 import { NextResponse, type NextRequest } from 'next/server';
 import { getWorktreeManager, getActiveWorktreeSummary } from '@/lib/worktree/launch';
 
+const API_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
+
+function checkAuth(req: NextRequest): NextResponse | null {
+  const auth = req.headers.get('authorization');
+  const token = auth?.startsWith('Bearer ') ? auth.slice(7) : req.nextUrl.searchParams.get('token');
+  if (token !== API_TOKEN) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  return null;
+}
+
 // ── GET: List worktrees + conflicts ──
 
 export async function GET(req: NextRequest) {
+  const denied = checkAuth(req);
+  if (denied) return denied;
+
   const repo = req.nextUrl.searchParams.get('repo');
   if (!repo) {
     return NextResponse.json({ error: 'repo parameter required' }, { status: 400 });
@@ -43,6 +57,9 @@ interface CreateBody {
 }
 
 export async function POST(req: NextRequest) {
+  const denied = checkAuth(req);
+  if (denied) return denied;
+
   let body: CreateBody;
   try {
     body = (await req.json()) as CreateBody;
@@ -87,6 +104,9 @@ interface DeleteBody {
 }
 
 export async function DELETE(req: NextRequest) {
+  const denied = checkAuth(req);
+  if (denied) return denied;
+
   let body: DeleteBody;
   try {
     body = (await req.json()) as DeleteBody;

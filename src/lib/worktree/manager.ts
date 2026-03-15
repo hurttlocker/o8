@@ -5,8 +5,7 @@
  * - Claude Code: passes through --worktree flag (Claude handles creation natively)
  * - Codex / others: creates and manages worktrees via git commands
  *
- * ~300 lines. Not a git reimplementation — thin orchestration on top of
- * git worktree + agent-specific behavior.
+ * Thin orchestration on top of git worktree + agent-specific behavior.
  *
  * Designed to generalize to IsolationProvider (containers, VMs) in 2028.
  *
@@ -19,7 +18,6 @@ import { access, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promi
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
-  AgentType,
   CleanupOptions,
   ConflictReport,
   CreateWorktreeOptions,
@@ -67,10 +65,18 @@ export class WorktreeManager {
    * Codex/others: git worktree add + optional setup
    */
   async create(opts: CreateWorktreeOptions): Promise<WorktreeInfo> {
-    const taskId = sanitizeTaskName(opts.taskName);
+    let taskId = sanitizeTaskName(opts.taskName);
     const baseBranch = opts.baseBranch ?? await this.getCurrentBranch();
-    const branchName = `worktree/${opts.agentType}/${taskId}`;
     const now = Date.now();
+
+    // Avoid ID collisions (e.g. "fix auth" and "fix-auth" both sanitize to "fix-auth")
+    const existingMeta = await this.loadAllMeta();
+    if (existingMeta[taskId]) {
+      const suffix = Math.random().toString(36).slice(2, 6);
+      taskId = `${taskId}-${suffix}`;
+    }
+
+    const branchName = `worktree/${opts.agentType}/${taskId}`;
 
     if (opts.agentType === 'claude-code') {
       // Claude manages its own worktree — we just track it
@@ -96,6 +102,7 @@ export class WorktreeManager {
         createdAt: now,
         claudeManaged: true,
         taskName: opts.taskName,
+        status: 'creating',
       });
 
       return info;
@@ -128,7 +135,7 @@ export class WorktreeManager {
       claudeManaged: false,
     };
 
-    // Save metadata
+    // Save metadata with 'creating' status before setup
     await this.saveMeta(taskId, {
       id: taskId,
       agentType: opts.agentType,
@@ -136,15 +143,18 @@ export class WorktreeManager {
       createdAt: now,
       claudeManaged: false,
       taskName: opts.taskName,
+      status: 'creating',
     });
 
     // Run project setup unless skipped
     if (!opts.skipSetup) {
       info.status = 'setup';
+      await this.updateMetaStatus(taskId, 'setup');
       await this.runSetup(worktreePath);
     }
 
     info.status = 'ready';
+    await this.updateMetaStatus(taskId, 'ready');
     return info;
   }
 
@@ -175,6 +185,7 @@ export class WorktreeManager {
       const dirtyFiles = exists ? await this.getDirtyFiles(worktreePath, entry.baseBranch) : [];
       const lastActivity = exists ? await this.getLastModified(worktreePath) : entry.createdAt;
       const status = this.inferStatus(lastActivity, dirtyFiles, entry);
+      const diskUsageBytes = exists ? await this.getDiskUsage(worktreePath) : 0;
 
       results.push({
         id,
@@ -186,6 +197,7 @@ export class WorktreeManager {
         status,
         createdAt: entry.createdAt,
         lastActivityAt: lastActivity,
+        diskUsageBytes,
         dirtyFiles,
         claudeManaged: entry.claudeManaged,
       });
@@ -454,6 +466,16 @@ export class WorktreeManager {
     }
   }
 
+  private async getDiskUsage(dirPath: string): Promise<number> {
+    try {
+      const { stdout } = await execFileAsync('du', ['-sk', dirPath], { timeout: 5000 });
+      const kb = parseInt(stdout.split('\t')[0] ?? '0', 10);
+      return kb * 1024;
+    } catch {
+      return 0;
+    }
+  }
+
   private async getLastModified(dirPath: string): Promise<number> {
     try {
       const s = await stat(dirPath);
@@ -463,7 +485,10 @@ export class WorktreeManager {
     }
   }
 
-  private inferStatus(lastActivity: number, dirtyFiles: string[], _entry: WorktreeMetaEntry): WorktreeStatus {
+  private inferStatus(lastActivity: number, dirtyFiles: string[], entry: WorktreeMetaEntry): WorktreeStatus {
+    // Preserve explicit lifecycle states tracked in metadata
+    if (entry.status === 'creating' || entry.status === 'setup') return entry.status;
+
     const ageMs = Date.now() - lastActivity;
     if (ageMs > STALE_THRESHOLD_MS) return 'stale';
     if (dirtyFiles.length > 0 && ageMs < 5 * 60_000) return 'active';
@@ -515,5 +540,14 @@ export class WorktreeManager {
     const existing = await this.loadAllMeta();
     delete existing[id];
     await this.writeMetaStore({ version: 1, worktrees: existing });
+  }
+
+  private async updateMetaStatus(id: string, status: WorktreeStatus): Promise<void> {
+    const existing = await this.loadAllMeta();
+    const entry = existing[id];
+    if (entry) {
+      entry.status = status;
+      await this.writeMetaStore({ version: 1, worktrees: existing });
+    }
   }
 }
