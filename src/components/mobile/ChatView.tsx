@@ -7,6 +7,7 @@ import { ChevronRight, FileDiff, FileText, Image as ImageIcon } from 'lucide-rea
 import type { MobileTranscriptMedia } from '@/lib/mobile/types';
 import type { ChatViewProps } from './types';
 import { MediaLightbox } from './MediaLightbox';
+import { MessageActions } from './MessageActions';
 import {
   formatStreamingPreview,
   isImageMedia,
@@ -101,6 +102,9 @@ const MessageBubble = memo(function MessageBubble({
           </div>
           <ChevronRight size={16} strokeWidth={1.6} className="remodex-inline-diff-chevron" />
         </button>
+      ) : null}
+      {hasText ? (
+        <MessageActions messageId={entry.id} messageText={entry.text} />
       ) : null}
     </article>
   );
