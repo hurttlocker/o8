@@ -1,4 +1,5 @@
 import { Fragment, createElement, type ReactNode } from 'react';
+import { CodeBlock } from './CodeBlock';
 import type { RuntimeReviewPacket } from '@/lib/fleet/types';
 import type {
   MobileInboxSnapshot,
@@ -302,6 +303,9 @@ export function renderMessageBody(text: string, keyPrefix: string) {
   let listType: 'ul' | 'ol' | null = null;
   let listItems: string[] = [];
   let tableLines: string[] = [];
+  let inCodeFence = false;
+  let codeFenceLines: string[] = [];
+  let codeFenceLang = '';
 
   const flushTable = () => {
     if (tableLines.length < 2) {
@@ -429,9 +433,88 @@ export function renderMessageBody(text: string, keyPrefix: string) {
     listItems = [];
   };
 
+  // Pre-pass: detect tool output chunks and wrap them as fenced code
+  // Pattern: "Chunk ID: XXXX Wall time: ... Output: ..." blocks
+  const processedLines: string[] = [];
+  let toolChunkLines: string[] = [];
+  let inToolChunk = false;
+
   for (const rawLine of lines) {
+    const trimmed = rawLine.trim();
+    const isChunkStart = /^Chunk ID:\s*[a-f0-9]+\s+Wall time:/i.test(trimmed);
+    const isOutputLine = /^\[?\{"type"/.test(trimmed) || /^Output:/.test(trimmed);
+
+    if (isChunkStart) {
+      // If we were already in a chunk, flush previous
+      if (inToolChunk && toolChunkLines.length > 0) {
+        processedLines.push('```tool-output');
+        processedLines.push(...toolChunkLines);
+        processedLines.push('```');
+      }
+      inToolChunk = true;
+      toolChunkLines = [rawLine];
+      continue;
+    }
+
+    if (inToolChunk) {
+      // Keep accumulating until we hit an empty line or a non-continuation line
+      if (!trimmed || (trimmed.length > 0 && !isOutputLine && !trimmed.startsWith('"') && !trimmed.startsWith('[') && !trimmed.startsWith('{') && !trimmed.includes('token count') && !trimmed.includes('exited with') && !trimmed.includes('Process') && !trimmed.includes('Output:') && !trimmed.startsWith('src/') && !trimmed.startsWith('import ') && !trimmed.startsWith('page.') && !trimmed.startsWith('await ') && !/^[A-Z].*:/.test(trimmed.split(' ')[0] ?? ''))) {
+        processedLines.push('```tool-output');
+        processedLines.push(...toolChunkLines);
+        processedLines.push('```');
+        inToolChunk = false;
+        toolChunkLines = [];
+        if (trimmed) processedLines.push(rawLine);
+      } else {
+        toolChunkLines.push(rawLine);
+      }
+      continue;
+    }
+
+    processedLines.push(rawLine);
+  }
+
+  // Flush any remaining tool chunk
+  if (inToolChunk && toolChunkLines.length > 0) {
+    processedLines.push('```tool-output');
+    processedLines.push(...toolChunkLines);
+    processedLines.push('```');
+  }
+
+  for (const rawLine of processedLines) {
     const line = rawLine.trimEnd();
     const trimmed = line.trim();
+
+    // Code fence handling — accumulate lines between ``` markers
+    if (trimmed.startsWith('```')) {
+      if (inCodeFence) {
+        // Closing fence — flush the code block
+        const code = codeFenceLines.join('\n');
+        const codeKey = `${keyPrefix}-code-${blocks.length}`;
+        blocks.push(createElement(CodeBlock, {
+          key: codeKey,
+          code,
+          language: codeFenceLang || undefined,
+        }));
+        inCodeFence = false;
+        codeFenceLines = [];
+        codeFenceLang = '';
+        continue;
+      }
+      // Opening fence
+      flushParagraph();
+      flushList();
+      if (tableLines.length > 0) flushTable();
+      inCodeFence = true;
+      codeFenceLang = trimmed.slice(3).trim();
+      continue;
+    }
+
+    if (inCodeFence) {
+      codeFenceLines.push(rawLine);
+      continue;
+    }
+
     const headingMatch = trimmed.match(/^(#{1,6})\s+(.*)$/);
     const orderedMatch = trimmed.match(/^\d+\.\s+(.*)$/);
     const unorderedMatch = trimmed.match(/^[-*]\s+(.*)$/);
