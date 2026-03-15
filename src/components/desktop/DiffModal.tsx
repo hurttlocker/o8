@@ -1,0 +1,408 @@
+'use client';
+
+/**
+ * DiffModal — glass modal showing workspace diff review.
+ *
+ * Shows changed files list + inline diff preview.
+ * Glass frost aesthetic matching mermaid modal.
+ */
+
+import { memo, useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { ChevronRight, FileText, FilePlus, FileMinus, FileEdit, X } from 'lucide-react';
+
+interface ChangedFile {
+  path: string;
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked';
+  additions: number | null;
+  deletions: number | null;
+}
+
+interface FileDetail {
+  path: string;
+  status: string;
+  additions: number | null;
+  deletions: number | null;
+  preview: string;
+  note?: string;
+  commitSummary?: string;
+  commitAuthor?: string;
+  commitAge?: string;
+}
+
+interface DiffModalProps {
+  onClose: () => void;
+}
+
+const statusColors: Record<string, string> = {
+  added: '#22c55e',
+  modified: '#f59e0b',
+  deleted: '#ef4444',
+  renamed: '#8b5cf6',
+  untracked: '#6b7280',
+};
+
+const StatusIcon = ({ status }: { status: string }) => {
+  const color = statusColors[status] ?? '#6b7280';
+  const size = 15;
+  switch (status) {
+    case 'added': return <FilePlus size={size} strokeWidth={1.8} style={{ color, flexShrink: 0 }} />;
+    case 'deleted': return <FileMinus size={size} strokeWidth={1.8} style={{ color, flexShrink: 0 }} />;
+    case 'modified': return <FileEdit size={size} strokeWidth={1.8} style={{ color, flexShrink: 0 }} />;
+    default: return <FileText size={size} strokeWidth={1.8} style={{ color, flexShrink: 0 }} />;
+  }
+};
+
+export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
+  const [files, setFiles] = useState<ChangedFile[]>([]);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [fileDetail, setFileDetail] = useState<FileDetail | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  // Escape to close
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [onClose]);
+
+  // Load workspace snapshot
+  useEffect(() => {
+    async function load() {
+      try {
+        const res = await fetch('/api/review/workspace');
+        if (!res.ok) return;
+        const data = await res.json();
+        setFiles(data.changedFiles ?? []);
+      } catch { /* silent */ }
+      finally { setLoading(false); }
+    }
+    void load();
+  }, []);
+
+  // Load file detail
+  const selectFile = useCallback(async (path: string) => {
+    setSelectedFile(path);
+    setDetailLoading(true);
+    setFileDetail(null);
+    try {
+      const res = await fetch(`/api/review/file?path=${encodeURIComponent(path)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setFileDetail(data.file ?? null);
+    } catch { /* silent */ }
+    finally { setDetailLoading(false); }
+  }, []);
+
+  const totalAdditions = files.reduce((sum, f) => sum + (f.additions ?? 0), 0);
+  const totalDeletions = files.reduce((sum, f) => sum + (f.deletions ?? 0), 0);
+
+  return createPortal(
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 99999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backdropFilter: 'blur(40px) saturate(200%) brightness(1.05)',
+        WebkitBackdropFilter: 'blur(40px) saturate(200%) brightness(1.05)',
+        backgroundColor: 'rgba(255, 255, 255, 0.15)',
+        animation: 'fadeIn 200ms ease',
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          position: 'relative',
+          width: '92vw',
+          height: '88vh',
+          maxWidth: 1400,
+          borderRadius: 20,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'linear-gradient(135deg, rgba(255,255,255,0.45) 0%, rgba(240,247,255,0.25) 100%)',
+          border: '1px solid rgba(255,255,255,0.35)',
+          boxShadow: '0 32px 80px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.6)',
+          backdropFilter: 'blur(60px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(60px) saturate(180%)',
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingTop: 14,
+          paddingRight: 16,
+          paddingBottom: 14,
+          paddingLeft: 20,
+          borderBottom: '1px solid rgba(0,0,0,0.06)',
+          background: 'rgba(255,255,255,0.2)',
+          flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: '#0f172a',
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}>
+              Workspace Diff
+            </span>
+            <span style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: '#22c55e',
+            }}>+{totalAdditions}</span>
+            <span style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: '#ef4444',
+            }}>-{totalDeletions}</span>
+            <span style={{
+              fontSize: 12,
+              color: '#64748b',
+            }}>{files.length} file{files.length !== 1 ? 's' : ''}</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={onClose}
+            title="Close (Esc)"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 30,
+              height: 30,
+              borderRadius: 8,
+              border: '1px solid rgba(0,0,0,0.08)',
+              background: 'rgba(255,255,255,0.7)',
+              color: '#ef4444',
+              cursor: 'pointer',
+              paddingTop: 0,
+              paddingRight: 0,
+              paddingBottom: 0,
+              paddingLeft: 0,
+            }}
+          >
+            <X size={15} strokeWidth={2} />
+          </button>
+        </div>
+
+        {/* Body: file list + diff preview */}
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          overflow: 'hidden',
+        }}>
+          {/* File list sidebar */}
+          <div style={{
+            width: 280,
+            flexShrink: 0,
+            borderRight: '1px solid rgba(0,0,0,0.06)',
+            overflowY: 'auto',
+            background: 'rgba(255,255,255,0.1)',
+          }}>
+            {loading ? (
+              <div style={{ padding: 20, fontSize: 13, color: '#9ca3af' }}>Loading…</div>
+            ) : files.length === 0 ? (
+              <div style={{ padding: 20, fontSize: 13, color: '#9ca3af' }}>Working tree clean</div>
+            ) : (
+              files.map((file) => {
+                const isActive = selectedFile === file.path;
+                const fileName = file.path.split('/').pop() ?? file.path;
+                const dirPath = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
+
+                return (
+                  <button
+                    key={file.path}
+                    type="button"
+                    onClick={() => void selectFile(file.path)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      width: '100%',
+                      paddingTop: 10,
+                      paddingRight: 12,
+                      paddingBottom: 10,
+                      paddingLeft: 14,
+                      border: 'none',
+                      borderLeft: isActive ? '2px solid #2563eb' : '2px solid transparent',
+                      background: isActive ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      transition: 'all 100ms ease',
+                    }}
+                  >
+                    <StatusIcon status={file.status} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 13,
+                        fontWeight: isActive ? 600 : 400,
+                        color: '#1e293b',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>{fileName}</div>
+                      {dirPath ? (
+                        <div style={{
+                          fontSize: 11,
+                          color: '#94a3b8',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>{dirPath}</div>
+                      ) : null}
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, flexShrink: 0, fontSize: 11, fontWeight: 600 }}>
+                      {(file.additions ?? 0) > 0 ? (
+                        <span style={{ color: '#22c55e' }}>+{file.additions}</span>
+                      ) : null}
+                      {(file.deletions ?? 0) > 0 ? (
+                        <span style={{ color: '#ef4444' }}>-{file.deletions}</span>
+                      ) : null}
+                    </div>
+                    <ChevronRight size={12} strokeWidth={2} style={{ color: '#cbd5e1', flexShrink: 0 }} />
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          {/* Diff preview */}
+          <div style={{
+            flex: 1,
+            overflowY: 'auto',
+            background: 'rgba(255,255,255,0.05)',
+          }}>
+            {!selectedFile ? (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                fontSize: 14,
+                color: '#94a3b8',
+              }}>
+                Select a file to see the diff
+              </div>
+            ) : detailLoading ? (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                fontSize: 13,
+                color: '#9ca3af',
+              }}>
+                Loading diff…
+              </div>
+            ) : fileDetail ? (
+              <div>
+                {/* File header */}
+                <div style={{
+                  paddingTop: 12,
+                  paddingRight: 16,
+                  paddingBottom: 12,
+                  paddingLeft: 16,
+                  borderBottom: '1px solid rgba(0,0,0,0.06)',
+                  background: 'rgba(255,255,255,0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                }}>
+                  <StatusIcon status={fileDetail.status} />
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{fileDetail.path}</span>
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, fontSize: 11, fontWeight: 600 }}>
+                    <span style={{ color: '#22c55e' }}>+{fileDetail.additions ?? 0}</span>
+                    <span style={{ color: '#ef4444' }}>-{fileDetail.deletions ?? 0}</span>
+                  </div>
+                </div>
+                {fileDetail.commitSummary ? (
+                  <div style={{
+                    paddingTop: 8,
+                    paddingRight: 16,
+                    paddingBottom: 8,
+                    paddingLeft: 16,
+                    borderBottom: '1px solid rgba(0,0,0,0.04)',
+                    fontSize: 12,
+                    color: '#64748b',
+                  }}>
+                    {fileDetail.commitSummary} — {fileDetail.commitAuthor} ({fileDetail.commitAge})
+                  </div>
+                ) : null}
+                {/* Diff content */}
+                <pre style={{
+                  margin: 0,
+                  paddingTop: 14,
+                  paddingRight: 16,
+                  paddingBottom: 14,
+                  paddingLeft: 16,
+                  fontSize: '0.8rem',
+                  lineHeight: 1.65,
+                  fontFamily: '"SF Mono", "Menlo", "Monaco", ui-monospace, monospace',
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  color: '#1e293b',
+                }}>
+                  {renderDiffLines(fileDetail.preview)}
+                </pre>
+              </div>
+            ) : (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                fontSize: 13,
+                color: '#ef4444',
+              }}>
+                Could not load file diff
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+});
+
+/** Render diff lines with +/- coloring */
+function renderDiffLines(text: string) {
+  return text.split('\n').map((line, i) => {
+    let color = '#1e293b';
+    let bg = 'transparent';
+
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      color = '#166534';
+      bg = 'rgba(34, 197, 94, 0.08)';
+    } else if (line.startsWith('-') && !line.startsWith('---')) {
+      color = '#991b1b';
+      bg = 'rgba(239, 68, 68, 0.08)';
+    } else if (line.startsWith('@@')) {
+      color = '#6366f1';
+      bg = 'rgba(99, 102, 241, 0.06)';
+    } else if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
+      color = '#64748b';
+    }
+
+    return (
+      <div key={i} style={{ color, background: bg, paddingTop: 1, paddingBottom: 1 }}>
+        {line || '\u00A0'}
+      </div>
+    );
+  });
+}

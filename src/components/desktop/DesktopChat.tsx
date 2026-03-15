@@ -36,6 +36,7 @@ import type {
 import type { ProjectGroup } from '@/components/mobile/types';
 import { buildProjectGroups } from '@/components/mobile/utils';
 import { CodeBlock } from './CodeBlock';
+import { DiffModal } from './DiffModal';
 import { MessageActions } from './MessageActions';
 import { ttsEngine } from '@/lib/tts/engine';
 
@@ -413,6 +414,8 @@ export function DesktopChat() {
   const [transcript, setTranscript] = useState<MobileTranscriptEntry[]>([]);
   const [draft, setDraft] = useState('');
   const [composeHeight, setComposeHeight] = useState(60);
+  const [diffOpen, setDiffOpen] = useState(false);
+  const [diffStats, setDiffStats] = useState({ additions: 0, deletions: 0, files: 0 });
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -536,6 +539,26 @@ export function DesktopChat() {
     } catch { /* silent */ }
     finally { setSending(false); }
   }, [draft, selectedKey, sending, fetchTranscript, scrollToBottom]);
+
+  // ── Diff stats (poll every 30s) ──
+  useEffect(() => {
+    async function fetchDiffStats() {
+      try {
+        const res = await fetch('/api/review/workspace');
+        if (!res.ok) return;
+        const data = await res.json();
+        const files = data.changedFiles ?? [];
+        setDiffStats({
+          additions: files.reduce((s: number, f: { additions?: number }) => s + (f.additions ?? 0), 0),
+          deletions: files.reduce((s: number, f: { deletions?: number }) => s + (f.deletions ?? 0), 0),
+          files: files.length,
+        });
+      } catch { /* silent */ }
+    }
+    void fetchDiffStats();
+    const id = setInterval(fetchDiffStats, 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   // ── Enhance draft ──
   const enhance = useCallback(async () => {
@@ -918,26 +941,30 @@ export function DesktopChat() {
         {/* Diff pill (right side) */}
         <button
           type="button"
-          disabled
+          onClick={() => setDiffOpen(true)}
           style={{
             flexShrink: 0,
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
-            padding: '6px 12px',
+            paddingTop: 6,
+            paddingRight: 12,
+            paddingBottom: 6,
+            paddingLeft: 12,
             borderRadius: 999,
-            border: '1px solid rgba(0,0,0,0.06)',
-            background: 'rgba(0,0,0,0.03)',
+            border: diffStats.files > 0 ? '1px solid rgba(37, 99, 235, 0.12)' : '1px solid rgba(0,0,0,0.06)',
+            background: diffStats.files > 0 ? 'rgba(37, 99, 235, 0.04)' : 'rgba(0,0,0,0.03)',
             color: '#8e8e93',
             fontSize: 12,
             fontWeight: 500,
-            cursor: 'default',
+            cursor: 'pointer',
+            transition: 'all 150ms ease',
           }}
           aria-label="Open diff sheet"
         >
-          <span style={{ color: '#22c55e', fontWeight: 600 }}>+0</span>
-          <span style={{ color: '#ef4444', fontWeight: 600 }}>-0</span>
-          <span style={{ color: '#8e8e93' }}>0 files</span>
+          <span style={{ color: '#22c55e', fontWeight: 600 }}>+{diffStats.additions}</span>
+          <span style={{ color: '#ef4444', fontWeight: 600 }}>-{diffStats.deletions}</span>
+          <span style={{ color: '#8e8e93' }}>{diffStats.files} file{diffStats.files !== 1 ? 's' : ''}</span>
           <SlidersHorizontal size={13} strokeWidth={2} />
         </button>
       </header>
@@ -1179,6 +1206,7 @@ export function DesktopChat() {
           </span>
         </div>
       </div>
+      {diffOpen ? <DiffModal onClose={() => setDiffOpen(false)} /> : null}
     </div>
   );
 }
