@@ -197,13 +197,18 @@ function renderMarkdown(text: string): React.ReactNode[] {
     }
 
     if (line.startsWith('- ') || line.startsWith('* ')) {
+      const listItems: { text: string; key: number }[] = [];
+      while (i < lines.length && (lines[i].startsWith('- ') || lines[i].startsWith('* '))) {
+        listItems.push({ text: lines[i].slice(2), key: i });
+        i++;
+      }
       elements.push(
-        <div key={`li-${i}`} className="remodex-rich-list-item">
-          <span className="remodex-rich-list-bullet">•</span>
-          <span>{renderInline(line.slice(2))}</span>
-        </div>
+        <ul key={`ul-${listItems[0].key}`} className="remodex-rich-list">
+          {listItems.map(item => (
+            <li key={item.key}>{renderInline(item.text)}</li>
+          ))}
+        </ul>
       );
-      i++;
       continue;
     }
 
