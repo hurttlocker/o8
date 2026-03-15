@@ -13,7 +13,8 @@
  *   - Scroll container is the sidebar div, not the window
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import ReactDOM from 'react-dom';
 import Image from 'next/image';
 import {
   ArrowUp,
@@ -390,6 +391,41 @@ function renderMarkdownBlocks(text: string): RenderedBlock[] {
       continue;
     }
 
+    // Block-level images: ![alt](url) on its own line
+    const blockImgMatch = line.trim().match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (blockImgMatch) {
+      blocks.push({
+        rawText: blockImgMatch[1] || 'image',
+        element: <ChatImage key={`img-${i}`} alt={blockImgMatch[1]} src={blockImgMatch[2]} />,
+      });
+      i++;
+      continue;
+    }
+
+    // Bare image file paths on their own line
+    const bareImgMatch = line.trim().match(/^(\/[^\s]+\.(png|jpg|jpeg|gif|webp|svg))$/i);
+    if (bareImgMatch) {
+      blocks.push({
+        rawText: bareImgMatch[1].split('/').pop() ?? 'image',
+        element: <ChatImage key={`img-${i}`} alt={bareImgMatch[1].split('/').pop() ?? 'image'} src={bareImgMatch[1]} />,
+      });
+      i++;
+      continue;
+    }
+
+    // MEDIA: lines
+    if (line.trim().startsWith('MEDIA:')) {
+      const mediaPath = line.trim().slice(6).trim();
+      if (mediaPath) {
+        blocks.push({
+          rawText: 'image',
+          element: <ChatImage key={`media-${i}`} alt="Generated image" src={mediaPath} />,
+        });
+      }
+      i++;
+      continue;
+    }
+
     if (!line.trim()) { i++; continue; }
 
     blocks.push({
@@ -402,14 +438,113 @@ function renderMarkdownBlocks(text: string): RenderedBlock[] {
   return blocks;
 }
 
+function resolveImageSrc(src: string): string {
+  if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:')) return src;
+  return `/api/panel/serve-image?path=${encodeURIComponent(src)}`;
+}
+
+function ChatImage({ src, alt }: { src: string; alt: string }) {
+  const [lightbox, setLightbox] = React.useState(false);
+  const resolved = resolveImageSrc(src);
+  return (
+    <>
+      <img
+        src={resolved}
+        alt={alt}
+        onClick={() => setLightbox(true)}
+        style={{
+          maxWidth: '100%',
+          maxHeight: 360,
+          borderRadius: 10,
+          marginTop: 8,
+          marginBottom: 8,
+          cursor: 'zoom-in',
+          boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+          border: '1px solid rgba(0,0,0,0.06)',
+          display: 'block',
+        }}
+      />
+      {lightbox && ReactDOM.createPortal(
+        <div
+          onClick={() => setLightbox(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            cursor: 'zoom-out',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setLightbox(false)}
+            style={{
+              position: 'absolute',
+              top: 16,
+              right: 16,
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              border: 'none',
+              background: 'rgba(255,255,255,0.15)',
+              color: '#ffffff',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 100000,
+            }}
+          >
+            ✕
+          </button>
+          <img
+            src={resolved}
+            alt={alt}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: '92vw',
+              maxHeight: '90vh',
+              objectFit: 'contain',
+              borderRadius: 8,
+              boxShadow: '0 8px 40px rgba(0,0,0,0.4)',
+              cursor: 'default',
+            }}
+          />
+        </div>,
+        document.body
+      )}
+    </>
+  );
+}
+
 function renderInline(text: string): React.ReactNode {
-  const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  const parts = text.split(/(!\[[^\]]*\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g);
   return parts.map((part, i) => {
+    // Images: ![alt](url)
+    const imgMatch = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+    if (imgMatch) {
+      return <ChatImage key={i} alt={imgMatch[1]} src={imgMatch[2]} />;
+    }
     if (part.startsWith('`') && part.endsWith('`')) {
       return <code key={i} className="remodex-rich-inline-code">{part.slice(1, -1)}</code>;
     }
     if (part.startsWith('**') && part.endsWith('**')) {
       return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    // Links: [text](url)
+    const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (linkMatch) {
+      return (
+        <a key={i} href={linkMatch[2]} target="_blank" rel="noopener noreferrer"
+          style={{ color: '#2563eb', textDecoration: 'none', borderBottom: '1px solid rgba(37,99,235,0.3)' }}>
+          {linkMatch[1]}
+        </a>
+      );
     }
     return <span key={i}>{part}</span>;
   });
