@@ -27,6 +27,7 @@ import {
   FilePlus,
   FileText,
   GitCommit,
+  Globe,
   MessageSquare,
   Plus,
   Radio,
@@ -38,7 +39,7 @@ import { IssueCreator } from './IssueCreator';
 
 // ── Tab Types ──
 
-export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'git-log' | 'image' | 'welcome';
+export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'git-log' | 'image' | 'deploy' | 'welcome';
 
 export interface CanvasTab {
   id: string;
@@ -198,6 +199,7 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
     case 'new-issue': return <Plus size={size} />;
     case 'git-log': return <GitCommit size={size} />;
     case 'image': return <FileText size={size} />;
+    case 'deploy': return <Globe size={size} />;
     case 'welcome': return <BookOpen size={size} />;
   }
 }
@@ -228,6 +230,8 @@ const TabContent = memo(function TabContent({ tab, onSelectCommit }: { tab: Canv
       return <GitLogViewer workspace={tab.resourceId} onSelectCommit={onSelectCommit} />;
     case 'image':
       return <ImagePreview filePath={tab.resourceId} workspace={tab.meta?.workspace} />;
+    case 'deploy':
+      return <DeployViewer project={tab.meta?.project} />;
     case 'welcome':
       return <CanvasEmpty />;
     default:
@@ -951,6 +955,241 @@ function ImagePreview({ filePath, workspace }: { filePath: string; workspace?: s
             }}
           />
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+// ── Deploy Viewer ──
+
+interface VercelDeploy {
+  uid: string;
+  name: string;
+  url: string;
+  state: string;
+  created: number;
+  ready?: number;
+  meta?: {
+    githubCommitSha?: string;
+    githubCommitMessage?: string;
+    githubCommitRef?: string;
+    githubCommitAuthorLogin?: string;
+  };
+  target?: string;
+  inspectorUrl?: string;
+}
+
+function deployColor(state: string): string {
+  switch (state.toUpperCase()) {
+    case 'READY': return '#22c55e';
+    case 'BUILDING': case 'INITIALIZING': return '#f59e0b';
+    case 'ERROR': case 'CANCELED': return '#ef4444';
+    case 'QUEUED': return '#94a3b8';
+    default: return '#64748b';
+  }
+}
+
+function deployIcon(state: string): string {
+  switch (state.toUpperCase()) {
+    case 'READY': return '●';
+    case 'BUILDING': case 'INITIALIZING': return '◉';
+    case 'ERROR': return '✗';
+    case 'CANCELED': return '⊘';
+    case 'QUEUED': return '○';
+    default: return '○';
+  }
+}
+
+function DeployViewer({ project }: { project?: string }) {
+  const [deploys, setDeploys] = useState<VercelDeploy[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    const params = project ? `?project=${encodeURIComponent(project)}` : '';
+    fetch(`/api/panel/deployments${params}`)
+      .then(r => r.json())
+      .then(data => {
+        if (!cancelled) {
+          setDeploys(data.deployments ?? []);
+          setLoading(false);
+        }
+      })
+      .catch(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [project]);
+
+  if (loading) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading deployments…</div>;
+  }
+
+  if (deploys.length === 0) {
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#94a3b8' }}>No deployments found</div>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Header */}
+      <div style={{
+        paddingTop: 12,
+        paddingRight: 20,
+        paddingBottom: 10,
+        paddingLeft: 20,
+        borderBottom: '1px solid rgba(0,0,0,0.06)',
+        background: 'rgba(255,255,255,0.4)',
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+      }}>
+        <Globe size={16} strokeWidth={1.8} style={{ color: '#64748b' }} />
+        <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>Deployments</span>
+        {project ? (
+          <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: '"SF Mono", ui-monospace, monospace' }}>{project}</span>
+        ) : null}
+      </div>
+
+      {/* Deploy list */}
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {deploys.map((d) => {
+          const color = deployColor(d.state);
+          const icon = deployIcon(d.state);
+          const isProduction = d.target === 'production';
+          const commitMsg = d.meta?.githubCommitMessage ?? '';
+          const commitSha = d.meta?.githubCommitSha?.slice(0, 7) ?? '';
+          const branch = d.meta?.githubCommitRef ?? '';
+          const author = d.meta?.githubCommitAuthorLogin ?? '';
+          const age = formatAge(new Date(d.created).toISOString());
+
+          return (
+            <div
+              key={d.uid}
+              style={{
+                display: 'flex',
+                gap: 12,
+                paddingTop: 12,
+                paddingRight: 20,
+                paddingBottom: 12,
+                paddingLeft: 20,
+                borderBottom: '1px solid rgba(0,0,0,0.03)',
+              }}
+            >
+              {/* Status */}
+              <span style={{
+                fontSize: 16,
+                color,
+                fontWeight: 700,
+                lineHeight: 1.2,
+                flexShrink: 0,
+                marginTop: 2,
+              }}>{icon}</span>
+
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {/* URL + target */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <a
+                    href={`https://${d.url}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 500,
+                      color: '#1e293b',
+                      textDecoration: 'none',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {d.url}
+                  </a>
+                  {isProduction ? (
+                    <span style={{
+                      fontSize: 9,
+                      fontWeight: 700,
+                      paddingTop: 1,
+                      paddingRight: 5,
+                      paddingBottom: 1,
+                      paddingLeft: 5,
+                      borderRadius: 3,
+                      background: 'rgba(34,197,94,0.08)',
+                      color: '#22c55e',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                    }}>Production</span>
+                  ) : null}
+                  <span style={{
+                    fontSize: 10,
+                    paddingTop: 1,
+                    paddingRight: 5,
+                    paddingBottom: 1,
+                    paddingLeft: 5,
+                    borderRadius: 3,
+                    color,
+                    background: `${color}10`,
+                    fontWeight: 600,
+                  }}>{d.state.toLowerCase()}</span>
+                </div>
+
+                {/* Commit info */}
+                {commitMsg ? (
+                  <div style={{
+                    fontSize: 12,
+                    color: '#475569',
+                    marginTop: 4,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}>
+                    {commitMsg}
+                  </div>
+                ) : null}
+
+                {/* Meta line */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  marginTop: 4,
+                  fontSize: 11,
+                  color: '#94a3b8',
+                }}>
+                  {branch ? (
+                    <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{branch}</span>
+                  ) : null}
+                  {commitSha ? (
+                    <>
+                      <span>·</span>
+                      <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10, color: '#64748b' }}>{commitSha}</span>
+                    </>
+                  ) : null}
+                  {author ? (
+                    <>
+                      <span>·</span>
+                      <span>{author}</span>
+                    </>
+                  ) : null}
+                  <span>·</span>
+                  <span>{age}</span>
+                  {d.inspectorUrl ? (
+                    <>
+                      <span>·</span>
+                      <a
+                        href={d.inspectorUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ color: '#3b82f6', textDecoration: 'none', fontSize: 10 }}
+                      >
+                        Inspect ↗
+                      </a>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
