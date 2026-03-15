@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { DesktopChat } from '@/components/desktop/DesktopChat';
 import { Canvas, CanvasTab } from '@/components/desktop/Canvas';
@@ -8,6 +8,7 @@ import { Canvas, CanvasTab } from '@/components/desktop/Canvas';
 export default function DashboardPage() {
   const [leftWidth, setLeftWidth] = useState(300);
   const [rightWidth, setRightWidth] = useState(420);
+  const [canvasHeight, setCanvasHeight] = useState(50); // percentage of center column
   const [activeSessionKey, setActiveSessionKey] = useState<string | undefined>();
 
   // ── Canvas tab state ──
@@ -75,6 +76,28 @@ export default function DashboardPage() {
     document.addEventListener('mouseup', onUp);
   }, [leftWidth]);
 
+  // ── Canvas vertical drag handle ──
+  const centerRef = useRef<HTMLDivElement>(null);
+  const startCanvasDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = canvasHeight;
+    const onMove = (ev: MouseEvent) => {
+      if (!centerRef.current) return;
+      const rect = centerRef.current.getBoundingClientRect();
+      const totalH = rect.height;
+      const deltaY = startY - ev.clientY; // dragging up = bigger canvas
+      const deltaPct = (deltaY / totalH) * 100;
+      setCanvasHeight(Math.min(Math.max(startH + deltaPct, 20), 80));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [canvasHeight]);
+
   // ── Right drag handle ──
   const startRightDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -139,23 +162,22 @@ export default function DashboardPage() {
       </div>
 
       {/* ── Center: Workspace (top) + Canvas (bottom) ── */}
-      <div style={{
+      <div ref={centerRef} style={{
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
         position: 'relative',
       }}>
-        {/* Top half — workspace placeholder (future: editor, terminals) */}
+        {/* Top — workspace placeholder (future: editor, terminals) */}
         <div style={{
-          flex: canvasTabs.length > 0 ? '0 0 50%' : 1,
+          flex: canvasTabs.length > 0 ? `0 0 ${100 - canvasHeight}%` : 1,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
           overflow: 'hidden',
           background: 'linear-gradient(180deg, #f0f4f8 0%, #e8edf4 100%)',
-          transition: 'flex 200ms ease',
         }}>
           <div style={{ textAlign: 'center', maxWidth: 480 }}>
             <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.12, color: '#94a3b8' }}>◇</div>
@@ -179,14 +201,41 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* Bottom half — Canvas (tabs + contextual content) */}
+        {/* Vertical drag handle between workspace and canvas */}
         {canvasTabs.length > 0 && (
-          <Canvas
-            tabs={canvasTabs}
-            activeTabId={activeCanvasTabId}
-            onSelectTab={setActiveCanvasTabId}
-            onCloseTab={closeCanvasTab}
-          />
+          <div
+            onMouseDown={startCanvasDrag}
+            style={{
+              height: 6,
+              cursor: 'row-resize',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              zIndex: 10,
+              background: 'rgba(0,0,0,0.02)',
+            }}
+          >
+            <div style={{
+              width: 40,
+              height: 3,
+              borderRadius: 2,
+              backgroundColor: 'rgba(0,0,0,0.08)',
+              transition: 'background-color 150ms',
+            }} />
+          </div>
+        )}
+
+        {/* Bottom — Canvas (tabs + contextual content) */}
+        {canvasTabs.length > 0 && (
+          <div style={{ flex: `0 0 ${canvasHeight}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <Canvas
+              tabs={canvasTabs}
+              activeTabId={activeCanvasTabId}
+              onSelectTab={setActiveCanvasTabId}
+              onCloseTab={closeCanvasTab}
+            />
+          </div>
         )}
       </div>
 
