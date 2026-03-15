@@ -4,7 +4,7 @@
  * MessageActions — inline action bar under each agent message.
  *
  * Always visible, icon-only row: ▶ Play, 📋 Copy, ↻ Retry, ··· More.
- * Desktop version — separate from mobile (per our component rule).
+ * Mobile version — separate from desktop (per our component rule).
  */
 
 import { memo, useCallback, useEffect, useState } from 'react';
@@ -29,8 +29,8 @@ const iconBtnBase: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 32,
-  height: 32,
+  width: 34,
+  height: 34,
   borderRadius: 8,
   border: '1px solid transparent',
   background: 'transparent',
@@ -38,6 +38,7 @@ const iconBtnBase: React.CSSProperties = {
   cursor: 'pointer',
   transition: 'all 150ms ease',
   padding: 0,
+  WebkitTapHighlightColor: 'transparent',
 };
 
 export const MessageActions = memo(function MessageActions({
@@ -84,7 +85,6 @@ export const MessageActions = memo(function MessageActions({
       textarea.value = messageText;
       document.body.appendChild(textarea);
       textarea.select();
-      document.execCommand('copy');
       document.body.removeChild(textarea);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
@@ -149,7 +149,7 @@ export const MessageActions = memo(function MessageActions({
         {copied ? <Check size={16} strokeWidth={2} /> : <Copy size={16} strokeWidth={1.8} />}
       </button>
 
-      {/* Retry — always show */}
+      {/* Retry */}
       <button
         type="button"
         onClick={onRetry ?? (() => {})}
