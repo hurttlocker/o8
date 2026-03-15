@@ -1,6 +1,7 @@
-import { memo, useCallback, useEffect, useRef } from 'react';
-import { ChevronDown, Menu, SlidersHorizontal } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronRight, Menu, SlidersHorizontal } from 'lucide-react';
 import type { TopBarProps } from './types';
+import { buildProjectGroups } from './utils';
 
 export const TopBar = memo(function TopBar({
   snapshot,
@@ -21,6 +22,17 @@ export const TopBar = memo(function TopBar({
   onSessionFocus,
 }: TopBarProps) {
   const pickerRef = useRef<HTMLDivElement>(null);
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
+
+  // Reset expanded group when picker closes
+  useEffect(() => {
+    if (!squadPickerOpen) setExpandedGroup(null);
+  }, [squadPickerOpen]);
+
+  const projectGroups = useMemo(
+    () => buildProjectGroups(snapshot, selectedSession),
+    [snapshot, selectedSession],
+  );
 
   // Close picker on outside tap
   const handleOutsideTap = useCallback((e: MouseEvent | TouchEvent) => {
@@ -151,7 +163,7 @@ export const TopBar = memo(function TopBar({
           />
         </button>
 
-        {/* Squad picker dropdown */}
+        {/* Squad picker dropdown — grouped by project */}
         <div
           style={{
             position: 'absolute',
@@ -174,87 +186,186 @@ export const TopBar = memo(function TopBar({
             transition: 'opacity 220ms cubic-bezier(0.32, 0.72, 0, 1), transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
           }}
         >
-          {snapshot.sessions.map((session) => {
-            const isActive = session.id === selectedSession?.id;
-            const isRunning = session.status === 'running' || session.status === 'reviewing';
-            const sessionPercent = Math.round(session.context?.usedPercent ?? 0);
-            const dotColor = isRunning ? '#34c759' : sessionPercent >= 75 ? '#ff9f0a' : '#8e8e93';
-            const name = session.name ?? session.sessionKey ?? session.id;
-            const subtitle = session.currentTask
-              ?? session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '')
-              ?? session.sessionKey
-              ?? '';
+          {projectGroups.map((group) => {
+            const isExpanded = expandedGroup === group.workspace;
+            const isSingle = group.sessions.length === 1;
+            const containsSelected = group.sessions.some((s) => s.id === selectedSession?.id);
+            const dotColor = group.hasRunning
+              ? '#34c759'
+              : group.bestContextPct >= 75
+                ? '#ff9f0a'
+                : '#8e8e93';
 
             return (
-              <button
-                key={session.id}
-                type="button"
-                onClick={() => {
-                  onSessionFocus(session.id);
-                  onToggleSquadPicker();
-                }}
-                data-session-id={session.id}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  width: '100%',
-                  padding: '10px 12px',
-                  border: 'none',
-                  borderRadius: '10px',
-                  background: isActive ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'background 120ms ease',
-                  WebkitTapHighlightColor: 'transparent',
-                  minHeight: '44px',
-                }}
-              >
-                <span style={{
-                  width: '8px',
-                  height: '8px',
-                  borderRadius: '50%',
-                  backgroundColor: dotColor,
-                  flexShrink: 0,
-                  boxShadow: isRunning ? `0 0 6px ${dotColor}` : 'none',
-                }} />
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{
-                    fontSize: '14px',
-                    fontWeight: isActive ? 600 : 500,
-                    color: isActive ? '#2563eb' : '#111827',
-                    lineHeight: 1.3,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}>
-                    {name}
-                  </div>
-                  {subtitle ? (
+              <div key={group.workspace}>
+                {/* Group header */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isSingle) {
+                      onSessionFocus(group.sessions[0].id);
+                      onToggleSquadPicker();
+                    } else {
+                      setExpandedGroup(isExpanded ? null : group.workspace);
+                    }
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    width: '100%',
+                    padding: '10px 12px',
+                    border: 'none',
+                    borderRadius: '10px',
+                    background: containsSelected && !isExpanded
+                      ? 'rgba(37, 99, 235, 0.08)'
+                      : 'transparent',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'background 120ms ease',
+                    WebkitTapHighlightColor: 'transparent',
+                    minHeight: '44px',
+                  }}
+                >
+                  <span style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    backgroundColor: dotColor,
+                    flexShrink: 0,
+                    boxShadow: group.hasRunning ? `0 0 6px ${dotColor}` : 'none',
+                  }} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{
+                      fontSize: '14px',
+                      fontWeight: containsSelected ? 600 : 500,
+                      color: containsSelected ? '#2563eb' : '#111827',
+                      lineHeight: 1.3,
+                    }}>
+                      {group.projectName}
+                    </div>
                     <div style={{
                       fontSize: '12px',
                       color: '#8e8e93',
                       lineHeight: 1.3,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
                       marginTop: '1px',
                     }}>
-                      {subtitle}
+                      {group.summary}
+                      {group.mostRecentTime ? ` · ${group.mostRecentTime}` : ''}
                     </div>
+                  </div>
+                  {containsSelected && isSingle ? (
+                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#2563eb', flexShrink: 0 }}>✓</span>
+                  ) : !isSingle ? (
+                    <ChevronRight
+                      size={14}
+                      strokeWidth={2.2}
+                      style={{
+                        flexShrink: 0,
+                        color: '#8e8e93',
+                        transition: 'transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+                        transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                      }}
+                    />
                   ) : null}
-                </div>
-                {isActive ? (
-                  <span style={{
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    color: '#2563eb',
-                    flexShrink: 0,
+                </button>
+
+                {/* Expanded session list */}
+                {isExpanded && !isSingle ? (
+                  <div style={{
+                    marginLeft: '18px',
+                    borderLeft: '2px solid rgba(37, 99, 235, 0.12)',
+                    paddingLeft: '8px',
+                    marginTop: '2px',
+                    marginBottom: '4px',
                   }}>
-                    ✓
-                  </span>
+                    {group.sessions.map((session) => {
+                      const isActive = session.id === selectedSession?.id;
+                      const isRunning = session.status === 'running' || session.status === 'reviewing';
+                      const sessionPercent = Math.round(session.context?.usedPercent ?? 0);
+                      const sDotColor = isRunning ? '#34c759' : sessionPercent >= 75 ? '#ff9f0a' : '#8e8e93';
+                      const name = session.name ?? session.sessionKey ?? session.id;
+                      const subtitle = session.currentTask
+                        ?? session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '')
+                        ?? session.sessionKey
+                        ?? '';
+
+                      return (
+                        <button
+                          key={session.id}
+                          type="button"
+                          onClick={() => {
+                            onSessionFocus(session.id);
+                            onToggleSquadPicker();
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                            width: '100%',
+                            padding: '8px 10px',
+                            border: 'none',
+                            borderRadius: '10px',
+                            background: isActive ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            transition: 'background 120ms ease',
+                            WebkitTapHighlightColor: 'transparent',
+                            minHeight: '44px',
+                          }}
+                        >
+                          <span style={{
+                            width: '6px',
+                            height: '6px',
+                            borderRadius: '50%',
+                            backgroundColor: sDotColor,
+                            flexShrink: 0,
+                            boxShadow: isRunning ? `0 0 5px ${sDotColor}` : 'none',
+                          }} />
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{
+                              fontSize: '13px',
+                              fontWeight: isActive ? 600 : 400,
+                              color: isActive ? '#2563eb' : '#111827',
+                              lineHeight: 1.3,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}>
+                              {name}
+                            </div>
+                            {subtitle ? (
+                              <div style={{
+                                fontSize: '11px',
+                                color: '#8e8e93',
+                                lineHeight: 1.3,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                marginTop: '1px',
+                              }}>
+                                {subtitle}
+                              </div>
+                            ) : null}
+                          </div>
+                          {isActive ? (
+                            <span style={{ fontSize: '11px', fontWeight: 600, color: '#2563eb', flexShrink: 0 }}>✓</span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
                 ) : null}
-              </button>
+
+                {/* Separator between groups */}
+                {group !== projectGroups[projectGroups.length - 1] ? (
+                  <div style={{
+                    height: '1px',
+                    background: 'rgba(15, 23, 42, 0.06)',
+                    margin: '4px 12px',
+                  }} />
+                ) : null}
+              </div>
             );
           })}
         </div>
