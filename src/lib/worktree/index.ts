@@ -14,6 +14,13 @@ export {
   getActiveWorktreeSummary,
 } from './launch';
 
+export {
+  detectFileOverlaps,
+  analyzeLineConflict,
+  recommendMergeOrder,
+  generateConflictReport,
+} from './conflicts';
+
 export type {
   WorktreeInfo,
   WorktreeStatus,
@@ -31,3 +38,10 @@ export type {
   WorktreeLaunchResult,
   WorktreeLaunchOptions,
 } from './launch';
+
+export type {
+  FileConflictDetail,
+  EnhancedConflictReport,
+  MergeOrderRecommendation,
+  LineRange,
+} from './conflicts';
