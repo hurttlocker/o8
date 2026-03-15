@@ -469,6 +469,7 @@ export class WorktreeManager {
 
   private async getDiskUsage(dirPath: string): Promise<number> {
     try {
+      // du -sk returns kilobytes; fast even for large dirs
       const { stdout } = await execFileAsync('du', ['-sk', dirPath], { timeout: 5000 });
       const kb = parseInt(stdout.split('\t')[0] ?? '0', 10);
       return kb * 1024;

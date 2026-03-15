@@ -41,6 +41,7 @@ export const WorktreeSummary = memo(function WorktreeSummary({
   const handlePrune = useCallback(async () => {
     if (!pruneConfirm) {
       setPruneConfirm(true);
+      // Auto-dismiss confirmation after 3 seconds
       setTimeout(() => setPruneConfirm(false), 3000);
       return;
     }
