@@ -8,21 +8,22 @@
  * does NOT affect mobile, and vice versa.
  *
  * Differences from mobile:
- *   - No hamburger menu
+ *   - No hamburger menu (not needed on desktop)
  *   - Fixed sidebar layout (not full-screen)
- *   - Session picker is a dropdown in the header
  *   - Scroll container is the sidebar div, not the window
  */
 
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import {
   ArrowUp,
   Brain,
   ChevronDown,
+  ChevronRight,
   Loader2,
   Plus,
   RefreshCw,
+  SlidersHorizontal,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -31,12 +32,14 @@ import type {
   MobileTranscriptEntry,
   MobileTranscriptMedia,
 } from '@/lib/mobile/types';
+import type { ProjectGroup } from '@/components/mobile/types';
+import { buildProjectGroups } from '@/components/mobile/utils';
 
 // ── Types ──
 
 type SessionSummary = MobileInboxSnapshot['sessions'][number];
 
-// ── Agent name helper ──
+// ── Helpers ──
 
 function getAgentName(s: SessionSummary): string {
   if (s.isCurrentSession) return 'Mister';
@@ -53,7 +56,11 @@ function roleLabel(role: string, agentName?: string): string {
   return agentName ?? 'Assistant';
 }
 
-// ── Media helpers ──
+function compactLine(text: string | null | undefined, fallback: string, max = 26): string {
+  const val = text ?? fallback;
+  if (val.length <= max) return val;
+  return val.slice(0, max - 1) + '…';
+}
 
 function mediaHref(path: string): string {
   return `/api/mobile/media?path=${encodeURIComponent(path)}`;
@@ -85,7 +92,6 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
     return Math.abs(curr - prev) >= 15 * 60 * 1000;
   })();
 
-  // Compaction marker
   if (entry.role === 'system' && entry.text.toLowerCase().includes('compaction')) {
     return (
       <div className="remodex-compaction-card">
@@ -151,7 +157,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName 
   );
 });
 
-// ── Markdown renderer (matches mobile renderMessageBody) ──
+// ── Markdown renderer ──
 
 function renderMarkdown(text: string): React.ReactNode[] {
   const lines = text.split('\n');
@@ -161,7 +167,6 @@ function renderMarkdown(text: string): React.ReactNode[] {
   while (i < lines.length) {
     const line = lines[i];
 
-    // Code block
     if (line.startsWith('```')) {
       const lang = line.slice(3).trim();
       const codeLines: string[] = [];
@@ -170,7 +175,7 @@ function renderMarkdown(text: string): React.ReactNode[] {
         codeLines.push(lines[i]);
         i++;
       }
-      i++; // skip closing ```
+      i++;
       elements.push(
         <pre key={`code-${i}`} className="remodex-rich-codeblock">
           {lang ? <div className="remodex-rich-codeblock-lang">{lang}</div> : null}
@@ -180,7 +185,6 @@ function renderMarkdown(text: string): React.ReactNode[] {
       continue;
     }
 
-    // Heading
     if (line.startsWith('## ')) {
       elements.push(<h3 key={`h-${i}`} className="remodex-rich-heading">{line.slice(3)}</h3>);
       i++;
@@ -192,7 +196,6 @@ function renderMarkdown(text: string): React.ReactNode[] {
       continue;
     }
 
-    // List item
     if (line.startsWith('- ') || line.startsWith('* ')) {
       elements.push(
         <div key={`li-${i}`} className="remodex-rich-list-item">
@@ -204,11 +207,10 @@ function renderMarkdown(text: string): React.ReactNode[] {
       continue;
     }
 
-    // Table row (pipe-delimited)
     if (line.includes('|') && line.trim().startsWith('|')) {
       const tableRows: string[] = [];
       while (i < lines.length && lines[i].includes('|') && lines[i].trim().startsWith('|')) {
-        if (!lines[i].match(/^\s*\|[\s-|]+\|\s*$/)) { // skip separator rows
+        if (!lines[i].match(/^\s*\|[\s-|]+\|\s*$/)) {
           tableRows.push(lines[i]);
         }
         i++;
@@ -235,13 +237,8 @@ function renderMarkdown(text: string): React.ReactNode[] {
       continue;
     }
 
-    // Empty line
-    if (!line.trim()) {
-      i++;
-      continue;
-    }
+    if (!line.trim()) { i++; continue; }
 
-    // Regular paragraph
     elements.push(<p key={`p-${i}`} className="remodex-rich-paragraph">{renderInline(line)}</p>);
     i++;
   }
@@ -249,10 +246,7 @@ function renderMarkdown(text: string): React.ReactNode[] {
   return elements;
 }
 
-// ── Inline formatting (bold, code, links) ──
-
 function renderInline(text: string): React.ReactNode {
-  // Split by inline code, bold, and plain text
   const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
   return parts.map((part, i) => {
     if (part.startsWith('`') && part.endsWith('`')) {
@@ -265,146 +259,10 @@ function renderInline(text: string): React.ReactNode {
   });
 }
 
-// ── Session Picker Dropdown ──
-
-function SessionPicker({
-  sessions,
-  selectedKey,
-  onSelect,
-  open,
-  onToggle,
-}: {
-  sessions: SessionSummary[];
-  selectedKey: string;
-  onSelect: (key: string) => void;
-  open: boolean;
-  onToggle: () => void;
-}) {
-  const selected = sessions.find(s => s.sessionKey === selectedKey);
-
-  return (
-    <div style={{ position: 'relative' }}>
-      <button
-        onClick={onToggle}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          background: 'none',
-          border: 'none',
-          color: '#111827',
-          fontSize: 15,
-          fontWeight: 600,
-          cursor: 'pointer',
-          padding: '4px 8px',
-          borderRadius: 8,
-          letterSpacing: '-0.01em',
-        }}
-      >
-        <span style={{
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          background: selected?.status === 'running' ? '#34c759' : selected?.status === 'idle' ? '#ff9f0a' : '#636366',
-          flexShrink: 0,
-        }} />
-        {selected ? getAgentName(selected) : 'Select session'}
-        <ChevronDown
-          size={14}
-          strokeWidth={2}
-          style={{
-            transform: open ? 'rotate(180deg)' : 'rotate(0)',
-            transition: 'transform 0.22s cubic-bezier(0.32, 0.72, 0, 1)',
-            color: '#8e8e93',
-          }}
-        />
-      </button>
-
-      {open ? (
-        <>
-          {/* Backdrop — clicking anywhere outside closes the picker */}
-          <div
-            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(); }}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: 9998,
-              background: 'rgba(0,0,0,0.15)',
-            }}
-          />
-          {/* Dropdown menu */}
-          <div style={{
-            position: 'absolute',
-            top: '100%',
-            left: 0,
-            marginTop: 6,
-            width: 280,
-            background: '#ffffff',
-            borderRadius: 12,
-            border: '1px solid rgba(0,0,0,0.1)',
-            boxShadow: '0 12px 40px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.08)',
-            zIndex: 9999,
-            padding: 6,
-            maxHeight: 360,
-            overflowY: 'auto',
-          }}>
-            {sessions.map(s => (
-              <button
-                key={s.sessionKey}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onSelect(s.sessionKey);
-                  onToggle();
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  width: '100%',
-                  padding: '10px 12px',
-                  background: s.sessionKey === selectedKey ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
-                  border: 'none',
-                  borderRadius: 8,
-                  color: '#111827',
-                  fontSize: 13,
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'background 0.15s ease',
-                }}
-                onMouseEnter={(e) => {
-                  if (s.sessionKey !== selectedKey) e.currentTarget.style.background = 'rgba(0,0,0,0.04)';
-                }}
-                onMouseLeave={(e) => {
-                  if (s.sessionKey !== selectedKey) e.currentTarget.style.background = 'transparent';
-                }}
-              >
-                <span style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: '50%',
-                  background: s.status === 'running' ? '#34c759' : s.status === 'idle' ? '#ff9f0a' : '#636366',
-                  flexShrink: 0,
-                }} />
-                <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {getAgentName(s)}
-                </span>
-                {s.sessionKey === selectedKey ? (
-                  <span style={{ color: '#2563eb', fontSize: 13, fontWeight: 600 }}>✓</span>
-                ) : null}
-              </button>
-            ))}
-          </div>
-        </>
-      ) : null}
-    </div>
-  );
-}
-
 // ── Main Component ──
 
 export function DesktopChat() {
+  const [snapshot, setSnapshot] = useState<MobileInboxSnapshot | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedKey, setSelectedKey] = useState<string>('');
   const [transcript, setTranscript] = useState<MobileTranscriptEntry[]>([]);
@@ -412,11 +270,58 @@ export function DesktopChat() {
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const composeRef = useRef<HTMLTextAreaElement>(null);
+  const pickerRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+
+  const selectedSession = useMemo(
+    () => sessions.find(s => s.sessionKey === selectedKey),
+    [sessions, selectedKey]
+  );
+
+  const projectGroups = useMemo(
+    () => snapshot ? buildProjectGroups(snapshot, selectedSession) : [],
+    [snapshot, selectedSession]
+  );
+
+  // ── Derived header values ──
+  const activeTitle = useMemo(() => {
+    if (!selectedSession) return 'Select session';
+    return compactLine(
+      selectedSession.isCurrentSession ? 'Q ↔ Mister live' : selectedSession.name ?? selectedSession.currentTask,
+      selectedSession.name ?? 'Current session',
+      30,
+    );
+  }, [selectedSession]);
+
+  const activeSubtitle = useMemo(() => {
+    if (!selectedSession) return '';
+    const raw = selectedSession as unknown as Record<string, unknown>;
+    const surface = raw.runtimeSurface as { repoSlug?: string; branch?: string } | undefined;
+    if (surface?.repoSlug) {
+      return compactLine(`/${surface.repoSlug}/${surface.branch ?? 'main'}`, selectedSession.sessionKey, 42);
+    }
+    return compactLine(selectedSession.sessionKey, 'session', 42);
+  }, [selectedSession]);
+
+  const headerLabel = useMemo(() => {
+    if (!selectedSession) return 'Session';
+    if (selectedSession.runtime === 'codex') return 'Codex';
+    if (selectedSession.status === 'running') return 'Live';
+    return 'Session';
+  }, [selectedSession]);
+
+  const connectionDotColor = selectedSession?.status === 'running'
+    ? '#34c759'
+    : selectedSession?.status === 'reviewing'
+      ? '#ff9f0a'
+      : '#8e8e93';
+
+  const currentAgentName = selectedSession ? getAgentName(selectedSession) : 'Mister';
 
   const scrollToBottom = useCallback((force = false) => {
     if (!scrollRef.current) return;
@@ -434,9 +339,9 @@ export function DesktopChat() {
       const res = await fetch('/api/mobile/inbox');
       if (!res.ok) return;
       const data = (await res.json()) as MobileInboxSnapshot;
+      setSnapshot(data);
       setSessions(data.sessions);
       if (!selectedKey && data.sessions.length > 0) {
-        // Default to the Telegram group session (our live chat) if available
         const telegramGroup = data.sessions.find(s => s.sessionKey.includes('telegram:group'));
         const primary = telegramGroup ?? data.sessions.find(s => s.isCurrentSession) ?? data.sessions[0];
         setSelectedKey(primary.sessionKey);
@@ -504,6 +409,12 @@ export function DesktopChat() {
     finally { setEnhancing(false); }
   }, [draft, enhancing]);
 
+  // ── Select session by id (for squad picker) ──
+  const handleSessionFocus = useCallback((sessionId: string) => {
+    const session = sessions.find(s => s.id === sessionId);
+    if (session) setSelectedKey(session.sessionKey);
+  }, [sessions]);
+
   // ── Init ──
   useEffect(() => { void fetchSessions(); }, [fetchSessions]);
 
@@ -515,14 +426,29 @@ export function DesktopChat() {
     }
   }, [selectedKey, fetchTranscript]);
 
-  // Poll for new messages
   useEffect(() => {
     if (!selectedKey) return;
     const interval = setInterval(() => void fetchTranscript(selectedKey), 5000);
     return () => clearInterval(interval);
   }, [selectedKey, fetchTranscript]);
 
-  // Scroll tracking
+  // Reset expanded group when picker closes
+  useEffect(() => {
+    if (!pickerOpen) setExpandedGroup(null);
+  }, [pickerOpen]);
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setPickerOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [pickerOpen]);
+
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
     const el = scrollRef.current;
@@ -532,8 +458,6 @@ export function DesktopChat() {
 
   useEffect(() => { scrollToBottom(); }, [transcript.length, scrollToBottom]);
 
-  const selectedSession = sessions.find(s => s.sessionKey === selectedKey);
-  const currentAgentName = selectedSession ? getAgentName(selectedSession) : 'Mister';
   const chatSendDisabled = !selectedKey || sending || !draft.trim();
 
   return (
@@ -543,93 +467,294 @@ export function DesktopChat() {
       height: '100%',
       background: '#f5f7fb',
       borderLeft: '1px solid rgba(0,0,0,0.06)',
-      /* Set CSS vars for remodex compose classes */
       ['--remodex-compose-active' as string]: '0',
       ['--remodex-dock-fade-progress' as string]: '0',
       ['--remodex-dock-motion-progress' as string]: '0',
     }}>
-      {/* ── Header (matches mobile TopBar) ── */}
-      <div style={{
-        flexShrink: 0,
-        background: 'rgba(255,255,255,0.82)',
-        backdropFilter: 'blur(20px) saturate(1.4)',
-        WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
-      }}>
-        {/* Top row: session name + status */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '14px 16px 6px',
-        }}>
-          <SessionPicker
-            sessions={sessions}
-            selectedKey={selectedKey}
-            onSelect={setSelectedKey}
-            open={pickerOpen}
-            onToggle={() => setPickerOpen(p => !p)}
-          />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            {(selectedSession as unknown as Record<string, unknown>)?.context ? (() => {
-              const ctx = (selectedSession as unknown as Record<string, unknown>).context as { usedPercent?: number } | undefined;
-              const pct = ctx?.usedPercent;
-              if (pct == null) return null;
-              return (
-                <span style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  padding: '2px 8px',
-                  borderRadius: 6,
-                  background: pct > 70 ? 'rgba(239, 68, 68, 0.1)' : 'rgba(0,0,0,0.04)',
-                  color: pct > 70 ? '#ef4444' : '#8e8e93',
-                }}>
-                  {pct}% used
+      {/* ── Header (matches mobile TopBar exactly) ── */}
+      <header
+        className="remodex-topbar"
+        data-compact="false"
+        data-context-visible="false"
+        data-visible="true"
+        data-picker-open={pickerOpen ? 'true' : 'false'}
+      >
+        {/* Title area — tappable to open squad picker */}
+        <div ref={pickerRef} style={{ minWidth: 0, flex: 1, position: 'relative' }}>
+          <button
+            type="button"
+            onClick={() => setPickerOpen(p => !p)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              width: '100%',
+              padding: 0,
+              margin: 0,
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              textAlign: 'left',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+            aria-label="Switch session"
+            aria-expanded={pickerOpen}
+          >
+            <div className="remodex-title-shell" style={{ minWidth: 0, flex: 1 }}>
+              <div className="remodex-title-stack">
+                <span className="remodex-title-kicker">
+                  <span
+                    style={{
+                      display: 'inline-block',
+                      width: '6px',
+                      height: '6px',
+                      borderRadius: '50%',
+                      backgroundColor: connectionDotColor,
+                      marginRight: '5px',
+                      verticalAlign: 'middle',
+                    }}
+                  />
+                  {headerLabel}
                 </span>
+                <h1>{activeTitle}</h1>
+                <p>{activeSubtitle}</p>
+              </div>
+            </div>
+            <ChevronDown
+              size={14}
+              strokeWidth={2.2}
+              style={{
+                flexShrink: 0,
+                color: '#8e8e93',
+                transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
+                transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+              }}
+            />
+          </button>
+
+          {/* Squad picker dropdown — grouped by project (matches mobile exactly) */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 8px)',
+              left: '-12px',
+              right: '-12px',
+              zIndex: 100,
+              borderRadius: '14px',
+              background: 'rgba(255, 255, 255, 0.96)',
+              backdropFilter: 'blur(40px) saturate(1.8)',
+              WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
+              boxShadow: '0 20px 60px rgba(15, 23, 42, 0.18), 0 1px 3px rgba(15, 23, 42, 0.08)',
+              padding: '8px',
+              maxHeight: '60vh',
+              overflowY: 'auto',
+              WebkitOverflowScrolling: 'touch',
+              opacity: pickerOpen ? 1 : 0,
+              transform: pickerOpen ? 'translateY(0) scale(1)' : 'translateY(-8px) scale(0.97)',
+              pointerEvents: pickerOpen ? 'auto' : 'none',
+              transition: 'opacity 220ms cubic-bezier(0.32, 0.72, 0, 1), transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+            }}
+          >
+            {projectGroups.map((group, gi) => {
+              const isExpanded = expandedGroup === group.workspace;
+              const isSingle = group.sessions.length === 1;
+              const containsSelected = group.sessions.some((s) => s.id === selectedSession?.id);
+              const dotColor = group.hasRunning
+                ? '#34c759'
+                : group.bestContextPct >= 75
+                  ? '#ff9f0a'
+                  : '#8e8e93';
+
+              return (
+                <div key={group.workspace}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isSingle) {
+                        handleSessionFocus(group.sessions[0].id);
+                        setPickerOpen(false);
+                      } else {
+                        setExpandedGroup(isExpanded ? null : group.workspace);
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '10px',
+                      width: '100%',
+                      padding: '10px 12px',
+                      border: 'none',
+                      borderRadius: '10px',
+                      background: containsSelected && !isExpanded
+                        ? 'rgba(37, 99, 235, 0.08)'
+                        : 'transparent',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'background 120ms ease',
+                      minHeight: '44px',
+                    }}
+                  >
+                    <span style={{
+                      width: '8px',
+                      height: '8px',
+                      borderRadius: '50%',
+                      backgroundColor: dotColor,
+                      flexShrink: 0,
+                      boxShadow: group.hasRunning ? `0 0 6px ${dotColor}` : 'none',
+                    }} />
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{
+                        fontSize: '14px',
+                        fontWeight: containsSelected ? 600 : 500,
+                        color: containsSelected ? '#2563eb' : '#111827',
+                        lineHeight: 1.3,
+                      }}>
+                        {group.projectName}
+                      </div>
+                      <div style={{
+                        fontSize: '12px',
+                        color: '#8e8e93',
+                        lineHeight: 1.3,
+                        marginTop: '1px',
+                      }}>
+                        {group.summary}
+                        {group.mostRecentTime ? ` · ${group.mostRecentTime}` : ''}
+                      </div>
+                    </div>
+                    {containsSelected && isSingle ? (
+                      <span style={{ fontSize: '11px', fontWeight: 600, color: '#2563eb', flexShrink: 0 }}>✓</span>
+                    ) : !isSingle ? (
+                      <ChevronRight
+                        size={14}
+                        strokeWidth={2.2}
+                        style={{
+                          flexShrink: 0,
+                          color: '#8e8e93',
+                          transition: 'transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+                          transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                        }}
+                      />
+                    ) : null}
+                  </button>
+
+                  {/* Expanded session list */}
+                  {isExpanded && !isSingle ? (
+                    <div style={{
+                      marginLeft: '18px',
+                      borderLeft: '2px solid rgba(37, 99, 235, 0.12)',
+                      paddingLeft: '8px',
+                      marginTop: '2px',
+                      marginBottom: '4px',
+                    }}>
+                      {group.sessions.map((session) => {
+                        const isActive = session.id === selectedSession?.id;
+                        const isRunning = session.status === 'running' || session.status === 'reviewing';
+                        const sessionPercent = Math.round(session.context?.usedPercent ?? 0);
+                        const sDotColor = isRunning ? '#34c759' : sessionPercent >= 75 ? '#ff9f0a' : '#8e8e93';
+                        const name = session.name ?? session.sessionKey ?? session.id;
+                        const subtitle = session.currentTask
+                          ?? session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '')
+                          ?? session.sessionKey
+                          ?? '';
+
+                        return (
+                          <button
+                            key={session.id}
+                            type="button"
+                            onClick={() => {
+                              handleSessionFocus(session.id);
+                              setPickerOpen(false);
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '10px',
+                              width: '100%',
+                              padding: '8px 10px',
+                              border: 'none',
+                              borderRadius: '10px',
+                              background: isActive ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              transition: 'background 120ms ease',
+                              minHeight: '44px',
+                            }}
+                          >
+                            <span style={{
+                              width: '6px',
+                              height: '6px',
+                              borderRadius: '50%',
+                              backgroundColor: sDotColor,
+                              flexShrink: 0,
+                              boxShadow: isRunning ? `0 0 5px ${sDotColor}` : 'none',
+                            }} />
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <div style={{
+                                fontSize: '13px',
+                                fontWeight: isActive ? 600 : 400,
+                                color: isActive ? '#2563eb' : '#111827',
+                                lineHeight: 1.3,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}>
+                                {name}
+                              </div>
+                              {subtitle ? (
+                                <div style={{
+                                  fontSize: '11px',
+                                  color: '#8e8e93',
+                                  lineHeight: 1.3,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  marginTop: '1px',
+                                }}>
+                                  {subtitle}
+                                </div>
+                              ) : null}
+                            </div>
+                            {isActive ? (
+                              <span style={{ fontSize: '11px', fontWeight: 600, color: '#2563eb', flexShrink: 0 }}>✓</span>
+                            ) : null}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+
+                  {gi < projectGroups.length - 1 ? (
+                    <div style={{
+                      height: '1px',
+                      background: 'rgba(15, 23, 42, 0.06)',
+                      margin: '4px 12px',
+                    }} />
+                  ) : null}
+                </div>
               );
-            })() : null}
+            })}
           </div>
         </div>
 
-        {/* Bottom row: runtime info strip */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '4px 16px 10px',
-          fontSize: 12,
-          color: '#8e8e93',
-          overflow: 'hidden',
-        }}>
-          {(selectedSession as unknown as Record<string, unknown> | undefined)?.runtimeSurface ? (
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              padding: '2px 8px',
-              borderRadius: 6,
-              background: 'rgba(0,0,0,0.04)',
-              fontSize: 11,
-              fontWeight: 500,
-              color: '#5b6475',
-              whiteSpace: 'nowrap',
-            }}>
-              ⎇ {((selectedSession as unknown as Record<string, unknown>)?.runtimeSurface as { branch?: string } | undefined)?.branch ?? 'main'}
-            </span>
-          ) : null}
-          {selectedSession?.name ? (
-            <span style={{
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              fontSize: 11,
-              color: '#94a3b8',
-            }}>
-              {selectedSession.name}
-            </span>
-          ) : null}
-        </div>
-      </div>
+        {/* Diff pill (right side — matches mobile exactly) */}
+        <button
+          type="button"
+          className="remodex-diff-pill"
+          disabled
+          style={{ flexShrink: 0 }}
+          aria-label="Open diff sheet"
+        >
+          <span className="remodex-diff-pill-stats" aria-hidden="true">
+            <span className="remodex-diff-pill-chip remodex-diff-pill-chip-add">+0</span>
+            <span className="remodex-diff-pill-chip remodex-diff-pill-chip-remove">-0</span>
+          </span>
+          <span className="remodex-diff-pill-meta">
+            <span className="remodex-diff-pill-count">0</span>
+            <span className="remodex-diff-pill-caption">files</span>
+          </span>
+          <SlidersHorizontal size={15} strokeWidth={2} />
+        </button>
+      </header>
 
       {/* ── Messages ── */}
       <div
@@ -666,7 +791,7 @@ export function DesktopChat() {
         )}
       </div>
 
-      {/* ── Compose Bar (identical structure to mobile) ── */}
+      {/* ── Compose Bar (matches mobile exactly) ── */}
       <div style={{
         padding: '10px 14px 14px',
         flexShrink: 0,
