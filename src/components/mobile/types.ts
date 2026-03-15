@@ -86,6 +86,7 @@ export interface ApprovalStackProps {
 export interface ChatViewProps {
   transcriptEntries: MobileTranscriptEntry[];
   transcriptLoading: boolean;
+  isRefreshing?: boolean;
   selectedSession?: SessionSummary;
   selectedReviewFile?: ReviewFileDetail;
   streamingText: string;
