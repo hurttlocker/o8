@@ -356,7 +356,7 @@ export function CommandCenterShell({
               <strong>{desktopInfo?.isDesktop ? 'Attached' : 'Browser preview'}</strong>
               <p>
                 {desktopInfo?.isDesktop
-                  ? `Electron ${desktopInfo.version} on ${desktopInfo.platform}`
+                  ? `Desktop ${desktopInfo.version} on ${desktopInfo.platform}`
                   : 'Browser remains the fast dev surface while the desktop wrapper matures.'}
               </p>
             </div>

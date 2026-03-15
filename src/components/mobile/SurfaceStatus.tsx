@@ -1,7 +1,8 @@
+import { memo } from 'react';
 import type { SurfaceStatusProps } from './types';
 import { sessionStatusSummary } from './utils';
 
-export function SurfaceStatus({
+export const SurfaceStatus = memo(function SurfaceStatus({
   snapshot,
   selectedSession,
   selectedReviewPacket,
@@ -38,4 +39,4 @@ export function SurfaceStatus({
       ))}
     </>
   );
-}
+});
