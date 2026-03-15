@@ -30,6 +30,7 @@ export function ControlsSheet({
   onCopyKey,
   onAbort,
   onSessionFocus,
+  children,
 }: ControlsSheetProps) {
   if (!controlsOpen) {
     return null;
@@ -107,6 +108,9 @@ export function ControlsSheet({
             </button>
           ) : null}
         </div>
+
+        {/* Cortex Memory status card (passed as children) */}
+        {children ? <div style={{ padding: '0 16px', marginTop: 4 }}>{children}</div> : null}
 
         {sessionSwitcher.length > 1 ? (
           <div className="remodex-controls-session-list">
