@@ -316,12 +316,7 @@ export function pinTranscriptToBottom({
     return () => window.cancelAnimationFrame(frameA);
   }
 
-  if (!stickToBottomRef.current) {
-    return;
-  }
-
-  const frame = window.requestAnimationFrame(() => {
-    transcriptBottomRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
-  });
-  return () => window.cancelAnimationFrame(frame);
+  // Auto-scroll disabled — user controls scroll position.
+  // The "new messages" pill handles manual scroll-to-bottom.
+  return;
 }

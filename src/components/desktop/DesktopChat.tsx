@@ -866,7 +866,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
     // If last message is user (or local optimistic) → agent is generating
     if (last.role === 'user' || last.id.startsWith('local-')) {
       setAgentRunning(true);
-      scrollToBottom();
+      // No auto-scroll — user controls position
     } else {
       setAgentRunning(false);
     }
@@ -958,14 +958,19 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
     return () => document.removeEventListener('mousedown', handler);
   }, [pickerOpen]);
 
+  const [showScrollPill, setShowScrollPill] = useState(false);
+
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
     const el = scrollRef.current;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     stickToBottomRef.current = distFromBottom < 80;
+    setShowScrollPill(distFromBottom > 200);
   }, []);
 
-  useEffect(() => { scrollToBottom(); }, [transcript.length, scrollToBottom]);
+  // Auto-scroll disabled — user controls position via "new messages" button.
+  // Only scroll on initial session load (handled by fetchTranscript).
+  // useEffect(() => { scrollToBottom(); }, [transcript.length, scrollToBottom]);
 
   const chatSendDisabled = !selectedKey || sending || !draft.trim();
 
@@ -1477,6 +1482,39 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
           transition: 'background-color 150ms',
         }} />
       </div>
+
+      {/* ── New Messages Pill ── */}
+      {showScrollPill && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          padding: '6px 0',
+          flexShrink: 0,
+        }}>
+          <button
+            onClick={() => scrollToBottom(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '5px 14px',
+              borderRadius: 14,
+              border: 'none',
+              background: 'rgba(0,122,255,0.9)',
+              color: '#fff',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              letterSpacing: '-0.01em',
+              boxShadow: '0 2px 8px rgba(0,122,255,0.3)',
+              transition: 'all 150ms ease',
+            }}
+          >
+            <ChevronDown size={13} />
+            New messages
+          </button>
+        </div>
+      )}
 
       {/* ── Compose Bar (matches mobile exactly) ── */}
       <div style={{
