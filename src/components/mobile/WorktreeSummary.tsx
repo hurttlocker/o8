@@ -30,6 +30,7 @@ export const WorktreeSummary = memo(function WorktreeSummary({
   onWorktreeSelect,
 }: WorktreeSummaryProps) {
   const [pruning, setPruning] = useState(false);
+  const [pruneConfirm, setPruneConfirm] = useState(false);
 
   const active = worktrees.filter((wt) =>
     wt.status === 'active' || wt.status === 'ready' || wt.status === 'setup',
@@ -38,13 +39,19 @@ export const WorktreeSummary = memo(function WorktreeSummary({
   if (active.length === 0) return null;
 
   const handlePrune = useCallback(async () => {
+    if (!pruneConfirm) {
+      setPruneConfirm(true);
+      setTimeout(() => setPruneConfirm(false), 3000);
+      return;
+    }
     setPruning(true);
+    setPruneConfirm(false);
     try {
       await onPrune();
     } finally {
       setPruning(false);
     }
-  }, [onPrune]);
+  }, [onPrune, pruneConfirm]);
 
   const totalFiles = active.reduce((sum, wt) => sum + wt.dirtyFiles.length, 0);
 
@@ -182,17 +189,18 @@ export const WorktreeSummary = memo(function WorktreeSummary({
           style={{
             padding: '4px 10px',
             borderRadius: '8px',
-            backgroundColor: 'rgba(255,255,255,0.08)',
+            backgroundColor: pruneConfirm ? '#ff3b30' : 'rgba(255,255,255,0.08)',
             border: 'none',
-            color: '#8e8e93',
+            color: pruneConfirm ? '#fff' : '#8e8e93',
             fontSize: '11px',
-            fontWeight: 500,
+            fontWeight: pruneConfirm ? 600 : 500,
             cursor: 'pointer',
             opacity: pruning ? 0.5 : 1,
+            transition: 'background-color 0.15s, color 0.15s',
             WebkitTapHighlightColor: 'transparent',
           }}
         >
-          {pruning ? 'Pruning…' : 'Prune stale'}
+          {pruning ? 'Pruning…' : pruneConfirm ? 'Confirm prune' : 'Prune stale'}
         </button>
       </div>
     </div>
