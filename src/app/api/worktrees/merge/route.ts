@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
           body: body.prBody,
           targetBranch: body.targetBranch ?? 'main',
           agentType: worktree.agentType,
+          createdAt: worktree.createdAt,
         });
         // Cleanup worktree but keep branch (PR needs it)
         if (result.ok) {
@@ -112,7 +113,7 @@ async function createPR(
   worktreePath: string,
   branch: string,
   dirtyFiles: string[],
-  opts: { title?: string; body?: string; targetBranch: string; agentType: string },
+  opts: { title?: string; body?: string; targetBranch: string; agentType: string; createdAt?: number },
 ): Promise<MergeResult> {
   // Commit any uncommitted changes
   try {
@@ -139,10 +140,35 @@ async function createPR(
     };
   }
 
+  // Get diffstat for PR body
+  let diffstat = '';
+  try {
+    const { stdout: statOut } = await execFileAsync('git', [
+      'diff', '--shortstat', `${opts.targetBranch}...HEAD`,
+    ], { cwd: worktreePath, timeout: 5000 });
+    diffstat = statOut.trim();
+  } catch { /* non-critical */ }
+
+  // Get duration estimate
+  const durationMin = opts.createdAt
+    ? Math.round((Date.now() - opts.createdAt) / 60_000)
+    : undefined;
+
   // Create PR via gh CLI
-  const title = opts.title ?? `Agent work: ${branch.split('/').pop()}`;
+  const taskName = branch.split('/').pop() ?? branch;
+  const title = opts.title ?? `${opts.agentType}: ${taskName}`;
   const fileList = dirtyFiles.map((f) => `- \`${f}\``).join('\n');
-  const prBody = opts.body ?? `## Changes\nAgent: ${opts.agentType}\n\n### Files Modified (${dirtyFiles.length})\n${fileList}\n\n---\n*Created by Cortex IDE WorktreeManager*`;
+  const prBody = opts.body ?? [
+    `## Changes`,
+    `**Agent:** ${opts.agentType}${durationMin ? ` · **Duration:** ${durationMin} min` : ''}`,
+    `**Branch:** \`${branch}\`${diffstat ? ` · ${diffstat}` : ''}`,
+    ``,
+    `### Files Modified (${dirtyFiles.length})`,
+    fileList,
+    ``,
+    `---`,
+    `*Created by Cortex IDE WorktreeManager*`,
+  ].join('\n');
 
   try {
     const { stdout } = await execFileAsync('gh', [
@@ -202,6 +228,7 @@ async function mergeToTarget(
       };
     }
   } catch {
+    // If we can't check, refuse
     return {
       action: 'merge',
       ok: false,
