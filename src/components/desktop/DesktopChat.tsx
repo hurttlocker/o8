@@ -476,15 +476,23 @@ export function DesktopChat() {
       ['--remodex-dock-fade-progress' as string]: '0',
       ['--remodex-dock-motion-progress' as string]: '0',
     }}>
-      {/* ── Header (matches mobile TopBar exactly) ── */}
+      {/* ── Header ── */}
       <header
-        className="remodex-topbar"
-        data-compact="false"
-        data-context-visible="false"
-        data-visible="true"
-        data-picker-open={pickerOpen ? 'true' : 'false'}
+        style={{
+          position: 'relative',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '14px 16px',
+          borderBottom: '1px solid rgba(0,0,0,0.06)',
+          background: 'rgba(255,255,255,0.82)',
+          backdropFilter: 'blur(20px) saturate(1.4)',
+          WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
+          flexShrink: 0,
+          zIndex: 10,
+        }}
       >
-        {/* Title area — tappable to open squad picker */}
+        {/* Title area — clickable to open squad picker */}
         <div ref={pickerRef} style={{ minWidth: 0, flex: 1, position: 'relative' }}>
           <button
             type="button"
@@ -505,25 +513,52 @@ export function DesktopChat() {
             aria-label="Switch session"
             aria-expanded={pickerOpen}
           >
-            <div className="remodex-title-shell" style={{ minWidth: 0, flex: 1 }}>
-              <div className="remodex-title-stack">
-                <span className="remodex-title-kicker">
-                  <span
-                    style={{
-                      display: 'inline-block',
-                      width: '6px',
-                      height: '6px',
-                      borderRadius: '50%',
-                      backgroundColor: connectionDotColor,
-                      marginRight: '5px',
-                      verticalAlign: 'middle',
-                    }}
-                  />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 2 }}>
+                <span
+                  style={{
+                    width: 7,
+                    height: 7,
+                    borderRadius: '50%',
+                    backgroundColor: connectionDotColor,
+                    flexShrink: 0,
+                    boxShadow: connectionDotColor === '#34c759' ? '0 0 6px #34c759' : 'none',
+                  }}
+                />
+                <span style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  textTransform: 'uppercase' as const,
+                  letterSpacing: '0.08em',
+                  color: 'rgba(17, 24, 39, 0.42)',
+                }}>
                   {headerLabel}
                 </span>
-                <h1>{activeTitle}</h1>
-                <p>{activeSubtitle}</p>
               </div>
+              <h1 style={{
+                fontSize: 15,
+                fontWeight: 700,
+                color: '#111827',
+                letterSpacing: '-0.02em',
+                margin: 0,
+                lineHeight: 1.3,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {activeTitle}
+              </h1>
+              <p style={{
+                fontSize: 12,
+                color: '#8e8e93',
+                margin: '2px 0 0',
+                lineHeight: 1.3,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {activeSubtitle}
+              </p>
             </div>
             <ChevronDown
               size={14}
@@ -741,23 +776,30 @@ export function DesktopChat() {
           </div>
         </div>
 
-        {/* Diff pill (right side — matches mobile exactly) */}
+        {/* Diff pill (right side) */}
         <button
           type="button"
-          className="remodex-diff-pill"
           disabled
-          style={{ flexShrink: 0 }}
+          style={{
+            flexShrink: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 12px',
+            borderRadius: 999,
+            border: '1px solid rgba(0,0,0,0.06)',
+            background: 'rgba(0,0,0,0.03)',
+            color: '#8e8e93',
+            fontSize: 12,
+            fontWeight: 500,
+            cursor: 'default',
+          }}
           aria-label="Open diff sheet"
         >
-          <span className="remodex-diff-pill-stats" aria-hidden="true">
-            <span className="remodex-diff-pill-chip remodex-diff-pill-chip-add">+0</span>
-            <span className="remodex-diff-pill-chip remodex-diff-pill-chip-remove">-0</span>
-          </span>
-          <span className="remodex-diff-pill-meta">
-            <span className="remodex-diff-pill-count">0</span>
-            <span className="remodex-diff-pill-caption">files</span>
-          </span>
-          <SlidersHorizontal size={15} strokeWidth={2} />
+          <span style={{ color: '#22c55e', fontWeight: 600 }}>+0</span>
+          <span style={{ color: '#ef4444', fontWeight: 600 }}>-0</span>
+          <span style={{ color: '#8e8e93' }}>0 files</span>
+          <SlidersHorizontal size={13} strokeWidth={2} />
         </button>
       </header>
 
