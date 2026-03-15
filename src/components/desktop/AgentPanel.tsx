@@ -4,7 +4,7 @@
  * AgentPanel — Left panel command center for Cortex IDE.
  *
  * Layout:
- *   Top: Agent status cards (always visible, never scroll)
+ *   Top: Agent status cards (expandable, shows surfaces)
  *   Middle: Tabbed content area (Activity / Issues / Files)
  *
  * Light theme — glass frost on white, matching chat sidebar.
@@ -17,17 +17,51 @@ import {
   BookOpen,
   ChevronDown,
   ChevronRight,
+  Clock,
+  Cpu,
   FileText,
   Folder,
   FolderOpen,
   GitCommit,
+  Globe,
+  MessageSquare,
+  Monitor,
+  Radio,
   Tag,
+  Terminal,
   X,
   Zap,
 } from 'lucide-react';
 import { MarkdownBody } from './MarkdownBody';
 
 // ── Types ──
+
+interface AgentDetail {
+  id: string;
+  name: string;
+  squadId: string;
+  model: string;
+  status: string;
+  currentTask: string;
+  workspace: string;
+  sessionKey: string;
+  lastEventAt: string;
+  surfaceLabel: string;
+  isCurrentSession: boolean;
+  alerts: number;
+  context?: { usedPercent: number; trend: string };
+  tokenUsage?: { totalTokens: number; remainingTokens: number };
+}
+
+interface EventEntry {
+  id: string;
+  agentId: string;
+  squadId: string;
+  severity: string;
+  title: string;
+  detail: string;
+  timestamp: string;
+}
 
 interface Squad {
   id: string;
@@ -36,12 +70,7 @@ interface Squad {
   liveSessions: number;
   alerts: number;
   throughputLabel: string;
-}
-
-interface CommitEntry {
-  hash: string;
-  message: string;
-  age: string;
+  members: string[];
 }
 
 interface GHIssue {
@@ -75,6 +104,7 @@ type Tab = 'activity' | 'issues' | 'files';
 // ── Status colors ──
 
 const statusDotColor: Record<string, string> = {
+  running: '#22c55e',
   watching: '#22c55e',
   healthy: '#22c55e',
   idle: '#f59e0b',
@@ -83,46 +113,86 @@ const statusDotColor: Record<string, string> = {
   error: '#ef4444',
 };
 
-const statusLabel: Record<string, string> = {
-  watching: 'running',
-  healthy: 'active',
-  idle: 'idle',
-  offline: 'offline',
-  unhealthy: 'error',
+const severityColor: Record<string, string> = {
+  success: '#22c55e',
+  info: '#3b82f6',
+  warning: '#f59e0b',
+  error: '#ef4444',
 };
 
-// ── Agent Card (light theme) ──
+// Surface icon picker
+function surfaceIcon(label: string) {
+  const l = label.toLowerCase();
+  if (l.includes('telegram')) return <MessageSquare size={12} strokeWidth={1.8} />;
+  if (l.includes('discord')) return <Radio size={12} strokeWidth={1.8} />;
+  if (l.includes('cron') || l.includes('automation')) return <Clock size={12} strokeWidth={1.8} />;
+  if (l.includes('codex') || l.includes('terminal')) return <Terminal size={12} strokeWidth={1.8} />;
+  if (l.includes('chat') || l.includes('direct')) return <Monitor size={12} strokeWidth={1.8} />;
+  return <Globe size={12} strokeWidth={1.8} />;
+}
 
-const AgentCard = memo(function AgentCard({ squad }: { squad: Squad }) {
+// Context bar color
+function ctxColor(pct: number) {
+  if (pct >= 70) return '#ef4444';
+  if (pct >= 50) return '#f59e0b';
+  return '#22c55e';
+}
+
+// ── Agent Card (expandable) ──
+
+const AgentCard = memo(function AgentCard({
+  squad,
+  agents,
+  expanded,
+  onToggle,
+}: {
+  squad: Squad;
+  agents: AgentDetail[];
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   const dotColor = statusDotColor[squad.status] ?? '#6b7280';
-  const label = statusLabel[squad.status] ?? squad.status;
+  // Get the primary agent's model
+  const primaryAgent = agents.find(a => a.squadId === squad.id && !a.id.includes('cron') && !a.id.includes('discord') && !a.id.includes('telegram'));
+  const model = primaryAgent?.model ?? '';
+  const ctx = primaryAgent?.context;
 
   return (
     <div style={{
       background: 'rgba(255, 255, 255, 0.7)',
-      border: '1px solid rgba(0, 0, 0, 0.06)',
+      border: expanded ? '1px solid rgba(37, 99, 235, 0.15)' : '1px solid rgba(0, 0, 0, 0.06)',
       borderRadius: 14,
-      paddingTop: 12,
-      paddingRight: 14,
-      paddingBottom: 12,
-      paddingLeft: 14,
       backdropFilter: 'blur(20px)',
       WebkitBackdropFilter: 'blur(20px)',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+      boxShadow: expanded ? '0 2px 8px rgba(37,99,235,0.06)' : '0 1px 3px rgba(0,0,0,0.04)',
       transition: 'all 200ms ease',
+      overflow: 'hidden',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        {/* Avatar circle */}
+      {/* Card header — clickable */}
+      <div
+        onClick={onToggle}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          paddingTop: 12,
+          paddingRight: 14,
+          paddingBottom: ctx ? 8 : 12,
+          paddingLeft: 14,
+          cursor: 'pointer',
+        }}
+      >
+        {/* Avatar */}
         <div style={{
-          width: 32,
-          height: 32,
+          width: 34,
+          height: 34,
           borderRadius: '50%',
           background: `linear-gradient(135deg, ${dotColor}22 0%, ${dotColor}0a 100%)`,
           border: `1.5px solid ${dotColor}44`,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          fontSize: 13,
+          fontSize: 14,
           fontWeight: 700,
           color: dotColor,
           flexShrink: 0,
@@ -130,7 +200,7 @@ const AgentCard = memo(function AgentCard({ squad }: { squad: Squad }) {
           {squad.name[0]}
         </div>
 
-        {/* Name + status */}
+        {/* Name + model + status */}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{
@@ -143,95 +213,272 @@ const AgentCard = memo(function AgentCard({ squad }: { squad: Squad }) {
               display: 'inline-flex',
               alignItems: 'center',
               gap: 4,
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: 500,
               color: dotColor,
               paddingTop: 2,
-              paddingRight: 8,
+              paddingRight: 7,
               paddingBottom: 2,
-              paddingLeft: 6,
+              paddingLeft: 5,
               borderRadius: 99,
               background: `${dotColor}12`,
             }}>
               <span style={{
-                width: 6,
-                height: 6,
+                width: 5,
+                height: 5,
                 borderRadius: '50%',
                 background: dotColor,
-                boxShadow: squad.status === 'watching' ? `0 0 6px ${dotColor}` : 'none',
+                boxShadow: squad.status === 'watching' || squad.status === 'healthy' ? `0 0 6px ${dotColor}` : 'none',
               }} />
-              {label}
+              {squad.status === 'watching' ? 'running' : squad.status}
             </span>
           </div>
           <div style={{
-            fontSize: 12,
-            color: '#94a3b8',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
             marginTop: 3,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
           }}>
-            {squad.throughputLabel}
+            {model ? (
+              <span style={{
+                fontSize: 11,
+                color: '#94a3b8',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 3,
+              }}>
+                <Cpu size={10} strokeWidth={1.8} />
+                {model.replace('claude-', '').replace(/-\d+$/, '')}
+              </span>
+            ) : null}
+            <span style={{ fontSize: 11, color: '#cbd5e1' }}>·</span>
+            <span style={{ fontSize: 11, color: '#94a3b8' }}>
+              {squad.liveSessions} surface{squad.liveSessions !== 1 ? 's' : ''}
+            </span>
           </div>
         </div>
 
-        {/* Alerts badge */}
-        {squad.alerts > 0 ? (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 3,
-            fontSize: 11,
-            fontWeight: 600,
-            color: '#ef4444',
-          }}>
-            <AlertCircle size={13} strokeWidth={2} />
-            {squad.alerts}
-          </div>
-        ) : null}
+        {/* Alerts + expand chevron */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {squad.alerts > 0 ? (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 3,
+              fontSize: 11,
+              fontWeight: 600,
+              color: '#ef4444',
+            }}>
+              <AlertCircle size={13} strokeWidth={2} />
+              {squad.alerts}
+            </div>
+          ) : null}
+          {expanded
+            ? <ChevronDown size={14} strokeWidth={2} style={{ color: '#94a3b8' }} />
+            : <ChevronRight size={14} strokeWidth={2} style={{ color: '#cbd5e1' }} />
+          }
+        </div>
       </div>
+
+      {/* Context usage bar */}
+      {ctx ? (
+        <div style={{
+          paddingTop: 0,
+          paddingRight: 14,
+          paddingBottom: 10,
+          paddingLeft: 14,
+        }}>
+          <div style={{
+            height: 3,
+            borderRadius: 2,
+            background: 'rgba(0,0,0,0.04)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: '100%',
+              width: `${Math.min(ctx.usedPercent, 100)}%`,
+              borderRadius: 2,
+              background: ctxColor(ctx.usedPercent),
+              transition: 'width 300ms ease',
+            }} />
+          </div>
+          <div style={{
+            fontSize: 10,
+            color: '#94a3b8',
+            marginTop: 3,
+            display: 'flex',
+            justifyContent: 'space-between',
+          }}>
+            <span>ctx {ctx.usedPercent}%</span>
+            <span>{ctx.trend}</span>
+          </div>
+        </div>
+      ) : null}
+
+      {/* Expanded: surface list */}
+      {expanded ? (
+        <div style={{
+          borderTop: '1px solid rgba(0,0,0,0.04)',
+          paddingTop: 6,
+          paddingBottom: 6,
+        }}>
+          {agents
+            .filter(a => a.squadId === squad.id)
+            .map(agent => (
+              <div key={agent.id} style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                paddingTop: 6,
+                paddingRight: 14,
+                paddingBottom: 6,
+                paddingLeft: 18,
+                fontSize: 12,
+              }}>
+                <span style={{ color: '#94a3b8', flexShrink: 0 }}>
+                  {surfaceIcon(agent.surfaceLabel || agent.name)}
+                </span>
+                <span style={{
+                  flex: 1,
+                  color: '#475569',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {agent.surfaceLabel || agent.name}
+                </span>
+                <span style={{
+                  fontSize: 10,
+                  color: '#94a3b8',
+                  flexShrink: 0,
+                }}>
+                  {agent.lastEventAt}
+                </span>
+              </div>
+            ))
+          }
+        </div>
+      ) : null}
     </div>
   );
 });
 
-// ── Activity Feed (light theme) ──
+// ── Activity Feed (rich events) ──
 
-const ActivityFeed = memo(function ActivityFeed({ commits }: { commits: CommitEntry[] }) {
-  if (!commits.length) {
+const ActivityFeed = memo(function ActivityFeed({ events, commits }: { events: EventEntry[]; commits: { hash: string; message: string; age: string }[] }) {
+  // Merge events + commits into a unified feed
+  const items: { type: 'event' | 'commit'; data: EventEntry | { hash: string; message: string; age: string } }[] = [];
+
+  // Add events (non-codex only)
+  for (const e of events) {
+    if (!e.agentId.includes('codex')) {
+      items.push({ type: 'event', data: e });
+    }
+  }
+
+  // Add commits
+  for (const c of commits) {
+    items.push({ type: 'commit', data: c });
+  }
+
+  if (!items.length) {
     return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>No recent activity</div>;
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {commits.map((c, i) => (
-        <div key={`${c.hash}-${i}`} style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: 10,
-          paddingTop: 10,
-          paddingRight: 14,
-          paddingBottom: 10,
-          paddingLeft: 14,
-          borderBottom: '1px solid rgba(0,0,0,0.04)',
-        }}>
-          <GitCommit size={14} strokeWidth={1.8} style={{ color: '#22c55e', marginTop: 2, flexShrink: 0 }} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{
-              fontSize: 13,
-              color: '#1e293b',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+      {items.map((item, i) => {
+        if (item.type === 'commit') {
+          const c = item.data as { hash: string; message: string; age: string };
+          return (
+            <div key={`c-${c.hash}`} style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              paddingTop: 10,
+              paddingRight: 14,
+              paddingBottom: 10,
+              paddingLeft: 14,
+              borderBottom: '1px solid rgba(0,0,0,0.03)',
             }}>
-              {c.message}
+              <div style={{
+                width: 22,
+                height: 22,
+                borderRadius: '50%',
+                background: 'rgba(34,197,94,0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                marginTop: 1,
+              }}>
+                <GitCommit size={12} strokeWidth={2} style={{ color: '#22c55e' }} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontSize: 13,
+                  color: '#1e293b',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  lineHeight: 1.4,
+                }}>
+                  {c.message}
+                </div>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, display: 'flex', gap: 6 }}>
+                  <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', color: '#64748b' }}>{c.hash}</span>
+                  <span>·</span>
+                  <span>{c.age}</span>
+                </div>
+              </div>
             </div>
-            <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
-              <span style={{ fontFamily: 'SF Mono, ui-monospace, monospace', color: '#64748b' }}>{c.hash}</span>
-              {' · '}{c.age}
+          );
+        }
+
+        const e = item.data as EventEntry;
+        const sColor = severityColor[e.severity] ?? '#64748b';
+        return (
+          <div key={e.id} style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+            paddingTop: 10,
+            paddingRight: 14,
+            paddingBottom: 10,
+            paddingLeft: 14,
+            borderBottom: '1px solid rgba(0,0,0,0.03)',
+          }}>
+            <div style={{
+              width: 22,
+              height: 22,
+              borderRadius: '50%',
+              background: `${sColor}10`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              marginTop: 1,
+            }}>
+              <Zap size={11} strokeWidth={2} style={{ color: sColor }} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontSize: 13,
+                color: '#1e293b',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                lineHeight: 1.4,
+              }}>
+                {e.title}
+              </div>
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+                {e.timestamp}
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 });
@@ -265,7 +512,7 @@ const IssuesList = memo(function IssuesList({ issues, onSelect }: { issues: GHIs
           <BookOpen size={14} strokeWidth={1.8} style={{ color: '#94a3b8', marginTop: 2, flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 500 }}>#{issue.number}</span>
+              <span style={{ fontSize: 12, color: '#ef4444', fontWeight: 600, fontFamily: '"SF Mono", ui-monospace, monospace' }}>#{issue.number}</span>
               <span style={{
                 fontSize: 13,
                 color: '#1e293b',
@@ -314,9 +561,7 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
   }, [onClose]);
@@ -347,7 +592,6 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
         backdropFilter: 'blur(40px) saturate(200%) brightness(1.05)',
         WebkitBackdropFilter: 'blur(40px) saturate(200%) brightness(1.05)',
         backgroundColor: 'rgba(255, 255, 255, 0.15)',
-        animation: 'fadeIn 200ms ease',
       }}
     >
       <div
@@ -381,22 +625,22 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
           background: 'rgba(255,255,255,0.2)',
           flexShrink: 0,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
             {loading ? (
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#64748b' }}>Loading issue…</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#64748b' }}>Loading…</span>
             ) : detail ? (
               <>
-                <span style={{
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: '#ef4444',
-                  fontFamily: 'SF Mono, ui-monospace, monospace',
-                }}>#{detail.number}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#ef4444', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                  #{detail.number}
+                </span>
                 <span style={{
                   fontSize: 15,
                   fontWeight: 700,
                   color: '#0f172a',
                   letterSpacing: '-0.01em',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
                 }}>{detail.title}</span>
                 <span style={{
                   fontSize: 11,
@@ -408,6 +652,7 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
                   borderRadius: 99,
                   background: detail.state === 'OPEN' ? 'rgba(34,197,94,0.1)' : 'rgba(139,92,246,0.1)',
                   color: detail.state === 'OPEN' ? '#16a34a' : '#7c3aed',
+                  flexShrink: 0,
                 }}>
                   {detail.state?.toLowerCase()}
                 </span>
@@ -435,6 +680,8 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
               paddingRight: 0,
               paddingBottom: 0,
               paddingLeft: 0,
+              flexShrink: 0,
+              marginLeft: 12,
             }}
           >
             <X size={15} strokeWidth={2} />
@@ -444,7 +691,6 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
         {/* Body */}
         {detail ? (
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            {/* Meta row */}
             <div style={{
               paddingTop: 12,
               paddingRight: 24,
@@ -487,8 +733,6 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
                 </>
               ) : null}
             </div>
-
-            {/* Issue body (rendered markdown) */}
             <div style={{
               paddingTop: 20,
               paddingRight: 24,
@@ -598,19 +842,22 @@ const tabs: { id: Tab; icon: typeof Zap; label: string }[] = [
   { id: 'files', icon: Folder, label: 'Files' },
 ];
 
-// ── Main Panel (light theme) ──
+// ── Main Panel ──
 
 export const AgentPanel = memo(function AgentPanel() {
   const [squads, setSquads] = useState<Squad[]>([]);
-  const [commits, setCommits] = useState<CommitEntry[]>([]);
+  const [agents, setAgents] = useState<AgentDetail[]>([]);
+  const [events, setEvents] = useState<EventEntry[]>([]);
+  const [commits, setCommits] = useState<{ hash: string; message: string; age: string }[]>([]);
   const [issues, setIssues] = useState<GHIssue[]>([]);
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [activeTab, setActiveTab] = useState<Tab>('activity');
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
+  const [expandedSquad, setExpandedSquad] = useState<string | null>(null);
 
-  // Fetch agent inventory
+  // Fetch agent inventory (agents + events + squads)
   useEffect(() => {
-    async function fetchAgents() {
+    async function fetchInventory() {
       try {
         const res = await fetch('/api/runtime/inventory');
         if (!res.ok) return;
@@ -619,10 +866,12 @@ export const AgentPanel = memo(function AgentPanel() {
           !s.id.includes('codex-local') && !s.id.includes('codex-owned')
         );
         setSquads(mainSquads);
+        setAgents(data.agents ?? []);
+        setEvents(data.events ?? []);
       } catch { /* silent */ }
     }
-    void fetchAgents();
-    const id = setInterval(fetchAgents, 30_000);
+    void fetchInventory();
+    const id = setInterval(fetchInventory, 30_000);
     return () => clearInterval(id);
   }, []);
 
@@ -682,14 +931,14 @@ export const AgentPanel = memo(function AgentPanel() {
       overflow: 'hidden',
       background: '#f5f7fb',
     }}>
-      {/* ── Titlebar spacer (clears macOS traffic lights) ── */}
+      {/* ── Titlebar spacer ── */}
       <div style={{
         height: 38,
         flexShrink: 0,
         WebkitAppRegion: 'drag' as unknown as string,
       } as React.CSSProperties} />
 
-      {/* ── Agent Cards (pinned top) ── */}
+      {/* ── Agent Cards ── */}
       <div style={{
         flexShrink: 0,
         paddingTop: 4,
@@ -715,7 +964,13 @@ export const AgentPanel = memo(function AgentPanel() {
           <div style={{ fontSize: 13, color: '#94a3b8', padding: '8px 2px' }}>Loading agents…</div>
         ) : (
           squads.map((squad) => (
-            <AgentCard key={squad.id} squad={squad} />
+            <AgentCard
+              key={squad.id}
+              squad={squad}
+              agents={agents}
+              expanded={expandedSquad === squad.id}
+              onToggle={() => setExpandedSquad(expandedSquad === squad.id ? null : squad.id)}
+            />
           ))
         )}
       </div>
@@ -766,14 +1021,14 @@ export const AgentPanel = memo(function AgentPanel() {
         })}
       </div>
 
-      {/* ── Content Area (scrollable) ── */}
+      {/* ── Content Area ── */}
       <div style={{
         flex: 1,
         overflowY: 'auto',
         borderTop: '1px solid rgba(0,0,0,0.04)',
         marginTop: 4,
       }}>
-        {activeTab === 'activity' ? <ActivityFeed commits={commits} /> : null}
+        {activeTab === 'activity' ? <ActivityFeed events={events} commits={commits} /> : null}
         {activeTab === 'issues' ? <IssuesList issues={issues} onSelect={setSelectedIssue} /> : null}
         {activeTab === 'files' ? <FileTree tree={fileTree} /> : null}
       </div>
