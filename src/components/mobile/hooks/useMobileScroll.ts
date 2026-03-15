@@ -36,8 +36,38 @@ export function useMobileScroll(state: MobileState, transcriptEntries: MobileTra
     if (typeof window === 'undefined') return;
     if (!force && !stickToBottomRef.current) return;
     if (force) stickToBottomRef.current = true;
-    transcriptBottomRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' });
-  }, [stickToBottomRef, transcriptBottomRef]);
+
+    // Use scrollTo with scrollHeight — scrollIntoView breaks with virtual
+    // scrolling because the document height grows as items render during
+    // the smooth animation, causing it to land halfway.
+    const scrollToAbsoluteBottom = () => {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+    };
+    scrollToAbsoluteBottom();
+
+    // After the smooth scroll settles and the virtualizer has rendered
+    // newly-visible items (which may increase scrollHeight), do a final
+    // jump to guarantee we're actually at the bottom.
+    const retryId = window.setTimeout(() => {
+      const distanceFromBottom = document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
+      if (distanceFromBottom > 10) {
+        window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+      }
+    }, 400);
+
+    // One more check for very long transcripts where virtualizer is still
+    // catching up after the first retry.
+    const finalId = window.setTimeout(() => {
+      const distanceFromBottom = document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
+      if (distanceFromBottom > 10) {
+        window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'auto' });
+      }
+    }, 900);
+
+    // Cleanup is best-effort — these are fire-and-forget corrective scrolls
+    void retryId;
+    void finalId;
+  }, [stickToBottomRef]);
 
   useEffect(() => {
     return trackViewportTopOffset({ setViewportTopOffset });

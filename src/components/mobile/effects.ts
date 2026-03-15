@@ -180,7 +180,8 @@ interface UnifiedSyncPollingArgs {
   diffOpen: boolean;
   selectedReviewFilePath: string | null;
   documentVisibleRef: MutableRefObject<boolean>;
-  historyBySession: Record<string, MobileTranscriptEntry[]>;
+  /** Stable ref to historyBySession — avoids putting the state object in deps which causes a restart loop */
+  historyBySessionRef: MutableRefObject<Record<string, MobileTranscriptEntry[]>>;
   /** When true, WebSocket is handling real-time push — polling backs off to safety-net interval */
   wsConnected?: boolean;
   // State setters for sync
@@ -204,7 +205,7 @@ export function startUnifiedSyncPolling(args: UnifiedSyncPollingArgs) {
     diffOpen,
     selectedReviewFilePath,
     documentVisibleRef,
-    historyBySession,
+    historyBySessionRef,
     wsConnected,
     setSnapshot,
     setRefreshError,
@@ -236,7 +237,7 @@ export function startUnifiedSyncPolling(args: UnifiedSyncPollingArgs) {
           : 20000;
 
   function getLastId(sessionKey: string): string | undefined {
-    const entries = historyBySession[sessionKey];
+    const entries = historyBySessionRef.current[sessionKey];
     if (!entries?.length) return undefined;
     const last = entries[entries.length - 1];
     return last?.id?.startsWith('optimistic-') ? undefined : last?.id;
