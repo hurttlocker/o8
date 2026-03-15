@@ -88,6 +88,16 @@ export default function DashboardPage() {
     });
   }, [openCanvasTab]);
 
+  const handleOpenDeploy = useCallback((project?: string) => {
+    openCanvasTab({
+      id: `deploy:${project ?? 'all'}`,
+      kind: 'deploy',
+      label: 'Deploys',
+      resourceId: project ?? '',
+      meta: project ? { project } : undefined,
+    });
+  }, [openCanvasTab]);
+
   const handleOpenCI = useCallback((repo: string) => {
     openCanvasTab({
       id: `ci:${repo}`,
@@ -213,6 +223,7 @@ export default function DashboardPage() {
           onOpenCI={handleOpenCI}
           onCreateIssue={handleCreateIssue}
           onOpenGitLog={handleOpenGitLog}
+          onOpenDeploy={handleOpenDeploy}
         />
       </div>
 
