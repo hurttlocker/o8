@@ -731,10 +731,11 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
     // If last message is user (or local optimistic) → agent is generating
     if (last.role === 'user' || last.id.startsWith('local-')) {
       setAgentRunning(true);
+      scrollToBottom();
     } else {
       setAgentRunning(false);
     }
-  }, [transcript]);
+  }, [transcript, scrollToBottom]);
 
   // ── Diff stats (poll every 30s) ──
   useEffect(() => {
@@ -1264,6 +1265,46 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
               />
             );
           })
+        )}
+
+        {/* ── Typing Indicator ── */}
+        {agentRunning && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            paddingTop: 8,
+            paddingRight: 16,
+            paddingBottom: 12,
+            paddingLeft: 16,
+          }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              paddingTop: 10,
+              paddingRight: 16,
+              paddingBottom: 10,
+              paddingLeft: 16,
+              borderRadius: 18,
+              background: 'rgba(248, 250, 252, 0.9)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              border: '1px solid rgba(0,0,0,0.04)',
+            }}>
+              <span className="remodex-typing-dot" style={{ animationDelay: '0ms' }} />
+              <span className="remodex-typing-dot" style={{ animationDelay: '150ms' }} />
+              <span className="remodex-typing-dot" style={{ animationDelay: '300ms' }} />
+              <span style={{
+                fontSize: 11,
+                color: '#94a3b8',
+                marginLeft: 6,
+                fontWeight: 500,
+              }}>
+                {currentAgentName || 'Agent'} is thinking…
+              </span>
+            </div>
+          </div>
         )}
       </div>
 
