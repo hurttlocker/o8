@@ -909,9 +909,11 @@ export const AgentPanel = memo(function AgentPanel({ onSelectSession }: { onSele
       } catch { /* silent */ }
     }
     void fetchCommits();
+    const id = setInterval(fetchCommits, 30_000);
+    return () => clearInterval(id);
   }, []);
 
-  // Fetch GitHub issues
+  // Fetch GitHub issues (every 60s)
   useEffect(() => {
     async function fetchIssues() {
       try {
@@ -922,6 +924,8 @@ export const AgentPanel = memo(function AgentPanel({ onSelectSession }: { onSele
       } catch { /* silent */ }
     }
     void fetchIssues();
+    const id = setInterval(fetchIssues, 60_000);
+    return () => clearInterval(id);
   }, []);
 
   // Fetch file tree
@@ -935,6 +939,8 @@ export const AgentPanel = memo(function AgentPanel({ onSelectSession }: { onSele
       } catch { /* silent */ }
     }
     void fetchFiles();
+    const id = setInterval(fetchFiles, 60_000);
+    return () => clearInterval(id);
   }, []);
 
   return (
