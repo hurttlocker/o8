@@ -180,20 +180,40 @@ export async function cortexAnswer(query: string): Promise<string | null> {
  * Maps raw Cortex search output to UI-friendly cards.
  */
 export async function getRecallCards(query: string, limit = 5): Promise<RecallCard[]> {
-  const results = await cortexSearch(query, limit);
-  return results.map((r) => ({
-    id: r.memory_id,
-    memoryId: r.memory_id,
-    text: r.snippet || r.content.slice(0, 200),
-    // Search results expose 'class' (memory class like "note"/"log"), not fact type.
-    // Default to 'state' — accurate type requires fact-level metadata not in search output.
-    factType: 'state' as RecallCard['factType'],
-    confidence: r.score,
-    source: shortenPath(r.source_file),
-    sourceSection: r.source_section,
-    age: formatAge(r.imported_at),
-    score: r.score,
-  }));
+  // Fetch extra results so we have room after dedup
+  const results = await cortexSearch(query, Math.min(limit * 3, 30));
+
+  const cards: RecallCard[] = [];
+  const seenTexts: string[] = [];
+
+  for (const r of results) {
+    if (cards.length >= limit) break;
+
+    const text = r.snippet || r.content.slice(0, 200);
+    const normalized = text.toLowerCase().replace(/\s+/g, ' ').trim();
+
+    // Skip near-duplicates: if >60% of trigrams overlap with any kept card, skip
+    if (seenTexts.some((seen) => trigramSimilarity(normalized, seen) > 0.6)) {
+      continue;
+    }
+
+    seenTexts.push(normalized);
+    cards.push({
+      id: r.memory_id,
+      memoryId: r.memory_id,
+      text,
+      // Search results expose 'class' (memory class like "note"/"log"), not fact type.
+      // Default to 'state' — accurate type requires fact-level metadata not in search output.
+      factType: 'state' as RecallCard['factType'],
+      confidence: r.score,
+      source: shortenPath(r.source_file),
+      sourceSection: r.source_section,
+      age: formatAge(r.imported_at),
+      score: r.score,
+    });
+  }
+
+  return cards;
 }
 
 /**
@@ -292,6 +312,28 @@ function formatAge(isoDate: string): string {
   if (days < 7) return `${days}d ago`;
   const weeks = Math.floor(days / 7);
   return `${weeks}w ago`;
+}
+
+/**
+ * Trigram similarity between two strings (0–1).
+ * Used for near-duplicate detection in recall results.
+ * ~60% threshold catches rephrased duplicates while keeping genuinely different content.
+ */
+function trigramSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  if (a.length < 3 || b.length < 3) return 0;
+
+  const trigrams = (s: string): Set<string> => {
+    const set = new Set<string>();
+    for (let i = 0; i <= s.length - 3; i++) set.add(s.slice(i, i + 3));
+    return set;
+  };
+
+  const setA = trigrams(a);
+  const setB = trigrams(b);
+  let intersection = 0;
+  for (const t of setA) if (setB.has(t)) intersection++;
+  return intersection / Math.max(setA.size, setB.size);
 }
 
 function emptyStats(): CortexStats {
