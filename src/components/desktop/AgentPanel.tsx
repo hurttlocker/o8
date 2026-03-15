@@ -431,7 +431,7 @@ const AgentCard = memo(function AgentCard({
 
 // ── Activity Feed (rich events) ──
 
-const ActivityFeed = memo(function ActivityFeed({ events, commits }: { events: EventEntry[]; commits: { hash: string; message: string; age: string }[] }) {
+const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommit }: { events: EventEntry[]; commits: { hash: string; message: string; age: string }[]; onSelectCommit?: (hash: string) => void }) {
   // Merge events + commits into a unified feed
   const items: { type: 'event' | 'commit'; data: EventEntry | { hash: string; message: string; age: string } }[] = [];
 
@@ -455,16 +455,24 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits }: { events: E
         if (item.type === 'commit') {
           const c = item.data as { hash: string; message: string; age: string };
           return (
-            <div key={`c-${c.hash}`} style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 10,
-              paddingTop: 10,
-              paddingRight: 14,
-              paddingBottom: 10,
-              paddingLeft: 14,
-              borderBottom: '1px solid rgba(0,0,0,0.03)',
-            }}>
+            <div
+              key={`c-${c.hash}`}
+              onClick={() => onSelectCommit?.(c.hash)}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                paddingTop: 10,
+                paddingRight: 14,
+                paddingBottom: 10,
+                paddingLeft: 14,
+                borderBottom: '1px solid rgba(0,0,0,0.03)',
+                cursor: onSelectCommit ? 'pointer' : 'default',
+                transition: 'background 100ms ease',
+              }}
+              onMouseEnter={(e) => { if (onSelectCommit) (e.currentTarget as HTMLDivElement).style.background = 'rgba(37,99,235,0.04)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+            >
               <div style={{
                 width: 22,
                 height: 22,
@@ -911,9 +919,11 @@ const tabs: { id: Tab; icon: typeof Zap; label: string }[] = [
 export const AgentPanel = memo(function AgentPanel({
   onSelectSession,
   onSelectIssue,
+  onSelectCommit,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number) => void;
+  onSelectCommit?: (hash: string) => void;
 } = {}) {
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([]);
@@ -1106,7 +1116,7 @@ export const AgentPanel = memo(function AgentPanel({
         borderTop: '1px solid rgba(0,0,0,0.04)',
         marginTop: 4,
       }}>
-        {activeTab === 'activity' ? <ActivityFeed events={events} commits={commits} /> : null}
+        {activeTab === 'activity' ? <ActivityFeed events={events} commits={commits} onSelectCommit={onSelectCommit} /> : null}
         {activeTab === 'issues' ? <IssuesList issues={issues} onSelect={onSelectIssue || setSelectedIssue} /> : null}
         {activeTab === 'files' ? <FileTree tree={fileTree} /> : null}
       </div>

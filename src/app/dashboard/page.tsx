@@ -60,6 +60,15 @@ export default function DashboardPage() {
     });
   }, [openCanvasTab]);
 
+  const handleSelectCommit = useCallback((hash: string) => {
+    openCanvasTab({
+      id: `commit:${hash}`,
+      kind: 'commit',
+      label: hash.slice(0, 7),
+      resourceId: hash,
+    });
+  }, [openCanvasTab]);
+
   // ── Left drag handle ──
   const startLeftDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -136,6 +145,7 @@ export default function DashboardPage() {
         <AgentPanel
           onSelectSession={handleSelectSession}
           onSelectIssue={handleSelectIssue}
+          onSelectCommit={handleSelectCommit}
         />
       </div>
 
