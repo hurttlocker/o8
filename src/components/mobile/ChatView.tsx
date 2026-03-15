@@ -170,6 +170,7 @@ export function ChatView({
   transcriptEntries,
   transcriptLoading,
   isRefreshing,
+  composeHeight = 120,
   selectedSession,
   selectedReviewFile,
   streamingText,
@@ -358,7 +359,7 @@ export function ChatView({
           }}
           style={{
             position: 'fixed',
-            bottom: '120px',
+            bottom: `${composeHeight + 16}px`,
             left: '50%',
             transform: 'translateX(-50%)',
             zIndex: 20,
