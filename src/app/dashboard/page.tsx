@@ -89,6 +89,16 @@ export default function DashboardPage() {
     });
   }, [openCanvasTab]);
 
+  const handleCreateIssue = useCallback((repo?: string) => {
+    openCanvasTab({
+      id: `new-issue:${repo ?? 'default'}:${Date.now()}`,
+      kind: 'new-issue',
+      label: 'New Issue',
+      resourceId: 'new',
+      meta: repo ? { repo } : undefined,
+    });
+  }, [openCanvasTab]);
+
   const handleSelectFile = useCallback((filePath: string, workspace?: string) => {
     openCanvasTab({
       id: `file:${filePath}${workspace ? `:${workspace}` : ''}`,
@@ -189,6 +199,7 @@ export default function DashboardPage() {
           onExpandWorkspace={handleExpandWorkspace}
           onSelectFile={handleSelectFile}
           onOpenCI={handleOpenCI}
+          onCreateIssue={handleCreateIssue}
         />
       </div>
 
