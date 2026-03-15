@@ -15,7 +15,6 @@ export function TopBar({
   compactLine,
   onOpenControls,
   onOpenDiff,
-  onOpenCortexRecall,
 }: TopBarProps) {
   const connectionDotColor = wsConnectionState === 'connected'
     ? '#34c759'
@@ -58,7 +57,7 @@ export function TopBar({
       data-context-visible="false"
       data-visible={headerVisible ? 'true' : 'false'}
     >
-      <div style={{ position: 'relative' }}>
+      <div style={{ position: 'relative', flexShrink: 0 }}>
         <button
           type="button"
           className="remodex-circle-button"
@@ -72,7 +71,7 @@ export function TopBar({
           <span className="remodex-approval-badge">{pendingApprovalsCount}</span>
         ) : null}
       </div>
-      <div className="remodex-title-shell">
+      <div className="remodex-title-shell" style={{ minWidth: 0, flex: 1 }}>
         <div className="remodex-title-stack">
           <span className="remodex-title-kicker">
             <span
@@ -93,37 +92,12 @@ export function TopBar({
           <p>{activeSubtitle}</p>
         </div>
       </div>
-      {onOpenCortexRecall ? (
-        <button
-          type="button"
-          onClick={onOpenCortexRecall}
-          aria-label="Cortex Memory Recall"
-          style={{
-            background: 'rgba(175, 82, 222, 0.12)',
-            border: 'none',
-            cursor: 'pointer',
-            padding: 0,
-            width: 32,
-            height: 32,
-            borderRadius: 10,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: 16,
-            lineHeight: 1,
-            flexShrink: 0,
-            minWidth: 44,
-            minHeight: 44,
-          }}
-        >
-          🧠
-        </button>
-      ) : null}
       <button
         type="button"
         className="remodex-diff-pill"
         onClick={onOpenDiff}
         disabled={!reviewFiles.length}
+        style={{ flexShrink: 0 }}
         aria-label={`Open diff sheet with +${focusedAdditions ?? 0}, -${focusedDeletions ?? 0}, ${reviewFiles.length} ${diffFileLabel}`}
       >
         <span className="remodex-diff-pill-stats" aria-hidden="true">
