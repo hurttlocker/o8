@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { demoFleet } from '@/lib/demo/fleet';
 import { getOwnedCodexFleetAdditions } from '@/lib/codex/owned';
 import { getCodexDiscoveredFleetAdditions } from '@/lib/codex/sessions';
+import { claudeCodeRuntime } from '@/lib/runtimes/claude-code';
 import type {
   AgentStatus,
   AgentSummary,
@@ -11,6 +12,7 @@ import type {
   SquadStatus,
   SquadSummary,
 } from '@/lib/fleet/types';
+import type { RuntimeSession } from '@/lib/runtimes/types';
 
 const execFileAsync = promisify(execFile);
 const WORKSPACE_ROOT = process.env.CORTEX_IDE_WORKSPACE_ROOT || '/Users/marquisehurtt/clawd';
@@ -194,6 +196,117 @@ function buildDemoFallback(reason: string): FleetSnapshot {
   };
 }
 
+function shortenHomePath(filePath: string): string {
+  const home = process.env.HOME ?? '/Users/unknown';
+  return filePath.startsWith(home) ? `~${filePath.slice(home.length)}` : filePath;
+}
+
+function mapClaudeCodeSessionToAgent(session: RuntimeSession): AgentSummary {
+  const ageMs = Date.now() - session.lastActivityAt.getTime();
+  return {
+    id: session.sessionKey,
+    name: session.displayName,
+    squadId: 'squad-claude-code',
+    runtime: 'claude-code',
+    model: session.model ?? 'claude',
+    status: session.status === 'running' ? 'running'
+      : session.status === 'reviewing' ? 'reviewing'
+      : 'idle',
+    currentTask: session.initialTask ?? 'Claude Code session',
+    workspace: shortenHomePath(session.cwd),
+    branch: session.branch ?? 'unknown',
+    sessionKey: session.sessionKey,
+    approvalStatus: 'none',
+    lastEventAt: relativeAge(ageMs),
+    context: { usedPercent: 0, trend: 'stable' },
+    alerts: 0,
+    sessionId: session.sessionKey.replace('claude-code:', ''),
+    sessionKind: 'terminal',
+    surfaceLabel: 'Claude Code terminal',
+    runtimeSurface: {
+      id: session.sessionKey,
+      runtime: 'claude-code',
+      kind: 'terminal-session',
+      ownership: session.ownership,
+      title: session.displayName,
+      cwd: shortenHomePath(session.cwd),
+      branch: session.branch,
+      sourceLabel: 'Local Claude Code discovery • ~/.claude/projects/',
+      tailSourceLabel: '~/.claude/projects/*.jsonl',
+      capabilities: {
+        attach: true,
+        readTail: true,
+        sendInput: session.sessionCapabilities.canSendInput,
+        interrupt: session.sessionCapabilities.canInterrupt,
+        resize: false,
+        diffContext: session.sessionCapabilities.canReviewDiffs,
+        reviewContext: true,
+      },
+      lifecycle: session.lifecycle ? {
+        availability: session.lifecycle.availability,
+        lastOutcome: session.lifecycle.lastOutcome,
+        lastRunMode: session.lifecycle.lastRunMode,
+        lastRunStartedAt: session.lifecycle.lastRunStartedAt,
+        lastRunFinishedAt: session.lifecycle.lastRunFinishedAt,
+        summary: session.lifecycle.summary,
+      } : undefined,
+      reviewContext: {
+        repoSlug: session.repoSlug,
+        branch: session.branch,
+        head: session.headSha,
+      },
+    },
+  };
+}
+
+async function discoverClaudeCodeSessions(): Promise<{
+  agents: AgentSummary[];
+  squads: SquadSummary[];
+  events: Array<{ id: string; agentId: string; squadId: string; severity: EventSeverity; title: string; detail: string; timestamp: string }>;
+  sourceLabel: string;
+  note: string;
+}> {
+  try {
+    const sessions = await claudeCodeRuntime.discoverSessions();
+    if (sessions.length === 0) {
+      return { agents: [], squads: [], events: [], sourceLabel: '', note: '' };
+    }
+
+    const agents = sessions.map(mapClaudeCodeSessionToAgent);
+    const squads: SquadSummary[] = [{
+      id: 'squad-claude-code',
+      name: 'Claude Code',
+      status: agents.some((a) => a.status === 'running') ? 'healthy' : 'watching',
+      throughputLabel: `${agents.length} local session${agents.length === 1 ? '' : 's'}`,
+      blockers: 0,
+      alerts: 0,
+      liveSessions: agents.length,
+      members: agents.map((a) => a.id),
+    }];
+
+    const events = agents.slice(0, 3).map((agent) => ({
+      id: `evt-cc-${agent.id}`,
+      agentId: agent.id,
+      squadId: agent.squadId,
+      severity: 'info' as EventSeverity,
+      title: `${agent.name} • Claude Code`,
+      detail: `${agent.currentTask?.slice(0, 120) ?? ''} • ${agent.lastEventAt}`,
+      timestamp: agent.lastEventAt,
+    }));
+
+    return {
+      agents,
+      squads,
+      events,
+      sourceLabel: `Claude Code discovery (${agents.length} session${agents.length === 1 ? '' : 's'})`,
+      note: `${agents.length} Claude Code session${agents.length === 1 ? '' : 's'} discovered from ~/.claude/projects/`,
+    };
+  } catch (err) {
+    console.error('[fleet] Claude Code discovery failed:', err);
+    return { agents: [], squads: [], events: [], sourceLabel: '', note: '' };
+  }
+}
+
 export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
   try {
     const { stdout } = await execFileAsync('openclaw', ['status', '--json'], {
@@ -292,9 +405,10 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
       timestamp: agent.lastEventAt,
     }));
 
-    const [ownedCodex, codexDiscovery] = await Promise.all([
+    const [ownedCodex, codexDiscovery, claudeCodeSessions] = await Promise.all([
       getOwnedCodexFleetAdditions(),
       getCodexDiscoveredFleetAdditions(),
+      discoverClaudeCodeSessions(),
     ]);
 
     const ownedThreadIds = new Set(ownedCodex.ownedThreadIds);
@@ -317,9 +431,9 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
         } satisfies SquadSummary]
       : [];
 
-    const allAgents = [...agents, ...ownedCodex.agents, ...filteredDiscoveredAgents];
-    const allSquads = [...openClawSquads, ...ownedCodex.squads, ...filteredDiscoveredSquads];
-    const allEvents = [...openClawEvents, ...ownedCodex.events, ...filteredDiscoveredEvents];
+    const allAgents = [...agents, ...ownedCodex.agents, ...filteredDiscoveredAgents, ...claudeCodeSessions.agents];
+    const allSquads = [...openClawSquads, ...ownedCodex.squads, ...filteredDiscoveredSquads, ...claudeCodeSessions.squads];
+    const allEvents = [...openClawEvents, ...ownedCodex.events, ...filteredDiscoveredEvents, ...claudeCodeSessions.events];
 
     return {
       generatedAt: new Date().toISOString(),
@@ -329,6 +443,7 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
           'runtime inventory • openclaw status --json',
           ownedCodex.sourceLabel,
           codexDiscovery.sourceLabel,
+          claudeCodeSessions.sourceLabel,
         ].filter(Boolean).join(' + '),
         gatewayLabel: parsed.gateway?.reachable
           ? `OpenClaw ${parsed.gateway?.self?.version ?? 'unknown'} • ${parsed.gateway?.mode ?? 'local'} gateway`
@@ -341,6 +456,7 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
             : 'Mirroring existing OpenClaw sessions first. New sessions should only appear when you explicitly spawn them.',
           ownedCodex.note,
           codexDiscovery.note,
+          claudeCodeSessions.note,
         ].filter(Boolean).join(' '),
       },
       squads: allSquads,
