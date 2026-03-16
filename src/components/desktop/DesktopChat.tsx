@@ -658,40 +658,59 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
       const data = await res.json();
       const serverEntries: MobileTranscriptEntry[] = data.transcript ?? data.entries ?? [];
 
-      // Preserve optimistic (local-*) messages that the server hasn't echoed yet.
-      // Only update state when data actually changed (prevents flicker/scroll jump).
+      // Append-only merge: never replace the full transcript (prevents old messages
+      // from re-appearing after compaction). Only genuinely new entries get appended.
       let didChange = false;
       setTranscript(prev => {
         const optimistic = prev.filter(m => m.id.startsWith('local-'));
         const realPrev = prev.filter(m => !m.id.startsWith('local-'));
 
-        // Check if server data actually changed
-        const serverChanged = realPrev.length !== serverEntries.length
-          || serverEntries.some((e, i) => realPrev[i]?.id !== e.id || realPrev[i]?.text !== e.text);
-
-        if (!serverChanged && !optimistic.length) return prev; // no change
-        if (!serverChanged && optimistic.length) {
-          // Server same, but check if optimistic messages were confirmed
-          const serverUserTexts = new Set(
-            serverEntries.filter(e => e.role === 'user').map(e => e.text)
-          );
-          const pending = optimistic.filter(m => !serverUserTexts.has(m.text));
-          if (pending.length === optimistic.length) return prev; // nothing changed
-          didChange = true;
-          if (!pending.length) return serverEntries;
-          return [...serverEntries, ...pending];
+        // First load — accept full transcript
+        if (realPrev.length === 0) {
+          didChange = serverEntries.length > 0;
+          return optimistic.length > 0 ? [...serverEntries, ...optimistic] : serverEntries;
         }
 
-        // Server changed — merge with any pending optimistic
-        didChange = true;
-        if (!optimistic.length) return serverEntries;
+        // Find where our last known message sits in the server response
+        const lastRealId = realPrev[realPrev.length - 1]?.id;
+        const serverIdx = serverEntries.findIndex(e => e.id === lastRealId);
 
+        let newFromServer: MobileTranscriptEntry[] = [];
+        if (serverIdx >= 0) {
+          // Found our last entry — only take entries after it
+          newFromServer = serverEntries.slice(serverIdx + 1);
+        } else {
+          // Last entry not found (compaction happened) — only add entries
+          // whose IDs we haven't seen (don't replace, don't reorder)
+          const existingIds = new Set(realPrev.map(e => e.id));
+          newFromServer = serverEntries.filter(e => !existingIds.has(e.id));
+          // Only add entries that appear AFTER the last timestamp we know about
+          // (prevents old messages from appearing at bottom)
+          if (newFromServer.length > 0 && realPrev.length > 0) {
+            const lastIdx = serverEntries.findIndex(e => e.id === newFromServer[0]?.id);
+            const lastKnownIdx = Math.max(...realPrev.map(e => serverEntries.findIndex(se => se.id === e.id)).filter(i => i >= 0));
+            if (lastKnownIdx >= 0) {
+              newFromServer = newFromServer.filter(e => {
+                const idx = serverEntries.indexOf(e);
+                return idx > lastKnownIdx;
+              });
+            }
+          }
+        }
+
+        // Clear confirmed optimistic messages
         const serverUserTexts = new Set(
-          serverEntries.filter(e => e.role === 'user').map(e => e.text)
+          [...realPrev, ...newFromServer].filter(e => e.role === 'user').map(e => e.text)
         );
-        const pending = optimistic.filter(m => !serverUserTexts.has(m.text));
-        if (!pending.length) return serverEntries;
-        return [...serverEntries, ...pending];
+        const pendingOptimistic = optimistic.filter(m => !serverUserTexts.has(m.text));
+
+        if (newFromServer.length === 0 && pendingOptimistic.length === optimistic.length) {
+          return prev; // nothing changed
+        }
+
+        didChange = newFromServer.length > 0;
+        const merged = [...realPrev, ...newFromServer];
+        return pendingOptimistic.length > 0 ? [...merged, ...pendingOptimistic] : merged;
       });
       setLoading(false);
       // Only scroll if user is already at bottom — never force-yank upward
