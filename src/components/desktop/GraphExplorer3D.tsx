@@ -622,9 +622,10 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
         border: '1px solid rgba(148, 163, 184, 0.08)',
       }}>
         {[
-          { label: 'Facts', value: (stats.totalFacts as number)?.toLocaleString() ?? '0', color: '#e2e8f0' },
-          { label: 'Active', value: (stats.confidenceHigh as number)?.toLocaleString() ?? '0', color: '#22c55e' },
-          { label: 'Clusters', value: String(clusters.length), color: '#3b82f6' },
+          { label: 'Active', value: (stats.activeFacts as number)?.toLocaleString() ?? '0', color: '#22c55e' },
+          { label: 'Retired', value: (stats.retiredFacts as number)?.toLocaleString() ?? '0', color: '#64748b' },
+          { label: 'Memories', value: (stats.totalMemories as number)?.toLocaleString() ?? '0', color: '#3b82f6' },
+          { label: 'Clusters', value: String(clusters.length), color: '#ef4444' },
         ].map(s => (
           <div key={s.label}>
             <div style={{ fontSize: 15, fontWeight: 700, color: s.color, fontFamily: '"SF Mono", ui-monospace, monospace' }}>{s.value}</div>
