@@ -10,6 +10,7 @@ import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { AlertBell } from '@/components/shared/AlertBell';
 import { AlertTray } from '@/components/shared/AlertTray';
 import { AlertToast } from '@/components/shared/AlertToast';
+import { NavRail, type NavSection } from '@/components/desktop/NavRail';
 
 export default function DashboardPage() {
   return (
@@ -27,6 +28,8 @@ function DashboardInner() {
   const [activeWorkspace, setActiveWorkspace] = useState<string | undefined>();
   const [showMemoryView, setShowMemoryView] = useState(false);
   const [alertTrayOpen, setAlertTrayOpen] = useState(false);
+  const [activeNavSection, setActiveNavSection] = useState<NavSection>('agents');
+  const [searchOpen, setSearchOpen] = useState(false);
 
   // ── Alert system ──
   const {
@@ -256,6 +259,19 @@ function DashboardInner() {
       fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif',
       overflow: 'hidden',
     }}>
+      {/* ── Nav Rail ── */}
+      <NavRail
+        activeSection={activeNavSection}
+        onSectionChange={(section) => {
+          setActiveNavSection(section);
+          if (section === 'memory') setShowMemoryView(true);
+          else setShowMemoryView(false);
+        }}
+        alertCount={unreadCount}
+        onAlertClick={() => setAlertTrayOpen(!alertTrayOpen)}
+        onSearchClick={() => setSearchOpen(true)}
+      />
+
       {/* ── Left: Agent Panel ── */}
       <div style={{
         width: leftWidth,
