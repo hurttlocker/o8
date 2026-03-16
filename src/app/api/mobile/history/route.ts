@@ -132,7 +132,8 @@ export async function GET(request: NextRequest) {
     }
 
     // OpenClaw sessions — use gateway chat.history
-    const transcript = await getSessionTranscript(sessionKey, limit);
+    const fresh = request.nextUrl.searchParams.get('fresh') === '1';
+    const transcript = await getSessionTranscript(sessionKey, limit, fresh);
     const payload: MobileHistoryResponse = {
       sessionKey,
       transcript,
