@@ -236,9 +236,10 @@ async function findLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
     const processes: LiveClaudeProcess[] = [];
     for (const pid of pids) {
       try {
-        // Use lsof -d cwd to get ONLY the working directory
+        // Use lsof -a -p PID -d cwd to get ONLY the working directory
+        // -a = AND mode (without it, -p and -d are OR'd, dumping all processes)
         const { stdout: cwdOut } = await execFileAsync(
-          'lsof', ['-p', String(pid), '-d', 'cwd', '-Fn'],
+          'lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'],
           { timeout: 2000 },
         );
         const cwdLine = cwdOut.split('\n').find((l) => l.startsWith('n/'));
