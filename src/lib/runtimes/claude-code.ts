@@ -222,14 +222,26 @@ interface LiveClaudeProcess {
 
 async function findLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
   try {
-    const { stdout } = await execFileAsync('pgrep', ['-f', 'claude'], { timeout: 3000 });
-    const pids = stdout.trim().split('\n').filter(Boolean).map(Number).filter(Boolean);
+    // Find Claude Code CLI processes (not Claude Desktop app)
+    const { stdout } = await execFileAsync(
+      'bash', ['-c', 'ps -eo pid=,command= | grep -E "claude (--|-)" | grep -v grep | grep -v ".app/"'],
+      { timeout: 3000 },
+    );
+    const pids: number[] = [];
+    for (const line of stdout.trim().split('\n').filter(Boolean)) {
+      const match = line.trim().match(/^(\d+)/);
+      if (match) pids.push(Number(match[1]));
+    }
 
     const processes: LiveClaudeProcess[] = [];
     for (const pid of pids) {
       try {
-        const { stdout: cwdOut } = await execFileAsync('lsof', ['-p', String(pid), '-Fn'], { timeout: 2000 });
-        const cwdLine = cwdOut.split('\n').find((l) => l.startsWith('n') && l.includes('/'));
+        // Use lsof -d cwd to get ONLY the working directory
+        const { stdout: cwdOut } = await execFileAsync(
+          'lsof', ['-p', String(pid), '-d', 'cwd', '-Fn'],
+          { timeout: 2000 },
+        );
+        const cwdLine = cwdOut.split('\n').find((l) => l.startsWith('n/'));
         processes.push({ pid, cwd: cwdLine?.slice(1) });
       } catch {
         processes.push({ pid });
