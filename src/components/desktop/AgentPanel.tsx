@@ -354,184 +354,181 @@ const AgentCard = memo(function AgentCard({
         </div>
       )}
 
-      {/* Expanded: full agent cards */}
-      {expanded && (
-        <div style={{
-          borderTop: '1px solid rgba(0,0,0,0.04)',
-          padding: '8px 10px 10px',
-          display: 'flex', flexDirection: 'column', gap: 8,
-        }}>
-          {group.agents.map(agent => {
-            const isRunning = agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy';
-            const agentDot = isRunning ? '#22c55e' : '#9ca3af';
-            const agentCtx = agent.context?.usedPercent ?? 0;
-            const agentName = agent.name.replace(/\s*\(.*\)/, '').split(' ')[0];
-            const fullName = agent.surfaceLabel || agent.name;
-            const branch = agent.currentTask || null;
-            const progress = agentCtx > 0 ? agentCtx / 100 : 0;
-            const model = agent.model ? agent.model.replace('claude-', '').replace(/-\d+$/, '') : '';
+      {/* Expanded: status-grouped agent cards */}
+      {expanded && (() => {
+        type AgentStatus = 'in_progress' | 'idle' | 'done';
+        const classify = (a: AgentDetail): AgentStatus => {
+          if (a.status === 'running' || a.status === 'watching' || a.status === 'healthy') return 'in_progress';
+          return 'idle';
+        };
+        const statusGroups: { key: AgentStatus; label: string; color: string; agents: AgentDetail[] }[] = [
+          { key: 'in_progress', label: 'In Progress', color: '#2563eb', agents: [] },
+          { key: 'idle', label: 'Idle', color: '#9ca3af', agents: [] },
+          { key: 'done', label: 'Done', color: '#22c55e', agents: [] },
+        ];
+        for (const agent of group.agents) {
+          const status = classify(agent);
+          statusGroups.find(g => g.key === status)?.agents.push(agent);
+        }
 
-            return (
-              <div
-                key={agent.id}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (agent.sessionKey && onSelectSession) {
-                    onSelectSession(agent.sessionKey);
-                  }
-                }}
-                style={{
-                  padding: '14px 14px 12px', borderRadius: 14,
-                  background: 'rgba(255,255,255,0.7)',
-                  border: '1px solid rgba(0,0,0,0.06)',
-                  backdropFilter: 'blur(20px)',
-                  WebkitBackdropFilter: 'blur(20px)',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-                  cursor: agent.sessionKey ? 'pointer' : 'default',
-                  transition: 'all 150ms ease',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.border = '1px solid rgba(37,99,235,0.15)';
-                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(37,99,235,0.06)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.border = '1px solid rgba(0,0,0,0.06)';
-                  e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)';
-                }}
-              >
-                {/* Row 1: Agent identity */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                  {/* Avatar circle */}
-                  <div style={{
-                    width: 34, height: 34, borderRadius: '50%',
-                    background: `linear-gradient(135deg, ${agentDot}22 0%, ${agentDot}0a 100%)`,
-                    border: `1.5px solid ${agentDot}44`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 14, fontWeight: 700, color: agentDot, flexShrink: 0,
-                  }}>
-                    {agentName[0]}
+        const renderCard = (agent: AgentDetail) => {
+          const isRunning = agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy';
+          const agentDot = isRunning ? '#22c55e' : '#9ca3af';
+          const agentCtx = agent.context?.usedPercent ?? 0;
+          const agentName = agent.name.replace(/\s*\(.*\)/, '').split(' ')[0];
+          const fullName = agent.surfaceLabel || agent.name;
+          const branch = agent.currentTask || null;
+          const progress = agentCtx > 0 ? agentCtx / 100 : 0;
+          const model = agent.model ? agent.model.replace('claude-', '').replace(/-\d+$/, '').replace('openai-codex/', '').replace('anthropic/', '') : '';
+
+          return (
+            <div
+              key={agent.id}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (agent.sessionKey && onSelectSession) onSelectSession(agent.sessionKey);
+              }}
+              style={{
+                padding: '12px', borderRadius: 12,
+                background: '#fff',
+                border: '1px solid rgba(0,0,0,0.06)',
+                cursor: agent.sessionKey ? 'pointer' : 'default',
+                transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.border = '1px solid rgba(37,99,235,0.12)';
+                e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.06)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.border = '1px solid rgba(0,0,0,0.06)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              {/* Identity row */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: 10,
+                  background: `${agentDot}0a`,
+                  border: `1.5px solid ${agentDot}30`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 13, fontWeight: 700, color: agentDot, flexShrink: 0,
+                  letterSpacing: '-0.02em',
+                }}>
+                  {agentName[0]}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#111827', letterSpacing: '-0.02em' }}>
+                      {fullName}
+                    </span>
                   </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{
-                        fontSize: 14, fontWeight: 700, color: '#1e293b',
-                        letterSpacing: '-0.01em',
-                      }}>{fullName}</span>
-                      <span style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 4,
-                        fontSize: 10, fontWeight: 500, color: agentDot,
-                        padding: '2px 7px 2px 5px', borderRadius: 99,
-                        background: `${agentDot}12`,
-                      }}>
-                        <span style={{
-                          width: 5, height: 5, borderRadius: '50%', background: agentDot,
-                          boxShadow: isRunning ? `0 0 6px ${agentDot}` : 'none',
-                        }} />
-                        {isRunning ? 'running' : 'idle'}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                    {model && (
+                      <span style={{ fontSize: 10, color: '#94a3b8', letterSpacing: '-0.01em' }}>
+                        {model}
                       </span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                      {model && (
-                        <span style={{ fontSize: 11, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 3 }}>
-                          <Cpu size={10} strokeWidth={1.8} />
-                          {model}
+                    )}
+                    {branch && (
+                      <>
+                        <span style={{ fontSize: 9, color: '#d1d5db' }}>·</span>
+                        <span style={{
+                          fontSize: 10, color: '#6b7280',
+                          fontFamily: 'SF Mono, Menlo, monospace',
+                          maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                          {branch}
                         </span>
-                      )}
-                      {branch && (
-                        <>
-                          <span style={{ fontSize: 11, color: '#cbd5e1' }}>·</span>
-                          <span style={{
-                            fontSize: 10, fontWeight: 500, color: '#6b7280',
-                            padding: '1px 6px', borderRadius: 5,
-                            background: 'rgba(0,0,0,0.04)',
-                            fontFamily: 'SF Mono, Menlo, monospace',
-                            maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                          }}>
-                            {branch}
-                          </span>
-                        </>
-                      )}
-                    </div>
+                      </>
+                    )}
                   </div>
-                  {/* Progress ring */}
-                  {progress > 0 && (
-                    <svg width={28} height={28} style={{ display: 'block', flexShrink: 0, transform: 'rotate(-90deg)' }}>
-                      <circle cx={14} cy={14} r={12} fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth={2.5} />
-                      <circle cx={14} cy={14} r={12} fill="none" stroke={ctxColor(agentCtx)} strokeWidth={2.5}
-                        strokeDasharray={2 * Math.PI * 12}
-                        strokeDashoffset={2 * Math.PI * 12 * (1 - progress)}
+                </div>
+                {/* Context ring */}
+                {progress > 0 && (
+                  <div style={{ position: 'relative', width: 32, height: 32, flexShrink: 0 }}>
+                    <svg width={32} height={32} style={{ display: 'block', transform: 'rotate(-90deg)' }}>
+                      <circle cx={16} cy={16} r={13} fill="none" stroke="rgba(0,0,0,0.04)" strokeWidth={2} />
+                      <circle cx={16} cy={16} r={13} fill="none" stroke={ctxColor(agentCtx)} strokeWidth={2}
+                        strokeDasharray={2 * Math.PI * 13}
+                        strokeDashoffset={2 * Math.PI * 13 * (1 - progress)}
                         strokeLinecap="round"
                         style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(0.32, 0.72, 0, 1)' }}
                       />
                     </svg>
-                  )}
-                </div>
-
-                {/* Row 2: Timeline + diff stats + context */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  {/* Timeline bar — fills available space */}
-                  <div style={{
-                    display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden',
-                    flex: 1, background: 'rgba(0,0,0,0.04)',
-                  }}>
-                    {isRunning ? (
-                      <>
-                        <div style={{ flex: 0.5, background: '#2563eb' }} />
-                        <div style={{ flex: 0.2, background: '#93c5fd', borderLeft: '0.5px solid rgba(255,255,255,0.5)' }} />
-                        <div style={{ flex: 0.15, background: '#f59e0b', borderLeft: '0.5px solid rgba(255,255,255,0.5)' }} />
-                        <div style={{ flex: 0.15, background: '#e5e7eb', borderLeft: '0.5px solid rgba(255,255,255,0.5)' }} />
-                      </>
-                    ) : (
-                      <div style={{ flex: 1, background: '#e5e7eb' }} />
-                    )}
-                  </div>
-
-                  {/* Diff stats (mock for now — will wire to real git data) */}
-                  {isRunning && (
                     <span style={{
-                      fontSize: 11, fontWeight: 700, flexShrink: 0,
+                      position: 'absolute', inset: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 8, fontWeight: 800, color: ctxColor(agentCtx),
                       fontFamily: 'SF Mono, Menlo, monospace',
                     }}>
-                      <span style={{ color: '#22c55e' }}>+{Math.floor(Math.random() * 500 + 50)}</span>
-                      {' '}
-                      <span style={{ color: '#ef4444' }}>-{Math.floor(Math.random() * 100 + 5)}</span>
+                      {agentCtx}
                     </span>
-                  )}
-
-                  {/* Context % */}
-                  {agentCtx > 0 && (
-                    <span style={{
-                      fontSize: 11, fontWeight: 700, flexShrink: 0,
-                      color: ctxColor(agentCtx),
-                      fontFamily: 'SF Mono, Menlo, monospace',
-                    }}>
-                      ctx {agentCtx}%
-                    </span>
-                  )}
-                </div>
-
-                {/* Row 3: Context bar */}
-                {agentCtx > 0 && (
-                  <div style={{ marginTop: 6 }}>
-                    <div style={{
-                      height: 3, borderRadius: 2,
-                      background: 'rgba(0,0,0,0.04)', overflow: 'hidden',
-                    }}>
-                      <div style={{
-                        height: '100%',
-                        width: `${Math.min(agentCtx, 100)}%`,
-                        borderRadius: 2,
-                        background: ctxColor(agentCtx),
-                        transition: 'width 300ms ease',
-                      }} />
-                    </div>
                   </div>
                 )}
               </div>
-            );
-          })}
-        </div>
-      )}
+
+              {/* Timeline + stats row */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+                <div style={{
+                  display: 'flex', height: 4, borderRadius: 2, overflow: 'hidden',
+                  flex: 1, background: 'rgba(0,0,0,0.03)',
+                }}>
+                  {isRunning ? (
+                    <>
+                      <div style={{ flex: 0.5, background: '#2563eb' }} />
+                      <div style={{ flex: 0.2, background: '#93c5fd' }} />
+                      <div style={{ flex: 0.15, background: '#f59e0b' }} />
+                      <div style={{ flex: 0.15, background: '#e5e7eb' }} />
+                    </>
+                  ) : (
+                    <div style={{ flex: 1, background: ctxColor(agentCtx) || '#e5e7eb' }} />
+                  )}
+                </div>
+                {agentCtx > 0 && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, color: '#94a3b8', flexShrink: 0,
+                    fontFamily: 'SF Mono, Menlo, monospace',
+                  }}>
+                    ctx {agentCtx}%
+                  </span>
+                )}
+              </div>
+            </div>
+          );
+        };
+
+        return (
+          <div style={{
+            borderTop: '1px solid rgba(0,0,0,0.04)',
+            padding: '6px 10px 10px',
+          }}>
+            {statusGroups.filter(g => g.agents.length > 0).map(g => (
+              <div key={g.key} style={{ marginTop: 8 }}>
+                <div style={{
+                  fontSize: 10, fontWeight: 700, color: g.color,
+                  textTransform: 'uppercase', letterSpacing: '0.04em',
+                  marginBottom: 6, padding: '0 2px',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                  <span style={{
+                    width: 5, height: 5, borderRadius: '50%', background: g.color,
+                    display: 'block',
+                  }} />
+                  {g.label}
+                  <span style={{
+                    fontSize: 9, fontWeight: 600, color: '#9ca3af',
+                    marginLeft: 'auto',
+                  }}>
+                    {g.agents.length}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {g.agents.map(renderCard)}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
     </div>
   );
 });
