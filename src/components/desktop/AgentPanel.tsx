@@ -114,7 +114,7 @@ interface FileNode {
   children?: FileNode[];
 }
 
-type Tab = 'activity' | 'issues' | 'prs' | 'files' | 'ci' | 'deploy';
+type Tab = 'activity' | 'issues' | 'prs' | 'files' | 'ci' | 'deploy' | 'memory';
 
 // ── Status colors ──
 
@@ -1336,6 +1336,7 @@ const tabs: { id: Tab; icon: typeof Zap; label: string }[] = [
   { id: 'files', icon: Folder, label: 'Files' },
   { id: 'ci', icon: PlayCircle, label: 'CI' },
   { id: 'deploy', icon: Globe, label: 'Deploy' },
+  { id: 'memory', icon: Cpu, label: 'Memory' },
 ];
 
 // ── Main Panel ──
@@ -1351,6 +1352,7 @@ export const AgentPanel = memo(function AgentPanel({
   onCreateIssue,
   onOpenGitLog,
   onOpenDeploy,
+  onOpenMemory,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
@@ -1362,6 +1364,7 @@ export const AgentPanel = memo(function AgentPanel({
   onCreateIssue?: (repo?: string) => void;
   onOpenGitLog?: (workspace?: string) => void;
   onOpenDeploy?: (project?: string) => void;
+  onOpenMemory?: () => void;
 } = {}) {
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([]);
@@ -1729,6 +1732,38 @@ export const AgentPanel = memo(function AgentPanel({
         {activeTab === 'files' ? <FileTree tree={fileTree} changedFiles={changedFiles} onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)} /> : null}
         {activeTab === 'ci' ? <CIList repo={activeRepo} onOpenCI={onOpenCI} /> : null}
         {activeTab === 'deploy' ? <DeployList onOpenDeploy={onOpenDeploy} /> : null}
+        {activeTab === 'memory' ? (
+          <div style={{ padding: 14 }}>
+            <button
+              type="button"
+              onClick={() => onOpenMemory?.()}
+              style={{
+                width: '100%',
+                paddingTop: 12,
+                paddingRight: 16,
+                paddingBottom: 12,
+                paddingLeft: 16,
+                borderRadius: 10,
+                border: '1px solid rgba(0,0,0,0.06)',
+                background: 'linear-gradient(135deg, #0a0e1a 0%, #1e293b 100%)',
+                color: '#e2e8f0',
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              <Cpu size={16} strokeWidth={1.8} style={{ color: '#3b82f6' }} />
+              Open Memory Visualization
+            </button>
+            <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 8, lineHeight: 1.5 }}>
+              Living particle view of Cortex knowledge. Heavy facts sink, fresh facts float. Hover to inspect.
+            </p>
+          </div>
+        ) : null}
       </div>
 
       {/* ── Issue Detail Modal ── */}

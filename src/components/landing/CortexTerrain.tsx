@@ -241,12 +241,18 @@ export default function CortexTerrain() {
 
     const resize = () => {
       const dpr = window.devicePixelRatio || 1;
-      const rect = canvas.getBoundingClientRect();
-      canvas.width = rect.width * dpr;
-      canvas.height = rect.height * dpr;
+      // Force canvas to fill parent — getBoundingClientRect can return 0 if parent isn't sized yet
+      const parent = canvas.parentElement;
+      const w = parent ? parent.clientWidth : window.innerWidth;
+      const h = parent ? parent.clientHeight : window.innerHeight;
+      canvas.style.width = w + "px";
+      canvas.style.height = h + "px";
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
-    resize();
+    // Delay first resize to let layout settle
+    requestAnimationFrame(resize);
     window.addEventListener("resize", resize);
 
     const handleMouse = (e: MouseEvent) => {
@@ -279,8 +285,8 @@ export default function CortexTerrain() {
       const w = rect.width;
       const h = rect.height;
       const cx = w / 2;
-      const cy = h * 0.55; // Offset down to show more of the top
-      const scale = Math.min(w, h) / 700;
+      const cy = h * 0.7; // Push origin low — bars grow upward from bottom
+      const scale = Math.min(w, h) / 480; // Fill the space dramatically
 
       // Smooth rotation lerp
       rotRef.current.y += (targetRotRef.current.y - rotRef.current.y) * 0.03;
@@ -467,11 +473,10 @@ export default function CortexTerrain() {
   }, []);
 
   return (
-    <div className="relative h-full w-full">
+    <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <canvas
         ref={canvasRef}
-        className="h-full w-full"
-        style={{ display: "block", cursor: "crosshair" }}
+        style={{ display: "block", width: "100%", height: "100%", cursor: "crosshair" }}
       />
 
       {/* Hover tooltip */}
@@ -481,21 +486,25 @@ export default function CortexTerrain() {
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
-            className="pointer-events-none absolute z-20 rounded-lg border px-3 py-2"
             style={{
-              left: Math.min(hoverInfo.screenX + 16, (typeof window !== 'undefined' ? window.innerWidth - 200 : 400)),
+              position: "absolute",
+              zIndex: 20,
+              pointerEvents: "none",
+              borderRadius: 10,
+              border: `1px solid ${hoverInfo.color}40`,
+              padding: "8px 14px",
+              left: Math.min(hoverInfo.screenX + 16, (typeof window !== 'undefined' ? window.innerWidth - 220 : 400)),
               top: hoverInfo.screenY - 10,
               background: "rgba(9, 9, 11, 0.92)",
-              borderColor: hoverInfo.color + "40",
               backdropFilter: "blur(10px)",
-              boxShadow: `0 0 20px ${hoverInfo.color}15`,
+              boxShadow: `0 0 24px ${hoverInfo.color}15`,
             }}
           >
-            <div className="flex items-center gap-2">
-              <div className="h-2 w-2 rounded-full" style={{ background: hoverInfo.color, boxShadow: `0 0 6px ${hoverInfo.color}` }} />
-              <span className="text-xs font-semibold text-white">{hoverInfo.label}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: hoverInfo.color, boxShadow: `0 0 8px ${hoverInfo.color}` }} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>{hoverInfo.label}</span>
             </div>
-            <div className="mt-0.5 text-[10px] text-zinc-500">
+            <div style={{ marginTop: 2, fontSize: 11, color: "#71717a" }}>
               {hoverInfo.category} · density {Math.round(hoverInfo.height * 100)}%
             </div>
           </motion.div>
