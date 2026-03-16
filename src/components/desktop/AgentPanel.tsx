@@ -343,16 +343,26 @@ const AgentCard = memo(function AgentCard({
         </div>
       )}
 
-      {/* Expanded: individual agents as clickable rows */}
+      {/* Expanded: workspace-style agent cards */}
       {expanded && (
         <div style={{
           borderTop: '1px solid rgba(0,0,0,0.04)',
-          paddingTop: 4, paddingBottom: 6,
+          padding: '8px 10px 10px',
+          display: 'flex', flexDirection: 'column', gap: 6,
         }}>
           {group.agents.map(agent => {
             const isRunning = agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy';
-            const agentColor = isRunning ? '#22c55e' : '#9ca3af';
+            const agentDot = isRunning ? '#22c55e' : '#9ca3af';
             const agentCtx = agent.context?.usedPercent ?? 0;
+            const agentName = agent.name.replace(/\s*\(.*\)/, '').split(' ')[0];
+            // Derive a branch name from workspace or current task
+            const branch = agent.currentTask
+              ? agent.currentTask.length > 30
+                ? agent.currentTask.slice(0, 27) + '...'
+                : agent.currentTask
+              : null;
+            // Progress ring: use context as proxy for activity progress
+            const progress = agentCtx > 0 ? agentCtx / 100 : 0;
 
             return (
               <div
@@ -365,34 +375,60 @@ const AgentCard = memo(function AgentCard({
                 }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '8px 14px 8px 16px',
+                  padding: '10px 12px', borderRadius: 12,
+                  background: 'rgba(0,0,0,0.02)',
+                  border: '1px solid rgba(0,0,0,0.05)',
                   cursor: agent.sessionKey ? 'pointer' : 'default',
-                  transition: 'background 100ms',
+                  transition: 'background 120ms',
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(37,99,235,0.04)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.04)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.02)'; }}
               >
+                {/* Agent dot + name */}
                 <span style={{
                   width: 8, height: 8, borderRadius: '50%',
-                  background: agentColor, display: 'block', flexShrink: 0,
-                  boxShadow: isRunning ? `0 0 6px ${agentColor}` : 'none',
+                  background: agentDot, display: 'block', flexShrink: 0,
+                  boxShadow: isRunning ? `0 0 6px ${agentDot}` : 'none',
                 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontSize: 12, fontWeight: 600, color: '#374151',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                <span style={{
+                  fontSize: 13, fontWeight: 700, color: '#374151',
+                  flexShrink: 0, letterSpacing: '-0.01em',
+                }}>
+                  {agentName}
+                </span>
+
+                {/* Branch pill */}
+                {branch && (
+                  <span style={{
+                    fontSize: 9, fontWeight: 500, color: '#6b7280',
+                    padding: '2px 6px', borderRadius: 5,
+                    background: 'rgba(0,0,0,0.04)',
+                    fontFamily: 'SF Mono, Menlo, monospace',
+                    maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    flexShrink: 1, minWidth: 0,
                   }}>
-                    {agent.surfaceLabel || agent.name}
-                  </div>
-                  {agent.currentTask && (
-                    <div style={{
-                      fontSize: 10, color: '#9ca3af', marginTop: 1,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
-                      {agent.currentTask}
-                    </div>
+                    {branch}
+                  </span>
+                )}
+
+                {/* Mini timeline bar */}
+                <div style={{
+                  display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden',
+                  width: 80, flexShrink: 0, background: 'rgba(0,0,0,0.04)',
+                }}>
+                  {isRunning ? (
+                    <>
+                      <div style={{ flex: 0.6, background: '#2563eb' }} />
+                      <div style={{ flex: 0.2, background: '#93c5fd', borderLeft: '0.5px solid rgba(255,255,255,0.5)' }} />
+                      <div style={{ flex: 0.1, background: '#f59e0b', borderLeft: '0.5px solid rgba(255,255,255,0.5)' }} />
+                      <div style={{ flex: 0.1, background: '#e5e7eb', borderLeft: '0.5px solid rgba(255,255,255,0.5)' }} />
+                    </>
+                  ) : (
+                    <div style={{ flex: 1, background: '#e5e7eb' }} />
                   )}
                 </div>
+
+                {/* Context % as monospace */}
                 {agentCtx > 0 && (
                   <span style={{
                     fontSize: 10, fontWeight: 600, flexShrink: 0,
@@ -402,9 +438,19 @@ const AgentCard = memo(function AgentCard({
                     {agentCtx}%
                   </span>
                 )}
-                <span style={{ fontSize: 10, color: '#94a3b8', flexShrink: 0 }}>
-                  {agent.lastEventAt}
-                </span>
+
+                {/* Progress ring */}
+                {progress > 0 && (
+                  <svg width={20} height={20} style={{ display: 'block', flexShrink: 0, transform: 'rotate(-90deg)' }}>
+                    <circle cx={10} cy={10} r={8.5} fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth={2.5} />
+                    <circle cx={10} cy={10} r={8.5} fill="none" stroke="#2563eb" strokeWidth={2.5}
+                      strokeDasharray={2 * Math.PI * 8.5}
+                      strokeDashoffset={2 * Math.PI * 8.5 * (1 - progress)}
+                      strokeLinecap="round"
+                      style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(0.32, 0.72, 0, 1)' }}
+                    />
+                  </svg>
+                )}
               </div>
             );
           })}
