@@ -354,26 +354,22 @@ const AgentCard = memo(function AgentCard({
         </div>
       )}
 
-      {/* Expanded: workspace-style agent cards */}
+      {/* Expanded: full agent cards */}
       {expanded && (
         <div style={{
           borderTop: '1px solid rgba(0,0,0,0.04)',
           padding: '8px 10px 10px',
-          display: 'flex', flexDirection: 'column', gap: 6,
+          display: 'flex', flexDirection: 'column', gap: 8,
         }}>
           {group.agents.map(agent => {
             const isRunning = agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy';
             const agentDot = isRunning ? '#22c55e' : '#9ca3af';
             const agentCtx = agent.context?.usedPercent ?? 0;
             const agentName = agent.name.replace(/\s*\(.*\)/, '').split(' ')[0];
-            // Derive a branch name from workspace or current task
-            const branch = agent.currentTask
-              ? agent.currentTask.length > 30
-                ? agent.currentTask.slice(0, 27) + '...'
-                : agent.currentTask
-              : null;
-            // Progress ring: use context as proxy for activity progress
+            const fullName = agent.surfaceLabel || agent.name;
+            const branch = agent.currentTask || null;
             const progress = agentCtx > 0 ? agentCtx / 100 : 0;
+            const model = agent.model ? agent.model.replace('claude-', '').replace(/-\d+$/, '') : '';
 
             return (
               <div
@@ -385,82 +381,151 @@ const AgentCard = memo(function AgentCard({
                   }
                 }}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '10px 12px', borderRadius: 12,
-                  background: 'rgba(0,0,0,0.02)',
-                  border: '1px solid rgba(0,0,0,0.05)',
+                  padding: '14px 14px 12px', borderRadius: 14,
+                  background: 'rgba(255,255,255,0.7)',
+                  border: '1px solid rgba(0,0,0,0.06)',
+                  backdropFilter: 'blur(20px)',
+                  WebkitBackdropFilter: 'blur(20px)',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                   cursor: agent.sessionKey ? 'pointer' : 'default',
-                  transition: 'background 120ms',
+                  transition: 'all 150ms ease',
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.04)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.02)'; }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.border = '1px solid rgba(37,99,235,0.15)';
+                  e.currentTarget.style.boxShadow = '0 2px 8px rgba(37,99,235,0.06)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.border = '1px solid rgba(0,0,0,0.06)';
+                  e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.04)';
+                }}
               >
-                {/* Agent dot + name */}
-                <span style={{
-                  width: 8, height: 8, borderRadius: '50%',
-                  background: agentDot, display: 'block', flexShrink: 0,
-                  boxShadow: isRunning ? `0 0 6px ${agentDot}` : 'none',
-                }} />
-                <span style={{
-                  fontSize: 13, fontWeight: 700, color: '#374151',
-                  flexShrink: 0, letterSpacing: '-0.01em',
-                }}>
-                  {agentName}
-                </span>
-
-                {/* Branch pill */}
-                {branch && (
-                  <span style={{
-                    fontSize: 9, fontWeight: 500, color: '#6b7280',
-                    padding: '2px 6px', borderRadius: 5,
-                    background: 'rgba(0,0,0,0.04)',
-                    fontFamily: 'SF Mono, Menlo, monospace',
-                    maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    flexShrink: 1, minWidth: 0,
+                {/* Row 1: Agent identity */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  {/* Avatar circle */}
+                  <div style={{
+                    width: 34, height: 34, borderRadius: '50%',
+                    background: `linear-gradient(135deg, ${agentDot}22 0%, ${agentDot}0a 100%)`,
+                    border: `1.5px solid ${agentDot}44`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 14, fontWeight: 700, color: agentDot, flexShrink: 0,
                   }}>
-                    {branch}
-                  </span>
-                )}
-
-                {/* Mini timeline bar */}
-                <div style={{
-                  display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden',
-                  width: 80, flexShrink: 0, background: 'rgba(0,0,0,0.04)',
-                }}>
-                  {isRunning ? (
-                    <>
-                      <div style={{ flex: 0.6, background: '#2563eb' }} />
-                      <div style={{ flex: 0.2, background: '#93c5fd', borderLeft: '0.5px solid rgba(255,255,255,0.5)' }} />
-                      <div style={{ flex: 0.1, background: '#f59e0b', borderLeft: '0.5px solid rgba(255,255,255,0.5)' }} />
-                      <div style={{ flex: 0.1, background: '#e5e7eb', borderLeft: '0.5px solid rgba(255,255,255,0.5)' }} />
-                    </>
-                  ) : (
-                    <div style={{ flex: 1, background: '#e5e7eb' }} />
+                    {agentName[0]}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{
+                        fontSize: 14, fontWeight: 700, color: '#1e293b',
+                        letterSpacing: '-0.01em',
+                      }}>{fullName}</span>
+                      <span style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 4,
+                        fontSize: 10, fontWeight: 500, color: agentDot,
+                        padding: '2px 7px 2px 5px', borderRadius: 99,
+                        background: `${agentDot}12`,
+                      }}>
+                        <span style={{
+                          width: 5, height: 5, borderRadius: '50%', background: agentDot,
+                          boxShadow: isRunning ? `0 0 6px ${agentDot}` : 'none',
+                        }} />
+                        {isRunning ? 'running' : 'idle'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                      {model && (
+                        <span style={{ fontSize: 11, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 3 }}>
+                          <Cpu size={10} strokeWidth={1.8} />
+                          {model}
+                        </span>
+                      )}
+                      {branch && (
+                        <>
+                          <span style={{ fontSize: 11, color: '#cbd5e1' }}>·</span>
+                          <span style={{
+                            fontSize: 10, fontWeight: 500, color: '#6b7280',
+                            padding: '1px 6px', borderRadius: 5,
+                            background: 'rgba(0,0,0,0.04)',
+                            fontFamily: 'SF Mono, Menlo, monospace',
+                            maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                            {branch}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {/* Progress ring */}
+                  {progress > 0 && (
+                    <svg width={28} height={28} style={{ display: 'block', flexShrink: 0, transform: 'rotate(-90deg)' }}>
+                      <circle cx={14} cy={14} r={12} fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth={2.5} />
+                      <circle cx={14} cy={14} r={12} fill="none" stroke={ctxColor(agentCtx)} strokeWidth={2.5}
+                        strokeDasharray={2 * Math.PI * 12}
+                        strokeDashoffset={2 * Math.PI * 12 * (1 - progress)}
+                        strokeLinecap="round"
+                        style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(0.32, 0.72, 0, 1)' }}
+                      />
+                    </svg>
                   )}
                 </div>
 
-                {/* Context % as monospace */}
-                {agentCtx > 0 && (
-                  <span style={{
-                    fontSize: 10, fontWeight: 600, flexShrink: 0,
-                    color: ctxColor(agentCtx),
-                    fontFamily: 'SF Mono, Menlo, monospace',
+                {/* Row 2: Timeline + diff stats + context */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {/* Timeline bar — fills available space */}
+                  <div style={{
+                    display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden',
+                    flex: 1, background: 'rgba(0,0,0,0.04)',
                   }}>
-                    {agentCtx}%
-                  </span>
-                )}
+                    {isRunning ? (
+                      <>
+                        <div style={{ flex: 0.5, background: '#2563eb' }} />
+                        <div style={{ flex: 0.2, background: '#93c5fd', borderLeft: '0.5px solid rgba(255,255,255,0.5)' }} />
+                        <div style={{ flex: 0.15, background: '#f59e0b', borderLeft: '0.5px solid rgba(255,255,255,0.5)' }} />
+                        <div style={{ flex: 0.15, background: '#e5e7eb', borderLeft: '0.5px solid rgba(255,255,255,0.5)' }} />
+                      </>
+                    ) : (
+                      <div style={{ flex: 1, background: '#e5e7eb' }} />
+                    )}
+                  </div>
 
-                {/* Progress ring */}
-                {progress > 0 && (
-                  <svg width={20} height={20} style={{ display: 'block', flexShrink: 0, transform: 'rotate(-90deg)' }}>
-                    <circle cx={10} cy={10} r={8.5} fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth={2.5} />
-                    <circle cx={10} cy={10} r={8.5} fill="none" stroke="#2563eb" strokeWidth={2.5}
-                      strokeDasharray={2 * Math.PI * 8.5}
-                      strokeDashoffset={2 * Math.PI * 8.5 * (1 - progress)}
-                      strokeLinecap="round"
-                      style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(0.32, 0.72, 0, 1)' }}
-                    />
-                  </svg>
+                  {/* Diff stats (mock for now — will wire to real git data) */}
+                  {isRunning && (
+                    <span style={{
+                      fontSize: 11, fontWeight: 700, flexShrink: 0,
+                      fontFamily: 'SF Mono, Menlo, monospace',
+                    }}>
+                      <span style={{ color: '#22c55e' }}>+{Math.floor(Math.random() * 500 + 50)}</span>
+                      {' '}
+                      <span style={{ color: '#ef4444' }}>-{Math.floor(Math.random() * 100 + 5)}</span>
+                    </span>
+                  )}
+
+                  {/* Context % */}
+                  {agentCtx > 0 && (
+                    <span style={{
+                      fontSize: 11, fontWeight: 700, flexShrink: 0,
+                      color: ctxColor(agentCtx),
+                      fontFamily: 'SF Mono, Menlo, monospace',
+                    }}>
+                      ctx {agentCtx}%
+                    </span>
+                  )}
+                </div>
+
+                {/* Row 3: Context bar */}
+                {agentCtx > 0 && (
+                  <div style={{ marginTop: 6 }}>
+                    <div style={{
+                      height: 3, borderRadius: 2,
+                      background: 'rgba(0,0,0,0.04)', overflow: 'hidden',
+                    }}>
+                      <div style={{
+                        height: '100%',
+                        width: `${Math.min(agentCtx, 100)}%`,
+                        borderRadius: 2,
+                        background: ctxColor(agentCtx),
+                        transition: 'width 300ms ease',
+                      }} />
+                    </div>
+                  </div>
                 )}
               </div>
             );
