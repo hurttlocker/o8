@@ -96,19 +96,31 @@ export async function mobileSyncOnce({
       const newEntries = data.history.entries;
       setHistoryBySession((current) => {
         const prev = current[sk] ?? [];
+        if (prev.length === 0) return { ...current, [sk]: newEntries };
+
+        // If we sent a sinceId (incremental delta), only append truly new entries
         if (historyLastId) {
           const existingIds = new Set(prev.map((e) => e.id));
           const genuinelyNew = newEntries.filter((e) => !existingIds.has(e.id));
           if (genuinelyNew.length === 0) return current;
           return { ...current, [sk]: [...prev, ...genuinelyNew] };
         }
-        if (
-          prev.length === newEntries.length
-          && prev.length > 0
-          && prev[prev.length - 1]?.id === newEntries[newEntries.length - 1]?.id
-          && prev[prev.length - 1]?.text === newEntries[newEntries.length - 1]?.text
-        ) return current;
-        return { ...current, [sk]: newEntries };
+
+        // Full refresh (no sinceId) — server returned full transcript.
+        // Only append entries that appear AFTER our last known entry in the server's order.
+        const lastPrevId = prev[prev.length - 1]?.id;
+        const serverIdx = newEntries.findIndex((e) => e.id === lastPrevId);
+        if (serverIdx >= 0) {
+          // Found our last entry in server response — append anything after it
+          const afterLast = newEntries.slice(serverIdx + 1);
+          if (afterLast.length === 0) return current;
+          return { ...current, [sk]: [...prev, ...afterLast] };
+        }
+
+        // Our last entry not found in server response (compaction happened).
+        // Keep existing entries, don't replace — prevents old messages showing up.
+        // New entries from delta polling will catch up.
+        return current;
       });
     }
 
@@ -121,18 +133,24 @@ export async function mobileSyncOnce({
       const newEntries = data.linked.entries;
       setHistoryBySession((current) => {
         const prev = current[sk] ?? [];
+        if (prev.length === 0) return { ...current, [sk]: newEntries };
+
         if (linkedLastId) {
           const existingIds = new Set(prev.map((e) => e.id));
           const genuinelyNew = newEntries.filter((e) => !existingIds.has(e.id));
           if (genuinelyNew.length === 0) return current;
           return { ...current, [sk]: [...prev, ...genuinelyNew] };
         }
-        if (
-          prev.length === newEntries.length
-          && prev.length > 0
-          && prev[prev.length - 1]?.id === newEntries[newEntries.length - 1]?.id
-        ) return current;
-        return { ...current, [sk]: newEntries };
+
+        const lastPrevId = prev[prev.length - 1]?.id;
+        const serverIdx = newEntries.findIndex((e) => e.id === lastPrevId);
+        if (serverIdx >= 0) {
+          const afterLast = newEntries.slice(serverIdx + 1);
+          if (afterLast.length === 0) return current;
+          return { ...current, [sk]: [...prev, ...afterLast] };
+        }
+
+        return current;
       });
     }
 
@@ -216,11 +234,20 @@ export async function loadSessionHistory({
       ) {
         return current;
       }
-      const existingIds = new Set(prev.filter((entry) => !entry.id.startsWith('optimistic-')).map((entry) => entry.id));
-      const newServerEntries = next.filter((entry) => !existingIds.has(entry.id));
-      if (newServerEntries.length === 0 && prev.length >= next.length) {
+      // Find our last non-optimistic entry in the server response
+      const lastRealEntry = [...prev].reverse().find((e) => !e.id.startsWith('optimistic-'));
+      if (lastRealEntry) {
+        const serverIdx = next.findIndex((e) => e.id === lastRealEntry.id);
+        if (serverIdx >= 0) {
+          // Append only entries after our last known
+          const afterLast = next.slice(serverIdx + 1);
+          if (afterLast.length === 0) return current;
+          return { ...current, [sessionKey]: [...prev, ...afterLast] };
+        }
+        // Last entry not found (compaction) — keep existing, don't replace
         return current;
       }
+      // No real entries yet — accept full transcript
       return { ...current, [sessionKey]: next };
     });
     setHistoryGroupsBySession((current) => {
