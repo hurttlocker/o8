@@ -600,7 +600,7 @@ function DashboardInner() {
       </div>{/* end main layout */}
 
       {/* ── Thoughts Card (floating overlay — sits on top of everything) ── */}
-      <ThoughtsCard open={thoughtsOpen} onClose={() => setThoughtsOpen(false)} />
+      <ThoughtsCard open={thoughtsOpen} onClose={() => setThoughtsOpen(false)} agents={JSON.parse(agentsJson)} />
     </div>
   );
 }
