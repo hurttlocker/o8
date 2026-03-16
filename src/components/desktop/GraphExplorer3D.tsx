@@ -520,28 +520,34 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
         ctx.fillRect(bar.sx - bar.barW / 2, bar.sy, bar.barW, reflH);
       }
 
-      // ── Draw Bars (with vertical gradient) ──
+      // ── Draw Bars (with vertical gradient + depth fog) ──
+      // Compute depth range for fog
+      const depths = bars.map(b => b.depth);
+      const minDepth = Math.min(...depths);
+      const maxDepth = Math.max(...depths);
+      const depthRange = Math.max(maxDepth - minDepth, 1);
+
       for (const bar of bars) {
-        const alpha = 0.85 + bar.cell.height * 0.15;
+        // Depth fog: far bars fade out
+        const depthNorm = (bar.depth - minDepth) / depthRange; // 0 = near, 1 = far
+        const fogFactor = 1 - depthNorm * 0.55; // far bars retain 45% visibility
+        const alpha = (0.85 + bar.cell.height * 0.15) * fogFactor;
         const rgb = hexToRgbStr(bar.cell.cluster.color);
 
         // Vertical gradient: dark base → category color → bright tip
-        const barGrad = ctx.createLinearGradient(
-          bar.sx, bar.sy,       // bottom (base)
-          bar.sx, bar.topY,     // top (peak)
-        );
-        barGrad.addColorStop(0, `rgba(${rgb}, ${0.3 * alpha * bar.cell.highlight})`);   // dark base
-        barGrad.addColorStop(0.4, `rgba(${rgb}, ${0.7 * alpha * bar.cell.highlight})`);  // mid
-        barGrad.addColorStop(0.8, `rgba(${rgb}, ${alpha * bar.cell.highlight})`);         // bright
-        barGrad.addColorStop(1, `rgba(${Math.min(parseInt(rgb), 255)}, ${Math.min(parseInt(rgb.split(', ')[1]), 255)}, ${Math.min(parseInt(rgb.split(', ')[2]), 255)}, ${alpha * bar.cell.highlight})`); // tip
+        const barGrad = ctx.createLinearGradient(bar.sx, bar.sy, bar.sx, bar.topY);
+        barGrad.addColorStop(0, `rgba(${rgb}, ${0.25 * alpha * bar.cell.highlight})`);
+        barGrad.addColorStop(0.35, `rgba(${rgb}, ${0.65 * alpha * bar.cell.highlight})`);
+        barGrad.addColorStop(0.75, `rgba(${rgb}, ${alpha * bar.cell.highlight})`);
+        barGrad.addColorStop(1, `rgba(${rgb}, ${alpha * bar.cell.highlight})`);
 
         ctx.fillStyle = barGrad;
         ctx.fillRect(bar.sx - bar.barW / 2, bar.topY, bar.barW, bar.barH);
 
-        // White-hot top cap (brighter than before)
+        // White-hot top cap
         const capRgb = rgb.split(', ').map(v => Math.min(parseInt(v) + 80, 255)).join(', ');
-        ctx.globalAlpha = bar.cell.highlight;
-        ctx.fillStyle = `rgba(${capRgb}, ${0.95})`;
+        ctx.globalAlpha = bar.cell.highlight * fogFactor;
+        ctx.fillStyle = `rgba(${capRgb}, 0.95)`;
         ctx.fillRect(bar.sx - bar.barW / 2, bar.topY, bar.barW, Math.max(1, bar.barW * 0.5));
         ctx.globalAlpha = 1;
 
@@ -549,8 +555,8 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
         if (bar.cell.glowIntensity > 0 && bar.cell.highlight > 0.5) {
           const glowR = 8 + bar.cell.glowIntensity * 15;
           const grad = ctx.createRadialGradient(bar.sx, bar.topY, 0, bar.sx, bar.topY, glowR * scale);
-          grad.addColorStop(0, `rgba(${capRgb}, ${0.5 * bar.cell.glowIntensity})`);
-          grad.addColorStop(0.5, `rgba(${rgb}, ${0.15 * bar.cell.glowIntensity})`);
+          grad.addColorStop(0, `rgba(${capRgb}, ${0.5 * bar.cell.glowIntensity * fogFactor})`);
+          grad.addColorStop(0.5, `rgba(${rgb}, ${0.15 * bar.cell.glowIntensity * fogFactor})`);
           grad.addColorStop(1, 'transparent');
           ctx.fillStyle = grad;
           ctx.beginPath();
@@ -560,7 +566,7 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
 
         // Light lines from peaks
         if (bar.cell.height > 0.55 && bar.cell.highlight > 0.5) {
-          const lineAlpha = (bar.cell.height - 0.55) * 0.15;
+          const lineAlpha = (bar.cell.height - 0.55) * 0.15 * fogFactor;
           ctx.strokeStyle = `rgba(${capRgb}, ${lineAlpha})`;
           ctx.lineWidth = 0.5;
           ctx.beginPath();
@@ -639,21 +645,37 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
         ctx.fill();
       }
 
-      // ── Floating Cluster Labels ──
-      // (reuse clusterPeaks from above)
+      // ── Floating Cluster Labels (ALL clusters, no height threshold) ──
       for (const [type, pos] of clusterPeaks) {
         const cluster = clusters.find(c => c.type === type);
-        if (cluster && pos.height > 0.3) {
-          ctx.globalAlpha = 0.85;
-          ctx.fillStyle = '#ffffff';
-          ctx.font = '600 10px -apple-system, system-ui, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(cluster.label, pos.sx, pos.sy - 14);
-          ctx.fillStyle = '#64748b';
-          ctx.font = '9px "SF Mono", ui-monospace, monospace';
-          ctx.fillText(`${cluster.factCount.toLocaleString()}`, pos.sx, pos.sy - 3);
-          ctx.globalAlpha = 1;
-        }
+        if (!cluster) continue;
+
+        // Depth fog on labels too
+        const labelDepthNorm = depths.length > 0 ? 0 : 0; // labels always visible
+        const labelAlpha = Math.max(0.5, 0.9 - (pos.height < 0.15 ? 0.3 : 0));
+        const labelY = pos.sy - 18;
+
+        // Subtle backdrop behind label for readability
+        const labelText = cluster.label;
+        ctx.font = '600 11px -apple-system, system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        const textWidth = ctx.measureText(labelText).width;
+
+        ctx.globalAlpha = labelAlpha * 0.4;
+        ctx.fillStyle = 'rgba(9, 9, 11, 0.7)';
+        const padH = 4, padW = 6;
+        ctx.fillRect(pos.sx - textWidth / 2 - padW, labelY - 10 - padH, textWidth + padW * 2, 24 + padH * 2);
+
+        // Label name
+        ctx.globalAlpha = labelAlpha;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(labelText, pos.sx, labelY);
+
+        // Fact count
+        ctx.fillStyle = `rgba(${hexToRgbStr(cluster.color)}, 0.85)`;
+        ctx.font = '500 10px "SF Mono", ui-monospace, monospace';
+        ctx.fillText(`${cluster.factCount.toLocaleString()} facts`, pos.sx, labelY + 13);
+        ctx.globalAlpha = 1;
       }
 
       // Particles
@@ -728,7 +750,7 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
           <Search size={14} style={{ color: '#64748b', flexShrink: 0 }} />
           <input
             type="text"
-            placeholder="Search knowledge graph…"
+            placeholder="Search memories…"
             value={searchQuery}
             onChange={(e) => handleSearch(e.target.value)}
             style={{
@@ -801,7 +823,7 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
         border: '1px solid rgba(148, 163, 184, 0.08)',
       }}>
         <div style={{ fontSize: 9, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
-          Cortex Knowledge Graph
+          Knowledge Clusters
         </div>
         {clusters.map(c => (
           <div
@@ -835,7 +857,7 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
         textAlign: 'right',
         lineHeight: 1.6,
       }}>
-        Drag to rotate · Scroll to zoom · Click peak to inspect
+        Drag to orbit · Scroll to zoom · Click to inspect
       </div>
 
       {/* Selected cluster detail panel */}
