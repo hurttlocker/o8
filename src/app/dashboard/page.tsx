@@ -13,6 +13,7 @@ import { AlertToast } from '@/components/shared/AlertToast';
 import { NavRail, type NavSection } from '@/components/desktop/NavRail';
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
+import { IntentCanvas } from '@/components/desktop/IntentCanvas';
 
 export default function DashboardPage() {
   return (
@@ -412,6 +413,13 @@ function DashboardInner() {
         overflow: 'hidden',
         position: 'relative',
       }}>
+        {/* Full-screen Intent Canvas */}
+        {activeNavSection === 'intent' && !showMemoryView && (
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <IntentCanvas />
+          </div>
+        )}
+
         {/* Full-screen Memory View */}
         {showMemoryView && (
           <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
@@ -447,7 +455,7 @@ function DashboardInner() {
         )}
 
         {/* Top — workspace area with search */}
-        {!showMemoryView && <div style={{
+        {!showMemoryView && activeNavSection !== 'intent' && <div style={{
           flex: canvasTabs.length > 0 ? `0 0 ${100 - canvasHeight}%` : 1,
           display: 'flex',
           flexDirection: 'column',
@@ -488,7 +496,7 @@ function DashboardInner() {
         </div>}
 
         {/* Vertical drag handle between workspace and canvas */}
-        {!showMemoryView && (<>
+        {!showMemoryView && activeNavSection !== 'intent' && (<>
 
         {canvasTabs.length > 0 && bottomPanelVisible && (
           <div
