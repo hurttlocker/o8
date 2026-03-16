@@ -645,14 +645,15 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
         ctx.fill();
       }
 
-      // ── Floating Cluster Labels (ALL clusters, no height threshold) ──
-      for (const [type, pos] of clusterPeaks) {
+      // ── Floating Cluster Labels (fade out when zoomed out) ──
+      const zoom = zoomRef.current;
+      // Labels start fading below zoom 0.8, fully gone below 0.55
+      const labelZoomAlpha = zoom > 0.8 ? 1 : zoom < 0.55 ? 0 : (zoom - 0.55) / 0.25;
+      if (labelZoomAlpha > 0) for (const [type, pos] of clusterPeaks) {
         const cluster = clusters.find(c => c.type === type);
         if (!cluster) continue;
 
-        // Depth fog on labels too
-        const labelDepthNorm = depths.length > 0 ? 0 : 0; // labels always visible
-        const labelAlpha = Math.max(0.5, 0.9 - (pos.height < 0.15 ? 0.3 : 0));
+        const labelAlpha = Math.max(0.5, 0.9 - (pos.height < 0.15 ? 0.3 : 0)) * labelZoomAlpha;
         const labelY = pos.sy - 18;
 
         // Subtle backdrop behind label for readability
@@ -703,6 +704,44 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
       }
       particlesRef.current = alive;
       ctx.globalAlpha = 1;
+
+      // ── Ambient Fireflies (floating in the void between peaks) ──
+      const fireflyCount = 40;
+      for (let i = 0; i < fireflyCount; i++) {
+        // Deterministic position from index + slow time drift
+        const seed = i * 7919; // prime for spread
+        const fx = (Math.sin(seed + t * 0.003) * 0.5 + 0.5) * w;
+        const fy = (Math.cos(seed * 1.3 + t * 0.002) * 0.5 + 0.5) * h * 0.85;
+
+        // Twinkle: each firefly blinks on its own cycle
+        const twinkle = Math.sin(t * 0.04 + seed * 0.1) * 0.5 + 0.5;
+        if (twinkle < 0.3) continue; // off phase
+
+        const ffAlpha = twinkle * 0.25;
+        const ffSize = 1 + twinkle * 1.2;
+
+        // Warm white color with slight hue variation
+        const hueShift = (seed % 3);
+        const ffColor = hueShift === 0 ? `rgba(200, 220, 255, ${ffAlpha})`  // cool blue-white
+          : hueShift === 1 ? `rgba(255, 230, 200, ${ffAlpha})`              // warm amber-white
+          : `rgba(220, 255, 220, ${ffAlpha})`;                               // faint green-white
+
+        ctx.fillStyle = ffColor;
+        ctx.beginPath();
+        ctx.arc(fx, fy, ffSize, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Subtle glow halo
+        if (twinkle > 0.7) {
+          const haloGrad = ctx.createRadialGradient(fx, fy, 0, fx, fy, ffSize * 4);
+          haloGrad.addColorStop(0, ffColor.replace(String(ffAlpha), String(ffAlpha * 0.4)));
+          haloGrad.addColorStop(1, 'transparent');
+          ctx.fillStyle = haloGrad;
+          ctx.beginPath();
+          ctx.arc(fx, fy, ffSize * 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
 
       frameRef.current = requestAnimationFrame(animate);
     }
