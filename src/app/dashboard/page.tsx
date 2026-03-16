@@ -5,7 +5,7 @@ import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { DesktopChat } from '@/components/desktop/DesktopChat';
 import { Canvas, CanvasTab } from '@/components/desktop/Canvas';
 import { WorkspaceSearch } from '@/components/desktop/WorkspaceSearch';
-import { MemoryLavaLamp } from '@/components/desktop/MemoryLavaLamp';
+import { GraphExplorer3D } from '@/components/desktop/GraphExplorer3D';
 
 export default function DashboardPage() {
   const [leftWidth, setLeftWidth] = useState(300);
@@ -298,7 +298,7 @@ export default function DashboardPage() {
             >
               ← Back to Workspace
             </button>
-            <MemoryLavaLamp />
+            <GraphExplorer3D />
           </div>
         )}
 

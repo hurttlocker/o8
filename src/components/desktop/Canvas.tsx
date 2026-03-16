@@ -36,7 +36,7 @@ import {
 } from 'lucide-react';
 import { MarkdownBody } from './MarkdownBody';
 import { IssueCreator } from './IssueCreator';
-import { MemoryLavaLamp } from './MemoryLavaLamp';
+import { GraphExplorer3D } from './GraphExplorer3D';
 
 // ── Tab Types ──
 
@@ -235,7 +235,7 @@ const TabContent = memo(function TabContent({ tab, onSelectCommit }: { tab: Canv
     case 'deploy':
       return <DeployViewer project={tab.meta?.project} />;
     case 'memory':
-      return <MemoryLavaLamp />;
+      return <GraphExplorer3D />;
     case 'welcome':
       return <CanvasEmpty />;
     default:
