@@ -401,6 +401,8 @@ function MobileRemoteShellInner({
         onCopyKey={actions.handleCopySelectedSessionKey}
         onAbort={actions.handleStopActiveRun}
         onSessionFocus={actions.handleSessionFocus}
+        onSearchSelectSession={(sessionKey) => actions.handleSessionFocus(sessionKey)}
+        onSearchSelectIssue={() => { /* issue viewing not wired on mobile yet */ }}
       >
         <CortexStatus
           onRecallOpen={() => { setControlsOpen(false); setCortexRecallOpen(true); }}

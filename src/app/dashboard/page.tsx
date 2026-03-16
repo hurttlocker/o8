@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { DesktopChat } from '@/components/desktop/DesktopChat';
 import { Canvas, CanvasTab } from '@/components/desktop/Canvas';
-import { WorkspaceSearch } from '@/components/desktop/WorkspaceSearch';
+import { UniversalSearch } from '@/components/shared/UniversalSearch';
 import { GraphExplorer3D } from '@/components/desktop/GraphExplorer3D';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { AlertBell } from '@/components/shared/AlertBell';
@@ -124,11 +124,13 @@ function DashboardInner() {
     setShowMemoryView(true);
   }, []);
 
-  // ── Feed agent data to alert engine ──
+  // ── Feed agent data to alert engine + search ──
+  const [agentsJson, setAgentsJson] = useState('[]');
   const handleAgentsUpdate = useCallback((agents: unknown[]) => {
     // AgentDetail from AgentPanel is compatible with AgentSummary for alert detection
     // (has id, name, status, context, approvalStatus, lastEventAt, sessionKey)
     updateAgents(agents as import('@/lib/fleet/types').AgentSummary[]);
+    setAgentsJson(JSON.stringify(agents));
   }, [updateAgents]);
 
   // ── Alert action: navigate to agent session ──
@@ -388,8 +390,12 @@ function DashboardInner() {
             paddingLeft: 24,
             flexShrink: 0,
           }}>
-            <WorkspaceSearch
+            <UniversalSearch
+              variant="desktop"
               workspace={activeWorkspace}
+              agentsJson={agentsJson}
+              onSelectSession={(sessionKey) => setActiveSessionKey(sessionKey)}
+              onSelectIssue={(num) => handleSelectIssue(num)}
               onSelectFile={(filePath, line) => {
                 openCanvasTab({
                   id: `file:${filePath}${activeWorkspace ? `:${activeWorkspace}` : ''}`,
