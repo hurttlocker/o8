@@ -181,10 +181,18 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
   const [hoverX, setHoverX] = useState<number | null>(null);
   const [hoverMin, setHoverMin] = useState<number | null>(null);
 
-  const totalMinutes = useMemo(() => {
+  // totalSpan = end time of last segment (for time display)
+  const totalSpan = useMemo(() => {
     if (segments.length === 0) return 0;
     const last = segments[segments.length - 1];
     return last.startMin + last.durationMin;
+  }, [segments]);
+
+  // totalRendered = sum of all durations (what flex actually distributes).
+  // Segments can overlap in time, so sum(durations) ≠ totalSpan.
+  // The flex bar divides space by this sum, so hover math must use it too.
+  const totalRendered = useMemo(() => {
+    return segments.reduce((sum, s) => sum + s.durationMin, 0);
   }, [segments]);
 
   const kindTotals = useMemo(() => {
@@ -199,25 +207,27 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
   // Segments are rendered as flex children occupying a % of the bar.
   // We calculate what fraction of the bar each segment covers and
   // build a lookup table so cursor position → segment is O(1).
+  // Segment ranges use totalRendered (matches flex layout exactly)
   const segmentRanges = useMemo(() => {
+    if (totalRendered === 0) return [];
     let cumPct = 0;
     return segments.map((seg) => {
       const startPct = cumPct;
-      const widthPct = seg.durationMin / totalMinutes;
+      const widthPct = seg.durationMin / totalRendered;
       cumPct += widthPct;
       return { startPct, endPct: cumPct };
     });
-  }, [segments, totalMinutes]);
+  }, [segments, totalRendered]);
 
   const [hoveredSegIdx, setHoveredSegIdx] = useState<number | null>(null);
 
   const handleBarMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!barRef.current || totalMinutes === 0) return;
+    if (!barRef.current || totalRendered === 0) return;
     const rect = barRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const pct = Math.max(0, Math.min(1, x / rect.width));
 
-    // Find segment at this pixel position
+    // Find segment at this pixel position (matches flex layout)
     let foundIdx: number | null = null;
     for (let i = 0; i < segmentRanges.length; i++) {
       if (pct >= segmentRanges[i].startPct && pct < segmentRanges[i].endPct) {
@@ -226,13 +236,23 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
       }
     }
 
-    // Map pixel position to minutes for the timestamp
-    const min = Math.round(pct * totalMinutes);
+    // Compute the actual time from the segment's real startMin
+    let min: number;
+    if (foundIdx !== null) {
+      const seg = segments[foundIdx];
+      const range = segmentRanges[foundIdx];
+      // How far into this segment (0-1)
+      const withinPct = (pct - range.startPct) / (range.endPct - range.startPct);
+      min = Math.round(seg.startMin + withinPct * seg.durationMin);
+    } else {
+      // Fallback: linear interpolation across total span
+      min = Math.round(pct * totalSpan);
+    }
 
     setHoverX(x);
     setHoverMin(min);
     setHoveredSegIdx(foundIdx);
-  }, [totalMinutes, segmentRanges]);
+  }, [totalRendered, totalSpan, segmentRanges, segments]);
 
   const handleBarMouseLeave = useCallback(() => {
     setHoverX(null);
@@ -240,7 +260,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     setHoveredSegIdx(null);
   }, []);
 
-  if (loading || totalMinutes === 0) return null;
+  if (loading || totalRendered === 0) return null;
 
   return (
     <div style={{
@@ -266,7 +286,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
         <TimelineButton icon={<PlayIcon />} label="Play session replay" />
         {onExpand && <TimelineButton icon={<ExpandIcon />} label="Expand timeline" onClick={onExpand} />}
         <span style={{ fontWeight: 600, color: '#374151', textTransform: 'uppercase', fontSize: 10, letterSpacing: '0.04em' }}>
-          Today: {formatDuration(totalMinutes)}
+          Today: {formatDuration(totalSpan)}
         </span>
       </div>
 
@@ -288,7 +308,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
       >
         {/* Segments */}
         {segments.map((seg, i) => {
-          const widthPct = (seg.durationMin / totalMinutes) * 100;
+          const widthPct = (seg.durationMin / totalRendered) * 100;
           const isHovered = hoveredSegIdx === i;
           return (
             <div
@@ -381,11 +401,26 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
           );
         })()}
 
-        {/* Time markers */}
-        {Array.from({ length: Math.ceil(totalMinutes / 60) + 1 }, (_, i) => {
-          const min = i * 60;
-          if (min > totalMinutes) return null;
-          const leftPct = (min / totalMinutes) * 100;
+        {/* Time markers — positioned by finding which segment contains each hour mark */}
+        {Array.from({ length: Math.ceil(totalSpan / 60) + 1 }, (_, i) => {
+          const hourMin = i * 60;
+          if (hourMin > totalSpan) return null;
+          // Find the pixel position of this hour mark by locating which segment it falls in
+          let leftPct = 0;
+          let cumDur = 0;
+          for (let si = 0; si < segments.length; si++) {
+            const seg = segments[si];
+            if (hourMin >= seg.startMin && hourMin < seg.startMin + seg.durationMin) {
+              // This hour falls within this segment
+              const withinSeg = (hourMin - seg.startMin) / seg.durationMin;
+              leftPct = ((cumDur + withinSeg * seg.durationMin) / totalRendered) * 100;
+              break;
+            }
+            cumDur += seg.durationMin;
+            if (si === segments.length - 1) {
+              leftPct = (cumDur / totalRendered) * 100;
+            }
+          }
           return (
             <div key={i} style={{
               position: 'absolute',
@@ -398,7 +433,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
               pointerEvents: 'none',
               whiteSpace: 'nowrap',
             }}>
-              {formatTime(min)}
+              {formatTime(hourMin)}
             </div>
           );
         })}
