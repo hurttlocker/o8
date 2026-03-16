@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
-import { WorkspacesPanel } from '@/components/desktop/WorkspacesPanel';
+// WorkspacesPanel merged into AgentPanel — unified agent+workspace view
 import { DesktopChat } from '@/components/desktop/DesktopChat';
 import { Canvas, CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
@@ -362,7 +362,6 @@ function DashboardInner() {
         borderRight: '1px solid rgba(0,0,0,0.06)',
         position: 'relative',
       }}>
-        <WorkspacesPanel />
         <AgentPanel
           onSelectSession={handleSelectSession}
           onSelectIssue={handleSelectIssue}

@@ -158,11 +158,23 @@ function ctxColor(pct: number) {
 interface WorkspaceGroup {
   workspace: string;
   displayName: string;
+  repo: string;
   agents: AgentDetail[];
   hasRunning: boolean;
   bestContextPct: number;
   primaryModel: string;
   totalAlerts: number;
+}
+
+function deriveRepo(workspace: string, agents: AgentDetail[]): string {
+  // Try to extract repo name from workspace path
+  const path = workspace.replace(/^~\//, '');
+  if (path.includes('repos/')) {
+    const parts = path.split('repos/');
+    return parts[1]?.split('/')[0] || path.split('/').pop() || 'workspace';
+  }
+  if (path === 'clawd' && agents.some(a => a.isCurrentSession)) return 'openclaw';
+  return path.split('/').pop() || 'workspace';
 }
 
 function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
@@ -176,13 +188,8 @@ function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
 
   const groups: WorkspaceGroup[] = [];
   for (const [workspace, wsAgents] of groupMap) {
-    // Derive display name from workspace path
-    const segments = workspace.replace(/^~\//, '').split('/');
-    const last = segments[segments.length - 1] || segments[0] || 'workspace';
-    let displayName = last;
-    if (last === 'clawd' && wsAgents.some(a => a.isCurrentSession)) displayName = 'OpenClaw';
-    if (workspace.includes('workspace-ace')) displayName = 'Niot';
-    if (workspace.includes('workspace-hawk')) displayName = 'Hawk';
+    const repo = deriveRepo(workspace, wsAgents);
+    const displayName = repo === 'openclaw' ? 'OpenClaw' : repo;
 
     const hasRunning = wsAgents.some(a => a.status === 'running' || a.status === 'watching' || a.status === 'healthy');
     const bestContextPct = Math.max(0, ...wsAgents.map(a => a.context?.usedPercent ?? 0));
@@ -192,6 +199,7 @@ function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
     groups.push({
       workspace,
       displayName,
+      repo,
       agents: wsAgents,
       hasRunning,
       bestContextPct,
@@ -240,111 +248,76 @@ const AgentCard = memo(function AgentCard({
       transition: 'all 200ms ease',
       overflow: 'hidden',
     }}>
-      {/* Card header — clickable */}
+      {/* Card header — repo-grouped */}
       <div
         onClick={onToggle}
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 10,
-          paddingTop: 12,
-          paddingRight: 14,
-          paddingBottom: ctx ? 8 : 12,
-          paddingLeft: 14,
+          padding: '12px 14px',
           cursor: 'pointer',
         }}
       >
-        {/* Avatar */}
-        <div style={{
-          width: 34,
-          height: 34,
-          borderRadius: '50%',
-          background: `linear-gradient(135deg, ${dotColor}22 0%, ${dotColor}0a 100%)`,
-          border: `1.5px solid ${dotColor}44`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          fontSize: 14,
-          fontWeight: 700,
-          color: dotColor,
-          flexShrink: 0,
-        }}>
-          {group.displayName[0]}
+        {/* GitHub icon */}
+        <div style={{ color: '#6b7280', flexShrink: 0 }}>
+          <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor" style={{ display: 'block' }}>
+            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+          </svg>
         </div>
 
-        {/* Name + model + status */}
+        {/* Repo name + agent count */}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: '#1e293b',
+              fontSize: 13, fontWeight: 700, color: '#1e293b',
               letterSpacing: '-0.01em',
             }}>{group.displayName}</span>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              fontSize: 10,
-              fontWeight: 500,
-              color: dotColor,
-              paddingTop: 2,
-              paddingRight: 7,
-              paddingBottom: 2,
-              paddingLeft: 5,
-              borderRadius: 99,
-              background: `${dotColor}12`,
-            }}>
-              <span style={{
-                width: 5,
-                height: 5,
-                borderRadius: '50%',
-                background: dotColor,
-                boxShadow: group.hasRunning ? `0 0 6px ${dotColor}` : 'none',
-              }} />
-              {group.hasRunning ? 'running' : 'idle'}
-            </span>
           </div>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            marginTop: 3,
-          }}>
-            {model ? (
-              <span style={{
-                fontSize: 11,
-                color: '#94a3b8',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 3,
-              }}>
-                <Cpu size={10} strokeWidth={1.8} />
-                {model.replace('claude-', '').replace(/-\d+$/, '')}
-              </span>
-            ) : null}
-            <span style={{ fontSize: 11, color: '#cbd5e1' }}>·</span>
-            <span style={{ fontSize: 11, color: '#94a3b8' }}>
-              {group.agents.length} session{group.agents.length !== 1 ? 's' : ''}
-            </span>
+          {/* Agent dots row — shows who's on this repo */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+            {group.agents.filter(a => !a.id.includes('cron')).slice(0, 4).map(agent => {
+              const isRunning = agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy';
+              const agentColor = isRunning ? '#22c55e' : '#9ca3af';
+              return (
+                <div key={agent.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{
+                    width: 7, height: 7, borderRadius: '50%',
+                    background: agentColor, display: 'block',
+                    boxShadow: isRunning ? `0 0 6px ${agentColor}` : 'none',
+                  }} />
+                  <span style={{
+                    fontSize: 11, fontWeight: 600,
+                    color: isRunning ? '#374151' : '#9ca3af',
+                  }}>
+                    {agent.name.replace(/\s*\(.*\)/, '').split(' ')[0]}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
 
-        {/* Alerts + expand chevron */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {group.totalAlerts > 0 ? (
+        {/* Context + chevron */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          {ctx && (
+            <span style={{
+              fontSize: 10, fontWeight: 600,
+              color: ctxColor(ctx.usedPercent),
+              fontFamily: 'SF Mono, Menlo, monospace',
+            }}>
+              {ctx.usedPercent}%
+            </span>
+          )}
+          {group.totalAlerts > 0 && (
             <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 3,
-              fontSize: 11,
-              fontWeight: 600,
-              color: '#ef4444',
+              display: 'flex', alignItems: 'center', gap: 3,
+              fontSize: 11, fontWeight: 600, color: '#ef4444',
             }}>
               <AlertCircle size={13} strokeWidth={2} />
               {group.totalAlerts}
             </div>
-          ) : null}
+          )}
           {expanded
             ? <ChevronDown size={14} strokeWidth={2} style={{ color: '#94a3b8' }} />
             : <ChevronRight size={14} strokeWidth={2} style={{ color: '#cbd5e1' }} />
@@ -352,19 +325,12 @@ const AgentCard = memo(function AgentCard({
         </div>
       </div>
 
-      {/* Context usage bar */}
-      {ctx ? (
-        <div style={{
-          paddingTop: 0,
-          paddingRight: 14,
-          paddingBottom: 10,
-          paddingLeft: 14,
-        }}>
+      {/* Context bar */}
+      {ctx && (
+        <div style={{ padding: '0 14px 8px' }}>
           <div style={{
-            height: 3,
-            borderRadius: 2,
-            background: 'rgba(0,0,0,0.04)',
-            overflow: 'hidden',
+            height: 3, borderRadius: 2,
+            background: 'rgba(0,0,0,0.04)', overflow: 'hidden',
           }}>
             <div style={{
               height: '100%',
@@ -374,26 +340,21 @@ const AgentCard = memo(function AgentCard({
               transition: 'width 300ms ease',
             }} />
           </div>
-          <div style={{
-            fontSize: 10,
-            color: '#94a3b8',
-            marginTop: 3,
-            display: 'flex',
-            justifyContent: 'space-between',
-          }}>
-            <span>ctx {ctx.usedPercent}%</span>
-          </div>
         </div>
-      ) : null}
+      )}
 
-      {/* Expanded: agent list */}
-      {expanded ? (
+      {/* Expanded: individual agents as clickable rows */}
+      {expanded && (
         <div style={{
           borderTop: '1px solid rgba(0,0,0,0.04)',
-          paddingTop: 6,
-          paddingBottom: 6,
+          paddingTop: 4, paddingBottom: 6,
         }}>
-          {group.agents.map(agent => (
+          {group.agents.map(agent => {
+            const isRunning = agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy';
+            const agentColor = isRunning ? '#22c55e' : '#9ca3af';
+            const agentCtx = agent.context?.usedPercent ?? 0;
+
+            return (
               <div
                 key={agent.id}
                 onClick={(e) => {
@@ -403,43 +364,52 @@ const AgentCard = memo(function AgentCard({
                   }
                 }}
                 style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  paddingTop: 6,
-                  paddingRight: 14,
-                  paddingBottom: 6,
-                  paddingLeft: 18,
-                  fontSize: 12,
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 14px 8px 16px',
                   cursor: agent.sessionKey ? 'pointer' : 'default',
-                  borderRadius: 8,
-                  transition: 'background 100ms ease',
+                  transition: 'background 100ms',
                 }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(37,99,235,0.04)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
               >
-                <span style={{ color: '#94a3b8', flexShrink: 0 }}>
-                  {surfaceIcon(agent.surfaceLabel || agent.name)}
-                </span>
                 <span style={{
-                  flex: 1,
-                  color: '#475569',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}>
-                  {agent.surfaceLabel || agent.name}
-                </span>
-                <span style={{
-                  fontSize: 10,
-                  color: '#94a3b8',
-                  flexShrink: 0,
-                }}>
+                  width: 8, height: 8, borderRadius: '50%',
+                  background: agentColor, display: 'block', flexShrink: 0,
+                  boxShadow: isRunning ? `0 0 6px ${agentColor}` : 'none',
+                }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 12, fontWeight: 600, color: '#374151',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {agent.surfaceLabel || agent.name}
+                  </div>
+                  {agent.currentTask && (
+                    <div style={{
+                      fontSize: 10, color: '#9ca3af', marginTop: 1,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {agent.currentTask}
+                    </div>
+                  )}
+                </div>
+                {agentCtx > 0 && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, flexShrink: 0,
+                    color: ctxColor(agentCtx),
+                    fontFamily: 'SF Mono, Menlo, monospace',
+                  }}>
+                    {agentCtx}%
+                  </span>
+                )}
+                <span style={{ fontSize: 10, color: '#94a3b8', flexShrink: 0 }}>
                   {agent.lastEventAt}
                 </span>
               </div>
-            ))
-          }
+            );
+          })}
         </div>
-      ) : null}
+      )}
     </div>
   );
 });
