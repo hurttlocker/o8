@@ -1655,8 +1655,8 @@ export const AgentPanel = memo(function AgentPanel({
 
       {/* ── Agent Cards ── */}
       <div style={{
-        flex: 1,
-        minHeight: 0,
+        flexShrink: 1,
+        maxHeight: '50%',
         overflowY: 'auto',
         overflowX: 'hidden',
         paddingTop: 4,
