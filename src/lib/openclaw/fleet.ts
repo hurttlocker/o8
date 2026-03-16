@@ -421,7 +421,13 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
     ]);
 
     const ownedThreadIds = new Set(ownedCodex.ownedThreadIds);
-    const filteredDiscoveredAgents = codexDiscovery.agents.filter((agent) => !ownedThreadIds.has(agent.sessionId ?? ''));
+    // Only show discovered codex sessions that have a live process (active PID)
+    // or are IDE-owned. Filter out stale SQLite session records.
+    const filteredDiscoveredAgents = codexDiscovery.agents.filter((agent) => {
+      if (ownedThreadIds.has(agent.sessionId ?? '')) return false; // handled by owned
+      // Only include if the agent has an active process (running status from live PID)
+      return agent.status === 'running';
+    });
     const filteredDiscoveredAgentIds = new Set(filteredDiscoveredAgents.map((agent) => agent.id));
     const filteredDiscoveredEvents = codexDiscovery.events.filter((event) => filteredDiscoveredAgentIds.has(event.agentId ?? ''));
     const filteredDiscoveredArtifacts = codexDiscovery.artifacts.filter(
