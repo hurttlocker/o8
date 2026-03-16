@@ -239,8 +239,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get('q')?.trim();
   const workspace = searchParams.get('workspace') ?? undefined;
-  const agentsJson = searchParams.get('agents') ?? '';
-  const categories = searchParams.get('categories')?.split(',') ?? ['conversation', 'agent', 'memory', 'issue', 'file'];
+  const categories = searchParams.get('categories')?.split(',') ?? ['conversation', 'memory', 'issue', 'file'];
 
   if (!query || query.length < 2) {
     return NextResponse.json({ results: [], query: query ?? '', categories });
@@ -248,9 +247,9 @@ export async function GET(request: Request) {
 
   try {
     // Run searches in parallel
+    // Agent search is done client-side to avoid oversized URLs (inventory is ~30KB)
     const searches = await Promise.allSettled([
       categories.includes('conversation') ? searchConversations(query) : Promise.resolve([]),
-      categories.includes('agent') ? Promise.resolve(searchAgents(query, agentsJson)) : Promise.resolve([]),
       categories.includes('memory') ? Promise.resolve(searchMemory(query)) : Promise.resolve([]),
       categories.includes('issue') ? Promise.resolve(searchIssues(query)) : Promise.resolve([]),
       categories.includes('file') ? Promise.resolve(searchFiles(query, workspace)) : Promise.resolve([]),

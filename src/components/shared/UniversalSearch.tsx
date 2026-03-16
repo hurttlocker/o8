@@ -76,6 +76,33 @@ const KIND_LABEL: Record<ResultKind, string> = {
   file: 'File',
 };
 
+/** Client-side agent search — avoids sending 30KB inventory in URL params */
+function searchAgentsLocally(query: string, agentsJson?: string): SearchResult[] {
+  if (!agentsJson || agentsJson === '[]') return [];
+  try {
+    const agents = JSON.parse(agentsJson);
+    const lq = query.toLowerCase();
+    const results: SearchResult[] = [];
+    for (const agent of agents) {
+      const name = (agent.name ?? '').toLowerCase();
+      const task = (agent.currentTask ?? '').toLowerCase();
+      const model = (agent.model ?? '').toLowerCase();
+      if (name.includes(lq) || task.includes(lq) || model.includes(lq)) {
+        results.push({
+          kind: 'agent',
+          title: agent.name ?? 'Unknown Agent',
+          detail: `${agent.status ?? 'unknown'} · ${agent.currentTask || agent.model || ''}`.slice(0, 120),
+          target: { sessionKey: agent.sessionKey },
+          score: name.includes(lq) ? 0.9 : 0.6,
+        });
+      }
+    }
+    return results;
+  } catch {
+    return [];
+  }
+}
+
 export const UniversalSearch = memo(function UniversalSearch({
   variant,
   workspace,
@@ -123,7 +150,7 @@ export const UniversalSearch = memo(function UniversalSearch({
       try {
         const params = new URLSearchParams({ q: query.trim() });
         if (workspace) params.set('workspace', workspace);
-        if (agentsJson) params.set('agents', agentsJson);
+        // Note: agents are searched client-side to avoid oversized URLs
 
         const res = await fetch(`/api/panel/universal-search?${params.toString()}`);
         if (!res.ok) {
@@ -136,7 +163,11 @@ export const UniversalSearch = memo(function UniversalSearch({
           setError(data.error);
           setResults([]);
         } else {
-          setResults(data.results ?? []);
+          // Merge server results with client-side agent search
+          const serverResults: SearchResult[] = data.results ?? [];
+          const agentResults = searchAgentsLocally(query.trim(), agentsJson);
+          const merged = [...agentResults, ...serverResults].sort((a, b) => b.score - a.score);
+          setResults(merged.slice(0, 25));
           setSelectedIndex(0);
         }
       } catch {
