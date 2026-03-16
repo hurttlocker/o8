@@ -367,6 +367,7 @@ interface FleetAgent {
   currentTask?: string;
   context?: { usedPercent: number; trend: string };
   heartbeatInterval?: number;
+  sessionKey?: string;
 }
 
 interface FleetSquad {
@@ -730,7 +731,6 @@ function AgentsTab() {
   const handleSave = useCallback(async (agentId: string, changes: { model?: string }) => {
     if (!changes.model) return;
     try {
-      // Use session_status model override via the OpenClaw API
       const sessionKey = agentId;
       await fetch('/api/mobile/action', {
         method: 'POST',
@@ -741,9 +741,24 @@ function AgentsTab() {
           model: changes.model,
         }),
       });
-      // Refresh fleet data
       setTimeout(fetchFleet, 1000);
     } catch { /* silent */ }
+  }, [fetchFleet]);
+
+  const [killingId, setKillingId] = useState<string | null>(null);
+
+  const handleKill = useCallback(async (agent: FleetAgent) => {
+    if (!confirm(`Kill terminal "${agent.name}"?\n\nSession: ${agent.id}`)) return;
+    setKillingId(agent.id);
+    try {
+      await fetch('/api/openclaw/abort', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionKey: agent.sessionKey || agent.id }),
+      });
+      setTimeout(fetchFleet, 1500);
+    } catch { /* silent */ }
+    finally { setKillingId(null); }
   }, [fetchFleet]);
 
   if (loading) {
@@ -835,6 +850,7 @@ function AgentsTab() {
                   agent={agent}
                   isOpenClaw={agent.runtime === 'openclaw'}
                   onEdit={agent.runtime === 'openclaw' ? setEditingAgent : undefined}
+                  onKill={agent.runtime !== 'openclaw' ? handleKill : undefined}
                 />
               ))}
             </div>
