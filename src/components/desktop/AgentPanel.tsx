@@ -114,7 +114,7 @@ interface FileNode {
   children?: FileNode[];
 }
 
-type Tab = 'activity' | 'issues' | 'prs' | 'files' | 'ci' | 'deploy' | 'memory';
+type Tab = 'activity' | 'issues' | 'prs' | 'files' | 'ci' | 'deploy';
 
 // ── Status colors ──
 
@@ -1363,7 +1363,7 @@ const tabs: { id: Tab; icon: typeof Zap; label: string }[] = [
   { id: 'files', icon: Folder, label: 'Files' },
   { id: 'ci', icon: PlayCircle, label: 'CI' },
   { id: 'deploy', icon: Globe, label: 'Deploy' },
-  { id: 'memory', icon: Cpu, label: 'Memory' },
+
 ];
 
 // ── Memory Tab — auto-opens canvas on mount ──
@@ -1808,9 +1808,7 @@ export const AgentPanel = memo(function AgentPanel({
         {activeTab === 'files' ? <FileTree tree={fileTree} changedFiles={changedFiles} onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)} /> : null}
         {activeTab === 'ci' ? <CIList repo={activeRepo} onOpenCI={onOpenCI} /> : null}
         {activeTab === 'deploy' ? <DeployList onOpenDeploy={onOpenDeploy} /> : null}
-        {activeTab === 'memory' ? (
-          <MemoryTabContent onOpenMemory={onOpenMemory} />
-        ) : null}
+
       </div>
 
       {/* ── Issue Detail Modal ── */}
