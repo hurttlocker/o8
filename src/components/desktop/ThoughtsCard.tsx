@@ -32,6 +32,18 @@ interface ChatMessage {
   timestamp: number;
 }
 
+interface PendingApproval {
+  id: string;
+  agent: string;
+  sessionKey: string;
+  title: string;
+  description: string;
+  command?: string;
+  risk: 'low' | 'medium' | 'high';
+  createdAt: number;
+  status: 'pending' | 'approved' | 'rejected';
+}
+
 // ── SVG Icons ──
 
 function GripIcon() {
@@ -157,6 +169,11 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
   const sendTimestampRef = useRef<number>(0);
   const seenAssistantIdsRef = useRef<Set<string>>(new Set());
 
+  // Approval state
+  const [approvals, setApprovals] = useState<PendingApproval[]>([]);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
+  const approvalPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const cardRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
   const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number; corner: string } | null>(null);
@@ -198,6 +215,60 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
+  }, []);
+
+  // ── Approval polling — runs whenever card is open ──
+  useEffect(() => {
+    if (!open) return;
+
+    const pollApprovals = async () => {
+      try {
+        const res = await fetch('/api/panel/approvals');
+        if (res.ok) {
+          const data = await res.json();
+          setApprovals(data.approvals || []);
+        }
+      } catch { /* silent */ }
+    };
+
+    pollApprovals(); // immediate
+    approvalPollRef.current = setInterval(pollApprovals, 5000);
+
+    return () => {
+      if (approvalPollRef.current) clearInterval(approvalPollRef.current);
+    };
+  }, [open]);
+
+  // ── Approval handlers ──
+  const handleApprovalResolve = useCallback(async (id: string, action: 'approve' | 'reject') => {
+    setResolvingId(id);
+    try {
+      const res = await fetch('/api/panel/approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, id }),
+      });
+      if (res.ok) {
+        setApprovals(prev => prev.filter(a => a.id !== id));
+      }
+    } catch { /* silent */ }
+    setResolvingId(null);
+  }, []);
+
+  const handleTestApproval = useCallback(async () => {
+    try {
+      await fetch('/api/panel/approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'test' }),
+      });
+      // Next poll will pick it up, or force immediate
+      const res = await fetch('/api/panel/approvals');
+      if (res.ok) {
+        const data = await res.json();
+        setApprovals(data.approvals || []);
+      }
+    } catch { /* silent */ }
   }, []);
 
   // ── Drag handlers ──
@@ -539,6 +610,19 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
           }}>
             {inTaskChat && chatMessages.length > 0 ? 'Task Chat' : 'Thoughts'}
           </span>
+          {/* Approval count badge */}
+          {approvals.length > 0 && (
+            <span style={{
+              minWidth: 18, height: 18, borderRadius: 9,
+              background: '#ef4444', color: '#fff',
+              fontSize: 10, fontWeight: 700,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '0 5px', letterSpacing: 0,
+              animation: 'pulse 2s ease-in-out infinite',
+            }}>
+              {approvals.length}
+            </span>
+          )}
           {!minimized && mode !== 'pick' && !isActive && !inTaskChat && (
             <span style={{
               fontSize: 9, fontWeight: 600, textTransform: 'uppercase',
@@ -606,6 +690,127 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
             borderRadius: '0 0 18px 18px',
           }}>
 
+            {/* ── APPROVAL CARDS — float above everything ── */}
+            {approvals.length > 0 && (
+              <div style={{
+                padding: '8px 12px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                borderBottom: '1px solid rgba(0,0,0,0.06)',
+                flexShrink: 0,
+                maxHeight: 200,
+                overflowY: 'auto',
+              }}>
+                {approvals.map((approval) => (
+                  <div key={approval.id} style={{
+                    padding: '10px 12px',
+                    borderRadius: 14,
+                    background: approval.risk === 'high'
+                      ? 'rgba(239, 68, 68, 0.06)'
+                      : approval.risk === 'medium'
+                      ? 'rgba(245, 158, 11, 0.06)'
+                      : 'rgba(37, 99, 235, 0.06)',
+                    border: `1px solid ${
+                      approval.risk === 'high'
+                        ? 'rgba(239, 68, 68, 0.15)'
+                        : approval.risk === 'medium'
+                        ? 'rgba(245, 158, 11, 0.15)'
+                        : 'rgba(37, 99, 235, 0.12)'
+                    }`,
+                  }}>
+                    {/* Header */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={
+                        approval.risk === 'high' ? '#ef4444' : approval.risk === 'medium' ? '#f59e0b' : '#2563eb'
+                      } strokeWidth="2" strokeLinecap="round" style={{ display: 'block', flexShrink: 0 }}>
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                      </svg>
+                      <span style={{
+                        fontSize: 11, fontWeight: 700, color: '#111827',
+                        letterSpacing: '-0.01em', flex: 1,
+                      }}>
+                        {approval.agent} — {approval.title}
+                      </span>
+                      <span style={{
+                        fontSize: 9, fontWeight: 600, textTransform: 'uppercase',
+                        padding: '2px 6px', borderRadius: 5,
+                        background: approval.risk === 'high'
+                          ? 'rgba(239, 68, 68, 0.1)'
+                          : approval.risk === 'medium'
+                          ? 'rgba(245, 158, 11, 0.1)'
+                          : 'rgba(37, 99, 235, 0.1)',
+                        color: approval.risk === 'high'
+                          ? '#ef4444'
+                          : approval.risk === 'medium'
+                          ? '#f59e0b'
+                          : '#2563eb',
+                        letterSpacing: '0.03em',
+                      }}>
+                        {approval.risk}
+                      </span>
+                    </div>
+
+                    {/* Description */}
+                    <div style={{
+                      fontSize: 11, color: '#4b5563', lineHeight: 1.5,
+                      marginBottom: approval.command ? 6 : 8,
+                    }}>
+                      {approval.description}
+                    </div>
+
+                    {/* Command preview */}
+                    {approval.command && (
+                      <div style={{
+                        padding: '6px 8px', borderRadius: 8,
+                        background: 'rgba(0,0,0,0.04)',
+                        fontFamily: 'SF Mono, Menlo, monospace',
+                        fontSize: 10, color: '#374151',
+                        marginBottom: 8, whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all', lineHeight: 1.4,
+                      }}>
+                        $ {approval.command}
+                      </div>
+                    )}
+
+                    {/* Action buttons */}
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        type="button"
+                        onClick={() => handleApprovalResolve(approval.id, 'approve')}
+                        disabled={resolvingId === approval.id}
+                        style={{
+                          flex: 1, padding: '7px 0', borderRadius: 10, border: 'none',
+                          background: '#22c55e', color: '#fff',
+                          fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                          opacity: resolvingId === approval.id ? 0.5 : 1,
+                          letterSpacing: '-0.01em',
+                        }}
+                      >
+                        {resolvingId === approval.id ? 'Resolving...' : 'Approve'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApprovalResolve(approval.id, 'reject')}
+                        disabled={resolvingId === approval.id}
+                        style={{
+                          flex: 1, padding: '7px 0', borderRadius: 10,
+                          border: '1px solid rgba(239, 68, 68, 0.2)',
+                          background: 'rgba(239, 68, 68, 0.06)',
+                          color: '#ef4444',
+                          fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                          opacity: resolvingId === approval.id ? 0.5 : 1,
+                          letterSpacing: '-0.01em',
+                        }}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* ── MODE PICKER ── */}
             {mode === 'pick' && workflow.step === 'idle' && (
               <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column' }}>
@@ -672,6 +877,31 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
                     </div>
                   </button>
                 </div>
+                {/* Test approval trigger */}
+                {approvals.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={handleTestApproval}
+                    style={{
+                      marginTop: 8, padding: '6px 0', borderRadius: 8,
+                      border: '1px dashed rgba(0,0,0,0.1)',
+                      background: 'transparent', color: '#9ca3af',
+                      fontSize: 10, fontWeight: 500, cursor: 'pointer',
+                      letterSpacing: '-0.01em',
+                      transition: 'color 120ms, border-color 120ms',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = '#6b7280';
+                      e.currentTarget.style.borderColor = 'rgba(0,0,0,0.2)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = '#9ca3af';
+                      e.currentTarget.style.borderColor = 'rgba(0,0,0,0.1)';
+                    }}
+                  >
+                    Simulate approval request
+                  </button>
+                )}
               </div>
             )}
 
