@@ -98,29 +98,21 @@ export async function mobileSyncOnce({
         const prev = current[sk] ?? [];
         if (prev.length === 0) return { ...current, [sk]: newEntries };
 
-        // If we sent a sinceId (incremental delta), only append truly new entries
-        if (historyLastId) {
-          const existingIds = new Set(prev.map((e) => e.id));
-          const genuinelyNew = newEntries.filter((e) => !existingIds.has(e.id));
-          if (genuinelyNew.length === 0) return current;
-          return { ...current, [sk]: [...prev, ...genuinelyNew] };
-        }
+        // Deduplicate by timestamp+role (stable across index shifts).
+        // IDs based on array index are unstable — the same message gets
+        // a different ID when the server window slides forward.
+        const existingKeys = new Set(
+          prev.map((e) => `${e.timestamp ?? 0}:${e.role}:${(e.text ?? '').slice(0, 60)}`),
+        );
+        const genuinelyNew = newEntries.filter(
+          (e) => !existingKeys.has(`${e.timestamp ?? 0}:${e.role}:${(e.text ?? '').slice(0, 60)}`),
+        );
+        if (genuinelyNew.length === 0) return current;
 
-        // Full refresh (no sinceId) — server returned full transcript.
-        // Only append entries that appear AFTER our last known entry in the server's order.
-        const lastPrevId = prev[prev.length - 1]?.id;
-        const serverIdx = newEntries.findIndex((e) => e.id === lastPrevId);
-        if (serverIdx >= 0) {
-          // Found our last entry in server response — append anything after it
-          const afterLast = newEntries.slice(serverIdx + 1);
-          if (afterLast.length === 0) return current;
-          return { ...current, [sk]: [...prev, ...afterLast] };
-        }
-
-        // Our last entry not found in server response (compaction happened).
-        // Keep existing entries, don't replace — prevents old messages showing up.
-        // New entries from delta polling will catch up.
-        return current;
+        // Append new entries and sort by timestamp to maintain order
+        const merged = [...prev, ...genuinelyNew];
+        merged.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+        return { ...current, [sk]: merged };
       });
     }
 
@@ -135,22 +127,17 @@ export async function mobileSyncOnce({
         const prev = current[sk] ?? [];
         if (prev.length === 0) return { ...current, [sk]: newEntries };
 
-        if (linkedLastId) {
-          const existingIds = new Set(prev.map((e) => e.id));
-          const genuinelyNew = newEntries.filter((e) => !existingIds.has(e.id));
-          if (genuinelyNew.length === 0) return current;
-          return { ...current, [sk]: [...prev, ...genuinelyNew] };
-        }
+        const existingKeys = new Set(
+          prev.map((e) => `${e.timestamp ?? 0}:${e.role}:${(e.text ?? '').slice(0, 60)}`),
+        );
+        const genuinelyNew = newEntries.filter(
+          (e) => !existingKeys.has(`${e.timestamp ?? 0}:${e.role}:${(e.text ?? '').slice(0, 60)}`),
+        );
+        if (genuinelyNew.length === 0) return current;
 
-        const lastPrevId = prev[prev.length - 1]?.id;
-        const serverIdx = newEntries.findIndex((e) => e.id === lastPrevId);
-        if (serverIdx >= 0) {
-          const afterLast = newEntries.slice(serverIdx + 1);
-          if (afterLast.length === 0) return current;
-          return { ...current, [sk]: [...prev, ...afterLast] };
-        }
-
-        return current;
+        const merged = [...prev, ...genuinelyNew];
+        merged.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+        return { ...current, [sk]: merged };
       });
     }
 
@@ -226,29 +213,32 @@ export async function loadSessionHistory({
     setHistoryBySession((current) => {
       const prev = current[sessionKey] ?? [];
       const next = payload.transcript;
-      if (
-        prev.length === next.length
-        && prev.length > 0
-        && prev[prev.length - 1]?.id === next[next.length - 1]?.id
-        && prev[prev.length - 1]?.text === next[next.length - 1]?.text
-      ) {
-        return current;
+
+      // No existing entries — accept full transcript
+      if (prev.length === 0) {
+        return { ...current, [sessionKey]: next };
       }
-      // Find our last non-optimistic entry in the server response
-      const lastRealEntry = [...prev].reverse().find((e) => !e.id.startsWith('optimistic-'));
-      if (lastRealEntry) {
-        const serverIdx = next.findIndex((e) => e.id === lastRealEntry.id);
-        if (serverIdx >= 0) {
-          // Append only entries after our last known
-          const afterLast = next.slice(serverIdx + 1);
-          if (afterLast.length === 0) return current;
-          return { ...current, [sessionKey]: [...prev, ...afterLast] };
-        }
-        // Last entry not found (compaction) — keep existing, don't replace
-        return current;
-      }
-      // No real entries yet — accept full transcript
-      return { ...current, [sessionKey]: next };
+
+      // Deduplicate by timestamp+role+text prefix (stable across index shifts)
+      const existingKeys = new Set(
+        prev.filter((e) => !e.id.startsWith('optimistic-'))
+          .map((e) => `${e.timestamp ?? 0}:${e.role}:${(e.text ?? '').slice(0, 60)}`),
+      );
+      const genuinelyNew = next.filter(
+        (e) => !existingKeys.has(`${e.timestamp ?? 0}:${e.role}:${(e.text ?? '').slice(0, 60)}`),
+      );
+
+      if (genuinelyNew.length === 0) return current;
+
+      // Remove optimistic entries that now have real server equivalents
+      const realTimestamps = new Set(next.map((e) => e.timestamp).filter(Boolean));
+      const withoutStaleOptimistic = prev.filter(
+        (e) => !e.id.startsWith('optimistic-') || !realTimestamps.has(e.timestamp),
+      );
+
+      const merged = [...withoutStaleOptimistic, ...genuinelyNew];
+      merged.sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+      return { ...current, [sessionKey]: merged };
     });
     setHistoryGroupsBySession((current) => {
       const prev = current[sessionKey] ?? [];
