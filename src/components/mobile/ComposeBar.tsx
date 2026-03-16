@@ -42,6 +42,7 @@ export const ComposeBar = memo(function ComposeBar({
   fileInputRef,
   handlers,
   onOpenRecall,
+  onModelPillTap,
 }: ComposeBarProps) {
   const sendButtonStyle = (disabled: boolean): CSSProperties => ({
     marginLeft: 'auto',
@@ -103,7 +104,7 @@ export const ComposeBar = memo(function ComposeBar({
           ) : null}
           <div className="remodex-compose-surface">
             <div className="remodex-compose-status-bar">
-              <span className="remodex-compose-chip remodex-compose-pill">{session?.model ?? 'live'}</span>
+              <button type="button" className="remodex-compose-chip remodex-compose-pill" onClick={onModelPillTap} style={{ cursor: "pointer", border: "none", background: "inherit", font: "inherit", color: "inherit", padding: "inherit" }}>{session?.model ?? 'live'}</button>
               <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{session?.status ?? 'idle'}</span>
             </div>
             <textarea
@@ -258,7 +259,7 @@ export const ComposeBar = memo(function ComposeBar({
               >
                 <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
               </button>
-              <span className="remodex-compose-chip remodex-compose-pill">{session?.model ?? 'live'}</span>
+              <button type="button" className="remodex-compose-chip remodex-compose-pill" onClick={onModelPillTap} style={{ cursor: 'pointer', border: 'none', background: 'inherit', font: 'inherit', color: 'inherit', padding: 'inherit' }}>{session?.model ?? 'live'}</button>
               <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{ownedLifecycleLabel(ownedAvailability)}</span>
               <span className="remodex-compose-chip remodex-compose-pill">{ownedReviewDispositionLabel(ownedReviewDisposition)}</span>
               <button
@@ -349,7 +350,7 @@ export const ComposeBar = memo(function ComposeBar({
               >
                 <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
               </button>
-              <span className="remodex-compose-chip remodex-compose-pill">{session?.model ?? 'live'}</span>
+              <button type="button" className="remodex-compose-chip remodex-compose-pill" onClick={onModelPillTap} style={{ cursor: 'pointer', border: 'none', background: 'inherit', font: 'inherit', color: 'inherit', padding: 'inherit' }}>{session?.model ?? 'live'}</button>
               <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{ownedLifecycleLabel(ownedAvailability)}</span>
               <span className="remodex-compose-chip remodex-compose-pill">{ownedReviewDispositionLabel(ownedReviewDisposition)}</span>
             </div>
