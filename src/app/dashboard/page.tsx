@@ -276,7 +276,7 @@ export default function DashboardPage() {
               onClick={() => setShowMemoryView(false)}
               style={{
                 position: 'absolute',
-                top: 12,
+                bottom: 14,
                 left: '50%',
                 transform: 'translateX(-50%)',
                 zIndex: 100,
