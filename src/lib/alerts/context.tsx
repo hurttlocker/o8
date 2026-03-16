@@ -23,6 +23,7 @@ import { SEVERITY_ORDER } from './types';
 import { detectAlerts, mergeAlerts } from './engine';
 
 const STORAGE_KEY = 'cortex-ide-alerts';
+const IS_SERVER = typeof window === 'undefined';
 
 interface AlertContextValue {
   /** All active alerts (sorted: urgent first, newest first within severity) */
@@ -58,7 +59,7 @@ const AlertCtx = createContext<AlertContextValue>({
 });
 
 function loadAlerts(): Alert[] {
-  if (typeof window === 'undefined') return [];
+  if (IS_SERVER) return [];
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     return raw ? JSON.parse(raw) : [];
@@ -68,7 +69,7 @@ function loadAlerts(): Alert[] {
 }
 
 function saveAlerts(alerts: Alert[]) {
-  if (typeof window === 'undefined') return;
+  if (IS_SERVER) return;
   try {
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(alerts));
   } catch {
@@ -89,13 +90,26 @@ function sortAlerts(alerts: Alert[]): Alert[] {
 }
 
 export function AlertProvider({ children }: { children: ReactNode }) {
-  const [alerts, setAlerts] = useState<Alert[]>(() => loadAlerts());
+  // Start empty to match server render — hydrate from sessionStorage after mount
+  const [alerts, setAlerts] = useState<Alert[]>([]);
   const alertsRef = useRef(alerts);
   alertsRef.current = alerts;
+  const mountedRef = useRef(false);
 
-  // Persist on change
+  // Load from sessionStorage AFTER mount (avoids hydration mismatch)
   useEffect(() => {
-    saveAlerts(alerts);
+    const stored = loadAlerts();
+    if (stored.length > 0) {
+      setAlerts(sortAlerts(stored));
+    }
+    mountedRef.current = true;
+  }, []);
+
+  // Persist on change (skip first render to avoid overwriting before load)
+  useEffect(() => {
+    if (mountedRef.current) {
+      saveAlerts(alerts);
+    }
   }, [alerts]);
 
   const updateAgents = useCallback((agents: AgentSummary[]) => {
