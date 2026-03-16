@@ -1398,6 +1398,7 @@ export const AgentPanel = memo(function AgentPanel({
   onOpenGitLog,
   onOpenDeploy,
   onOpenMemory,
+  onAgentsUpdate,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
@@ -1410,6 +1411,7 @@ export const AgentPanel = memo(function AgentPanel({
   onOpenGitLog?: (workspace?: string) => void;
   onOpenDeploy?: (project?: string) => void;
   onOpenMemory?: () => void;
+  onAgentsUpdate?: (agents: AgentDetail[]) => void;
 } = {}) {
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([]);
@@ -1454,8 +1456,10 @@ export const AgentPanel = memo(function AgentPanel({
         const res = await fetch('/api/runtime/inventory');
         if (!res.ok) return;
         const data = await res.json();
-        setAgents(prev => JSON.stringify(prev) === JSON.stringify(data.agents ?? []) ? prev : (data.agents ?? []));
+        const newAgents = data.agents ?? [];
+        setAgents(prev => JSON.stringify(prev) === JSON.stringify(newAgents) ? prev : newAgents);
         setEvents(prev => JSON.stringify(prev) === JSON.stringify(data.events ?? []) ? prev : (data.events ?? []));
+        if (onAgentsUpdate) onAgentsUpdate(newAgents);
       } catch { /* silent */ }
     }
     void fetchInventory();

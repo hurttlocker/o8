@@ -22,6 +22,8 @@ import { SurfaceStatus } from './mobile/SurfaceStatus';
 import { TopBar } from './mobile/TopBar';
 
 import { ShimmerCard } from './mobile/ShimmerCard';
+import { AlertProvider, useAlerts } from '@/lib/alerts/context';
+import { AlertTray } from '@/components/shared/AlertTray';
 
 // Lazy-loaded panels — only loaded when opened (#45)
 const shimmerFallback = { loading: () => <ShimmerCard /> };
@@ -50,7 +52,22 @@ import { useMobileScroll } from './mobile/hooks/useMobileScroll';
 import { useMobileStreaming } from './mobile/hooks/useMobileStreaming';
 import { useMobileActions } from './mobile/hooks/useMobileActions';
 
-export function MobileRemoteShell({
+export function MobileRemoteShell(props: MobileRemoteShellProps) {
+  return (
+    <AlertProvider>
+      <MobileRemoteShellInner {...props} />
+    </AlertProvider>
+  );
+}
+
+interface MobileRemoteShellProps {
+  initialSnapshot: MobileInboxSnapshot;
+  initialTranscript?: { sessionKey: string; transcript: MobileTranscriptEntry[] };
+  initialReviewFile?: MobileReviewFileResponse['file'] | null;
+  initialOwnedReviewPacket?: RuntimeReviewPacket | null;
+}
+
+function MobileRemoteShellInner({
   initialSnapshot,
   initialTranscript,
   initialReviewFile,
@@ -73,6 +90,14 @@ export function MobileRemoteShell({
   // ── Action handlers ──
   const actions = useMobileActions(state, { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles });
 
+  // ── Alert engine: feed agent data on each snapshot update ──
+  const { updateAgents, alerts: activeAlerts, markRead: alertMarkRead, markAllRead: alertMarkAllRead, dismiss: alertDismiss, dismissAll: alertDismissAll } = useAlerts();
+  useEffect(() => {
+    if (state.snapshot.sessions.length > 0) {
+      updateAgents(state.snapshot.sessions);
+    }
+  }, [state.snapshot, updateAgents]);
+
   // ── Derived transcript data ──
   const {
     snapshot, selectedSession, selectedSessionKey,
@@ -85,7 +110,8 @@ export function MobileRemoteShell({
     draftBySession, actionStateBySession, actionNoteBySession,
     draftAttachmentsBySession, pendingOwnedTurnBySession,
     enhancing, preEnhanceDraft,
-    controlsOpen, pendingApprovals, resolvedApprovals,
+    controlsOpen, alertsOpen,
+    pendingApprovals, resolvedApprovals,
     surfaceRefreshing, expandedMedia, scrollY,
     isScrolling, headerVisible, viewportTopOffset,
     composeFocused, waitingForResponse, hydrated,
@@ -95,7 +121,8 @@ export function MobileRemoteShell({
     setDraftBySession, setActionStateBySession, setActionNoteBySession,
     setDraftAttachmentsBySession, setPendingOwnedTurnBySession,
     setEnhancing, setPreEnhanceDraft,
-    setControlsOpen, setPendingApprovals, setResolvedApprovals,
+    setControlsOpen, setAlertsOpen,
+    setPendingApprovals, setResolvedApprovals,
     setSurfaceRefreshing, setExpandedMedia,
     setComposeFocused, setWaitingForResponse,
     setExpandedProject, setSelectedReviewFilePath,
@@ -250,6 +277,7 @@ export function MobileRemoteShell({
           squadPickerOpen={state.squadPickerOpen}
           onOpenControls={() => setControlsOpen(true)}
           onOpenDiff={actions.openDiffViewer}
+          onOpenAlerts={() => state.setAlertsOpen(true)}
           onToggleSquadPicker={() => state.setSquadPickerOpen(!state.squadPickerOpen)}
           onSessionFocus={actions.handleSessionFocus}
         />
@@ -419,6 +447,22 @@ export function MobileRemoteShell({
         visible={cortexGraphOpen}
         onClose={() => setCortexGraphOpen(false)}
         initialSubject={selectedSession?.currentTask?.slice(0, 60)}
+      />
+      <AlertTray
+        alerts={activeAlerts}
+        open={alertsOpen}
+        onClose={() => setAlertsOpen(false)}
+        onMarkRead={alertMarkRead}
+        onMarkAllRead={alertMarkAllRead}
+        onDismiss={alertDismiss}
+        onDismissAll={alertDismissAll}
+        onAction={(alert) => {
+          if (alert.sessionKey) {
+            actions.handleSessionFocus(alert.sessionKey);
+          }
+          setAlertsOpen(false);
+        }}
+        variant="mobile"
       />
     </div>
   );

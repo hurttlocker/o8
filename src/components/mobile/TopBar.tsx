@@ -2,6 +2,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Menu, SlidersHorizontal } from 'lucide-react';
 import type { TopBarProps } from './types';
 import { buildProjectGroups } from './utils';
+import { useAlerts } from '@/lib/alerts/context';
+import { AlertBell } from '@/components/shared/AlertBell';
 
 export const TopBar = memo(function TopBar({
   snapshot,
@@ -18,9 +20,11 @@ export const TopBar = memo(function TopBar({
   squadPickerOpen,
   onOpenControls,
   onOpenDiff,
+  onOpenAlerts,
   onToggleSquadPicker,
   onSessionFocus,
 }: TopBarProps) {
+  const { unreadCount, urgentCount, hasUnread } = useAlerts();
   const pickerRef = useRef<HTMLDivElement>(null);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
 
@@ -95,16 +99,25 @@ export const TopBar = memo(function TopBar({
       data-picker-open={squadPickerOpen ? 'true' : 'false'}
     >
       <div style={{ position: 'relative', flexShrink: 0 }}>
-        <button
-          type="button"
-          className="remodex-circle-button"
-          aria-label="Conversation controls"
-          onClick={onOpenControls}
-          style={{ background: '#ef4444', color: '#ffffff', border: 'none', boxShadow: '0 4px 12px rgba(239,68,68,0.25)' }}
-        >
-          <Menu size={18} strokeWidth={2.1} />
-        </button>
-        {pendingApprovalsCount > 0 ? (
+        {hasUnread ? (
+          <AlertBell
+            unreadCount={unreadCount}
+            urgentCount={urgentCount}
+            onClick={onOpenAlerts}
+            size="mobile"
+          />
+        ) : (
+          <button
+            type="button"
+            className="remodex-circle-button"
+            aria-label="Conversation controls"
+            onClick={onOpenControls}
+            style={{ background: '#ef4444', color: '#ffffff', border: 'none', boxShadow: '0 4px 12px rgba(239,68,68,0.25)' }}
+          >
+            <Menu size={18} strokeWidth={2.1} />
+          </button>
+        )}
+        {!hasUnread && pendingApprovalsCount > 0 ? (
           <span className="remodex-approval-badge">{pendingApprovalsCount}</span>
         ) : null}
       </div>
