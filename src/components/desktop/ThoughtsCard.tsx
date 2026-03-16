@@ -141,9 +141,11 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
   const [minimized, setMinimized] = useState(false);
   const [workflow, setWorkflow] = useState<WorkflowState>({ step: 'idle' });
   const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [size, setSize] = useState({ w: 400, h: 0 }); // h=0 means auto-height
   const [initialized, setInitialized] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
+  const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number; corner: string } | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // Center on first open
@@ -189,25 +191,85 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
     window.addEventListener('mouseup', handleUp);
   }, [position]);
 
+  // ── Resize handlers ──
+
+  const handleResizeStart = useCallback((corner: string) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const currentH = cardRef.current?.getBoundingClientRect().height || 300;
+    resizeRef.current = { startX: e.clientX, startY: e.clientY, origW: size.w, origH: currentH, corner };
+
+    const handleMove = (ev: MouseEvent) => {
+      if (!resizeRef.current) return;
+      const dx = ev.clientX - resizeRef.current.startX;
+      const dy = ev.clientY - resizeRef.current.startY;
+      const c = resizeRef.current.corner;
+
+      let newW = resizeRef.current.origW;
+      let newH = resizeRef.current.origH;
+
+      if (c.includes('e')) newW = Math.max(320, Math.min(800, resizeRef.current.origW + dx));
+      if (c.includes('w')) {
+        newW = Math.max(320, Math.min(800, resizeRef.current.origW - dx));
+        setPosition(p => ({ ...p, x: Math.max(0, p.x + (resizeRef.current!.origW - newW) * (dx > 0 ? 0 : 0) + dx) }));
+      }
+      if (c.includes('s')) newH = Math.max(200, Math.min(700, resizeRef.current.origH + dy));
+
+      setSize({ w: newW, h: newH });
+    };
+
+    const handleUp = () => {
+      resizeRef.current = null;
+      window.removeEventListener('mousemove', handleMove);
+      window.removeEventListener('mouseup', handleUp);
+    };
+
+    window.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleUp);
+  }, [size.w]);
+
   // ── Submit thought ──
 
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     if (!input.trim()) return;
     const thought = input.trim();
     setInput('');
 
-    // Simulate workflow progression
+    // Step 1: Understanding intent
     setWorkflow({ step: 'thinking', summary: thought });
 
-    const advance = (step: WorkflowStep, extras: Partial<WorkflowState>, delay: number) => {
-      setTimeout(() => setWorkflow(prev => ({ ...prev, step, ...extras })), delay);
-    };
+    try {
+      // Send thought to the main OpenClaw agent via the existing chat API
+      const res = await fetch('/api/mobile/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: `[Thought from IDE] ${thought}` }),
+      });
 
-    // Demo flow — in real implementation, each step calls real APIs
-    advance('creating', { repo: 'hurttlocker/cortex-ide' }, 1500);
-    advance('assigning', { issue: '#117', agent: 'Niot' }, 3000);
-    advance('planning', {}, 4500);
-    advance('reviewing', { plan: 'Agent will analyze the codebase, create isolated worktree, implement changes, and open PR for review.' }, 6500);
+      if (res.ok) {
+        // Progress through visual steps while agent processes
+        setTimeout(() => setWorkflow(prev => ({ ...prev, step: 'creating' })), 1500);
+        setTimeout(() => setWorkflow(prev => ({ ...prev, step: 'assigning', issue: 'pending', agent: 'Main Agent' })), 3000);
+        setTimeout(() => setWorkflow(prev => ({ ...prev, step: 'planning' })), 4500);
+        setTimeout(() => setWorkflow(prev => ({
+          ...prev,
+          step: 'reviewing',
+          plan: 'Thought sent to your main OpenClaw agent. Check the chat panel for the agent\'s response and plan.',
+        })), 6000);
+      } else {
+        setWorkflow(prev => ({
+          ...prev,
+          step: 'reviewing',
+          plan: 'Failed to reach agent. Check that the dev server is running and the agent is connected.',
+        }));
+      }
+    } catch {
+      setWorkflow(prev => ({
+        ...prev,
+        step: 'reviewing',
+        plan: 'Connection error. Make sure the OpenClaw gateway is running.',
+      }));
+    }
   }, [input]);
 
   const handleApprove = useCallback(() => {
@@ -266,7 +328,8 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
           position: 'fixed',
           left: position.x,
           top: position.y,
-          width: minimized ? 220 : 400,
+          width: minimized ? 220 : size.w,
+          ...(size.h > 0 && !minimized ? { height: size.h } : {}),
           zIndex: 9999,
           borderRadius: minimized ? 12 : 18,
           background: 'rgba(255, 255, 255, 0.45)',
@@ -275,7 +338,9 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
           border: '1px solid rgba(255, 255, 255, 0.35)',
           boxShadow: '0 24px 80px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06), inset 0 0.5px 0 rgba(255,255,255,0.5)',
           overflow: 'hidden',
-          transition: 'width 250ms cubic-bezier(0.32, 0.72, 0, 1), border-radius 250ms',
+          display: 'flex',
+          flexDirection: 'column',
+          transition: resizeRef.current ? 'none' : 'width 250ms cubic-bezier(0.32, 0.72, 0, 1), border-radius 250ms',
           fontFamily: '-apple-system, system-ui, BlinkMacSystemFont, sans-serif',
         }}
       >
@@ -326,10 +391,10 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
 
         {/* Body — hidden when minimized */}
         {!minimized && (
-          <div style={{ padding: '12px 14px 14px' }}>
+          <div style={{ padding: '12px 14px 14px', flex: size.h > 0 ? 1 : undefined, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             {/* Input area */}
             {workflow.step === 'idle' && (
-              <div style={{ position: 'relative' }}>
+              <div style={{ position: 'relative', flex: size.h > 0 ? 1 : undefined, display: 'flex', flexDirection: 'column' }}>
                 <textarea
                   ref={inputRef}
                   value={input}
@@ -344,7 +409,8 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
                   style={{
                     width: '100%',
                     minHeight: 72,
-                    maxHeight: 160,
+                    flex: size.h > 0 ? 1 : undefined,
+                    maxHeight: size.h > 0 ? 'none' : 160,
                     padding: '10px 80px 10px 12px',
                     borderRadius: 12,
                     border: '1px solid rgba(0,0,0,0.06)',
@@ -542,6 +608,44 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
               </div>
             )}
           </div>
+        )}
+
+        {/* Resize handles — right edge, bottom edge, bottom-right corner */}
+        {!minimized && (
+          <>
+            {/* Right edge */}
+            <div
+              onMouseDown={handleResizeStart('e')}
+              style={{
+                position: 'absolute', top: 20, right: -3, bottom: 20, width: 6,
+                cursor: 'ew-resize', zIndex: 2,
+              }}
+            />
+            {/* Bottom edge */}
+            <div
+              onMouseDown={handleResizeStart('s')}
+              style={{
+                position: 'absolute', bottom: -3, left: 20, right: 20, height: 6,
+                cursor: 'ns-resize', zIndex: 2,
+              }}
+            />
+            {/* Bottom-right corner */}
+            <div
+              onMouseDown={handleResizeStart('se')}
+              style={{
+                position: 'absolute', bottom: -3, right: -3, width: 14, height: 14,
+                cursor: 'nwse-resize', zIndex: 3,
+              }}
+            />
+            {/* Bottom-left corner */}
+            <div
+              onMouseDown={handleResizeStart('sw')}
+              style={{
+                position: 'absolute', bottom: -3, left: -3, width: 14, height: 14,
+                cursor: 'nesw-resize', zIndex: 3,
+              }}
+            />
+          </>
         )}
       </div>
     </>
