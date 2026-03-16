@@ -138,7 +138,6 @@ function MediaGrid({
                 src={mediaHref(item.path)}
                 alt={item.name}
                 loading="lazy"
-                onLoad={() => onScrollToLatestMessage()}
                 style={{ width: '100%', height: 'auto', borderRadius: 8, display: 'block' }}
               />
               <span className="remodex-media-card-caption">Tap to expand</span>
@@ -204,21 +203,31 @@ export function ChatView({
     seenMessageIdsRef.current?.add(entryId);
   }, [seenMessageIdsRef]);
 
+  // Stable estimateSize — must NOT depend on transcriptEntries to avoid
+  // virtualizer recalculating all sizes on every poll update, which causes
+  // scroll position to jump randomly on mobile.
+  const transcriptRef = useRef(transcriptEntries);
+  transcriptRef.current = transcriptEntries;
+
   const estimateSize = useCallback((index: number) => {
-    const entry = transcriptEntries[index];
+    const entry = transcriptRef.current[index];
     if (!entry) return 60;
     const textLen = entry.text?.length ?? 0;
     const hasMedia = Boolean(entry.media?.length);
     if (entry.role === 'user') return Math.max(52, 52 + Math.ceil(textLen / 60) * 20 + (hasMedia ? 200 : 0));
     if (entry.role === 'system' && entry.text.toLowerCase().includes('compaction')) return 44;
     return Math.max(64, 64 + Math.ceil(textLen / 50) * 22 + (hasMedia ? 200 : 0));
-  }, [transcriptEntries]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const scrollMargin = listRef.current?.offsetTop ?? 0;
   const virtualizer = useWindowVirtualizer({
     count: transcriptEntries.length,
     estimateSize,
     overscan: 8,
-    scrollMargin: listRef.current?.offsetTop ?? 0,
+    scrollMargin,
+    // Prevent scroll jumps: keep measured sizes for existing items stable.
+    // Only new items (appended at end) get fresh estimates.
+    rangeExtractor: undefined,
   });
 
   // No auto-scroll — user controls position via "new messages" button.
