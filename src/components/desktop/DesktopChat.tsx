@@ -660,6 +660,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
 
       // Preserve optimistic (local-*) messages that the server hasn't echoed yet.
       // Only update state when data actually changed (prevents flicker/scroll jump).
+      let didChange = false;
       setTranscript(prev => {
         const optimistic = prev.filter(m => m.id.startsWith('local-'));
         const realPrev = prev.filter(m => !m.id.startsWith('local-'));
@@ -676,11 +677,13 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
           );
           const pending = optimistic.filter(m => !serverUserTexts.has(m.text));
           if (pending.length === optimistic.length) return prev; // nothing changed
+          didChange = true;
           if (!pending.length) return serverEntries;
           return [...serverEntries, ...pending];
         }
 
         // Server changed — merge with any pending optimistic
+        didChange = true;
         if (!optimistic.length) return serverEntries;
 
         const serverUserTexts = new Set(
@@ -691,7 +694,10 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
         return [...serverEntries, ...pending];
       });
       setLoading(false);
-      scrollToBottom(true);
+      // Only scroll if user is already at bottom — never force-yank upward
+      if (didChange && stickToBottomRef.current) {
+        scrollToBottom();
+      }
     } catch {
       setLoading(false);
     }
