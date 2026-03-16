@@ -11,6 +11,7 @@ import {
   Square,
 } from 'lucide-react';
 import type { ControlsSheetProps } from './types';
+import { UniversalSearch } from '@/components/shared/UniversalSearch';
 
 export function ControlsSheet({
   controlsOpen,
@@ -30,6 +31,8 @@ export function ControlsSheet({
   onCopyKey,
   onAbort,
   onSessionFocus,
+  onSearchSelectSession,
+  onSearchSelectIssue,
   children,
 }: ControlsSheetProps) {
   if (!controlsOpen) {
@@ -47,6 +50,26 @@ export function ControlsSheet({
           <button type="button" className="remodex-done-button remodex-done-tinted" onClick={onClose}>
             Done
           </button>
+        </div>
+
+        {/* Universal Search */}
+        <div style={{ padding: '0 16px 8px' }}>
+          <UniversalSearch
+            variant="mobile"
+            onSelectSession={(sessionKey) => {
+              if (onSearchSelectSession) onSearchSelectSession(sessionKey);
+              onClose();
+            }}
+            onSelectIssue={(num) => {
+              if (onSearchSelectIssue) onSearchSelectIssue(num);
+              onClose();
+            }}
+            onSelectFile={() => {
+              // File viewing not wired on mobile yet — close menu
+              onClose();
+            }}
+            onClose={onClose}
+          />
         </div>
 
         <div className="remodex-controls-action-list">

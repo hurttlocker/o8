@@ -167,6 +167,8 @@ export interface ControlsSheetProps {
   onCopyKey: () => void;
   onAbort: () => void | Promise<void>;
   onSessionFocus: (sessionId: string) => void;
+  onSearchSelectSession?: (sessionKey: string) => void;
+  onSearchSelectIssue?: (issueNumber: number) => void;
   children?: ReactNode;
 }
 
