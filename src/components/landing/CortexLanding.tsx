@@ -267,10 +267,11 @@ const s = {
     margin: "0 auto",
     padding: "100px 40px",
     position: "relative" as const,
+    zIndex: 2,
   },
   paperBg: {
     position: "relative" as const,
-    background: "linear-gradient(180deg, #0d0d0f 0%, #111114 30%, #0e0e11 70%, #09090b 100%)",
+    background: "linear-gradient(180deg, #0c0c0f 0%, #131318 20%, #111116 50%, #0f0f13 80%, #09090b 100%)",
     overflow: "hidden" as const,
   },
   sectionEyebrow: {
@@ -340,6 +341,8 @@ const s = {
     maxWidth: 600,
     margin: "0 auto",
     padding: "80px 40px 120px",
+    position: "relative" as const,
+    zIndex: 2,
   },
   downloadTitle: {
     fontSize: "clamp(28px, 4vw, 44px)",
@@ -382,44 +385,46 @@ const s = {
 /* ─────────────────────── PAPER NOISE SHADER ─────────────────────── */
 
 function PaperNoise() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const divRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    const el = divRef.current;
+    if (!el) return;
+
+    // Generate a small noise tile and convert to a repeating CSS background
+    const size = 200;
+    const c = document.createElement("canvas");
+    c.width = size;
+    c.height = size;
+    const ctx = c.getContext("2d");
     if (!ctx) return;
 
-    const w = 256;
-    const h = 256;
-    canvas.width = w;
-    canvas.height = h;
-
-    const imageData = ctx.createImageData(w, h);
-    const data = imageData.data;
-
-    for (let i = 0; i < data.length; i += 4) {
-      const v = Math.random() * 20 + 8; // dark gray noise, subtle
-      data[i] = v;
-      data[i + 1] = v;
-      data[i + 2] = v;
-      data[i + 3] = 35; // low alpha for subtle texture
+    const imageData = ctx.createImageData(size, size);
+    const d = imageData.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const v = Math.random() * 30 + 10;
+      d[i] = v;
+      d[i + 1] = v;
+      d[i + 2] = v + Math.random() * 5; // slight cool tint
+      d[i + 3] = 50;
     }
     ctx.putImageData(imageData, 0, 0);
+
+    el.style.backgroundImage = `url(${c.toDataURL()})`;
+    el.style.backgroundRepeat = "repeat";
+    el.style.backgroundSize = `${size}px ${size}px`;
   }, []);
 
   return (
-    <canvas
-      ref={canvasRef}
+    <div
+      ref={divRef}
       style={{
         position: "absolute",
         inset: 0,
-        width: "100%",
-        height: "100%",
         pointerEvents: "none",
-        opacity: 0.5,
+        opacity: 0.7,
         mixBlendMode: "screen",
-        zIndex: 0,
+        zIndex: 1,
       }}
     />
   );
@@ -520,6 +525,23 @@ export default function CortexLanding() {
       <div style={s.paperBg}>
         {/* Paper shader noise overlay */}
         <PaperNoise />
+
+        {/* Ambient gradient orbs — give glass something to blur */}
+        <div style={{
+          position: "absolute", top: "15%", left: "15%", width: 400, height: 400,
+          borderRadius: "50%", background: "radial-gradient(circle, rgba(168,85,247,0.07) 0%, transparent 70%)",
+          filter: "blur(80px)", pointerEvents: "none", zIndex: 0,
+        }} />
+        <div style={{
+          position: "absolute", top: "40%", right: "10%", width: 350, height: 350,
+          borderRadius: "50%", background: "radial-gradient(circle, rgba(6,182,212,0.05) 0%, transparent 70%)",
+          filter: "blur(80px)", pointerEvents: "none", zIndex: 0,
+        }} />
+        <div style={{
+          position: "absolute", bottom: "20%", left: "30%", width: 300, height: 300,
+          borderRadius: "50%", background: "radial-gradient(circle, rgba(236,72,153,0.04) 0%, transparent 70%)",
+          filter: "blur(80px)", pointerEvents: "none", zIndex: 0,
+        }} />
 
         {/* ──── FEATURES ──── */}
         <section style={s.section}>
