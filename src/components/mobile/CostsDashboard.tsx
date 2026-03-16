@@ -11,7 +11,9 @@ export function CostsDashboard({
   );
   const totalTokens = openClawSessions.reduce((sum, session) => sum + (session.tokenUsage?.totalTokens ?? 0), 0);
   const totalRemaining = openClawSessions.reduce((sum, session) => sum + (session.tokenUsage?.remainingTokens ?? 0), 0);
-  const totalCapacity = totalTokens + totalRemaining;
+  // Only compute capacity ratio if remainingTokens is actually reported
+  const hasRemaining = openClawSessions.some((s) => (s.tokenUsage?.remainingTokens ?? 0) > 0);
+  const totalCapacity = hasRemaining ? totalTokens + totalRemaining : 0;
 
   const byModel = new Map<string, { sessions: typeof openClawSessions; tokens: number; capacity: number }>();
   for (const session of openClawSessions) {
