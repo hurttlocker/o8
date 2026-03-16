@@ -410,7 +410,6 @@ export function WorkspacesPanel() {
           transition: 'max-height 250ms cubic-bezier(0.32, 0.72, 0, 1)',
         }}>
           <StatusSection status="in_progress" cards={grouped.in_progress} />
-          <StatusSection status="awaiting_review" cards={grouped.awaiting_review} />
           <StatusSection status="done" cards={grouped.done} />
           <StatusSection status="backlog" cards={grouped.backlog} />
         </div>
