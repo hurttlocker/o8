@@ -1735,10 +1735,10 @@ button.workflow-file-item.workflow-file-item-active {
   align-items: stretch;
   min-width: 0;
   max-height: 112px;
-  overflow: hidden;
+  overflow: visible;
   opacity: 1;
   transform: translateX(-50%);
-  padding: calc(0.26rem - (var(--remodex-header-progress) * 0.08rem)) 0.05rem 0.06rem;
+  padding: calc(0.26rem - (var(--remodex-header-progress) * 0.08rem)) 0.3rem 0.06rem;
   transition:
     gap 220ms ease,
     padding 220ms ease,
@@ -1759,6 +1759,7 @@ button.workflow-file-item.workflow-file-item-active {
 .remodex-topbar[data-visible='false'] {
   max-height: 0;
   opacity: 0;
+  overflow: hidden;
   transform: translate(-50%, -18px);
   padding-top: 0;
   padding-bottom: 0;
