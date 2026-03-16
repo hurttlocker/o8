@@ -148,11 +148,11 @@ export function TitleBar({ onSettingsClick, renderSearch }: TitleBarProps) {
           onClick={onSettingsClick}
           aria-label="Settings"
           style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
+            width: 36,
+            height: 36,
+            borderRadius: 10,
             border: 'none',
-            background: 'transparent',
+            background: 'rgba(239, 68, 68, 0.06)',
             color: '#ef4444',
             display: 'flex',
             alignItems: 'center',
@@ -170,7 +170,7 @@ export function TitleBar({ onSettingsClick, renderSearch }: TitleBarProps) {
             e.currentTarget.style.color = '#ef4444';
           }}
         >
-          <Settings size={18} strokeWidth={1.8} />
+          <Settings size={20} strokeWidth={2} />
         </button>
       </div>
 
