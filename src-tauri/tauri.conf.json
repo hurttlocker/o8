@@ -5,7 +5,7 @@
   "identifier": "com.cortexide.app",
   "build": {
     "frontendDist": "../out",
-    "devUrl": "http://localhost:3001",
+    "devUrl": "http://localhost:3001/dashboard",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },
