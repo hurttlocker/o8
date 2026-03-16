@@ -98,8 +98,8 @@ export async function GET() {
       const agentMatch = file.match(/agents\/([^/]+)\//);
       const agent = agentMatch ? agentMatch[1] : 'unknown';
 
-      // Read last 200 lines for better coverage
-      const lines = execQuiet(`tail -200 "${file}" 2>/dev/null`);
+      // Read last 500 lines for full day coverage
+      const lines = execQuiet(`tail -500 "${file}" 2>/dev/null`, { timeout: 10000 });
       if (!lines) continue;
 
       let currentKind: string | null = null;
@@ -179,12 +179,14 @@ export async function GET() {
       const seg = pass1[i];
       const prev = merged[merged.length - 1];
 
-      // If this segment is tiny and between same-kind neighbors, absorb it
+      // If this segment is tiny and adjacent to something, absorb it.
+      // Coding always wins over thinking (tool calls happen between planning messages).
       if (seg.durationMin <= 2 && seg.kind !== 'idle' && seg.kind !== 'error') {
-        const next = pass1[i + 1];
-        // Absorb into previous if previous exists and is within 3 min
         if (prev && prev.kind !== 'idle' && seg.startMin <= prev.startMin + prev.durationMin + 3) {
-          // Extend previous to cover this
+          // Extend previous to cover this, but upgrade to coding if either is coding
+          if (seg.kind === 'coding' || prev.kind === 'coding') {
+            prev.kind = 'coding';
+          }
           prev.durationMin = Math.max(prev.durationMin, (seg.startMin + seg.durationMin) - prev.startMin);
           continue;
         }
@@ -210,8 +212,10 @@ export async function GET() {
         seg.kind !== 'error' && prev.kind !== 'error' &&
         seg.startMin <= prev.startMin + prev.durationMin + 5
       ) {
-        // Keep the kind of whichever segment is longer
-        if (seg.durationMin > prev.durationMin) {
+        // Coding wins when merging (coding sessions have thinking interspersed)
+        if (seg.kind === 'coding' || prev.kind === 'coding') {
+          prev.kind = 'coding';
+        } else if (seg.durationMin > prev.durationMin) {
           prev.kind = seg.kind;
         }
         prev.durationMin = Math.max(prev.durationMin, (seg.startMin + seg.durationMin) - prev.startMin);
