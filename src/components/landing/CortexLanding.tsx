@@ -136,24 +136,24 @@ const s = {
     flexDirection: "column" as const,
     alignItems: "center",
     justifyContent: "flex-start",
-    paddingTop: "14vh",
+    paddingTop: "11vh",
     overflow: "hidden",
   },
   terrainWrap: {
     position: "absolute" as const,
-    left: 0,
-    right: 0,
+    left: "-10%",
+    right: "-10%",
     bottom: 0,
-    height: "50%",
+    height: "70%",
     zIndex: 1,
   },
   heroOverlay: {
     position: "absolute" as const,
-    left: 0,
-    right: 0,
+    left: "-10%",
+    right: "-10%",
     bottom: 0,
-    height: "55%",
-    background: "linear-gradient(180deg, rgba(9,9,11,1) 0%, rgba(9,9,11,0.7) 20%, rgba(9,9,11,0.15) 50%, rgba(9,9,11,0.4) 100%)",
+    height: "75%",
+    background: "linear-gradient(180deg, rgba(9,9,11,1) 0%, rgba(9,9,11,0.6) 18%, rgba(9,9,11,0.1) 45%, rgba(9,9,11,0.35) 100%)",
     pointerEvents: "none" as const,
     zIndex: 5,
   },
@@ -205,14 +205,14 @@ const s = {
     gap: 8,
     fontSize: 15,
     fontWeight: 600,
-    color: "#fff",
-    background: "linear-gradient(135deg, #a855f7, #7c3aed)",
-    border: "1px solid rgba(168,85,247,0.4)",
+    color: "#09090b",
+    background: "linear-gradient(135deg, #ffffff, #e4e4e7)",
+    border: "1px solid rgba(255,255,255,0.6)",
     borderRadius: 12,
     padding: "14px 32px",
     cursor: "pointer",
     textDecoration: "none",
-    boxShadow: "0 12px 40px rgba(168,85,247,0.3), 0 0 0 1px rgba(168,85,247,0.15)",
+    boxShadow: "0 12px 40px rgba(255,255,255,0.15), 0 0 0 1px rgba(255,255,255,0.1)",
     transition: "transform 0.2s, box-shadow 0.2s",
   },
   ctaSecondary: {
@@ -241,10 +241,10 @@ const s = {
     zIndex: 20,
     display: "flex",
     justifyContent: "center",
-    gap: 48,
+    gap: 56,
     flexWrap: "wrap" as const,
     marginTop: "auto",
-    paddingBottom: 48,
+    paddingBottom: 80,
   },
   statItem: {
     textAlign: "center" as const,
@@ -259,13 +259,19 @@ const s = {
     fontSize: 11,
     textTransform: "uppercase" as const,
     letterSpacing: "0.15em",
-    color: "#52525b",
+    color: "rgba(255,255,255,0.7)",
     marginTop: 4,
   },
   section: {
     maxWidth: 1100,
     margin: "0 auto",
     padding: "100px 40px",
+    position: "relative" as const,
+  },
+  paperBg: {
+    position: "relative" as const,
+    background: "linear-gradient(180deg, #0d0d0f 0%, #111114 30%, #0e0e11 70%, #09090b 100%)",
+    overflow: "hidden" as const,
   },
   sectionEyebrow: {
     fontSize: 12,
@@ -293,22 +299,23 @@ const s = {
     position: "relative" as const,
     padding: "28px 28px 24px",
     borderRadius: 16,
-    border: `1px solid ${color}18`,
-    background: "rgba(15, 16, 19, 0.6)",
-    backdropFilter: "blur(8px)",
+    border: `1px solid rgba(255,255,255,0.08)`,
+    background: "rgba(255, 255, 255, 0.03)",
+    backdropFilter: "blur(16px)",
+    WebkitBackdropFilter: "blur(16px)",
     overflow: "hidden",
-    transition: "border-color 0.3s, box-shadow 0.3s",
+    transition: "border-color 0.3s, box-shadow 0.3s, background 0.3s",
   }),
   cardGlow: (color: string) => ({
     position: "absolute" as const,
-    top: -30,
-    right: -30,
-    width: 120,
-    height: 120,
+    top: -40,
+    right: -40,
+    width: 140,
+    height: 140,
     borderRadius: "50%",
     background: color,
-    opacity: 0.04,
-    filter: "blur(40px)",
+    opacity: 0.06,
+    filter: "blur(50px)",
     pointerEvents: "none" as const,
   }),
   cardIcon: (color: string) => ({
@@ -367,10 +374,56 @@ const s = {
   },
   divider: {
     width: "100%",
-    height: 1,
-    background: "linear-gradient(90deg, transparent, rgba(168,85,247,0.15), transparent)",
+    height: 120,
+    background: "linear-gradient(180deg, #09090b 0%, #0d0d0f 100%)",
   },
 };
+
+/* ─────────────────────── PAPER NOISE SHADER ─────────────────────── */
+
+function PaperNoise() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const w = 256;
+    const h = 256;
+    canvas.width = w;
+    canvas.height = h;
+
+    const imageData = ctx.createImageData(w, h);
+    const data = imageData.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+      const v = Math.random() * 20 + 8; // dark gray noise, subtle
+      data[i] = v;
+      data[i + 1] = v;
+      data[i + 2] = v;
+      data[i + 3] = 35; // low alpha for subtle texture
+    }
+    ctx.putImageData(imageData, 0, 0);
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      style={{
+        position: "absolute",
+        inset: 0,
+        width: "100%",
+        height: "100%",
+        pointerEvents: "none",
+        opacity: 0.5,
+        mixBlendMode: "screen",
+        zIndex: 0,
+      }}
+    />
+  );
+}
 
 /* ─────────────────────── COMPONENT ─────────────────────── */
 
@@ -461,24 +514,30 @@ export default function CortexLanding() {
         </div>
       </section>
 
-      {/* ──── DIVIDER ──── */}
+      {/* ──── FADE + PAPER SECTION ──── */}
       <div style={s.divider} />
 
-      {/* ──── FEATURES ──── */}
-      <section style={s.section}>
-        <p style={s.sectionEyebrow}>What's inside</p>
-        <h2 style={s.sectionTitle}>Built for the multi-agent era</h2>
+      <div style={s.paperBg}>
+        {/* Paper shader noise overlay */}
+        <PaperNoise />
+
+        {/* ──── FEATURES ──── */}
+        <section style={s.section}>
+          <p style={s.sectionEyebrow}>What's inside</p>
+          <h2 style={s.sectionTitle}>Built for the multi-agent era</h2>
         <div style={s.grid}>
           {features.map((f) => (
             <div
               key={f.title}
               style={s.card(f.color)}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLDivElement).style.borderColor = f.color + "40";
-                (e.currentTarget as HTMLDivElement).style.boxShadow = `0 20px 50px ${f.color}10`;
+                (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(255,255,255,0.14)";
+                (e.currentTarget as HTMLDivElement).style.background = "rgba(255, 255, 255, 0.05)";
+                (e.currentTarget as HTMLDivElement).style.boxShadow = `0 20px 60px ${f.color}12, 0 0 40px ${f.color}08`;
               }}
               onMouseLeave={(e) => {
-                (e.currentTarget as HTMLDivElement).style.borderColor = f.color + "18";
+                (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(255,255,255,0.08)";
+                (e.currentTarget as HTMLDivElement).style.background = "rgba(255, 255, 255, 0.03)";
                 (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
               }}
             >
@@ -491,9 +550,6 @@ export default function CortexLanding() {
         </div>
       </section>
 
-      {/* ──── DIVIDER ──── */}
-      <div style={s.divider} />
-
       {/* ──── DOWNLOAD CTA ──── */}
       <section id="download" style={s.downloadSection}>
         <h2 style={s.downloadTitle}>Start commanding your fleet.</h2>
@@ -502,7 +558,7 @@ export default function CortexLanding() {
           Zero config. One binary. Local-first forever.
         </p>
         <div style={{ ...s.ctaRow, marginTop: 32 }}>
-          <a href="#" style={{ ...s.ctaPrimary, padding: "16px 40px", fontSize: 16 }}>
+          <a href="#" style={{ ...s.ctaPrimary, padding: "16px 40px", fontSize: 16, color: "#09090b" }}>
             ⬇ Download for macOS
           </a>
         </div>
@@ -513,6 +569,8 @@ export default function CortexLanding() {
           Windows & Linux coming soon
         </p>
       </section>
+
+      </div>{/* close paperBg */}
 
       {/* ──── FOOTER ──── */}
       <footer style={s.footer}>
