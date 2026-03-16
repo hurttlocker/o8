@@ -354,9 +354,18 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
 
   // Click a search result → fly into its cluster
   const handleResultClick = useCallback((result: SearchResult) => {
+    console.log('[GraphExplorer] handleResultClick fired:', result.type, result.text.slice(0, 40));
     setSearchOpen(false);
-    const cluster = clusters.find(c => c.type === result.type);
-    if (!cluster) return;
+
+    // Use ref for current clusters (avoids stale closure)
+    const curClusters = clustersRef.current;
+    const cluster = curClusters.find(c => c.type === result.type);
+    if (!cluster) {
+      console.warn('[GraphExplorer] No cluster found for type:', result.type, 'available:', curClusters.map(c => c.type));
+      return;
+    }
+
+    console.log('[GraphExplorer] Flying into cluster:', cluster.label);
 
     // Save camera
     savedCameraRef.current = {
@@ -365,8 +374,8 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
       zoom: targetZoomRef.current,
     };
 
-    const idx = clusters.indexOf(cluster);
-    const angle = (idx / clusters.length) * Math.PI * 2 + 0.3;
+    const idx = curClusters.indexOf(cluster);
+    const angle = (idx / curClusters.length) * Math.PI * 2 + 0.3;
     targetRotRef.current.y = -angle - 0.5;
     targetRotRef.current.x = -0.45;
     targetZoomRef.current = 2.2;
@@ -377,12 +386,17 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
       }
     }
 
+    // Reset focus animation
+    focusProgressRef.current = 0;
     factRevealRef.current = 0;
+
+    // Set focus facts FIRST (so ref syncs before next frame)
+    const filteredFacts = searchResults.filter(r => r.type === result.type).slice(0, 12);
+    console.log('[GraphExplorer] Setting focusFacts:', filteredFacts.length, 'facts');
+    setFocusFacts(filteredFacts);
     setFocusedCluster(cluster);
     setSelectedCluster(null);
-    // Use the search results as focus facts, filtered to this type
-    setFocusFacts(searchResults.filter(r => r.type === result.type).slice(0, 12));
-  }, [clusters, searchResults]);
+  }, [searchResults]);
 
   // Mouse drag rotation
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -431,6 +445,22 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
     return closest;
   }, []);
 
+  // Exit focus mode
+  const exitFocus = useCallback(() => {
+    targetRotRef.current.y = savedCameraRef.current.rotY;
+    targetRotRef.current.x = savedCameraRef.current.rotX;
+    targetZoomRef.current = savedCameraRef.current.zoom;
+
+    for (const row of terrainRef.current.grid) {
+      for (const cell of row) cell.highlight = 1.0;
+    }
+
+    focusProgressRef.current = 0;
+    factRevealRef.current = 0;
+    setFocusedCluster(null);
+    setFocusFacts([]);
+  }, []);
+
   // Single click → select cluster (show side panel)
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     if (draggingRef.current) return;
@@ -448,10 +478,12 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
     if (!cluster) return;
 
     // If already focused on this cluster, exit focus
-    if (focusedCluster?.type === cluster.type) {
+    if (focusedClusterRef.current?.type === cluster.type) {
       exitFocus();
       return;
     }
+
+    console.log('[GraphExplorer] Double-click fly-in:', cluster.label);
 
     // Save camera
     savedCameraRef.current = {
@@ -460,23 +492,21 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
       zoom: targetZoomRef.current,
     };
 
-    // Find cluster's world position for camera target
-    const idx = clusters.indexOf(cluster);
-    const angle = (idx / clusters.length) * Math.PI * 2 + 0.3;
+    const curClusters = clustersRef.current;
+    const idx = curClusters.indexOf(cluster);
+    const angle = (idx / Math.max(curClusters.length, 1)) * Math.PI * 2 + 0.3;
 
-    // Fly camera to face this cluster
     targetRotRef.current.y = -angle - 0.5;
     targetRotRef.current.x = -0.45;
     targetZoomRef.current = 2.2;
 
-    // Dim non-focused bars
     for (const row of terrainRef.current.grid) {
       for (const cell of row) {
         cell.highlight = cell.cluster.type === cluster.type ? 1.0 : 0.08;
       }
     }
 
-    // Reset reveal counter
+    focusProgressRef.current = 0;
     factRevealRef.current = 0;
     setFocusedCluster(cluster);
     setSelectedCluster(null);
@@ -485,30 +515,15 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
     try {
       const res = await fetch(`/api/panel/cortex-graph?q=${encodeURIComponent(cluster.label)}`);
       const data = await res.json();
-      setFocusFacts((data.searchResults ?? []).slice(0, 12));
+      const facts = (data.searchResults ?? []).slice(0, 12);
+      console.log('[GraphExplorer] Fetched', facts.length, 'facts for', cluster.label);
+      setFocusFacts(facts);
     } catch {
       setFocusFacts([]);
     }
-  }, [clusters, focusedCluster]);
+  }, [exitFocus, findClusterAtPoint]);
 
   // Exit focus mode
-  const exitFocus = useCallback(() => {
-    // Restore camera
-    targetRotRef.current.y = savedCameraRef.current.rotY;
-    targetRotRef.current.x = savedCameraRef.current.rotX;
-    targetZoomRef.current = savedCameraRef.current.zoom;
-
-    // Restore all highlights
-    for (const row of terrainRef.current.grid) {
-      for (const cell of row) cell.highlight = 1.0;
-    }
-
-    focusProgressRef.current = 0;
-    factRevealRef.current = 0;
-    setFocusedCluster(null);
-    setFocusFacts([]);
-  }, []);
-
   // Animation loop
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -619,6 +634,91 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
         }
       }
 
+      // ── Heat Map Mode (crossfade as camera tilts to top-down) ──
+      // rotX range: -0.15 (side view) to -1.2 (top-down)
+      // Heat map starts appearing at -0.9, fully replaces bars at -1.15
+      const heatAlpha = rotX < -1.15 ? 1 : rotX < -0.9 ? (Math.abs(rotX) - 0.9) / 0.25 : 0;
+
+      if (heatAlpha > 0 && grid.length > 0) {
+        const cellW = Math.max(2, (w / gridX) * zoomRef.current * 0.8);
+        const cellH = Math.max(1.5, (h / gridZ) * zoomRef.current * 0.5);
+
+        for (let ix = 0; ix < gridX; ix++) {
+          for (let iz = 0; iz < gridZ; iz++) {
+            const cell = grid[ix]?.[iz];
+            if (!cell || cell.rawHeight < 0.5) continue;
+
+            const worldX = ix * BAR_SPACING;
+            const worldZ = iz * BAR_SPACING;
+            const proj = project3D(worldX, 0, worldZ, rotY, rotX, cx, cy, scale, gridX, gridZ);
+
+            const intensity = cell.height * cell.highlight;
+            if (intensity < 0.02) continue;
+
+            const rgb = hexToRgbStr(cell.cluster.color);
+
+            // Heat cell
+            ctx.globalAlpha = intensity * 0.7 * heatAlpha;
+            ctx.fillStyle = `rgba(${rgb}, 1)`;
+            ctx.fillRect(proj.sx - cellW / 2, proj.sy - cellH / 2, cellW, cellH);
+
+            // Glow for high-intensity cells
+            if (intensity > 0.4) {
+              const glowSize = cellW * (1.5 + intensity);
+              const heatGlow = ctx.createRadialGradient(proj.sx, proj.sy, 0, proj.sx, proj.sy, glowSize);
+              heatGlow.addColorStop(0, `rgba(${rgb}, ${intensity * 0.3 * heatAlpha})`);
+              heatGlow.addColorStop(1, 'transparent');
+              ctx.fillStyle = heatGlow;
+              ctx.beginPath();
+              ctx.arc(proj.sx, proj.sy, glowSize, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        }
+
+        // Contour lines — draw rings around high-density areas
+        for (const cluster of curClusters) {
+          const idx = curClusters.indexOf(cluster);
+          const angle = (idx / curClusters.length) * Math.PI * 2 + 0.3;
+          const radius = 0.15 + (idx % 3) * 0.1;
+          const peakNX = 0.5 + Math.cos(angle) * radius;
+          const peakNZ = 0.5 + Math.sin(angle) * radius;
+          const peakWorldX = peakNX * gridX * BAR_SPACING;
+          const peakWorldZ = peakNZ * gridZ * BAR_SPACING;
+          const peakProj = project3D(peakWorldX, 0, peakWorldZ, rotY, rotX, cx, cy, scale, gridX, gridZ);
+
+          const rgb = hexToRgbStr(cluster.color);
+
+          // 3 concentric contour rings
+          for (let ring = 1; ring <= 3; ring++) {
+            const ringR = ring * 25 * zoomRef.current;
+            ctx.globalAlpha = (0.2 - ring * 0.05) * heatAlpha * (cluster.factCount > 200 ? 1 : 0.5);
+            ctx.strokeStyle = `rgba(${rgb}, 0.6)`;
+            ctx.lineWidth = ring === 1 ? 1.2 : 0.6;
+            ctx.setLineDash(ring > 1 ? [4, 4] : []);
+            ctx.beginPath();
+            ctx.ellipse(peakProj.sx, peakProj.sy, ringR, ringR * 0.5, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          ctx.setLineDash([]);
+
+          // Cluster label in heat map mode
+          ctx.globalAlpha = 0.9 * heatAlpha;
+          ctx.fillStyle = '#ffffff';
+          ctx.font = '700 12px -apple-system, system-ui, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(cluster.label, peakProj.sx, peakProj.sy - 4);
+          ctx.fillStyle = `rgba(${rgb}, 0.85)`;
+          ctx.font = '500 10px "SF Mono", monospace';
+          ctx.fillText(`${cluster.factCount.toLocaleString()}`, peakProj.sx, peakProj.sy + 10);
+        }
+
+        ctx.globalAlpha = 1;
+      }
+
+      // Bar opacity (crossfade with heat map)
+      const barOpacity = 1 - heatAlpha;
+
       // Collect bars
       const bars: {
         sx: number; sy: number; depth: number;
@@ -669,6 +769,11 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
 
       bars.sort((a, b) => b.depth - a.depth);
 
+      // ── Floor Reflections + Bars (skip when fully in heat map mode) ──
+      if (barOpacity < 0.01) {
+        // Skip bars + reflections entirely in full heat map mode
+      } else {
+
       // ── Floor Reflections (drawn before bars so they're underneath) ──
       for (const bar of bars) {
         if (bar.barH < 3 || bar.cell.height < 0.15) continue;
@@ -698,7 +803,7 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
         // Depth fog: far bars fade out
         const depthNorm = (bar.depth - minDepth) / depthRange; // 0 = near, 1 = far
         const fogFactor = 1 - depthNorm * 0.55; // far bars retain 45% visibility
-        const alpha = (0.85 + bar.cell.height * 0.15) * fogFactor;
+        const alpha = (0.85 + bar.cell.height * 0.15) * fogFactor * barOpacity;
         const rgb = hexToRgbStr(bar.cell.cluster.color);
 
         // Vertical gradient: dark base → category color → bright tip
@@ -744,6 +849,8 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
       }
 
       ctx.globalAlpha = 1;
+
+      } // end barOpacity > 0.01 block
 
       // ── Connection Arcs Between Clusters ──
       // Find peak screen positions for each cluster type first
@@ -1054,7 +1161,7 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
             value={searchQuery}
             onChange={(e) => handleSearchInput(e.target.value)}
             onFocus={() => { setSearchFocused(true); if (searchResults.length > 0) setSearchOpen(true); }}
-            onBlur={() => { setSearchFocused(false); setTimeout(() => setSearchOpen(false), 200); }}
+            onBlur={() => { setSearchFocused(false); setTimeout(() => setSearchOpen(false), 400); }}
             style={{
               flex: 1,
               border: 'none',
