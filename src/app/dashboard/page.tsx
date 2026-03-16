@@ -262,7 +262,31 @@ function DashboardInner() {
       overflow: 'hidden',
     }}>
       {/* ── Title Bar ── */}
-      <TitleBar onSearchClick={() => setSearchOpen(true)} />
+      <TitleBar
+        renderSearch={(onClose) => (
+          <UniversalSearch
+            variant="desktop"
+            workspace={activeWorkspace}
+            agentsJson={agentsJson}
+            onSelectSession={(sessionKey) => { setActiveSessionKey(sessionKey); onClose(); }}
+            onSelectIssue={(num) => { handleSelectIssue(num); onClose(); }}
+            onSelectFile={(filePath, line) => {
+              openCanvasTab({
+                id: `file:${filePath}${activeWorkspace ? `:${activeWorkspace}` : ''}`,
+                kind: 'file',
+                label: filePath.split('/').pop() ?? filePath,
+                resourceId: filePath,
+                meta: {
+                  ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
+                  ...(line ? { line: String(line) } : {}),
+                },
+              });
+              onClose();
+            }}
+            onClose={onClose}
+          />
+        )}
+      />
 
       {/* ── Main Layout (horizontal) ── */}
       <div style={{
@@ -409,34 +433,7 @@ function DashboardInner() {
           overflow: 'hidden',
           background: 'linear-gradient(180deg, #f0f4f8 0%, #e8edf4 100%)',
         }}>
-          {/* Search bar */}
-          <div style={{
-            paddingTop: 16,
-            paddingRight: 24,
-            paddingBottom: 12,
-            paddingLeft: 24,
-            flexShrink: 0,
-          }}>
-            <UniversalSearch
-              variant="desktop"
-              workspace={activeWorkspace}
-              agentsJson={agentsJson}
-              onSelectSession={(sessionKey) => setActiveSessionKey(sessionKey)}
-              onSelectIssue={(num) => handleSelectIssue(num)}
-              onSelectFile={(filePath, line) => {
-                openCanvasTab({
-                  id: `file:${filePath}${activeWorkspace ? `:${activeWorkspace}` : ''}`,
-                  kind: 'file',
-                  label: filePath.split('/').pop() ?? filePath,
-                  resourceId: filePath,
-                  meta: {
-                    ...(activeWorkspace ? { workspace: activeWorkspace } : {}),
-                    ...(line ? { line: String(line) } : {}),
-                  },
-                });
-              }}
-            />
-          </div>
+          {/* Search moved to TitleBar */}
           {/* Workspace content area */}
           <div style={{
             flex: 1,
