@@ -16,15 +16,15 @@ interface ClusterData {
 
 // Map cortex fact types to display labels + colors
 const TYPE_MAP: Record<string, { label: string; color: string }> = {
-  state: { label: 'State', color: '#ef4444' },          // red — largest cluster
-  kv: { label: 'Key-Value', color: '#f59e0b' },         // amber
-  relationship: { label: 'Relationships', color: '#3b82f6' }, // blue
-  temporal: { label: 'Temporal', color: '#06b6d4' },     // cyan
-  decision: { label: 'Decisions', color: '#8b5cf6' },    // purple
-  identity: { label: 'Identity', color: '#ec4899' },     // pink
-  config: { label: 'Config', color: '#22c55e' },         // green
-  preference: { label: 'Preferences', color: '#f97316' },// orange
-  location: { label: 'Locations', color: '#14b8a6' },    // teal
+  state: { label: 'State', color: '#ef4444' },
+  kv: { label: 'Key-Value', color: '#f59e0b' },
+  relationship: { label: 'Relationships', color: '#3b82f6' },
+  temporal: { label: 'Temporal', color: '#06b6d4' },
+  decision: { label: 'Decisions', color: '#8b5cf6' },
+  identity: { label: 'Identity', color: '#ec4899' },
+  config: { label: 'Config', color: '#22c55e' },
+  preference: { label: 'Preferences', color: '#f97316' },
+  location: { label: 'Locations', color: '#14b8a6' },
 };
 
 export async function GET(request: Request) {
@@ -38,28 +38,54 @@ export async function GET(request: Request) {
     });
     const stats = JSON.parse(statsOutput);
     const factsByType: Record<string, number> = stats.facts_by_type ?? {};
-    const totalFacts = stats.facts ?? 0;
     const totalMemories = stats.memories ?? 0;
-    const confidenceDist = stats.confidence_distribution ?? {};
+
+    // Get REAL active/retired/superseded counts from beliefs
+    let activeFacts = 0;
+    let retiredFacts = 0;
+    let supersededFacts = 0;
+    let totalFacts = 0;
+    try {
+      const beliefsOutput = execSync(`${CORTEX_BIN} beliefs 2>/dev/null`, {
+        encoding: 'utf-8', timeout: 5000,
+      });
+      const beliefs = JSON.parse(beliefsOutput);
+      const states = beliefs.states ?? {};
+      activeFacts = states.active ?? 0;
+      retiredFacts = states.retired ?? 0;
+      supersededFacts = states.superseded ?? 0;
+      totalFacts = beliefs.total ?? (activeFacts + retiredFacts + supersededFacts);
+    } catch {
+      // Fallback to stats if beliefs unavailable
+      totalFacts = stats.facts ?? 0;
+      activeFacts = stats.confidence_distribution?.high ?? totalFacts;
+    }
+
+    // Scale cluster fact counts proportionally to active-only
+    // stats.facts_by_type includes ALL facts (active + retired + superseded)
+    // We want to show the active proportion for each type
+    const totalInTypes = Object.values(factsByType).reduce((s: number, c) => s + (c as number), 0);
+    const activeRatio = totalInTypes > 0 ? activeFacts / totalInTypes : 1;
 
     // Build clusters from type breakdown
     const clusters: ClusterData[] = [];
-    for (const [type, count] of Object.entries(factsByType)) {
+    for (const [type, rawCount] of Object.entries(factsByType)) {
       const meta = TYPE_MAP[type] ?? { label: type, color: '#94a3b8' };
+      // Approximate active count per type (proportional scaling)
+      const activeCount = Math.round((rawCount as number) * activeRatio);
       clusters.push({
         label: meta.label,
         type,
-        factCount: count,
+        factCount: activeCount,
         avgConfidence: stats.avg_confidence ? stats.avg_confidence * 100 : 80,
         color: meta.color,
-        facts: [], // populated on search
+        facts: [],
       });
     }
 
-    // Sort by fact count (biggest clusters first)
     clusters.sort((a, b) => b.factCount - a.factCount);
 
-    // If search query, fetch matching facts
+    // Search
     let searchResults: { text: string; confidence: number; source: string; type: string }[] = [];
     if (query) {
       try {
@@ -83,20 +109,20 @@ export async function GET(request: Request) {
       clusters,
       searchResults,
       stats: {
+        activeFacts,
+        retiredFacts,
+        supersededFacts,
         totalFacts,
         totalMemories,
         sources: stats.sources ?? 0,
         avgConfidence: stats.avg_confidence ? (stats.avg_confidence * 100).toFixed(1) : '0',
-        confidenceHigh: confidenceDist.high ?? 0,
-        confidenceMedium: confidenceDist.medium ?? 0,
-        confidenceLow: confidenceDist.low ?? 0,
       },
     });
   } catch (err) {
     return NextResponse.json({
       clusters: [],
       searchResults: [],
-      stats: { totalFacts: 0, totalMemories: 0, sources: 0, avgConfidence: '0' },
+      stats: { activeFacts: 0, retiredFacts: 0, supersededFacts: 0, totalFacts: 0, totalMemories: 0, sources: 0, avgConfidence: '0' },
       error: err instanceof Error ? err.message : 'Unknown error',
     });
   }
