@@ -215,7 +215,6 @@ export const AlertTray = memo(function AlertTray({
   // Prevent hydration mismatch — alerts are client-only (sessionStorage)
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
-  if (!mounted) return null;
 
   // Close on outside click (desktop only)
   useEffect(() => {
@@ -246,6 +245,8 @@ export const AlertTray = memo(function AlertTray({
   }, [open, onClose]);
 
   const hasAlerts = alerts.length > 0;
+
+  if (!mounted) return null;
 
   if (variant === 'mobile') {
     return (
