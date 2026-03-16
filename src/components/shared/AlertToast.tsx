@@ -38,6 +38,10 @@ export const AlertToast = memo(function AlertToast({
   onAction,
 }: AlertToastProps) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  // Prevent hydration mismatch — alert state is client-only
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  // Note: can't early-return before hooks, so guard the render below
   const shownRef = useRef<Set<string>>(new Set());
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -94,7 +98,7 @@ export const AlertToast = memo(function AlertToast({
     };
   }, []);
 
-  if (toasts.length === 0) return null;
+  if (!mounted || toasts.length === 0) return null;
 
   return (
     <div
