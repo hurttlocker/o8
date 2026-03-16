@@ -11,6 +11,7 @@ export type MobileInboxItemKind = 'alert' | 'approval' | 'review' | 'run_watch';
 export type MobileControlActionKind =
   | 'inspect'
   | 'steer'
+  | 'send'
   | 'approve'
   | 'deny'
   | 'pause'
@@ -139,7 +140,7 @@ export interface MobileActionAttachment {
 }
 
 export interface MobileActionRequest {
-  action: Extract<MobileControlActionKind, 'steer' | 'stop' | 'approve' | 'deny' | 'pause' | 'resume' | 'watch' | 'resolve' | 'launch'>;
+  action: Extract<MobileControlActionKind, 'send' | 'steer' | 'stop' | 'approve' | 'deny' | 'pause' | 'resume' | 'watch' | 'resolve' | 'launch'>;
   sessionKey: string;
   message?: string;
   attachments?: MobileActionAttachment[];
@@ -151,7 +152,7 @@ export interface MobileActionResponse {
   ok: boolean;
   action: MobileActionRequest['action'];
   sessionKey: string;
-  status: 'queued' | 'completed' | 'unavailable';
+  status: 'queued' | 'completed' | 'unavailable' | 'sent' | 'error';
   note: string;
   runId?: string;
   aborted?: boolean;
