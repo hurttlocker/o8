@@ -14,6 +14,7 @@ import { NavRail, type NavSection } from '@/components/desktop/NavRail';
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { IntentCanvas } from '@/components/desktop/IntentCanvas';
+import { SettingsPage } from '@/components/desktop/SettingsPage';
 
 export default function DashboardPage() {
   return (
@@ -420,6 +421,13 @@ function DashboardInner() {
           </div>
         )}
 
+        {/* Full-screen Settings */}
+        {activeNavSection === 'settings' && !showMemoryView && (
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <SettingsPage />
+          </div>
+        )}
+
         {/* Full-screen Memory View */}
         {showMemoryView && (
           <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
@@ -455,7 +463,7 @@ function DashboardInner() {
         )}
 
         {/* Top — workspace area with search */}
-        {!showMemoryView && activeNavSection !== 'intent' && <div style={{
+        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && <div style={{
           flex: canvasTabs.length > 0 ? `0 0 ${100 - canvasHeight}%` : 1,
           display: 'flex',
           flexDirection: 'column',
@@ -496,7 +504,7 @@ function DashboardInner() {
         </div>}
 
         {/* Vertical drag handle between workspace and canvas */}
-        {!showMemoryView && activeNavSection !== 'intent' && (<>
+        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && (<>
 
         {canvasTabs.length > 0 && bottomPanelVisible && (
           <div
