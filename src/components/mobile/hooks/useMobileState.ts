@@ -75,6 +75,7 @@ export function useMobileState(init: MobileStateInit) {
   // ── UI chrome ──
   const [controlsOpen, setControlsOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
+  const [sessionInfoOpen, setSessionInfoOpen] = useState(false);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [resolvedApprovals, setResolvedApprovals] = useState<Record<string, 'approved' | 'rejected'>>({});
   const [surfaceRefreshing, setSurfaceRefreshing] = useState(false);
@@ -162,6 +163,7 @@ export function useMobileState(init: MobileStateInit) {
     // UI chrome
     controlsOpen, setControlsOpen,
     alertsOpen, setAlertsOpen,
+    sessionInfoOpen, setSessionInfoOpen,
     pendingApprovals, setPendingApprovals,
     resolvedApprovals, setResolvedApprovals,
     surfaceRefreshing, setSurfaceRefreshing,
