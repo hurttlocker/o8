@@ -5,11 +5,11 @@ import { motion, AnimatePresence } from "framer-motion";
 
 /* ─────────────────────── CONFIG ─────────────────────── */
 
-const GRID_X = 120;
-const GRID_Z = 80;
-const BAR_SPACING = 5;
-const MAX_HEIGHT = 280;
-const BASE_BAR_WIDTH = 3.2;
+const GRID_X = 160;
+const GRID_Z = 90;
+const BAR_SPACING = 4.5;
+const MAX_HEIGHT = 300;
+const BASE_BAR_WIDTH = 3.0;
 
 // Color stops: warm base → purple mid → cyan peak → white hot
 function heightColor(t: number): string {
@@ -285,8 +285,8 @@ export default function CortexTerrain() {
       const w = rect.width;
       const h = rect.height;
       const cx = w / 2;
-      const cy = h * 0.7; // Push origin low — bars grow upward from bottom
-      const scale = Math.min(w, h) / 480; // Fill the space dramatically
+      const cy = h * 0.72;
+      const scale = Math.max(w, h) / 580; // Scale to largest dimension — fills widescreen
 
       // Smooth rotation lerp
       rotRef.current.y += (targetRotRef.current.y - rotRef.current.y) * 0.03;
