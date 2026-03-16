@@ -158,29 +158,72 @@ export async function GET() {
     // Sort by start time
     allSegments.sort((a, b) => a.startMin - b.startMin);
 
-    // Merge adjacent same-kind segments (within 2 min gap)
-    const merged: TimelineSegment[] = [];
+    // Pass 1: Merge adjacent same-kind segments (within 3 min gap)
+    const pass1: TimelineSegment[] = [];
     for (const seg of allSegments) {
-      const last = merged[merged.length - 1];
-      if (last && last.kind === seg.kind && seg.startMin <= last.startMin + last.durationMin + 2) {
+      const last = pass1[pass1.length - 1];
+      if (last && last.kind === seg.kind && seg.startMin <= last.startMin + last.durationMin + 3) {
         last.durationMin = Math.max(last.durationMin, (seg.startMin + seg.durationMin) - last.startMin);
+      } else {
+        pass1.push({ ...seg });
+      }
+    }
+
+    // Pass 2: Absorb short segments (< 3 min) into their neighbors.
+    // In a real coding session, thinking→coding→thinking→coding rapidly
+    // alternating should just be "coding". The dominant kind wins.
+    const merged: TimelineSegment[] = [];
+    for (let i = 0; i < pass1.length; i++) {
+      const seg = pass1[i];
+      const prev = merged[merged.length - 1];
+
+      // If this segment is tiny and between same-kind neighbors, absorb it
+      if (seg.durationMin <= 2 && seg.kind !== 'idle' && seg.kind !== 'error') {
+        const next = pass1[i + 1];
+        // Absorb into previous if previous exists and is within 3 min
+        if (prev && prev.kind !== 'idle' && seg.startMin <= prev.startMin + prev.durationMin + 3) {
+          // Extend previous to cover this
+          prev.durationMin = Math.max(prev.durationMin, (seg.startMin + seg.durationMin) - prev.startMin);
+          continue;
+        }
+      }
+
+      // Try to merge with previous
+      if (prev && prev.kind === seg.kind && seg.startMin <= prev.startMin + prev.durationMin + 3) {
+        prev.durationMin = Math.max(prev.durationMin, (seg.startMin + seg.durationMin) - prev.startMin);
       } else {
         merged.push({ ...seg });
       }
     }
 
-    const totalMinutes = merged.length > 0
-      ? merged[merged.length - 1].startMin + merged[merged.length - 1].durationMin
+    // Pass 3: Final merge — any remaining tiny non-idle segments get absorbed
+    const final: TimelineSegment[] = [];
+    for (const seg of merged) {
+      const prev = final[final.length - 1];
+      if (prev && seg.kind !== 'idle' && prev.kind !== 'idle' && seg.startMin <= prev.startMin + prev.durationMin + 5) {
+        // Pick the dominant kind (coding > thinking > testing)
+        const priority: Record<string, number> = { coding: 3, testing: 2, thinking: 1, error: 4, idle: 0 };
+        if ((priority[seg.kind] || 0) >= (priority[prev.kind] || 0)) {
+          prev.kind = seg.kind;
+        }
+        prev.durationMin = Math.max(prev.durationMin, (seg.startMin + seg.durationMin) - prev.startMin);
+      } else {
+        final.push({ ...seg });
+      }
+    }
+
+    const totalMinutes = final.length > 0
+      ? final[final.length - 1].startMin + final[final.length - 1].durationMin
       : 0;
 
     // Summary stats
     const kindTotals: Record<string, number> = {};
-    for (const seg of merged) {
+    for (const seg of final) {
       kindTotals[seg.kind] = (kindTotals[seg.kind] || 0) + seg.durationMin;
     }
 
     return NextResponse.json({
-      segments: merged,
+      segments: final,
       totalMinutes,
       stats: kindTotals,
       source: 'jsonl',
