@@ -1,30 +1,12 @@
 import { NextResponse } from 'next/server';
+import { execSync } from 'child_process';
 
 /**
  * /api/panel/timeline — Aggregates today's agent activity into timeline segments.
  *
- * Phase 1: Reads gateway sessions, maps message patterns to segment kinds.
- * Returns segments array for the SessionTimeline component.
- *
- * Segment classification:
- * - tool calls (exec/read/write/edit) → coding
- * - thinking blocks, planning → thinking
- * - test/verify mentions → testing
- * - errors → error
- * - gaps > 5min → idle
+ * Uses openclaw CLI (same pattern as universal-search) to read session data.
+ * Classifies messages into segment kinds for the SessionTimeline component.
  */
-
-const GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || 'http://127.0.0.1:18789';
-const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || '';
-
-interface GatewaySession {
-  sessionId: string;
-  agentId: string;
-  label?: string;
-  createdAt?: string;
-  lastMessageAt?: string;
-  messageCount?: number;
-}
 
 interface TimelineSegment {
   kind: 'thinking' | 'coding' | 'testing' | 'error' | 'idle';
@@ -35,193 +17,143 @@ interface TimelineSegment {
   sessionId?: string;
 }
 
-// Classify a message into a segment kind
-function classifyMessage(msg: any): 'thinking' | 'coding' | 'testing' | 'error' | 'idle' {
-  const role = msg.role || '';
-  const content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content || '');
-  const toolName = msg.name || msg.tool_name || '';
+function execQuiet(cmd: string, opts?: { timeout?: number }): string {
+  try {
+    return execSync(cmd, {
+      encoding: 'utf-8',
+      timeout: opts?.timeout ?? 8000,
+      maxBuffer: 1024 * 1024,
+      env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` },
+    }).trim();
+  } catch {
+    return '';
+  }
+}
 
-  // Errors
-  if (role === 'error' || content.includes('Error:') || content.includes('error:') || content.includes('FAILED')) {
+function classifyContent(role: string, content: string): 'thinking' | 'coding' | 'testing' | 'error' | 'idle' {
+  const lc = content.toLowerCase();
+
+  if (lc.includes('error') || lc.includes('failed') || lc.includes('permission denied') || lc.includes('exit: 1')) {
     return 'error';
   }
-
-  // Tool calls = coding
-  if (role === 'tool' || toolName || content.includes('tool_calls') || content.includes('exec') || content.includes('function_call')) {
-    // Check if it's a test-related tool call
-    if (content.includes('test') || content.includes('verify') || content.includes('tsc --noEmit') || content.includes('npm test')) {
+  if (role === 'tool' || lc.includes('exec') || lc.includes('write') || lc.includes('edit') || lc.includes('git commit') || lc.includes('git push')) {
+    if (lc.includes('tsc --noemit') || lc.includes('npm test') || lc.includes('verify') || lc.includes('check')) {
       return 'testing';
     }
     return 'coding';
   }
-
-  // Assistant thinking
   if (role === 'assistant') {
-    if (content.includes('thinking') || content.includes('planning') || content.includes('Let me') || content.length < 200) {
+    // Short responses or planning language = thinking
+    if (content.length < 300 || lc.includes('let me') || lc.includes('planning') || lc.includes('thinking') || lc.includes('i need to')) {
       return 'thinking';
     }
     return 'coding';
   }
-
   return 'thinking';
 }
 
 export async function GET() {
   try {
-    // Get today's start time (9 AM ET)
     const now = new Date();
     const todayStart = new Date(now);
     todayStart.setHours(9, 0, 0, 0);
-
     if (now < todayStart) {
-      return NextResponse.json({ segments: [], totalMinutes: 0, agentCount: 0 });
+      return NextResponse.json({ segments: [], totalMinutes: 0 });
     }
 
-    // Fetch sessions from gateway
-    const sessionsRes = await fetch(`${GATEWAY_URL}/api/sessions?active=true`, {
-      headers: {
-        'Authorization': `Bearer ${GATEWAY_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      signal: AbortSignal.timeout(5000),
-    });
+    // Get session list via CLI
+    const sessionsRaw = execQuiet('openclaw status --json 2>/dev/null || echo "[]"', { timeout: 10000 });
+    let sessions: any[] = [];
+    try {
+      const parsed = JSON.parse(sessionsRaw);
+      sessions = Array.isArray(parsed) ? parsed : (parsed.sessions || parsed.agents || []);
+    } catch {
+      // Try alternative: read session files directly
+      const lsRaw = execQuiet(`ls -t ~/.openclaw/agents/*/sessions/*.jsonl 2>/dev/null | head -10`);
+      const files = lsRaw.split('\n').filter(Boolean);
 
-    if (!sessionsRes.ok) {
-      return NextResponse.json({ segments: [], error: 'gateway_unavailable' }, { status: 502 });
-    }
+      const allSegments: TimelineSegment[] = [];
 
-    const sessionsData = await sessionsRes.json();
-    const sessions: GatewaySession[] = Array.isArray(sessionsData) ? sessionsData : (sessionsData.sessions || []);
+      for (const file of files) {
+        // Get agent name from path
+        const agentMatch = file.match(/agents\/([^/]+)\//);
+        const agent = agentMatch ? agentMatch[1] : 'unknown';
 
-    // Filter to today's sessions
-    const todaySessions = sessions.filter((s) => {
-      const lastMsg = s.lastMessageAt ? new Date(s.lastMessageAt) : null;
-      const created = s.createdAt ? new Date(s.createdAt) : null;
-      const relevant = lastMsg || created;
-      return relevant && relevant >= todayStart;
-    });
+        // Read last 100 lines of the session file
+        const lines = execQuiet(`tail -100 "${file}" 2>/dev/null`);
+        if (!lines) continue;
 
-    if (todaySessions.length === 0) {
-      return NextResponse.json({ segments: [], totalMinutes: 0, agentCount: 0 });
-    }
-
-    // For each session, try to get recent history and classify
-    const allSegments: TimelineSegment[] = [];
-
-    for (const session of todaySessions.slice(0, 10)) { // Cap at 10 sessions
-      try {
-        const histRes = await fetch(
-          `${GATEWAY_URL}/api/sessions/${session.sessionId}/history?limit=50`,
-          {
-            headers: {
-              'Authorization': `Bearer ${GATEWAY_TOKEN}`,
-              'Content-Type': 'application/json',
-            },
-            signal: AbortSignal.timeout(3000),
-          }
-        );
-
-        if (!histRes.ok) continue;
-
-        const histData = await histRes.json();
-        const messages = Array.isArray(histData) ? histData : (histData.messages || []);
-
-        if (messages.length === 0) continue;
-
-        // Group messages into time blocks (5-min granularity)
         let currentKind: string | null = null;
         let blockStart = 0;
         let blockDur = 0;
 
-        for (const msg of messages) {
-          const ts = msg.timestamp || msg.created_at;
-          if (!ts) continue;
+        for (const line of lines.split('\n')) {
+          if (!line.trim()) continue;
+          try {
+            const msg = JSON.parse(line);
+            const ts = msg.timestamp || msg.ts || msg.created;
+            if (!ts) continue;
 
-          const msgTime = new Date(ts);
-          if (msgTime < todayStart) continue;
+            const msgTime = new Date(ts);
+            if (isNaN(msgTime.getTime()) || msgTime < todayStart) continue;
 
-          const minSinceStart = Math.floor((msgTime.getTime() - todayStart.getTime()) / 60000);
-          const kind = classifyMessage(msg);
+            const minSinceStart = Math.floor((msgTime.getTime() - todayStart.getTime()) / 60000);
+            const role = msg.role || '';
+            const content = typeof msg.content === 'string'
+              ? msg.content
+              : Array.isArray(msg.content)
+                ? msg.content.map((c: any) => c.text || '').join(' ')
+                : '';
+            const kind = classifyContent(role, content);
 
-          if (currentKind === null) {
-            currentKind = kind;
-            blockStart = minSinceStart;
-            blockDur = 1;
-          } else if (kind === currentKind && minSinceStart - (blockStart + blockDur) < 5) {
-            // Same kind, extend block
-            blockDur = minSinceStart - blockStart + 1;
-          } else {
-            // Different kind or gap — flush current block
-            if (minSinceStart - (blockStart + blockDur) >= 5) {
-              // Insert idle gap
-              allSegments.push({
-                kind: currentKind as any,
-                startMin: blockStart,
-                durationMin: blockDur,
-                agent: session.agentId,
-                sessionId: session.sessionId,
-              });
-              allSegments.push({
-                kind: 'idle',
-                startMin: blockStart + blockDur,
-                durationMin: minSinceStart - (blockStart + blockDur),
-                agent: session.agentId,
-              });
+            if (currentKind === null) {
+              currentKind = kind;
+              blockStart = minSinceStart;
+              blockDur = 1;
+            } else if (kind === currentKind && minSinceStart - (blockStart + blockDur) < 5) {
+              blockDur = Math.max(blockDur, minSinceStart - blockStart + 1);
             } else {
-              allSegments.push({
-                kind: currentKind as any,
-                startMin: blockStart,
-                durationMin: blockDur,
-                agent: session.agentId,
-                sessionId: session.sessionId,
-              });
+              // Flush block
+              if (minSinceStart - (blockStart + blockDur) >= 5) {
+                allSegments.push({ kind: currentKind as any, startMin: blockStart, durationMin: blockDur, agent });
+                allSegments.push({ kind: 'idle', startMin: blockStart + blockDur, durationMin: minSinceStart - (blockStart + blockDur), agent });
+              } else {
+                allSegments.push({ kind: currentKind as any, startMin: blockStart, durationMin: blockDur, agent });
+              }
+              currentKind = kind;
+              blockStart = minSinceStart;
+              blockDur = 1;
             }
-            currentKind = kind;
-            blockStart = minSinceStart;
-            blockDur = 1;
-          }
+          } catch { continue; }
         }
 
-        // Flush last block
         if (currentKind !== null) {
-          allSegments.push({
-            kind: currentKind as any,
-            startMin: blockStart,
-            durationMin: blockDur,
-            agent: session.agentId,
-            sessionId: session.sessionId,
-          });
+          allSegments.push({ kind: currentKind as any, startMin: blockStart, durationMin: blockDur, agent });
         }
-      } catch {
-        // Skip failed session history fetch
       }
+
+      // Sort and merge
+      allSegments.sort((a, b) => a.startMin - b.startMin);
+      const merged: TimelineSegment[] = [];
+      for (const seg of allSegments) {
+        const last = merged[merged.length - 1];
+        if (last && last.kind === seg.kind && seg.startMin <= last.startMin + last.durationMin + 2) {
+          last.durationMin = Math.max(last.durationMin, (seg.startMin + seg.durationMin) - last.startMin);
+          if (!last.agent && seg.agent) last.agent = seg.agent;
+        } else {
+          merged.push({ ...seg });
+        }
+      }
+
+      const totalMinutes = merged.length > 0
+        ? merged[merged.length - 1].startMin + merged[merged.length - 1].durationMin
+        : 0;
+
+      return NextResponse.json({ segments: merged, totalMinutes, source: 'jsonl' });
     }
 
-    // Sort by start time and merge adjacent same-kind segments
-    allSegments.sort((a, b) => a.startMin - b.startMin);
-
-    const merged: TimelineSegment[] = [];
-    for (const seg of allSegments) {
-      const last = merged[merged.length - 1];
-      if (last && last.kind === seg.kind && seg.startMin <= last.startMin + last.durationMin + 2) {
-        // Merge overlapping/adjacent same-kind
-        last.durationMin = Math.max(last.durationMin, (seg.startMin + seg.durationMin) - last.startMin);
-      } else {
-        merged.push({ ...seg });
-      }
-    }
-
-    const totalMinutes = merged.length > 0
-      ? merged[merged.length - 1].startMin + merged[merged.length - 1].durationMin
-      : 0;
-
-    return NextResponse.json({
-      segments: merged,
-      totalMinutes,
-      agentCount: new Set(todaySessions.map(s => s.agentId)).size,
-      sessionCount: todaySessions.length,
-    });
-  } catch (err) {
+    return NextResponse.json({ segments: [], totalMinutes: 0 });
+  } catch {
     return NextResponse.json({ segments: [], error: 'internal' }, { status: 500 });
   }
 }

@@ -237,6 +237,8 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
       fontWeight: 500,
       color: '#6b7280',
       letterSpacing: '-0.01em',
+      position: 'relative',
+      zIndex: 100,
     }}>
       {/* Left — Play + Expand + Label */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
