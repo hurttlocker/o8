@@ -155,11 +155,22 @@ function ScopeBadge({ scope }: { scope: string }) {
 
 // ── GitHub Tab Content ──
 
+function ChevronDownIcon({ rotated }: { rotated?: boolean }) {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+      style={{ display: 'block', flexShrink: 0, transition: 'transform 200ms', transform: rotated ? 'rotate(180deg)' : 'rotate(0)' }}>
+      <polyline points="6 9 12 15 18 9"/>
+    </svg>
+  );
+}
+
 function GitHubTab({ accounts, repos, loading }: {
   accounts: GitHubAccount[];
   repos: GitHubRepo[];
   loading: boolean;
 }) {
+  const [reposExpanded, setReposExpanded] = useState(false);
+
   if (loading) {
     return (
       <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
@@ -168,122 +179,160 @@ function GitHubTab({ accounts, repos, loading }: {
     );
   }
 
-  const activeAccount = accounts.find(a => a.active);
+  // Only show active accounts
+  const activeAccounts = accounts.filter(a => a.active);
+  const activeAccount = activeAccounts[0];
+  const connected = !!activeAccount;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Connection Status */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Connection Status Card */}
       <div style={{
         background: '#fff',
         borderRadius: 14,
-        padding: 20,
+        padding: 24,
         border: '1px solid rgba(0,0,0,0.06)',
         boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-          <div style={{ color: '#111827' }}><GitHubIcon size={24} /></div>
-          <h3 style={{ fontSize: 15, fontWeight: 700, color: '#111827', margin: 0 }}>GitHub</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+          <div style={{ color: '#111827' }}><GitHubIcon size={28} /></div>
+          <div>
+            <h3 style={{ fontSize: 17, fontWeight: 700, color: '#111827', margin: 0 }}>GitHub</h3>
+            <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0 0' }}>
+              Source control, issues, and pull requests
+            </p>
+          </div>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto',
-            padding: '4px 10px', borderRadius: 8,
-            background: 'rgba(34, 197, 94, 0.08)', color: '#22c55e',
-            fontSize: 11, fontWeight: 600,
+            padding: '5px 12px', borderRadius: 8,
+            background: connected ? 'rgba(34, 197, 94, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+            color: connected ? '#22c55e' : '#ef4444',
+            fontSize: 12, fontWeight: 600,
           }}>
-            <CheckCircleIcon />
-            Connected
+            {connected && <CheckCircleIcon />}
+            {connected ? 'Connected' : 'Not Connected'}
           </div>
         </div>
 
-        {/* Accounts */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {accounts.map((acct) => (
-            <div key={acct.login} style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              padding: 12,
-              borderRadius: 10,
-              background: acct.active ? 'rgba(37, 99, 235, 0.04)' : 'rgba(0,0,0,0.02)',
-              border: acct.active ? '1px solid rgba(37, 99, 235, 0.15)' : '1px solid rgba(0,0,0,0.04)',
-            }}>
-              {/* Avatar */}
-              <img
-                src={acct.avatarUrl}
-                alt={acct.login}
-                width={36}
-                height={36}
-                style={{ borderRadius: 18, border: '2px solid rgba(0,0,0,0.06)' }}
-              />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>{acct.login}</span>
-                  {acct.name && <span style={{ fontSize: 11, color: '#9ca3af' }}>({acct.name})</span>}
-                  {acct.active && (
-                    <span style={{
-                      fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
-                      padding: '1px 6px', borderRadius: 4,
-                      background: '#2563eb', color: '#fff',
-                    }}>
-                      Active
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>
-                  Protocol: {acct.protocol} · {acct.scopes.length} scopes
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Scopes */}
+        {/* Active Account */}
         {activeAccount && (
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-              Token Scopes
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-              {activeAccount.scopes.map((s) => <ScopeBadge key={s} scope={s} />)}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 14,
+            padding: 16,
+            borderRadius: 12,
+            background: 'rgba(37, 99, 235, 0.03)',
+            border: '1px solid rgba(37, 99, 235, 0.1)',
+          }}>
+            <img
+              src={activeAccount.avatarUrl}
+              alt={activeAccount.login}
+              width={44}
+              height={44}
+              style={{ borderRadius: 22, border: '2px solid rgba(37, 99, 235, 0.2)' }}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>{activeAccount.login}</span>
+                {activeAccount.name && <span style={{ fontSize: 12, color: '#6b7280' }}>{activeAccount.name}</span>}
+              </div>
+              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>
+                Protocol: {activeAccount.protocol} · {activeAccount.scopes.length} scopes · {repos.length} repositories
+              </div>
+              {/* Scopes inline */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                {activeAccount.scopes.map((s) => <ScopeBadge key={s} scope={s} />)}
+              </div>
             </div>
           </div>
         )}
+
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+          {connected ? (
+            <>
+              <button type="button" style={{
+                padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.08)',
+                background: '#fff', color: '#6b7280', fontSize: 12, fontWeight: 600,
+                cursor: 'pointer', transition: 'background 120ms',
+              }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}
+              >
+                Disconnect
+              </button>
+              <button type="button" style={{
+                padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.08)',
+                background: '#fff', color: '#6b7280', fontSize: 12, fontWeight: 600,
+                cursor: 'pointer', transition: 'background 120ms',
+              }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}
+              >
+                Switch Account
+              </button>
+            </>
+          ) : (
+            <button type="button" style={{
+              padding: '8px 20px', borderRadius: 10, border: 'none',
+              background: '#111827', color: '#fff', fontSize: 12, fontWeight: 600,
+              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+              transition: 'background 120ms',
+            }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#374151'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = '#111827'; }}
+            >
+              <GitHubIcon size={14} /> Connect GitHub
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Connected Repositories */}
+      {/* Repositories — Collapsible */}
       <div style={{
         background: '#fff',
         borderRadius: 14,
-        padding: 20,
         border: '1px solid rgba(0,0,0,0.06)',
         boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        overflow: 'hidden',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <h3 style={{ fontSize: 13, fontWeight: 700, color: '#111827', margin: 0 }}>
-            Repositories
-          </h3>
-          <span style={{ fontSize: 11, color: '#9ca3af' }}>{repos.length} repos</span>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {repos.map((repo) => (
-            <div key={repo.nameWithOwner} style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '8px 10px',
-              borderRadius: 8,
-              transition: 'background 80ms',
-            }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.02)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-            >
-              <div style={{ color: repo.isPrivate ? '#f59e0b' : '#22c55e' }}>
-                {repo.isPrivate ? <LockIcon /> : <GlobeIcon />}
+        <button
+          type="button"
+          onClick={() => setReposExpanded(v => !v)}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            width: '100%', padding: '14px 20px', border: 'none', background: 'transparent',
+            cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#111827',
+            borderBottom: reposExpanded ? '1px solid rgba(0,0,0,0.04)' : 'none',
+          }}
+        >
+          <span>Repositories ({repos.length})</span>
+          <ChevronDownIcon rotated={reposExpanded} />
+        </button>
+        {reposExpanded && (
+          <div style={{ padding: '8px 12px 12px', maxHeight: 300, overflowY: 'auto' }}>
+            {repos.map((repo) => (
+              <div key={repo.nameWithOwner} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '7px 8px',
+                borderRadius: 8,
+                transition: 'background 80ms',
+              }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.02)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+              >
+                <div style={{ color: repo.isPrivate ? '#f59e0b' : '#22c55e' }}>
+                  {repo.isPrivate ? <LockIcon /> : <GlobeIcon />}
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 500, color: '#374151', flex: 1 }}>
+                  {repo.nameWithOwner}
+                </span>
+                <span style={{ fontSize: 10, color: '#b0b8c4' }}>
+                  {repo.updatedAt}
+                </span>
               </div>
-              <span style={{ fontSize: 12, fontWeight: 500, color: '#374151', flex: 1 }}>
-                {repo.nameWithOwner}
-              </span>
-              <span style={{ fontSize: 10, color: '#b0b8c4' }}>
-                {repo.updatedAt}
-              </span>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -370,8 +419,8 @@ export function SettingsPage() {
         <TabButton label="About" icon={<InfoIcon />} active={activeTab === 'about'} onClick={() => setActiveTab('about')} />
       </div>
 
-      {/* Right content */}
-      <div style={{ flex: 1, minWidth: 0, maxWidth: 640 }}>
+      {/* Right content — full width */}
+      <div style={{ flex: 1, minWidth: 0 }}>
         {activeTab === 'github' && (
           <GitHubTab accounts={accounts} repos={repos} loading={loading} />
         )}

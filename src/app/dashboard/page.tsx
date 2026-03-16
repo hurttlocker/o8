@@ -275,6 +275,10 @@ function DashboardInner() {
         onToggleBottomPanel={() => setBottomPanelVisible(v => !v)}
         chatVisible={chatVisible}
         onToggleChat={() => setChatVisible(v => !v)}
+        onSettingsClick={() => {
+          setActiveNavSection('settings');
+          setShowMemoryView(false);
+        }}
         renderSearch={(onClose) => (
           <UniversalSearch
             variant="desktop"
