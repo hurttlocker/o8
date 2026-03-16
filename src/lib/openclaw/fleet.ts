@@ -451,10 +451,14 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
       agent.status === 'running' || agent.runtimeSurface?.lifecycle?.availability === 'running'
     );
 
-    const allAgents = [...agents, ...liveOwnedAgents, ...filteredDiscoveredAgents, ...claudeCodeSessions.agents];
+    // Only include Claude Code sessions with a live process
+    const liveClaudeCodeAgents = claudeCodeSessions.agents.filter((agent) => agent.status === 'running');
+    const liveClaudeCodeSquads = liveClaudeCodeAgents.length > 0 ? claudeCodeSessions.squads : [];
+
+    const allAgents = [...agents, ...liveOwnedAgents, ...filteredDiscoveredAgents, ...liveClaudeCodeAgents];
     // Only include squads that have live agents
     const liveOwnedSquads = liveOwnedAgents.length > 0 ? ownedCodex.squads : [];
-    const allSquads = [...openClawSquads, ...liveOwnedSquads, ...filteredDiscoveredSquads, ...claudeCodeSessions.squads];
+    const allSquads = [...openClawSquads, ...liveOwnedSquads, ...filteredDiscoveredSquads, ...liveClaudeCodeSquads];
     const allEvents = [...openClawEvents, ...ownedCodex.events, ...filteredDiscoveredEvents, ...claudeCodeSessions.events];
 
     return {
