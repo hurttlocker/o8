@@ -432,11 +432,12 @@ function ContextBar({ percent, trend }: { percent: number; trend: string }) {
 
 // ── Agent Card ──
 
-function AgentCard({ agent, isOpenClaw, onEdit, onKill }: {
+function AgentCard({ agent, isOpenClaw, onEdit, onKill, killing }: {
   agent: FleetAgent;
   isOpenClaw: boolean;
   onEdit?: (agent: FleetAgent) => void;
   onKill?: (agent: FleetAgent) => void;
+  killing?: boolean;
 }) {
   const shortModel = agent.model
     .replace('claude-opus-4-6', 'Opus 4.6')
@@ -551,27 +552,33 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill }: {
           <button
             type="button"
             onClick={() => onKill(agent)}
+            disabled={killing}
             style={{
               padding: '6px 12px',
               borderRadius: 8,
-              border: '1px solid rgba(239, 68, 68, 0.2)',
-              background: '#fff',
+              border: killing ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid rgba(239, 68, 68, 0.2)',
+              background: killing ? 'rgba(239, 68, 68, 0.08)' : '#fff',
               color: '#ef4444',
               fontSize: 11,
               fontWeight: 600,
-              cursor: 'pointer',
+              cursor: killing ? 'wait' : 'pointer',
               transition: 'all 120ms',
+              opacity: killing ? 0.7 : 1,
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)';
-              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+              if (!killing) {
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+              }
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = '#fff';
-              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.2)';
+              if (!killing) {
+                e.currentTarget.style.background = '#fff';
+                e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.2)';
+              }
             }}
           >
-            Kill
+            {killing ? 'Killing…' : 'Kill'}
           </button>
         )}
       </div>
@@ -754,7 +761,6 @@ function AgentsTab() {
   const [killingId, setKillingId] = useState<string | null>(null);
 
   const handleKill = useCallback(async (agent: FleetAgent) => {
-    if (!confirm(`Kill terminal "${agent.name}"?\n\nSession: ${agent.id}`)) return;
     setKillingId(agent.id);
     try {
       const res = await fetch('/api/openclaw/kill-terminal', {
@@ -766,12 +772,11 @@ function AgentsTab() {
       });
       const result = await res.json();
       if (result.success) {
-        // Remove from local state immediately for instant feedback
         setAgents(prev => prev.filter(a => a.id !== agent.id));
       }
       setTimeout(fetchFleet, 2000);
     } catch { /* silent */ }
-    finally { setKillingId(null); }
+    finally { setTimeout(() => setKillingId(null), 1000); }
   }, [fetchFleet]);
 
   if (loading) {
@@ -864,6 +869,7 @@ function AgentsTab() {
                   isOpenClaw={agent.runtime === 'openclaw'}
                   onEdit={agent.runtime === 'openclaw' ? setEditingAgent : undefined}
                   onKill={agent.runtime !== 'openclaw' ? handleKill : undefined}
+                  killing={killingId === agent.id}
                 />
               ))}
             </div>
