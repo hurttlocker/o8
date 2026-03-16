@@ -452,6 +452,12 @@ function AgentCard({ agent, isOpenClaw, onEdit }: {
 
   const shortId = agent.id.split(':').slice(-1)[0]?.slice(0, 12) || agent.id;
 
+  // Derive heartbeat from agent ID (gateway config doesn't expose via API yet)
+  const heartbeatLabel = agent.id.startsWith('agent:main:') ? '2h'
+    : agent.id.startsWith('agent:hawk:') ? '3h'
+    : agent.id.startsWith('agent:ace:') ? '4h'
+    : null;
+
   return (
     <div style={{
       display: 'flex',
@@ -498,6 +504,12 @@ function AgentCard({ agent, isOpenClaw, onEdit }: {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#9ca3af' }}>
           <span style={{ fontWeight: 600, color: '#6b7280' }}>{shortModel}</span>
+          {heartbeatLabel && (
+            <>
+              <span>·</span>
+              <span style={{ color: '#9ca3af' }}>HB {heartbeatLabel}</span>
+            </>
+          )}
           <span>·</span>
           <span style={{ fontFamily: '"SF Mono", monospace', fontSize: 10 }}>{shortId}</span>
         </div>
