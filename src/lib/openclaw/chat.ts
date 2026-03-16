@@ -330,8 +330,20 @@ export async function getSessionTranscript(sessionKey: string, limit = 12) {
         limit: Math.min(Math.max(limit * 5, 24), 100),
       });
 
+  // Track per-timestamp-role counts to generate stable IDs.
+  // Using array index in IDs causes them to shift when the server
+  // window slides (new messages arrive), breaking dedup in the
+  // client merge logic and causing duplicate/out-of-order entries.
+  const idCounts = new Map<string, number>();
+  function stableId(timestamp: number | undefined, role: string, suffix?: string) {
+    const base = `${sessionKey}:${timestamp ?? 0}:${role}${suffix ? `:${suffix}` : ''}`;
+    const count = idCounts.get(base) ?? 0;
+    idCounts.set(base, count + 1);
+    return count === 0 ? base : `${base}:${count}`;
+  }
+
   const entries = (payload.messages ?? [])
-    .map((message, index) => {
+    .map((message) => {
       const sourceRole = normalizeRole(message.role);
       const { text, media } = extractVisiblePayload(message.content);
       const cleanedText = sanitizeVisibleText(text);
@@ -346,7 +358,7 @@ export async function getSessionTranscript(sessionKey: string, limit = 12) {
         }
 
         return {
-          id: `${sessionKey}:${message.timestamp ?? index}:${index}:media`,
+          id: stableId(message.timestamp, 'assistant', 'media'),
           role: 'assistant',
           text: '',
           media,
@@ -368,7 +380,7 @@ export async function getSessionTranscript(sessionKey: string, limit = 12) {
       }
 
       return {
-        id: `${sessionKey}:${message.timestamp ?? index}:${index}`,
+        id: stableId(message.timestamp, sourceRole),
         role: sourceRole,
         text: cleanedText,
         media,
