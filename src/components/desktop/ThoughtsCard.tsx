@@ -154,7 +154,8 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
   const [waitingForReply, setWaitingForReply] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const lastAssistantIdRef = useRef<string | null>(null);
+  const sendTimestampRef = useRef<number>(0);
+  const seenAssistantIdsRef = useRef<Set<string>>(new Set());
 
   const cardRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
@@ -265,31 +266,44 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
   const startPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
     let attempts = 0;
-    const maxAttempts = 60; // 60 × 2s = 2 min max
+    const maxAttempts = 40; // 40 × 3s = 2 min max
 
-    pollRef.current = setInterval(async () => {
-      attempts++;
-      if (attempts > maxAttempts) {
-        if (pollRef.current) clearInterval(pollRef.current);
-        setWaitingForReply(false);
-        return;
-      }
+    // 3s initial delay — give the agent time to start processing
+    const timer = setTimeout(() => {
+      pollRef.current = setInterval(async () => {
+        attempts++;
+        if (attempts > maxAttempts) {
+          if (pollRef.current) clearInterval(pollRef.current);
+          setWaitingForReply(false);
+          return;
+        }
 
-      try {
-        // Add cache-bust to avoid stale transcript cache
-        const res = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(MAIN_SESSION_KEY)}&limit=5&_t=${Date.now()}fresh=1`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const entries = data.transcript || data.entries || [];
+        try {
+          const res = await fetch(
+            `/api/mobile/history?sessionKey=${encodeURIComponent(MAIN_SESSION_KEY)}&limit=8&fresh=1`
+          );
+          if (!res.ok) return;
+          const data = await res.json();
+          const entries = data.transcript || data.entries || [];
 
-        // Find the newest assistant message — API returns `text` not `content`
-        for (let i = entries.length - 1; i >= 0; i--) {
-          const entry = entries[i];
-          const entryText = (entry.text || entry.content || '').trim();
-          if (entry.role === 'assistant' && entryText) {
-            const entryId = entry.id || `a-${entry.timestamp || i}`;
-            if (entryId !== lastAssistantIdRef.current) {
-              lastAssistantIdRef.current = entryId;
+          // Find assistant messages NEWER than our send timestamp
+          for (let i = entries.length - 1; i >= 0; i--) {
+            const entry = entries[i];
+            const entryText = (entry.text || entry.content || '').trim();
+            const entryTs = entry.timestamp || 0;
+            const entryId = entry.id || `a-${entryTs}-${i}`;
+
+            if (
+              entry.role === 'assistant' &&
+              entryText &&
+              entryText.length > 5 &&
+              entryTs > sendTimestampRef.current &&
+              !seenAssistantIdsRef.current.has(entryId)
+            ) {
+              // Skip tool-header-only messages
+              if (entryText.startsWith('🔧')) continue;
+
+              seenAssistantIdsRef.current.add(entryId);
               setChatMessages(prev => [
                 ...prev,
                 {
@@ -304,11 +318,14 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
               return;
             }
           }
+        } catch {
+          // silent retry
         }
-      } catch {
-        // silent retry
-      }
-    }, 2000);
+      }, 3000);
+    }, 3000);
+
+    // Store cleanup ref
+    pollRef.current = timer as unknown as ReturnType<typeof setInterval>;
   }, []);
 
   // ── Issue mode: submit thought ──
@@ -374,19 +391,21 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
     setWaitingForReply(true);
 
     try {
-      // Snapshot the current last assistant message ID so we know when a NEW one arrives
-      const snapRes = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(MAIN_SESSION_KEY)}&limit=5&_t=${Date.now()}fresh=1`);
+      // Snapshot ALL current assistant message IDs so we only detect genuinely new ones
+      const snapRes = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(MAIN_SESSION_KEY)}&limit=8&fresh=1`);
       if (snapRes.ok) {
         const data = await snapRes.json();
         const entries = data.transcript || data.entries || [];
-        for (let i = entries.length - 1; i >= 0; i--) {
-          const entryText = (entries[i].text || entries[i].content || '').trim();
-          if (entries[i].role === 'assistant' && entryText) {
-            lastAssistantIdRef.current = entries[i].id || `a-${entries[i].timestamp || i}`;
-            break;
+        for (const entry of entries) {
+          if (entry.role === 'assistant') {
+            const entryId = entry.id || `a-${entry.timestamp || 0}`;
+            seenAssistantIdsRef.current.add(entryId);
           }
         }
       }
+
+      // Record send timestamp — only accept responses AFTER this
+      sendTimestampRef.current = Date.now();
 
       // Send via the action API
       await fetch('/api/mobile/action', {
@@ -428,7 +447,8 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
     setChatMessages([]);
     setWaitingForReply(false);
     if (pollRef.current) clearInterval(pollRef.current);
-    lastAssistantIdRef.current = null;
+    sendTimestampRef.current = 0;
+    seenAssistantIdsRef.current.clear();
     setSize(prev => ({ ...prev, h: 0 }));
     setTimeout(() => inputRef.current?.focus(), 50);
   }, []);
