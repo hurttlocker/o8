@@ -220,6 +220,9 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
   const [stats, setStats] = useState<Record<string, unknown>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchFocused, setSearchFocused] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedCluster, setSelectedCluster] = useState<ClusterData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -288,15 +291,14 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
     return () => ro.disconnect();
   }, []);
 
-  // Search handler
-  const handleSearch = useCallback(async (q: string) => {
-    setSearchQuery(q);
+  // Search handler (debounced 300ms)
+  const executeSearch = useCallback(async (q: string) => {
     if (!q.trim()) {
-      // Reset highlights
       for (const row of terrainRef.current.grid) {
         for (const cell of row) cell.highlight = 1;
       }
       setSearchResults([]);
+      setSearchOpen(false);
       return;
     }
 
@@ -305,20 +307,17 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
       const data = await res.json();
       const results: SearchResult[] = data.searchResults ?? [];
       setSearchResults(results);
+      setSearchOpen(results.length > 0);
 
-      // Find which cluster types match
       const matchingTypes = new Set(results.map((r: SearchResult) => r.type));
 
-      // Highlight matching clusters, dim others
       for (const row of terrainRef.current.grid) {
         for (const cell of row) {
           cell.highlight = matchingTypes.has(cell.cluster.type) ? 1.0 : 0.15;
         }
       }
 
-      // Camera: lerp to center of matching cluster
       if (clusters.length > 0 && matchingTypes.size > 0) {
-        // Find the matching cluster's position
         const matchCluster = clusters.find(c => matchingTypes.has(c.type));
         if (matchCluster) {
           const idx = clusters.indexOf(matchCluster);
@@ -329,6 +328,48 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
       }
     } catch { /* silent */ }
   }, [clusters]);
+
+  const handleSearchInput = useCallback((q: string) => {
+    setSearchQuery(q);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (!q.trim()) {
+      executeSearch('');
+      return;
+    }
+    searchTimerRef.current = setTimeout(() => executeSearch(q), 300);
+  }, [executeSearch]);
+
+  // Click a search result → fly into its cluster
+  const handleResultClick = useCallback((result: SearchResult) => {
+    setSearchOpen(false);
+    const cluster = clusters.find(c => c.type === result.type);
+    if (!cluster) return;
+
+    // Save camera
+    savedCameraRef.current = {
+      rotY: targetRotRef.current.y,
+      rotX: targetRotRef.current.x,
+      zoom: targetZoomRef.current,
+    };
+
+    const idx = clusters.indexOf(cluster);
+    const angle = (idx / clusters.length) * Math.PI * 2 + 0.3;
+    targetRotRef.current.y = -angle - 0.5;
+    targetRotRef.current.x = -0.45;
+    targetZoomRef.current = 2.2;
+
+    for (const row of terrainRef.current.grid) {
+      for (const cell of row) {
+        cell.highlight = cell.cluster.type === cluster.type ? 1.0 : 0.08;
+      }
+    }
+
+    factRevealRef.current = 0;
+    setFocusedCluster(cluster);
+    setSelectedCluster(null);
+    // Use the search results as focus facts, filtered to this type
+    setFocusFacts(searchResults.filter(r => r.type === result.type).slice(0, 12));
+  }, [clusters, searchResults]);
 
   // Mouse drag rotation
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -962,14 +1003,15 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
         style={{ width: '100%', height: '100%', cursor: draggingRef.current ? 'grabbing' : 'grab' }}
       />
 
-      {/* Search bar — top center */}
+      {/* Search bar + dropdown — top center */}
       <div style={{
         position: 'absolute',
         top: 14,
         left: '50%',
         transform: 'translateX(-50%)',
-        width: 340,
-        maxWidth: '60%',
+        width: 400,
+        maxWidth: '65%',
+        zIndex: 30,
       }}>
         <div style={{
           display: 'flex',
@@ -979,18 +1021,22 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
           paddingRight: 14,
           paddingBottom: 8,
           paddingLeft: 14,
-          borderRadius: 12,
-          background: 'rgba(9, 9, 11, 0.85)',
-          backdropFilter: 'blur(16px)',
+          borderRadius: searchOpen ? '12px 12px 0 0' : 12,
+          background: 'rgba(9, 9, 11, 0.92)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
           border: '1px solid rgba(148, 163, 184, 0.12)',
-          boxShadow: '0 4px 24px rgba(0,0,0,0.3)',
+          borderBottom: searchOpen ? '1px solid rgba(148, 163, 184, 0.06)' : undefined,
+          boxShadow: '0 4px 24px rgba(0,0,0,0.4)',
         }}>
           <Search size={14} style={{ color: '#64748b', flexShrink: 0 }} />
           <input
             type="text"
             placeholder="Search memories…"
             value={searchQuery}
-            onChange={(e) => handleSearch(e.target.value)}
+            onChange={(e) => handleSearchInput(e.target.value)}
+            onFocus={() => { setSearchFocused(true); if (searchResults.length > 0) setSearchOpen(true); }}
+            onBlur={() => { setSearchFocused(false); setTimeout(() => setSearchOpen(false), 200); }}
             style={{
               flex: 1,
               border: 'none',
@@ -1002,19 +1048,130 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
             }}
           />
           {searchQuery && (
-            <button type="button" onClick={() => handleSearch('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: 0 }}>
-              <X size={14} />
-            </button>
+            <>
+              <span style={{ fontSize: 10, color: '#64748b', fontFamily: '"SF Mono", monospace', whiteSpace: 'nowrap' }}>
+                {searchResults.length} results
+              </span>
+              <button type="button" onClick={() => handleSearchInput('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: 0, flexShrink: 0 }}>
+                <X size={14} />
+              </button>
+            </>
           )}
         </div>
-        {searchResults.length > 0 && (
+
+        {/* Search results dropdown */}
+        {searchOpen && searchResults.length > 0 && (
           <div style={{
-            marginTop: 8,
-            fontSize: 11,
-            color: '#64748b',
-            textAlign: 'center',
+            background: 'rgba(9, 9, 11, 0.95)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            border: '1px solid rgba(148, 163, 184, 0.10)',
+            borderTop: 'none',
+            borderRadius: '0 0 12px 12px',
+            maxHeight: 320,
+            overflowY: 'auto',
+            boxShadow: '0 12px 40px rgba(0,0,0,0.5)',
           }}>
-            {searchResults.length} matching facts
+            {/* Group results by cluster type */}
+            {(() => {
+              const grouped = new Map<string, SearchResult[]>();
+              for (const r of searchResults) {
+                const arr = grouped.get(r.type) ?? [];
+                arr.push(r);
+                grouped.set(r.type, arr);
+              }
+              return Array.from(grouped.entries()).map(([type, results]) => {
+                const cluster = clusters.find(c => c.type === type);
+                const color = CATEGORY_COLORS[type] ?? '#94a3b8';
+                return (
+                  <div key={type}>
+                    {/* Type header */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 7,
+                      paddingTop: 8,
+                      paddingRight: 14,
+                      paddingBottom: 4,
+                      paddingLeft: 14,
+                    }}>
+                      <div style={{ width: 6, height: 6, borderRadius: 3, background: color, boxShadow: `0 0 6px ${color}50`, flexShrink: 0 }} />
+                      <span style={{ fontSize: 10, fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                        {cluster?.label ?? type}
+                      </span>
+                      <span style={{ fontSize: 10, color: '#475569', marginLeft: 'auto' }}>
+                        {results.length}
+                      </span>
+                    </div>
+                    {/* Results */}
+                    {results.slice(0, 5).map((r, i) => (
+                      <div
+                        key={i}
+                        onMouseDown={(e) => { e.preventDefault(); handleResultClick(r); }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          paddingTop: 7,
+                          paddingRight: 14,
+                          paddingBottom: 7,
+                          paddingLeft: 28,
+                          cursor: 'pointer',
+                          borderBottom: '1px solid rgba(148, 163, 184, 0.04)',
+                          transition: 'background 120ms',
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'rgba(148, 163, 184, 0.06)'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+                      >
+                        {/* Confidence indicator */}
+                        <div style={{
+                          width: 4,
+                          height: 4,
+                          borderRadius: 2,
+                          background: r.confidence > 70 ? '#22c55e' : r.confidence > 40 ? '#f59e0b' : '#64748b',
+                          flexShrink: 0,
+                        }} />
+                        {/* Fact text */}
+                        <span style={{
+                          fontSize: 12,
+                          color: '#cbd5e1',
+                          lineHeight: 1.4,
+                          flex: 1,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {r.text}
+                        </span>
+                        {/* Confidence + source */}
+                        <span style={{
+                          fontSize: 10,
+                          color: '#475569',
+                          fontFamily: '"SF Mono", monospace',
+                          whiteSpace: 'nowrap',
+                          flexShrink: 0,
+                        }}>
+                          {r.confidence.toFixed(0)}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              });
+            })()}
+            {/* Footer */}
+            <div style={{
+              paddingTop: 6,
+              paddingRight: 14,
+              paddingBottom: 8,
+              paddingLeft: 14,
+              fontSize: 10,
+              color: '#475569',
+              textAlign: 'center',
+              borderTop: '1px solid rgba(148, 163, 184, 0.06)',
+            }}>
+              Click a result to explore its cluster
+            </div>
           </div>
         )}
       </div>
