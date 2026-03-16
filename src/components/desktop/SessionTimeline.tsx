@@ -14,7 +14,7 @@
  * Bottom: Legend with colored dots
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 
 // ── Types ──
 
@@ -143,9 +143,26 @@ function PlayIcon() {
   );
 }
 
+// ── Expand Icon ──
+
+function ExpandIcon() {
+  return (
+    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+      <path d="M15 3h6v6" />
+      <path d="M9 21H3v-6" />
+      <path d="M21 3l-7 7" />
+      <path d="M3 21l7-7" />
+    </svg>
+  );
+}
+
+// ── Exported mock segments for the expanded view ──
+export { generateMockSegments, formatDuration, formatTime, SEGMENT_COLORS, SEGMENT_LABELS };
+export type { TimelineSegment, SegmentKind };
+
 // ── Component ──
 
-export function SessionTimeline() {
+export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
   const [hoveredSegment, setHoveredSegment] = useState<number | null>(null);
 
   const segments = useMemo(() => generateMockSegments(), []);
@@ -215,6 +232,32 @@ export function SessionTimeline() {
         >
           <PlayIcon />
         </button>
+        {onExpand && (
+          <button
+            type="button"
+            aria-label="Expand timeline"
+            onClick={onExpand}
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: 12,
+              border: 'none',
+              background: 'rgba(0, 0, 0, 0.06)',
+              color: '#374151',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: 'background 120ms',
+              flexShrink: 0,
+              padding: 0,
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0, 0, 0, 0.1)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0, 0, 0, 0.06)'; }}
+          >
+            <ExpandIcon />
+          </button>
+        )}
         <span style={{ fontWeight: 600, color: '#374151', textTransform: 'uppercase', fontSize: 10, letterSpacing: '0.04em' }}>
           Session: {formatDuration(totalMinutes)}
         </span>
