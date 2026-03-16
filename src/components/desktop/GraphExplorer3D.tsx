@@ -32,6 +32,10 @@ interface SearchResult {
   confidence: number;
   source: string;
   type: string;
+  factId?: number;
+  subject?: string;
+  predicate?: string;
+  object?: string;
 }
 
 interface TerrainCell {
@@ -232,6 +236,15 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
   const focusProgressRef = useRef(0); // 0 = overview, 1 = fully focused
   const savedCameraRef = useRef({ rotY: -0.6, rotX: -0.55, zoom: 1.0 });
   const factRevealRef = useRef(0); // counts up for staggered fact reveal
+  // Refs that shadow state so the animation loop can read current values
+  const focusedClusterRef = useRef<ClusterData | null>(null);
+  const focusFactsRef = useRef<SearchResult[]>([]);
+  const clustersRef = useRef<ClusterData[]>([]);
+
+  // Sync refs with state (so animation loop reads current values)
+  useEffect(() => { focusedClusterRef.current = focusedCluster; }, [focusedCluster]);
+  useEffect(() => { focusFactsRef.current = focusFacts; }, [focusFacts]);
+  useEffect(() => { clustersRef.current = clusters; }, [clusters]);
 
   // Fetch data (initial + auto-refresh every 60s)
   useEffect(() => {
@@ -520,17 +533,22 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
       rotRef.current.x += (targetRotRef.current.x - rotRef.current.x) * 0.04;
       zoomRef.current += (targetZoomRef.current - zoomRef.current) * 0.06;
 
+      // Read current focus state from refs (not stale closure)
+      const curFocusCluster = focusedClusterRef.current;
+      const curFocusFacts = focusFactsRef.current;
+      const curClusters = clustersRef.current;
+
       // Auto-orbit when not dragging (slower in focus mode)
-      if (!draggingRef.current && !focusedCluster) {
+      if (!draggingRef.current && !curFocusCluster) {
         targetRotRef.current.y += 0.0008;
       }
 
       // Focus mode progress
-      if (focusedCluster) {
-        focusProgressRef.current = Math.min(1, focusProgressRef.current + 0.025); // ~40 frames to fully focus
-        factRevealRef.current += 0.016; // reveal timer
+      if (curFocusCluster) {
+        focusProgressRef.current = Math.min(1, focusProgressRef.current + 0.025);
+        factRevealRef.current += 0.016;
       } else {
-        focusProgressRef.current = Math.max(0, focusProgressRef.current - 0.04); // faster exit
+        focusProgressRef.current = Math.max(0, focusProgressRef.current - 0.04);
       }
       const fp = focusProgressRef.current; // shorthand
 
@@ -617,9 +635,9 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
           let worldZ = iz * BAR_SPACING;
 
           // Spread effect: focused cluster bars push outward from cluster center
-          if (fp > 0 && focusedCluster && cell.cluster.type === focusedCluster.type) {
-            const clusterIdx = clusters.indexOf(focusedCluster);
-            const clusterAngle = (clusterIdx / clusters.length) * Math.PI * 2 + 0.3;
+          if (fp > 0 && curFocusCluster && cell.cluster.type === curFocusCluster.type) {
+            const clusterIdx = curClusters.indexOf(curFocusCluster);
+            const clusterAngle = (clusterIdx / curClusters.length) * Math.PI * 2 + 0.3;
             const clusterCX = (0.5 + Math.cos(clusterAngle) * (0.15 + (clusterIdx % 3) * 0.1)) * gridX * BAR_SPACING;
             const clusterCZ = (0.5 + Math.sin(clusterAngle) * (0.15 + (clusterIdx % 3) * 0.1)) * gridZ * BAR_SPACING;
             const dx = worldX - clusterCX;
@@ -829,12 +847,12 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
       }
 
       // ── Fact Cards (visible in focus mode) ──
-      if (fp > 0.3 && focusFacts.length > 0 && focusedCluster) {
-        const focusPeak = clusterPeaks.get(focusedCluster.type);
+      if (fp > 0.3 && curFocusFacts.length > 0 && curFocusCluster) {
+        const focusPeak = clusterPeaks.get(curFocusCluster.type);
         if (focusPeak) {
           const cardAlpha = Math.min(1, (fp - 0.3) / 0.4); // fade in after 30% progress
           const revealTime = factRevealRef.current;
-          const maxCards = Math.min(focusFacts.length, 12);
+          const maxCards = Math.min(curFocusFacts.length, 12);
 
           for (let i = 0; i < maxCards; i++) {
             // Stagger: each card appears 0.12s after the previous
@@ -842,8 +860,8 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
             const cardProgress = Math.min(1, Math.max(0, (revealTime - cardDelay) / 0.3));
             if (cardProgress <= 0) continue;
 
-            const fact = focusFacts[i];
-            const rgb = hexToRgbStr(focusedCluster.color);
+            const fact = curFocusFacts[i];
+            const rgb = hexToRgbStr(curFocusCluster.color);
 
             // Position: fan out from the peak, alternating left/right
             const side = i % 2 === 0 ? -1 : 1;
@@ -917,7 +935,7 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
       }
 
       // ── Search Result Nodes (visible when searching, outside focus mode) ──
-      if (!focusedCluster && searchResults.length > 0) {
+      if (!curFocusCluster && searchResults.length > 0) {
         const maxVisible = Math.min(searchResults.length, 8);
         for (let i = 0; i < maxVisible; i++) {
           const r = searchResults[i];
