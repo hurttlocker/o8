@@ -31,6 +31,9 @@ function DashboardInner() {
   const [alertTrayOpen, setAlertTrayOpen] = useState(false);
   const [activeNavSection, setActiveNavSection] = useState<NavSection>('agents');
   const [searchOpen, setSearchOpen] = useState(false);
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [chatVisible, setChatVisible] = useState(true);
+  const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
 
   // ── Alert system ──
   const {
@@ -263,6 +266,12 @@ function DashboardInner() {
     }}>
       {/* ── Title Bar ── */}
       <TitleBar
+        sidebarVisible={sidebarVisible}
+        onToggleSidebar={() => setSidebarVisible(v => !v)}
+        bottomPanelVisible={bottomPanelVisible}
+        onToggleBottomPanel={() => setBottomPanelVisible(v => !v)}
+        chatVisible={chatVisible}
+        onToggleChat={() => setChatVisible(v => !v)}
         renderSearch={(onClose) => (
           <UniversalSearch
             variant="desktop"
@@ -294,8 +303,8 @@ function DashboardInner() {
         display: 'flex',
         overflow: 'hidden',
       }}>
-      {/* ── Nav Rail ── */}
-      <NavRail
+      {/* ── Nav Rail + Left Panel ── */}
+      {sidebarVisible && <NavRail
         activeSection={activeNavSection}
         onSectionChange={(section) => {
           setActiveNavSection(section);
@@ -305,10 +314,10 @@ function DashboardInner() {
         alertCount={unreadCount}
         onAlertClick={() => setAlertTrayOpen(!alertTrayOpen)}
         onSearchClick={() => setSearchOpen(true)}
-      />
+      />}
 
       {/* ── Left: Agent Panel ── */}
-      <div style={{
+      {sidebarVisible && <div style={{
         width: leftWidth,
         flexShrink: 0,
         height: '100%',
@@ -359,10 +368,10 @@ function DashboardInner() {
           onOpenMemory={handleOpenMemory}
           onAgentsUpdate={handleAgentsUpdate}
         />
-      </div>
+      </div>}
 
       {/* ── Left drag handle ── */}
-      <div
+      {sidebarVisible && <div
         onMouseDown={startLeftDrag}
         style={{
           width: 6,
@@ -381,7 +390,7 @@ function DashboardInner() {
           backgroundColor: 'rgba(0,0,0,0.08)',
           transition: 'background-color 150ms',
         }} />
-      </div>
+      </div>}
 
       {/* ── Center: Memory View OR Workspace (top) + Canvas (bottom) ── */}
       <div ref={centerRef} style={{
@@ -469,7 +478,7 @@ function DashboardInner() {
         {/* Vertical drag handle between workspace and canvas */}
         {!showMemoryView && (<>
 
-        {canvasTabs.length > 0 && (
+        {canvasTabs.length > 0 && bottomPanelVisible && (
           <div
             onMouseDown={startCanvasDrag}
             style={{
@@ -494,7 +503,7 @@ function DashboardInner() {
         )}
 
         {/* Bottom — Canvas (tabs + contextual content) */}
-        {canvasTabs.length > 0 && (
+        {canvasTabs.length > 0 && bottomPanelVisible && (
           <div style={{ flex: `0 0 ${canvasHeight}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             <Canvas
               tabs={canvasTabs}
@@ -509,7 +518,7 @@ function DashboardInner() {
       </div>
 
       {/* ── Right drag handle ── */}
-      <div
+      {chatVisible && <div
         onMouseDown={startRightDrag}
         style={{
           width: 6,
@@ -528,10 +537,10 @@ function DashboardInner() {
           backgroundColor: 'rgba(0,0,0,0.08)',
           transition: 'background-color 150ms',
         }} />
-      </div>
+      </div>}
 
       {/* ── Right: Chat Sidebar ── */}
-      <div style={{
+      {chatVisible && <div style={{
         width: rightWidth,
         flexShrink: 0,
         height: '100%',
@@ -548,7 +557,7 @@ function DashboardInner() {
             });
           }}
         />
-      </div>
+      </div>}
 
       {/* ── Alert Toast (desktop only — urgent alerts slide in top-right) ── */}
       <AlertToast alerts={activeAlerts} onAction={handleAlertAction} />
