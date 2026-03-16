@@ -36,8 +36,10 @@ function classifyMessage(role: string, content: string, type: string): 'thinking
 
   // Tool results are direct evidence of coding activity
   if (role === 'toolResult' || role === 'tool') {
-    // Check for errors in tool output
-    if (lc.includes('error:') || lc.includes('exit: 1') || lc.includes('permission denied') || lc.includes('command failed')) {
+    // Only mark as error if it's a REAL failure (exit code non-zero at the end, or explicit error patterns)
+    const isRealError = (lc.includes('exit: 1') || lc.includes('permission denied') || lc.includes('command failed') || lc.includes('fatal:'))
+      && !lc.includes('exit: 0') && !lc.includes('successfully');
+    if (isRealError) {
       return 'error';
     }
     // Check for testing patterns
@@ -196,14 +198,20 @@ export async function GET() {
       }
     }
 
-    // Pass 3: Final merge — any remaining tiny non-idle segments get absorbed
+    // Pass 3: Final merge — any remaining non-idle segments within 5 min get merged.
+    // The LONGER segment's kind wins (coding sessions absorb brief thinking pauses).
+    // Errors stay separate (they're important signals) unless truly tiny (< 2 min).
     const final: TimelineSegment[] = [];
     for (const seg of merged) {
       const prev = final[final.length - 1];
-      if (prev && seg.kind !== 'idle' && prev.kind !== 'idle' && seg.startMin <= prev.startMin + prev.durationMin + 5) {
-        // Pick the dominant kind (coding > thinking > testing)
-        const priority: Record<string, number> = { coding: 3, testing: 2, thinking: 1, error: 4, idle: 0 };
-        if ((priority[seg.kind] || 0) >= (priority[prev.kind] || 0)) {
+      if (
+        prev &&
+        seg.kind !== 'idle' && prev.kind !== 'idle' &&
+        seg.kind !== 'error' && prev.kind !== 'error' &&
+        seg.startMin <= prev.startMin + prev.durationMin + 5
+      ) {
+        // Keep the kind of whichever segment is longer
+        if (seg.durationMin > prev.durationMin) {
           prev.kind = seg.kind;
         }
         prev.durationMin = Math.max(prev.durationMin, (seg.startMin + seg.durationMin) - prev.startMin);
