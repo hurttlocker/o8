@@ -99,7 +99,7 @@ export const MemoryLavaLamp = memo(function MemoryLavaLamp() {
   const tooltipRef = useRef<{ fact: CortexFact | null; x: number; y: number }>({ fact: null, x: 0, y: 0 });
 
   const [categories, setCategories] = useState<CategoryDef[]>([]);
-  const [stats, setStats] = useState({ totalFacts: 0, activeFacts: 0 });
+  const [stats, setStats] = useState({ totalFacts: 0, activeFacts: 0, totalMemories: 0 });
   const [hoveredFact, setHoveredFact] = useState<CortexFact | null>(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [loading, setLoading] = useState(true);
@@ -113,12 +113,21 @@ export const MemoryLavaLamp = memo(function MemoryLavaLamp() {
         if (cancelled) return;
         const facts: CortexFact[] = data.facts ?? [];
         setCategories(data.categories ?? []);
-        setStats(data.stats ?? { totalFacts: 0, activeFacts: 0 });
+        setStats(data.stats ?? { totalFacts: 0, activeFacts: 0, totalMemories: 0 });
 
+        // Use container size (canvas may not be sized yet)
+        const container = containerRef.current;
         const canvas = canvasRef.current;
-        if (!canvas) return;
-        const w = canvas.width;
-        const h = canvas.height;
+        if (!container || !canvas) return;
+
+        const rect = container.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const w = rect.width * dpr;
+        const h = rect.height * dpr;
+        canvas.width = w;
+        canvas.height = h;
+        canvas.style.width = `${rect.width}px`;
+        canvas.style.height = `${rect.height}px`;
 
         particlesRef.current = facts.map(f => createParticle(f, w, h));
         setLoading(false);
@@ -439,9 +448,9 @@ export const MemoryLavaLamp = memo(function MemoryLavaLamp() {
         </div>
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, color: '#3b82f6', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-            {particlesRef.current.length}
+            {stats.totalMemories.toLocaleString()}
           </div>
-          <div style={{ fontSize: 9, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Rendered</div>
+          <div style={{ fontSize: 9, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Memories</div>
         </div>
       </div>
 
