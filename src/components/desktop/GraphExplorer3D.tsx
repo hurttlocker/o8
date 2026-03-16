@@ -54,6 +54,13 @@ const MAX_HEIGHT = 280;
 const BAR_SPACING = 4.5;
 const BASE_BAR_WIDTH = 3.2;
 
+/* ─── Helpers ─── */
+
+function hexToRgbStr(hex: string): string {
+  const m = hex.match(/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i);
+  return m ? `${parseInt(m[1], 16)}, ${parseInt(m[2], 16)}, ${parseInt(m[3], 16)}` : '200, 200, 200';
+}
+
 /* ─── Color from height ─── */
 
 function heightColor(t: number, baseColor: string): string {
@@ -419,6 +426,48 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
         return;
       }
 
+      // ── Holographic Grid Floor ──
+      const gridLines = 20;
+      const gridSpan = Math.max(gridX, gridZ) * BAR_SPACING;
+      const gridStep = gridSpan / gridLines;
+      ctx.lineWidth = 0.5;
+
+      for (let i = 0; i <= gridLines; i++) {
+        const pos = i * gridStep;
+
+        // Lines along X axis
+        const x1 = project3D(pos, 0, 0, rotY, rotX, cx, cy, scale, gridX, gridZ);
+        const x2 = project3D(pos, 0, gridSpan, rotY, rotX, cx, cy, scale, gridX, gridZ);
+        // Fade based on distance from center
+        const distFromCenter = Math.abs(i / gridLines - 0.5) * 2;
+        const lineAlpha = 0.08 * (1 - distFromCenter * 0.6);
+        ctx.strokeStyle = `rgba(148, 163, 184, ${lineAlpha})`;
+        ctx.beginPath();
+        ctx.moveTo(x1.sx, x1.sy);
+        ctx.lineTo(x2.sx, x2.sy);
+        ctx.stroke();
+
+        // Lines along Z axis
+        const z1 = project3D(0, 0, pos, rotY, rotX, cx, cy, scale, gridX, gridZ);
+        const z2 = project3D(gridSpan, 0, pos, rotY, rotX, cx, cy, scale, gridX, gridZ);
+        ctx.strokeStyle = `rgba(148, 163, 184, ${lineAlpha})`;
+        ctx.beginPath();
+        ctx.moveTo(z1.sx, z1.sy);
+        ctx.lineTo(z2.sx, z2.sy);
+        ctx.stroke();
+      }
+
+      // Grid floor glow at intersection points
+      for (let i = 0; i <= gridLines; i += 4) {
+        for (let j = 0; j <= gridLines; j += 4) {
+          const pos = project3D(i * gridStep, 0, j * gridStep, rotY, rotX, cx, cy, scale, gridX, gridZ);
+          ctx.fillStyle = 'rgba(148, 163, 184, 0.12)';
+          ctx.beginPath();
+          ctx.arc(pos.sx, pos.sy, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
       // Collect bars
       const bars: {
         sx: number; sy: number; depth: number;
@@ -490,22 +539,76 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
 
       ctx.globalAlpha = 1;
 
-      // Floating cluster labels
-      const labelPositions: { label: string; sx: number; sy: number; color: string }[] = [];
-      for (const cluster of (typeof clusters !== 'undefined' ? [] : [])) {
-        // This is handled in the overlay
-        void cluster;
-      }
-      // Instead, find peak positions for each cluster type
-      const peakMap = new Map<string, { sx: number; sy: number; height: number }>();
+      // ── Connection Arcs Between Clusters ──
+      // Find peak screen positions for each cluster type first
+      const clusterPeaks = new Map<string, { sx: number; sy: number; height: number; color: string }>();
       for (const bar of bars) {
         const key = bar.cell.cluster.type;
-        const existing = peakMap.get(key);
+        const existing = clusterPeaks.get(key);
         if (!existing || bar.cell.height > existing.height) {
-          peakMap.set(key, { sx: bar.sx, sy: bar.topY, height: bar.cell.height });
+          clusterPeaks.set(key, { sx: bar.sx, sy: bar.topY, height: bar.cell.height, color: bar.cell.cluster.color });
         }
       }
-      for (const [type, pos] of peakMap) {
+
+      // Define semantic connections between cluster types
+      const connections: [string, string][] = [
+        ['state', 'kv'],              // state facts reference key-value pairs
+        ['decision', 'identity'],     // decisions shape identity
+        ['decision', 'preference'],   // decisions reflect preferences
+        ['config', 'state'],          // config drives state
+        ['relationship', 'identity'], // relationships define identity
+        ['temporal', 'state'],        // temporal events create state
+        ['location', 'config'],       // locations inform config
+        ['preference', 'identity'],   // preferences express identity
+      ];
+
+      for (const [typeA, typeB] of connections) {
+        const peakA = clusterPeaks.get(typeA);
+        const peakB = clusterPeaks.get(typeB);
+        if (!peakA || !peakB) continue;
+        if (peakA.height < 0.2 || peakB.height < 0.2) continue;
+
+        // Bezier control point — arc upward
+        const midX = (peakA.sx + peakB.sx) / 2;
+        const midY = Math.min(peakA.sy, peakB.sy) - 40 - Math.min(peakA.height, peakB.height) * 30;
+
+        // Pulsing alpha
+        const pulse = 0.5 + Math.sin(t * 0.015 + (typeA.length + typeB.length)) * 0.5;
+        const arcAlpha = 0.06 + pulse * 0.06;
+
+        // Draw arc with gradient
+        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = `rgba(148, 163, 184, ${arcAlpha})`;
+        ctx.beginPath();
+        ctx.moveTo(peakA.sx, peakA.sy);
+        ctx.quadraticCurveTo(midX, midY, peakB.sx, peakB.sy);
+        ctx.stroke();
+
+        // Colored glow on each end
+        const glowSize = 4;
+        ctx.fillStyle = `rgba(${hexToRgbStr(peakA.color)}, ${arcAlpha * 1.5})`;
+        ctx.beginPath();
+        ctx.arc(peakA.sx, peakA.sy, glowSize, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = `rgba(${hexToRgbStr(peakB.color)}, ${arcAlpha * 1.5})`;
+        ctx.beginPath();
+        ctx.arc(peakB.sx, peakB.sy, glowSize, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Traveling dot along the arc
+        const dotT = (Math.sin(t * 0.02 + typeA.length * 2) + 1) / 2;
+        const dotX = (1 - dotT) * (1 - dotT) * peakA.sx + 2 * (1 - dotT) * dotT * midX + dotT * dotT * peakB.sx;
+        const dotY = (1 - dotT) * (1 - dotT) * peakA.sy + 2 * (1 - dotT) * dotT * midY + dotT * dotT * peakB.sy;
+        ctx.fillStyle = `rgba(255, 255, 255, ${arcAlpha * 2.5})`;
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // ── Floating Cluster Labels ──
+      // (reuse clusterPeaks from above)
+      for (const [type, pos] of clusterPeaks) {
         const cluster = clusters.find(c => c.type === type);
         if (cluster && pos.height > 0.3) {
           ctx.globalAlpha = 0.85;
