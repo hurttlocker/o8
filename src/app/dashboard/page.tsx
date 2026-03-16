@@ -362,33 +362,6 @@ function DashboardInner() {
         borderRight: '1px solid rgba(0,0,0,0.06)',
         position: 'relative',
       }}>
-        {/* Alert bell — floats at top-right of left panel */}
-        {hasUnread && (
-          <div style={{
-            position: 'absolute',
-            top: 10,
-            right: 12,
-            zIndex: 50,
-          }}>
-            <AlertBell
-              unreadCount={unreadCount}
-              urgentCount={urgentCount}
-              onClick={() => setAlertTrayOpen(!alertTrayOpen)}
-              size="desktop"
-            />
-            <AlertTray
-              alerts={activeAlerts}
-              open={alertTrayOpen}
-              onClose={() => setAlertTrayOpen(false)}
-              onMarkRead={markRead}
-              onMarkAllRead={markAllRead}
-              onDismiss={dismiss}
-              onDismissAll={dismissAll}
-              onAction={handleAlertAction}
-              variant="desktop"
-            />
-          </div>
-        )}
         <WorkspacesPanel />
         <AgentPanel
           onSelectSession={handleSelectSession}
