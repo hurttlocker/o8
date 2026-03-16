@@ -223,11 +223,14 @@ export function ChatView({
     scrollMargin: listRef.current?.offsetTop ?? 0,
   });
 
-  // Stick-to-bottom: auto-scroll when new messages arrive
+  // No auto-scroll — user controls position via "new messages" button.
+  // Only scroll to bottom on initial load (first non-zero entry set).
+  const initialScrollDone = useRef(false);
   useEffect(() => {
-    if (!stickToBottomRef.current || transcriptEntries.length === 0) return;
+    if (initialScrollDone.current || transcriptEntries.length === 0) return;
+    initialScrollDone.current = true;
     requestAnimationFrame(() => {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' });
+      window.scrollTo({ top: document.documentElement.scrollHeight });
     });
   }, [transcriptEntries.length]);
 
