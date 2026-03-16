@@ -4,30 +4,82 @@
  * TitleBar — Topmost bar across the entire application.
  *
  * Layout (matching Cursor/Claude Code pattern):
- * Left:  [Sidebar toggle] [← Back] [→ Forward]
+ * Left:  [78px traffic light spacer] [Sidebar toggle] [← Back] [→ Forward]
  * Center: [Search pill / expanded UniversalSearch]
  * Right: [Bottom panel toggle] [Chat toggle] [Settings gear (red)]
  *
  * Sits ABOVE everything. Height: 44px. Frosted glass.
  */
 
-import {
-  Settings,
-  Search,
-  PanelLeft,
-  PanelBottom,
-  MessageSquare,
-  ChevronLeft,
-  ChevronRight,
-} from 'lucide-react';
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+
+// ── Inline SVG icons (Tauri webview doesn't reliably render Lucide React components) ──
+
+function IconPanelLeft({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M9 3v18" />
+    </svg>
+  );
+}
+
+function IconChevronLeft({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="m15 18-6-6 6-6" />
+    </svg>
+  );
+}
+
+function IconChevronRight({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+
+function IconSearch({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
+function IconPanelBottom({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M3 15h18" />
+    </svg>
+  );
+}
+
+function IconMessageSquare({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+function IconSettings({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
 
 // ── Types ──
 
 interface TitleBarProps {
   onSettingsClick?: () => void;
   renderSearch?: (onClose: () => void) => React.ReactNode;
-  // Panel toggles
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
   bottomPanelVisible?: boolean;
@@ -75,17 +127,16 @@ function TitleBarButton({
         WebkitTapHighlightColor: 'transparent',
         transition: 'background 120ms ease, color 120ms ease',
         flexShrink: 0,
+        padding: 0,
       }}
       onMouseEnter={(e) => {
         if (!active) {
           e.currentTarget.style.background = defaultHoverBg;
-          if (color) e.currentTarget.style.color = color;
         }
       }}
       onMouseLeave={(e) => {
         if (!active) {
           e.currentTarget.style.background = 'transparent';
-          e.currentTarget.style.color = active ? '#111827' : defaultColor;
         }
       }}
     >
@@ -158,7 +209,7 @@ export function TitleBar({
         ['WebkitAppRegion' as string]: 'drag',
       }}
     >
-      {/* ── Left controls ── */}
+      {/* ── Left: Traffic light spacer + controls ── */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
@@ -166,9 +217,12 @@ export function TitleBar({
         flexShrink: 0,
         ['WebkitAppRegion' as string]: 'no-drag',
       }}>
+        {/* Spacer for macOS traffic lights (close/minimize/maximize) */}
+        <div style={{ width: 78, flexShrink: 0 }} />
+
         {/* Sidebar toggle */}
         <TitleBarButton
-          icon={<PanelLeft size={16} strokeWidth={1.8} />}
+          icon={<IconPanelLeft />}
           label="Toggle sidebar"
           onClick={onToggleSidebar}
           active={sidebarVisible}
@@ -178,14 +232,14 @@ export function TitleBar({
 
         {/* Back */}
         <TitleBarButton
-          icon={<ChevronLeft size={16} strokeWidth={2} />}
+          icon={<IconChevronLeft />}
           label="Go back"
           onClick={() => window.history.back()}
         />
 
         {/* Forward */}
         <TitleBarButton
-          icon={<ChevronRight size={16} strokeWidth={2} />}
+          icon={<IconChevronRight />}
           label="Go forward"
           onClick={() => window.history.forward()}
         />
@@ -235,7 +289,7 @@ export function TitleBar({
                 e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.06)';
               }}
             >
-              <Search size={14} strokeWidth={2} style={{ color: '#aeaeb2' }} />
+              <IconSearch />
               <span>Search</span>
               <kbd style={{
                 fontSize: 10,
@@ -265,11 +319,12 @@ export function TitleBar({
         alignItems: 'center',
         gap: 2,
         flexShrink: 0,
+        paddingRight: 4,
         ['WebkitAppRegion' as string]: 'no-drag',
       }}>
         {/* Bottom panel toggle */}
         <TitleBarButton
-          icon={<PanelBottom size={16} strokeWidth={1.8} />}
+          icon={<IconPanelBottom />}
           label="Toggle bottom panel"
           onClick={onToggleBottomPanel}
           active={bottomPanelVisible}
@@ -277,7 +332,7 @@ export function TitleBar({
 
         {/* Chat panel toggle */}
         <TitleBarButton
-          icon={<MessageSquare size={16} strokeWidth={1.8} />}
+          icon={<IconMessageSquare />}
           label="Toggle chat"
           onClick={onToggleChat}
           active={chatVisible}
@@ -287,7 +342,7 @@ export function TitleBar({
 
         {/* Settings — red */}
         <TitleBarButton
-          icon={<Settings size={18} strokeWidth={1.8} />}
+          icon={<IconSettings />}
           label="Settings"
           onClick={onSettingsClick}
           color="#ef4444"
