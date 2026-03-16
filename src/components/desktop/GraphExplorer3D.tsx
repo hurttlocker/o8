@@ -54,6 +54,14 @@ const MAX_HEIGHT = 280;
 const BAR_SPACING = 4.5;
 const BASE_BAR_WIDTH = 3.2;
 
+/* ─── Constants ─── */
+
+const CATEGORY_COLORS: Record<string, string> = {
+  state: '#ef4444', kv: '#f59e0b', relationship: '#3b82f6', temporal: '#06b6d4',
+  decision: '#8b5cf6', identity: '#ec4899', config: '#22c55e', preference: '#f97316',
+  location: '#14b8a6',
+};
+
 /* ─── Helpers ─── */
 
 function hexToRgbStr(hex: string): string {
@@ -215,6 +223,13 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
   const [selectedCluster, setSelectedCluster] = useState<ClusterData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // ── Focus Mode (fly-in to cluster) ──
+  const [focusedCluster, setFocusedCluster] = useState<ClusterData | null>(null);
+  const [focusFacts, setFocusFacts] = useState<SearchResult[]>([]);
+  const focusProgressRef = useRef(0); // 0 = overview, 1 = fully focused
+  const savedCameraRef = useRef({ rotY: -0.6, rotX: -0.55, zoom: 1.0 });
+  const factRevealRef = useRef(0); // counts up for staggered fact reveal
+
   // Fetch data (initial + auto-refresh every 60s)
   useEffect(() => {
     let cancelled = false;
@@ -338,38 +353,106 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
     targetZoomRef.current = Math.max(0.4, Math.min(3.0, targetZoomRef.current - e.deltaY * 0.001));
   }, []);
 
-  // Click to select cluster
-  const handleCanvasClick = useCallback((e: React.MouseEvent) => {
-    if (draggingRef.current) return;
+  // Find cluster at screen position
+  const findClusterAtPoint = useCallback((mx: number, my: number): ClusterData | null => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
     const { grid, gridX, gridZ } = terrainRef.current;
     const w = rect.width, h = rect.height;
-    const cx = w / 2, cy = h * 0.6;
-    const scale = Math.max(w, h) / 580 * zoomRef.current;
+    const cxp = w / 2, cyp = h * 0.6;
+    const sc = Math.max(w, h) / 580 * zoomRef.current;
 
-    let closestCluster: ClusterData | null = null;
+    let closest: ClusterData | null = null;
     let closestDist = 30;
-
     for (const row of grid) {
       for (const cell of row) {
         if (cell.rawHeight < 2 || cell.highlight < 0.5) continue;
-        const worldX = cell.gx * BAR_SPACING;
-        const worldZ = cell.gz * BAR_SPACING;
-        const top = project3D(worldX, -cell.rawHeight, worldZ, rotRef.current.y, rotRef.current.x, cx, cy, scale, gridX, gridZ);
-        const dx = mx - top.sx;
-        const dy = my - top.sy;
+        const top = project3D(cell.gx * BAR_SPACING, -cell.rawHeight, cell.gz * BAR_SPACING, rotRef.current.y, rotRef.current.x, cxp, cyp, sc, gridX, gridZ);
+        const dx = mx - top.sx, dy = my - top.sy;
         const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < closestDist && cell.height > 0.3) {
-          closestDist = dist;
-          closestCluster = cell.cluster;
-        }
+        if (dist < closestDist && cell.height > 0.2) { closestDist = dist; closest = cell.cluster; }
       }
     }
-    setSelectedCluster(closestCluster);
+    return closest;
+  }, []);
+
+  // Single click → select cluster (show side panel)
+  const handleCanvasClick = useCallback((e: React.MouseEvent) => {
+    if (draggingRef.current) return;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const cluster = findClusterAtPoint(e.clientX - rect.left, e.clientY - rect.top);
+    setSelectedCluster(cluster);
+  }, [findClusterAtPoint]);
+
+  // Double-click → fly into cluster
+  const handleDoubleClick = useCallback(async (e: React.MouseEvent) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const cluster = findClusterAtPoint(e.clientX - rect.left, e.clientY - rect.top);
+    if (!cluster) return;
+
+    // If already focused on this cluster, exit focus
+    if (focusedCluster?.type === cluster.type) {
+      exitFocus();
+      return;
+    }
+
+    // Save camera
+    savedCameraRef.current = {
+      rotY: targetRotRef.current.y,
+      rotX: targetRotRef.current.x,
+      zoom: targetZoomRef.current,
+    };
+
+    // Find cluster's world position for camera target
+    const idx = clusters.indexOf(cluster);
+    const angle = (idx / clusters.length) * Math.PI * 2 + 0.3;
+
+    // Fly camera to face this cluster
+    targetRotRef.current.y = -angle - 0.5;
+    targetRotRef.current.x = -0.45;
+    targetZoomRef.current = 2.2;
+
+    // Dim non-focused bars
+    for (const row of terrainRef.current.grid) {
+      for (const cell of row) {
+        cell.highlight = cell.cluster.type === cluster.type ? 1.0 : 0.08;
+      }
+    }
+
+    // Reset reveal counter
+    factRevealRef.current = 0;
+    setFocusedCluster(cluster);
+    setSelectedCluster(null);
+
+    // Fetch facts for this cluster
+    try {
+      const res = await fetch(`/api/panel/cortex-graph?q=${encodeURIComponent(cluster.label)}`);
+      const data = await res.json();
+      setFocusFacts((data.searchResults ?? []).slice(0, 12));
+    } catch {
+      setFocusFacts([]);
+    }
+  }, [clusters, focusedCluster]);
+
+  // Exit focus mode
+  const exitFocus = useCallback(() => {
+    // Restore camera
+    targetRotRef.current.y = savedCameraRef.current.rotY;
+    targetRotRef.current.x = savedCameraRef.current.rotX;
+    targetZoomRef.current = savedCameraRef.current.zoom;
+
+    // Restore all highlights
+    for (const row of terrainRef.current.grid) {
+      for (const cell of row) cell.highlight = 1.0;
+    }
+
+    focusProgressRef.current = 0;
+    factRevealRef.current = 0;
+    setFocusedCluster(null);
+    setFocusFacts([]);
   }, []);
 
   // Animation loop
@@ -396,10 +479,19 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
       rotRef.current.x += (targetRotRef.current.x - rotRef.current.x) * 0.04;
       zoomRef.current += (targetZoomRef.current - zoomRef.current) * 0.06;
 
-      // Auto-orbit when not dragging
-      if (!draggingRef.current) {
+      // Auto-orbit when not dragging (slower in focus mode)
+      if (!draggingRef.current && !focusedCluster) {
         targetRotRef.current.y += 0.0008;
       }
+
+      // Focus mode progress
+      if (focusedCluster) {
+        focusProgressRef.current = Math.min(1, focusProgressRef.current + 0.025); // ~40 frames to fully focus
+        factRevealRef.current += 0.016; // reveal timer
+      } else {
+        focusProgressRef.current = Math.max(0, focusProgressRef.current - 0.04); // faster exit
+      }
+      const fp = focusProgressRef.current; // shorthand
 
       const scale = Math.max(w, h) / 580 * zoomRef.current;
       const rotY = rotRef.current.y;
@@ -480,8 +572,24 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
           const cell = grid[ix]?.[iz];
           if (!cell || cell.rawHeight < 1) continue;
 
-          const worldX = ix * BAR_SPACING;
-          const worldZ = iz * BAR_SPACING;
+          let worldX = ix * BAR_SPACING;
+          let worldZ = iz * BAR_SPACING;
+
+          // Spread effect: focused cluster bars push outward from cluster center
+          if (fp > 0 && focusedCluster && cell.cluster.type === focusedCluster.type) {
+            const clusterIdx = clusters.indexOf(focusedCluster);
+            const clusterAngle = (clusterIdx / clusters.length) * Math.PI * 2 + 0.3;
+            const clusterCX = (0.5 + Math.cos(clusterAngle) * (0.15 + (clusterIdx % 3) * 0.1)) * gridX * BAR_SPACING;
+            const clusterCZ = (0.5 + Math.sin(clusterAngle) * (0.15 + (clusterIdx % 3) * 0.1)) * gridZ * BAR_SPACING;
+            const dx = worldX - clusterCX;
+            const dz = worldZ - clusterCZ;
+            const dist = Math.sqrt(dx * dx + dz * dz);
+            if (dist > 0.1) {
+              const spreadAmount = fp * 2.5; // spread multiplier
+              worldX += (dx / dist) * dist * spreadAmount;
+              worldZ += (dz / dist) * dist * spreadAmount;
+            }
+          }
 
           const breathe = cell.height > 0.4 ? Math.sin(t * 0.02 + ix * 0.1 + iz * 0.15) * 3 * cell.height : 0;
           const animHeight = cell.rawHeight * cell.highlight + breathe;
@@ -679,6 +787,134 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
         ctx.globalAlpha = 1;
       }
 
+      // ── Fact Cards (visible in focus mode) ──
+      if (fp > 0.3 && focusFacts.length > 0 && focusedCluster) {
+        const focusPeak = clusterPeaks.get(focusedCluster.type);
+        if (focusPeak) {
+          const cardAlpha = Math.min(1, (fp - 0.3) / 0.4); // fade in after 30% progress
+          const revealTime = factRevealRef.current;
+          const maxCards = Math.min(focusFacts.length, 12);
+
+          for (let i = 0; i < maxCards; i++) {
+            // Stagger: each card appears 0.12s after the previous
+            const cardDelay = i * 0.12;
+            const cardProgress = Math.min(1, Math.max(0, (revealTime - cardDelay) / 0.3));
+            if (cardProgress <= 0) continue;
+
+            const fact = focusFacts[i];
+            const rgb = hexToRgbStr(focusedCluster.color);
+
+            // Position: fan out from the peak, alternating left/right
+            const side = i % 2 === 0 ? -1 : 1;
+            const row = Math.floor(i / 2);
+            const cardX = focusPeak.sx + side * (130 + row * 15) * cardProgress;
+            const cardY = focusPeak.sy - 50 + row * 42;
+
+            // Card dimensions
+            const cardW = 220;
+            const cardH = 34;
+            const cornerR = 8;
+
+            // Ease-out slide
+            const slideOffset = (1 - cardProgress) * 30 * side;
+            const finalX = cardX + slideOffset;
+
+            // Card background
+            ctx.globalAlpha = cardAlpha * cardProgress * 0.92;
+            ctx.fillStyle = `rgba(9, 9, 11, 0.88)`;
+            ctx.beginPath();
+            ctx.roundRect(finalX - cardW / 2, cardY - cardH / 2, cardW, cardH, cornerR);
+            ctx.fill();
+
+            // Left accent bar
+            ctx.fillStyle = `rgba(${rgb}, ${cardAlpha * cardProgress * 0.9})`;
+            ctx.beginPath();
+            ctx.roundRect(finalX - cardW / 2, cardY - cardH / 2, 3, cardH, [cornerR, 0, 0, cornerR]);
+            ctx.fill();
+
+            // Confidence dot
+            const dotRadius = 3;
+            const confColor = fact.confidence > 70 ? `rgba(34, 197, 94, ${cardAlpha * cardProgress})` // green
+              : fact.confidence > 40 ? `rgba(245, 158, 11, ${cardAlpha * cardProgress})` // amber
+              : `rgba(148, 163, 184, ${cardAlpha * cardProgress})`; // gray
+            ctx.fillStyle = confColor;
+            ctx.beginPath();
+            ctx.arc(finalX - cardW / 2 + 14, cardY, dotRadius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Fact text (truncated)
+            ctx.globalAlpha = cardAlpha * cardProgress;
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = '11px -apple-system, system-ui, sans-serif';
+            ctx.textAlign = 'left';
+            const maxTextW = cardW - 50;
+            let text = fact.text;
+            while (ctx.measureText(text).width > maxTextW && text.length > 10) {
+              text = text.slice(0, -4) + '…';
+            }
+            ctx.fillText(text, finalX - cardW / 2 + 24, cardY + 4);
+
+            // Confidence % on right
+            ctx.fillStyle = '#64748b';
+            ctx.font = '9px "SF Mono", ui-monospace, monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText(`${fact.confidence.toFixed(0)}%`, finalX + cardW / 2 - 8, cardY + 3);
+
+            // Connection line from card to peak
+            ctx.globalAlpha = cardAlpha * cardProgress * 0.15;
+            ctx.strokeStyle = `rgba(${rgb}, 0.5)`;
+            ctx.lineWidth = 0.8;
+            ctx.beginPath();
+            ctx.moveTo(finalX - cardW / 2 + (side < 0 ? cardW : 0), cardY);
+            ctx.lineTo(focusPeak.sx, focusPeak.sy);
+            ctx.stroke();
+          }
+
+          ctx.globalAlpha = 1;
+          ctx.textAlign = 'center';
+        }
+      }
+
+      // ── Search Result Nodes (visible when searching, outside focus mode) ──
+      if (!focusedCluster && searchResults.length > 0) {
+        const maxVisible = Math.min(searchResults.length, 8);
+        for (let i = 0; i < maxVisible; i++) {
+          const r = searchResults[i];
+          const matchPeak = clusterPeaks.get(r.type);
+          if (!matchPeak) continue;
+
+          const rgb = hexToRgbStr(CATEGORY_COLORS[r.type] ?? '#94a3b8');
+          const nodeY = matchPeak.sy - 30 - i * 22;
+          const nodeX = matchPeak.sx;
+
+          // Small pill
+          ctx.globalAlpha = 0.85;
+          ctx.fillStyle = 'rgba(9, 9, 11, 0.8)';
+          const pillW = 150, pillH = 18;
+          ctx.beginPath();
+          ctx.roundRect(nodeX - pillW / 2, nodeY - pillH / 2, pillW, pillH, 5);
+          ctx.fill();
+
+          // Accent dot
+          ctx.fillStyle = `rgba(${rgb}, 0.9)`;
+          ctx.beginPath();
+          ctx.arc(nodeX - pillW / 2 + 8, nodeY, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Text
+          ctx.fillStyle = '#cbd5e1';
+          ctx.font = '9px -apple-system, system-ui, sans-serif';
+          ctx.textAlign = 'left';
+          let pillText = r.text;
+          while (ctx.measureText(pillText).width > pillW - 30 && pillText.length > 8) {
+            pillText = pillText.slice(0, -4) + '…';
+          }
+          ctx.fillText(pillText, nodeX - pillW / 2 + 16, nodeY + 3);
+          ctx.textAlign = 'center';
+        }
+        ctx.globalAlpha = 1;
+      }
+
       // Particles
       if (t - lastSpawn > 4 && grid.length > 0) {
         particlesRef.current.push(...spawnParticles(grid, gridX, gridZ, 6));
@@ -721,6 +957,7 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
         onClick={handleCanvasClick}
+        onDoubleClick={handleDoubleClick}
         onWheel={handleWheel}
         style={{ width: '100%', height: '100%', cursor: draggingRef.current ? 'grabbing' : 'grab' }}
       />
@@ -858,11 +1095,78 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
         textAlign: 'right',
         lineHeight: 1.6,
       }}>
-        Drag to orbit · Scroll to zoom · Click to inspect
+        {focusedCluster ? 'Drag to orbit · Double-click to exit' : 'Drag to orbit · Scroll to zoom · Double-click peak to explore'}
       </div>
 
+      {/* Focus mode back button */}
+      {focusedCluster && (
+        <button
+          type="button"
+          onClick={exitFocus}
+          style={{
+            position: 'absolute',
+            top: 14,
+            right: 14,
+            paddingTop: 8,
+            paddingRight: 16,
+            paddingBottom: 8,
+            paddingLeft: 16,
+            borderRadius: 10,
+            border: `1px solid ${focusedCluster.color}30`,
+            background: 'rgba(9, 9, 11, 0.9)',
+            backdropFilter: 'blur(12px)',
+            color: '#e2e8f0',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            fontFamily: '-apple-system, system-ui, sans-serif',
+            boxShadow: `0 4px 20px rgba(0,0,0,0.3), 0 0 20px ${focusedCluster.color}10`,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            zIndex: 20,
+          }}
+        >
+          <span style={{ fontSize: 14 }}>←</span>
+          <span>Back to Overview</span>
+        </button>
+      )}
+
+      {/* Focus mode cluster info */}
+      {focusedCluster && (
+        <div style={{
+          position: 'absolute',
+          bottom: 60,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          paddingTop: 10,
+          paddingRight: 20,
+          paddingBottom: 10,
+          paddingLeft: 20,
+          borderRadius: 12,
+          background: 'rgba(9, 9, 11, 0.9)',
+          border: `1px solid ${focusedCluster.color}25`,
+          backdropFilter: 'blur(16px)',
+          zIndex: 20,
+        }}>
+          <div style={{ width: 10, height: 10, borderRadius: 5, background: focusedCluster.color, boxShadow: `0 0 10px ${focusedCluster.color}60` }} />
+          <span style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>{focusedCluster.label}</span>
+          <span style={{ fontSize: 12, color: '#64748b', fontFamily: '"SF Mono", monospace' }}>
+            {focusedCluster.factCount.toLocaleString()} facts
+          </span>
+          {focusFacts.length > 0 && (
+            <span style={{ fontSize: 11, color: '#94a3b8' }}>
+              · Showing {focusFacts.length} samples
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Selected cluster detail panel */}
-      {selectedCluster && (
+      {selectedCluster && !focusedCluster && (
         <div
           style={{
             position: 'absolute',
