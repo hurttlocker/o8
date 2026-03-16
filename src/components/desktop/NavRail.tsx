@@ -268,7 +268,7 @@ export function NavRail({
       onMouseLeave={() => setExpanded(false)}
       aria-label="Main navigation"
       style={{
-        height: '100vh',
+        height: '100%',
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
