@@ -350,8 +350,17 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
         approvalStatus: 'none',
         lastEventAt: relativeAge(ageMs),
         context: {
-          usedPercent: session.percentUsed ?? 0,
-          trend: deriveTrend(session.percentUsed, ageMs),
+          usedPercent: session.percentUsed
+            ?? (session.contextTokens && session.totalTokens
+              ? Math.min(100, Math.round((session.totalTokens / session.contextTokens) * 100))
+              : 0),
+          trend: deriveTrend(
+            session.percentUsed
+              ?? (session.contextTokens && session.totalTokens
+                ? Math.round((session.totalTokens / session.contextTokens) * 100)
+                : null),
+            ageMs,
+          ),
         },
         alerts,
         sessionId: session.sessionId,
@@ -361,7 +370,10 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
         runtimeSurface: buildOpenClawRuntimeSurface(name, session, workspace, branch, surfaceLabel),
         tokenUsage: {
           totalTokens: session.totalTokens,
-          remainingTokens: session.remainingTokens,
+          remainingTokens: session.remainingTokens
+            ?? (session.contextTokens && session.totalTokens
+              ? Math.max(0, session.contextTokens - session.totalTokens)
+              : undefined),
           fresh: session.totalTokensFresh,
         },
       };
