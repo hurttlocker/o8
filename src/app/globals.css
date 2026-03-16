@@ -3365,7 +3365,7 @@ button.workflow-file-item.workflow-file-item-active {
 .remodex-compose-pill {
   flex: 1 1 0;
   justify-content: center;
-  pointer-events: none;
+  pointer-events: auto;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
