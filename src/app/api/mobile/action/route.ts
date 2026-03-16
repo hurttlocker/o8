@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import type { MobileActionRequest, MobileActionResponse } from '@/lib/mobile/types';
 import { launchCodexFromMobile, performRuntimeAction } from '@/lib/runtime/actions';
+import { steerOpenClawSession } from '@/lib/openclaw/chat';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -16,6 +17,36 @@ export async function POST(request: NextRequest) {
 
   try {
     const isOwnedCodex = sessionKey.startsWith('codex-owned:');
+
+    // ── Send message to an OpenClaw agent session ──
+    if (action === 'send') {
+      const message = (payload as unknown as Record<string, unknown>)?.message as string | undefined;
+      if (!message?.trim()) {
+        return NextResponse.json(
+          { error: 'message is required for send' },
+          { status: 400, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+        );
+      }
+      try {
+        const result = await steerOpenClawSession(sessionKey, message.trim());
+        const response: MobileActionResponse = {
+          ok: true,
+          action: 'send',
+          sessionKey,
+          status: 'sent',
+          note: `Message sent to ${sessionKey}`,
+          runId: (result as Record<string, unknown>)?.runId as string | undefined,
+        };
+        return NextResponse.json(response, {
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
+        });
+      } catch (err) {
+        return NextResponse.json(
+          { ok: false, action: 'send', sessionKey, status: 'error', note: err instanceof Error ? err.message : 'Send failed' },
+          { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+        );
+      }
+    }
 
     if (action === 'launch') {
       const cwd = payload?.cwd?.trim();
