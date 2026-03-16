@@ -44,6 +44,7 @@ const MemoryHealth = dynamic(() => import('./mobile/MemoryHealth'), { ssr: false
 const GraphExplorer = dynamic(() => import('./mobile/GraphExplorer'), { ssr: false });
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const CortexStatus = dynamic(() => import('./mobile/CortexStatus'), { ssr: false });
+const SessionInfoSheet = dynamic(() => import('./mobile/SessionInfoSheet').then((m) => ({ default: m.SessionInfoSheet })), { ssr: false });
 
 // Extracted hooks (#43 — hooks extraction)
 import { useMobileState } from './mobile/hooks/useMobileState';
@@ -65,6 +66,16 @@ interface MobileRemoteShellProps {
   initialTranscript?: { sessionKey: string; transcript: MobileTranscriptEntry[] };
   initialReviewFile?: MobileReviewFileResponse['file'] | null;
   initialOwnedReviewPacket?: RuntimeReviewPacket | null;
+}
+
+function formatSessionAge(lastEventAt: string): string {
+  const diff = Date.now() - new Date(lastEventAt).getTime();
+  const mins = Math.floor(diff / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ${mins % 60}m`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 function MobileRemoteShellInner({
@@ -110,7 +121,7 @@ function MobileRemoteShellInner({
     draftBySession, actionStateBySession, actionNoteBySession,
     draftAttachmentsBySession, pendingOwnedTurnBySession,
     enhancing, preEnhanceDraft,
-    controlsOpen, alertsOpen,
+    controlsOpen, alertsOpen, sessionInfoOpen,
     pendingApprovals, resolvedApprovals,
     surfaceRefreshing, expandedMedia, scrollY,
     isScrolling, headerVisible, viewportTopOffset,
@@ -121,7 +132,7 @@ function MobileRemoteShellInner({
     setDraftBySession, setActionStateBySession, setActionNoteBySession,
     setDraftAttachmentsBySession, setPendingOwnedTurnBySession,
     setEnhancing, setPreEnhanceDraft,
-    setControlsOpen, setAlertsOpen,
+    setControlsOpen, setAlertsOpen, setSessionInfoOpen,
     setPendingApprovals, setResolvedApprovals,
     setSurfaceRefreshing, setExpandedMedia,
     setComposeFocused, setWaitingForResponse,
@@ -371,6 +382,7 @@ function MobileRemoteShellInner({
               fileInputRef={fileInputRef}
               handlers={actions.composeBarHandlers}
               onOpenRecall={() => setCortexRecallOpen(true)}
+              onModelPillTap={() => setSessionInfoOpen(true)}
             />
           </div>
           <RuntimeBar
@@ -465,6 +477,20 @@ function MobileRemoteShellInner({
           setAlertsOpen(false);
         }}
         variant="mobile"
+      />
+      <SessionInfoSheet
+        open={sessionInfoOpen}
+        onClose={() => setSessionInfoOpen(false)}
+        sessionKey={selectedSessionKey}
+        modelName={selectedSession?.model}
+        status={selectedSession?.status}
+        contextPercent={selectedSession?.context?.usedPercent ?? 0}
+        totalTokens={selectedSession?.tokenUsage?.totalTokens ?? 0}
+        contextTokens={selectedSession?.tokenUsage?.remainingTokens ? (selectedSession.tokenUsage.totalTokens ?? 0) + (selectedSession.tokenUsage.remainingTokens ?? 0) : 0}
+        messageCount={transcriptEntries.length}
+        sessionAge={selectedSession?.lastEventAt ? formatSessionAge(selectedSession.lastEventAt) : undefined}
+        onCopyKey={actions.handleCopySelectedSessionKey}
+        onExpandMedia={(media) => { setSessionInfoOpen(false); setExpandedMedia(media); }}
       />
     </div>
   );
