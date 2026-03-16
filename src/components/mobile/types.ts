@@ -201,6 +201,7 @@ export interface TopBarProps {
   squadPickerOpen: boolean;
   onOpenControls: () => void;
   onOpenDiff: () => void;
+  onOpenAlerts: () => void;
   onToggleSquadPicker: () => void;
   onSessionFocus: (sessionId: string) => void;
 }
