@@ -167,14 +167,25 @@ interface WorkspaceGroup {
 }
 
 function deriveRepo(workspace: string, agents: AgentDetail[]): string {
-  // Try to extract repo name from workspace path
   const path = workspace.replace(/^~\//, '');
+
+  // Unknown or empty workspace — group under OpenClaw
+  if (!path || path === 'unknown') return 'openclaw';
+
+  // Explicit repo path
   if (path.includes('repos/')) {
     const parts = path.split('repos/');
-    return parts[1]?.split('/')[0] || path.split('/').pop() || 'workspace';
+    return parts[1]?.split('/')[0] || path.split('/').pop() || 'openclaw';
   }
-  if (path === 'clawd' && agents.some(a => a.isCurrentSession)) return 'openclaw';
-  return path.split('/').pop() || 'workspace';
+  if (path.includes('projects/')) {
+    const parts = path.split('projects/');
+    return parts[1]?.split('/')[0] || path.split('/').pop() || 'openclaw';
+  }
+
+  // Main workspace
+  if (path === 'clawd') return 'openclaw';
+
+  return path.split('/').pop() || 'openclaw';
 }
 
 function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
