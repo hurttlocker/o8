@@ -143,9 +143,29 @@ function StepIndicator({ step, currentStep }: { step: WorkflowStep; currentStep:
 
 // ── Main Component ──
 
+interface FleetAgent {
+  name?: string;
+  status?: string;
+  currentTask?: string;
+  context?: { usedPercent?: number };
+  alerts?: number;
+  sessionKey?: string;
+  model?: string;
+  lastEventAt?: string;
+  activity?: { headline?: string };
+}
+
+interface ContextSuggestion {
+  text: string;
+  action: string; // pre-filled message
+  agent: AgentTarget;
+  priority: 'info' | 'warn' | 'critical';
+}
+
 interface ThoughtsCardProps {
   open: boolean;
   onClose: () => void;
+  agents?: FleetAgent[];
 }
 
 interface AgentTarget {
@@ -161,7 +181,68 @@ const AGENTS: AgentTarget[] = [
   { key: 'agent:hawk:main', name: 'Hawk', emoji: '', color: '#f59e0b' },
 ];
 
-export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
+function generateSuggestions(agents: FleetAgent[]): ContextSuggestion[] {
+  const suggestions: ContextSuggestion[] = [];
+  const agentMap = new Map(AGENTS.map(a => [a.name.toLowerCase(), a]));
+
+  for (const agent of agents) {
+    const name = agent.name || 'Unknown';
+    const target = agentMap.get(name.toLowerCase()) || AGENTS[0];
+
+    // Context pressure warning
+    const ctx = agent.context?.usedPercent ?? 0;
+    if (ctx > 80) {
+      suggestions.push({
+        text: `${name} is at ${Math.round(ctx)}% context — approaching limit`,
+        action: `What's your context status? Do you need to compact?`,
+        agent: target,
+        priority: ctx > 90 ? 'critical' : 'warn',
+      });
+    }
+
+    // Agent stuck / failed
+    if (agent.status === 'failed' || agent.status === 'error') {
+      suggestions.push({
+        text: `${name} has failed — may need intervention`,
+        action: `What happened? Can you recover?`,
+        agent: target,
+        priority: 'critical',
+      });
+    }
+
+    // Agent idle for a while with a task
+    if (agent.status === 'idle' && agent.currentTask) {
+      const lastEvent = agent.lastEventAt ? new Date(agent.lastEventAt).getTime() : 0;
+      const idleMinutes = lastEvent ? (Date.now() - lastEvent) / 60000 : 0;
+      if (idleMinutes > 30) {
+        suggestions.push({
+          text: `${name} has been idle ${Math.round(idleMinutes)}min with task: "${agent.currentTask}"`,
+          action: `Status update on "${agent.currentTask}"?`,
+          agent: target,
+          priority: 'warn',
+        });
+      }
+    }
+
+    // Alerts
+    if (agent.alerts && agent.alerts > 0) {
+      suggestions.push({
+        text: `${name} has ${agent.alerts} alert${agent.alerts > 1 ? 's' : ''}`,
+        action: `What alerts do you have? Anything I should know?`,
+        agent: target,
+        priority: 'warn',
+      });
+    }
+  }
+
+  // Sort: critical first, then warn, then info
+  const priorityOrder = { critical: 0, warn: 1, info: 2 };
+  suggestions.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+
+  return suggestions.slice(0, 3); // max 3 suggestions
+}
+
+export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) {
   const [mode, setMode] = useState<ThoughtMode>('pick');
   const [input, setInput] = useState('');
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
@@ -572,6 +653,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
   const isActive = workflow.step !== 'idle';
   const currentStepIdx = stepIndex(workflow.step);
   const inTaskChat = mode === 'task';
+  const suggestions = generateSuggestions(agents);
 
   // ── Render ──
 
@@ -892,6 +974,70 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
                     </div>
                   </button>
                 </div>
+                {/* Context-aware suggestions */}
+                {suggestions.length > 0 && (
+                  <div style={{
+                    marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4,
+                  }}>
+                    <div style={{
+                      fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
+                      color: '#9ca3af', letterSpacing: '0.05em', padding: '0 2px',
+                    }}>
+                      Suggested
+                    </div>
+                    {suggestions.map((s, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => {
+                          setMode('task');
+                          setTargetAgent(s.agent);
+                          setInput(s.action);
+                          setTimeout(() => inputRef.current?.focus(), 50);
+                        }}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: '8px 10px', borderRadius: 10, textAlign: 'left',
+                          border: `1px solid ${
+                            s.priority === 'critical' ? 'rgba(239, 68, 68, 0.15)'
+                            : s.priority === 'warn' ? 'rgba(245, 158, 11, 0.12)'
+                            : 'rgba(0, 0, 0, 0.06)'
+                          }`,
+                          background: s.priority === 'critical' ? 'rgba(239, 68, 68, 0.04)'
+                            : s.priority === 'warn' ? 'rgba(245, 158, 11, 0.04)'
+                            : 'rgba(0, 0, 0, 0.02)',
+                          cursor: 'pointer',
+                          transition: 'background 120ms',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = s.priority === 'critical' ? 'rgba(239, 68, 68, 0.08)' : s.priority === 'warn' ? 'rgba(245, 158, 11, 0.08)' : 'rgba(0, 0, 0, 0.04)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = s.priority === 'critical' ? 'rgba(239, 68, 68, 0.04)' : s.priority === 'warn' ? 'rgba(245, 158, 11, 0.04)' : 'rgba(0, 0, 0, 0.02)'; }}
+                      >
+                        <span style={{
+                          width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                          background: s.priority === 'critical' ? '#ef4444'
+                            : s.priority === 'warn' ? '#f59e0b' : '#9ca3af',
+                        }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontSize: 11, color: '#374151', lineHeight: 1.4,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
+                            {s.text}
+                          </div>
+                          <div style={{
+                            fontSize: 9, color: '#9ca3af', marginTop: 1,
+                          }}>
+                            → {s.agent.name}
+                          </div>
+                        </div>
+                        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" style={{ display: 'block', flexShrink: 0 }}>
+                          <polyline points="9 18 15 12 9 6"/>
+                        </svg>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 {/* Test approval trigger */}
                 {approvals.length === 0 && (
                   <button
