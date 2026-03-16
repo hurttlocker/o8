@@ -9,7 +9,7 @@ if (self.location.protocol === 'tauri:' || self.location.hostname === 'tauri.loc
 
 // Cache version — bumped automatically on each deploy via BUILD_ID
 // The SW file itself changes (new hash) so the browser re-registers it
-const CACHE_VERSION = '2026031601';
+const CACHE_VERSION = '2026031602';
 const CACHE_NAME = `cortex-ide-${CACHE_VERSION}`;
 const SHELL_ASSETS = [
   '/mobile',
@@ -48,22 +48,17 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // _next/static/ chunks: stale-while-revalidate
-  // Serve from cache immediately, fetch update in background
+  // _next/static/ chunks: network-first with cache fallback
+  // Always try to get fresh JS to pick up hot-reload changes
   if (url.pathname.startsWith('/_next/static/')) {
     event.respondWith(
-      caches.open(CACHE_NAME).then((cache) =>
-        cache.match(event.request).then((cached) => {
-          const fetchPromise = fetch(event.request).then((response) => {
-            if (response.ok) {
-              cache.put(event.request, response.clone());
-            }
-            return response;
-          }).catch(() => cached);
-
-          return cached || fetchPromise;
-        })
-      )
+      fetch(event.request).then((response) => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        }
+        return response;
+      }).catch(() => caches.match(event.request).then((cached) => cached || new Response('', { status: 503 })))
     );
     return;
   }
