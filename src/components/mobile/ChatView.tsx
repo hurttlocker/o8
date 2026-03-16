@@ -2,7 +2,6 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import Image from 'next/image';
 import { ChevronRight, FileDiff, FileText, Image as ImageIcon } from 'lucide-react';
 import type { MobileTranscriptMedia } from '@/lib/mobile/types';
 import type { ChatViewProps } from './types';
@@ -134,14 +133,13 @@ function MediaGrid({
               className="remodex-media-card remodex-media-card-image"
               onClick={() => setExpandedMedia(item)}
             >
-              <Image
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
                 src={mediaHref(item.path)}
                 alt={item.name}
-                width={1200}
-                height={900}
-                unoptimized
                 loading="lazy"
-                onLoadingComplete={() => onScrollToLatestMessage()}
+                onLoad={() => onScrollToLatestMessage()}
+                style={{ width: '100%', height: 'auto', borderRadius: 8, display: 'block' }}
               />
               <span className="remodex-media-card-caption">Tap to expand</span>
             </button>
