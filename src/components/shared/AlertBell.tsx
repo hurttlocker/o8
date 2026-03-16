@@ -7,7 +7,7 @@
  * On desktop: sits in the top bar.
  */
 
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { Bell } from 'lucide-react';
 
 interface AlertBellProps {
@@ -24,6 +24,11 @@ export const AlertBell = memo(function AlertBell({
   onClick,
   size = 'desktop',
 }: AlertBellProps) {
+  // Prevent hydration mismatch — alert state is client-only
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+  if (!mounted) return null;
+
   const isMobile = size === 'mobile';
   const buttonSize = isMobile ? 36 : 32;
   const iconSize = isMobile ? 18 : 16;
