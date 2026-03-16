@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
+import { WorkspacesPanel } from '@/components/desktop/WorkspacesPanel';
 import { DesktopChat } from '@/components/desktop/DesktopChat';
 import { Canvas, CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
@@ -388,6 +389,7 @@ function DashboardInner() {
             />
           </div>
         )}
+        <WorkspacesPanel />
         <AgentPanel
           onSelectSession={handleSelectSession}
           onSelectIssue={handleSelectIssue}
