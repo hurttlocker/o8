@@ -85,17 +85,10 @@ function formatGatewayError(error: unknown) {
 }
 
 async function callGateway<T>(method: string, params: Record<string, unknown>) {
+  // Uses gateway-client which handles REST API + CLI fallback
   try {
-    const { stdout } = await execFileAsync(
-      'openclaw',
-      ['gateway', 'call', method, '--json', '--params', JSON.stringify(params)],
-      {
-        cwd: WORKSPACE_ROOT,
-        maxBuffer: 4 * 1024 * 1024,
-      },
-    );
-
-    return JSON.parse(extractJsonPayload(stdout)) as T;
+    const { gatewayRpc } = await import('@/lib/openclaw/gateway-client');
+    return await gatewayRpc<T>(method, params);
   } catch (error) {
     throw new Error(formatGatewayError(error));
   }
