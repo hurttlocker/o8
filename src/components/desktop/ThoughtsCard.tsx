@@ -148,7 +148,18 @@ interface ThoughtsCardProps {
   onClose: () => void;
 }
 
-const MAIN_SESSION_KEY = 'agent:main:main';
+interface AgentTarget {
+  key: string;
+  name: string;
+  emoji: string;
+  color: string;
+}
+
+const AGENTS: AgentTarget[] = [
+  { key: 'agent:main:main', name: 'Mister', emoji: '🏴', color: '#111827' },
+  { key: 'agent:ace:main', name: 'Niot', emoji: '⚡', color: '#2563eb' },
+  { key: 'agent:hawk:main', name: 'Hawk', emoji: '🦅', color: '#f59e0b' },
+];
 
 export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
   const [mode, setMode] = useState<ThoughtMode>('pick');
@@ -156,6 +167,8 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
   const [minimized, setMinimized] = useState(false);
+  const [targetAgent, setTargetAgent] = useState(AGENTS[0]);
+  const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [workflow, setWorkflow] = useState<WorkflowState>({ step: 'idle' });
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [size, setSize] = useState({ w: 400, h: 0 });
@@ -351,7 +364,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
 
         try {
           const res = await fetch(
-            `/api/mobile/history?sessionKey=${encodeURIComponent(MAIN_SESSION_KEY)}&limit=8&fresh=1`
+            `/api/mobile/history?sessionKey=${encodeURIComponent(targetAgent.key)}&limit=8&fresh=1`
           );
           if (!res.ok) return;
           const data = await res.json();
@@ -414,7 +427,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'send',
-          sessionKey: MAIN_SESSION_KEY,
+          sessionKey: targetAgent.key,
           message: `[Issue from Thoughts] ${thought}`,
         }),
       });
@@ -463,7 +476,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
 
     try {
       // Snapshot ALL current assistant message IDs so we only detect genuinely new ones
-      const snapRes = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(MAIN_SESSION_KEY)}&limit=8&fresh=1`);
+      const snapRes = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(targetAgent.key)}&limit=8&fresh=1`);
       if (snapRes.ok) {
         const data = await snapRes.json();
         const entries = data.transcript || data.entries || [];
@@ -484,7 +497,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'send',
-          sessionKey: MAIN_SESSION_KEY,
+          sessionKey: targetAgent.key,
           message: msg,
         }),
       });
@@ -517,6 +530,8 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
     setMode('pick');
     setChatMessages([]);
     setWaitingForReply(false);
+    setTargetAgent(AGENTS[0]);
+    setAgentPickerOpen(false);
     if (pollRef.current) clearInterval(pollRef.current);
     sendTimestampRef.current = 0;
     seenAssistantIdsRef.current.clear();
@@ -608,7 +623,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
             fontSize: 12, fontWeight: 700, color: '#111827',
             letterSpacing: '-0.01em', flex: 1,
           }}>
-            {inTaskChat && chatMessages.length > 0 ? 'Task Chat' : 'Thoughts'}
+            {inTaskChat && chatMessages.length > 0 ? `${targetAgent.emoji} ${targetAgent.name}` : 'Thoughts'}
           </span>
           {/* Approval count badge */}
           {approvals.length > 0 && (
@@ -1133,12 +1148,99 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
                   <div ref={chatEndRef} />
                 </div>
 
-                {/* Compose bar */}
+                {/* Compose bar with agent picker */}
                 <div style={{
                   padding: '8px 12px 12px',
                   borderTop: '1px solid rgba(0,0,0,0.04)',
                   flexShrink: 0,
                 }}>
+                  {/* Agent picker row */}
+                  <div style={{ position: 'relative', marginBottom: 6 }}>
+                    <button
+                      type="button"
+                      onClick={() => setAgentPickerOpen(v => !v)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 5,
+                        padding: '4px 8px', borderRadius: 8,
+                        border: '1px solid rgba(0,0,0,0.06)',
+                        background: 'rgba(255,255,255,0.4)',
+                        cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                        color: targetAgent.color, letterSpacing: '-0.01em',
+                        transition: 'background 120ms',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.7)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.4)'; }}
+                    >
+                      <span style={{ fontSize: 12 }}>{targetAgent.emoji}</span>
+                      {targetAgent.name}
+                      <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                        strokeWidth="2.5" strokeLinecap="round" style={{
+                          display: 'block', transition: 'transform 200ms',
+                          transform: agentPickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                        }}>
+                        <polyline points="6 9 12 15 18 9"/>
+                      </svg>
+                    </button>
+
+                    {/* Dropdown */}
+                    {agentPickerOpen && (
+                      <div style={{
+                        position: 'absolute', bottom: '100%', left: 0,
+                        marginBottom: 4, minWidth: 160,
+                        borderRadius: 12, padding: 4,
+                        background: 'rgba(255, 255, 255, 0.85)',
+                        backdropFilter: 'blur(40px) saturate(180%)',
+                        WebkitBackdropFilter: 'blur(40px) saturate(180%)',
+                        border: '1px solid rgba(255, 255, 255, 0.4)',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)',
+                        zIndex: 10,
+                      }}>
+                        {AGENTS.map((agent) => (
+                          <button
+                            key={agent.key}
+                            type="button"
+                            onClick={() => {
+                              setTargetAgent(agent);
+                              setAgentPickerOpen(false);
+                              // Clear chat when switching agents
+                              setChatMessages([]);
+                              setWaitingForReply(false);
+                              if (pollRef.current) clearInterval(pollRef.current);
+                              sendTimestampRef.current = 0;
+                              seenAssistantIdsRef.current.clear();
+                            }}
+                            style={{
+                              width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+                              padding: '7px 10px', borderRadius: 8,
+                              border: 'none', cursor: 'pointer', textAlign: 'left',
+                              background: targetAgent.key === agent.key ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                              transition: 'background 100ms',
+                            }}
+                            onMouseEnter={(e) => {
+                              if (targetAgent.key !== agent.key) e.currentTarget.style.background = 'rgba(0,0,0,0.04)';
+                            }}
+                            onMouseLeave={(e) => {
+                              if (targetAgent.key !== agent.key) e.currentTarget.style.background = 'transparent';
+                            }}
+                          >
+                            <span style={{ fontSize: 14 }}>{agent.emoji}</span>
+                            <div>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: agent.color }}>{agent.name}</div>
+                              <div style={{ fontSize: 9, color: '#9ca3af', fontFamily: 'SF Mono, Menlo, monospace' }}>
+                                {agent.key}
+                              </div>
+                            </div>
+                            {targetAgent.key === agent.key && (
+                              <div style={{ marginLeft: 'auto', color: '#2563eb' }}>
+                                <CheckIcon />
+                              </div>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   <div style={{ position: 'relative' }}>
                     <textarea
                       ref={mode === 'task' ? inputRef : undefined}
@@ -1147,7 +1249,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleTaskSend(); }
                       }}
-                      placeholder={waitingForReply ? 'Agent is thinking...' : 'Ask your agent anything...'}
+                      placeholder={waitingForReply ? `${targetAgent.name} is thinking...` : `Message ${targetAgent.name}...`}
                       disabled={waitingForReply}
                       rows={1}
                       style={{
