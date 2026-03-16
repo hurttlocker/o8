@@ -11,7 +11,7 @@
  * Sits ABOVE everything. Height: 44px. Frosted glass.
  */
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
 // ── Inline SVG icons (Tauri webview doesn't reliably render Lucide React components) ──
 
@@ -173,6 +173,28 @@ export function TitleBar({
   onToggleChat,
 }: TitleBarProps) {
   const [searchExpanded, setSearchExpanded] = useState(false);
+  const headerRef = useRef<HTMLElement>(null);
+
+  // Window drag — Tauri v2 startDragging API
+  const handleMouseDown = useCallback(async (e: React.MouseEvent) => {
+    // Only drag from the header itself or non-interactive children
+    const target = e.target as HTMLElement;
+    // Skip if clicking a button, input, or anything interactive
+    if (
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('kbd') ||
+      target.closest('[data-no-drag]')
+    ) {
+      return;
+    }
+    try {
+      const { getCurrentWindow } = await import('@tauri-apps/api/window');
+      await getCurrentWindow().startDragging();
+    } catch {
+      // Not in Tauri — ignore (browser mode)
+    }
+  }, []);
 
   // ⌘K keyboard shortcut
   useEffect(() => {
@@ -193,7 +215,9 @@ export function TitleBar({
 
   return (
     <header
+      ref={headerRef}
       data-tauri-drag-region=""
+      onMouseDown={handleMouseDown}
       style={{
         height: 44,
         flexShrink: 0,
