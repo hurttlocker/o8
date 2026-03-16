@@ -15,6 +15,7 @@ import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { IntentCanvas } from '@/components/desktop/IntentCanvas';
 import { SettingsPage } from '@/components/desktop/SettingsPage';
+import { ThoughtsCard } from '@/components/desktop/ThoughtsCard';
 
 export default function DashboardPage() {
   return (
@@ -37,6 +38,7 @@ function DashboardInner() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [chatVisible, setChatVisible] = useState(true);
   const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
+  const [thoughtsOpen, setThoughtsOpen] = useState(false);
 
   // ── Alert system ──
   const {
@@ -332,6 +334,8 @@ function DashboardInner() {
         alertCount={unreadCount}
         onAlertClick={() => setAlertTrayOpen(!alertTrayOpen)}
         onSearchClick={() => setSearchOpen(true)}
+        thoughtsOpen={thoughtsOpen}
+        onThoughtsToggle={() => setThoughtsOpen(v => !v)}
       />}
 
       {/* ── Left: Agent Panel ── */}
@@ -594,6 +598,9 @@ function DashboardInner() {
       {/* ── Alert Toast (desktop only — urgent alerts slide in top-right) ── */}
       <AlertToast alerts={activeAlerts} onAction={handleAlertAction} />
       </div>{/* end main layout */}
+
+      {/* ── Thoughts Card (floating overlay — sits on top of everything) ── */}
+      <ThoughtsCard open={thoughtsOpen} onClose={() => setThoughtsOpen(false)} />
     </div>
   );
 }
