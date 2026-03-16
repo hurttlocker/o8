@@ -299,7 +299,15 @@ function DashboardInner() {
       />
 
       {/* ── Session Timeline ── */}
-      <SessionTimeline />
+      <SessionTimeline onExpand={() => {
+        openCanvasTab({
+          id: 'timeline:session',
+          kind: 'timeline',
+          label: 'Session Replay',
+          resourceId: 'session',
+        });
+        setBottomPanelVisible(true);
+      }} />
 
       {/* ── Main Layout (horizontal) ── */}
       <div style={{
