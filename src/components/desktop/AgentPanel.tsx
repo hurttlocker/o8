@@ -1655,7 +1655,10 @@ export const AgentPanel = memo(function AgentPanel({
 
       {/* ── Agent Cards ── */}
       <div style={{
-        flexShrink: 0,
+        flex: 1,
+        minHeight: 0,
+        overflowY: 'auto',
+        overflowX: 'hidden',
         paddingTop: 4,
         paddingRight: 14,
         paddingBottom: 8,
@@ -1663,7 +1666,9 @@ export const AgentPanel = memo(function AgentPanel({
         display: 'flex',
         flexDirection: 'column',
         gap: 8,
-      }}>
+        scrollbarWidth: 'thin',
+        scrollbarColor: 'rgba(0,0,0,0.1) transparent',
+      } as React.CSSProperties}>
         <div style={{
           fontSize: 11,
           fontWeight: 700,
