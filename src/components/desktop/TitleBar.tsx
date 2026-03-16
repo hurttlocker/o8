@@ -128,6 +128,7 @@ function TitleBarButton({
         transition: 'background 120ms ease, color 120ms ease',
         flexShrink: 0,
         padding: 0,
+        ['WebkitAppRegion' as string]: 'no-drag',
       }}
       onMouseEnter={(e) => {
         if (!active) {
@@ -215,7 +216,6 @@ export function TitleBar({
         alignItems: 'center',
         gap: 2,
         flexShrink: 0,
-        ['WebkitAppRegion' as string]: 'no-drag',
       }}>
         {/* Spacer for macOS traffic lights (close/minimize/maximize) */}
         <div style={{ width: 78, flexShrink: 0 }} />
@@ -250,7 +250,6 @@ export function TitleBar({
         flex: 1,
         display: 'flex',
         justifyContent: 'center',
-        ['WebkitAppRegion' as string]: 'no-drag',
       }}>
         <div style={{
           width: '100%',
@@ -279,6 +278,7 @@ export function TitleBar({
                 transition: 'background 150ms ease, border-color 150ms ease',
                 width: '100%',
                 justifyContent: 'center',
+                ['WebkitAppRegion' as string]: 'no-drag',
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
@@ -306,7 +306,7 @@ export function TitleBar({
               </kbd>
             </button>
           ) : (
-            <div style={{ position: 'relative' }}>
+            <div style={{ position: 'relative', ['WebkitAppRegion' as string]: 'no-drag' }}>
               {renderSearch ? renderSearch(closeSearch) : null}
             </div>
           )}
@@ -320,7 +320,6 @@ export function TitleBar({
         gap: 2,
         flexShrink: 0,
         paddingRight: 4,
-        ['WebkitAppRegion' as string]: 'no-drag',
       }}>
         {/* Bottom panel toggle */}
         <TitleBarButton
