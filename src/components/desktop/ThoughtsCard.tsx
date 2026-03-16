@@ -156,9 +156,9 @@ interface AgentTarget {
 }
 
 const AGENTS: AgentTarget[] = [
-  { key: 'agent:main:main', name: 'Mister', emoji: '🏴', color: '#111827' },
-  { key: 'agent:ace:main', name: 'Niot', emoji: '⚡', color: '#2563eb' },
-  { key: 'agent:hawk:main', name: 'Hawk', emoji: '🦅', color: '#f59e0b' },
+  { key: 'agent:main:main', name: 'Mister', emoji: '', color: '#111827' },
+  { key: 'agent:ace:main', name: 'Niot', emoji: '', color: '#2563eb' },
+  { key: 'agent:hawk:main', name: 'Hawk', emoji: '', color: '#f59e0b' },
 ];
 
 export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
@@ -623,7 +623,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
             fontSize: 12, fontWeight: 700, color: '#111827',
             letterSpacing: '-0.01em', flex: 1,
           }}>
-            {inTaskChat && chatMessages.length > 0 ? `${targetAgent.emoji} ${targetAgent.name}` : 'Thoughts'}
+            {inTaskChat && chatMessages.length > 0 ? targetAgent.name : 'Thoughts'}
           </span>
           {/* Approval count badge */}
           {approvals.length > 0 && (
@@ -1171,7 +1171,10 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
                       onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.7)'; }}
                       onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.4)'; }}
                     >
-                      <span style={{ fontSize: 12 }}>{targetAgent.emoji}</span>
+                      <span style={{
+                        width: 8, height: 8, borderRadius: '50%',
+                        background: targetAgent.color, display: 'block', flexShrink: 0,
+                      }} />
                       {targetAgent.name}
                       <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor"
                         strokeWidth="2.5" strokeLinecap="round" style={{
@@ -1223,7 +1226,10 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
                               if (targetAgent.key !== agent.key) e.currentTarget.style.background = 'transparent';
                             }}
                           >
-                            <span style={{ fontSize: 14 }}>{agent.emoji}</span>
+                            <span style={{
+                              width: 8, height: 8, borderRadius: '50%',
+                              background: agent.color, display: 'block', flexShrink: 0,
+                            }} />
                             <div>
                               <div style={{ fontSize: 12, fontWeight: 600, color: agent.color }}>{agent.name}</div>
                               <div style={{ fontSize: 9, color: '#9ca3af', fontFamily: 'SF Mono, Menlo, monospace' }}>
