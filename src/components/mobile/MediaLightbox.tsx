@@ -18,7 +18,7 @@ export function MediaLightbox({ media, onClose }: MediaLightboxProps) {
         </div>
         <div className="remodex-media-lightbox-body">
           {isImageMedia(media) ? (
-            {/* eslint-disable-next-line @next/next/no-img-element */}
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={mediaHref(media.path)}
               alt={media.name}
