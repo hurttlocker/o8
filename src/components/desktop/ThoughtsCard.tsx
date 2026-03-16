@@ -14,6 +14,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 
 // ── Types ──
 
+type ThoughtMode = 'pick' | 'issue' | 'task';
 type WorkflowStep = 'idle' | 'thinking' | 'creating' | 'assigning' | 'planning' | 'reviewing' | 'executing' | 'done';
 
 interface WorkflowState {
@@ -135,6 +136,7 @@ interface ThoughtsCardProps {
 }
 
 export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
+  const [mode, setMode] = useState<ThoughtMode>('pick');
   const [input, setInput] = useState('');
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
   const [enhancing, setEnhancing] = useState(false);
@@ -272,6 +274,29 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
     }
   }, [input]);
 
+  // Task mode: simple send to agent, no workflow steps
+  const handleTaskSubmit = useCallback(async () => {
+    if (!input.trim()) return;
+    const msg = input.trim();
+    setInput('');
+    setWorkflow({ step: 'executing', summary: msg });
+
+    try {
+      const res = await fetch('/api/mobile/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg }),
+      });
+      if (res.ok) {
+        setTimeout(() => setWorkflow(prev => ({ ...prev, step: 'done' })), 1500);
+      } else {
+        setWorkflow(prev => ({ ...prev, step: 'done' }));
+      }
+    } catch {
+      setWorkflow(prev => ({ ...prev, step: 'done' }));
+    }
+  }, [input]);
+
   const handleApprove = useCallback(() => {
     setWorkflow(prev => ({ ...prev, step: 'executing' }));
     setTimeout(() => setWorkflow(prev => ({ ...prev, step: 'done' })), 3000);
@@ -281,6 +306,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
     setWorkflow({ step: 'idle' });
     setInput('');
     setPreEnhanceInput(null);
+    setMode('pick');
     setTimeout(() => inputRef.current?.focus(), 50);
   }, []);
 
@@ -337,10 +363,10 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
           WebkitBackdropFilter: 'blur(50px) saturate(180%)',
           border: '1px solid rgba(255, 255, 255, 0.35)',
           boxShadow: '0 24px 80px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06), inset 0 0.5px 0 rgba(255,255,255,0.5)',
-          overflow: 'hidden',
+          overflow: 'visible',
           display: 'flex',
           flexDirection: 'column',
-          transition: resizeRef.current ? 'none' : 'width 250ms cubic-bezier(0.32, 0.72, 0, 1), border-radius 250ms',
+          transition: 'border-radius 250ms',
           fontFamily: '-apple-system, system-ui, BlinkMacSystemFont, sans-serif',
         }}
       >
@@ -364,6 +390,17 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
           }}>
             Thoughts
           </span>
+          {!minimized && mode !== 'pick' && !isActive && (
+            <span style={{
+              fontSize: 9, fontWeight: 600, textTransform: 'uppercase',
+              padding: '2px 7px', borderRadius: 5,
+              background: mode === 'issue' ? 'rgba(37,99,235,0.1)' : 'rgba(0,0,0,0.05)',
+              color: mode === 'issue' ? '#2563eb' : '#6b7280',
+              letterSpacing: '0.03em',
+            }}>
+              {mode === 'issue' ? 'Issue' : 'Task'}
+            </span>
+          )}
           {isActive && !minimized && (
             <span style={{
               fontSize: 9, fontWeight: 600, textTransform: 'uppercase',
@@ -391,9 +428,101 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
 
         {/* Body — hidden when minimized */}
         {!minimized && (
-          <div style={{ padding: '12px 14px 14px', flex: size.h > 0 ? 1 : undefined, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ padding: '12px 14px 14px', flex: size.h > 0 ? 1 : undefined, display: 'flex', flexDirection: 'column', overflow: 'auto', borderRadius: '0 0 18px 18px' }}>
+            {/* Mode picker — Issue vs Task */}
+            {mode === 'pick' && workflow.step === 'idle' && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                {/* Issue button */}
+                <button
+                  type="button"
+                  onClick={() => { setMode('issue'); setTimeout(() => inputRef.current?.focus(), 50); }}
+                  style={{
+                    flex: 1, padding: '12px 14px', borderRadius: 12,
+                    border: '1px solid rgba(37, 99, 235, 0.15)',
+                    background: 'rgba(37, 99, 235, 0.06)',
+                    cursor: 'pointer', textAlign: 'left',
+                    transition: 'background 120ms, border-color 120ms',
+                    position: 'relative',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(37, 99, 235, 0.12)';
+                    e.currentTarget.style.borderColor = 'rgba(37, 99, 235, 0.3)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(37, 99, 235, 0.06)';
+                    e.currentTarget.style.borderColor = 'rgba(37, 99, 235, 0.15)';
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#2563eb', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block' }}>
+                      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
+                    </svg>
+                    Issue
+                  </div>
+                  <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>
+                    Creates a GitHub issue, assigns an agent, generates a plan for your review, then executes.
+                  </div>
+                </button>
+
+                {/* Task button */}
+                <button
+                  type="button"
+                  onClick={() => { setMode('task'); setTimeout(() => inputRef.current?.focus(), 50); }}
+                  style={{
+                    flex: 1, padding: '12px 14px', borderRadius: 12,
+                    border: '1px solid rgba(0, 0, 0, 0.08)',
+                    background: 'rgba(0, 0, 0, 0.02)',
+                    cursor: 'pointer', textAlign: 'left',
+                    transition: 'background 120ms, border-color 120ms',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
+                    e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.15)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(0, 0, 0, 0.02)';
+                    e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.08)';
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block' }}>
+                      <polyline points="22 12 16 12 14 15 10 9 8 12 2 12"/>
+                    </svg>
+                    Task
+                  </div>
+                  <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>
+                    Quick message to your agent. No issue, no plan — just a direct conversation turn.
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {/* Mode label — shown after picking */}
+            {mode !== 'pick' && workflow.step === 'idle' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setMode('pick')}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                    fontSize: 11, color: '#9ca3af', fontWeight: 500,
+                  }}
+                >
+                  ← back
+                </button>
+                <span style={{
+                  fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                  padding: '2px 7px', borderRadius: 5, letterSpacing: '0.04em',
+                  background: mode === 'issue' ? 'rgba(37, 99, 235, 0.1)' : 'rgba(0,0,0,0.05)',
+                  color: mode === 'issue' ? '#2563eb' : '#6b7280',
+                }}>
+                  {mode === 'issue' ? 'New Issue' : 'Quick Task'}
+                </span>
+              </div>
+            )}
+
             {/* Input area */}
-            {workflow.step === 'idle' && (
+            {mode !== 'pick' && workflow.step === 'idle' && (
               <div style={{ position: 'relative', flex: size.h > 0 ? 1 : undefined, display: 'flex', flexDirection: 'column' }}>
                 <textarea
                   ref={inputRef}
@@ -402,10 +531,13 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
-                      handleSubmit();
+                      mode === 'issue' ? handleSubmit() : handleTaskSubmit();
                     }
                   }}
-                  placeholder="What do you need? Describe the task, bug, or feature..."
+                  placeholder={mode === 'issue'
+                    ? "Describe the feature, bug, or change you need..."
+                    : "Ask your agent anything — quick question, small fix, lookup..."
+                  }
                   style={{
                     width: '100%',
                     minHeight: 72,
@@ -484,7 +616,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
                   {/* Send */}
                   <button
                     type="button"
-                    onClick={handleSubmit}
+                    onClick={mode === 'issue' ? handleSubmit : handleTaskSubmit}
                     disabled={!input.trim()}
                     style={{
                       width: 30,
@@ -523,8 +655,22 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
               </div>
             )}
 
-            {/* Workflow steps */}
-            {isActive && (
+            {/* Task mode — simple sent confirmation */}
+            {isActive && mode === 'task' && workflow.step === 'executing' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', color: '#2563eb' }}>
+                <LoaderIcon />
+                <span style={{ fontSize: 12, fontWeight: 500 }}>Sending to agent...</span>
+              </div>
+            )}
+            {isActive && mode === 'task' && workflow.step === 'done' && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', color: '#22c55e' }}>
+                <CheckIcon />
+                <span style={{ fontSize: 12, fontWeight: 500 }}>Sent — check the chat panel for the response.</span>
+              </div>
+            )}
+
+            {/* Issue mode — full workflow steps */}
+            {isActive && mode === 'issue' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {STEPS.map((step, i) => {
                   if (step.key === 'done' && workflow.step !== 'done') return null;
