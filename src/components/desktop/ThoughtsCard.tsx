@@ -3,11 +3,10 @@
 /**
  * ThoughtsCard — Floating glass command surface.
  *
- * Not a page — an overlay. Draggable, sits on top of everything.
- * User types intent ("I need X on Y repo") and the card orchestrates
- * the full workflow: create issue → assign agent → review plan → execute.
- *
- * The card shows each workflow step as it progresses.
+ * Two modes:
+ * - ISSUE: Full canonical workflow (create → assign → plan → review → execute)
+ * - TASK: Mini-chat with your main agent right inside the card.
+ *         Does NOT touch the main chat panel — independent channel.
  */
 
 import { useState, useRef, useCallback, useEffect } from 'react';
@@ -24,6 +23,13 @@ interface WorkflowState {
   agent?: string;
   plan?: string;
   summary?: string;
+}
+
+interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
 }
 
 // ── SVG Icons ──
@@ -111,17 +117,12 @@ function stepIndex(step: WorkflowStep): number {
   return i >= 0 ? i : -1;
 }
 
-// ── Step Indicator ──
-
 function StepIndicator({ step, currentStep }: { step: WorkflowStep; currentStep: WorkflowStep }) {
   const si = stepIndex(step);
   const ci = stepIndex(currentStep);
-  const isDone = ci > si;
-  const isActive = ci === si;
-
-  return isDone ? (
+  return ci > si ? (
     <div style={{ color: '#22c55e' }}><CheckIcon /></div>
-  ) : isActive ? (
+  ) : ci === si ? (
     <div style={{ color: '#2563eb' }}><LoaderIcon /></div>
   ) : (
     <CircleIcon />
@@ -135,6 +136,8 @@ interface ThoughtsCardProps {
   onClose: () => void;
 }
 
+const MAIN_SESSION_KEY = 'agent:main:main';
+
 export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
   const [mode, setMode] = useState<ThoughtMode>('pick');
   const [input, setInput] = useState('');
@@ -143,8 +146,16 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
   const [minimized, setMinimized] = useState(false);
   const [workflow, setWorkflow] = useState<WorkflowState>({ step: 'idle' });
   const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [size, setSize] = useState({ w: 400, h: 0 }); // h=0 means auto-height
+  const [size, setSize] = useState({ w: 400, h: 0 });
   const [initialized, setInitialized] = useState(false);
+
+  // Task chat state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [waitingForReply, setWaitingForReply] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const lastAssistantIdRef = useRef<string | null>(null);
+
   const cardRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
   const resizeRef = useRef<{ startX: number; startY: number; origW: number; origH: number; corner: string } | null>(null);
@@ -162,12 +173,31 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
     }
   }, [open, initialized]);
 
-  // Focus input when un-minimized
+  // Focus input when un-minimized or mode changes
   useEffect(() => {
     if (open && !minimized) {
       setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [open, minimized]);
+  }, [open, minimized, mode]);
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatMessages]);
+
+  // Auto-expand card when entering task mode
+  useEffect(() => {
+    if (mode === 'task' && size.h === 0) {
+      setSize(prev => ({ ...prev, h: 420 }));
+    }
+  }, [mode, size.h]);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
 
   // ── Drag handlers ──
 
@@ -213,7 +243,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
       if (c.includes('e')) newW = Math.max(320, Math.min(800, resizeRef.current.origW + dx));
       if (c.includes('w')) {
         newW = Math.max(320, Math.min(800, resizeRef.current.origW - dx));
-        setPosition(p => ({ ...p, x: Math.max(0, p.x + (resizeRef.current!.origW - newW) * (dx > 0 ? 0 : 0) + dx) }));
+        setPosition(p => ({ ...p, x: Math.max(0, p.x + dx) }));
       }
       if (c.includes('s')) newH = Math.max(200, Math.min(700, resizeRef.current.origH + dy));
 
@@ -230,39 +260,89 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
     window.addEventListener('mouseup', handleUp);
   }, [size.w]);
 
-  // ── Submit thought ──
+  // ── Poll for agent response ──
 
-  const handleSubmit = useCallback(async () => {
+  const startPolling = useCallback(() => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    let attempts = 0;
+    const maxAttempts = 60; // 60 × 2s = 2 min max
+
+    pollRef.current = setInterval(async () => {
+      attempts++;
+      if (attempts > maxAttempts) {
+        if (pollRef.current) clearInterval(pollRef.current);
+        setWaitingForReply(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(MAIN_SESSION_KEY)}&limit=3`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const entries = data.entries || data.transcript || [];
+
+        // Find the newest assistant message
+        for (let i = entries.length - 1; i >= 0; i--) {
+          const entry = entries[i];
+          if (entry.role === 'assistant' && entry.content?.trim()) {
+            const entryId = entry.id || `a-${entry.timestamp || i}`;
+            if (entryId !== lastAssistantIdRef.current) {
+              lastAssistantIdRef.current = entryId;
+              setChatMessages(prev => [
+                ...prev,
+                {
+                  id: entryId,
+                  role: 'assistant',
+                  content: entry.content.trim(),
+                  timestamp: Date.now(),
+                },
+              ]);
+              setWaitingForReply(false);
+              if (pollRef.current) clearInterval(pollRef.current);
+              return;
+            }
+          }
+        }
+      } catch {
+        // silent retry
+      }
+    }, 2000);
+  }, []);
+
+  // ── Issue mode: submit thought ──
+
+  const handleIssueSubmit = useCallback(async () => {
     if (!input.trim()) return;
     const thought = input.trim();
     setInput('');
 
-    // Step 1: Understanding intent
     setWorkflow({ step: 'thinking', summary: thought });
 
     try {
-      // Send thought to the main OpenClaw agent via the existing chat API
-      const res = await fetch('/api/mobile/send', {
+      const res = await fetch('/api/mobile/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: `[Thought from IDE] ${thought}` }),
+        body: JSON.stringify({
+          action: 'send',
+          sessionKey: MAIN_SESSION_KEY,
+          message: `[Issue from Thoughts] ${thought}`,
+        }),
       });
 
       if (res.ok) {
-        // Progress through visual steps while agent processes
         setTimeout(() => setWorkflow(prev => ({ ...prev, step: 'creating' })), 1500);
         setTimeout(() => setWorkflow(prev => ({ ...prev, step: 'assigning', issue: 'pending', agent: 'Main Agent' })), 3000);
         setTimeout(() => setWorkflow(prev => ({ ...prev, step: 'planning' })), 4500);
         setTimeout(() => setWorkflow(prev => ({
           ...prev,
           step: 'reviewing',
-          plan: 'Thought sent to your main OpenClaw agent. Check the chat panel for the agent\'s response and plan.',
+          plan: 'Thought sent to your main OpenClaw agent. The agent will create the issue and propose a plan.',
         })), 6000);
       } else {
         setWorkflow(prev => ({
           ...prev,
           step: 'reviewing',
-          plan: 'Failed to reach agent. Check that the dev server is running and the agent is connected.',
+          plan: 'Failed to reach agent. Check that the gateway is running.',
         }));
       }
     } catch {
@@ -274,28 +354,72 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
     }
   }, [input]);
 
-  // Task mode: simple send to agent, no workflow steps
-  const handleTaskSubmit = useCallback(async () => {
-    if (!input.trim()) return;
+  // ── Task mode: send chat message ──
+
+  const handleTaskSend = useCallback(async () => {
+    if (!input.trim() || waitingForReply) return;
     const msg = input.trim();
     setInput('');
-    setWorkflow({ step: 'executing', summary: msg });
+
+    // Add user message to chat
+    const userMsg: ChatMessage = {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      content: msg,
+      timestamp: Date.now(),
+    };
+    setChatMessages(prev => [...prev, userMsg]);
+    setWaitingForReply(true);
 
     try {
-      const res = await fetch('/api/mobile/send', {
+      // Snapshot the current last assistant message ID so we know when a NEW one arrives
+      const res = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(MAIN_SESSION_KEY)}&limit=2`);
+      if (res.ok) {
+        const data = await res.json();
+        const entries = data.entries || data.transcript || [];
+        for (let i = entries.length - 1; i >= 0; i--) {
+          if (entries[i].role === 'assistant') {
+            lastAssistantIdRef.current = entries[i].id || `a-${entries[i].timestamp || i}`;
+            break;
+          }
+        }
+      }
+
+      // Send the message
+      await fetch('/api/mobile/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: msg }),
+        body: JSON.stringify({
+          history: { sessionKey: MAIN_SESSION_KEY },
+        }),
       });
-      if (res.ok) {
-        setTimeout(() => setWorkflow(prev => ({ ...prev, step: 'done' })), 1500);
-      } else {
-        setWorkflow(prev => ({ ...prev, step: 'done' }));
-      }
+
+      // Use the action API to send
+      await fetch('/api/mobile/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'send',
+          sessionKey: MAIN_SESSION_KEY,
+          message: msg,
+        }),
+      });
+
+      // Start polling for the response
+      startPolling();
     } catch {
-      setWorkflow(prev => ({ ...prev, step: 'done' }));
+      setChatMessages(prev => [
+        ...prev,
+        {
+          id: `err-${Date.now()}`,
+          role: 'assistant',
+          content: 'Connection error. Make sure the OpenClaw gateway is running.',
+          timestamp: Date.now(),
+        },
+      ]);
+      setWaitingForReply(false);
     }
-  }, [input]);
+  }, [input, waitingForReply, startPolling]);
 
   const handleApprove = useCallback(() => {
     setWorkflow(prev => ({ ...prev, step: 'executing' }));
@@ -307,6 +431,11 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
     setInput('');
     setPreEnhanceInput(null);
     setMode('pick');
+    setChatMessages([]);
+    setWaitingForReply(false);
+    if (pollRef.current) clearInterval(pollRef.current);
+    lastAssistantIdRef.current = null;
+    setSize(prev => ({ ...prev, h: 0 }));
     setTimeout(() => inputRef.current?.focus(), 50);
   }, []);
 
@@ -325,7 +454,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
         if (data.enhanced) setInput(data.enhanced);
       }
     } catch {
-      // silently fail — keep original input
+      // silently fail
     } finally {
       setEnhancing(false);
     }
@@ -342,11 +471,16 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
 
   const isActive = workflow.step !== 'idle';
   const currentStepIdx = stepIndex(workflow.step);
+  const inTaskChat = mode === 'task';
+
+  // ── Render ──
 
   return (
     <>
-      {/* Spin animation */}
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+      `}</style>
 
       <div
         ref={cardRef}
@@ -355,7 +489,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
           left: position.x,
           top: position.y,
           width: minimized ? 220 : size.w,
-          ...(size.h > 0 && !minimized ? { height: size.h } : {}),
+          height: minimized ? 'auto' : (size.h > 0 ? size.h : 'auto'),
           zIndex: 9999,
           borderRadius: minimized ? 12 : 18,
           background: 'rgba(255, 255, 255, 0.45)',
@@ -370,7 +504,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
           fontFamily: '-apple-system, system-ui, BlinkMacSystemFont, sans-serif',
         }}
       >
-        {/* Header — drag handle */}
+        {/* ── Header — drag handle ── */}
         <div
           onMouseDown={handleDragStart}
           style={{
@@ -381,6 +515,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
             cursor: 'grab',
             userSelect: 'none',
             borderBottom: minimized ? 'none' : '1px solid rgba(0,0,0,0.04)',
+            flexShrink: 0,
           }}
         >
           <GripIcon />
@@ -388,9 +523,9 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
             fontSize: 12, fontWeight: 700, color: '#111827',
             letterSpacing: '-0.01em', flex: 1,
           }}>
-            Thoughts
+            {inTaskChat && chatMessages.length > 0 ? 'Task Chat' : 'Thoughts'}
           </span>
-          {!minimized && mode !== 'pick' && !isActive && (
+          {!minimized && mode !== 'pick' && !isActive && !inTaskChat && (
             <span style={{
               fontSize: 9, fontWeight: 600, textTransform: 'uppercase',
               padding: '2px 7px', borderRadius: 5,
@@ -401,7 +536,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
               {mode === 'issue' ? 'Issue' : 'Task'}
             </span>
           )}
-          {isActive && !minimized && (
+          {isActive && !minimized && !inTaskChat && (
             <span style={{
               fontSize: 9, fontWeight: 600, textTransform: 'uppercase',
               padding: '2px 7px', borderRadius: 5,
@@ -411,6 +546,27 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
             }}>
               {STEPS.find(s => s.key === workflow.step)?.label || workflow.step}
             </span>
+          )}
+          {inTaskChat && waitingForReply && !minimized && (
+            <span style={{
+              fontSize: 9, fontWeight: 600, textTransform: 'uppercase',
+              padding: '2px 7px', borderRadius: 5,
+              background: 'rgba(37,99,235,0.1)',
+              color: '#2563eb',
+              letterSpacing: '0.03em',
+              animation: 'pulse 1.5s ease-in-out infinite',
+            }}>
+              Thinking...
+            </span>
+          )}
+          {/* New Thought (resets) — only in task chat */}
+          {inTaskChat && chatMessages.length > 0 && !minimized && (
+            <button type="button" onClick={handleReset} title="New thought" style={{
+              background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+              color: '#9ca3af', display: 'flex', borderRadius: 6, fontSize: 11, fontWeight: 600,
+            }}>
+              New
+            </button>
           )}
           <button type="button" onClick={() => setMinimized(v => !v)} style={{
             background: 'none', border: 'none', cursor: 'pointer', padding: 4,
@@ -426,374 +582,446 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
           </button>
         </div>
 
-        {/* Body — hidden when minimized */}
+        {/* ── Body ── */}
         {!minimized && (
-          <div style={{ padding: '12px 14px 14px', flex: size.h > 0 ? 1 : undefined, display: 'flex', flexDirection: 'column', overflow: 'auto', borderRadius: '0 0 18px 18px' }}>
-            {/* Mode picker — Issue vs Task */}
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            borderRadius: '0 0 18px 18px',
+          }}>
+
+            {/* ── MODE PICKER ── */}
             {mode === 'pick' && workflow.step === 'idle' && (
-              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                {/* Issue button */}
-                <button
-                  type="button"
-                  onClick={() => { setMode('issue'); setTimeout(() => inputRef.current?.focus(), 50); }}
-                  style={{
-                    flex: 1, padding: '12px 14px', borderRadius: 12,
-                    border: '1px solid rgba(37, 99, 235, 0.15)',
-                    background: 'rgba(37, 99, 235, 0.06)',
-                    cursor: 'pointer', textAlign: 'left',
-                    transition: 'background 120ms, border-color 120ms',
-                    position: 'relative',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(37, 99, 235, 0.12)';
-                    e.currentTarget.style.borderColor = 'rgba(37, 99, 235, 0.3)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'rgba(37, 99, 235, 0.06)';
-                    e.currentTarget.style.borderColor = 'rgba(37, 99, 235, 0.15)';
-                  }}
-                >
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#2563eb', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block' }}>
-                      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
-                    </svg>
-                    Issue
-                  </div>
-                  <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>
-                    Creates a GitHub issue, assigns an agent, generates a plan for your review, then executes.
-                  </div>
-                </button>
+              <div style={{ padding: '12px 14px 14px', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {/* Issue button */}
+                  <button
+                    type="button"
+                    onClick={() => { setMode('issue'); setTimeout(() => inputRef.current?.focus(), 50); }}
+                    style={{
+                      flex: 1, padding: '12px 14px', borderRadius: 12,
+                      border: '1px solid rgba(37, 99, 235, 0.15)',
+                      background: 'rgba(37, 99, 235, 0.06)',
+                      cursor: 'pointer', textAlign: 'left',
+                      transition: 'background 120ms, border-color 120ms',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(37, 99, 235, 0.12)';
+                      e.currentTarget.style.borderColor = 'rgba(37, 99, 235, 0.3)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(37, 99, 235, 0.06)';
+                      e.currentTarget.style.borderColor = 'rgba(37, 99, 235, 0.15)';
+                    }}
+                  >
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#2563eb', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block' }}>
+                        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>
+                      </svg>
+                      Issue
+                    </div>
+                    <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>
+                      Creates a GitHub issue, assigns an agent, generates a plan for your review, then executes.
+                    </div>
+                  </button>
 
-                {/* Task button */}
-                <button
-                  type="button"
-                  onClick={() => { setMode('task'); setTimeout(() => inputRef.current?.focus(), 50); }}
-                  style={{
-                    flex: 1, padding: '12px 14px', borderRadius: 12,
-                    border: '1px solid rgba(0, 0, 0, 0.08)',
-                    background: 'rgba(0, 0, 0, 0.02)',
-                    cursor: 'pointer', textAlign: 'left',
-                    transition: 'background 120ms, border-color 120ms',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
-                    e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.15)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'rgba(0, 0, 0, 0.02)';
-                    e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.08)';
-                  }}
-                >
-                  <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block' }}>
-                      <polyline points="22 12 16 12 14 15 10 9 8 12 2 12"/>
-                    </svg>
-                    Task
-                  </div>
-                  <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>
-                    Quick message to your agent. No issue, no plan — just a direct conversation turn.
-                  </div>
-                </button>
+                  {/* Task button */}
+                  <button
+                    type="button"
+                    onClick={() => { setMode('task'); setTimeout(() => inputRef.current?.focus(), 50); }}
+                    style={{
+                      flex: 1, padding: '12px 14px', borderRadius: 12,
+                      border: '1px solid rgba(0, 0, 0, 0.08)',
+                      background: 'rgba(0, 0, 0, 0.02)',
+                      cursor: 'pointer', textAlign: 'left',
+                      transition: 'background 120ms, border-color 120ms',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
+                      e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.15)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(0, 0, 0, 0.02)';
+                      e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.08)';
+                    }}
+                  >
+                    <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block' }}>
+                        <polyline points="22 12 16 12 14 15 10 9 8 12 2 12"/>
+                      </svg>
+                      Task
+                    </div>
+                    <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>
+                      Quick chat with your main agent. Conversation stays right here — doesn&apos;t touch the main chat.
+                    </div>
+                  </button>
+                </div>
               </div>
             )}
 
-            {/* Mode label — shown after picking */}
-            {mode !== 'pick' && workflow.step === 'idle' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => setMode('pick')}
-                  style={{
-                    background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-                    fontSize: 11, color: '#9ca3af', fontWeight: 500,
-                  }}
-                >
-                  ← back
-                </button>
-                <span style={{
-                  fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-                  padding: '2px 7px', borderRadius: 5, letterSpacing: '0.04em',
-                  background: mode === 'issue' ? 'rgba(37, 99, 235, 0.1)' : 'rgba(0,0,0,0.05)',
-                  color: mode === 'issue' ? '#2563eb' : '#6b7280',
-                }}>
-                  {mode === 'issue' ? 'New Issue' : 'Quick Task'}
-                </span>
-              </div>
-            )}
+            {/* ── ISSUE MODE ── */}
+            {mode === 'issue' && (
+              <div style={{ padding: '12px 14px 14px', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
+                {/* Back + label */}
+                {workflow.step === 'idle' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <button type="button" onClick={() => setMode('pick')} style={{
+                      background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+                      fontSize: 11, color: '#9ca3af', fontWeight: 500,
+                    }}>
+                      ← back
+                    </button>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+                      padding: '2px 7px', borderRadius: 5, letterSpacing: '0.04em',
+                      background: 'rgba(37, 99, 235, 0.1)', color: '#2563eb',
+                    }}>
+                      New Issue
+                    </span>
+                  </div>
+                )}
 
-            {/* Input area */}
-            {mode !== 'pick' && workflow.step === 'idle' && (
-              <div style={{ position: 'relative', flex: size.h > 0 ? 1 : undefined, display: 'flex', flexDirection: 'column' }}>
-                <textarea
-                  ref={inputRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      mode === 'issue' ? handleSubmit() : handleTaskSubmit();
-                    }
-                  }}
-                  placeholder={mode === 'issue'
-                    ? "Describe the feature, bug, or change you need..."
-                    : "Ask your agent anything — quick question, small fix, lookup..."
-                  }
-                  style={{
-                    width: '100%',
-                    minHeight: 72,
-                    flex: size.h > 0 ? 1 : undefined,
-                    maxHeight: size.h > 0 ? 'none' : 160,
-                    padding: '10px 80px 10px 12px',
-                    borderRadius: 12,
-                    border: '1px solid rgba(0,0,0,0.06)',
-                    background: 'rgba(255,255,255,0.35)',
-                    fontSize: 13,
-                    color: '#111827',
-                    resize: 'vertical',
-                    outline: 'none',
-                    fontFamily: 'inherit',
-                    lineHeight: 1.5,
-                    letterSpacing: '-0.01em',
-                    boxSizing: 'border-box',
-                  }}
-                />
-                {/* Bottom button row — enhance + send */}
-                <div style={{
-                  position: 'absolute',
-                  right: 8,
-                  bottom: 8,
-                  display: 'flex',
-                  gap: 4,
-                  alignItems: 'center',
-                }}>
-                  {/* Undo enhance */}
-                  {preEnhanceInput !== null && (
-                    <button
-                      type="button"
-                      onClick={handleUndoEnhance}
-                      title="Undo enhancement"
+                {/* Input */}
+                {workflow.step === 'idle' && (
+                  <div style={{ position: 'relative', flex: size.h > 0 ? 1 : undefined, display: 'flex', flexDirection: 'column' }}>
+                    <textarea
+                      ref={mode === 'issue' ? inputRef : undefined}
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleIssueSubmit(); }
+                      }}
+                      placeholder="Describe the feature, bug, or change you need..."
                       style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: 7,
-                        border: 'none',
-                        background: 'rgba(239, 68, 68, 0.1)',
-                        color: '#ef4444',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
+                        width: '100%', minHeight: 72,
+                        flex: size.h > 0 ? 1 : undefined,
+                        maxHeight: size.h > 0 ? 'none' : 160,
+                        padding: '10px 80px 10px 12px', borderRadius: 12,
+                        border: '1px solid rgba(0,0,0,0.06)',
+                        background: 'rgba(255,255,255,0.35)',
+                        fontSize: 13, color: '#111827', resize: 'none',
+                        outline: 'none', fontFamily: 'inherit', lineHeight: 1.5,
+                        letterSpacing: '-0.01em', boxSizing: 'border-box',
+                      }}
+                    />
+                    <InputButtons
+                      input={input}
+                      enhancing={enhancing}
+                      preEnhanceInput={preEnhanceInput}
+                      onEnhance={handleEnhance}
+                      onUndoEnhance={handleUndoEnhance}
+                      onSubmit={handleIssueSubmit}
+                    />
+                  </div>
+                )}
+
+                {/* Workflow summary */}
+                {isActive && workflow.summary && (
+                  <div style={{
+                    padding: '8px 12px', borderRadius: 10,
+                    background: 'rgba(37, 99, 235, 0.06)',
+                    border: '1px solid rgba(37, 99, 235, 0.1)',
+                    marginBottom: 12, fontSize: 12, color: '#374151',
+                    lineHeight: 1.5, fontStyle: 'italic',
+                  }}>
+                    &ldquo;{workflow.summary}&rdquo;
+                  </div>
+                )}
+
+                {/* Workflow steps */}
+                {isActive && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {STEPS.map((step) => {
+                      if (step.key === 'done' && workflow.step !== 'done') return null;
+                      const si = stepIndex(step.key);
+                      if (si > currentStepIdx + 1 && workflow.step !== 'done') return null;
+                      return (
+                        <div key={step.key} style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '6px 0',
+                          opacity: si > currentStepIdx ? 0.4 : 1,
+                          transition: 'opacity 300ms',
+                        }}>
+                          <StepIndicator step={step.key} currentStep={workflow.step} />
+                          <span style={{
+                            fontSize: 12, color: si === currentStepIdx ? '#111827' : '#6b7280',
+                            fontWeight: si === currentStepIdx ? 600 : 400,
+                          }}>
+                            {step.label}
+                          </span>
+                          {step.key === 'creating' && workflow.repo && si <= currentStepIdx && (
+                            <span style={{ fontSize: 10, color: '#9ca3af', marginLeft: 'auto' }}>{workflow.repo}</span>
+                          )}
+                          {step.key === 'assigning' && workflow.agent && si <= currentStepIdx && (
+                            <span style={{ fontSize: 10, color: '#22c55e', fontWeight: 600, marginLeft: 'auto' }}>{workflow.agent}</span>
+                          )}
+                          {step.key === 'creating' && workflow.issue && si <= currentStepIdx && (
+                            <span style={{ fontSize: 10, color: '#2563eb', fontWeight: 600, marginLeft: 4 }}>{workflow.issue}</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Plan review */}
+                {workflow.step === 'reviewing' && workflow.plan && (
+                  <div style={{ marginTop: 12 }}>
+                    <div style={{
+                      padding: '10px 12px', borderRadius: 10,
+                      background: 'rgba(0,0,0,0.02)', border: '1px solid rgba(0,0,0,0.06)',
+                      fontSize: 11, color: '#374151', lineHeight: 1.6, marginBottom: 10,
+                    }}>
+                      {workflow.plan}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button type="button" onClick={handleApprove} style={{
+                        flex: 1, padding: '8px 0', borderRadius: 10, border: 'none',
+                        background: '#22c55e', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      }}>
+                        Approve
+                      </button>
+                      <button type="button" style={{
+                        flex: 1, padding: '8px 0', borderRadius: 10,
+                        border: '1px solid rgba(0,0,0,0.1)', background: 'rgba(255,255,255,0.5)',
+                        color: '#6b7280', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      }}>
+                        Edit Plan
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Done */}
+                {workflow.step === 'done' && (
+                  <div style={{ marginTop: 12 }}>
+                    <button type="button" onClick={handleReset} style={{
+                      width: '100%', padding: '8px 0', borderRadius: 10, border: 'none',
+                      background: '#2563eb', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                    }}>
+                      New Thought
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── TASK MODE — Mini Chat ── */}
+            {mode === 'task' && (
+              <>
+                {/* Chat messages area */}
+                <div style={{
+                  flex: 1,
+                  overflowY: 'auto',
+                  padding: '8px 14px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}>
+                  {/* Empty state */}
+                  {chatMessages.length === 0 && !waitingForReply && (
+                    <div style={{
+                      display: 'flex', flexDirection: 'column', alignItems: 'center',
+                      justifyContent: 'center', flex: 1, gap: 6, padding: '20px 0',
+                    }}>
+                      <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', lineHeight: 1.5 }}>
+                        Quick chat with your main agent.<br/>
+                        The main chat panel stays untouched.
+                      </div>
+                      <button type="button" onClick={() => setMode('pick')} style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        fontSize: 10, color: '#9ca3af', fontWeight: 500, marginTop: 4,
+                      }}>
+                        ← back to picker
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Messages */}
+                  {chatMessages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      style={{
+                        alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                        maxWidth: '85%',
+                        padding: '8px 12px',
+                        borderRadius: msg.role === 'user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+                        background: msg.role === 'user'
+                          ? 'rgba(37, 99, 235, 0.12)'
+                          : 'rgba(255, 255, 255, 0.6)',
+                        border: msg.role === 'user'
+                          ? '1px solid rgba(37, 99, 235, 0.15)'
+                          : '1px solid rgba(0,0,0,0.06)',
                         fontSize: 12,
-                        fontWeight: 600,
+                        color: '#111827',
+                        lineHeight: 1.5,
+                        letterSpacing: '-0.01em',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
                       }}
                     >
-                      ↩
-                    </button>
-                  )}
-                  {/* Enhance */}
-                  <button
-                    type="button"
-                    onClick={handleEnhance}
-                    disabled={!input.trim() || enhancing}
-                    title="Enhance thought with AI"
-                    style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 7,
-                      border: 'none',
-                      background: input.trim() ? 'rgba(37, 99, 235, 0.1)' : 'rgba(0,0,0,0.04)',
-                      color: enhancing ? '#93c5fd' : input.trim() ? '#2563eb' : '#b0b8c4',
-                      cursor: input.trim() && !enhancing ? 'pointer' : 'default',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      transition: 'background 120ms, color 120ms',
-                      animation: enhancing ? 'spin 1.5s ease-in-out infinite' : 'none',
-                    }}
-                  >
-                    <SparklesIcon />
-                  </button>
-                  {/* Send */}
-                  <button
-                    type="button"
-                    onClick={mode === 'issue' ? handleSubmit : handleTaskSubmit}
-                    disabled={!input.trim()}
-                    style={{
-                      width: 30,
-                      height: 30,
-                      borderRadius: 8,
-                      border: 'none',
-                      background: input.trim() ? '#2563eb' : 'rgba(0,0,0,0.06)',
-                      color: input.trim() ? '#fff' : '#b0b8c4',
-                      cursor: input.trim() ? 'pointer' : 'default',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      transition: 'background 120ms',
-                    }}
-                  >
-                    <SendIcon />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Workflow summary */}
-            {isActive && workflow.summary && (
-              <div style={{
-                padding: '8px 12px',
-                borderRadius: 10,
-                background: 'rgba(37, 99, 235, 0.06)',
-                border: '1px solid rgba(37, 99, 235, 0.1)',
-                marginBottom: 12,
-                fontSize: 12,
-                color: '#374151',
-                lineHeight: 1.5,
-                fontStyle: 'italic',
-              }}>
-                &ldquo;{workflow.summary}&rdquo;
-              </div>
-            )}
-
-            {/* Task mode — simple sent confirmation */}
-            {isActive && mode === 'task' && workflow.step === 'executing' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', color: '#2563eb' }}>
-                <LoaderIcon />
-                <span style={{ fontSize: 12, fontWeight: 500 }}>Sending to agent...</span>
-              </div>
-            )}
-            {isActive && mode === 'task' && workflow.step === 'done' && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', color: '#22c55e' }}>
-                <CheckIcon />
-                <span style={{ fontSize: 12, fontWeight: 500 }}>Sent — check the chat panel for the response.</span>
-              </div>
-            )}
-
-            {/* Issue mode — full workflow steps */}
-            {isActive && mode === 'issue' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {STEPS.map((step, i) => {
-                  if (step.key === 'done' && workflow.step !== 'done') return null;
-                  const si = stepIndex(step.key);
-                  if (si > currentStepIdx + 1 && workflow.step !== 'done') return null;
-
-                  return (
-                    <div key={step.key} style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: '6px 0',
-                      opacity: si > currentStepIdx ? 0.4 : 1,
-                      transition: 'opacity 300ms',
-                    }}>
-                      <StepIndicator step={step.key} currentStep={workflow.step} />
-                      <span style={{
-                        fontSize: 12, color: si === currentStepIdx ? '#111827' : '#6b7280',
-                        fontWeight: si === currentStepIdx ? 600 : 400,
-                      }}>
-                        {step.label}
-                      </span>
-                      {/* Contextual detail */}
-                      {step.key === 'creating' && workflow.repo && si <= currentStepIdx && (
-                        <span style={{ fontSize: 10, color: '#9ca3af', marginLeft: 'auto' }}>{workflow.repo}</span>
-                      )}
-                      {step.key === 'assigning' && workflow.agent && si <= currentStepIdx && (
-                        <span style={{ fontSize: 10, color: '#22c55e', fontWeight: 600, marginLeft: 'auto' }}>{workflow.agent}</span>
-                      )}
-                      {step.key === 'creating' && workflow.issue && si <= currentStepIdx && (
-                        <span style={{ fontSize: 10, color: '#2563eb', fontWeight: 600, marginLeft: 4 }}>{workflow.issue}</span>
-                      )}
+                      {msg.content}
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                  ))}
 
-            {/* Plan review */}
-            {workflow.step === 'reviewing' && workflow.plan && (
-              <div style={{ marginTop: 12 }}>
+                  {/* Typing indicator */}
+                  {waitingForReply && (
+                    <div style={{
+                      alignSelf: 'flex-start',
+                      padding: '8px 14px',
+                      borderRadius: '14px 14px 14px 4px',
+                      background: 'rgba(255, 255, 255, 0.6)',
+                      border: '1px solid rgba(0,0,0,0.06)',
+                      display: 'flex', gap: 4, alignItems: 'center',
+                    }}>
+                      {[0, 1, 2].map((i) => (
+                        <div key={i} style={{
+                          width: 5, height: 5, borderRadius: '50%',
+                          background: '#9ca3af',
+                          animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+                        }} />
+                      ))}
+                    </div>
+                  )}
+
+                  <div ref={chatEndRef} />
+                </div>
+
+                {/* Compose bar */}
                 <div style={{
-                  padding: '10px 12px',
-                  borderRadius: 10,
-                  background: 'rgba(0,0,0,0.02)',
-                  border: '1px solid rgba(0,0,0,0.06)',
-                  fontSize: 11,
-                  color: '#374151',
-                  lineHeight: 1.6,
-                  marginBottom: 10,
+                  padding: '8px 12px 12px',
+                  borderTop: '1px solid rgba(0,0,0,0.04)',
+                  flexShrink: 0,
                 }}>
-                  {workflow.plan}
+                  <div style={{ position: 'relative' }}>
+                    <textarea
+                      ref={mode === 'task' ? inputRef : undefined}
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleTaskSend(); }
+                      }}
+                      placeholder={waitingForReply ? 'Agent is thinking...' : 'Ask your agent anything...'}
+                      disabled={waitingForReply}
+                      rows={1}
+                      style={{
+                        width: '100%', minHeight: 36, maxHeight: 80,
+                        padding: '8px 76px 8px 12px', borderRadius: 12,
+                        border: '1px solid rgba(0,0,0,0.06)',
+                        background: waitingForReply ? 'rgba(0,0,0,0.02)' : 'rgba(255,255,255,0.35)',
+                        fontSize: 12, color: '#111827', resize: 'none',
+                        outline: 'none', fontFamily: 'inherit', lineHeight: 1.4,
+                        boxSizing: 'border-box',
+                        opacity: waitingForReply ? 0.5 : 1,
+                      }}
+                    />
+                    <InputButtons
+                      input={input}
+                      enhancing={enhancing}
+                      preEnhanceInput={preEnhanceInput}
+                      onEnhance={handleEnhance}
+                      onUndoEnhance={handleUndoEnhance}
+                      onSubmit={handleTaskSend}
+                      small
+                    />
+                  </div>
                 </div>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button type="button" onClick={handleApprove} style={{
-                    flex: 1, padding: '8px 0', borderRadius: 10, border: 'none',
-                    background: '#22c55e', color: '#fff', fontSize: 12, fontWeight: 600,
-                    cursor: 'pointer',
-                  }}>
-                    Approve
-                  </button>
-                  <button type="button" style={{
-                    flex: 1, padding: '8px 0', borderRadius: 10,
-                    border: '1px solid rgba(0,0,0,0.1)', background: '#fff',
-                    color: '#6b7280', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                  }}>
-                    Edit Plan
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Done state */}
-            {workflow.step === 'done' && (
-              <div style={{ marginTop: 12 }}>
-                <button type="button" onClick={handleReset} style={{
-                  width: '100%', padding: '8px 0', borderRadius: 10, border: 'none',
-                  background: '#2563eb', color: '#fff', fontSize: 12, fontWeight: 600,
-                  cursor: 'pointer',
-                }}>
-                  New Thought
-                </button>
-              </div>
+              </>
             )}
           </div>
         )}
 
-        {/* Resize handles — right edge, bottom edge, bottom-right corner */}
+        {/* ── Resize handles ── */}
         {!minimized && (
           <>
-            {/* Right edge */}
-            <div
-              onMouseDown={handleResizeStart('e')}
-              style={{
-                position: 'absolute', top: 20, right: -3, bottom: 20, width: 6,
-                cursor: 'ew-resize', zIndex: 2,
-              }}
-            />
-            {/* Bottom edge */}
-            <div
-              onMouseDown={handleResizeStart('s')}
-              style={{
-                position: 'absolute', bottom: -3, left: 20, right: 20, height: 6,
-                cursor: 'ns-resize', zIndex: 2,
-              }}
-            />
-            {/* Bottom-right corner */}
-            <div
-              onMouseDown={handleResizeStart('se')}
-              style={{
-                position: 'absolute', bottom: -3, right: -3, width: 14, height: 14,
-                cursor: 'nwse-resize', zIndex: 3,
-              }}
-            />
-            {/* Bottom-left corner */}
-            <div
-              onMouseDown={handleResizeStart('sw')}
-              style={{
-                position: 'absolute', bottom: -3, left: -3, width: 14, height: 14,
-                cursor: 'nesw-resize', zIndex: 3,
-              }}
-            />
+            <div onMouseDown={handleResizeStart('e')} style={{
+              position: 'absolute', top: 20, right: -3, bottom: 20, width: 6,
+              cursor: 'ew-resize', zIndex: 2,
+            }} />
+            <div onMouseDown={handleResizeStart('s')} style={{
+              position: 'absolute', bottom: -3, left: 20, right: 20, height: 6,
+              cursor: 'ns-resize', zIndex: 2,
+            }} />
+            <div onMouseDown={handleResizeStart('se')} style={{
+              position: 'absolute', bottom: -3, right: -3, width: 14, height: 14,
+              cursor: 'nwse-resize', zIndex: 3,
+            }} />
+            <div onMouseDown={handleResizeStart('sw')} style={{
+              position: 'absolute', bottom: -3, left: -3, width: 14, height: 14,
+              cursor: 'nesw-resize', zIndex: 3,
+            }} />
           </>
         )}
       </div>
     </>
+  );
+}
+
+// ── Input Buttons (shared between Issue and Task compose) ──
+
+function InputButtons({
+  input,
+  enhancing,
+  preEnhanceInput,
+  onEnhance,
+  onUndoEnhance,
+  onSubmit,
+  small,
+}: {
+  input: string;
+  enhancing: boolean;
+  preEnhanceInput: string | null;
+  onEnhance: () => void;
+  onUndoEnhance: () => void;
+  onSubmit: () => void;
+  small?: boolean;
+}) {
+  const sz = small ? 24 : 28;
+  const sendSz = small ? 26 : 30;
+
+  return (
+    <div style={{
+      position: 'absolute',
+      right: 6,
+      bottom: 6,
+      display: 'flex',
+      gap: 3,
+      alignItems: 'center',
+    }}>
+      {preEnhanceInput !== null && (
+        <button type="button" onClick={onUndoEnhance} title="Undo enhancement" style={{
+          width: sz, height: sz, borderRadius: 7, border: 'none',
+          background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444',
+          cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 11, fontWeight: 600,
+        }}>
+          ↩
+        </button>
+      )}
+      <button type="button" onClick={onEnhance} disabled={!input.trim() || enhancing}
+        title="Enhance with AI" style={{
+          width: sz, height: sz, borderRadius: 7, border: 'none',
+          background: input.trim() ? 'rgba(37, 99, 235, 0.1)' : 'rgba(0,0,0,0.04)',
+          color: enhancing ? '#93c5fd' : input.trim() ? '#2563eb' : '#b0b8c4',
+          cursor: input.trim() && !enhancing ? 'pointer' : 'default',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          transition: 'background 120ms, color 120ms',
+          animation: enhancing ? 'spin 1.5s ease-in-out infinite' : 'none',
+        }}>
+        <SparklesIcon />
+      </button>
+      <button type="button" onClick={onSubmit} disabled={!input.trim()} style={{
+        width: sendSz, height: sendSz, borderRadius: 8, border: 'none',
+        background: input.trim() ? '#2563eb' : 'rgba(0,0,0,0.06)',
+        color: input.trim() ? '#fff' : '#b0b8c4',
+        cursor: input.trim() ? 'pointer' : 'default',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        transition: 'background 120ms',
+      }}>
+        <SendIcon />
+      </button>
+    </div>
   );
 }
