@@ -219,15 +219,11 @@ export function ChatView({
     return Math.max(64, 64 + Math.ceil(textLen / 50) * 22 + (hasMedia ? 200 : 0));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const scrollMargin = listRef.current?.offsetTop ?? 0;
   const virtualizer = useWindowVirtualizer({
     count: transcriptEntries.length,
     estimateSize,
     overscan: 8,
-    scrollMargin,
-    // Prevent scroll jumps: keep measured sizes for existing items stable.
-    // Only new items (appended at end) get fresh estimates.
-    rangeExtractor: undefined,
+    scrollMargin: listRef.current?.offsetTop ?? 0,
   });
 
   // No auto-scroll — user controls position via "new messages" button.
