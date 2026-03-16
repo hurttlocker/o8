@@ -355,6 +355,470 @@ function PlaceholderTab({ title, description }: { title: string; description: st
   );
 }
 
+// ── Agent Types ──
+
+interface FleetAgent {
+  id: string;
+  name: string;
+  squadId: string;
+  runtime: string;
+  model: string;
+  status: string;
+  currentTask?: string;
+  context?: { usedPercent: number; trend: string };
+  heartbeatInterval?: number;
+}
+
+interface FleetSquad {
+  id: string;
+  name: string;
+  status: string;
+  throughputLabel: string;
+  liveSessions: number;
+  members: string[];
+}
+
+// ── Status Dot ──
+
+function StatusDot({ status }: { status: string }) {
+  const color = status === 'running' ? '#22c55e'
+    : status === 'reviewing' ? '#3b82f6'
+    : status === 'idle' ? '#9ca3af'
+    : status === 'error' ? '#ef4444'
+    : '#f59e0b';
+  return (
+    <span style={{
+      display: 'inline-block',
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      background: color,
+      flexShrink: 0,
+    }} />
+  );
+}
+
+// ── Context Bar ──
+
+function ContextBar({ percent, trend }: { percent: number; trend: string }) {
+  const barColor = percent > 70 ? '#ef4444' : percent > 50 ? '#f59e0b' : '#22c55e';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 120 }}>
+      <div style={{
+        flex: 1,
+        height: 6,
+        borderRadius: 3,
+        background: 'rgba(0,0,0,0.06)',
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          width: `${percent}%`,
+          height: '100%',
+          borderRadius: 3,
+          background: barColor,
+          transition: 'width 300ms ease',
+        }} />
+      </div>
+      <span style={{ fontSize: 10, fontWeight: 600, color: '#6b7280', minWidth: 32, textAlign: 'right' }}>
+        {percent}%
+      </span>
+      {trend === 'rising' && (
+        <span style={{ fontSize: 9, color: '#f59e0b' }}>↑</span>
+      )}
+    </div>
+  );
+}
+
+// ── Agent Card ──
+
+function AgentCard({ agent, isOpenClaw, onEdit }: {
+  agent: FleetAgent;
+  isOpenClaw: boolean;
+  onEdit?: (agent: FleetAgent) => void;
+}) {
+  const shortModel = agent.model
+    .replace('claude-opus-4-6', 'Opus 4.6')
+    .replace('claude-sonnet-4-20250514', 'Sonnet 4')
+    .replace('claude-haiku-4-5-20251001', 'Haiku 4.5')
+    .replace('gemini-3-flash-preview', 'Gemini 3 Flash')
+    .replace('codex owned', 'Codex')
+    .replace(/^openai-codex\//, '')
+    .replace(/^anthropic\//, '');
+
+  const shortName = agent.name
+    .replace('OpenClaw ', '')
+    .replace(' session', '')
+    .replace('This chat', 'Main Chat');
+
+  const shortId = agent.id.split(':').slice(-1)[0]?.slice(0, 12) || agent.id;
+
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 14,
+      padding: '14px 16px',
+      borderRadius: 12,
+      background: '#fff',
+      border: '1px solid rgba(0,0,0,0.06)',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+      transition: 'box-shadow 120ms',
+    }}>
+      {/* Status + Icon */}
+      <div style={{
+        width: 40,
+        height: 40,
+        borderRadius: 10,
+        display: 'grid',
+        placeItems: 'center',
+        background: isOpenClaw ? 'rgba(37, 99, 235, 0.06)' : 'rgba(0,0,0,0.03)',
+        color: isOpenClaw ? '#2563eb' : '#6b7280',
+        fontSize: 14,
+        fontWeight: 700,
+        flexShrink: 0,
+      }}>
+        {agent.runtime === 'openclaw' ? '🏴' : agent.runtime === 'codex' ? '⌨️' : '🤖'}
+      </div>
+
+      {/* Info */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
+          <StatusDot status={agent.status} />
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>{shortName}</span>
+          <span style={{
+            fontSize: 10,
+            fontWeight: 600,
+            padding: '1px 7px',
+            borderRadius: 5,
+            background: agent.status === 'running' ? 'rgba(34, 197, 94, 0.08)' : 'rgba(0,0,0,0.04)',
+            color: agent.status === 'running' ? '#22c55e' : '#9ca3af',
+          }}>
+            {agent.status}
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#9ca3af' }}>
+          <span style={{ fontWeight: 600, color: '#6b7280' }}>{shortModel}</span>
+          <span>·</span>
+          <span style={{ fontFamily: '"SF Mono", monospace', fontSize: 10 }}>{shortId}</span>
+        </div>
+      </div>
+
+      {/* Context bar */}
+      {agent.context && (
+        <div style={{ width: 140 }}>
+          <ContextBar percent={agent.context.usedPercent} trend={agent.context.trend} />
+        </div>
+      )}
+
+      {/* Edit button for OpenClaw agents */}
+      {isOpenClaw && onEdit && (
+        <button
+          type="button"
+          onClick={() => onEdit(agent)}
+          style={{
+            padding: '6px 12px',
+            borderRadius: 8,
+            border: '1px solid rgba(0,0,0,0.08)',
+            background: '#fff',
+            color: '#6b7280',
+            fontSize: 11,
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'background 120ms',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}
+        >
+          Configure
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Edit Modal ──
+
+function AgentEditModal({ agent, onClose, onSave }: {
+  agent: FleetAgent;
+  onClose: () => void;
+  onSave: (agentId: string, changes: { model?: string }) => void;
+}) {
+  const [model, setModel] = useState(agent.model);
+  const [saving, setSaving] = useState(false);
+
+  const modelOptions = [
+    { value: 'anthropic/claude-opus-4-6', label: 'Claude Opus 4.6' },
+    { value: 'anthropic/claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5' },
+    { value: 'anthropic/claude-sonnet-4-20250514', label: 'Claude Sonnet 4' },
+    { value: 'anthropic/claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+    { value: 'openai-codex/gpt-5.4', label: 'Codex 5.4' },
+    { value: 'openai-codex/gpt-5.3-codex', label: 'Codex 5.3' },
+    { value: 'google/gemini-3-flash-preview', label: 'Gemini 3 Flash' },
+    { value: 'google/gemini-3-pro-preview', label: 'Gemini 3 Pro' },
+    { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+    { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+  ];
+
+  const handleSave = async () => {
+    setSaving(true);
+    onSave(agent.id, { model });
+    setSaving(false);
+    onClose();
+  };
+
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      zIndex: 9999,
+      display: 'grid',
+      placeItems: 'center',
+      background: 'rgba(0,0,0,0.3)',
+      backdropFilter: 'blur(8px)',
+    }} onClick={onClose}>
+      <div style={{
+        background: '#fff',
+        borderRadius: 18,
+        padding: 28,
+        width: 420,
+        maxWidth: '90vw',
+        boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+      }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: '0 0 4px' }}>
+          Configure Agent
+        </h3>
+        <p style={{ fontSize: 12, color: '#9ca3af', margin: '0 0 20px' }}>
+          {agent.id}
+        </p>
+
+        {/* Model selector */}
+        <label style={{ display: 'block', marginBottom: 16 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+            Model
+          </span>
+          <select
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              borderRadius: 10,
+              border: '1px solid rgba(0,0,0,0.1)',
+              background: '#fff',
+              fontSize: 13,
+              color: '#111827',
+              cursor: 'pointer',
+              appearance: 'none',
+              WebkitAppearance: 'none',
+            }}
+          >
+            {modelOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+            {/* Include current model if not in list */}
+            {!modelOptions.find(o => o.value === agent.model) && (
+              <option value={agent.model}>{agent.model} (current)</option>
+            )}
+          </select>
+        </label>
+
+        {/* Info */}
+        <div style={{
+          padding: 12,
+          borderRadius: 10,
+          background: 'rgba(37, 99, 235, 0.04)',
+          border: '1px solid rgba(37, 99, 235, 0.08)',
+          fontSize: 11,
+          color: '#6b7280',
+          lineHeight: 1.5,
+          marginBottom: 20,
+        }}>
+          Model changes take effect on the next session or after a restart.
+          This uses the OpenClaw <code style={{ background: 'rgba(0,0,0,0.04)', padding: '1px 4px', borderRadius: 3 }}>session_status</code> model override.
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button type="button" onClick={onClose} style={{
+            padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.08)',
+            background: '#fff', color: '#6b7280', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          }}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || model === agent.model}
+            style={{
+              padding: '8px 20px', borderRadius: 10, border: 'none',
+              background: model !== agent.model ? '#2563eb' : '#d1d5db',
+              color: '#fff', fontSize: 12, fontWeight: 600, cursor: model !== agent.model ? 'pointer' : 'default',
+              opacity: saving ? 0.6 : 1,
+            }}
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Agents Tab ──
+
+function AgentsTab() {
+  const [squads, setSquads] = useState<FleetSquad[]>([]);
+  const [agents, setAgents] = useState<FleetAgent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editingAgent, setEditingAgent] = useState<FleetAgent | null>(null);
+
+  const fetchFleet = useCallback(async () => {
+    try {
+      const res = await fetch('/api/openclaw/fleet');
+      if (!res.ok) return;
+      const data = await res.json();
+      setSquads(data.squads || []);
+      setAgents(data.agents || []);
+    } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { fetchFleet(); }, [fetchFleet]);
+
+  // Auto-refresh every 30s
+  useEffect(() => {
+    const timer = setInterval(fetchFleet, 30000);
+    return () => clearInterval(timer);
+  }, [fetchFleet]);
+
+  const handleSave = useCallback(async (agentId: string, changes: { model?: string }) => {
+    if (!changes.model) return;
+    try {
+      // Use session_status model override via the OpenClaw API
+      const sessionKey = agentId;
+      await fetch('/api/mobile/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionKey,
+          action: 'session_status',
+          model: changes.model,
+        }),
+      });
+      // Refresh fleet data
+      setTimeout(fetchFleet, 1000);
+    } catch { /* silent */ }
+  }, [fetchFleet]);
+
+  if (loading) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+        Loading agent fleet...
+      </div>
+    );
+  }
+
+  // Group agents by squad
+  const squadMap = new Map(squads.map(s => [s.id, s]));
+  const grouped = new Map<string, FleetAgent[]>();
+  for (const agent of agents) {
+    const key = agent.squadId || 'ungrouped';
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key)!.push(agent);
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Summary bar */}
+      <div style={{
+        display: 'flex',
+        gap: 16,
+        padding: '14px 20px',
+        borderRadius: 14,
+        background: '#fff',
+        border: '1px solid rgba(0,0,0,0.06)',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+      }}>
+        <div style={{ textAlign: 'center', flex: 1 }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: '#111827' }}>{agents.length}</div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Agents</div>
+        </div>
+        <div style={{ width: 1, background: 'rgba(0,0,0,0.06)' }} />
+        <div style={{ textAlign: 'center', flex: 1 }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: '#22c55e' }}>
+            {agents.filter(a => a.status === 'running').length}
+          </div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Running</div>
+        </div>
+        <div style={{ width: 1, background: 'rgba(0,0,0,0.06)' }} />
+        <div style={{ textAlign: 'center', flex: 1 }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: '#3b82f6' }}>{squads.length}</div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Squads</div>
+        </div>
+        <div style={{ width: 1, background: 'rgba(0,0,0,0.06)' }} />
+        <div style={{ textAlign: 'center', flex: 1 }}>
+          <div style={{ fontSize: 22, fontWeight: 800, color: '#f59e0b' }}>
+            {agents.filter(a => a.runtime === 'openclaw').length}
+          </div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>OpenClaw</div>
+        </div>
+      </div>
+
+      {/* Agent groups */}
+      {Array.from(grouped.entries()).map(([squadId, members]) => {
+        const squad = squadMap.get(squadId);
+        return (
+          <div key={squadId}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginBottom: 10,
+              paddingLeft: 4,
+            }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
+                {squad?.name || squadId}
+              </span>
+              <span style={{
+                fontSize: 10, fontWeight: 600, color: '#9ca3af',
+                padding: '1px 8px', borderRadius: 5,
+                background: 'rgba(0,0,0,0.04)',
+              }}>
+                {members.length}
+              </span>
+              {squad && (
+                <span style={{ fontSize: 10, color: '#b0b8c4', marginLeft: 'auto' }}>
+                  {squad.throughputLabel}
+                </span>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {members.map((agent) => (
+                <AgentCard
+                  key={agent.id}
+                  agent={agent}
+                  isOpenClaw={agent.runtime === 'openclaw'}
+                  onEdit={agent.runtime === 'openclaw' ? setEditingAgent : undefined}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* Edit modal */}
+      {editingAgent && (
+        <AgentEditModal
+          agent={editingAgent}
+          onClose={() => setEditingAgent(null)}
+          onSave={handleSave}
+        />
+      )}
+    </div>
+  );
+}
+
 // ── Main Settings Page ──
 
 export function SettingsPage() {
@@ -425,7 +889,7 @@ export function SettingsPage() {
           <GitHubTab accounts={accounts} repos={repos} loading={loading} />
         )}
         {activeTab === 'agents' && (
-          <PlaceholderTab title="Agent Configuration" description="Configure default models, heartbeat intervals, and agent-specific settings. Coming soon." />
+          <AgentsTab />
         )}
         {activeTab === 'appearance' && (
           <PlaceholderTab title="Appearance" description="Theme, font size, density, and layout preferences. Coming soon." />
