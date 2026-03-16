@@ -5,6 +5,7 @@ import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { DesktopChat } from '@/components/desktop/DesktopChat';
 import { Canvas, CanvasTab } from '@/components/desktop/Canvas';
 import { WorkspaceSearch } from '@/components/desktop/WorkspaceSearch';
+import { MemoryLavaLamp } from '@/components/desktop/MemoryLavaLamp';
 
 export default function DashboardPage() {
   const [leftWidth, setLeftWidth] = useState(300);
@@ -12,16 +13,21 @@ export default function DashboardPage() {
   const [canvasHeight, setCanvasHeight] = useState(50); // percentage of center column
   const [activeSessionKey, setActiveSessionKey] = useState<string | undefined>();
   const [activeWorkspace, setActiveWorkspace] = useState<string | undefined>();
+  const [showMemoryView, setShowMemoryView] = useState(false);
 
   // ── Canvas tab state ──
   const [canvasTabs, setCanvasTabs] = useState<CanvasTab[]>([]);
   const [activeCanvasTabId, setActiveCanvasTabId] = useState<string | null>(null);
 
   const openCanvasTab = useCallback((tab: CanvasTab) => {
+    console.log('[Canvas] openCanvasTab called:', tab.kind, tab.id);
     setCanvasTabs((prev) => {
-      // If tab with same id already exists, just activate it
       const existing = prev.find((t) => t.id === tab.id);
-      if (existing) return prev;
+      if (existing) {
+        console.log('[Canvas] tab already exists, just activating');
+        return prev;
+      }
+      console.log('[Canvas] adding new tab, total:', prev.length + 1);
       return [...prev, tab];
     });
     setActiveCanvasTabId(tab.id);
@@ -89,13 +95,8 @@ export default function DashboardPage() {
   }, [openCanvasTab]);
 
   const handleOpenMemory = useCallback(() => {
-    openCanvasTab({
-      id: 'memory:cortex',
-      kind: 'memory',
-      label: 'Cortex Memory',
-      resourceId: 'cortex',
-    });
-  }, [openCanvasTab]);
+    setShowMemoryView(true);
+  }, []);
 
   const handleOpenDeploy = useCallback((project?: string) => {
     openCanvasTab({
@@ -259,7 +260,7 @@ export default function DashboardPage() {
         }} />
       </div>
 
-      {/* ── Center: Workspace (top) + Canvas (bottom) ── */}
+      {/* ── Center: Memory View OR Workspace (top) + Canvas (bottom) ── */}
       <div ref={centerRef} style={{
         flex: 1,
         display: 'flex',
@@ -267,8 +268,42 @@ export default function DashboardPage() {
         overflow: 'hidden',
         position: 'relative',
       }}>
+        {/* Full-screen Memory View */}
+        {showMemoryView && (
+          <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+            <button
+              type="button"
+              onClick={() => setShowMemoryView(false)}
+              style={{
+                position: 'absolute',
+                top: 12,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 100,
+                paddingTop: 6,
+                paddingRight: 14,
+                paddingBottom: 6,
+                paddingLeft: 14,
+                borderRadius: 8,
+                border: '1px solid rgba(148,163,184,0.15)',
+                background: 'rgba(10, 14, 26, 0.85)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                color: '#94a3b8',
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              ← Back to Workspace
+            </button>
+            <MemoryLavaLamp />
+          </div>
+        )}
+
         {/* Top — workspace area with search */}
-        <div style={{
+        {!showMemoryView && <div style={{
           flex: canvasTabs.length > 0 ? `0 0 ${100 - canvasHeight}%` : 1,
           display: 'flex',
           flexDirection: 'column',
@@ -329,9 +364,11 @@ export default function DashboardPage() {
               </div>
             ) : null}
           </div>
-        </div>
+        </div>}
 
         {/* Vertical drag handle between workspace and canvas */}
+        {!showMemoryView && (<>
+
         {canvasTabs.length > 0 && (
           <div
             onMouseDown={startCanvasDrag}
@@ -368,6 +405,7 @@ export default function DashboardPage() {
             />
           </div>
         )}
+        </>)}
       </div>
 
       {/* ── Right drag handle ── */}
