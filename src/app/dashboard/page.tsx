@@ -1,19 +1,45 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 import { DesktopChat } from '@/components/desktop/DesktopChat';
 import { Canvas, CanvasTab } from '@/components/desktop/Canvas';
 import { WorkspaceSearch } from '@/components/desktop/WorkspaceSearch';
 import { GraphExplorer3D } from '@/components/desktop/GraphExplorer3D';
+import { AlertProvider, useAlerts } from '@/lib/alerts/context';
+import { AlertBell } from '@/components/shared/AlertBell';
+import { AlertTray } from '@/components/shared/AlertTray';
+import { AlertToast } from '@/components/shared/AlertToast';
 
 export default function DashboardPage() {
+  return (
+    <AlertProvider>
+      <DashboardInner />
+    </AlertProvider>
+  );
+}
+
+function DashboardInner() {
   const [leftWidth, setLeftWidth] = useState(300);
   const [rightWidth, setRightWidth] = useState(420);
   const [canvasHeight, setCanvasHeight] = useState(50); // percentage of center column
   const [activeSessionKey, setActiveSessionKey] = useState<string | undefined>();
   const [activeWorkspace, setActiveWorkspace] = useState<string | undefined>();
   const [showMemoryView, setShowMemoryView] = useState(false);
+  const [alertTrayOpen, setAlertTrayOpen] = useState(false);
+
+  // ── Alert system ──
+  const {
+    alerts: activeAlerts,
+    unreadCount,
+    urgentCount,
+    hasUnread,
+    markRead,
+    markAllRead,
+    dismiss,
+    dismissAll,
+    updateAgents,
+  } = useAlerts();
 
   // ── Canvas tab state ──
   const [canvasTabs, setCanvasTabs] = useState<CanvasTab[]>([]);
@@ -96,6 +122,21 @@ export default function DashboardPage() {
 
   const handleOpenMemory = useCallback(() => {
     setShowMemoryView(true);
+  }, []);
+
+  // ── Feed agent data to alert engine ──
+  const handleAgentsUpdate = useCallback((agents: unknown[]) => {
+    // AgentDetail from AgentPanel is compatible with AgentSummary for alert detection
+    // (has id, name, status, context, approvalStatus, lastEventAt, sessionKey)
+    updateAgents(agents as import('@/lib/fleet/types').AgentSummary[]);
+  }, [updateAgents]);
+
+  // ── Alert action: navigate to agent session ──
+  const handleAlertAction = useCallback((alert: import('@/lib/alerts/types').Alert) => {
+    if (alert.sessionKey) {
+      setActiveSessionKey(alert.sessionKey);
+    }
+    setAlertTrayOpen(false);
   }, []);
 
   const handleOpenDeploy = useCallback((project?: string) => {
@@ -222,7 +263,35 @@ export default function DashboardPage() {
         flexDirection: 'column',
         overflow: 'hidden',
         borderRight: '1px solid rgba(0,0,0,0.06)',
+        position: 'relative',
       }}>
+        {/* Alert bell — floats at top-right of left panel */}
+        {hasUnread && (
+          <div style={{
+            position: 'absolute',
+            top: 10,
+            right: 12,
+            zIndex: 50,
+          }}>
+            <AlertBell
+              unreadCount={unreadCount}
+              urgentCount={urgentCount}
+              onClick={() => setAlertTrayOpen(!alertTrayOpen)}
+              size="desktop"
+            />
+            <AlertTray
+              alerts={activeAlerts}
+              open={alertTrayOpen}
+              onClose={() => setAlertTrayOpen(false)}
+              onMarkRead={markRead}
+              onMarkAllRead={markAllRead}
+              onDismiss={dismiss}
+              onDismissAll={dismissAll}
+              onAction={handleAlertAction}
+              variant="desktop"
+            />
+          </div>
+        )}
         <AgentPanel
           onSelectSession={handleSelectSession}
           onSelectIssue={handleSelectIssue}
@@ -235,6 +304,7 @@ export default function DashboardPage() {
           onOpenGitLog={handleOpenGitLog}
           onOpenDeploy={handleOpenDeploy}
           onOpenMemory={handleOpenMemory}
+          onAgentsUpdate={handleAgentsUpdate}
         />
       </div>
 
@@ -449,6 +519,9 @@ export default function DashboardPage() {
           }}
         />
       </div>
+
+      {/* ── Alert Toast (desktop only — urgent alerts slide in top-right) ── */}
+      <AlertToast alerts={activeAlerts} onAction={handleAlertAction} />
     </div>
   );
 }
