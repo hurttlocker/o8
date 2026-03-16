@@ -502,22 +502,55 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
 
       bars.sort((a, b) => b.depth - a.depth);
 
-      // Draw bars
+      // ── Floor Reflections (drawn before bars so they're underneath) ──
+      for (const bar of bars) {
+        if (bar.barH < 3 || bar.cell.height < 0.15) continue;
+        const reflH = bar.barH * 0.35; // reflection is 35% of bar height
+        const rgb = hexToRgbStr(bar.cell.cluster.color);
+        const reflAlpha = 0.08 * bar.cell.highlight * bar.cell.height;
+
+        // Reflected gradient (fades downward)
+        const reflGrad = ctx.createLinearGradient(
+          bar.sx, bar.sy,
+          bar.sx, bar.sy + reflH,
+        );
+        reflGrad.addColorStop(0, `rgba(${rgb}, ${reflAlpha})`);
+        reflGrad.addColorStop(1, `rgba(${rgb}, 0)`);
+        ctx.fillStyle = reflGrad;
+        ctx.fillRect(bar.sx - bar.barW / 2, bar.sy, bar.barW, reflH);
+      }
+
+      // ── Draw Bars (with vertical gradient) ──
       for (const bar of bars) {
         const alpha = 0.85 + bar.cell.height * 0.15;
-        ctx.globalAlpha = alpha * bar.cell.highlight;
-        ctx.fillStyle = bar.color;
+        const rgb = hexToRgbStr(bar.cell.cluster.color);
+
+        // Vertical gradient: dark base → category color → bright tip
+        const barGrad = ctx.createLinearGradient(
+          bar.sx, bar.sy,       // bottom (base)
+          bar.sx, bar.topY,     // top (peak)
+        );
+        barGrad.addColorStop(0, `rgba(${rgb}, ${0.3 * alpha * bar.cell.highlight})`);   // dark base
+        barGrad.addColorStop(0.4, `rgba(${rgb}, ${0.7 * alpha * bar.cell.highlight})`);  // mid
+        barGrad.addColorStop(0.8, `rgba(${rgb}, ${alpha * bar.cell.highlight})`);         // bright
+        barGrad.addColorStop(1, `rgba(${Math.min(parseInt(rgb), 255)}, ${Math.min(parseInt(rgb.split(', ')[1]), 255)}, ${Math.min(parseInt(rgb.split(', ')[2]), 255)}, ${alpha * bar.cell.highlight})`); // tip
+
+        ctx.fillStyle = barGrad;
         ctx.fillRect(bar.sx - bar.barW / 2, bar.topY, bar.barW, bar.barH);
 
-        // Top cap
-        ctx.globalAlpha = 1 * bar.cell.highlight;
+        // White-hot top cap (brighter than before)
+        const capRgb = rgb.split(', ').map(v => Math.min(parseInt(v) + 80, 255)).join(', ');
+        ctx.globalAlpha = bar.cell.highlight;
+        ctx.fillStyle = `rgba(${capRgb}, ${0.95})`;
         ctx.fillRect(bar.sx - bar.barW / 2, bar.topY, bar.barW, Math.max(1, bar.barW * 0.5));
+        ctx.globalAlpha = 1;
 
         // Peak glow
         if (bar.cell.glowIntensity > 0 && bar.cell.highlight > 0.5) {
           const glowR = 8 + bar.cell.glowIntensity * 15;
           const grad = ctx.createRadialGradient(bar.sx, bar.topY, 0, bar.sx, bar.topY, glowR * scale);
-          grad.addColorStop(0, bar.color.replace('rgb', 'rgba').replace(')', `,${0.4 * bar.cell.glowIntensity})`));
+          grad.addColorStop(0, `rgba(${capRgb}, ${0.5 * bar.cell.glowIntensity})`);
+          grad.addColorStop(0.5, `rgba(${rgb}, ${0.15 * bar.cell.glowIntensity})`);
           grad.addColorStop(1, 'transparent');
           ctx.fillStyle = grad;
           ctx.beginPath();
@@ -527,8 +560,8 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
 
         // Light lines from peaks
         if (bar.cell.height > 0.55 && bar.cell.highlight > 0.5) {
-          const lineAlpha = (bar.cell.height - 0.55) * 0.12;
-          ctx.strokeStyle = bar.color.replace('rgb', 'rgba').replace(')', `,${lineAlpha})`);
+          const lineAlpha = (bar.cell.height - 0.55) * 0.15;
+          ctx.strokeStyle = `rgba(${capRgb}, ${lineAlpha})`;
           ctx.lineWidth = 0.5;
           ctx.beginPath();
           ctx.moveTo(bar.sx, bar.topY);
