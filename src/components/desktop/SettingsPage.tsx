@@ -431,10 +431,11 @@ function ContextBar({ percent, trend }: { percent: number; trend: string }) {
 
 // ── Agent Card ──
 
-function AgentCard({ agent, isOpenClaw, onEdit }: {
+function AgentCard({ agent, isOpenClaw, onEdit, onKill }: {
   agent: FleetAgent;
   isOpenClaw: boolean;
   onEdit?: (agent: FleetAgent) => void;
+  onKill?: (agent: FleetAgent) => void;
 }) {
   const shortModel = agent.model
     .replace('claude-opus-4-6', 'Opus 4.6')
@@ -522,29 +523,51 @@ function AgentCard({ agent, isOpenClaw, onEdit }: {
         </div>
       )}
 
-      {/* Edit button for OpenClaw agents */}
-      {isOpenClaw && onEdit && (
-        <button
-          type="button"
-          onClick={() => onEdit(agent)}
-          style={{
-            padding: '6px 12px',
-            borderRadius: 8,
-            border: '1px solid rgba(0,0,0,0.08)',
-            background: '#fff',
-            color: '#6b7280',
-            fontSize: 11,
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'background 120ms',
-            flexShrink: 0,
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}
-        >
-          Configure
-        </button>
-      )}
+      {/* Action buttons */}
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        {isOpenClaw && onEdit && (
+          <button
+            type="button"
+            onClick={() => onEdit(agent)}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: '1px solid rgba(0,0,0,0.08)',
+              background: '#fff',
+              color: '#6b7280',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'background 120ms',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}
+          >
+            Configure
+          </button>
+        )}
+        {!isOpenClaw && onKill && (
+          <button
+            type="button"
+            onClick={() => onKill(agent)}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              background: '#fff',
+              color: '#ef4444',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'background 120ms',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.04)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}
+          >
+            Kill
+          </button>
+        )}
+      </div>
     </div>
   );
 }
