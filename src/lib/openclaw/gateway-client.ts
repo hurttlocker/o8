@@ -146,7 +146,11 @@ export async function getGatewayStatus(): Promise<{
   }
 
   // Strategy 2: CLI cache (slow fallback)
-  console.log('[gateway-client] REST API unavailable, falling back to CLI cache');
+  console.warn(
+    '[gateway-client] ⚠️ REST API unavailable — falling back to CLI cache (30-40s).\n' +
+    '  Fix: run ~/cortex-ide/scripts/rest-api-patch.sh\n' +
+    '  PR: https://github.com/openclaw/openclaw/pull/47863'
+  );
   ensureCliRefreshLoop();
 
   if (!statusCache) {
