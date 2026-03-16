@@ -1,4 +1,3 @@
-import Image from 'next/image';
 import { Download, ExternalLink, FileText, X } from 'lucide-react';
 import type { MediaLightboxProps } from './types';
 import { isImageMedia, mediaHref } from './utils';
@@ -19,13 +18,12 @@ export function MediaLightbox({ media, onClose }: MediaLightboxProps) {
         </div>
         <div className="remodex-media-lightbox-body">
           {isImageMedia(media) ? (
-            <Image
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
               src={mediaHref(media.path)}
               alt={media.name}
-              width={1600}
-              height={1200}
-              unoptimized
               className="remodex-media-lightbox-image"
+              style={{ maxWidth: '100%', maxHeight: '70vh', objectFit: 'contain' }}
             />
           ) : (
             <div className="remodex-media-lightbox-file">

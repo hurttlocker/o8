@@ -10,8 +10,9 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, unlinkSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const execFileAsync = promisify(execFile);
 
@@ -178,14 +179,21 @@ export async function gatewayRpc<T>(
   params: Record<string, unknown> = {},
   timeoutMs = 15_000,
 ): Promise<T> {
-  // For now, chat methods still go through CLI
-  // (REST API currently only serves read-only status endpoints)
+  const paramsJson = JSON.stringify(params);
+
+  // If params are large (e.g. base64 image attachments), use direct WS
+  // to avoid "spawn E2BIG" (argument list too long) OS error.
+  // CLI only supports --params as a command-line arg which has OS limits.
+  if (paramsJson.length > 100_000) {
+    return gatewayRpcViaWs<T>(method, params, timeoutMs);
+  }
+
   const { stdout } = await execFileAsync(
     'openclaw',
-    ['gateway', 'call', method, '--json', '--params', JSON.stringify(params)],
+    ['gateway', 'call', method, '--json', '--params', paramsJson],
     {
       cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || '/Users/marquisehurtt',
-      maxBuffer: 4 * 1024 * 1024,
+      maxBuffer: 10 * 1024 * 1024,
       timeout: timeoutMs,
       env: {
         ...process.env,
@@ -195,4 +203,88 @@ export async function gatewayRpc<T>(
   );
 
   return JSON.parse(extractJsonPayload(stdout)) as T;
+}
+
+/**
+ * Direct WebSocket RPC — used for large payloads that exceed CLI arg limits.
+ * Connects to the gateway WS, sends JSON-RPC, waits for response, disconnects.
+ */
+async function gatewayRpcViaWs<T>(
+  method: string,
+  params: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<T> {
+  const config = loadConfig();
+  const url = `ws://127.0.0.1:${config.port}`;
+
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`Gateway WS RPC timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    // Use dynamic import for WebSocket to avoid bundling issues
+    import('ws').then(({ default: WebSocket }) => {
+      const ws = new WebSocket(url, {
+        headers: config.token ? { Authorization: `Bearer ${config.token}` } : {},
+      });
+
+      const requestId = `cortex-ide-${Date.now()}`;
+
+      ws.on('open', () => {
+        // Send protocol handshake
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'initialize',
+          id: 'init-1',
+          params: {
+            protocolVersion: 3,
+            clientId: 'cortex-ide-ws',
+            displayName: 'Cortex IDE',
+          },
+        }));
+      });
+
+      ws.on('message', (data: Buffer | string) => {
+        try {
+          const msg = JSON.parse(data.toString());
+
+          // After init response, send the actual RPC call
+          if (msg.id === 'init-1') {
+            ws.send(JSON.stringify({
+              jsonrpc: '2.0',
+              method,
+              id: requestId,
+              params,
+            }));
+            return;
+          }
+
+          // Our response
+          if (msg.id === requestId) {
+            clearTimeout(timeout);
+            ws.close();
+            if (msg.error) {
+              reject(new Error(msg.error.message || 'Gateway RPC error'));
+            } else {
+              resolve(msg.result as T);
+            }
+          }
+        } catch {
+          // ignore parse errors on other messages
+        }
+      });
+
+      ws.on('error', (err: Error) => {
+        clearTimeout(timeout);
+        reject(new Error(`Gateway WS error: ${err.message}`));
+      });
+
+      ws.on('close', () => {
+        clearTimeout(timeout);
+      });
+    }).catch((err) => {
+      clearTimeout(timeout);
+      reject(new Error(`Failed to load ws module: ${err}`));
+    });
+  });
 }
