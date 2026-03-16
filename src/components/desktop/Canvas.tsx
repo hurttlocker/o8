@@ -40,7 +40,7 @@ import { GraphExplorer3D } from './GraphExplorer3D';
 
 // ── Tab Types ──
 
-export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'git-log' | 'image' | 'deploy' | 'memory' | 'welcome';
+export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'git-log' | 'image' | 'deploy' | 'memory' | 'welcome' | 'timeline';
 
 export interface CanvasTab {
   id: string;
@@ -203,6 +203,7 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
     case 'deploy': return <Globe size={size} />;
     case 'memory': return <Radio size={size} />;
     case 'welcome': return <BookOpen size={size} />;
+    case 'timeline': return <Clock size={size} />;
   }
 }
 
@@ -238,10 +239,251 @@ const TabContent = memo(function TabContent({ tab, onSelectCommit }: { tab: Canv
       return <GraphExplorer3D />;
     case 'welcome':
       return <CanvasEmpty />;
+    case 'timeline':
+      return <TimelineExpanded />;
     default:
       return <CanvasEmpty />;
   }
 });
+
+// ── Timeline Expanded View ──
+
+function TimelineExpanded() {
+  const segments = useMemo(() => {
+    // Same mock data as SessionTimeline — will be shared data source later
+    const now = new Date();
+    const start = new Date(now); start.setHours(9, 0, 0, 0);
+    const elapsed = Math.max(0, Math.floor((now.getTime() - start.getTime()) / 60000));
+    if (elapsed === 0) return [];
+
+    const segs: { kind: string; startMin: number; durationMin: number; label: string }[] = [];
+    let c = 0;
+    const add = (kind: string, dur: number, label: string) => {
+      const d = Math.min(dur, elapsed - c);
+      if (d > 0) { segs.push({ kind, startMin: c, durationMin: d, label }); c += d; }
+    };
+    add('thinking', 12, 'Boot + context load');
+    add('coding', 35, 'NavRail + TitleBar');
+    add('thinking', 5, 'Planning session timeline');
+    add('coding', 45, 'SessionTimeline + Canvas wiring');
+    add('testing', 15, 'Tauri drag verification');
+    add('coding', 25, 'Icon fixes + permissions');
+    add('error', 3, 'startDragging permission denied');
+    add('coding', 30, 'Timeline colors + expand');
+    if (c < elapsed) add('idle', elapsed - c, 'Idle');
+    return segs;
+  }, []);
+
+  const colors: Record<string, string> = {
+    coding: '#2563eb', thinking: '#93c5fd', testing: '#f59e0b', error: '#ef4444', idle: '#e5e7eb',
+  };
+  const labels: Record<string, string> = {
+    coding: 'CODING', thinking: 'THINKING', testing: 'TESTING', error: 'ERRORS', idle: 'IDLE',
+  };
+
+  const totalMin = segments.length > 0 ? segments[segments.length - 1].startMin + segments[segments.length - 1].durationMin : 0;
+  const fmtDur = (m: number) => { const h = Math.floor(m / 60); const mm = m % 60; return h > 0 ? `${h}h ${mm}m` : `${mm}m`; };
+  const fmtTime = (m: number) => { const h = 9 + Math.floor(m / 60); const mm = m % 60; const p = h >= 12 ? 'PM' : 'AM'; return `${h > 12 ? h - 12 : h}:${String(mm).padStart(2, '0')} ${p}`; };
+
+  // Aggregate by kind
+  const totals: Record<string, number> = {};
+  for (const s of segments) totals[s.kind] = (totals[s.kind] || 0) + s.durationMin;
+
+  // Mock chain-of-thought entries
+  const thoughts = [
+    { kind: 'thinking', text: 'Loading workspace context, reading AGENTS.md + MEMORY.md. Identifying current state of Cortex IDE desktop app.' },
+    { kind: 'coding', text: 'Building NavRail component — porting PlaygroundGlassNav from MisterADA. Framer-motion spring animation, hover expand 56px → 200px.' },
+    { kind: 'coding', text: 'Creating TitleBar — frosted glass, search pill with ⌘K, settings gear. Wiring sidebar/chat/bottom panel toggles.' },
+    { kind: 'testing', text: 'Verifying Tauri drag region. startDragging() permission denied — adding core:window:allow-start-dragging to capabilities.' },
+    { kind: 'coding', text: 'SessionTimeline V0 — color-coded activity bar with play button, legend, hover tooltips. Wired into dashboard.' },
+    { kind: 'error', text: 'Lucide icons not rendering in Tauri webview. Replaced with inline SVG elements.' },
+  ];
+
+  return (
+    <div style={{
+      height: '100%',
+      overflow: 'auto',
+      padding: 24,
+      background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
+    }}>
+      {/* Header */}
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.02em', color: '#111827', margin: 0 }}>
+          SESSION REPLAY: {fmtDur(totalMin)} TOTAL
+        </h2>
+        <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>
+          {fmtTime(0)} — {fmtTime(totalMin)} · Today
+        </p>
+      </div>
+
+      {/* Scrubber bar */}
+      <div style={{
+        background: '#fff',
+        borderRadius: 14,
+        padding: 20,
+        marginBottom: 16,
+        border: '1px solid rgba(0,0,0,0.06)',
+      }}>
+        {/* Progress bar */}
+        <div style={{ height: 4, borderRadius: 2, background: '#e5e7eb', marginBottom: 16, position: 'relative' }}>
+          <div style={{ height: '100%', borderRadius: 2, background: '#2563eb', width: '100%' }} />
+          <div style={{
+            position: 'absolute', right: -6, top: -4, width: 12, height: 12, borderRadius: 6,
+            background: '#2563eb', border: '2px solid #fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+          }} />
+        </div>
+
+        {/* Segment bar */}
+        <div style={{ height: 32, borderRadius: 6, overflow: 'hidden', display: 'flex', background: '#f1f5f9' }}>
+          {segments.map((seg, i) => (
+            <div
+              key={i}
+              style={{
+                width: `${(seg.durationMin / totalMin) * 100}%`,
+                height: '100%',
+                background: colors[seg.kind] || '#e5e7eb',
+                borderRight: i < segments.length - 1 ? '1px solid rgba(255,255,255,0.3)' : 'none',
+                cursor: 'pointer',
+                transition: 'opacity 120ms',
+              }}
+              title={`${labels[seg.kind] || seg.kind}: ${fmtDur(seg.durationMin)} (${fmtTime(seg.startMin)})`}
+            />
+          ))}
+        </div>
+
+        {/* Legend */}
+        <div style={{ display: 'flex', gap: 20, marginTop: 12 }}>
+          {(['thinking', 'coding', 'testing', 'error'] as const).map((kind) => {
+            const t = totals[kind];
+            if (!t) return null;
+            return (
+              <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 10, height: 10, borderRadius: 2, background: colors[kind] }} />
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>{labels[kind]}</span>
+                <span style={{ fontSize: 11, color: '#9ca3af' }}>({fmtDur(t)})</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Two-column: Code + Chain of Thought */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+        {/* Left — Recent Activity */}
+        <div style={{
+          background: '#fff',
+          borderRadius: 14,
+          padding: 20,
+          border: '1px solid rgba(0,0,0,0.06)',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h3 style={{ fontSize: 12, fontWeight: 700, color: '#374151', letterSpacing: '0.04em', textTransform: 'uppercase', margin: 0 }}>
+              Recent Activity
+            </h3>
+            <span style={{ fontSize: 10, color: '#22c55e', fontWeight: 600, background: 'rgba(34,197,94,0.1)', padding: '2px 8px', borderRadius: 6 }}>
+              Active
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {segments.slice(-6).reverse().map((seg, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
+                <div style={{ width: 8, height: 8, borderRadius: 4, background: colors[seg.kind], flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: '#111827' }}>{seg.label}</div>
+                  <div style={{ fontSize: 10, color: '#9ca3af' }}>{fmtTime(seg.startMin)} · {fmtDur(seg.durationMin)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Right — Agent Chain-of-Thought */}
+        <div style={{
+          background: '#fff',
+          borderRadius: 14,
+          padding: 20,
+          border: '1px solid rgba(0,0,0,0.06)',
+        }}>
+          <h3 style={{ fontSize: 12, fontWeight: 700, color: '#374151', letterSpacing: '0.04em', textTransform: 'uppercase', margin: '0 0 16px' }}>
+            Agent Reasoning — Chain of Thought
+          </h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {thoughts.map((t, i) => (
+              <div key={i} style={{
+                padding: '10px 14px',
+                borderRadius: 10,
+                background: t.kind === 'error' ? 'rgba(239,68,68,0.06)' : 'rgba(0,0,0,0.02)',
+                borderLeft: `3px solid ${colors[t.kind] || '#e5e7eb'}`,
+              }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: colors[t.kind], textTransform: 'uppercase', marginBottom: 4 }}>
+                  {labels[t.kind] || t.kind}
+                </div>
+                <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>{t.text}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Agent Orchestration Panel */}
+      <div style={{
+        background: '#fff',
+        borderRadius: 14,
+        padding: 20,
+        border: '1px solid rgba(0,0,0,0.06)',
+      }}>
+        <h3 style={{ fontSize: 12, fontWeight: 700, color: '#374151', letterSpacing: '0.04em', textTransform: 'uppercase', margin: '0 0 20px' }}>
+          Agent Orchestration
+        </h3>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', gap: 16, position: 'relative' }}>
+          {/* Connection line */}
+          <div style={{
+            position: 'absolute', top: '50%', left: '15%', right: '15%', height: 2,
+            background: 'linear-gradient(90deg, #2563eb, #22c55e, #f59e0b)',
+            borderRadius: 1, zIndex: 0,
+          }} />
+          {/* Agent cards */}
+          {[
+            { name: 'MISTER', model: 'Opus', branch: 'main', pct: 75, status: 'ACTIVE', task: 'IDE Development', color: '#2563eb' },
+            { name: 'NIOT', model: 'Codex', branch: 'feat/cortex', pct: 40, status: 'CODING', task: 'Cortex Features', color: '#22c55e' },
+            { name: 'HAWK', model: 'Codex', branch: 'reviewing PR', pct: 90, status: 'REVIEWING', task: 'QA Validation', color: '#f59e0b' },
+          ].map((agent) => (
+            <div key={agent.name} style={{
+              background: '#fff',
+              borderRadius: 14,
+              padding: '16px 20px',
+              border: '1px solid rgba(0,0,0,0.06)',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              zIndex: 1,
+              minWidth: 180,
+              textAlign: 'center',
+            }}>
+              {/* Progress ring */}
+              <div style={{ position: 'relative', width: 56, height: 56, margin: '0 auto 10px' }}>
+                <svg width={56} height={56} viewBox="0 0 56 56" style={{ transform: 'rotate(-90deg)' }}>
+                  <circle cx="28" cy="28" r="24" fill="none" stroke="#f1f5f9" strokeWidth="4" />
+                  <circle cx="28" cy="28" r="24" fill="none" stroke={agent.color} strokeWidth="4"
+                    strokeDasharray={`${(agent.pct / 100) * 150.8} 150.8`}
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#111827' }}>
+                  {agent.pct}%
+                </div>
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#111827' }}>{agent.name}</div>
+              <div style={{ fontSize: 10, color: '#9ca3af' }}>({agent.model}) · {agent.branch}</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: agent.color, marginTop: 6, textTransform: 'uppercase' }}>
+                {agent.status}
+              </div>
+              <div style={{ fontSize: 10, color: '#6b7280' }}>{agent.task}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ── Issue Viewer ──
 
