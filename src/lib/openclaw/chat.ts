@@ -310,10 +310,12 @@ const transcriptCache = new Map<string, { entries: SessionTranscriptEntry[]; tim
 const transcriptInflight = new Map<string, Promise<SessionTranscriptEntry[]>>();
 const TRANSCRIPT_CACHE_TTL = 5000; // 5 seconds
 
-export async function getSessionTranscript(sessionKey: string, limit = 12) {
-  const cached = transcriptCache.get(sessionKey);
-  if (cached && Date.now() - cached.timestamp < TRANSCRIPT_CACHE_TTL) {
-    return cached.entries.slice(-limit);
+export async function getSessionTranscript(sessionKey: string, limit = 12, fresh = false) {
+  if (!fresh) {
+    const cached = transcriptCache.get(sessionKey);
+    if (cached && Date.now() - cached.timestamp < TRANSCRIPT_CACHE_TTL) {
+      return cached.entries.slice(-limit);
+    }
   }
 
   // Deduplicate: if a request is already in-flight for this session, piggyback

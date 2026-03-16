@@ -276,15 +276,17 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
       }
 
       try {
-        const res = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(MAIN_SESSION_KEY)}&limit=3`);
+        // Add cache-bust to avoid stale transcript cache
+        const res = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(MAIN_SESSION_KEY)}&limit=5&_t=${Date.now()}fresh=1`);
         if (!res.ok) return;
         const data = await res.json();
-        const entries = data.entries || data.transcript || [];
+        const entries = data.transcript || data.entries || [];
 
-        // Find the newest assistant message
+        // Find the newest assistant message — API returns `text` not `content`
         for (let i = entries.length - 1; i >= 0; i--) {
           const entry = entries[i];
-          if (entry.role === 'assistant' && entry.content?.trim()) {
+          const entryText = (entry.text || entry.content || '').trim();
+          if (entry.role === 'assistant' && entryText) {
             const entryId = entry.id || `a-${entry.timestamp || i}`;
             if (entryId !== lastAssistantIdRef.current) {
               lastAssistantIdRef.current = entryId;
@@ -293,7 +295,7 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
                 {
                   id: entryId,
                   role: 'assistant',
-                  content: entry.content.trim(),
+                  content: entryText,
                   timestamp: Date.now(),
                 },
               ]);
@@ -373,28 +375,20 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
 
     try {
       // Snapshot the current last assistant message ID so we know when a NEW one arrives
-      const res = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(MAIN_SESSION_KEY)}&limit=2`);
-      if (res.ok) {
-        const data = await res.json();
-        const entries = data.entries || data.transcript || [];
+      const snapRes = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(MAIN_SESSION_KEY)}&limit=5&_t=${Date.now()}fresh=1`);
+      if (snapRes.ok) {
+        const data = await snapRes.json();
+        const entries = data.transcript || data.entries || [];
         for (let i = entries.length - 1; i >= 0; i--) {
-          if (entries[i].role === 'assistant') {
+          const entryText = (entries[i].text || entries[i].content || '').trim();
+          if (entries[i].role === 'assistant' && entryText) {
             lastAssistantIdRef.current = entries[i].id || `a-${entries[i].timestamp || i}`;
             break;
           }
         }
       }
 
-      // Send the message
-      await fetch('/api/mobile/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          history: { sessionKey: MAIN_SESSION_KEY },
-        }),
-      });
-
-      // Use the action API to send
+      // Send via the action API
       await fetch('/api/mobile/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
