@@ -61,6 +61,14 @@ function SendIcon() {
   );
 }
 
+function SparklesIcon() {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 3l1.912 5.813a2 2 0 0 0 1.275 1.275L21 12l-5.813 1.912a2 2 0 0 0-1.275 1.275L12 21l-1.912-5.813a2 2 0 0 0-1.275-1.275L3 12l5.813-1.912a2 2 0 0 0 1.275-1.275L12 3z"/>
+    </svg>
+  );
+}
+
 function CheckIcon() {
   return (
     <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" style={{ display: 'block', flexShrink: 0 }}>
@@ -128,6 +136,8 @@ interface ThoughtsCardProps {
 
 export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
   const [input, setInput] = useState('');
+  const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
+  const [enhancing, setEnhancing] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [workflow, setWorkflow] = useState<WorkflowState>({ step: 'idle' });
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -208,8 +218,37 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
   const handleReset = useCallback(() => {
     setWorkflow({ step: 'idle' });
     setInput('');
+    setPreEnhanceInput(null);
     setTimeout(() => inputRef.current?.focus(), 50);
   }, []);
+
+  const handleEnhance = useCallback(async () => {
+    if (!input.trim() || enhancing) return;
+    setEnhancing(true);
+    setPreEnhanceInput(input);
+    try {
+      const res = await fetch('/api/mobile/enhance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: input }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.enhanced) setInput(data.enhanced);
+      }
+    } catch {
+      // silently fail — keep original input
+    } finally {
+      setEnhancing(false);
+    }
+  }, [input, enhancing]);
+
+  const handleUndoEnhance = useCallback(() => {
+    if (preEnhanceInput !== null) {
+      setInput(preEnhanceInput);
+      setPreEnhanceInput(null);
+    }
+  }, [preEnhanceInput]);
 
   if (!open) return null;
 
@@ -230,11 +269,11 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
           width: minimized ? 220 : 400,
           zIndex: 9999,
           borderRadius: minimized ? 12 : 18,
-          background: 'rgba(255, 255, 255, 0.78)',
-          backdropFilter: 'blur(40px)',
-          WebkitBackdropFilter: 'blur(40px)',
-          border: '1px solid rgba(255, 255, 255, 0.45)',
-          boxShadow: '0 24px 80px rgba(0,0,0,0.12), 0 8px 24px rgba(0,0,0,0.08), 0 0 0 0.5px rgba(0,0,0,0.04)',
+          background: 'rgba(255, 255, 255, 0.45)',
+          backdropFilter: 'blur(50px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(50px) saturate(180%)',
+          border: '1px solid rgba(255, 255, 255, 0.35)',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06), inset 0 0.5px 0 rgba(255,255,255,0.5)',
           overflow: 'hidden',
           transition: 'width 250ms cubic-bezier(0.32, 0.72, 0, 1), border-radius 250ms',
           fontFamily: '-apple-system, system-ui, BlinkMacSystemFont, sans-serif',
@@ -306,10 +345,10 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
                     width: '100%',
                     minHeight: 72,
                     maxHeight: 160,
-                    padding: '10px 42px 10px 12px',
+                    padding: '10px 80px 10px 12px',
                     borderRadius: 12,
-                    border: '1px solid rgba(0,0,0,0.08)',
-                    background: 'rgba(255,255,255,0.6)',
+                    border: '1px solid rgba(0,0,0,0.06)',
+                    background: 'rgba(255,255,255,0.35)',
                     fontSize: 13,
                     color: '#111827',
                     resize: 'vertical',
@@ -320,29 +359,84 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
                     boxSizing: 'border-box',
                   }}
                 />
-                <button
-                  type="button"
-                  onClick={handleSubmit}
-                  disabled={!input.trim()}
-                  style={{
-                    position: 'absolute',
-                    right: 8,
-                    bottom: 8,
-                    width: 30,
-                    height: 30,
-                    borderRadius: 8,
-                    border: 'none',
-                    background: input.trim() ? '#2563eb' : 'rgba(0,0,0,0.06)',
-                    color: input.trim() ? '#fff' : '#b0b8c4',
-                    cursor: input.trim() ? 'pointer' : 'default',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    transition: 'background 120ms',
-                  }}
-                >
-                  <SendIcon />
-                </button>
+                {/* Bottom button row — enhance + send */}
+                <div style={{
+                  position: 'absolute',
+                  right: 8,
+                  bottom: 8,
+                  display: 'flex',
+                  gap: 4,
+                  alignItems: 'center',
+                }}>
+                  {/* Undo enhance */}
+                  {preEnhanceInput !== null && (
+                    <button
+                      type="button"
+                      onClick={handleUndoEnhance}
+                      title="Undo enhancement"
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: 7,
+                        border: 'none',
+                        background: 'rgba(239, 68, 68, 0.1)',
+                        color: '#ef4444',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 12,
+                        fontWeight: 600,
+                      }}
+                    >
+                      ↩
+                    </button>
+                  )}
+                  {/* Enhance */}
+                  <button
+                    type="button"
+                    onClick={handleEnhance}
+                    disabled={!input.trim() || enhancing}
+                    title="Enhance thought with AI"
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 7,
+                      border: 'none',
+                      background: input.trim() ? 'rgba(37, 99, 235, 0.1)' : 'rgba(0,0,0,0.04)',
+                      color: enhancing ? '#93c5fd' : input.trim() ? '#2563eb' : '#b0b8c4',
+                      cursor: input.trim() && !enhancing ? 'pointer' : 'default',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'background 120ms, color 120ms',
+                      animation: enhancing ? 'spin 1.5s ease-in-out infinite' : 'none',
+                    }}
+                  >
+                    <SparklesIcon />
+                  </button>
+                  {/* Send */}
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={!input.trim()}
+                    style={{
+                      width: 30,
+                      height: 30,
+                      borderRadius: 8,
+                      border: 'none',
+                      background: input.trim() ? '#2563eb' : 'rgba(0,0,0,0.06)',
+                      color: input.trim() ? '#fff' : '#b0b8c4',
+                      cursor: input.trim() ? 'pointer' : 'default',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'background 120ms',
+                    }}
+                  >
+                    <SendIcon />
+                  </button>
+                </div>
               </div>
             )}
 
@@ -351,8 +445,8 @@ export function ThoughtsCard({ open, onClose }: ThoughtsCardProps) {
               <div style={{
                 padding: '8px 12px',
                 borderRadius: 10,
-                background: 'rgba(37, 99, 235, 0.04)',
-                border: '1px solid rgba(37, 99, 235, 0.08)',
+                background: 'rgba(37, 99, 235, 0.06)',
+                border: '1px solid rgba(37, 99, 235, 0.1)',
                 marginBottom: 12,
                 fontSize: 12,
                 color: '#374151',
