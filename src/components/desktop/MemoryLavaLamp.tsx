@@ -104,6 +104,10 @@ export const MemoryLavaLamp = memo(function MemoryLavaLamp() {
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [loading, setLoading] = useState(true);
 
+  // Store fetched facts so we can init particles after canvas mounts
+  const factsRef = useRef<CortexFact[]>([]);
+  const initDoneRef = useRef(false);
+
   // Fetch data
   useEffect(() => {
     let cancelled = false;
@@ -111,30 +115,36 @@ export const MemoryLavaLamp = memo(function MemoryLavaLamp() {
       .then(r => r.json())
       .then(data => {
         if (cancelled) return;
-        const facts: CortexFact[] = data.facts ?? [];
+        factsRef.current = data.facts ?? [];
         setCategories(data.categories ?? []);
         setStats(data.stats ?? { totalFacts: 0, activeFacts: 0, totalMemories: 0 });
-
-        // Use container size (canvas may not be sized yet)
-        const container = containerRef.current;
-        const canvas = canvasRef.current;
-        if (!container || !canvas) return;
-
-        const rect = container.getBoundingClientRect();
-        const dpr = window.devicePixelRatio || 1;
-        const w = rect.width * dpr;
-        const h = rect.height * dpr;
-        canvas.width = w;
-        canvas.height = h;
-        canvas.style.width = `${rect.width}px`;
-        canvas.style.height = `${rect.height}px`;
-
-        particlesRef.current = facts.map(f => createParticle(f, w, h));
         setLoading(false);
       })
       .catch(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
+
+  // Initialize particles once canvas is mounted and data is loaded
+  useEffect(() => {
+    if (loading || initDoneRef.current) return;
+    const container = containerRef.current;
+    const canvas = canvasRef.current;
+    if (!container || !canvas) return;
+
+    const rect = container.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const w = rect.width * dpr;
+    const h = rect.height * dpr;
+    canvas.width = w;
+    canvas.height = h;
+    canvas.style.width = `${rect.width}px`;
+    canvas.style.height = `${rect.height}px`;
+
+    particlesRef.current = factsRef.current.map(f => createParticle(f, w, h));
+    initDoneRef.current = true;
+  }, [loading]);
 
   // Resize
   useEffect(() => {
@@ -323,22 +333,6 @@ export const MemoryLavaLamp = memo(function MemoryLavaLamp() {
     return () => cancelAnimationFrame(animRef.current);
   }, [loading]);
 
-  if (loading) {
-    return (
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        height: '100%',
-        background: '#0a0e1a',
-        color: '#94a3b8',
-        fontSize: 13,
-      }}>
-        Loading Cortex memory…
-      </div>
-    );
-  }
-
   return (
     <div
       ref={containerRef}
@@ -350,6 +344,20 @@ export const MemoryLavaLamp = memo(function MemoryLavaLamp() {
         overflow: 'hidden',
       }}
     >
+      {loading && (
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: '#94a3b8',
+          fontSize: 13,
+          zIndex: 50,
+        }}>
+          Loading Cortex memory…
+        </div>
+      )}
       <canvas
         ref={canvasRef}
         onMouseMove={handleMouseMove}
