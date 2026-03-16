@@ -309,12 +309,9 @@ async function discoverClaudeCodeSessions(): Promise<{
 
 export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
   try {
-    const { stdout } = await execFileAsync('openclaw', ['status', '--json'], {
-      cwd: WORKSPACE_ROOT,
-      maxBuffer: 4 * 1024 * 1024,
-    });
-
-    const parsed = JSON.parse(extractJsonPayload(stdout)) as OpenClawStatusPayload;
+    // Use gateway REST API (<50ms) with CLI fallback (30-40s)
+    const { getGatewayStatus } = await import('@/lib/openclaw/gateway-client');
+    const parsed = await getGatewayStatus() as unknown as OpenClawStatusPayload;
     const recent = (parsed.sessions?.recent ?? [])
       .filter((session) => !isDuplicateRunSurface(session.key))
       .slice(0, 10);
