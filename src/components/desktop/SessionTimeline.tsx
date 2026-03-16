@@ -30,8 +30,8 @@ interface TimelineSegment {
 // ── Constants ──
 
 const SEGMENT_COLORS: Record<SegmentKind, string> = {
-  thinking: '#3b82f6',  // blue
-  coding: '#22c55e',    // green
+  coding: '#2563eb',    // royal blue
+  thinking: '#93c5fd',  // light blue
   testing: '#f59e0b',   // amber
   error: '#ef4444',     // red
   idle: '#e5e7eb',      // light gray
