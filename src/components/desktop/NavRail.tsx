@@ -20,6 +20,7 @@ import {
   Bell,
   Search,
   Zap,
+  Lightbulb,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -39,6 +40,8 @@ interface NavRailProps {
   alertCount?: number;
   onAlertClick?: () => void;
   onSearchClick?: () => void;
+  thoughtsOpen?: boolean;
+  onThoughtsToggle?: () => void;
 }
 
 interface NavItem {
@@ -180,12 +183,14 @@ function UtilButton({
   expanded,
   onClick,
   badge,
+  active,
 }: {
   icon: LucideIcon;
   label: string;
   expanded: boolean;
   onClick?: () => void;
   badge?: number;
+  active?: boolean;
 }) {
   return (
     <button
@@ -200,8 +205,8 @@ function UtilButton({
         padding: '10px 12px',
         borderRadius: 12,
         border: 'none',
-        background: 'transparent',
-        color: '#6b7280',
+        background: active ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+        color: active ? '#2563eb' : '#6b7280',
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
         transition: 'background 150ms ease',
@@ -259,6 +264,8 @@ export function NavRail({
   alertCount = 0,
   onAlertClick,
   onSearchClick,
+  thoughtsOpen,
+  onThoughtsToggle,
 }: NavRailProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -319,8 +326,15 @@ export function NavRail({
         ))}
       </div>
 
-      {/* Bottom — Alerts + Settings */}
+      {/* Bottom — Thoughts + Alerts + Settings */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <UtilButton
+          icon={Lightbulb}
+          label="Thoughts"
+          expanded={expanded}
+          onClick={onThoughtsToggle}
+          active={thoughtsOpen}
+        />
         <UtilButton
           icon={Bell}
           label="Alerts"
