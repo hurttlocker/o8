@@ -560,10 +560,16 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill }: {
               fontSize: 11,
               fontWeight: 600,
               cursor: 'pointer',
-              transition: 'background 120ms',
+              transition: 'all 120ms',
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.04)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)';
+              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = '#fff';
+              e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.2)';
+            }}
           >
             Kill
           </button>
@@ -751,12 +757,19 @@ function AgentsTab() {
     if (!confirm(`Kill terminal "${agent.name}"?\n\nSession: ${agent.id}`)) return;
     setKillingId(agent.id);
     try {
-      await fetch('/api/openclaw/abort', {
+      const res = await fetch('/api/openclaw/kill-terminal', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionKey: agent.sessionKey || agent.id }),
+        body: JSON.stringify({
+          sessionKey: agent.sessionKey || agent.id,
+        }),
       });
-      setTimeout(fetchFleet, 1500);
+      const result = await res.json();
+      if (result.success) {
+        // Remove from local state immediately for instant feedback
+        setAgents(prev => prev.filter(a => a.id !== agent.id));
+      }
+      setTimeout(fetchFleet, 2000);
     } catch { /* silent */ }
     finally { setKillingId(null); }
   }, [fetchFleet]);
