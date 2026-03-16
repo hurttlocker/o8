@@ -208,22 +208,39 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
   const [selectedCluster, setSelectedCluster] = useState<ClusterData | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Fetch data
+  // Fetch data (initial + auto-refresh every 60s)
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/panel/cortex-graph')
-      .then(r => r.json())
-      .then(data => {
-        if (cancelled) return;
-        const c: ClusterData[] = data.clusters ?? [];
-        setClusters(c);
-        setStats(data.stats ?? {});
-        terrainRef.current = generateTerrain(c);
-        setLoading(false);
-      })
-      .catch(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
+
+    const fetchData = () => {
+      const q = searchQuery ? `?q=${encodeURIComponent(searchQuery)}` : '';
+      fetch(`/api/panel/cortex-graph${q}`)
+        .then(r => r.json())
+        .then(data => {
+          if (cancelled) return;
+          const c: ClusterData[] = data.clusters ?? [];
+          setClusters(c);
+          setStats(data.stats ?? {});
+          if (searchQuery) {
+            setSearchResults(data.searchResults ?? []);
+          }
+          // Only regenerate terrain if cluster data actually changed
+          const newKey = c.map(cl => `${cl.type}:${cl.factCount}`).join(',');
+          const oldKey = terrainRef.current.grid.length > 0
+            ? clusters.map(cl => `${cl.type}:${cl.factCount}`).join(',')
+            : '';
+          if (newKey !== oldKey) {
+            terrainRef.current = generateTerrain(c);
+          }
+          setLoading(false);
+        })
+        .catch(() => { if (!cancelled) setLoading(false); });
+    };
+
+    fetchData();
+    const interval = setInterval(fetchData, 60000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Canvas sizing
   useEffect(() => {
