@@ -36,10 +36,11 @@ import {
 } from 'lucide-react';
 import { MarkdownBody } from './MarkdownBody';
 import { IssueCreator } from './IssueCreator';
+import { MemoryLavaLamp } from './MemoryLavaLamp';
 
 // ── Tab Types ──
 
-export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'git-log' | 'image' | 'deploy' | 'welcome';
+export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'git-log' | 'image' | 'deploy' | 'memory' | 'welcome';
 
 export interface CanvasTab {
   id: string;
@@ -200,6 +201,7 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
     case 'git-log': return <GitCommit size={size} />;
     case 'image': return <FileText size={size} />;
     case 'deploy': return <Globe size={size} />;
+    case 'memory': return <Radio size={size} />;
     case 'welcome': return <BookOpen size={size} />;
   }
 }
@@ -232,6 +234,8 @@ const TabContent = memo(function TabContent({ tab, onSelectCommit }: { tab: Canv
       return <ImagePreview filePath={tab.resourceId} workspace={tab.meta?.workspace} />;
     case 'deploy':
       return <DeployViewer project={tab.meta?.project} />;
+    case 'memory':
+      return <MemoryLavaLamp />;
     case 'welcome':
       return <CanvasEmpty />;
     default:

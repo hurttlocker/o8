@@ -88,6 +88,15 @@ export default function DashboardPage() {
     });
   }, [openCanvasTab]);
 
+  const handleOpenMemory = useCallback(() => {
+    openCanvasTab({
+      id: 'memory:cortex',
+      kind: 'memory',
+      label: 'Cortex Memory',
+      resourceId: 'cortex',
+    });
+  }, [openCanvasTab]);
+
   const handleOpenDeploy = useCallback((project?: string) => {
     openCanvasTab({
       id: `deploy:${project ?? 'all'}`,
@@ -224,6 +233,7 @@ export default function DashboardPage() {
           onCreateIssue={handleCreateIssue}
           onOpenGitLog={handleOpenGitLog}
           onOpenDeploy={handleOpenDeploy}
+          onOpenMemory={handleOpenMemory}
         />
       </div>
 
