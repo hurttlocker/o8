@@ -71,14 +71,15 @@ function CortexLogo({ expanded }: { expanded: boolean }) {
       overflow: 'hidden',
       whiteSpace: 'nowrap',
     }}>
-      {/* Gradient shape — matches MisterADA logo */}
-      <div style={{
-        width: 24,
-        height: 20,
-        borderRadius: '8px 4px 8px 2px',
-        background: 'linear-gradient(135deg, #ef4444 0%, #f97316 55%, #eab308 100%)',
-        flexShrink: 0,
-      }} />
+      {/* Cortex brain logo */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src="/icons/icon-192x192.png"
+        alt="Cortex"
+        width={28}
+        height={28}
+        style={{ flexShrink: 0, borderRadius: 6 }}
+      />
       <motion.span
         initial={false}
         animate={{
