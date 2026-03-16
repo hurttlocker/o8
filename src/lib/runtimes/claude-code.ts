@@ -278,18 +278,20 @@ export const claudeCodeRuntime: AgentRuntime = {
     try {
       projectDirs = await readdir(CLAUDE_PROJECTS_DIR);
     } catch {
-      return [];
+      projectDirs = [];
     }
 
     const [allSessions, liveProcesses] = await Promise.all([
-      Promise.all(projectDirs.map((dir) => discoverProjectSessions(dir))).then((r) => r.flat()),
+      projectDirs.length > 0
+        ? Promise.all(projectDirs.map((dir) => discoverProjectSessions(dir))).then((r) => r.flat())
+        : Promise.resolve([]),
       findLiveClaudeProcesses(),
     ]);
 
     // Sort by most recent first
     allSessions.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
 
-    return allSessions.map((meta): RuntimeSession => {
+    const results: RuntimeSession[] = allSessions.map((meta): RuntimeSession => {
       const status = inferSessionStatus(meta, liveProcesses);
       const name = `${projectDisplayName(meta.projectPath)}${meta.gitBranch ? ` • ${meta.gitBranch}` : ''}`;
 
@@ -302,7 +304,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         status,
         ownership: 'discovered',
         sessionCapabilities: {
-          canSendInput: status !== 'running', // Can resume if not actively running
+          canSendInput: status !== 'running',
           canInterrupt: status === 'running',
           canReviewDiffs: true,
         },
@@ -311,6 +313,45 @@ export const claudeCodeRuntime: AgentRuntime = {
         model: 'claude',
       };
     });
+
+    // Create synthetic sessions for live Claude Code processes that don't match any project
+    const matchedCwds = new Set(
+      allSessions
+        .filter((m) => inferSessionStatus(m, liveProcesses) === 'running')
+        .map((m) => m.cwd)
+        .filter(Boolean),
+    );
+
+    for (const proc of liveProcesses) {
+      if (!proc.cwd) continue;
+      // Check if this process CWD is already covered by a project session
+      const alreadyMatched = [...matchedCwds].some(
+        (cwd) => cwd && (proc.cwd!.startsWith(cwd) || cwd.startsWith(proc.cwd!)),
+      );
+      if (alreadyMatched) continue;
+
+      // Create a synthetic session for this unmatched live process
+      const dirName = proc.cwd.split('/').pop() || 'unknown';
+      results.push({
+        sessionKey: `claude-code:live-${proc.pid}`,
+        runtimeId: 'claude-code',
+        displayName: dirName,
+        cwd: proc.cwd,
+        branch: undefined,
+        status: 'running',
+        ownership: 'discovered',
+        sessionCapabilities: {
+          canSendInput: false,
+          canInterrupt: true,
+          canReviewDiffs: false,
+        },
+        lastActivityAt: new Date(),
+        initialTask: `Live Claude Code session (PID ${proc.pid})`,
+        model: 'claude',
+      });
+    }
+
+    return results;
   },
 
   async readTranscript(sessionKey: string, _sinceId?: string, limit = 50): Promise<RuntimeTranscriptEntry[]> {

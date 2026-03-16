@@ -244,6 +244,7 @@ const AgentCard = memo(function AgentCard({
   onToggle: () => void;
   onSelectSession?: (sessionKey: string) => void;
 }) {
+  const [expandedAgentId, setExpandedAgentId] = useState<string | null>(null);
   const dotColor = group.hasRunning ? '#22c55e' : '#6b7280';
   const model = group.primaryModel;
   const ctx = group.bestContextPct > 0 ? { usedPercent: group.bestContextPct } : null;
@@ -371,7 +372,8 @@ const AgentCard = memo(function AgentCard({
           statusGroups.find(g => g.key === status)?.agents.push(agent);
         }
 
-        const renderCard = (agent: AgentDetail) => {
+        const renderAgent = (agent: AgentDetail) => {
+          const isExpanded = expandedAgentId === agent.id;
           const isRunning = agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy';
           const agentDot = isRunning ? '#22c55e' : '#9ca3af';
           const agentCtx = agent.context?.usedPercent ?? 0;
@@ -379,29 +381,85 @@ const AgentCard = memo(function AgentCard({
           const fullName = agent.surfaceLabel || agent.name;
           const branch = agent.currentTask || null;
           const progress = agentCtx > 0 ? agentCtx / 100 : 0;
-          const model = agent.model ? agent.model.replace('claude-', '').replace(/-\d+$/, '').replace('openai-codex/', '').replace('anthropic/', '') : '';
+          const agentModel = agent.model ? agent.model.replace('claude-', '').replace(/-\d+$/, '').replace('openai-codex/', '').replace('anthropic/', '') : '';
 
+          // ── PILL (collapsed) ──
+          if (!isExpanded) {
+            return (
+              <div
+                key={agent.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setExpandedAgentId(agent.id);
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 10px', borderRadius: 10,
+                  background: '#fff',
+                  border: '1px solid rgba(0,0,0,0.05)',
+                  cursor: 'pointer',
+                  transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(37,99,235,0.03)';
+                  e.currentTarget.style.border = '1px solid rgba(37,99,235,0.1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = '#fff';
+                  e.currentTarget.style.border = '1px solid rgba(0,0,0,0.05)';
+                }}
+              >
+                <span style={{
+                  width: 7, height: 7, borderRadius: '50%',
+                  background: agentDot, display: 'block', flexShrink: 0,
+                  boxShadow: isRunning ? `0 0 5px ${agentDot}` : 'none',
+                }} />
+                <span style={{
+                  fontSize: 12, fontWeight: 600, color: '#374151',
+                  flex: 1, minWidth: 0,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  letterSpacing: '-0.01em',
+                }}>
+                  {fullName}
+                </span>
+                {agentModel && (
+                  <span style={{ fontSize: 9, color: '#b0b8c4' }}>{agentModel}</span>
+                )}
+                {/* Mini context ring */}
+                {agentCtx > 0 && (
+                  <div style={{ position: 'relative', width: 22, height: 22, flexShrink: 0 }}>
+                    <svg width={22} height={22} style={{ display: 'block', transform: 'rotate(-90deg)' }}>
+                      <circle cx={11} cy={11} r={9} fill="none" stroke="rgba(0,0,0,0.04)" strokeWidth={1.5} />
+                      <circle cx={11} cy={11} r={9} fill="none" stroke={ctxColor(agentCtx)} strokeWidth={1.5}
+                        strokeDasharray={2 * Math.PI * 9}
+                        strokeDashoffset={2 * Math.PI * 9 * (1 - progress)}
+                        strokeLinecap="round"
+                      />
+                    </svg>
+                    <span style={{
+                      position: 'absolute', inset: 0,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 7, fontWeight: 800, color: ctxColor(agentCtx),
+                      fontFamily: 'SF Mono, Menlo, monospace',
+                    }}>
+                      {agentCtx}
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          // ── EXPANDED (full card) ──
           return (
             <div
               key={agent.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (agent.sessionKey && onSelectSession) onSelectSession(agent.sessionKey);
-              }}
               style={{
                 padding: '12px', borderRadius: 12,
                 background: '#fff',
-                border: '1px solid rgba(0,0,0,0.06)',
-                cursor: agent.sessionKey ? 'pointer' : 'default',
+                border: '1px solid rgba(37,99,235,0.12)',
+                boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
                 transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.border = '1px solid rgba(37,99,235,0.12)';
-                e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.06)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.border = '1px solid rgba(0,0,0,0.06)';
-                e.currentTarget.style.boxShadow = 'none';
               }}
             >
               {/* Identity row */}
@@ -412,21 +470,16 @@ const AgentCard = memo(function AgentCard({
                   border: `1.5px solid ${agentDot}30`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 13, fontWeight: 700, color: agentDot, flexShrink: 0,
-                  letterSpacing: '-0.02em',
                 }}>
                   {agentName[0]}
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#111827', letterSpacing: '-0.02em' }}>
-                      {fullName}
-                    </span>
-                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#111827', letterSpacing: '-0.02em' }}>
+                    {fullName}
+                  </span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
-                    {model && (
-                      <span style={{ fontSize: 10, color: '#94a3b8', letterSpacing: '-0.01em' }}>
-                        {model}
-                      </span>
+                    {agentModel && (
+                      <span style={{ fontSize: 10, color: '#94a3b8' }}>{agentModel}</span>
                     )}
                     {branch && (
                       <>
@@ -442,7 +495,6 @@ const AgentCard = memo(function AgentCard({
                     )}
                   </div>
                 </div>
-                {/* Context ring */}
                 {progress > 0 && (
                   <div style={{ position: 'relative', width: 32, height: 32, flexShrink: 0 }}>
                     <svg width={32} height={32} style={{ display: 'block', transform: 'rotate(-90deg)' }}>
@@ -466,7 +518,7 @@ const AgentCard = memo(function AgentCard({
                 )}
               </div>
 
-              {/* Timeline + stats row */}
+              {/* Timeline bar */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
                 <div style={{
                   display: 'flex', height: 4, borderRadius: 2, overflow: 'hidden',
@@ -484,13 +536,45 @@ const AgentCard = memo(function AgentCard({
                   )}
                 </div>
                 {agentCtx > 0 && (
-                  <span style={{
-                    fontSize: 10, fontWeight: 600, color: '#94a3b8', flexShrink: 0,
-                    fontFamily: 'SF Mono, Menlo, monospace',
-                  }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: '#94a3b8', flexShrink: 0, fontFamily: 'SF Mono, Menlo, monospace' }}>
                     ctx {agentCtx}%
                   </span>
                 )}
+              </div>
+
+              {/* Action row */}
+              <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (agent.sessionKey && onSelectSession) onSelectSession(agent.sessionKey);
+                  }}
+                  style={{
+                    flex: 1, padding: '6px 0', borderRadius: 8,
+                    background: '#2563eb', color: '#fff', border: 'none',
+                    fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                    transition: 'opacity 150ms',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+                >
+                  Open Chat
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExpandedAgentId(null);
+                  }}
+                  style={{
+                    padding: '6px 12px', borderRadius: 8,
+                    background: 'rgba(0,0,0,0.04)', color: '#6b7280', border: 'none',
+                    fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  Collapse
+                </button>
               </div>
             </div>
           );
@@ -521,8 +605,8 @@ const AgentCard = memo(function AgentCard({
                     {g.agents.length}
                   </span>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {g.agents.map(renderCard)}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {g.agents.map(renderAgent)}
                 </div>
               </div>
             ))}
