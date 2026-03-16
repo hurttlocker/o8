@@ -11,6 +11,7 @@ import { AlertBell } from '@/components/shared/AlertBell';
 import { AlertTray } from '@/components/shared/AlertTray';
 import { AlertToast } from '@/components/shared/AlertToast';
 import { NavRail, type NavSection } from '@/components/desktop/NavRail';
+import { TitleBar } from '@/components/desktop/TitleBar';
 
 export default function DashboardPage() {
   return (
@@ -254,11 +255,21 @@ function DashboardInner() {
     <div style={{
       height: '100vh',
       display: 'flex',
+      flexDirection: 'column',
       background: '#eef1f6',
       color: '#1e293b',
       fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif',
       overflow: 'hidden',
     }}>
+      {/* ── Title Bar ── */}
+      <TitleBar onSearchClick={() => setSearchOpen(true)} />
+
+      {/* ── Main Layout (horizontal) ── */}
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        overflow: 'hidden',
+      }}>
       {/* ── Nav Rail ── */}
       <NavRail
         activeSection={activeNavSection}
@@ -276,7 +287,7 @@ function DashboardInner() {
       <div style={{
         width: leftWidth,
         flexShrink: 0,
-        height: '100vh',
+        height: '100%',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -526,7 +537,7 @@ function DashboardInner() {
       <div style={{
         width: rightWidth,
         flexShrink: 0,
-        height: '100vh',
+        height: '100%',
         borderLeft: '1px solid rgba(0,0,0,0.06)',
       }}>
         <DesktopChat
@@ -544,6 +555,7 @@ function DashboardInner() {
 
       {/* ── Alert Toast (desktop only — urgent alerts slide in top-right) ── */}
       <AlertToast alerts={activeAlerts} onAction={handleAlertAction} />
+      </div>{/* end main layout */}
     </div>
   );
 }
