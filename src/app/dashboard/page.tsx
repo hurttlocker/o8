@@ -12,6 +12,7 @@ import { AlertTray } from '@/components/shared/AlertTray';
 import { AlertToast } from '@/components/shared/AlertToast';
 import { NavRail, type NavSection } from '@/components/desktop/NavRail';
 import { TitleBar } from '@/components/desktop/TitleBar';
+import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 
 export default function DashboardPage() {
   return (
@@ -296,6 +297,9 @@ function DashboardInner() {
           />
         )}
       />
+
+      {/* ── Session Timeline ── */}
+      <SessionTimeline />
 
       {/* ── Main Layout (horizontal) ── */}
       <div style={{
