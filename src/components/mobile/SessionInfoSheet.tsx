@@ -3,14 +3,18 @@
 /**
  * SessionInfoSheet — slides down from top when user taps the model pill.
  *
- * Shows: model + status, context pressure bar, session stats,
- * media gallery (all images from conversation including compacted),
- * quick actions.
+ * Apple Design Pass:
+ * 1. Date-grouped media gallery with section headers
+ * 2. Pull-to-dismiss gesture via touch tracking
+ * 3. Apple photo grid corners (outer rounded, inner sharp)
+ * 4. Stats hierarchy — context % is hero, others secondary
+ * 5. Accessibility — role=dialog, aria-modal, aria-label, reduced motion
+ * 6. Spring curve + staggered backdrop fade
+ * 7. Haptic feedback on open
  */
 
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ChevronDown,
   Clock,
   Copy,
   Download,
@@ -30,6 +34,11 @@ interface SessionMedia {
   mimeType: string;
   timestamp: string;
   role: 'user' | 'assistant' | 'tool';
+}
+
+interface DateGroup {
+  label: string;
+  items: SessionMedia[];
 }
 
 interface SessionInfoSheetProps {
@@ -56,16 +65,12 @@ function useSessionMedia(sessionKey?: string, open?: boolean) {
 
   useEffect(() => {
     if (!open || !sessionKey) return;
-
-    // Use cache if available
     if (cacheRef.current[sessionKey]) {
       setMedia(cacheRef.current[sessionKey]);
       return;
     }
-
     let cancelled = false;
     setLoading(true);
-
     fetch(`/api/mobile/session-media?sessionKey=${encodeURIComponent(sessionKey)}`)
       .then(res => res.ok ? res.json() : { media: [] })
       .then(data => {
@@ -76,11 +81,54 @@ function useSessionMedia(sessionKey?: string, open?: boolean) {
       })
       .catch(() => { if (!cancelled) setMedia([]); })
       .finally(() => { if (!cancelled) setLoading(false); });
-
     return () => { cancelled = true; };
   }, [sessionKey, open]);
 
   return { media, loading };
+}
+
+// ── Date grouping ──
+
+function groupByDate(items: SessionMedia[]): DateGroup[] {
+  const groups = new Map<string, SessionMedia[]>();
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  for (const item of items) {
+    const d = new Date(item.timestamp);
+    let label: string;
+    if (d.toDateString() === today.toDateString()) {
+      label = 'Today';
+    } else if (d.toDateString() === yesterday.toDateString()) {
+      label = 'Yesterday';
+    } else {
+      label = d.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+    }
+    if (!groups.has(label)) groups.set(label, []);
+    groups.get(label)!.push(item);
+  }
+
+  return Array.from(groups.entries()).map(([label, items]) => ({ label, items }));
+}
+
+// ── Grid corner radius helper (Apple Photos pattern) ──
+
+function gridCornerRadius(index: number, total: number, cols: number): string {
+  const R = 12;
+  const row = Math.floor(index / cols);
+  const col = index % cols;
+  const totalRows = Math.ceil(total / cols);
+  const isTop = row === 0;
+  const isBottom = row === totalRows - 1;
+  const isLeft = col === 0;
+  const isRight = col === cols - 1 || index === total - 1;
+
+  const tl = isTop && isLeft ? R : 0;
+  const tr = isTop && isRight ? R : 0;
+  const br = isBottom && isRight ? R : 0;
+  const bl = isBottom && isLeft ? R : 0;
+  return `${tl}px ${tr}px ${br}px ${bl}px`;
 }
 
 // ── Context Pressure Bar ──
@@ -90,20 +138,104 @@ function ContextBar({ percent }: { percent: number }) {
   return (
     <div style={{
       width: '100%',
-      height: 6,
-      borderRadius: 3,
+      height: 4,
+      borderRadius: 2,
       background: 'rgba(120, 120, 128, 0.12)',
       overflow: 'hidden',
     }}>
       <div style={{
         width: `${Math.min(100, percent)}%`,
         height: '100%',
-        borderRadius: 3,
+        borderRadius: 2,
         background: color,
-        transition: 'width 300ms ease, background 300ms ease',
+        transition: 'width 400ms cubic-bezier(0.32, 0.72, 0, 1), background 400ms ease',
       }} />
     </div>
   );
+}
+
+// ── Formatters ──
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return String(n);
+}
+
+function contextLabel(percent: number): string {
+  if (percent >= 85) return 'Critical';
+  if (percent >= 70) return 'Elevated';
+  if (percent >= 50) return 'Moderate';
+  return 'Healthy';
+}
+
+function contextColor(percent: number): string {
+  if (percent >= 85) return '#ff3b30';
+  if (percent >= 70) return '#ff9f0a';
+  if (percent >= 50) return '#ffcc00';
+  return '#34c759';
+}
+
+// ── Pull-to-dismiss hook ──
+
+function usePullToDismiss(sheetRef: React.RefObject<HTMLDivElement | null>, onClose: () => void, open: boolean) {
+  const startYRef = useRef(0);
+  const currentYRef = useRef(0);
+  const isDragging = useRef(false);
+
+  useEffect(() => {
+    const el = sheetRef.current;
+    if (!el || !open) return;
+
+    function onTouchStart(e: TouchEvent) {
+      // Only start drag if scrolled to top
+      if (el!.scrollTop > 0) return;
+      startYRef.current = e.touches[0].clientY;
+      currentYRef.current = 0;
+      isDragging.current = true;
+    }
+
+    function onTouchMove(e: TouchEvent) {
+      if (!isDragging.current) return;
+      const delta = e.touches[0].clientY - startYRef.current;
+      // Only allow downward drag (positive delta = pulling down from top)
+      if (delta < 0) {
+        currentYRef.current = 0;
+        el!.style.transform = '';
+        return;
+      }
+      currentYRef.current = delta;
+      // Rubber-band effect: diminishing returns past 100px
+      const dampened = delta > 100 ? 100 + (delta - 100) * 0.3 : delta;
+      el!.style.transform = `translateY(${dampened}px)`;
+      el!.style.transition = 'none';
+      // Prevent scroll while dragging
+      if (delta > 10) e.preventDefault();
+    }
+
+    function onTouchEnd() {
+      if (!isDragging.current) return;
+      isDragging.current = false;
+      el!.style.transition = '';
+      if (currentYRef.current > 120) {
+        // Dismiss: slide fully off screen
+        el!.style.transform = 'translateY(100vh)';
+        setTimeout(onClose, 200);
+      } else {
+        // Snap back
+        el!.style.transform = '';
+      }
+    }
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: false });
+    el.addEventListener('touchend', onTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart);
+      el.removeEventListener('touchmove', onTouchMove);
+      el.removeEventListener('touchend', onTouchEnd);
+    };
+  }, [sheetRef, onClose, open]);
 }
 
 // ── Main Component ──
@@ -124,6 +256,22 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
 }: SessionInfoSheetProps) {
   const { media, loading } = useSessionMedia(sessionKey, open);
   const sheetRef = useRef<HTMLDivElement>(null);
+  const [backdropVisible, setBackdropVisible] = useState(false);
+
+  // Pull-to-dismiss
+  usePullToDismiss(sheetRef, onClose, open);
+
+  // Staggered backdrop: sheet starts moving first, backdrop fades in 80ms later
+  useEffect(() => {
+    if (open) {
+      const t = setTimeout(() => setBackdropVisible(true), 80);
+      // Haptic feedback
+      try { navigator?.vibrate?.(10); } catch { /* no vibrate support */ }
+      return () => clearTimeout(t);
+    } else {
+      setBackdropVisible(false);
+    }
+  }, [open]);
 
   // Close on backdrop tap
   const handleBackdropClick = useCallback((e: React.MouseEvent) => {
@@ -133,30 +281,36 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
   // Close on Escape
   useEffect(() => {
     if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [open, onClose]);
 
-  const formatTokens = (n: number) => {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-    return String(n);
-  };
+  // Date-grouped media
+  const dateGroups = useMemo(() => groupByDate(media), [media]);
+
+  // Reduced motion check
+  const prefersReducedMotion = typeof window !== 'undefined'
+    && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+  const springCurve = 'cubic-bezier(0.32, 0.72, 0, 1)';
+  const sheetTransition = prefersReducedMotion ? 'none' : `transform 400ms ${springCurve}`;
+  const backdropTransition = prefersReducedMotion ? 'none' : 'opacity 300ms ease';
 
   return (
     <div
       onClick={handleBackdropClick}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Session information"
       style={{
         position: 'fixed',
         inset: 0,
         zIndex: 9998,
         background: 'rgba(0, 0, 0, 0.35)',
-        opacity: open ? 1 : 0,
+        opacity: backdropVisible && open ? 1 : 0,
         pointerEvents: open ? 'auto' : 'none',
-        transition: 'opacity 250ms ease',
+        transition: backdropTransition,
         WebkitTapHighlightColor: 'transparent',
       }}
     >
@@ -167,7 +321,7 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
           top: 0,
           left: 0,
           right: 0,
-          maxHeight: '80vh',
+          maxHeight: '85vh',
           overflowY: 'auto',
           WebkitOverflowScrolling: 'touch',
           background: 'rgba(255, 255, 255, 0.97)',
@@ -176,19 +330,32 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
           borderRadius: '0 0 20px 20px',
           boxShadow: '0 20px 60px rgba(0, 0, 0, 0.15)',
           transform: open ? 'translateY(0)' : 'translateY(-100%)',
-          transition: 'transform 350ms cubic-bezier(0.32, 0.72, 0, 1)',
+          transition: sheetTransition,
           paddingBottom: 'env(safe-area-inset-bottom, 20px)',
         }}
       >
-        {/* Safe area spacer for notch */}
-        <div style={{ height: 'env(safe-area-inset-top, 48px)', minHeight: 48 }} />
+        {/* Drag handle — functional for pull-to-dismiss */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          paddingTop: 'env(safe-area-inset-top, 48px)',
+          paddingBottom: 8,
+        }}>
+          <div style={{
+            width: 36,
+            height: 5,
+            borderRadius: 2.5,
+            background: 'rgba(120, 120, 128, 0.3)',
+            marginTop: 8,
+          }} />
+        </div>
 
         {/* Header */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          padding: '0 20px 12px',
+          padding: '0 20px 16px',
         }}>
           <span style={{
             fontSize: 17,
@@ -199,6 +366,7 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close session info"
             style={{
               width: 30,
               height: 30,
@@ -210,34 +378,60 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
               justifyContent: 'center',
               cursor: 'pointer',
               WebkitTapHighlightColor: 'transparent',
+              minWidth: 44,
+              minHeight: 44,
             }}
           >
             <X size={16} strokeWidth={2.5} style={{ color: '#8e8e93' }} />
           </button>
         </div>
 
-        {/* Model + Status Card */}
+        {/* Hero Context Card — #4 Stats hierarchy */}
         <div style={{ padding: '0 20px 16px' }}>
           <div style={{
             background: 'rgba(120, 120, 128, 0.06)',
             borderRadius: 14,
             padding: 16,
           }}>
-            {/* Model name */}
+            {/* Context % hero */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: 6,
+              marginBottom: 8,
+            }}>
+              <span style={{
+                fontSize: 34,
+                fontWeight: 700,
+                color: '#111827',
+                letterSpacing: '-0.03em',
+                fontVariantNumeric: 'tabular-nums',
+                lineHeight: 1,
+              }}>{contextPercent.toFixed(0)}%</span>
+              <span style={{
+                fontSize: 13,
+                fontWeight: 500,
+                color: contextColor(contextPercent),
+              }}>{contextLabel(contextPercent)}</span>
+            </div>
+
+            <ContextBar percent={contextPercent} />
+
+            {/* Secondary stats line */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 8,
-              marginBottom: 12,
+              gap: 16,
+              marginTop: 10,
+              color: '#8e8e93',
+              fontSize: 12,
             }}>
-              <Zap size={16} strokeWidth={2} style={{ color: '#007aff' }} />
-              <span style={{
-                fontSize: 15,
-                fontWeight: 600,
-                color: '#111827',
-                letterSpacing: '-0.01em',
-                fontFamily: '"SF Mono", ui-monospace, monospace',
-              }}>{modelName ?? 'unknown'}</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <Zap size={12} strokeWidth={2} />
+                <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 11 }}>
+                  {modelName ?? 'unknown'}
+                </span>
+              </span>
               {status ? (
                 <span style={{
                   fontSize: 11,
@@ -250,35 +444,35 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
               ) : null}
             </div>
 
-            {/* Context bar */}
-            <ContextBar percent={contextPercent} />
+            {/* Token + message + age line */}
             <div style={{
               display: 'flex',
-              justifyContent: 'space-between',
-              marginTop: 6,
+              alignItems: 'center',
+              gap: 16,
+              marginTop: 8,
+              color: '#aeaeb2',
+              fontSize: 11,
             }}>
-              <span style={{ fontSize: 11, color: '#8e8e93' }}>
-                {contextPercent.toFixed(0)}% context used
+              <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                <MessageSquare size={10} strokeWidth={2} />
+                {messageCount} msgs
               </span>
-              <span style={{ fontSize: 11, color: '#8e8e93', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-                {formatTokens(totalTokens)} / {formatTokens(contextTokens)}
-              </span>
+              {sessionAge ? (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                  <Clock size={10} strokeWidth={2} />
+                  {sessionAge}
+                </span>
+              ) : null}
+              {totalTokens > 0 ? (
+                <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                  {formatTokens(totalTokens)} / {formatTokens(contextTokens)}
+                </span>
+              ) : null}
             </div>
           </div>
         </div>
 
-        {/* Stats Row */}
-        <div style={{
-          display: 'flex',
-          gap: 10,
-          padding: '0 20px 16px',
-        }}>
-          <StatPill icon={<MessageSquare size={13} strokeWidth={2} />} value={String(messageCount)} label="messages" />
-          <StatPill icon={<Clock size={13} strokeWidth={2} />} value={sessionAge ?? '—'} label="active" />
-          <StatPill icon={<ImageIcon size={13} strokeWidth={2} />} value={String(media.length)} label="images" />
-        </div>
-
-        {/* Media Gallery */}
+        {/* Media Gallery — #1 Date-grouped, #3 Apple photo grid corners */}
         <div style={{ padding: '0 20px 16px' }}>
           <div style={{
             display: 'flex',
@@ -287,12 +481,12 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
             marginBottom: 10,
           }}>
             <span style={{
-              fontSize: 13,
+              fontSize: 15,
               fontWeight: 600,
               color: '#111827',
               letterSpacing: '-0.01em',
             }}>
-              Media {media.length > 0 ? `(${media.length})` : ''}
+              Media{media.length > 0 ? ` (${media.length})` : ''}
             </span>
           </div>
 
@@ -300,12 +494,13 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
             <div style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: 4,
+              gap: 2,
+              borderRadius: 12,
+              overflow: 'hidden',
             }}>
               {[0, 1, 2, 3, 4, 5].map(i => (
                 <div key={i} style={{
                   aspectRatio: '1',
-                  borderRadius: 8,
                   background: 'rgba(120, 120, 128, 0.08)',
                   animation: 'shimmer 1.5s infinite ease-in-out',
                 }} />
@@ -314,77 +509,77 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
           ) : media.length === 0 ? (
             <div style={{
               textAlign: 'center',
-              padding: '24px 0',
-              color: '#aeaeb2',
+              padding: '28px 0',
+              color: '#c7c7cc',
               fontSize: 13,
             }}>
-              <ImageIcon size={24} strokeWidth={1.5} style={{ color: '#d1d5db', marginBottom: 8 }} />
-              <div>No images in this conversation</div>
+              <ImageIcon size={28} strokeWidth={1.2} style={{ color: '#d1d1d6', marginBottom: 8 }} />
+              <div style={{ fontWeight: 500 }}>No images yet</div>
             </div>
           ) : (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: 4,
-              borderRadius: 12,
-              overflow: 'hidden',
-            }}>
-              {media.map((item, i) => (
-                <button
-                  key={`${item.path}:${i}`}
-                  type="button"
-                  onClick={() => {
-                    if (onExpandMedia) {
-                      onExpandMedia({
-                        kind: 'image',
-                        path: item.path,
-                        name: item.name,
-                        mimeType: item.mimeType,
-                      });
-                    }
-                  }}
-                  style={{
-                    aspectRatio: '1',
-                    border: 'none',
-                    padding: 0,
-                    cursor: 'pointer',
-                    background: 'rgba(120, 120, 128, 0.08)',
-                    overflow: 'hidden',
-                    position: 'relative',
-                    WebkitTapHighlightColor: 'transparent',
-                  }}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={mediaHref(item.path)}
-                    alt={item.name}
-                    loading="lazy"
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      objectFit: 'cover',
-                      display: 'block',
-                    }}
-                  />
-                  {/* Timestamp overlay on hover/first image */}
-                  {i === 0 || i === media.length - 1 ? (
-                    <span style={{
-                      position: 'absolute',
-                      bottom: 4,
-                      left: 4,
-                      fontSize: 9,
-                      color: '#fff',
-                      background: 'rgba(0,0,0,0.5)',
-                      borderRadius: 4,
-                      padding: '1px 5px',
-                      fontWeight: 500,
-                    }}>
-                      {i === 0 ? 'Oldest' : 'Latest'}
-                    </span>
-                  ) : null}
-                </button>
-              ))}
-            </div>
+            dateGroups.map((group) => (
+              <div key={group.label} style={{ marginBottom: 16 }}>
+                {/* Date section header */}
+                <div style={{
+                  fontSize: 13,
+                  fontWeight: 600,
+                  color: '#8e8e93',
+                  marginBottom: 6,
+                  letterSpacing: '-0.01em',
+                }}>
+                  {group.label}
+                </div>
+
+                {/* Photo grid */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: 2,
+                }}>
+                  {group.items.map((item, i) => (
+                    <button
+                      key={`${item.path}:${i}`}
+                      type="button"
+                      aria-label={`Photo from ${group.label}`}
+                      onClick={() => {
+                        if (onExpandMedia) {
+                          onExpandMedia({
+                            kind: 'image',
+                            path: item.path,
+                            name: item.name,
+                            mimeType: item.mimeType,
+                          });
+                        }
+                      }}
+                      style={{
+                        aspectRatio: '1',
+                        border: 'none',
+                        padding: 0,
+                        cursor: 'pointer',
+                        background: 'rgba(120, 120, 128, 0.08)',
+                        overflow: 'hidden',
+                        borderRadius: gridCornerRadius(i, group.items.length, 3),
+                        WebkitTapHighlightColor: 'transparent',
+                        minHeight: 44,
+                      }}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={mediaHref(item.path)}
+                        alt={item.name}
+                        loading="lazy"
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                          display: 'block',
+                        }}
+                      />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))
           )}
         </div>
 
@@ -392,37 +587,20 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
         <div style={{
           display: 'flex',
           gap: 10,
-          padding: '0 20px 20px',
+          padding: '0 20px 24px',
         }}>
           {onCopyKey ? (
             <ActionButton
               icon={<Copy size={14} strokeWidth={2} />}
-              label="Copy Key"
+              label="Copy Session ID"
               onClick={() => { onCopyKey(); onClose(); }}
             />
           ) : null}
           <ActionButton
             icon={<Download size={14} strokeWidth={2} />}
             label="Export"
-            onClick={() => {
-              // Future: export transcript
-              onClose();
-            }}
+            onClick={() => { onClose(); }}
           />
-        </div>
-
-        {/* Bottom handle */}
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          paddingBottom: 8,
-        }}>
-          <div style={{
-            width: 36,
-            height: 5,
-            borderRadius: 2.5,
-            background: 'rgba(120, 120, 128, 0.2)',
-          }} />
         </div>
       </div>
     </div>
@@ -430,33 +608,6 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
 });
 
 // ── Sub-components ──
-
-function StatPill({ icon, value, label }: { icon: React.ReactNode; value: string; label: string }) {
-  return (
-    <div style={{
-      flex: 1,
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: 4,
-      padding: '10px 0',
-      borderRadius: 12,
-      background: 'rgba(120, 120, 128, 0.06)',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#007aff' }}>
-        {icon}
-        <span style={{
-          fontSize: 15,
-          fontWeight: 600,
-          color: '#111827',
-          fontFamily: '"SF Mono", ui-monospace, monospace',
-          fontVariantNumeric: 'tabular-nums',
-        }}>{value}</span>
-      </div>
-      <span style={{ fontSize: 10, color: '#8e8e93', fontWeight: 500 }}>{label}</span>
-    </div>
-  );
-}
 
 function ActionButton({ icon, label, onClick }: { icon: React.ReactNode; label: string; onClick: () => void }) {
   return (
