@@ -195,28 +195,49 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     return totals;
   }, [segments]);
 
-  // Find which segment the cursor is over
-  const hoveredSegment = useMemo(() => {
-    if (hoverMin === null) return null;
-    for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i];
-      if (hoverMin >= seg.startMin && hoverMin < seg.startMin + seg.durationMin) return i;
-    }
-    return null;
-  }, [hoverMin, segments]);
+  // Precompute cumulative pixel positions for each segment.
+  // Segments are rendered as flex children occupying a % of the bar.
+  // We calculate what fraction of the bar each segment covers and
+  // build a lookup table so cursor position → segment is O(1).
+  const segmentRanges = useMemo(() => {
+    let cumPct = 0;
+    return segments.map((seg) => {
+      const startPct = cumPct;
+      const widthPct = seg.durationMin / totalMinutes;
+      cumPct += widthPct;
+      return { startPct, endPct: cumPct };
+    });
+  }, [segments, totalMinutes]);
+
+  const [hoveredSegIdx, setHoveredSegIdx] = useState<number | null>(null);
 
   const handleBarMouseMove = useCallback((e: React.MouseEvent) => {
     if (!barRef.current || totalMinutes === 0) return;
     const rect = barRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const pct = Math.max(0, Math.min(1, x / rect.width));
+
+    // Find segment at this pixel position
+    let foundIdx: number | null = null;
+    for (let i = 0; i < segmentRanges.length; i++) {
+      if (pct >= segmentRanges[i].startPct && pct < segmentRanges[i].endPct) {
+        foundIdx = i;
+        break;
+      }
+    }
+
+    // Map pixel position to minutes for the timestamp
+    const min = Math.round(pct * totalMinutes);
+
     setHoverX(x);
-    setHoverMin(Math.round(pct * totalMinutes));
-  }, [totalMinutes]);
+    setHoverMin(min);
+    setHoveredSegIdx(foundIdx);
+  }, [totalMinutes, segmentRanges]);
 
   const handleBarMouseLeave = useCallback(() => {
     setHoverX(null);
     setHoverMin(null);
+    setHoveredSegIdx(null);
   }, []);
 
   if (loading || totalMinutes === 0) return null;
@@ -268,7 +289,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
         {/* Segments */}
         {segments.map((seg, i) => {
           const widthPct = (seg.durationMin / totalMinutes) * 100;
-          const isHovered = hoveredSegment === i;
+          const isHovered = hoveredSegIdx === i;
           return (
             <div
               key={i}
@@ -276,8 +297,8 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                 width: `${widthPct}%`,
                 height: '100%',
                 background: SEGMENT_COLORS[seg.kind],
-                opacity: isHovered ? 1 : 0.8,
-                transition: 'opacity 80ms',
+                opacity: isHovered ? 1 : 0.75,
+                transition: 'opacity 60ms ease-out',
                 borderRight: i < segments.length - 1 ? '1px solid rgba(255,255,255,0.25)' : 'none',
                 borderRadius: i === 0 ? '4px 0 0 4px' : i === segments.length - 1 ? '0 4px 4px 0' : 0,
               }}
@@ -285,64 +306,80 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
           );
         })}
 
-        {/* Hover scrubber line + timestamp */}
-        {hoverX !== null && hoverMin !== null && (
-          <>
-            {/* Vertical line */}
-            <div style={{
-              position: 'absolute',
-              left: hoverX,
-              top: -4,
-              bottom: -4,
-              width: 1.5,
-              background: '#111827',
-              borderRadius: 1,
-              pointerEvents: 'none',
-              zIndex: 5,
-            }} />
-            {/* Timestamp badge above */}
-            <div style={{
-              position: 'absolute',
-              left: hoverX,
-              bottom: '100%',
-              transform: 'translateX(-50%)',
-              marginBottom: 6,
-              padding: '2px 7px',
-              borderRadius: 5,
-              background: '#111827',
-              color: '#fff',
-              fontSize: 9,
-              fontWeight: 600,
-              whiteSpace: 'nowrap',
-              pointerEvents: 'none',
-              zIndex: 10,
-              letterSpacing: '0.02em',
-            }}>
-              {formatTime(hoverMin)}
-            </div>
-            {/* Segment label below */}
-            {hoveredSegment !== null && (
+        {/* Hover scrubber line + badges */}
+        {hoverX !== null && hoverMin !== null && (() => {
+          const seg = hoveredSegIdx !== null ? segments[hoveredSegIdx] : null;
+          const lineColor = seg ? SEGMENT_COLORS[seg.kind] : '#111827';
+          const badgeBg = seg ? SEGMENT_COLORS[seg.kind] : '#111827';
+          const kindLabel = seg ? SEGMENT_LABELS[seg.kind] : '';
+          const durLabel = seg ? formatDuration(seg.durationMin) : '';
+          const agentLabel = seg?.agent ? ` · ${seg.agent}` : '';
+
+          return (
+            <>
+              {/* Vertical line — colored to match segment */}
               <div style={{
                 position: 'absolute',
                 left: hoverX,
-                top: '100%',
+                top: -6,
+                bottom: -6,
+                width: 2,
+                background: lineColor,
+                borderRadius: 1,
+                pointerEvents: 'none',
+                zIndex: 5,
+                boxShadow: `0 0 6px ${lineColor}40`,
+              }} />
+              {/* Top badge — time */}
+              <div style={{
+                position: 'absolute',
+                left: hoverX,
+                bottom: '100%',
                 transform: 'translateX(-50%)',
-                marginTop: 4,
-                padding: '2px 7px',
-                borderRadius: 5,
-                background: SEGMENT_COLORS[segments[hoveredSegment].kind],
+                marginBottom: 8,
+                padding: '3px 8px',
+                borderRadius: 6,
+                background: '#111827',
                 color: '#fff',
-                fontSize: 9,
+                fontSize: 10,
                 fontWeight: 600,
                 whiteSpace: 'nowrap',
                 pointerEvents: 'none',
                 zIndex: 10,
+                letterSpacing: '0.02em',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               }}>
-                {segments[hoveredSegment].label || SEGMENT_LABELS[segments[hoveredSegment].kind]}
+                {formatTime(hoverMin)}
               </div>
-            )}
-          </>
-        )}
+              {/* Bottom badge — segment kind + duration + agent */}
+              {seg && (
+                <div style={{
+                  position: 'absolute',
+                  left: hoverX,
+                  top: '100%',
+                  transform: 'translateX(-50%)',
+                  marginTop: 6,
+                  padding: '3px 8px',
+                  borderRadius: 6,
+                  background: badgeBg,
+                  color: seg.kind === 'thinking' ? '#1e3a5f' : '#fff',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  pointerEvents: 'none',
+                  zIndex: 10,
+                  boxShadow: `0 2px 8px ${badgeBg}40`,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}>
+                  <span>{kindLabel}</span>
+                  <span style={{ opacity: 0.7, fontWeight: 500 }}>{durLabel}{agentLabel}</span>
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {/* Time markers */}
         {Array.from({ length: Math.ceil(totalMinutes / 60) + 1 }, (_, i) => {
