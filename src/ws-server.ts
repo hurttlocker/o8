@@ -544,6 +544,30 @@ if (existsSync(GIT_DIR)) {
 connectGateway();
 startPollingLoops();
 
+httpServer.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.log(`[ws-server] Port ${WS_PORT} in use — killing stale process...`);
+    try {
+      const pids = execSync(`lsof -ti :${WS_PORT} -sTCP:LISTEN`, { encoding: 'utf-8' }).trim();
+      if (pids) {
+        execSync(`kill -9 ${pids.split('\n').join(' ')}`, { encoding: 'utf-8' });
+        console.log(`[ws-server] Killed stale process(es): ${pids.replace(/\n/g, ', ')}`);
+        // Retry once after a short delay
+        setTimeout(() => {
+          httpServer.listen(WS_PORT, '0.0.0.0', () => {
+            console.log(`[ws-server] Cortex IDE WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+          });
+        }, 500);
+      }
+    } catch {
+      console.error(`[ws-server] Failed to clear port ${WS_PORT} — exiting`);
+      process.exit(1);
+    }
+  } else {
+    throw err;
+  }
+});
+
 httpServer.listen(WS_PORT, '0.0.0.0', () => {
   console.log(`[ws-server] Cortex IDE WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
 });

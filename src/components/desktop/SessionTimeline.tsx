@@ -243,9 +243,10 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
   const [, forceUpdate] = useState(0);
   const tickDrag = useCallback(() => forceUpdate(n => n + 1), []);
 
-  interface AgentSession { id: string; label: string; model: string; startTime: string; duration: string; messages: number; status: string }
+  interface AgentSession { id: string; label: string; model: string; startTime: string; duration: string; messages: number; status: string; cost?: number; inputTokens?: number; outputTokens?: number; cacheTokens?: number }
   const [agentSessions, setAgentSessions] = useState<AgentSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [agentTotalCost, setAgentTotalCost] = useState<number>(0);
 
   const handleBarDoubleClick = useCallback((e: React.MouseEvent) => {
     // Open drill-down centered on click position
@@ -290,20 +291,36 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     });
     setSelectedAgent(agentName);
 
-    // Fetch sessions for this agent
+    // Fetch sessions + costs for this agent
     setSessionsLoading(true);
     setAgentSessions([]);
-    fetch(`/api/panel/timeline?agent=${encodeURIComponent(agentName)}&sessions=true`)
+    setAgentTotalCost(0);
+
+    // Fetch cost data from JSONL transcripts
+    fetch(`/api/panel/session-costs?agent=${encodeURIComponent(agentName)}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data?.sessions) {
-          setAgentSessions(data.sessions);
+        if (data?.sessions?.length > 0) {
+          const sessions: AgentSession[] = data.sessions.map((s: { id: string; model: string; messages: number; cost: number; inputTokens: number; outputTokens: number; cacheTokens: number }) => ({
+            id: s.id,
+            label: s.id.slice(0, 8),
+            model: s.model || '',
+            startTime: '',
+            duration: '',
+            messages: s.messages,
+            status: 'active',
+            cost: s.cost,
+            inputTokens: s.inputTokens,
+            outputTokens: s.outputTokens,
+            cacheTokens: s.cacheTokens,
+          }));
+          setAgentSessions(sessions);
+          setAgentTotalCost(data.byAgent?.[agentName]?.cost || 0);
         } else {
           // Fallback: derive from segments
           const agentSegs = segments.filter(s => s.agent === agentName);
           if (agentSegs.length > 0) {
             const firstSeg = agentSegs[0];
-            const lastSeg = agentSegs[agentSegs.length - 1];
             const totalMin = agentSegs.reduce((s, x) => s + x.durationMin, 0);
             setAgentSessions([{
               id: `derived-${agentName}`,
@@ -888,8 +905,19 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                     {selectedAgent[0]}
                   </div>
                   <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
-                    {selectedAgent} Sessions
+                    {selectedAgent}
                   </span>
+                  {agentTotalCost > 0 && (
+                    <span style={{
+                      fontSize: 11, fontWeight: 700, color: '#22c55e',
+                      fontFamily: '"SF Mono", ui-monospace, monospace',
+                      background: 'rgba(34, 197, 94, 0.1)',
+                      padding: '2px 6px',
+                      borderRadius: 6,
+                    }}>
+                      ${agentTotalCost.toFixed(2)}
+                    </span>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -956,17 +984,25 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                     </div>
                     {/* Meta row */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{
-                        fontSize: 10, color: 'var(--t-text-muted)',
-                        fontFamily: '"SF Mono", ui-monospace, monospace',
-                      }}>
-                        {session.startTime}
-                      </span>
-                      <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
-                      <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontWeight: 600 }}>
-                        {session.duration}
-                      </span>
-                      <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
+                      {session.startTime && (
+                        <>
+                          <span style={{
+                            fontSize: 10, color: 'var(--t-text-muted)',
+                            fontFamily: '"SF Mono", ui-monospace, monospace',
+                          }}>
+                            {session.startTime}
+                          </span>
+                          <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
+                        </>
+                      )}
+                      {session.duration && (
+                        <>
+                          <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontWeight: 600 }}>
+                            {session.duration}
+                          </span>
+                          <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
+                        </>
+                      )}
                       <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>
                         {session.messages} msg{session.messages !== 1 ? 's' : ''}
                       </span>
@@ -979,6 +1015,36 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                         </>
                       )}
                     </div>
+                    {/* Cost + token row */}
+                    {session.cost != null && session.cost > 0 && (
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        marginTop: 6, flexWrap: 'wrap',
+                      }}>
+                        <span style={{
+                          fontSize: 11, fontWeight: 700, color: '#22c55e',
+                          fontFamily: '"SF Mono", ui-monospace, monospace',
+                        }}>
+                          ${session.cost.toFixed(3)}
+                        </span>
+                        {(session.outputTokens ?? 0) > 0 && (
+                          <>
+                            <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
+                            <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                              {((session.outputTokens ?? 0) / 1000).toFixed(1)}k out
+                            </span>
+                          </>
+                        )}
+                        {(session.cacheTokens ?? 0) > 0 && (
+                          <>
+                            <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
+                            <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                              {((session.cacheTokens ?? 0) / 1_000_000).toFixed(1)}M cache
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
 
