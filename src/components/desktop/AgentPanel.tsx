@@ -1643,7 +1643,7 @@ export const AgentPanel = memo(function AgentPanel({
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      overflow: 'hidden',
+      overflow: 'auto',
       background: '#f5f7fb',
     }}>
       {/* ── Titlebar spacer ── */}
@@ -1655,11 +1655,7 @@ export const AgentPanel = memo(function AgentPanel({
 
       {/* ── Agent Cards ── */}
       <div style={{
-        flex: '0 1 auto',
-        minHeight: 80,
-        maxHeight: 'calc(100vh - 200px)',
-        overflowY: 'scroll',
-        overflowX: 'hidden',
+        flexShrink: 0,
         paddingTop: 4,
         paddingRight: 14,
         paddingBottom: 8,
