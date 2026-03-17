@@ -218,7 +218,10 @@ function mapClaudeCodeSessionToAgent(session: RuntimeSession): AgentSummary {
     sessionKey: session.sessionKey,
     approvalStatus: 'none',
     lastEventAt: relativeAge(ageMs),
-    context: { usedPercent: 0, trend: 'stable' },
+    context: {
+      usedPercent: session.contextUsedPercent ?? 0,
+      trend: (session.contextUsedPercent ?? 0) >= 60 ? 'rising' : 'stable',
+    },
     alerts: 0,
     sessionId: session.sessionKey.replace('claude-code:', ''),
     sessionKind: 'terminal',

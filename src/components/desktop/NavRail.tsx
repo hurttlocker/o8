@@ -96,7 +96,7 @@ function CortexLogo({ expanded }: { expanded: boolean }) {
         style={{
           fontSize: 14,
           fontWeight: 700,
-          color: '#111827',
+          color: 'var(--t-text)',
           letterSpacing: '-0.02em',
         }}
       >
@@ -135,8 +135,8 @@ function NavButton({
         padding: '10px 12px',
         borderRadius: 12,
         border: 'none',
-        background: active ? 'rgba(0, 0, 0, 0.06)' : 'transparent',
-        color: active ? '#111827' : '#6b7280',
+        background: active ? 'var(--t-panel-active)' : 'transparent',
+        color: active ? 'var(--t-text)' : 'var(--t-text-secondary)',
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
         transition: 'background 150ms ease, color 150ms ease',
@@ -145,7 +145,7 @@ function NavButton({
         minHeight: 44,
       }}
       onMouseEnter={(e) => {
-        if (!active) e.currentTarget.style.background = 'rgba(0, 0, 0, 0.03)';
+        if (!active) e.currentTarget.style.background = 'var(--t-hover)';
       }}
       onMouseLeave={(e) => {
         if (!active) e.currentTarget.style.background = 'transparent';
@@ -206,7 +206,7 @@ function UtilButton({
         borderRadius: 12,
         border: 'none',
         background: active ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
-        color: active ? '#2563eb' : '#6b7280',
+        color: active ? '#2563eb' : 'var(--t-text-secondary)',
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
         transition: 'background 150ms ease',
@@ -215,7 +215,7 @@ function UtilButton({
         minHeight: 44,
         position: 'relative',
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0, 0, 0, 0.03)'; }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
       onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
     >
       <div style={{ position: 'relative', flexShrink: 0 }}>
@@ -284,10 +284,10 @@ export function NavRail({
         flexDirection: 'column',
         justifyContent: 'space-between',
         padding: '16px 8px',
-        background: 'rgba(245, 247, 251, 0.82)',
+        background: 'var(--t-chrome-nav)',
         backdropFilter: 'blur(20px) saturate(1.4)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
-        borderRight: '1px solid rgba(0, 0, 0, 0.06)',
+        borderRight: '1px solid var(--t-divider)',
         overflow: 'hidden',
         boxSizing: 'border-box',
       }}
@@ -310,7 +310,7 @@ export function NavRail({
         {/* Separator */}
         <div style={{
           height: 1,
-          background: 'rgba(0, 0, 0, 0.06)',
+          background: 'var(--t-divider)',
           margin: '4px 12px',
         }} />
 
