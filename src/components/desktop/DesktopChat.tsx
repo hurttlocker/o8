@@ -579,6 +579,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
   const pickerRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const claudeSessionIdRef = useRef<string | undefined>(undefined);
+  const codexThreadIdRef = useRef<string | undefined>(undefined);
 
   const selectedSession = useMemo(
     () => sessions.find(s => s.sessionKey === selectedKey),
@@ -586,6 +587,8 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
   );
 
   const isClaudeCode = selectedSession?.runtime === 'claude-code';
+  const isCodexLocal = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'discovered';
+  const isLocalAgent = isClaudeCode || isCodexLocal;
 
   const projectGroups = useMemo(
     () => snapshot ? buildProjectGroups(snapshot, selectedSession) : [],
@@ -925,6 +928,103 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
     }
   }, [sessions, selectedKey, scrollToBottom]);
 
+  const sendToCodex = useCallback(async (text: string) => {
+    const session = sessions.find(s => s.sessionKey === selectedKey);
+    const cwd = session?.workspace || undefined;
+
+    const assistantId = `codex-${Date.now()}`;
+    const assistantEntry: MobileTranscriptEntry = {
+      id: assistantId,
+      role: 'assistant',
+      text: '',
+      timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setTranscript(prev => [...prev, assistantEntry]);
+    setAgentRunning(true);
+
+    try {
+      const res = await fetch('/api/codex/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          cwd,
+          threadId: codexThreadIdRef.current,
+        }),
+      });
+
+      if (!res.ok || !res.body) {
+        setTranscript(prev => prev.map(e =>
+          e.id === assistantId ? { ...e, text: `Error: ${res.statusText}` } : e
+        ));
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const event = JSON.parse(line.slice(6)) as {
+              type: string;
+              text?: string;
+              name?: string;
+              threadId?: string;
+            };
+
+            if (event.type === 'session' && event.threadId) {
+              codexThreadIdRef.current = event.threadId;
+            }
+
+            if (event.type === 'delta' && event.text) {
+              accumulated += event.text;
+              setTranscript(prev => prev.map(e =>
+                e.id === assistantId ? { ...e, text: accumulated } : e
+              ));
+              scrollToBottom(false);
+            }
+
+            if (event.type === 'tool' && event.name) {
+              const toolLine = `\n🔧 *${event.name}*\n`;
+              accumulated += toolLine;
+              setTranscript(prev => prev.map(e =>
+                e.id === assistantId ? { ...e, text: accumulated } : e
+              ));
+            }
+
+            if ((event.type === 'done' || event.type === 'close') && event.threadId) {
+              codexThreadIdRef.current = event.threadId;
+            }
+
+            if (event.type === 'error' && event.text) {
+              accumulated += `\n⚠️ ${event.text}`;
+              setTranscript(prev => prev.map(e =>
+                e.id === assistantId ? { ...e, text: accumulated } : e
+              ));
+            }
+          } catch { /* skip */ }
+        }
+      }
+    } catch (err) {
+      setTranscript(prev => prev.map(e =>
+        e.id === assistantId ? { ...e, text: `Error: ${err instanceof Error ? err.message : 'unknown'}` } : e
+      ));
+    } finally {
+      setAgentRunning(false);
+    }
+  }, [sessions, selectedKey, scrollToBottom]);
+
   const send = useCallback(async () => {
     if ((!draft.trim() && pendingFiles.length === 0) || !selectedKey || sending) return;
     const text = draft.trim();
@@ -948,9 +1048,11 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
     scrollToBottom(true);
 
     try {
-      // Route to Claude Code CLI if the selected session is claude-code runtime
+      // Route to local agent CLIs based on runtime
       if (isClaudeCode) {
         await sendToClaudeCode(text);
+      } else if (isCodexLocal) {
+        await sendToCodex(text);
       } else {
         const payload: Record<string, unknown> = {
           sessionKey: selectedKey,
@@ -981,7 +1083,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
       files.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview); });
       setSending(false);
     }
-  }, [draft, pendingFiles, selectedKey, sending, isClaudeCode, sendToClaudeCode, fetchTranscript, scrollToBottom, playSendSound]);
+  }, [draft, pendingFiles, selectedKey, sending, isClaudeCode, isCodexLocal, sendToClaudeCode, sendToCodex, fetchTranscript, scrollToBottom, playSendSound]);
 
   // ── Stop / Abort run ──
   const stopRun = useCallback(async () => {
@@ -1067,10 +1169,9 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
     const session = sessions.find(s => s.id === sessionId);
     if (session) {
       setSelectedKey(session.sessionKey);
-      // Reset Claude Code session ref when switching sessions
-      if (session.runtime !== 'claude-code') {
-        claudeSessionIdRef.current = undefined;
-      }
+      // Reset session refs when switching
+      if (session.runtime !== 'claude-code') claudeSessionIdRef.current = undefined;
+      if (session.runtime !== 'codex') codexThreadIdRef.current = undefined;
     }
   }, [sessions]);
 
