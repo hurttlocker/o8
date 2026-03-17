@@ -49,6 +49,7 @@ type SessionSummary = MobileInboxSnapshot['sessions'][number];
 // ── Helpers ──
 
 function getAgentName(s: SessionSummary): string {
+  if (s.runtime === 'claude-code') return 'Claude Code';
   if (s.isCurrentSession) return 'Mister';
   const name = s.name || s.sessionKey;
   if (name.includes('codex-owned')) return 'Codex';
