@@ -109,10 +109,11 @@ export async function GET() {
 
     return NextResponse.json({
       connected: accounts.length > 0,
+      deviceFlowEnabled: Boolean(process.env.GITHUB_OAUTH_CLIENT_ID?.trim()),
       accounts,
       repos,
     });
   } catch {
-    return NextResponse.json({ connected: false, accounts: [], repos: [] }, { status: 500 });
+    return NextResponse.json({ connected: false, deviceFlowEnabled: false, accounts: [], repos: [] }, { status: 500 });
   }
 }
