@@ -37,6 +37,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { MarkdownBody } from './MarkdownBody';
+import { formatModelLabel } from '@/lib/format';
 
 // ── Types ──
 
@@ -171,14 +172,58 @@ function ctxColor(pct: number) {
   return '#22c55e';
 }
 
-function formatModelLabel(model: string) {
-  return model
-    .replace('claude-opus-4-6', 'Opus 4.6')
-    .replace('claude-sonnet-4-20250514', 'Sonnet 4')
-    .replace('claude-haiku-4-5-20251001', 'Haiku 4.5')
-    .replace('gemini-3-flash-preview', 'Gemini 3 Flash')
-    .replace(/^openai-codex\//, '')
-    .replace(/^anthropic\//, '');
+// formatModelLabel imported from @/lib/format
+
+/** Smart model attribution for expanded agent cards */
+function renderModelAttribution(agent: AgentDetail): React.ReactNode {
+  const live = agent.model || '';
+  const primary = agent.primaryModel;
+  const heartbeat = agent.heartbeatModel;
+  const surface = (agent.surfaceLabel || '').toLowerCase();
+
+  const liveLabel = formatModelLabel(live);
+
+  // Case D: Unexpected mismatch — live differs from both primary and heartbeat
+  if (primary && live && live !== primary && live !== heartbeat) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ width: 6, height: 6, borderRadius: 3, background: '#f59e0b', flexShrink: 0 }} />
+        <span style={{ fontSize: 10, color: '#f59e0b', letterSpacing: '-0.01em' }}>{liveLabel}</span>
+      </span>
+    );
+  }
+
+  // Case C: Cron/automation surface
+  if (surface.includes('cron') || surface.includes('automation')) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+        <Zap size={9} strokeWidth={2} style={{ color: 'var(--t-text-faint)' }} />
+        <span style={{ fontSize: 10, color: 'var(--t-text-muted)', letterSpacing: '-0.01em' }}>{liveLabel}</span>
+      </span>
+    );
+  }
+
+  // Case B: Heartbeat run — live matches heartbeat but differs from primary
+  if (primary && heartbeat && live === heartbeat && live !== primary) {
+    const primaryLabel = formatModelLabel(primary);
+    const hbLabel = formatModelLabel(heartbeat);
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-secondary)' }}>{primaryLabel}</span>
+        <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
+        <Clock size={9} strokeWidth={2} style={{ color: 'var(--t-text-faint)', flexShrink: 0 }} />
+        <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontStyle: 'italic' }}>{hbLabel}</span>
+      </span>
+    );
+  }
+
+  // Case A: Normal — no primaryModel, or live matches primary
+  if (!liveLabel) return null;
+  return (
+    <span style={{ fontSize: 10, color: 'var(--t-text-muted)', letterSpacing: '-0.01em' }}>
+      {liveLabel}
+    </span>
+  );
 }
 
 // ── Workspace grouping (matches chat session picker) ──
@@ -455,7 +500,7 @@ const AgentCard = memo(function AgentCard({
             : (agent.surfaceLabel || agent.name);
           const branch = agent.branch || agent.currentTask || null;
           const progress = agentCtx > 0 ? agentCtx / 100 : 0;
-          const agentModel = agent.model ? formatModelLabel(agent.model) : '';
+          const modelAttribution = renderModelAttribution(agent);
           const pr = agent.pr;
           const diff = pr ? { add: pr.additions, del: pr.deletions } : agent.localDiff ? { add: agent.localDiff.additions, del: agent.localDiff.deletions } : null;
 
@@ -511,11 +556,7 @@ const AgentCard = memo(function AgentCard({
                     </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2, flexWrap: 'wrap' }}>
-                    {agentModel && (
-                      <span style={{ fontSize: 10, color: 'var(--t-text-muted)', letterSpacing: '-0.01em' }}>
-                        {agentModel}
-                      </span>
-                    )}
+                    {modelAttribution}
                     {branch && (
                       <>
                         <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>

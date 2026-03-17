@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useTheme } from '@/lib/theme/context';
+import { formatModelLabel } from '@/lib/format';
 
 // ── Types ──
 
@@ -717,6 +718,8 @@ interface FleetAgent {
   squadId: string;
   runtime: string;
   model: string;
+  primaryModel?: string;
+  heartbeatModel?: string;
   status: string;
   currentTask?: string;
   context?: { usedPercent: number; trend: string };
@@ -793,14 +796,7 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill, killing }: {
   onKill?: (agent: FleetAgent) => void;
   killing?: boolean;
 }) {
-  const shortModel = agent.model
-    .replace('claude-opus-4-6', 'Opus 4.6')
-    .replace('claude-sonnet-4-20250514', 'Sonnet 4')
-    .replace('claude-haiku-4-5-20251001', 'Haiku 4.5')
-    .replace('gemini-3-flash-preview', 'Gemini 3 Flash')
-    .replace('codex owned', 'Codex')
-    .replace(/^openai-codex\//, '')
-    .replace(/^anthropic\//, '');
+  const shortModel = formatModelLabel(agent.model);
 
   const shortName = agent.name
     .replace('OpenClaw ', '')
@@ -859,17 +855,29 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill, killing }: {
             {agent.status}
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--t-text-muted)' }}>
-          <span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>{shortModel}</span>
-          {heartbeatLabel && (
-            <>
-              <span>·</span>
-              <span style={{ color: 'var(--t-text-muted)' }}>HB {heartbeatLabel}</span>
-            </>
-          )}
-          <span>·</span>
-          <span style={{ fontFamily: '"SF Mono", monospace', fontSize: 10 }}>{shortId}</span>
-        </div>
+        {agent.primaryModel || agent.heartbeatModel ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 2 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--t-text-faint)', minWidth: 58 }}>Primary</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>{formatModelLabel(agent.primaryModel || agent.model)}</span>
+            </div>
+            {agent.heartbeatModel && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--t-text-faint)', minWidth: 58 }}>Heartbeat</span>
+                <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{formatModelLabel(agent.heartbeatModel)}</span>
+                {heartbeatLabel && (
+                  <span style={{ fontSize: 9, padding: '1px 5px', borderRadius: 4, background: 'var(--t-divider-subtle)', color: 'var(--t-text-muted)' }}>every {heartbeatLabel}</span>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--t-text-muted)' }}>
+            <span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>{shortModel}</span>
+            <span>·</span>
+            <span style={{ fontFamily: '"SF Mono", monospace', fontSize: 10 }}>{shortId}</span>
+          </div>
+        )}
       </div>
 
       {/* Context bar */}
@@ -1025,6 +1033,39 @@ function AgentEditModal({ agent, onClose, onSave }: {
             )}
           </select>
         </label>
+
+        {/* Read-only configured models */}
+        {(agent.primaryModel || agent.heartbeatModel) && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+            {agent.primaryModel && (
+              <div>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)', display: 'block', marginBottom: 4 }}>
+                  Primary Model
+                </span>
+                <div style={{
+                  padding: '8px 12px', borderRadius: 10,
+                  background: 'var(--t-hover)', border: '1px solid var(--t-panel-border)',
+                  fontSize: 13, color: 'var(--t-text-muted)',
+                }}>{formatModelLabel(agent.primaryModel)}</div>
+              </div>
+            )}
+            {agent.heartbeatModel && (
+              <div>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)', display: 'block', marginBottom: 4 }}>
+                  Heartbeat Model
+                </span>
+                <div style={{
+                  padding: '8px 12px', borderRadius: 10,
+                  background: 'var(--t-hover)', border: '1px solid var(--t-panel-border)',
+                  fontSize: 13, color: 'var(--t-text-muted)',
+                }}>{formatModelLabel(agent.heartbeatModel)}</div>
+              </div>
+            )}
+            <p style={{ fontSize: 10, color: 'var(--t-text-faint)', margin: 0 }}>
+              Configured via openclaw.json
+            </p>
+          </div>
+        )}
 
         {/* Info */}
         <div style={{
