@@ -248,6 +248,17 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [agentTotalCost, setAgentTotalCost] = useState<number>(0);
 
+  // ── Issue assignment panel state ──
+  interface GHIssue { number: number; title: string; labels: (string | { name: string; color?: string })[]; state: string }
+  const [issuesPanelOpen, setIssuesPanelOpen] = useState(false);
+  const [issuesPanelPos, setIssuesPanelPos] = useState({ x: 0, y: 0 });
+  const issuesDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const issuesPanelRef = useRef<HTMLDivElement>(null);
+  const [ghIssues, setGhIssues] = useState<GHIssue[]>([]);
+  const [issuesLoading, setIssuesLoading] = useState(false);
+  const [assigningIssue, setAssigningIssue] = useState<number | null>(null);
+  const sessionPanelElRef = useRef<HTMLDivElement>(null);
+
   const handleBarDoubleClick = useCallback((e: React.MouseEvent) => {
     // Open drill-down centered on click position
     const x = Math.max(20, e.clientX - 260);
@@ -381,10 +392,69 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     window.addEventListener('mouseup', onUp);
   }, [drillPos, tickDrag]);
 
-  // Close session panel when drill closes
+  // Open issues panel — spawns to the right of session panel
+  const handleOpenIssues = useCallback(() => {
+    setIssuesPanelPos({
+      x: sessionPanelPos.x + 400,
+      y: sessionPanelPos.y,
+    });
+    setIssuesPanelOpen(true);
+    setIssuesLoading(true);
+    fetch('/api/panel/issues')
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.issues) {
+          setGhIssues(data.issues.filter((i: GHIssue) => i.state === 'open').slice(0, 20));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setIssuesLoading(false));
+  }, [sessionPanelPos]);
+
+  // Issues panel drag
+  const handleIssuesDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    issuesDragRef.current = { startX: e.clientX, startY: e.clientY, originX: issuesPanelPos.x, originY: issuesPanelPos.y };
+    const onMove = (ev: MouseEvent) => {
+      if (!issuesDragRef.current) return;
+      setIssuesPanelPos({
+        x: issuesDragRef.current.originX + (ev.clientX - issuesDragRef.current.startX),
+        y: issuesDragRef.current.originY + (ev.clientY - issuesDragRef.current.startY),
+      });
+      tickDrag();
+    };
+    const onUp = () => {
+      issuesDragRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [issuesPanelPos, tickDrag]);
+
+  // Assign issue to agent
+  const handleAssignIssue = useCallback(async (issueNumber: number) => {
+    if (!selectedAgent) return;
+    setAssigningIssue(issueNumber);
+    try {
+      await fetch('/api/panel/assign-issue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ issue: issueNumber, agent: selectedAgent }),
+      });
+      // Remove from list after assignment
+      setGhIssues(prev => prev.filter(i => i.number !== issueNumber));
+    } catch { /* silent */ }
+    finally { setAssigningIssue(null); }
+  }, [selectedAgent]);
+
+  // Close child panels when parent closes
   useEffect(() => {
-    if (!drillOpen) setSelectedAgent(null);
+    if (!drillOpen) { setSelectedAgent(null); setIssuesPanelOpen(false); }
   }, [drillOpen]);
+  useEffect(() => {
+    if (!selectedAgent) setIssuesPanelOpen(false);
+  }, [selectedAgent]);
 
   // Group segments by agent for drill-down
   const agentBreakdown = useMemo(() => {
@@ -920,22 +990,46 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                     </span>
                   )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedAgent(null)}
-                  aria-label="Close"
-                  style={{
-                    width: 22, height: 22, borderRadius: 11,
-                    border: 'none', background: 'rgba(255,255,255,0.12)',
-                    color: 'var(--t-text-muted)', cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 13, fontWeight: 600, lineHeight: 1,
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.2)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
-                >
-                  ×
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <button
+                    type="button"
+                    onClick={handleOpenIssues}
+                    style={{
+                      height: 22, borderRadius: 6,
+                      border: 'none',
+                      background: issuesPanelOpen ? 'rgba(37, 99, 235, 0.2)' : 'rgba(255,255,255,0.12)',
+                      color: issuesPanelOpen ? '#2563eb' : 'var(--t-text-muted)',
+                      cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', gap: 4,
+                      padding: '0 8px',
+                      fontSize: 10, fontWeight: 600, letterSpacing: '-0.01em',
+                      transition: 'all 120ms',
+                    }}
+                    onMouseEnter={(e) => { if (!issuesPanelOpen) e.currentTarget.style.background = 'rgba(255,255,255,0.2)'; }}
+                    onMouseLeave={(e) => { if (!issuesPanelOpen) e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
+                  >
+                    <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                      <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" />
+                    </svg>
+                    Assign
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedAgent(null)}
+                    aria-label="Close"
+                    style={{
+                      width: 22, height: 22, borderRadius: 11,
+                      border: 'none', background: 'rgba(255,255,255,0.12)',
+                      color: 'var(--t-text-muted)', cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 13, fontWeight: 600, lineHeight: 1,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.2)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
 
               {/* Session list */}
@@ -1057,6 +1151,165 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                 {!sessionsLoading && agentSessions.length === 0 && (
                   <div style={{ textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 11, padding: 16 }}>
                     No sessions found
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── SVG Connector: Session Panel → Issues Panel ── */}
+          {issuesPanelOpen && selectedAgent && (() => {
+            const x1 = sessionPanelPos.x + 380 + 2;
+            const y1 = sessionPanelPos.y + 30;
+            const x2 = issuesPanelPos.x;
+            const y2 = issuesPanelPos.y + 30;
+            const cpOffset = Math.min(80, Math.abs(x2 - x1) * 0.4);
+            return (
+              <svg style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', pointerEvents: 'none', zIndex: 9998 }}>
+                <defs>
+                  <linearGradient id="issueConnGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.6" />
+                    <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.3" />
+                  </linearGradient>
+                </defs>
+                <path d={`M ${x1} ${y1} C ${x1 + cpOffset} ${y1}, ${x2 - cpOffset} ${y2}, ${x2} ${y2}`} fill="none" stroke="rgba(245, 158, 11, 0.15)" strokeWidth="6" strokeLinecap="round" />
+                <path d={`M ${x1} ${y1} C ${x1 + cpOffset} ${y1}, ${x2 - cpOffset} ${y2}, ${x2} ${y2}`} fill="none" stroke="url(#issueConnGrad)" strokeWidth="1.5" strokeLinecap="round" />
+                <circle cx={x1} cy={y1} r="3" fill="#f59e0b" opacity="0.5" />
+                <circle cx={x2} cy={y2} r="3" fill="#f59e0b" opacity="0.5" />
+              </svg>
+            );
+          })()}
+
+          {/* ── Issues Assignment Panel ── */}
+          {issuesPanelOpen && selectedAgent && (
+            <div
+              ref={issuesPanelRef}
+              style={{
+                position: 'fixed',
+                left: issuesPanelPos.x,
+                top: issuesPanelPos.y,
+                width: 360,
+                maxHeight: 440,
+                zIndex: 9999,
+                background: 'rgba(255, 255, 255, 0.18)',
+                backdropFilter: 'blur(80px) saturate(2.2)',
+                WebkitBackdropFilter: 'blur(80px) saturate(2.2)',
+                border: '1px solid rgba(245, 158, 11, 0.2)',
+                borderRadius: 16,
+                boxShadow: '0 24px 80px rgba(0, 0, 0, 0.08), 0 8px 32px rgba(0, 0, 0, 0.04), inset 0 0.5px 0 rgba(255, 255, 255, 0.4)',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                animation: 'drillFadeIn 180ms cubic-bezier(0.32, 0.72, 0, 1)',
+              }}
+            >
+              {/* Header */}
+              <div
+                onMouseDown={handleIssuesDragStart}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                  padding: '12px 14px 10px', cursor: 'grab', userSelect: 'none',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
+                    <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                  </svg>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
+                    Assign to {selectedAgent}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIssuesPanelOpen(false)}
+                  aria-label="Close"
+                  style={{
+                    width: 22, height: 22, borderRadius: 11,
+                    border: 'none', background: 'rgba(255,255,255,0.12)',
+                    color: 'var(--t-text-muted)', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 13, fontWeight: 600, lineHeight: 1,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.2)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Issues list */}
+              <div style={{
+                padding: '8px 14px 14px', overflowY: 'auto', flex: 1,
+                display: 'flex', flexDirection: 'column', gap: 6,
+              }}>
+                {issuesLoading && (
+                  <div style={{ textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 11, padding: 16 }}>
+                    Loading issues…
+                  </div>
+                )}
+
+                {!issuesLoading && ghIssues.map((issue) => (
+                  <div
+                    key={issue.number}
+                    style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 8,
+                      background: 'rgba(255, 255, 255, 0.1)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: 10, padding: '8px 10px',
+                      transition: 'all 120ms',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'; }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
+                        <span style={{ fontSize: 10, color: '#f59e0b', fontWeight: 700, fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                          #{issue.number}
+                        </span>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {issue.title}
+                        </span>
+                      </div>
+                      {issue.labels.length > 0 && (
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          {issue.labels.slice(0, 3).map((label, li) => {
+                            const labelName = typeof label === 'string' ? label : label.name;
+                            return (
+                            <span key={li} style={{
+                              fontSize: 9, padding: '1px 5px', borderRadius: 4,
+                              background: 'rgba(255, 255, 255, 0.15)',
+                              color: 'var(--t-text-muted)', fontWeight: 500,
+                            }}>
+                              {labelName}
+                            </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleAssignIssue(issue.number)}
+                      disabled={assigningIssue === issue.number}
+                      style={{
+                        height: 24, borderRadius: 6, border: 'none',
+                        background: assigningIssue === issue.number ? 'rgba(245, 158, 11, 0.3)' : 'rgba(245, 158, 11, 0.15)',
+                        color: '#f59e0b', cursor: assigningIssue === issue.number ? 'wait' : 'pointer',
+                        fontSize: 10, fontWeight: 700, padding: '0 8px',
+                        flexShrink: 0, transition: 'all 120ms',
+                      }}
+                      onMouseEnter={(e) => { if (assigningIssue !== issue.number) e.currentTarget.style.background = 'rgba(245, 158, 11, 0.25)'; }}
+                      onMouseLeave={(e) => { if (assigningIssue !== issue.number) e.currentTarget.style.background = 'rgba(245, 158, 11, 0.15)'; }}
+                    >
+                      {assigningIssue === issue.number ? '…' : 'Assign'}
+                    </button>
+                  </div>
+                ))}
+
+                {!issuesLoading && ghIssues.length === 0 && (
+                  <div style={{ textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 11, padding: 16 }}>
+                    No open issues
                   </div>
                 )}
               </div>
