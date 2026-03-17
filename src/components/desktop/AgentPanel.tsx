@@ -294,10 +294,18 @@ const AgentCard = memo(function AgentCard({
             }}>{group.displayName}</span>
           </div>
           {/* Agent dots row — shows who's on this repo */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
             {group.agents.filter(a => !a.id.includes('cron')).slice(0, 4).map(agent => {
               const isRunning = agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy';
               const agentColor = isRunning ? '#22c55e' : '#9ca3af';
+              const isOC = group.repo === 'openclaw';
+              const nLow = (agent.name || '').toLowerCase();
+              const mLow = (agent.model || '').toLowerCase();
+              const dotLabel = isOC
+                ? (agent.surfaceLabel || agent.name).replace(/\s*\(.*\)/, '').split(' ')[0]
+                : nLow.includes('codex') || mLow.includes('codex') ? 'Codex'
+                : nLow.includes('claude') ? 'Claude Code'
+                : (agent.surfaceLabel || agent.name).replace(/\s*\(.*\)/, '').split(' ')[0];
               return (
                 <div key={agent.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   <span style={{
@@ -309,7 +317,7 @@ const AgentCard = memo(function AgentCard({
                     fontSize: 11, fontWeight: 600,
                     color: isRunning ? '#374151' : '#9ca3af',
                   }}>
-                    {agent.name.replace(/\s*\(.*\)/, '').split(' ')[0]}
+                    {dotLabel}
                   </span>
                 </div>
               );
