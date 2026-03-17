@@ -25,9 +25,21 @@ import { join, resolve } from 'node:path';
 import { execSync, execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import { WebSocketServer, WebSocket } from 'ws';
-import { listRepos } from './lib/repos/registry';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
+
+// Read repo registry directly (avoid importing registry.ts which uses 'server-only')
+function listRepoPathsSync(): string[] {
+  try {
+    const registryPath = join(homedir(), '.cortex-ide', 'repos.json');
+    const raw = readFileSync(registryPath, 'utf-8');
+    const store = JSON.parse(raw) as { repos?: Array<{ localPath?: string }> };
+    return (store.repos ?? []).map(r => r.localPath).filter(Boolean) as string[];
+  } catch {
+    return [];
+  }
+}
 
 // ── node-pty (optional — terminal feature) ──
 let pty: typeof import('node-pty') | null = null;
@@ -807,10 +819,9 @@ function shortHome(filePath: string) {
 }
 
 async function getReviewWatchTargets() {
-  const repoEntries = await listRepos().catch(() => []);
   const repoPaths = new Set<string>([REPO_ROOT]);
-  for (const repo of repoEntries) {
-    if (repo.localPath) repoPaths.add(resolve(repo.localPath));
+  for (const p of listRepoPathsSync()) {
+    repoPaths.add(resolve(p));
   }
 
   const targets = [] as Array<{ repoPath: string; workspacePath: string; sessionKey?: string }>;
