@@ -53,6 +53,18 @@ interface AgentDetail {
   alerts: number;
   context?: { usedPercent: number; trend: string };
   tokenUsage?: { totalTokens: number; remainingTokens: number };
+  // Workspace/PR data (populated from /api/panel/workspaces)
+  branch?: string;
+  pr?: {
+    number: number;
+    title: string;
+    additions: number;
+    deletions: number;
+    changedFiles: number;
+    state: 'open' | 'merged' | 'closed';
+    url: string;
+  };
+  workspaceStatus?: 'in_progress' | 'in_review' | 'done' | 'idle' | 'cancelled';
 }
 
 interface EventEntry {
@@ -372,15 +384,19 @@ const AgentCard = memo(function AgentCard({
 
       {/* Expanded: status-grouped agent cards */}
       {expanded && (() => {
-        type AgentStatus = 'in_progress' | 'idle' | 'done';
+        type AgentStatus = 'in_progress' | 'in_review' | 'done' | 'idle';
         const classify = (a: AgentDetail): AgentStatus => {
+          // Use workspace status if available (PR-aware)
+          if (a.workspaceStatus === 'in_review') return 'in_review';
+          if (a.workspaceStatus === 'done') return 'done';
           if (a.status === 'running' || a.status === 'watching' || a.status === 'healthy') return 'in_progress';
           return 'idle';
         };
         const statusGroups: { key: AgentStatus; label: string; color: string; agents: AgentDetail[] }[] = [
           { key: 'in_progress', label: 'In Progress', color: '#2563eb', agents: [] },
-          { key: 'idle', label: 'Idle', color: '#9ca3af', agents: [] },
+          { key: 'in_review', label: 'In Review', color: '#f59e0b', agents: [] },
           { key: 'done', label: 'Done', color: '#22c55e', agents: [] },
+          { key: 'idle', label: 'Idle', color: '#9ca3af', agents: [] },
         ];
         for (const agent of group.agents) {
           const status = classify(agent);
@@ -404,9 +420,10 @@ const AgentCard = memo(function AgentCard({
             : isCodex ? 'Codex'
             : isClaudeCode ? 'Claude Code'
             : (agent.surfaceLabel || agent.name);
-          const branch = agent.currentTask || null;
+          const branch = agent.branch || agent.currentTask || null;
           const progress = agentCtx > 0 ? agentCtx / 100 : 0;
-          const model = agent.model ? agent.model.replace('claude-', '').replace(/-\d+$/, '').replace('openai-codex/', '').replace('anthropic/', '') : '';
+          const agentModel = agent.model ? agent.model.replace('claude-', '').replace(/-\d+$/, '').replace('openai-codex/', '').replace('anthropic/', '') : '';
+          const pr = agent.pr;
 
           return (
             <div
@@ -449,10 +466,10 @@ const AgentCard = memo(function AgentCard({
                       {fullName}
                     </span>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
-                    {model && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2, flexWrap: 'wrap' }}>
+                    {agentModel && (
                       <span style={{ fontSize: 10, color: '#94a3b8', letterSpacing: '-0.01em' }}>
-                        {model}
+                        {agentModel}
                       </span>
                     )}
                     {branch && (
@@ -464,6 +481,17 @@ const AgentCard = memo(function AgentCard({
                           maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         }}>
                           {branch}
+                        </span>
+                      </>
+                    )}
+                    {pr && (
+                      <>
+                        <span style={{ fontSize: 9, color: '#d1d5db' }}>·</span>
+                        <span style={{
+                          fontSize: 10, fontWeight: 600,
+                          color: pr.state === 'merged' ? '#8b5cf6' : pr.state === 'open' ? '#22c55e' : '#9ca3af',
+                        }}>
+                          #{pr.number}
                         </span>
                       </>
                     )}
@@ -510,6 +538,17 @@ const AgentCard = memo(function AgentCard({
                     <div style={{ flex: 1, background: ctxColor(agentCtx) || '#e5e7eb' }} />
                   )}
                 </div>
+                {/* Diff stats badge */}
+                {pr && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, flexShrink: 0,
+                    fontFamily: 'SF Mono, Menlo, monospace',
+                    display: 'flex', gap: 4,
+                  }}>
+                    <span style={{ color: '#22c55e' }}>+{pr.additions}</span>
+                    <span style={{ color: '#ef4444' }}>-{pr.deletions}</span>
+                  </span>
+                )}
                 {agentCtx > 0 && (
                   <span style={{
                     fontSize: 10, fontWeight: 600, color: '#94a3b8', flexShrink: 0,
@@ -1582,6 +1621,36 @@ export const AgentPanel = memo(function AgentPanel({
     const id = setInterval(fetchInventory, 30_000);
     return () => clearInterval(id);
   }, []);
+
+  // Enrich agents with workspace/PR data
+  useEffect(() => {
+    if (agents.length === 0) return;
+    async function fetchWorkspaces() {
+      try {
+        const res = await fetch('/api/panel/workspaces');
+        if (!res.ok) return;
+        const data = await res.json();
+        const wsMap = new Map<string, { branch: string; pr: AgentDetail['pr']; workspaceStatus: AgentDetail['workspaceStatus'] }>();
+        for (const ws of data.workspaces ?? []) {
+          if (ws.sessionKey) {
+            wsMap.set(ws.sessionKey, { branch: ws.branch, pr: ws.pr, workspaceStatus: ws.status });
+          }
+        }
+        // Merge into agents
+        setAgents(prev => {
+          const enriched = prev.map(a => {
+            const ws = wsMap.get(a.sessionKey);
+            if (!ws) return a;
+            return { ...a, branch: ws.branch, pr: ws.pr || undefined, workspaceStatus: ws.workspaceStatus };
+          });
+          return JSON.stringify(enriched) === JSON.stringify(prev) ? prev : enriched;
+        });
+      } catch { /* silent */ }
+    }
+    void fetchWorkspaces();
+    const id = setInterval(fetchWorkspaces, 30_000);
+    return () => clearInterval(id);
+  }, [agents.length]);
 
   // Fetch recent commits
   useEffect(() => {
