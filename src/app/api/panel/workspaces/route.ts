@@ -36,8 +36,6 @@ interface WorkspaceEntry {
     state: 'open' | 'merged' | 'closed';
     url: string;
   } | null;
-  // Activity breakdown (for timeline bar)
-  activity?: { coding: number; thinking: number; testing: number; idle: number };
   // Derived status
   status: 'in_progress' | 'in_review' | 'done' | 'idle' | 'cancelled';
 }
@@ -55,83 +53,15 @@ function deriveRepo(workspace: string): string {
   return '';
 }
 
-import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
-
-function getSessionActivity(sessionKey: string): { coding: number; thinking: number; testing: number; idle: number } | null {
-  try {
-    // Find JSONL for this session
-    const HOME = process.env.HOME || '/Users/marquisehurtt';
-    const agentsDir = join(HOME, '.openclaw/agents');
-    
-    // Extract session ID from key
-    const sessionId = sessionKey.replace(/^(codex:|claude-code:|agent:\w+:)/, '');
-    
-    // Search for JSONL file
-    const searchDirs = ['main', 'ace', 'hawk'];
-    let jsonlPath = '';
-    for (const agent of searchDirs) {
-      const p = join(agentsDir, agent, 'sessions', `${sessionId}.jsonl`);
-      if (existsSync(p)) { jsonlPath = p; break; }
-    }
-    
-    // For Claude Code, check ~/.claude/projects/
-    if (!jsonlPath && sessionKey.startsWith('claude-code:')) {
-      const claudeId = sessionKey.replace('claude-code:', '');
-      const claudeProjects = join(HOME, '.claude/projects');
-      try {
-        const dirs = require('fs').readdirSync(claudeProjects);
-        for (const dir of dirs) {
-          const p = join(claudeProjects, dir, `${claudeId}.jsonl`);
-          if (existsSync(p)) { jsonlPath = p; break; }
-        }
-      } catch { /* silent */ }
-    }
-    
-    if (!jsonlPath) return null;
-    
-    // Read last 200 lines for quick classification
-    const content = readFileSync(jsonlPath, 'utf-8');
-    const lines = content.split('\n').filter(Boolean).slice(-200);
-    
-    let coding = 0, thinking = 0, testing = 0, idle = 0;
-    for (const line of lines) {
-      try {
-        const d = JSON.parse(line);
-        const type = d.type || d.message?.role;
-        const text = typeof d.message?.content === 'string' ? d.message.content : '';
-        
-        if (type === 'toolResult' || type === 'tool' || (type === 'assistant' && text.length < 100 && d.message?.tool_calls)) {
-          coding++;
-        } else if (type === 'assistant' && text.length > 150) {
-          thinking++;
-        } else if (type === 'assistant' && /test|spec|assert|expect/.test(text.toLowerCase())) {
-          testing++;
-        } else {
-          idle++;
-        }
-      } catch { idle++; }
-    }
-    
-    const total = coding + thinking + testing + idle || 1;
-    return {
-      coding: Math.round(coding / total * 100),
-      thinking: Math.round(thinking / total * 100),
-      testing: Math.round(testing / total * 100),
-      idle: Math.round(idle / total * 100),
-    };
-  } catch {
-    return null;
-  }
-}
-
 function resolveWorkspacePath(workspace: string): string {
   return workspace.replace(/^~/, process.env.HOME || '/Users/marquisehurtt');
 }
 
 function getLocalDiffStats(workspace: string): { additions: number; deletions: number; changedFiles: number } | null {
   try {
-    const cwd = resolveWorkspacePath(workspace);
+    const cwd = workspace === 'unknown'
+      ? (process.env.HOME || '/Users/marquisehurtt') + '/clawd'
+      : resolveWorkspacePath(workspace);
     // Uncommitted changes (working tree + staged)
     const diffStat = execSync('git diff --shortstat HEAD 2>/dev/null || true', { cwd, encoding: 'utf-8', timeout: 5000 }).trim();
     // Recent commits in last 6 hours
@@ -232,8 +162,12 @@ export async function GET() {
     const workspaces: WorkspaceEntry[] = [];
 
     for (const s of sessions) {
-      const repoName = deriveRepo(s.workspace);
-      if (!repoName) continue; // Skip non-repo sessions (OpenClaw agents, crons, etc.)
+      let repoName = deriveRepo(s.workspace);
+      // OpenClaw agents report workspace=unknown but work in ~/clawd
+      if (!repoName && s.workspace === 'unknown') {
+        repoName = 'clawd';
+      }
+      if (!repoName) continue;
 
       // Try to match PR by branch
       const branchName = s.branch.replace('surface/', '');
@@ -257,7 +191,7 @@ export async function GET() {
 
       // For agents without a PR, get local diff stats
       const localDiff = !pr ? getLocalDiffStats(s.workspace) : null;
-      const activity = getSessionActivity(s.sessionKey) ?? undefined;
+      // Activity classification removed — top timeline handles this
 
       workspaces.push({
         id: s.sessionKey || s.name,
@@ -268,7 +202,6 @@ export async function GET() {
         branch: branchName,
         repo: repoName,
         localDiff: localDiff ?? undefined,
-        activity,
         pr: pr ? {
           number: pr.number,
           title: pr.title,
