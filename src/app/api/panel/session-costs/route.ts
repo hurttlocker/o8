@@ -22,6 +22,7 @@ interface SessionCost {
   cacheTokens: number;
   messages: number;
   model: string;
+  active: boolean;
 }
 
 const AGENT_DIRS: Record<string, string> = {
@@ -107,6 +108,9 @@ export async function GET(request: Request) {
 
           if (!hasActivity) continue;
 
+          // Active = modified in last 5 minutes
+          const isActive = (Date.now() - stat.mtimeMs) < 5 * 60 * 1000;
+
           results.push({
             id: basename(file, '.jsonl'),
             agent: agentName,
@@ -117,6 +121,7 @@ export async function GET(request: Request) {
             cacheTokens,
             messages,
             model,
+            active: isActive,
           });
         } catch { /* skip unreadable files */ }
       }

@@ -4737,3 +4737,15 @@ body:has(.remodex-diff-overlay) {
   from { opacity: 0; transform: translateY(-8px) scale(0.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+
+/* Session card pulse — active sessions in drill-down */
+@keyframes sessionPulse {
+  0%, 100% {
+    border-color: rgba(52, 211, 153, 0.25);
+    box-shadow: 0 0 12px rgba(52, 211, 153, 0.08), inset 0 0 8px rgba(52, 211, 153, 0.03);
+  }
+  50% {
+    border-color: rgba(52, 211, 153, 0.08);
+    box-shadow: 0 0 4px rgba(52, 211, 153, 0.02), inset 0 0 4px rgba(52, 211, 153, 0.01);
+  }
+}
