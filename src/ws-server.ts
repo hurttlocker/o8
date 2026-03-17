@@ -26,16 +26,19 @@ import { execSync, execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
+import { listRepos } from './lib/repos/registry';
+import { getLiveReviewChangeSet } from './lib/review/live-changes';
 
 // ── node-pty (optional — terminal feature) ──
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 let pty: typeof import('node-pty') | null = null;
-try {
-  pty = require('node-pty');
-  console.log('[ws-server] node-pty loaded — terminal feature available');
-} catch {
-  console.log('[ws-server] node-pty not available — terminal feature disabled');
-}
+void import('node-pty')
+  .then((mod) => {
+    pty = mod;
+    console.log('[ws-server] node-pty loaded — terminal feature available');
+  })
+  .catch(() => {
+    console.log('[ws-server] node-pty not available — terminal feature disabled');
+  });
 
 // ── Config ──
 
@@ -757,12 +760,58 @@ setInterval(() => {
   }
 }, PING_INTERVAL_MS);
 
-// ── Git watcher — push diff stats on changes ──
+// ── Git watcher — push diff stats + file changes on changes ──
 
 const REPO_ROOT = resolve(process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide');
 const GIT_DIR = resolve(REPO_ROOT, '.git');
 let lastDiffHash = '';
 let diffDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let reviewPollTimer: ReturnType<typeof setInterval> | null = null;
+const reviewTargetHashes = new Map<string, string>();
+const REVIEW_POLL_INTERVAL_MS = 10_000;
+
+function shortHome(filePath: string) {
+  const home = process.env.HOME ?? '/Users/marquisehurtt';
+  return filePath.startsWith(`${home}/`) ? filePath.replace(`${home}/`, '~/') : filePath;
+}
+
+async function getReviewWatchTargets() {
+  const repoEntries = await listRepos().catch(() => []);
+  const repoPaths = new Set<string>([REPO_ROOT]);
+  for (const repo of repoEntries) {
+    if (repo.localPath) repoPaths.add(resolve(repo.localPath));
+  }
+
+  const targets = [] as Array<{ repoPath: string; workspacePath: string; sessionKey?: string }>;
+
+  for (const repoPath of repoPaths) {
+    targets.push({ repoPath, workspacePath: repoPath });
+
+    try {
+      const metaPath = resolve(repoPath, '.cortex-worktrees', '.meta.json');
+      if (!existsSync(metaPath)) continue;
+      const raw = readFileSync(metaPath, 'utf-8');
+      const meta = JSON.parse(raw) as {
+        worktrees?: Record<string, { id: string; sessionKey?: string; claudeManaged?: boolean }>;
+      };
+      for (const worktree of Object.values(meta.worktrees ?? {})) {
+        const workspacePath = worktree.claudeManaged
+          ? resolve(repoPath, '.claude', 'worktrees', worktree.id)
+          : resolve(repoPath, '.cortex-worktrees', worktree.id);
+        if (!existsSync(workspacePath)) continue;
+        targets.push({
+          repoPath,
+          workspacePath,
+          sessionKey: worktree.sessionKey,
+        });
+      }
+    } catch {
+      // Ignore repos without a readable worktree store
+    }
+  }
+
+  return targets;
+}
 
 function broadcastDiffStats() {
   if (clients.size === 0) return;
@@ -789,8 +838,80 @@ function broadcastDiffStats() {
     if (hash === lastDiffHash) return;
     lastDiffHash = hash;
 
-    broadcast({ channel: 'review', event: 'diff-stats', data: { additions, deletions, files } });
+    broadcast({ channel: 'review', event: 'diff-stats', data: { kind: 'diff-stats', additions, deletions, files } });
   });
+}
+
+async function broadcastReviewFileChanges() {
+  if (clients.size === 0) return;
+
+  const targets = await getReviewWatchTargets();
+  const liveTargetKeys = new Set(targets.map((target) => target.workspacePath));
+
+  for (const key of [...reviewTargetHashes.keys()]) {
+    if (!liveTargetKeys.has(key)) {
+      reviewTargetHashes.delete(key);
+    }
+  }
+
+  for (const target of targets) {
+    try {
+      const summary = await getLiveReviewChangeSet(target.workspacePath, target.repoPath, target.sessionKey);
+      const hash = JSON.stringify(summary.changedFiles.map((file) => [
+        file.path,
+        file.status,
+        file.additions ?? null,
+        file.deletions ?? null,
+      ]));
+
+      if (reviewTargetHashes.get(target.workspacePath) === hash) {
+        continue;
+      }
+      reviewTargetHashes.set(target.workspacePath, hash);
+
+      broadcast({
+        channel: 'review',
+        event: 'file-changes',
+        data: {
+          kind: 'file-changes',
+          repoPath: shortHome(summary.repoPath),
+          workspacePath: shortHome(summary.workspacePath),
+          sessionKey: summary.sessionKey,
+          additions: summary.additions,
+          deletions: summary.deletions,
+          files: summary.files,
+          changedFiles: summary.changedFiles,
+        },
+      });
+
+      if (resolve(target.workspacePath) === REPO_ROOT) {
+        const rootHash = `${summary.additions}:${summary.deletions}:${summary.files}`;
+        if (rootHash !== lastDiffHash) {
+          lastDiffHash = rootHash;
+          broadcast({
+            channel: 'review',
+            event: 'diff-stats',
+            data: {
+              kind: 'diff-stats',
+              additions: summary.additions,
+              deletions: summary.deletions,
+              files: summary.files,
+            },
+          });
+        }
+      }
+    } catch {
+      // Ignore transient git failures on disappearing worktrees
+    }
+  }
+}
+
+function scheduleReviewRefresh(delayMs = 500) {
+  if (diffDebounceTimer) clearTimeout(diffDebounceTimer);
+  diffDebounceTimer = setTimeout(() => {
+    void broadcastReviewFileChanges();
+    broadcastDiffStats();
+  }, delayMs);
 }
 
 // Watch .git directory for changes (commits, merges, rebases)
@@ -799,20 +920,23 @@ if (existsSync(GIT_DIR)) {
   const refsDir = resolve(GIT_DIR, 'refs');
   if (existsSync(refsDir)) {
     watch(refsDir, { recursive: true }, () => {
-      if (diffDebounceTimer) clearTimeout(diffDebounceTimer);
-      diffDebounceTimer = setTimeout(broadcastDiffStats, 500);
+      scheduleReviewRefresh();
     });
   }
   // Watch index (staged files change)
   const indexFile = resolve(GIT_DIR, 'index');
   if (existsSync(indexFile)) {
     watch(indexFile, () => {
-      if (diffDebounceTimer) clearTimeout(diffDebounceTimer);
-      diffDebounceTimer = setTimeout(broadcastDiffStats, 500);
+      scheduleReviewRefresh();
     });
   }
   console.log(`[ws-server] Watching git at ${GIT_DIR} for diff changes`);
 }
+
+reviewPollTimer = setInterval(() => {
+  void broadcastReviewFileChanges();
+}, REVIEW_POLL_INTERVAL_MS);
+if (reviewPollTimer.unref) reviewPollTimer.unref();
 
 // Start everything
 connectGateway();
@@ -858,7 +982,7 @@ function shutdown(signal: string) {
   }
 
   // Destroy all terminal PTY handles (tmux sessions persist independently)
-  for (const [name, att] of terminalAttachments) {
+  for (const [, att] of terminalAttachments) {
     if (att.batchTimer) clearTimeout(att.batchTimer);
     try { att.ptyProcess.kill(); } catch { /* already gone */ }
   }
