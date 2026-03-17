@@ -265,7 +265,7 @@ export async function addRepo(localPath: string) {
       remoteUrl: candidate.remoteUrl,
       defaultBranch: candidate.defaultBranch,
       setup: existing.setup ?? candidate.setup,
-      lastOpenedAt: existing.lastOpenedAt ?? now,
+      lastOpenedAt: now,
     };
 
     const repos = store.repos.map((repo) => (repo.id === existing.id ? updated : repo));
