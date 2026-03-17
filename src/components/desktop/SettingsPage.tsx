@@ -27,7 +27,7 @@ interface GitHubRepo {
   updatedAt: string;
 }
 
-type GitHubActionKind = 'refresh' | 'switch' | 'logout';
+type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token';
 
 type SettingsTab = 'connectors' | 'agents' | 'appearance' | 'about';
 
@@ -187,6 +187,7 @@ function GitHubTab({
   onRefresh,
   onSwitchAccount,
   onDisconnect,
+  onLoginWithToken,
 }: {
   accounts: GitHubAccount[];
   repos: GitHubRepo[];
@@ -196,8 +197,22 @@ function GitHubTab({
   onRefresh?: () => void;
   onSwitchAccount?: (user: string) => void;
   onDisconnect?: (user: string) => void;
+  onLoginWithToken?: (token: string) => void;
 }) {
   const [reposExpanded, setReposExpanded] = useState(false);
+  const [patToken, setPatToken] = useState('');
+  const [commandCopied, setCommandCopied] = useState(false);
+  const browserLoginCommand = 'gh auth login --web --hostname github.com --git-protocol https --skip-ssh-key';
+
+  async function copyBrowserLoginCommand() {
+    try {
+      await navigator.clipboard.writeText(browserLoginCommand);
+      setCommandCopied(true);
+      window.setTimeout(() => setCommandCopied(false), 1500);
+    } catch {
+      setCommandCopied(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -339,6 +354,101 @@ function GitHubTab({
               In-app connect is not wired yet. For now, run <code style={{ background: 'var(--t-divider-subtle)', padding: '1px 4px', borderRadius: 4 }}>gh auth login --web</code> in the terminal, then hit refresh here.
             </div>
           )}
+        </div>
+
+        <div style={{ marginTop: 18, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+          <div style={{
+            padding: 14,
+            borderRadius: 12,
+            background: 'var(--t-bg-subtle)',
+            border: '1px solid var(--t-panel-border)',
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)', marginBottom: 6 }}>
+              Browser Login
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.45, marginBottom: 10 }}>
+              This keeps auth local through the GitHub CLI. Run the web login command in your terminal, finish the browser flow, then refresh this panel.
+            </div>
+            <div style={{
+              padding: '10px 12px',
+              borderRadius: 10,
+              background: 'var(--t-panel)',
+              border: '1px solid var(--t-panel-border)',
+              fontSize: 11,
+              color: 'var(--t-text-secondary)',
+              fontFamily: '"SF Mono", Menlo, monospace',
+              lineHeight: 1.5,
+              wordBreak: 'break-all',
+            }}>
+              {browserLoginCommand}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              <button
+                type="button"
+                onClick={() => { void copyBrowserLoginCommand(); }}
+                style={{
+                  padding: '7px 12px',
+                  borderRadius: 8,
+                  border: '1px solid var(--t-panel-border)',
+                  background: 'var(--t-panel)',
+                  color: 'var(--t-text-secondary)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {commandCopied ? 'Copied' : 'Copy Command'}
+              </button>
+            </div>
+          </div>
+
+          <div style={{
+            padding: 14,
+            borderRadius: 12,
+            background: 'var(--t-bg-subtle)',
+            border: '1px solid var(--t-panel-border)',
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)', marginBottom: 6 }}>
+              PAT Login
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.45, marginBottom: 10 }}>
+              Paste a GitHub Personal Access Token and let <code style={{ background: 'var(--t-divider-subtle)', padding: '1px 4px', borderRadius: 4 }}>gh auth login --with-token</code> store it locally through the GitHub CLI.
+            </div>
+            <input
+              type="password"
+              value={patToken}
+              onChange={(event) => setPatToken(event.target.value)}
+              placeholder="ghp_... or github_pat_..."
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                borderRadius: 10,
+                border: '1px solid var(--t-panel-border)',
+                background: 'var(--t-panel)',
+                color: 'var(--t-text)',
+                fontSize: 12,
+                outline: 'none',
+                marginBottom: 10,
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => onLoginWithToken?.(patToken)}
+              disabled={!patToken.trim() || actionBusy === 'login_token'}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 8,
+                border: 'none',
+                background: !patToken.trim() || actionBusy === 'login_token' ? 'var(--t-divider-subtle)' : 'var(--t-text)',
+                color: !patToken.trim() || actionBusy === 'login_token' ? 'var(--t-text-faint)' : '#fff',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: !patToken.trim() || actionBusy === 'login_token' ? 'default' : 'pointer',
+              }}
+            >
+              {actionBusy === 'login_token' ? 'Connecting…' : 'Connect with PAT'}
+            </button>
+          </div>
         </div>
 
         {inactiveAccounts.length > 0 && (
@@ -1240,14 +1350,17 @@ export function SettingsPage() {
     void loadGitHubStatus();
   }, [loadGitHubStatus]);
 
-  const runGitHubAction = useCallback(async (action: Extract<GitHubActionKind, 'switch' | 'logout'>, user: string) => {
+  const runGitHubAction = useCallback(async (
+    action: Extract<GitHubActionKind, 'switch' | 'logout' | 'login_token'>,
+    payload: { user?: string; token?: string },
+  ) => {
     setActionBusy(action);
     setActionNote(null);
     try {
       const res = await fetch('/api/panel/github-auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action, user }),
+        body: JSON.stringify({ action, ...payload }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -1311,8 +1424,9 @@ export function SettingsPage() {
             actionBusy={actionBusy}
             actionNote={actionNote}
             onRefresh={() => { void loadGitHubStatus(true); }}
-            onSwitchAccount={(user) => { void runGitHubAction('switch', user); }}
-            onDisconnect={(user) => { void runGitHubAction('logout', user); }}
+            onSwitchAccount={(user) => { void runGitHubAction('switch', { user }); }}
+            onDisconnect={(user) => { void runGitHubAction('logout', { user }); }}
+            onLoginWithToken={(token) => { void runGitHubAction('login_token', { token }); }}
           />
         )}
         {activeTab === 'agents' && (

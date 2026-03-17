@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import type { WsConnectionState } from '@/components/desktop/hooks/useDesktopWebSocket';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 // WorkspacesPanel merged into AgentPanel — unified agent+workspace view
 import { DesktopChat } from '@/components/desktop/DesktopChat';
@@ -51,6 +52,7 @@ function DashboardInner() {
   const [chatVisible, setChatVisible] = useState(true);
   const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
   const [thoughtsOpen, setThoughtsOpen] = useState(false);
+  const [wsStatus, setWsStatus] = useState<WsConnectionState>('disconnected');
 
   // ── Alert system ──
   const {
@@ -324,6 +326,7 @@ function DashboardInner() {
           setActiveNavSection('settings');
           setShowMemoryView(false);
         }}
+        wsStatus={wsStatus}
         renderSearch={(onClose) => (
           <UniversalSearch
             variant="desktop"
@@ -653,6 +656,7 @@ function DashboardInner() {
               resourceId: code,
             });
           }}
+          onWsStatusChange={setWsStatus}
         />
       </div>}
 

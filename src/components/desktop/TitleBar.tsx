@@ -86,6 +86,7 @@ interface TitleBarProps {
   onToggleBottomPanel?: () => void;
   chatVisible?: boolean;
   onToggleChat?: () => void;
+  wsStatus?: 'connected' | 'connecting' | 'reconnecting' | 'disconnected';
 }
 
 // ── Icon Button ──
@@ -171,6 +172,7 @@ export function TitleBar({
   onToggleBottomPanel,
   chatVisible = true,
   onToggleChat,
+  wsStatus = 'disconnected',
 }: TitleBarProps) {
   const [searchExpanded, setSearchExpanded] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
@@ -345,6 +347,23 @@ export function TitleBar({
         flexShrink: 0,
         paddingRight: 4,
       }}>
+        {/* WS connection indicator */}
+        <div
+          title={wsStatus === 'connected' ? 'WebSocket connected' : wsStatus === 'reconnecting' ? 'Reconnecting…' : wsStatus === 'connecting' ? 'Connecting…' : 'Disconnected — polling fallback'}
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: '50%',
+            background: wsStatus === 'connected' ? '#34c759'
+              : wsStatus === 'reconnecting' || wsStatus === 'connecting' ? '#ff9f0a'
+              : '#ff3b30',
+            flexShrink: 0,
+            marginRight: 6,
+            transition: 'background 300ms ease',
+            ['WebkitAppRegion' as string]: 'no-drag',
+          }}
+        />
+
         {/* Bottom panel toggle */}
         <TitleBarButton
           icon={<IconPanelBottom />}
