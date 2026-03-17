@@ -437,6 +437,20 @@ function startPollingLoops() {
 
 // ── Terminal handlers ──
 
+/** Find an existing cortex-dash tmux session to reuse, or return null. */
+function findExistingDashSession(): string | null {
+  try {
+    const out = execSync('tmux list-sessions -F "#{session_name}" 2>/dev/null', {
+      encoding: 'utf-8',
+      timeout: 3000,
+    });
+    const sessions = out.trim().split('\n').filter(n => n.startsWith('cortex-dash-'));
+    return sessions[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>) {
   if (!pty) {
     send(client, { channel: 'terminal', event: 'error', sessionName: '', error: 'Terminal not available (node-pty not installed)' });
@@ -445,18 +459,26 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
 
   const cols = typeof msg.cols === 'number' ? msg.cols : 120;
   const rows = typeof msg.rows === 'number' ? msg.rows : 30;
+
+  // Reuse an existing dashboard tmux session if one exists (avoids accumulation)
+  const existing = findExistingDashSession();
+  if (existing) {
+    console.log(`[ws-server] Reusing existing tmux session: ${existing}`);
+    send(client, { channel: 'terminal', event: 'created', sessionName: existing });
+    handleTerminalAttach(client, { sessionName: existing, cols, rows });
+    return;
+  }
+
   const shortId = randomUUID().slice(0, 8);
   const sessionName = `cortex-dash-${shortId}`;
 
   try {
-    // Create a new tmux session running bash
     execSync(
       `tmux new-session -d -s ${sessionName} -x ${cols} -y ${rows}`,
       { encoding: 'utf-8', timeout: 5000 },
     );
     console.log(`[ws-server] Created tmux session: ${sessionName}`);
 
-    // Tell client the session name, then auto-attach
     send(client, { channel: 'terminal', event: 'created', sessionName });
     handleTerminalAttach(client, { sessionName, cols, rows });
   } catch (err) {
@@ -639,12 +661,21 @@ function removeClientFromTerminal(clientId: string, sessionName: string) {
   const c = clients.get(clientId);
   if (c) c.terminalSessions.delete(sessionName);
 
-  // If no more clients, destroy the PTY handle (tmux session persists independently)
+  // If no more clients, destroy the PTY handle and clean up the tmux session
   if (attachment.clientIds.size === 0) {
-    console.log(`[ws-server] No clients left for terminal ${sessionName} — destroying PTY handle`);
+    console.log(`[ws-server] No clients left for terminal ${sessionName} — destroying PTY + tmux`);
     if (attachment.batchTimer) clearTimeout(attachment.batchTimer);
     try { attachment.ptyProcess.kill(); } catch { /* already gone */ }
     terminalAttachments.delete(sessionName);
+
+    // Kill dashboard-created tmux sessions (cortex-dash-*) since they're ephemeral.
+    // Agent-launched sessions (cortex-codex-*, cortex-claude-*) persist for reattach.
+    if (sessionName.startsWith('cortex-dash-')) {
+      try {
+        execSync(`tmux kill-session -t ${sessionName} 2>/dev/null`, { timeout: 3000 });
+        console.log(`[ws-server] Killed ephemeral tmux session: ${sessionName}`);
+      } catch { /* already gone */ }
+    }
   }
 }
 
@@ -937,6 +968,24 @@ reviewPollTimer = setInterval(() => {
   void broadcastReviewFileChanges();
 }, REVIEW_POLL_INTERVAL_MS);
 if (reviewPollTimer.unref) reviewPollTimer.unref();
+
+// Clean up stale dashboard tmux sessions from previous runs
+try {
+  const staleOut = execSync('tmux list-sessions -F "#{session_name}" 2>/dev/null', {
+    encoding: 'utf-8',
+    timeout: 3000,
+  });
+  const staleSessions = staleOut.trim().split('\n').filter(n => n.startsWith('cortex-dash-'));
+  for (const name of staleSessions) {
+    try {
+      execSync(`tmux kill-session -t ${name} 2>/dev/null`, { timeout: 3000 });
+      console.log(`[ws-server] Cleaned up stale tmux session: ${name}`);
+    } catch { /* already gone */ }
+  }
+  if (staleSessions.length > 0) {
+    console.log(`[ws-server] Cleaned ${staleSessions.length} stale dashboard tmux sessions`);
+  }
+} catch { /* tmux not running or no sessions — fine */ }
 
 // Start everything
 connectGateway();
