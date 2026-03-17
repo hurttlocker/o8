@@ -48,7 +48,10 @@ export async function GET(request: Request) {
 
     for (const [agentId, dirName] of Object.entries(AGENT_DIRS)) {
       const agentName = AGENT_NAMES[agentId] || agentId;
-      if (agentFilter && agentFilter.toLowerCase() !== agentName.toLowerCase()) continue;
+      if (agentFilter) {
+        const filterLower = agentFilter.toLowerCase();
+        if (filterLower !== agentName.toLowerCase() && filterLower !== agentId.toLowerCase()) continue;
+      }
 
       const sessionsDir = join(sessionsRoot, dirName, 'sessions');
       let files: string[];
