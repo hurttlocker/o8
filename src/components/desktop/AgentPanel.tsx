@@ -500,56 +500,41 @@ const AgentCard = memo(function AgentCard({
                     )}
                   </div>
                 </div>
-                {/* Context ring */}
-                {progress > 0 && (
-                  <div style={{ position: 'relative', width: 32, height: 32, flexShrink: 0 }}>
-                    <svg width={32} height={32} style={{ display: 'block', transform: 'rotate(-90deg)' }}>
-                      <circle cx={16} cy={16} r={13} fill="none" stroke="var(--t-divider-subtle)" strokeWidth={2} />
-                      <circle cx={16} cy={16} r={13} fill="none" stroke={ctxColor(agentCtx)} strokeWidth={2}
-                        strokeDasharray={2 * Math.PI * 13}
-                        strokeDashoffset={2 * Math.PI * 13 * (1 - progress)}
-                        strokeLinecap="round"
-                        style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(0.32, 0.72, 0, 1)' }}
-                      />
-                    </svg>
-                    <span style={{
-                      position: 'absolute', inset: 0,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      fontSize: 8, fontWeight: 800, color: ctxColor(agentCtx),
-                      fontFamily: 'SF Mono, Menlo, monospace',
-                    }}>
-                      {agentCtx}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Stats row — diff + context */}
-              {(diff || agentCtx > 0) && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                {/* Right side: diff stats + context ring */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 'auto' }}>
                   {diff && (
                     <span style={{
-                      fontSize: 11, fontWeight: 700,
+                      fontSize: 10, fontWeight: 700,
                       fontFamily: 'SF Mono, Menlo, monospace',
-                      display: 'flex', gap: 5,
+                      display: 'flex', gap: 4, flexShrink: 0,
                     }}>
                       <span style={{ color: '#22c55e' }}>+{diff.add.toLocaleString()}</span>
                       <span style={{ color: '#ef4444' }}>-{diff.del.toLocaleString()}</span>
                     </span>
                   )}
-                  {diff && agentCtx > 0 && (
-                    <span style={{ fontSize: 9, color: 'rgba(0,0,0,0.15)' }}>·</span>
-                  )}
-                  {agentCtx > 0 && (
-                    <span style={{
-                      fontSize: 11, fontWeight: 600, color: ctxColor(agentCtx),
-                      fontFamily: 'SF Mono, Menlo, monospace',
-                    }}>
-                      {agentCtx}% ctx
-                    </span>
+                  {progress > 0 && (
+                    <div style={{ position: 'relative', width: 32, height: 32, flexShrink: 0 }}>
+                      <svg width={32} height={32} style={{ display: 'block', transform: 'rotate(-90deg)' }}>
+                        <circle cx={16} cy={16} r={13} fill="none" stroke="var(--t-divider-subtle)" strokeWidth={2} />
+                        <circle cx={16} cy={16} r={13} fill="none" stroke={ctxColor(agentCtx)} strokeWidth={2}
+                          strokeDasharray={2 * Math.PI * 13}
+                          strokeDashoffset={2 * Math.PI * 13 * (1 - progress)}
+                          strokeLinecap="round"
+                          style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(0.32, 0.72, 0, 1)' }}
+                        />
+                      </svg>
+                      <span style={{
+                        position: 'absolute', inset: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 8, fontWeight: 800, color: ctxColor(agentCtx),
+                        fontFamily: 'SF Mono, Menlo, monospace',
+                      }}>
+                        {agentCtx}
+                      </span>
+                    </div>
                   )}
                 </div>
-              )}
+              </div>
             </div>
           );
         };
