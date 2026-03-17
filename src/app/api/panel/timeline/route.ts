@@ -232,7 +232,9 @@ export async function GET() {
     const openclawFiles = execQuiet(`ls -t ${home}/.openclaw/agents/*/sessions/*.jsonl 2>/dev/null | head -15`);
     for (const file of openclawFiles.split('\n').filter(Boolean)) {
       const agentMatch = file.match(/agents\/([^/]+)\//);
-      const agent = agentMatch ? agentMatch[1] : 'unknown';
+      const agentKey = agentMatch ? agentMatch[1] : 'unknown';
+      const agentDisplayNames: Record<string, string> = { main: 'Mister', ace: 'Niot', hawk: 'Hawk' };
+      const agent = agentDisplayNames[agentKey] || agentKey;
       const lines = execQuiet(`tail -500 "${file}" 2>/dev/null`, { timeout: 10000 });
       if (!lines) continue;
 

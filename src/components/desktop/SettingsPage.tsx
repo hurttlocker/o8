@@ -367,14 +367,6 @@ function GitHubTab({
     }
   }
 
-  if (loading) {
-    return (
-      <div style={{ padding: 40, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
-        Checking GitHub connection...
-      </div>
-    );
-  }
-
   // Only show active accounts
   const activeAccounts = accounts.filter(a => a.active);
   const activeAccount = activeAccounts[0];
@@ -432,6 +424,16 @@ function GitHubTab({
     { label: 'Developer Settings', href: 'https://github.com/settings/developers' },
   ] : [];
   const diagnosticsReadyCount = diagnostics.filter((item) => item.status === 'ready').length;
+  const activeDeviceFlow = deviceFlow ?? {
+    flowId: '',
+    userCode: '',
+    verificationUri: '',
+    verificationUriComplete: '',
+    expiresAt: 0,
+    expiresInMinutes: 0,
+    nextPollInMs: 1000,
+    note: '',
+  };
 
   useEffect(() => {
     try {
@@ -448,6 +450,14 @@ function GitHubTab({
       // noop
     }
   }, [expanded]);
+
+  if (loading) {
+    return (
+      <div style={{ padding: 40, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
+        Checking GitHub connection...
+      </div>
+    );
+  }
 
   const modernView = (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -695,25 +705,25 @@ function GitHubTab({
                     <div style={{ padding: '12px 14px', borderRadius: 12, background: 'var(--t-panel)', border: '1px solid var(--t-panel-border)' }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>Enter This Code</div>
                       <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--t-text)', letterSpacing: '0.14em', fontFamily: '"SF Mono", Menlo, monospace' }}>
-                        {deviceFlow.userCode}
+                        {activeDeviceFlow.userCode}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 8, lineHeight: 1.45 }}>
-                        {deviceFlow.note || 'Waiting for approval in GitHub…'} Expires in about {deviceFlow.expiresInMinutes} minute(s).
+                        {activeDeviceFlow.note || 'Waiting for approval in GitHub…'} Expires in about {activeDeviceFlow.expiresInMinutes} minute(s).
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                      <button type="button" onClick={() => window.open(deviceFlow.verificationUriComplete || deviceFlow.verificationUri, '_blank', 'noopener,noreferrer')} style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--t-panel-border)', background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                      <button type="button" onClick={() => window.open(activeDeviceFlow.verificationUriComplete || activeDeviceFlow.verificationUri, '_blank', 'noopener,noreferrer')} style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--t-panel-border)', background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
                         Open GitHub
                       </button>
                       <button type="button" onClick={() => { void copyDeviceCode(); }} style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--t-panel-border)', background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
                         {deviceCodeCopied ? 'Copied' : 'Copy Code'}
                       </button>
-                      <button type="button" onClick={() => onPollDeviceFlow?.(deviceFlow.flowId)} style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--t-panel-border)', background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                      <button type="button" onClick={() => onPollDeviceFlow?.(activeDeviceFlow.flowId)} style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--t-panel-border)', background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
                         Poll Now
                       </button>
                       <button
                         type="button"
-                        onClick={() => onCancelDeviceFlow?.(deviceFlow.flowId)}
+                        onClick={() => onCancelDeviceFlow?.(activeDeviceFlow.flowId)}
                         disabled={actionBusy === 'cancel_device'}
                         style={{
                           padding: '7px 12px',
@@ -1132,16 +1142,16 @@ function GitHubTab({
                     letterSpacing: '0.14em',
                     fontFamily: '"SF Mono", Menlo, monospace',
                   }}>
-                    {deviceFlow.userCode}
+                    {activeDeviceFlow.userCode}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 8, lineHeight: 1.45 }}>
-                    {deviceFlow.note || 'Waiting for approval in GitHub…'} Expires in about {deviceFlow.expiresInMinutes} minute(s).
+                    {activeDeviceFlow.note || 'Waiting for approval in GitHub…'} Expires in about {activeDeviceFlow.expiresInMinutes} minute(s).
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
                   <button
                     type="button"
-                    onClick={() => window.open(deviceFlow.verificationUriComplete || deviceFlow.verificationUri, '_blank', 'noopener,noreferrer')}
+                    onClick={() => window.open(activeDeviceFlow.verificationUriComplete || activeDeviceFlow.verificationUri, '_blank', 'noopener,noreferrer')}
                     style={{
                       padding: '7px 12px',
                       borderRadius: 8,
@@ -1173,7 +1183,7 @@ function GitHubTab({
                   </button>
                   <button
                     type="button"
-                    onClick={() => onPollDeviceFlow?.(deviceFlow.flowId)}
+                    onClick={() => onPollDeviceFlow?.(activeDeviceFlow.flowId)}
                     style={{
                       padding: '7px 12px',
                       borderRadius: 8,
@@ -1189,7 +1199,7 @@ function GitHubTab({
                   </button>
                   <button
                     type="button"
-                    onClick={() => onCancelDeviceFlow?.(deviceFlow.flowId)}
+                    onClick={() => onCancelDeviceFlow?.(activeDeviceFlow.flowId)}
                     disabled={actionBusy === 'cancel_device'}
                     style={{
                       padding: '7px 12px',
