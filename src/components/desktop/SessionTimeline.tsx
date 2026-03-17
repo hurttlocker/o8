@@ -12,6 +12,7 @@
  */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 // ── Types ──
 
@@ -226,6 +227,54 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
 
   const [hoveredSegIdx, setHoveredSegIdx] = useState<number | null>(null);
 
+  // ── Drill-down modal state ──
+  const [drillOpen, setDrillOpen] = useState(false);
+  const [drillPos, setDrillPos] = useState({ x: 200, y: 100 });
+  const [drillSize, setDrillSize] = useState({ w: 520, h: 400 });
+  const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+
+  const handleBarDoubleClick = useCallback((e: React.MouseEvent) => {
+    // Open drill-down centered on click position
+    const x = Math.max(20, e.clientX - 260);
+    const y = Math.max(60, e.clientY + 10);
+    setDrillPos({ x, y });
+    setDrillOpen(true);
+  }, []);
+
+  // Drag handler for modal
+  const handleDrillDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragRef.current = { startX: e.clientX, startY: e.clientY, originX: drillPos.x, originY: drillPos.y };
+    const onMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return;
+      setDrillPos({
+        x: dragRef.current.originX + (ev.clientX - dragRef.current.startX),
+        y: dragRef.current.originY + (ev.clientY - dragRef.current.startY),
+      });
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [drillPos]);
+
+  // Group segments by agent for drill-down
+  const agentBreakdown = useMemo(() => {
+    const map = new Map<string, { agent: string; segments: TimelineSegment[]; totalMin: number; breakdown: Partial<Record<SegmentKind, number>> }>();
+    for (const seg of segments) {
+      const agent = seg.agent || 'Unknown';
+      if (!map.has(agent)) map.set(agent, { agent, segments: [], totalMin: 0, breakdown: {} });
+      const entry = map.get(agent)!;
+      entry.segments.push(seg);
+      entry.totalMin += seg.durationMin;
+      entry.breakdown[seg.kind] = (entry.breakdown[seg.kind] || 0) + seg.durationMin;
+    }
+    return Array.from(map.values()).sort((a, b) => b.totalMin - a.totalMin);
+  }, [segments]);
+
   const handleBarMouseMove = useCallback((e: React.MouseEvent) => {
     if (!barRef.current || totalRendered === 0) return;
     const rect = barRef.current.getBoundingClientRect();
@@ -300,6 +349,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
         ref={barRef}
         onMouseMove={handleBarMouseMove}
         onMouseLeave={handleBarMouseLeave}
+        onDoubleClick={handleBarDoubleClick}
         style={{
           flex: 1,
           height: 18,
@@ -457,6 +507,173 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
           );
         })}
       </div>
+
+      {/* ── Agent Drill-Down Modal (glass, draggable) ── */}
+      {drillOpen && typeof document !== 'undefined' && createPortal(
+        <>
+          {/* Backdrop */}
+          <div
+            onClick={() => setDrillOpen(false)}
+            style={{
+              position: 'fixed', inset: 0, zIndex: 9998,
+              background: 'rgba(0, 0, 0, 0.15)',
+              backdropFilter: 'blur(2px)',
+              WebkitBackdropFilter: 'blur(2px)',
+            }}
+          />
+          {/* Modal */}
+          <div style={{
+            position: 'fixed',
+            left: drillPos.x,
+            top: drillPos.y,
+            width: drillSize.w,
+            maxHeight: drillSize.h,
+            zIndex: 9999,
+            background: 'rgba(255, 255, 255, 0.85)',
+            backdropFilter: 'blur(40px) saturate(1.8)',
+            WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
+            border: '1px solid rgba(255, 255, 255, 0.5)',
+            borderRadius: 16,
+            boxShadow: '0 24px 80px rgba(0, 0, 0, 0.18), 0 0 1px rgba(0, 0, 0, 0.1)',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            animation: 'drillFadeIn 180ms cubic-bezier(0.32, 0.72, 0, 1)',
+          }}>
+            {/* Header — draggable */}
+            <div
+              onMouseDown={handleDrillDragStart}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '14px 16px 10px',
+                cursor: 'grab',
+                userSelect: 'none',
+                borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
+                  Agent Activity
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontWeight: 500 }}>
+                  Today · {formatDuration(totalSpan)}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDrillOpen(false)}
+                aria-label="Close"
+                style={{
+                  width: 24, height: 24, borderRadius: 12,
+                  border: 'none', background: 'rgba(0,0,0,0.06)',
+                  color: 'var(--t-text-muted)', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 14, fontWeight: 600, lineHeight: 1,
+                  transition: 'background 120ms',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.12)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.06)'; }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Content — per-agent breakdown */}
+            <div style={{
+              padding: '12px 16px 16px',
+              overflowY: 'auto',
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 14,
+            }}>
+              {agentBreakdown.map((entry) => (
+                <div key={entry.agent} style={{
+                  background: 'rgba(255, 255, 255, 0.6)',
+                  border: '1px solid rgba(0, 0, 0, 0.05)',
+                  borderRadius: 12,
+                  padding: 12,
+                }}>
+                  {/* Agent header */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{
+                        width: 24, height: 24, borderRadius: 8,
+                        background: 'rgba(37, 99, 235, 0.08)',
+                        border: '1px solid rgba(37, 99, 235, 0.15)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 11, fontWeight: 700, color: '#2563eb',
+                      }}>
+                        {entry.agent[0]}
+                      </div>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
+                        {entry.agent}
+                      </span>
+                    </div>
+                    <span style={{
+                      fontSize: 11, fontWeight: 600, color: 'var(--t-text-muted)',
+                      fontFamily: '"SF Mono", ui-monospace, monospace',
+                    }}>
+                      {formatDuration(entry.totalMin)}
+                    </span>
+                  </div>
+
+                  {/* Per-agent timeline bar */}
+                  <div style={{
+                    height: 10, borderRadius: 5, overflow: 'hidden',
+                    display: 'flex', background: 'rgba(0, 0, 0, 0.04)',
+                  }}>
+                    {entry.segments.map((seg, i) => {
+                      const agentTotal = entry.segments.reduce((s, x) => s + x.durationMin, 0);
+                      const pct = (seg.durationMin / agentTotal) * 100;
+                      return (
+                        <div
+                          key={i}
+                          title={`${SEGMENT_LABELS[seg.kind]} — ${formatDuration(seg.durationMin)}${seg.label ? ` · ${seg.label}` : ''}`}
+                          style={{
+                            width: `${pct}%`,
+                            height: '100%',
+                            background: SEGMENT_COLORS[seg.kind],
+                            opacity: 0.85,
+                            transition: 'opacity 120ms',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.85'; }}
+                        />
+                      );
+                    })}
+                  </div>
+
+                  {/* Breakdown stats */}
+                  <div style={{ display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+                    {(['coding', 'thinking', 'testing', 'error'] as SegmentKind[]).map((kind) => {
+                      const mins = entry.breakdown[kind];
+                      if (!mins) return null;
+                      return (
+                        <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <div style={{ width: 6, height: 6, borderRadius: 3, background: SEGMENT_COLORS[kind] }} />
+                          <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontWeight: 500 }}>
+                            {SEGMENT_LABELS[kind]} {formatDuration(mins)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+
+              {agentBreakdown.length === 0 && (
+                <div style={{ textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 12, padding: 20 }}>
+                  No agent activity yet today
+                </div>
+              )}
+            </div>
+          </div>
+        </>,
+        document.body,
+      )}
     </div>
   );
 }
