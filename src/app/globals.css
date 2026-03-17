@@ -4726,3 +4726,8 @@ body:has(.remodex-diff-overlay) {
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* Cursor blink for streaming text */
+@keyframes blink {
+  50% { opacity: 0; }
+}
