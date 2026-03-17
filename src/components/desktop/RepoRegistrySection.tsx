@@ -1,0 +1,1662 @@
+'use client';
+
+import { createPortal } from 'react-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  FolderOpen,
+  GitBranch,
+  Plus,
+  Settings2,
+  Trash2,
+  X,
+} from 'lucide-react';
+import type {
+  RepoRegistryEntry,
+  RepoSetupConfig,
+  RepoSetupEnvMode,
+  ValidatedRepoCandidate,
+} from '@/lib/repos/types';
+
+interface JsonErrorShape {
+  error?: string;
+}
+
+interface WorkspaceCreateResult {
+  id: string;
+  branch: string;
+  path: string;
+  baseBranch: string;
+}
+
+function formatRelativeTime(value: string | null) {
+  if (!value) return 'Never';
+
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) return 'Unknown';
+
+  const delta = Math.max(0, Date.now() - timestamp);
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+
+  if (delta < minute) return 'Just now';
+  if (delta < hour) return `${Math.max(1, Math.round(delta / minute))}m ago`;
+  if (delta < day) return `${Math.max(1, Math.round(delta / hour))}h ago`;
+  if (delta < 7 * day) return `${Math.max(1, Math.round(delta / day))}d ago`;
+
+  return new Date(value).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+function shortenPath(value: string) {
+  const userPath = value.replace(/^\/Users\/[^/]+/, '~');
+  if (userPath !== value) return userPath;
+  return value.replace(/^\/home\/[^/]+/, '~');
+}
+
+function sanitizeWorkspaceName(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 60);
+}
+
+function getWorkspaceBranchPreview(value: string) {
+  const slug = sanitizeWorkspaceName(value) || 'workspace';
+  return `worktree/workspace/${slug}`;
+}
+
+function githubUrlFromRemote(remoteUrl: string | null) {
+  if (!remoteUrl) return null;
+
+  const httpsMatch = remoteUrl.match(/github\.com[/:]([^/]+\/[^/.]+)(?:\.git)?$/i);
+  if (httpsMatch?.[1]) return `https://github.com/${httpsMatch[1]}`;
+
+  return null;
+}
+
+function defaultWorkspaceName(repoName: string) {
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
+  return `${repoName}-${stamp}`;
+}
+
+function normalizeSetupDraft(setup: RepoSetupConfig): RepoSetupConfig {
+  const envFiles = Array.from(
+    new Set(
+      setup.envFiles
+        .map((file) => file.trim())
+        .filter(Boolean),
+    ),
+  );
+
+  return {
+    ...setup,
+    envFiles,
+    installCommand: setup.installCommand?.trim() || null,
+    buildCommand: setup.buildCommand?.trim() || null,
+  };
+}
+
+async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit) {
+  const response = await fetch(input, init);
+  const data = (await response.json().catch(() => ({}))) as T & JsonErrorShape;
+  if (!response.ok) {
+    throw new Error(data.error || 'Request failed.');
+  }
+  return data;
+}
+
+function GlassModal({
+  open,
+  title,
+  subtitle,
+  onClose,
+  children,
+  footer,
+  width = 560,
+}: {
+  open: boolean;
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  width?: number;
+}) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [open, onClose]);
+
+  if (!open || typeof document === 'undefined') {
+    return null;
+  }
+
+  return createPortal(
+    <>
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9998,
+          background: 'rgba(0, 0, 0, 0.05)',
+          backdropFilter: 'blur(6px)',
+          WebkitBackdropFilter: 'blur(6px)',
+        }}
+      />
+      <div
+        onClick={(event) => event.stopPropagation()}
+        style={{
+          position: 'fixed',
+          left: '50%',
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: `min(${width}px, calc(100vw - 28px))`,
+          maxHeight: 'calc(100vh - 28px)',
+          zIndex: 9999,
+          background: 'rgba(255, 255, 255, 0.18)',
+          backdropFilter: 'blur(80px) saturate(2.2)',
+          WebkitBackdropFilter: 'blur(80px) saturate(2.2)',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          borderRadius: 16,
+          boxShadow: '0 24px 80px rgba(0, 0, 0, 0.08), 0 8px 32px rgba(0, 0, 0, 0.04), inset 0 0.5px 0 rgba(255, 255, 255, 0.4), inset 0 -0.5px 0 rgba(255, 255, 255, 0.1)',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 12,
+            padding: '16px 18px 14px',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.14)',
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 15,
+                fontWeight: 700,
+                color: 'var(--t-text)',
+                letterSpacing: '-0.02em',
+              }}
+            >
+              {title}
+            </div>
+            {subtitle ? (
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 12,
+                  lineHeight: 1.45,
+                  color: 'var(--t-text-muted)',
+                }}
+              >
+                {subtitle}
+              </div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 14,
+              border: 'none',
+              background: 'rgba(255, 255, 255, 0.14)',
+              color: 'var(--t-text-muted)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <X size={14} strokeWidth={2.25} />
+          </button>
+        </div>
+
+        <div
+          style={{
+            padding: 18,
+            overflowY: 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+          }}
+        >
+          {children}
+        </div>
+
+        {footer ? (
+          <div
+            style={{
+              padding: '14px 18px 18px',
+              borderTop: '1px solid rgba(255, 255, 255, 0.14)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: 10,
+            }}
+          >
+            {footer}
+          </div>
+        ) : null}
+      </div>
+    </>,
+    document.body,
+  );
+}
+
+function RepoActionButton({
+  label,
+  icon,
+  onClick,
+  disabled = false,
+  active = false,
+  danger = false,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  active?: boolean;
+  danger?: boolean;
+}) {
+  const color = danger ? '#ef4444' : active ? 'var(--t-text)' : 'var(--t-text-secondary)';
+  const border = danger ? 'rgba(239, 68, 68, 0.18)' : active ? 'rgba(37, 99, 235, 0.16)' : 'var(--t-btn-secondary-border)';
+  const background = danger ? 'rgba(239, 68, 68, 0.08)' : active ? 'rgba(37, 99, 235, 0.08)' : 'var(--t-panel-hover)';
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        minHeight: 32,
+        padding: '8px 10px',
+        borderRadius: 10,
+        border: `1px solid ${border}`,
+        background,
+        color,
+        fontSize: 11,
+        fontWeight: 600,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.45 : 1,
+        fontFamily: '-apple-system, system-ui, sans-serif',
+        transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function SetupModeButton({
+  label,
+  selected,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        flex: 1,
+        minHeight: 34,
+        padding: '8px 10px',
+        borderRadius: 10,
+        border: selected ? '1px solid rgba(37, 99, 235, 0.2)' : '1px solid var(--t-btn-secondary-border)',
+        background: selected ? 'rgba(37, 99, 235, 0.08)' : 'rgba(255, 255, 255, 0.55)',
+        color: selected ? 'var(--t-text)' : 'var(--t-text-muted)',
+        fontSize: 11,
+        fontWeight: 600,
+        cursor: 'pointer',
+        fontFamily: '-apple-system, system-ui, sans-serif',
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function RepoCard({
+  repo,
+  workspaceNotice,
+  onCreateWorkspace,
+  onOpenGitHub,
+  onRemove,
+  onSaveSetup,
+}: {
+  repo: RepoRegistryEntry;
+  workspaceNotice: WorkspaceCreateResult | null;
+  onCreateWorkspace: (repo: RepoRegistryEntry) => void;
+  onOpenGitHub: (repo: RepoRegistryEntry) => void;
+  onRemove: (repo: RepoRegistryEntry) => void;
+  onSaveSetup: (repoId: string, setup: RepoSetupConfig) => Promise<void>;
+}) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [draftSetup, setDraftSetup] = useState<RepoSetupConfig>(repo.setup);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraftSetup(repo.setup);
+  }, [repo.setup]);
+
+  const githubUrl = useMemo(() => githubUrlFromRemote(repo.remoteUrl), [repo.remoteUrl]);
+  const hasUnsavedChanges = JSON.stringify(draftSetup) !== JSON.stringify(repo.setup);
+
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await onSaveSetup(repo.id, normalizeSetupDraft(draftSetup));
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Unable to save setup profile.');
+    } finally {
+      setSaving(false);
+    }
+  }, [draftSetup, onSaveSetup, repo.id]);
+
+  const updateEnvMode = useCallback((envMode: RepoSetupEnvMode) => {
+    setDraftSetup((current) => ({
+      ...current,
+      envMode,
+    }));
+  }, []);
+
+  return (
+    <div
+      style={{
+        background: 'rgba(255, 255, 255, 0.7)',
+        border: '1px solid var(--t-panel-border)',
+        borderRadius: 14,
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        boxShadow: 'var(--t-panel-shadow)',
+        overflow: 'hidden',
+      }}
+    >
+      <div style={{ padding: '14px 14px 12px' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <div
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 10,
+              background: 'rgba(37, 99, 235, 0.08)',
+              border: '1px solid rgba(37, 99, 235, 0.16)',
+              color: '#2563eb',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <FolderOpen size={15} strokeWidth={2} />
+          </div>
+
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: 'var(--t-text)',
+                  letterSpacing: '-0.01em',
+                }}
+              >
+                {repo.name}
+              </span>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  background: 'var(--t-divider-subtle)',
+                  color: 'var(--t-text-secondary)',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                }}
+              >
+                <GitBranch size={11} strokeWidth={2} />
+                {repo.defaultBranch}
+              </span>
+            </div>
+
+            <div
+              style={{
+                marginTop: 5,
+                fontSize: 11,
+                color: 'var(--t-text-muted)',
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                lineHeight: 1.45,
+                wordBreak: 'break-all',
+              }}
+              title={repo.localPath}
+            >
+              {shortenPath(repo.localPath)}
+            </div>
+
+            <div
+              style={{
+                marginTop: 8,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                flexWrap: 'wrap',
+                fontSize: 11,
+                color: 'var(--t-text-muted)',
+              }}
+            >
+              <span>Last opened {formatRelativeTime(repo.lastOpenedAt)}</span>
+              <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+              <span
+                style={{
+                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                  color: 'var(--t-text-faint)',
+                }}
+              >
+                {repo.remoteUrl ? repo.remoteUrl.replace(/^https?:\/\//, '') : 'No remote configured'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {workspaceNotice ? (
+          <div
+            style={{
+              marginTop: 12,
+              padding: 10,
+              borderRadius: 12,
+              border: '1px solid rgba(34, 197, 94, 0.18)',
+              background: 'rgba(34, 197, 94, 0.08)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 11,
+                fontWeight: 700,
+                color: '#15803d',
+              }}
+            >
+              <CheckCircle2 size={13} strokeWidth={2} />
+              Workspace ready
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                color: '#166534',
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                lineHeight: 1.45,
+                wordBreak: 'break-all',
+              }}
+            >
+              {workspaceNotice.branch}
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                color: '#166534',
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                lineHeight: 1.45,
+                wordBreak: 'break-all',
+              }}
+            >
+              {shortenPath(workspaceNotice.path)}
+            </div>
+          </div>
+        ) : null}
+
+        <div
+          style={{
+            marginTop: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flexWrap: 'wrap',
+          }}
+        >
+          <RepoActionButton
+            label="New Workspace"
+            icon={<Plus size={12} strokeWidth={2.5} />}
+            onClick={() => onCreateWorkspace(repo)}
+            active
+          />
+          <RepoActionButton
+            label="Settings"
+            icon={<Settings2 size={12} strokeWidth={2} />}
+            onClick={() => setSettingsOpen((current) => !current)}
+            active={settingsOpen}
+          />
+          <RepoActionButton
+            label="Open on GitHub"
+            icon={<ExternalLink size={12} strokeWidth={2} />}
+            onClick={() => onOpenGitHub(repo)}
+            disabled={!githubUrl}
+          />
+          <RepoActionButton
+            label="Remove"
+            icon={<Trash2 size={12} strokeWidth={2} />}
+            onClick={() => onRemove(repo)}
+            danger
+          />
+        </div>
+      </div>
+
+      {settingsOpen ? (
+        <div
+          style={{
+            borderTop: '1px solid var(--t-divider-subtle)',
+            padding: '12px 14px 14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: 'var(--t-text)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+              }}
+            >
+              Setup Profile
+            </div>
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 11,
+                lineHeight: 1.45,
+                color: 'var(--t-text-muted)',
+              }}
+            >
+              Environment handling and optional bootstrap commands are stored per repo here. Build and env hooks are scaffolded and not yet injected into workspace bootstrap.
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+              Environment files
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <SetupModeButton label="Copy" selected={draftSetup.envMode === 'copy'} onClick={() => updateEnvMode('copy')} />
+              <SetupModeButton label="Symlink" selected={draftSetup.envMode === 'symlink'} onClick={() => updateEnvMode('symlink')} />
+              <SetupModeButton label="Skip" selected={draftSetup.envMode === 'skip'} onClick={() => updateEnvMode('skip')} />
+            </div>
+            <input
+              value={draftSetup.envFiles.join(', ')}
+              onChange={(event) => {
+                const envFiles = event.currentTarget.value.split(',');
+                setDraftSetup((current) => ({
+                  ...current,
+                  envFiles,
+                }));
+              }}
+              placeholder=".env, .env.local"
+              style={{
+                width: '100%',
+                minHeight: 36,
+                padding: '9px 11px',
+                borderRadius: 10,
+                border: '1px solid var(--t-btn-secondary-border)',
+                background: 'rgba(255, 255, 255, 0.55)',
+                color: 'var(--t-text)',
+                fontSize: 12,
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                outline: 'none',
+              }}
+            />
+          </div>
+
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={draftSetup.installOnCreateWorkspace}
+              onChange={(event) => {
+                const checked = event.currentTarget.checked;
+                setDraftSetup((current) => ({
+                  ...current,
+                  installOnCreateWorkspace: checked,
+                }));
+              }}
+              style={{
+                marginTop: 2,
+                accentColor: '#ef4444',
+              }}
+            />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+                Install dependencies on workspace create
+              </div>
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 11,
+                  color: 'var(--t-text-muted)',
+                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                  lineHeight: 1.45,
+                }}
+              >
+                {draftSetup.installCommand ?? 'No install command detected'}
+              </div>
+            </div>
+          </label>
+
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={draftSetup.runBuildOnCreateWorkspace}
+              onChange={(event) => {
+                const checked = event.currentTarget.checked;
+                setDraftSetup((current) => ({
+                  ...current,
+                  runBuildOnCreateWorkspace: checked,
+                }));
+              }}
+              style={{
+                marginTop: 2,
+                accentColor: '#ef4444',
+              }}
+            />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+                Run build after setup
+              </div>
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 11,
+                  color: 'var(--t-text-muted)',
+                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                  lineHeight: 1.45,
+                }}
+              >
+                {draftSetup.buildCommand ?? 'No build command detected'}
+              </div>
+            </div>
+          </label>
+
+          {saveError ? (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 11,
+                color: '#b91c1c',
+              }}
+            >
+              <AlertCircle size={13} strokeWidth={2} />
+              {saveError}
+            </div>
+          ) : null}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || !hasUnsavedChanges}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6,
+                minHeight: 34,
+                padding: '8px 12px',
+                borderRadius: 10,
+                border: '1px solid rgba(239, 68, 68, 0.2)',
+                background: 'rgba(239, 68, 68, 0.08)',
+                color: '#b91c1c',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: saving || !hasUnsavedChanges ? 'not-allowed' : 'pointer',
+                opacity: saving || !hasUnsavedChanges ? 0.45 : 1,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              {saving ? 'Saving…' : 'Save Profile'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setDraftSetup(repo.setup);
+                setSaveError(null);
+              }}
+              disabled={!hasUnsavedChanges || saving}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: 34,
+                padding: '8px 12px',
+                borderRadius: 10,
+                border: '1px solid var(--t-btn-secondary-border)',
+                background: 'var(--t-panel-hover)',
+                color: 'var(--t-text-secondary)',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: !hasUnsavedChanges || saving ? 'not-allowed' : 'pointer',
+                opacity: !hasUnsavedChanges || saving ? 0.45 : 1,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function RepoRegistrySection() {
+  const [repos, setRepos] = useState<RepoRegistryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reposOpen, setReposOpen] = useState(true);
+
+  const [addOpen, setAddOpen] = useState(false);
+  const [repoPathInput, setRepoPathInput] = useState('');
+  const [validating, setValidating] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [validationResult, setValidationResult] = useState<ValidatedRepoCandidate | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  const [workspaceRepo, setWorkspaceRepo] = useState<RepoRegistryEntry | null>(null);
+  const [workspaceName, setWorkspaceName] = useState('');
+  const [workspaceBaseBranch, setWorkspaceBaseBranch] = useState('');
+  const [workspaceUseSetup, setWorkspaceUseSetup] = useState(true);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [workspaceResult, setWorkspaceResult] = useState<WorkspaceCreateResult | null>(null);
+  const [workspaceNotice, setWorkspaceNotice] = useState<Record<string, WorkspaceCreateResult>>({});
+
+  const [removeTarget, setRemoveTarget] = useState<RepoRegistryEntry | null>(null);
+  const [removeBusy, setRemoveBusy] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+
+  const loadRepos = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const data = await requestJson<{ repos: RepoRegistryEntry[] }>('/api/panel/repos');
+      setRepos(data.repos ?? []);
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Unable to load repositories.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadRepos();
+  }, [loadRepos]);
+
+  const resetAddModal = useCallback(() => {
+    setAddOpen(false);
+    setRepoPathInput('');
+    setValidationError(null);
+    setValidationResult(null);
+    setValidating(false);
+    setAdding(false);
+  }, []);
+
+  const handleValidate = useCallback(async () => {
+    const localPath = repoPathInput.trim();
+    if (!localPath) {
+      setValidationError('Enter a local folder path.');
+      setValidationResult(null);
+      return;
+    }
+
+    setValidating(true);
+    setValidationError(null);
+    setValidationResult(null);
+
+    try {
+      const data = await requestJson<{ repo: ValidatedRepoCandidate }>('/api/panel/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'validate', localPath }),
+      });
+      setValidationResult(data.repo);
+    } catch (error) {
+      setValidationError(error instanceof Error ? error.message : 'Validation failed.');
+    } finally {
+      setValidating(false);
+    }
+  }, [repoPathInput]);
+
+  const handleAddRepo = useCallback(async () => {
+    const localPath = repoPathInput.trim();
+    if (!localPath) {
+      setValidationError('Enter a local folder path.');
+      return;
+    }
+
+    setAdding(true);
+    setValidationError(null);
+
+    try {
+      await requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', localPath }),
+      });
+      await loadRepos();
+      resetAddModal();
+    } catch (error) {
+      setValidationError(error instanceof Error ? error.message : 'Unable to add repository.');
+    } finally {
+      setAdding(false);
+    }
+  }, [loadRepos, repoPathInput, resetAddModal]);
+
+  const handleSaveSetup = useCallback(async (repoId: string, setup: RepoSetupConfig) => {
+    const data = await requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'update', id: repoId, setup }),
+    });
+
+    setRepos((current) => current.map((repo) => (repo.id === repoId ? data.repo : repo)));
+  }, []);
+
+  const handleOpenGitHub = useCallback((repo: RepoRegistryEntry) => {
+    const githubUrl = githubUrlFromRemote(repo.remoteUrl);
+    if (!githubUrl) return;
+
+    void requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'touch', id: repo.id }),
+    }).then((data) => {
+      setRepos((current) => current.map((entry) => (entry.id === repo.id ? data.repo : entry)));
+    }).catch(() => null);
+
+    window.open(githubUrl, '_blank', 'noopener,noreferrer');
+  }, []);
+
+  const openWorkspaceModal = useCallback((repo: RepoRegistryEntry) => {
+    setWorkspaceRepo(repo);
+    setWorkspaceName(defaultWorkspaceName(repo.name));
+    setWorkspaceBaseBranch(repo.defaultBranch);
+    setWorkspaceUseSetup(repo.setup.installOnCreateWorkspace);
+    setWorkspaceError(null);
+    setWorkspaceResult(null);
+  }, []);
+
+  const closeWorkspaceModal = useCallback(() => {
+    setWorkspaceRepo(null);
+    setWorkspaceName('');
+    setWorkspaceBaseBranch('');
+    setWorkspaceUseSetup(true);
+    setWorkspaceError(null);
+    setWorkspaceResult(null);
+    setWorkspaceLoading(false);
+  }, []);
+
+  const handleCreateWorkspace = useCallback(async () => {
+    if (!workspaceRepo) return;
+
+    const taskName = workspaceName.trim();
+    if (!taskName) {
+      setWorkspaceError('Workspace name is required.');
+      return;
+    }
+
+    setWorkspaceLoading(true);
+    setWorkspaceError(null);
+
+    try {
+      const data = await requestJson<{ worktree: WorkspaceCreateResult }>('/api/worktrees', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repo: workspaceRepo.localPath,
+          agentType: 'workspace',
+          taskName,
+          baseBranch: workspaceBaseBranch.trim() || undefined,
+          skipSetup: !workspaceUseSetup,
+        }),
+      });
+
+      setWorkspaceResult(data.worktree);
+      setWorkspaceNotice((current) => ({
+        ...current,
+        [workspaceRepo.id]: data.worktree,
+      }));
+
+      const touched = await requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'touch', id: workspaceRepo.id }),
+      });
+
+      setRepos((current) => current.map((repo) => (repo.id === workspaceRepo.id ? touched.repo : repo)));
+    } catch (error) {
+      setWorkspaceError(error instanceof Error ? error.message : 'Unable to create workspace.');
+    } finally {
+      setWorkspaceLoading(false);
+    }
+  }, [workspaceBaseBranch, workspaceName, workspaceRepo, workspaceUseSetup]);
+
+  const handleRemoveRepo = useCallback(async () => {
+    if (!removeTarget) return;
+
+    setRemoveBusy(true);
+    setRemoveError(null);
+    try {
+      await requestJson<{ ok: boolean }>('/api/panel/repos', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: removeTarget.id }),
+      });
+      setRepos((current) => current.filter((repo) => repo.id !== removeTarget.id));
+      setWorkspaceNotice((current) => {
+        const next = { ...current };
+        delete next[removeTarget.id];
+        return next;
+      });
+      setRemoveTarget(null);
+    } catch (error) {
+      setRemoveError(error instanceof Error ? error.message : 'Unable to remove repository.');
+    } finally {
+      setRemoveBusy(false);
+    }
+  }, [removeTarget]);
+
+  const branchPreview = useMemo(() => getWorkspaceBranchPreview(workspaceName), [workspaceName]);
+
+  return (
+    <>
+      <div style={{ flexShrink: 0, paddingLeft: 14, paddingRight: 14, paddingTop: 0, paddingBottom: 0 }}>
+        <button
+          type="button"
+          onClick={() => setReposOpen((current) => !current)}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '8px 2px',
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            fontFamily: '-apple-system, system-ui, sans-serif',
+          }}
+        >
+          <FolderOpen size={12} strokeWidth={2} color={reposOpen ? '#ef4444' : 'var(--t-text-muted)'} />
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: reposOpen ? 'var(--t-text)' : 'var(--t-text-muted)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+            }}
+          >
+            Repositories
+          </span>
+          <span
+            style={{
+              fontSize: 10,
+              color: 'var(--t-text-faint)',
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+            }}
+          >
+            {repos.length}
+          </span>
+          <span
+            style={{
+              marginLeft: 'auto',
+              fontSize: 10,
+              color: 'var(--t-text-faint)',
+              display: 'flex',
+              alignItems: 'center',
+            }}
+          >
+            {reposOpen ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
+          </span>
+        </button>
+      </div>
+
+      {reposOpen ? (
+        <div
+          style={{
+            flexShrink: 0,
+            paddingTop: 0,
+            paddingRight: 14,
+            paddingBottom: 8,
+            paddingLeft: 14,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={() => {
+                setAddOpen(true);
+                setValidationError(null);
+                setValidationResult(null);
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                minHeight: 32,
+                padding: '8px 10px',
+                borderRadius: 10,
+                border: '1px solid rgba(239, 68, 68, 0.18)',
+                background: 'rgba(239, 68, 68, 0.08)',
+                color: '#b91c1c',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              <Plus size={12} strokeWidth={2.5} />
+              Add Repository
+            </button>
+          </div>
+
+          {loading ? (
+            <div style={{ fontSize: 13, color: 'var(--t-text-muted)', padding: '8px 2px' }}>Loading repositories…</div>
+          ) : null}
+
+          {loadError ? (
+            <div
+              style={{
+                padding: 12,
+                borderRadius: 14,
+                border: '1px solid rgba(239, 68, 68, 0.16)',
+                background: 'rgba(254, 242, 242, 0.9)',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                fontSize: 12,
+                color: '#991b1b',
+              }}
+            >
+              <AlertCircle size={14} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1 }} />
+              <span>{loadError}</span>
+            </div>
+          ) : null}
+
+          {!loading && !loadError && repos.length === 0 ? (
+            <div
+              style={{
+                padding: 14,
+                borderRadius: 14,
+                border: '1px solid var(--t-panel-border)',
+                background: 'rgba(255, 255, 255, 0.7)',
+                backdropFilter: 'blur(20px)',
+                WebkitBackdropFilter: 'blur(20px)',
+                boxShadow: 'var(--t-panel-shadow)',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: 'var(--t-text)',
+                  letterSpacing: '-0.01em',
+                }}
+              >
+                Bring a repo into Cortex
+              </div>
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  color: 'var(--t-text-muted)',
+                }}
+              >
+                Add a local Git repository, persist it in the repo registry, and spin up isolated workspaces from the same panel.
+              </div>
+            </div>
+          ) : null}
+
+          {!loading && !loadError ? (
+            repos.map((repo) => (
+              <RepoCard
+                key={repo.id}
+                repo={repo}
+                workspaceNotice={workspaceNotice[repo.id] ?? null}
+                onCreateWorkspace={openWorkspaceModal}
+                onOpenGitHub={handleOpenGitHub}
+                onRemove={setRemoveTarget}
+                onSaveSetup={handleSaveSetup}
+              />
+            ))
+          ) : null}
+        </div>
+      ) : null}
+
+      <GlassModal
+        open={addOpen}
+        onClose={resetAddModal}
+        title="Add Repository"
+        subtitle="First pass is local-folder only. Cortex validates the path, resolves the repo root, and records the default branch plus setup scaffold."
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+            Local folder path
+          </div>
+          <input
+            value={repoPathInput}
+            onChange={(event) => {
+              setRepoPathInput(event.currentTarget.value);
+              setValidationError(null);
+              setValidationResult(null);
+            }}
+            placeholder="~/clawd/repos/cortex-ide"
+            autoFocus
+            style={{
+              width: '100%',
+              minHeight: 40,
+              padding: '10px 12px',
+              borderRadius: 12,
+              border: '1px solid var(--t-btn-secondary-border)',
+              background: 'rgba(255, 255, 255, 0.55)',
+              color: 'var(--t-text)',
+              fontSize: 13,
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+              outline: 'none',
+            }}
+          />
+        </div>
+
+        {validationError ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+              padding: 12,
+              borderRadius: 12,
+              border: '1px solid rgba(239, 68, 68, 0.18)',
+              background: 'rgba(254, 242, 242, 0.82)',
+              color: '#991b1b',
+              fontSize: 12,
+              lineHeight: 1.45,
+            }}
+          >
+            <AlertCircle size={14} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{validationError}</span>
+          </div>
+        ) : null}
+
+        {validationResult ? (
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 12,
+              border: '1px solid rgba(34, 197, 94, 0.18)',
+              background: 'rgba(240, 253, 244, 0.85)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12,
+                fontWeight: 700,
+                color: '#166534',
+              }}
+            >
+              <CheckCircle2 size={14} strokeWidth={2} />
+              Validation complete
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '92px 1fr', gap: '6px 10px', fontSize: 12 }}>
+              <span style={{ color: 'var(--t-text-muted)' }}>Repo</span>
+              <span style={{ color: 'var(--t-text)', fontWeight: 600 }}>{validationResult.name}</span>
+              <span style={{ color: 'var(--t-text-muted)' }}>Path</span>
+              <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace', wordBreak: 'break-all' }}>
+                {shortenPath(validationResult.localPath)}
+              </span>
+              <span style={{ color: 'var(--t-text-muted)' }}>Branch</span>
+              <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                {validationResult.defaultBranch}
+              </span>
+              <span style={{ color: 'var(--t-text-muted)' }}>Remote</span>
+              <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace', wordBreak: 'break-all' }}>
+                {validationResult.remoteUrl ?? 'No origin remote'}
+              </span>
+            </div>
+          </div>
+        ) : null}
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
+          <button
+            type="button"
+            onClick={handleValidate}
+            disabled={validating || adding}
+            style={{
+              minHeight: 36,
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid var(--t-btn-secondary-border)',
+              background: 'var(--t-panel-hover)',
+              color: 'var(--t-text-secondary)',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: validating || adding ? 'not-allowed' : 'pointer',
+              opacity: validating || adding ? 0.45 : 1,
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
+            {validating ? 'Validating…' : 'Validate'}
+          </button>
+          <button
+            type="button"
+            onClick={handleAddRepo}
+            disabled={adding || validating}
+            style={{
+              minHeight: 36,
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              background: 'rgba(239, 68, 68, 0.08)',
+              color: '#b91c1c',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: adding || validating ? 'not-allowed' : 'pointer',
+              opacity: adding || validating ? 0.45 : 1,
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
+            {adding ? 'Adding…' : 'Add Repository'}
+          </button>
+        </div>
+      </GlassModal>
+
+      <GlassModal
+        open={workspaceRepo !== null}
+        onClose={closeWorkspaceModal}
+        title={workspaceRepo ? `New Workspace · ${workspaceRepo.name}` : 'New Workspace'}
+        subtitle="This reuses the existing worktree API. Cortex derives a worktree branch from the name below and returns the new workspace path after creation."
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+            Workspace name
+          </div>
+          <input
+            value={workspaceName}
+            onChange={(event) => setWorkspaceName(event.currentTarget.value)}
+            placeholder="repo-sync-20260317"
+            style={{
+              width: '100%',
+              minHeight: 40,
+              padding: '10px 12px',
+              borderRadius: 12,
+              border: '1px solid var(--t-btn-secondary-border)',
+              background: 'rgba(255, 255, 255, 0.55)',
+              color: 'var(--t-text)',
+              fontSize: 13,
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+              outline: 'none',
+            }}
+          />
+          <div
+            style={{
+              fontSize: 11,
+              color: 'var(--t-text-muted)',
+            }}
+          >
+            Branch preview
+          </div>
+          <div
+            style={{
+              padding: '10px 12px',
+              borderRadius: 12,
+              border: '1px solid var(--t-divider-subtle)',
+              background: 'rgba(255, 255, 255, 0.45)',
+              color: 'var(--t-text)',
+              fontSize: 12,
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+              wordBreak: 'break-all',
+            }}
+          >
+            {branchPreview}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+            Base branch
+          </div>
+          <input
+            value={workspaceBaseBranch}
+            onChange={(event) => setWorkspaceBaseBranch(event.currentTarget.value)}
+            placeholder="main"
+            style={{
+              width: '100%',
+              minHeight: 40,
+              padding: '10px 12px',
+              borderRadius: 12,
+              border: '1px solid var(--t-btn-secondary-border)',
+              background: 'rgba(255, 255, 255, 0.55)',
+              color: 'var(--t-text)',
+              fontSize: 13,
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+              outline: 'none',
+            }}
+          />
+        </div>
+
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+            cursor: 'pointer',
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={workspaceUseSetup}
+            onChange={(event) => setWorkspaceUseSetup(event.currentTarget.checked)}
+            style={{
+              marginTop: 2,
+              accentColor: '#ef4444',
+            }}
+          />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+              Run dependency setup
+            </div>
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: 11,
+                color: 'var(--t-text-muted)',
+                lineHeight: 1.45,
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+              }}
+            >
+              {workspaceRepo?.setup.installCommand ?? 'No install command detected'}
+            </div>
+          </div>
+        </label>
+
+        {workspaceRepo?.setup.runBuildOnCreateWorkspace || workspaceRepo?.setup.envMode !== 'copy' ? (
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 12,
+              border: '1px solid rgba(37, 99, 235, 0.12)',
+              background: 'rgba(239, 246, 255, 0.78)',
+              fontSize: 11,
+              lineHeight: 1.5,
+              color: '#1d4ed8',
+            }}
+          >
+            Saved repo setup includes env/build preferences. Those fields are stored now and can be wired into workspace bootstrap separately.
+          </div>
+        ) : null}
+
+        {workspaceError ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+              padding: 12,
+              borderRadius: 12,
+              border: '1px solid rgba(239, 68, 68, 0.18)',
+              background: 'rgba(254, 242, 242, 0.82)',
+              color: '#991b1b',
+              fontSize: 12,
+              lineHeight: 1.45,
+            }}
+          >
+            <AlertCircle size={14} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{workspaceError}</span>
+          </div>
+        ) : null}
+
+        {workspaceResult ? (
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 12,
+              border: '1px solid rgba(34, 197, 94, 0.18)',
+              background: 'rgba(240, 253, 244, 0.85)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12,
+                fontWeight: 700,
+                color: '#166534',
+              }}
+            >
+              <CheckCircle2 size={14} strokeWidth={2} />
+              Workspace created
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '84px 1fr', gap: '6px 10px', fontSize: 12 }}>
+              <span style={{ color: 'var(--t-text-muted)' }}>Branch</span>
+              <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace', wordBreak: 'break-all' }}>
+                {workspaceResult.branch}
+              </span>
+              <span style={{ color: 'var(--t-text-muted)' }}>Location</span>
+              <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace', wordBreak: 'break-all' }}>
+                {shortenPath(workspaceResult.path)}
+              </span>
+              <span style={{ color: 'var(--t-text-muted)' }}>Base</span>
+              <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                {workspaceResult.baseBranch}
+              </span>
+            </div>
+          </div>
+        ) : null}
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
+          <button
+            type="button"
+            onClick={closeWorkspaceModal}
+            style={{
+              minHeight: 36,
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid var(--t-btn-secondary-border)',
+              background: 'var(--t-panel-hover)',
+              color: 'var(--t-text-secondary)',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
+            {workspaceResult ? 'Close' : 'Cancel'}
+          </button>
+          <button
+            type="button"
+            onClick={handleCreateWorkspace}
+            disabled={workspaceLoading}
+            style={{
+              minHeight: 36,
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              background: 'rgba(239, 68, 68, 0.08)',
+              color: '#b91c1c',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: workspaceLoading ? 'not-allowed' : 'pointer',
+              opacity: workspaceLoading ? 0.45 : 1,
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
+            {workspaceLoading ? 'Creating…' : workspaceResult ? 'Create Another' : 'Create Workspace'}
+          </button>
+        </div>
+      </GlassModal>
+
+      <GlassModal
+        open={removeTarget !== null}
+        onClose={() => {
+          setRemoveTarget(null);
+          setRemoveError(null);
+          setRemoveBusy(false);
+        }}
+        title={removeTarget ? `Remove ${removeTarget.name}` : 'Remove Repository'}
+        subtitle="This only removes the repo from Cortex's registry. It does not delete the local repository or any existing worktrees."
+        width={460}
+      >
+        <div
+          style={{
+            fontSize: 12,
+            lineHeight: 1.55,
+            color: 'var(--t-text-muted)',
+          }}
+        >
+          {removeTarget ? (
+            <>
+              <div style={{ color: 'var(--t-text)', fontWeight: 600 }}>{removeTarget.name}</div>
+              <div style={{ marginTop: 6, fontFamily: '"SF Mono", ui-monospace, monospace', wordBreak: 'break-all' }}>
+                {shortenPath(removeTarget.localPath)}
+              </div>
+            </>
+          ) : null}
+        </div>
+
+        {removeError ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+              padding: 12,
+              borderRadius: 12,
+              border: '1px solid rgba(239, 68, 68, 0.18)',
+              background: 'rgba(254, 242, 242, 0.82)',
+              color: '#991b1b',
+              fontSize: 12,
+              lineHeight: 1.45,
+            }}
+          >
+            <AlertCircle size={14} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{removeError}</span>
+          </div>
+        ) : null}
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
+          <button
+            type="button"
+            onClick={() => {
+              setRemoveTarget(null);
+              setRemoveError(null);
+              setRemoveBusy(false);
+            }}
+            style={{
+              minHeight: 36,
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid var(--t-btn-secondary-border)',
+              background: 'var(--t-panel-hover)',
+              color: 'var(--t-text-secondary)',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleRemoveRepo}
+            disabled={removeBusy}
+            style={{
+              minHeight: 36,
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              background: 'rgba(239, 68, 68, 0.08)',
+              color: '#b91c1c',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: removeBusy ? 'not-allowed' : 'pointer',
+              opacity: removeBusy ? 0.45 : 1,
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
+            {removeBusy ? 'Removing…' : 'Remove Repository'}
+          </button>
+        </div>
+      </GlassModal>
+    </>
+  );
+}

@@ -498,7 +498,7 @@ function DashboardInner() {
         )}
 
         {/* Top — workspace area with search */}
-        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && <div style={{
+        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && <div style={{
           flex: canvasTabs.length > 0 ? `0 0 ${100 - canvasHeight}%` : 1,
           display: 'flex',
           flexDirection: 'column',
@@ -539,7 +539,7 @@ function DashboardInner() {
         </div>}
 
         {/* Vertical drag handle between workspace and canvas */}
-        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && (<>
+        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (<>
 
         {((canvasTabs.length > 0 && bottomPanelVisible) || (liveOutputAgent && !liveOutputCollapsed)) && (
           <div
@@ -597,7 +597,7 @@ function DashboardInner() {
         )}
 
         {/* Live output even when no canvas tabs open */}
-        {(!canvasTabs.length || !bottomPanelVisible) && liveOutputAgent && !showMemoryView && (activeNavSection as string) !== 'intent' && (activeNavSection as string) !== 'settings' && (
+        {(!canvasTabs.length || !bottomPanelVisible) && liveOutputAgent && !showMemoryView && (activeNavSection as string) !== 'intent' && (activeNavSection as string) !== 'settings' && (activeNavSection as string) !== 'analytics' && (
           <div style={{
             flex: liveOutputCollapsed ? 'none' : `0 0 ${canvasHeight}%`,
             marginTop: liveOutputCollapsed ? 'auto' : undefined,

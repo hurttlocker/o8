@@ -37,6 +37,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { MarkdownBody } from './MarkdownBody';
+import { RepoRegistrySection } from './RepoRegistrySection';
 import { formatModelLabel } from '@/lib/format';
 
 // ── Types ──
@@ -1979,6 +1980,8 @@ export const AgentPanel = memo(function AgentPanel({
         )}
       </div>
       )}
+
+      <RepoRegistrySection />
 
       {/* ── Tab Bar ── */}
       <div style={{
