@@ -516,9 +516,9 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
             onClick={() => setDrillOpen(false)}
             style={{
               position: 'fixed', inset: 0, zIndex: 9998,
-              background: 'rgba(0, 0, 0, 0.08)',
-              backdropFilter: 'blur(4px)',
-              WebkitBackdropFilter: 'blur(4px)',
+              background: 'rgba(0, 0, 0, 0.05)',
+              backdropFilter: 'blur(6px)',
+              WebkitBackdropFilter: 'blur(6px)',
             }}
           />
           {/* Modal */}
@@ -529,12 +529,12 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
             width: drillSize.w,
             maxHeight: drillSize.h,
             zIndex: 9999,
-            background: 'rgba(255, 255, 255, 0.45)',
-            backdropFilter: 'blur(60px) saturate(2.0)',
-            WebkitBackdropFilter: 'blur(60px) saturate(2.0)',
-            border: '1px solid rgba(255, 255, 255, 0.35)',
+            background: 'rgba(255, 255, 255, 0.18)',
+            backdropFilter: 'blur(80px) saturate(2.2)',
+            WebkitBackdropFilter: 'blur(80px) saturate(2.2)',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
             borderRadius: 16,
-            boxShadow: '0 24px 80px rgba(0, 0, 0, 0.12), 0 8px 32px rgba(0, 0, 0, 0.06), inset 0 0.5px 0 rgba(255, 255, 255, 0.6)',
+            boxShadow: '0 24px 80px rgba(0, 0, 0, 0.08), 0 8px 32px rgba(0, 0, 0, 0.04), inset 0 0.5px 0 rgba(255, 255, 255, 0.4), inset 0 -0.5px 0 rgba(255, 255, 255, 0.1)',
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
@@ -550,7 +550,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                 padding: '14px 16px 10px',
                 cursor: 'grab',
                 userSelect: 'none',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -567,14 +567,14 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                 aria-label="Close"
                 style={{
                   width: 24, height: 24, borderRadius: 12,
-                  border: 'none', background: 'rgba(255,255,255,0.25)',
+                  border: 'none', background: 'rgba(255,255,255,0.12)',
                   color: 'var(--t-text-muted)', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 14, fontWeight: 600, lineHeight: 1,
                   transition: 'background 120ms',
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.4)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.25)'; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.2)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
               >
                 ×
               </button>
@@ -591,8 +591,8 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
             }}>
               {agentBreakdown.map((entry) => (
                 <div key={entry.agent} style={{
-                  background: 'rgba(255, 255, 255, 0.25)',
-                  border: '1px solid rgba(255, 255, 255, 0.3)',
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
                   borderRadius: 12,
                   padding: 12,
                 }}>
@@ -623,7 +623,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                   {/* Per-agent timeline bar */}
                   <div style={{
                     height: 10, borderRadius: 5, overflow: 'hidden',
-                    display: 'flex', background: 'rgba(255, 255, 255, 0.15)',
+                    display: 'flex', background: 'rgba(255, 255, 255, 0.08)',
                   }}>
                     {entry.segments.map((seg, i) => {
                       const agentTotal = entry.segments.reduce((s, x) => s + x.durationMin, 0);
