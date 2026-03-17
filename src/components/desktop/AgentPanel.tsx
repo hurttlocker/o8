@@ -524,45 +524,32 @@ const AgentCard = memo(function AgentCard({
                 )}
               </div>
 
-              {/* Timeline + stats row */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
-                <div style={{
-                  display: 'flex', height: 4, borderRadius: 2, overflow: 'hidden',
-                  flex: 1, background: 'var(--t-hover)',
-                }}>
-                  {agent.activity ? (
-                    <>
-                      {agent.activity.coding > 0 && <div style={{ flex: agent.activity.coding, background: '#2563eb' }} />}
-                      {agent.activity.thinking > 0 && <div style={{ flex: agent.activity.thinking, background: '#93c5fd' }} />}
-                      {agent.activity.testing > 0 && <div style={{ flex: agent.activity.testing, background: '#f59e0b' }} />}
-                      {agent.activity.idle > 0 && <div style={{ flex: agent.activity.idle, background: '#e5e7eb' }} />}
-                    </>
-                  ) : isRunning ? (
-                    <div style={{ flex: 1, background: '#2563eb' }} />
-                  ) : (
-                    <div style={{ flex: 1, background: '#e5e7eb' }} />
+              {/* Stats row — diff + context */}
+              {(diff || agentCtx > 0) && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                  {diff && (
+                    <span style={{
+                      fontSize: 11, fontWeight: 700,
+                      fontFamily: 'SF Mono, Menlo, monospace',
+                      display: 'flex', gap: 5,
+                    }}>
+                      <span style={{ color: '#22c55e' }}>+{diff.add.toLocaleString()}</span>
+                      <span style={{ color: '#ef4444' }}>-{diff.del.toLocaleString()}</span>
+                    </span>
+                  )}
+                  {diff && agentCtx > 0 && (
+                    <span style={{ fontSize: 9, color: 'rgba(0,0,0,0.15)' }}>·</span>
+                  )}
+                  {agentCtx > 0 && (
+                    <span style={{
+                      fontSize: 11, fontWeight: 600, color: ctxColor(agentCtx),
+                      fontFamily: 'SF Mono, Menlo, monospace',
+                    }}>
+                      {agentCtx}% ctx
+                    </span>
                   )}
                 </div>
-                {/* Diff stats badge */}
-                {diff && (
-                  <span style={{
-                    fontSize: 10, fontWeight: 700, flexShrink: 0,
-                    fontFamily: 'SF Mono, Menlo, monospace',
-                    display: 'flex', gap: 4,
-                  }}>
-                    <span style={{ color: '#22c55e' }}>+{diff.add}</span>
-                    <span style={{ color: '#ef4444' }}>-{diff.del}</span>
-                  </span>
-                )}
-                {agentCtx > 0 && (
-                  <span style={{
-                    fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', flexShrink: 0,
-                    fontFamily: 'SF Mono, Menlo, monospace',
-                  }}>
-                    ctx {agentCtx}%
-                  </span>
-                )}
-              </div>
+              )}
             </div>
           );
         };
