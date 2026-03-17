@@ -463,9 +463,14 @@ function findExistingDashSession(): string | null {
   }
 }
 
+// Helper — all terminal events must wrap payload in `data` to match hook parser
+function sendTerminal(client: ClientState, event: string, payload: Record<string, unknown>) {
+  send(client, { channel: 'terminal', event, data: payload });
+}
+
 function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>) {
   if (!pty) {
-    send(client, { channel: 'terminal', event: 'error', sessionName: '', error: 'Terminal not available (node-pty not installed)' });
+    sendTerminal(client, 'error', { sessionName: '', error: 'Terminal not available (node-pty not installed)' });
     return;
   }
 
@@ -476,7 +481,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   const existing = findExistingDashSession();
   if (existing) {
     console.log(`[ws-server] Reusing existing tmux session: ${existing}`);
-    send(client, { channel: 'terminal', event: 'created', sessionName: existing });
+    sendTerminal(client, 'created', { sessionName: existing });
     handleTerminalAttach(client, { sessionName: existing, cols, rows });
     return;
   }
@@ -491,24 +496,24 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
     );
     console.log(`[ws-server] Created tmux session: ${sessionName}`);
 
-    send(client, { channel: 'terminal', event: 'created', sessionName });
+    sendTerminal(client, 'created', { sessionName });
     handleTerminalAttach(client, { sessionName, cols, rows });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     console.error(`[ws-server] Failed to create terminal session:`, error);
-    send(client, { channel: 'terminal', event: 'error', sessionName: '', error: `Failed to create terminal: ${error}` });
+    sendTerminal(client, 'error', { sessionName: '', error: `Failed to create terminal: ${error}` });
   }
 }
 
 function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>) {
   const sessionName = msg.sessionName as string;
   if (!sessionName || typeof sessionName !== 'string') {
-    send(client, { channel: 'terminal', event: 'error', sessionName: '', error: 'sessionName required' });
+    sendTerminal(client, 'error', { sessionName: '', error: 'sessionName required' });
     return;
   }
 
   if (!pty) {
-    send(client, { channel: 'terminal', event: 'error', sessionName, error: 'Terminal not available (node-pty not installed)' });
+    sendTerminal(client, 'error', { sessionName, error: 'Terminal not available (node-pty not installed)' });
     return;
   }
 
@@ -522,7 +527,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
     // Add this client to existing attachment
     attachment.clientIds.add(client.id);
     client.terminalSessions.add(sessionName);
-    send(client, { channel: 'terminal', event: 'attached', sessionName });
+    sendTerminal(client, 'attached', { sessionName });
     console.log(`[ws-server] Client ${client.id} attached to existing terminal ${sessionName}`);
     return;
   }
@@ -574,8 +579,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
           const msg = JSON.stringify({
             channel: 'terminal',
             event: 'data',
-            sessionName,
-            data: encoded,
+            data: { sessionName, data: encoded },
           });
 
           for (const cid of att.clientIds) {
@@ -597,7 +601,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       if (att.batchBuffer) {
         const encoded = Buffer.from(att.batchBuffer, 'utf-8').toString('base64');
         const flushMsg = JSON.stringify({
-          channel: 'terminal', event: 'data', sessionName, data: encoded,
+          channel: 'terminal', event: 'data', data: { sessionName, data: encoded },
         });
         for (const cid of att.clientIds) {
           const c = clients.get(cid);
@@ -607,7 +611,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
 
       // Notify all clients
       const exitMsg = JSON.stringify({
-        channel: 'terminal', event: 'exited', sessionName, exitCode,
+        channel: 'terminal', event: 'exited', data: { sessionName, exitCode },
       });
       for (const cid of att.clientIds) {
         const c = clients.get(cid);
@@ -620,12 +624,12 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       terminalAttachments.delete(sessionName);
     });
 
-    send(client, { channel: 'terminal', event: 'attached', sessionName });
+    sendTerminal(client, 'attached', { sessionName });
     console.log(`[ws-server] Client ${client.id} attached to new terminal ${sessionName}`);
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);
     console.error(`[ws-server] Failed to attach terminal ${sessionName}:`, error);
-    send(client, { channel: 'terminal', event: 'error', sessionName, error });
+    sendTerminal(client, 'error', { sessionName, error });
   }
 }
 
@@ -662,7 +666,7 @@ function handleTerminalDetach(client: ClientState, msg: Record<string, unknown>)
   const sessionName = msg.sessionName as string;
   if (!sessionName) return;
   removeClientFromTerminal(client.id, sessionName);
-  send(client, { channel: 'terminal', event: 'detached', sessionName });
+  sendTerminal(client, 'detached', { sessionName });
 }
 
 function removeClientFromTerminal(clientId: string, sessionName: string) {
