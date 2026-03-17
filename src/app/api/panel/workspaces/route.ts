@@ -57,34 +57,41 @@ function resolveWorkspacePath(workspace: string): string {
   return workspace.replace(/^~/, process.env.HOME || '/Users/marquisehurtt');
 }
 
+// Cache to avoid re-running git on every poll (30s TTL)
+const diffCache = new Map<string, { data: { additions: number; deletions: number; changedFiles: number } | null; ts: number }>();
+const DIFF_CACHE_TTL = 30_000;
+
 function getLocalDiffStats(workspace: string): { additions: number; deletions: number; changedFiles: number } | null {
   try {
     const cwd = workspace === 'unknown'
       ? (process.env.HOME || '/Users/marquisehurtt') + '/clawd'
       : resolveWorkspacePath(workspace);
-    // Uncommitted changes (working tree + staged)
-    const diffStat = execSync('git diff --shortstat HEAD 2>/dev/null || true', { cwd, encoding: 'utf-8', timeout: 5000 }).trim();
-    // Recent commits in last 6 hours
-    const logStat = execSync('git log --since="6 hours ago" --shortstat --format="" 2>/dev/null || true', { cwd, encoding: 'utf-8', timeout: 5000 }).trim();
+
+    // Check cache
+    const cached = diffCache.get(cwd);
+    if (cached && Date.now() - cached.ts < DIFF_CACHE_TTL) return cached.data;
+
+    // Diff since last push: compare HEAD to origin/main (what's been pushed)
+    // This resets to 0 after each push, then builds up as new commits land
+    const diffStat = execSync(
+      'git diff --shortstat origin/main..HEAD 2>/dev/null; git diff --shortstat 2>/dev/null',
+      { cwd, encoding: 'utf-8', timeout: 5000 },
+    ).trim();
 
     let additions = 0, deletions = 0, changedFiles = 0;
 
-    const parseStat = (line: string) => {
+    for (const line of diffStat.split('\n').filter(Boolean)) {
       const filesMatch = line.match(/(\d+) files? changed/);
       const addMatch = line.match(/(\d+) insertions?\(\+\)/);
       const delMatch = line.match(/(\d+) deletions?\(-\)/);
       if (filesMatch) changedFiles += parseInt(filesMatch[1]);
       if (addMatch) additions += parseInt(addMatch[1]);
       if (delMatch) deletions += parseInt(delMatch[1]);
-    };
-
-    if (diffStat) parseStat(diffStat);
-    for (const line of logStat.split('\n').filter(Boolean)) {
-      parseStat(line);
     }
 
-    if (additions === 0 && deletions === 0) return null;
-    return { additions, deletions, changedFiles };
+    const result = (additions === 0 && deletions === 0) ? null : { additions, deletions, changedFiles };
+    diffCache.set(cwd, { data: result, ts: Date.now() });
+    return result;
   } catch {
     return null;
   }
