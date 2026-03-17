@@ -261,7 +261,7 @@ const TabBar = memo(function TabBar({
       display: 'flex',
       alignItems: 'stretch',
       height: 36,
-      marginTop: 20,
+      marginTop: 0,
       background: '#f8fafc',
       borderBottom: '1px solid #e2e8f0',
       flexShrink: 0,

@@ -660,42 +660,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
           );
         })()}
 
-        {/* Time markers — positioned by finding which segment contains each hour mark */}
-        {Array.from({ length: Math.ceil(totalSpan / 60) + 1 }, (_, i) => {
-          const hourMin = i * 60;
-          if (hourMin > totalSpan) return null;
-          // Find the pixel position of this hour mark by locating which segment it falls in
-          let leftPct = 0;
-          let cumDur = 0;
-          for (let si = 0; si < segments.length; si++) {
-            const seg = segments[si];
-            if (hourMin >= seg.startMin && hourMin < seg.startMin + seg.durationMin) {
-              // This hour falls within this segment
-              const withinSeg = (hourMin - seg.startMin) / seg.durationMin;
-              leftPct = ((cumDur + withinSeg * seg.durationMin) / totalRendered) * 100;
-              break;
-            }
-            cumDur += seg.durationMin;
-            if (si === segments.length - 1) {
-              leftPct = (cumDur / totalRendered) * 100;
-            }
-          }
-          return (
-            <div key={i} style={{
-              position: 'absolute',
-              left: `${leftPct}%`,
-              bottom: -14,
-              transform: 'translateX(-50%)',
-              fontSize: 8,
-              color: 'var(--t-text-faint)',
-              fontWeight: 500,
-              pointerEvents: 'none',
-              whiteSpace: 'nowrap',
-            }}>
-              {formatTime(hourMin)}
-            </div>
-          );
-        })}
+        {/* Time markers removed — hover tooltip shows time on demand (cleaner) */}
       </div>
 
       {/* Right — Legend dots */}
