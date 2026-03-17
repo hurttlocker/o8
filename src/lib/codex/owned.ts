@@ -6,6 +6,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
+import { isTmuxAvailable, tmuxSessionName, createTmuxSession } from '@/lib/terminal/tmux';
 import type {
   AgentSummary,
   EventItem,
@@ -50,6 +51,7 @@ type OwnedCodexRunRecord = {
   stderrPath: string;
   outcome: OwnedRunOutcome;
   interruptRequestedAt?: string;
+  tmuxSession?: string;
 };
 
 type OwnedReviewDisposition = 'watching' | 'resolved';
@@ -655,45 +657,67 @@ async function spawnOwnedRun(session: OwnedCodexSessionRecord, prompt: string, m
   const runId = `${Date.now()}-${randomUUID().slice(0, 8)}`;
   const stdoutPath = path.join(session.sessionDir, RUNS_DIR, `${runId}.jsonl`);
   const stderrPath = path.join(session.sessionDir, RUNS_DIR, `${runId}.stderr.log`);
-  const stdoutFd = openSync(stdoutPath, 'a');
-  const stderrFd = openSync(stderrPath, 'a');
 
-  try {
-    const args = mode === 'launch'
-      ? runArgsForLaunch(session.repoPath, prompt)
-      : runArgsForResume(session.threadId ?? '', prompt);
+  const args = mode === 'launch'
+    ? runArgsForLaunch(session.repoPath, prompt)
+    : runArgsForResume(session.threadId ?? '', prompt);
 
-    const child = spawn('codex', args, {
-      cwd: session.repoPath,
-      detached: true,
-      stdio: ['ignore', stdoutFd, stderrFd],
-    });
+  let pid = 0;
+  let tmuxName: string | undefined;
 
-    child.unref();
-
-    const run: OwnedCodexRunRecord = {
-      id: runId,
-      mode,
-      prompt,
-      startedAt: nowIso(),
-      pid: child.pid ?? 0,
-      stdoutPath,
-      stderrPath,
-      outcome: 'running',
-    };
-
-    session.latestPrompt = prompt;
-    session.latestSummary = compactText(prompt, 140) || session.latestSummary;
-    session.reviewDisposition = 'watching';
-    session.reviewDispositionUpdatedAt = nowIso();
-    session.activeRun = run;
-    session.recentRuns = [run, ...session.recentRuns].slice(0, 16);
-    await saveOwnedSession(session);
-    return run;
-  } finally {
-    closeSync(stdoutFd);
-    closeSync(stderrFd);
+  // Try tmux-wrapped launch first
+  if (await isTmuxAvailable()) {
+    tmuxName = tmuxSessionName('codex', runId);
+    // Use shell command with tee to preserve JSON stdout capture
+    const codexCmd = ['codex', ...args].map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+    const shellCmd = `${codexCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
+    const result = await createTmuxSession(tmuxName, 'sh', ['-c', shellCmd], session.repoPath);
+    if (result.ok) {
+      // tmux doesn't give us a direct PID, use 0
+      pid = 0;
+    } else {
+      tmuxName = undefined; // fall through to detached spawn
+    }
   }
+
+  if (!tmuxName) {
+    // Fallback: detached spawn (existing behavior)
+    const stdoutFd = openSync(stdoutPath, 'a');
+    const stderrFd = openSync(stderrPath, 'a');
+    try {
+      const child = spawn('codex', args, {
+        cwd: session.repoPath,
+        detached: true,
+        stdio: ['ignore', stdoutFd, stderrFd],
+      });
+      child.unref();
+      pid = child.pid ?? 0;
+    } finally {
+      closeSync(stdoutFd);
+      closeSync(stderrFd);
+    }
+  }
+
+  const run: OwnedCodexRunRecord = {
+    id: runId,
+    mode,
+    prompt,
+    startedAt: nowIso(),
+    pid,
+    stdoutPath,
+    stderrPath,
+    outcome: 'running',
+    tmuxSession: tmuxName,
+  };
+
+  session.latestPrompt = prompt;
+  session.latestSummary = compactText(prompt, 140) || session.latestSummary;
+  session.reviewDisposition = 'watching';
+  session.reviewDispositionUpdatedAt = nowIso();
+  session.activeRun = run;
+  session.recentRuns = [run, ...session.recentRuns].slice(0, 16);
+  await saveOwnedSession(session);
+  return run;
 }
 
 export async function launchOwnedCodexSession(request: OwnedCodexLaunchRequest): Promise<OwnedCodexLaunchResponse> {
@@ -1058,6 +1082,7 @@ export async function getOwnedCodexFleetAdditions(): Promise<{
         sessionKind: 'owned-runtime',
         surfaceLabel: `Codex terminal • ${lifecycleLabel}`,
         runtimeSurface,
+        tmuxSession: session.activeRun?.tmuxSession ?? lastRun?.tmuxSession,
       } satisfies AgentSummary;
     });
 

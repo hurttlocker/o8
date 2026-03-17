@@ -7,7 +7,8 @@
  */
 
 import { execFile, spawn } from 'node:child_process';
-import { access, readdir, readFile, stat } from 'node:fs/promises';
+import { closeSync, openSync } from 'node:fs';
+import { access, mkdtemp, readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -20,12 +21,20 @@ import type {
   RuntimeActionResult,
   LaunchOptions,
 } from './types';
+import {
+  isTmuxAvailable,
+  tmuxSessionName,
+  createTmuxSession,
+  renameTmuxSession,
+} from '@/lib/terminal/tmux';
 
 const execFileAsync = promisify(execFile);
 
 const CLAUDE_HOME = process.env.CLAUDE_HOME || path.join(os.homedir(), '.claude');
+const CLAUDE_BIN = process.env.CLAUDE_BIN || path.join(os.homedir(), '.local', 'bin', 'claude');
 const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_HOME, 'projects');
 const RECENT_WINDOW_MS = 6 * 60 * 60_000; // 6 hours
+const LAUNCH_SESSION_ID_TIMEOUT_MS = 12_000;
 
 const capabilities: RuntimeCapabilities = {
   discover: true,
@@ -52,6 +61,73 @@ function decodeProjectPath(encodedName: string): string {
 
 function shortenPath(filePath: string): string {
   return filePath.replace(`${os.homedir()}/`, '~/');
+}
+
+function encodeProjectPath(projectPath: string): string {
+  const resolved = path.resolve(projectPath);
+  return `-${resolved.replace(/^\/+/, '').replace(/\//g, '-')}`;
+}
+
+function quoteShellArg(value: string) {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+async function listProjectSessionIds(projectPath: string) {
+  const projectDir = path.join(CLAUDE_PROJECTS_DIR, encodeProjectPath(projectPath));
+  const entries = await readdir(projectDir).catch(() => []);
+  return new Set(
+    entries
+      .filter((entry) => entry.endsWith('.jsonl'))
+      .map((entry) => entry.replace(/\.jsonl$/, '')),
+  );
+}
+
+function extractSessionIdFromOutput(raw: string) {
+  for (const line of raw.split('\n').filter(Boolean)) {
+    try {
+      const event = JSON.parse(line) as Record<string, unknown>;
+      if (typeof event.session_id === 'string' && event.session_id) {
+        return event.session_id;
+      }
+      if (typeof event.sessionId === 'string' && event.sessionId) {
+        return event.sessionId;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+async function waitForLaunchSessionId(
+  outputPath: string,
+  projectPaths: string[],
+  knownSessionIds: Map<string, Set<string>>,
+  timeoutMs = LAUNCH_SESSION_ID_TIMEOUT_MS,
+) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const raw = await readFile(outputPath, 'utf8').catch(() => '');
+    const streamedSessionId = extractSessionIdFromOutput(raw);
+    if (streamedSessionId) {
+      return streamedSessionId;
+    }
+
+    for (const projectPath of projectPaths) {
+      const known = knownSessionIds.get(projectPath) ?? new Set<string>();
+      const current = await listProjectSessionIds(projectPath);
+      const nextId = [...current].find((sessionId) => !known.has(sessionId));
+      if (nextId) {
+        return nextId;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  return null;
 }
 
 /**
@@ -427,25 +503,81 @@ export const claudeCodeRuntime: AgentRuntime = {
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
     try {
-      const child = spawn('claude', [
+      const launchId = `launched-${Date.now()}`;
+      const projectPaths = Array.from(new Set(
+        [opts.worktreePath, opts.cwd]
+          .filter((value): value is string => Boolean(value))
+          .map((value) => path.resolve(value)),
+      ));
+      const knownSessionIds = new Map(
+        await Promise.all(
+          projectPaths.map(async (projectPath) => [projectPath, await listProjectSessionIds(projectPath)] as const),
+        ),
+      );
+      const captureDir = await mkdtemp(path.join(os.tmpdir(), 'cortex-claude-launch-'));
+      const stdoutPath = path.join(captureDir, 'stdout.jsonl');
+      const stderrPath = path.join(captureDir, 'stderr.log');
+      const cliArgs = [
         '-p', '--print',
+        ...(opts.worktreeFlag ? ['--worktree', opts.worktreeFlag] : []),
         '--permission-mode', 'bypassPermissions',
         '--output-format', 'stream-json',
-        '--no-session-persistence',
+        '--verbose',
         opts.prompt,
-      ], {
-        cwd: opts.cwd,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        detached: true,
-        env: { ...process.env },
-      });
+      ];
+      let tmuxName: string | null = null;
 
-      child.unref();
+      // Try tmux-wrapped launch first
+      if (await isTmuxAvailable()) {
+        tmuxName = tmuxSessionName('cc', launchId);
+        const shellCmd = `${quoteShellArg(CLAUDE_BIN)} ${cliArgs.map(quoteShellArg).join(' ')} | tee ${quoteShellArg(stdoutPath)} 2>${quoteShellArg(stderrPath)}`;
+        const result = await createTmuxSession(tmuxName, 'sh', ['-c', shellCmd], opts.cwd);
+        if (result.ok) {
+          const sessionId = await waitForLaunchSessionId(stdoutPath, projectPaths, knownSessionIds);
+          if (sessionId) {
+            await renameTmuxSession(tmuxName, tmuxSessionName('cc', sessionId));
+            return {
+              ok: true,
+              note: `Claude Code session launched in tmux:${tmuxSessionName('cc', sessionId)} at ${shortenPath(opts.cwd)}`,
+              sessionKey: `claude-code:${sessionId}`,
+            };
+          }
+          return {
+            ok: false,
+            note: `Claude Code launched in tmux:${tmuxName}, but Cortex could not resolve the persistent session id.`,
+          };
+        }
+        // tmux failed — fall through to detached spawn
+      }
+
+      // Fallback: detached spawn (existing behavior)
+      const stdoutFd = openSync(stdoutPath, 'a');
+      const stderrFd = openSync(stderrPath, 'a');
+      try {
+        const child = spawn(CLAUDE_BIN, cliArgs, {
+          cwd: opts.cwd,
+          stdio: ['ignore', stdoutFd, stderrFd],
+          detached: true,
+          env: { ...process.env, FORCE_COLOR: '0' },
+        });
+        child.unref();
+      } finally {
+        closeSync(stdoutFd);
+        closeSync(stderrFd);
+      }
+
+      const sessionId = await waitForLaunchSessionId(stdoutPath, projectPaths, knownSessionIds);
+      if (!sessionId) {
+        return {
+          ok: false,
+          note: `Claude Code launched in ${shortenPath(opts.cwd)}, but Cortex could not resolve the persistent session id.`,
+        };
+      }
 
       return {
         ok: true,
         note: `Claude Code session launched in ${shortenPath(opts.cwd)}`,
-        sessionKey: `claude-code:launched-${Date.now()}`,
+        sessionKey: `claude-code:${sessionId}`,
       };
     } catch (err) {
       return {
@@ -457,15 +589,30 @@ export const claudeCodeRuntime: AgentRuntime = {
 
   async resume(sessionKey: string, message: string): Promise<RuntimeActionResult> {
     const sessionId = sessionKey.replace('claude-code:', '');
+    const cliArgs = [
+      '-p', '--print',
+      '--resume', sessionId,
+      '--permission-mode', 'bypassPermissions',
+      '--output-format', 'stream-json',
+      message,
+    ];
 
     try {
-      const child = spawn('claude', [
-        '-p', '--print',
-        '--resume', sessionId,
-        '--permission-mode', 'bypassPermissions',
-        '--output-format', 'stream-json',
-        message,
-      ], {
+      // Try tmux-wrapped resume
+      if (await isTmuxAvailable()) {
+        const tmuxName = tmuxSessionName('cc', sessionId);
+        const result = await createTmuxSession(tmuxName, 'claude', cliArgs, process.env.HOME ?? '/tmp');
+        if (result.ok) {
+          return {
+            ok: true,
+            note: 'Message sent to Claude Code session (tmux).',
+            sessionKey,
+          };
+        }
+      }
+
+      // Fallback: detached spawn
+      const child = spawn('claude', cliArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: true,
         env: { ...process.env },
