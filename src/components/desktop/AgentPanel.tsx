@@ -441,7 +441,7 @@ const AgentCard = memo(function AgentCard({
                   ? 'linear-gradient(135deg, var(--t-panel) 0%, rgba(147, 197, 253, 0.03) 100%)'
                   : 'var(--t-panel)',
                 border: agent.status === 'running'
-                  ? '1px solid rgba(147, 197, 253, 0.12)'
+                  ? '1px solid rgba(52, 211, 153, 0.2)'
                   : '1px solid var(--t-panel-border)',
                 cursor: agent.sessionKey ? 'pointer' : 'default',
                 transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
@@ -452,8 +452,13 @@ const AgentCard = memo(function AgentCard({
                 e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.06)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.border = '1px solid var(--t-panel-border)';
-                e.currentTarget.style.boxShadow = 'none';
+                if (agent.status === 'running') {
+                  e.currentTarget.style.border = '';
+                  e.currentTarget.style.boxShadow = '';
+                } else {
+                  e.currentTarget.style.border = '1px solid var(--t-panel-border)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }
               }}
             >
               {/* Identity row */}
@@ -1960,8 +1965,14 @@ export const AgentPanel = memo(function AgentPanel({
       ) : null}
       <style>{`
         @keyframes agentCardPulse {
-          0%, 100% { border-color: rgba(147, 197, 253, 0.12); }
-          50% { border-color: rgba(147, 197, 253, 0.06); }
+          0%, 100% {
+            border-color: rgba(52, 211, 153, 0.25);
+            box-shadow: 0 0 12px rgba(52, 211, 153, 0.08), inset 0 0 12px rgba(52, 211, 153, 0.03);
+          }
+          50% {
+            border-color: rgba(52, 211, 153, 0.08);
+            box-shadow: 0 0 4px rgba(52, 211, 153, 0.02), inset 0 0 4px rgba(52, 211, 153, 0.01);
+          }
         }
       `}</style>
     </div>
