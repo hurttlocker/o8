@@ -1560,7 +1560,7 @@ const FileTree = memo(function FileTree({ tree, changedFiles, onSelectFile }: {
 // ── Tab Bar ──
 
 const tabs: { id: Tab; icon: typeof Zap; label: string }[] = [
-  { id: 'activity', icon: Zap, label: 'Activity' },
+
   { id: 'issues', icon: Tag, label: 'Issues' },
   { id: 'prs', icon: GitCommit, label: 'PRs' },
   { id: 'files', icon: Folder, label: 'Files' },
@@ -1650,7 +1650,8 @@ export const AgentPanel = memo(function AgentPanel({
   const [prs, setPrs] = useState<GHPullRequest[]>([]);
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<Tab>('activity');
+  const [activeTab, setActiveTab] = useState<Tab>('issues');
+  const [activityOpen, setActivityOpen] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
@@ -1845,10 +1846,66 @@ export const AgentPanel = memo(function AgentPanel({
         WebkitAppRegion: 'drag' as unknown as string,
       } as React.CSSProperties} />
 
+      {/* ── Activity Dropdown (above agents, collapsed by default) ── */}
+      <div style={{ flexShrink: 0, paddingLeft: 14, paddingRight: 14, paddingTop: 4, paddingBottom: 0 }}>
+        <button
+          type="button"
+          onClick={() => setActivityOpen(!activityOpen)}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '8px 2px',
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            fontFamily: '-apple-system, system-ui, sans-serif',
+          }}
+        >
+          <Zap size={12} strokeWidth={2} color={activityOpen ? '#ef4444' : 'var(--t-text-muted)'} />
+          <span style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: activityOpen ? 'var(--t-text)' : 'var(--t-text-muted)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+          }}>
+            Activity
+          </span>
+          <span style={{
+            marginLeft: 'auto',
+            fontSize: 10,
+            color: 'var(--t-text-faint)',
+            display: 'flex', alignItems: 'center',
+          }}>
+            {activityOpen
+              ? <ChevronDown size={12} strokeWidth={2} />
+              : <ChevronRight size={12} strokeWidth={2} />
+            }
+          </span>
+        </button>
+        {activityOpen && (
+          <div style={{
+            maxHeight: 240,
+            overflowY: 'auto',
+            borderRadius: 10,
+            border: '1px solid var(--t-divider-subtle)',
+            background: 'var(--t-panel)',
+            marginBottom: 8,
+            scrollbarWidth: 'none',
+          } as React.CSSProperties}
+          className="hide-scrollbar"
+          >
+            <ActivityFeed events={events} commits={commits} onSelectCommit={onSelectCommit} />
+          </div>
+        )}
+      </div>
+
       {/* ── Agent Cards ── */}
       <div style={{
         flexShrink: 0,
-        paddingTop: 4,
+        paddingTop: 0,
         paddingRight: 14,
         paddingBottom: 8,
         paddingLeft: 14,
@@ -1932,7 +1989,7 @@ export const AgentPanel = memo(function AgentPanel({
       </div>
 
       {/* ── Scoped Context Label ── */}
-      {activeTab !== 'activity' && expandedGroup ? (
+      {expandedGroup ? (
         <div style={{
           paddingTop: 6,
           paddingRight: 14,
@@ -2014,10 +2071,9 @@ export const AgentPanel = memo(function AgentPanel({
       <div style={{
         flex: 1,
         overflowY: 'auto',
-        borderTop: expandedGroup && activeTab !== 'activity' ? 'none' : '1px solid var(--t-divider-subtle)',
-        marginTop: expandedGroup && activeTab !== 'activity' ? 0 : 4,
+        borderTop: expandedGroup ? 'none' : '1px solid var(--t-divider-subtle)',
+        marginTop: expandedGroup ? 0 : 4,
       }}>
-        {activeTab === 'activity' ? <ActivityFeed events={events} commits={commits} onSelectCommit={onSelectCommit} /> : null}
         {activeTab === 'issues' ? (
           <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             <div style={{
