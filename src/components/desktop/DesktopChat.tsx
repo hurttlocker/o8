@@ -577,11 +577,14 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
   const composeRef = useRef<HTMLTextAreaElement>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  const claudeSessionIdRef = useRef<string | undefined>(undefined);
 
   const selectedSession = useMemo(
     () => sessions.find(s => s.sessionKey === selectedKey),
     [sessions, selectedKey]
   );
+
+  const isClaudeCode = selectedSession?.runtime === 'claude-code';
 
   const projectGroups = useMemo(
     () => snapshot ? buildProjectGroups(snapshot, selectedSession) : [],
@@ -610,6 +613,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
 
   const headerLabel = useMemo(() => {
     if (!selectedSession) return 'Session';
+    if (selectedSession.runtime === 'claude-code') return 'Claude Code';
     if (selectedSession.runtime === 'codex') return 'Codex';
     if (selectedSession.status === 'running') return 'Live';
     return 'Session';
@@ -810,6 +814,111 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
   }, []);
 
   // ── Send message ──
+  const sendToClaudeCode = useCallback(async (text: string) => {
+    const session = sessions.find(s => s.sessionKey === selectedKey);
+    const cwd = session?.workspace || undefined;
+
+    // Create a streaming assistant entry
+    const assistantId = `claude-${Date.now()}`;
+    const assistantEntry: MobileTranscriptEntry = {
+      id: assistantId,
+      role: 'assistant',
+      text: '',
+      timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setTranscript(prev => [...prev, assistantEntry]);
+    setAgentRunning(true);
+
+    try {
+      const res = await fetch('/api/claude-code/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: text,
+          cwd,
+          sessionId: claudeSessionIdRef.current,
+        }),
+      });
+
+      if (!res.ok || !res.body) {
+        setTranscript(prev => prev.map(e =>
+          e.id === assistantId ? { ...e, text: `Error: ${res.statusText}` } : e
+        ));
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = '';
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const event = JSON.parse(line.slice(6)) as {
+              type: string;
+              text?: string;
+              name?: string;
+              sessionId?: string;
+              exitCode?: number;
+            };
+
+            if (event.type === 'delta' && event.text) {
+              accumulated += event.text;
+              setTranscript(prev => prev.map(e =>
+                e.id === assistantId ? { ...e, text: accumulated } : e
+              ));
+              scrollToBottom(false);
+            }
+
+            if (event.type === 'tool' && event.name) {
+              // Show tool usage inline
+              const toolLine = `\n🔧 *${event.name}*\n`;
+              accumulated += toolLine;
+              setTranscript(prev => prev.map(e =>
+                e.id === assistantId ? { ...e, text: accumulated } : e
+              ));
+            }
+
+            if (event.type === 'done' || event.type === 'close') {
+              if (event.sessionId) {
+                claudeSessionIdRef.current = event.sessionId;
+              }
+              // Use the final text if close provided it and we have nothing
+              if (event.type === 'close' && event.text && !accumulated) {
+                accumulated = event.text;
+                setTranscript(prev => prev.map(e =>
+                  e.id === assistantId ? { ...e, text: accumulated } : e
+                ));
+              }
+            }
+
+            if (event.type === 'error' && event.text) {
+              accumulated += `\n⚠️ ${event.text}`;
+              setTranscript(prev => prev.map(e =>
+                e.id === assistantId ? { ...e, text: accumulated } : e
+              ));
+            }
+          } catch { /* skip malformed SSE lines */ }
+        }
+      }
+    } catch (err) {
+      setTranscript(prev => prev.map(e =>
+        e.id === assistantId ? { ...e, text: `Error: ${err instanceof Error ? err.message : 'unknown'}` } : e
+      ));
+    } finally {
+      setAgentRunning(false);
+    }
+  }, [sessions, selectedKey, scrollToBottom]);
+
   const send = useCallback(async () => {
     if ((!draft.trim() && pendingFiles.length === 0) || !selectedKey || sending) return;
     const text = draft.trim();
@@ -833,35 +942,40 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
     scrollToBottom(true);
 
     try {
-      const payload: Record<string, unknown> = {
-        sessionKey: selectedKey,
-        action: 'steer',
-        message: text || (files.length > 0 ? `[${files.map(f => f.name).join(', ')}]` : ''),
-      };
-      if (files.length > 0) {
-        payload.attachments = files.map(f => ({
-          mimeType: f.mimeType,
-          fileName: f.name,
-          content: f.content,
-        }));
+      // Route to Claude Code CLI if the selected session is claude-code runtime
+      if (isClaudeCode) {
+        await sendToClaudeCode(text);
+      } else {
+        const payload: Record<string, unknown> = {
+          sessionKey: selectedKey,
+          action: 'steer',
+          message: text || (files.length > 0 ? `[${files.map(f => f.name).join(', ')}]` : ''),
+        };
+        if (files.length > 0) {
+          payload.attachments = files.map(f => ({
+            mimeType: f.mimeType,
+            fileName: f.name,
+            content: f.content,
+          }));
+        }
+        // Fire and don't wait — optimistic UI already shows the message
+        fetch('/api/mobile/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        }).catch(() => {});
+        // Quick poll for response (500ms, 1.5s, 3s)
+        setTimeout(() => void fetchTranscript(selectedKey), 500);
+        setTimeout(() => void fetchTranscript(selectedKey), 1500);
+        setTimeout(() => void fetchTranscript(selectedKey), 3000);
       }
-      // Fire and don't wait — optimistic UI already shows the message
-      fetch('/api/mobile/action', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }).catch(() => {});
-      // Quick poll for response (500ms, 1.5s, 3s)
-      setTimeout(() => void fetchTranscript(selectedKey), 500);
-      setTimeout(() => void fetchTranscript(selectedKey), 1500);
-      setTimeout(() => void fetchTranscript(selectedKey), 3000);
     } catch { /* silent */ }
     finally {
       // Revoke any preview URLs
       files.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview); });
       setSending(false);
     }
-  }, [draft, pendingFiles, selectedKey, sending, fetchTranscript, scrollToBottom, playSendSound]);
+  }, [draft, pendingFiles, selectedKey, sending, isClaudeCode, sendToClaudeCode, fetchTranscript, scrollToBottom, playSendSound]);
 
   // ── Stop / Abort run ──
   const stopRun = useCallback(async () => {
@@ -945,7 +1059,13 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
   // ── Select session by id (for squad picker) ──
   const handleSessionFocus = useCallback((sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId);
-    if (session) setSelectedKey(session.sessionKey);
+    if (session) {
+      setSelectedKey(session.sessionKey);
+      // Reset Claude Code session ref when switching sessions
+      if (session.runtime !== 'claude-code') {
+        claudeSessionIdRef.current = undefined;
+      }
+    }
   }, [sessions]);
 
   // ── Init ──
