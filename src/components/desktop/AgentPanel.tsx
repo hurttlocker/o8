@@ -10,7 +10,9 @@
  * Light theme — glass frost on white, matching chat sidebar.
  */
 
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDesktopWebSocket } from './hooks/useDesktopWebSocket';
+import type { DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
 import { createPortal } from 'react-dom';
 import {
   AlertCircle,
@@ -1617,6 +1619,17 @@ export const AgentPanel = memo(function AgentPanel({
       .catch(() => setActiveRepo(null));
   }, [expandedGroup, onExpandWorkspace]);
 
+  // Ref for triggering immediate fetch from WS events
+  const fetchNowRef = useRef<() => void>(() => {});
+
+  // WS listener — triggers immediate re-fetch on agent status changes
+  const wsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
+    onInboxUpdate: () => { fetchNowRef.current(); },
+    onReviewUpdate: () => { fetchNowRef.current(); },
+  }), []);
+
+  const { isConnected: wsConnected } = useDesktopWebSocket(undefined, wsCallbacks);
+
   // Fetch agent inventory + workspace/PR data in single pass (prevents pop-in/out)
   useEffect(() => {
     async function fetchAll() {
@@ -1657,10 +1670,19 @@ export const AgentPanel = memo(function AgentPanel({
         setAgents(prev => JSON.stringify(prev) === JSON.stringify(enriched) ? prev : enriched);
       } catch { /* silent */ }
     }
+    // Debounced immediate fetch (WS events may fire rapidly)
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    fetchNowRef.current = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => { void fetchAll(); }, 300);
+    };
+
     void fetchAll();
-    const id = setInterval(fetchAll, 30_000);
-    return () => clearInterval(id);
-  }, []);
+    // Safety-net: 60s when WS connected, 30s when disconnected
+    const ms = wsConnected ? 60_000 : 30_000;
+    const id = setInterval(fetchAll, ms);
+    return () => { clearInterval(id); if (debounceTimer) clearTimeout(debounceTimer); };
+  }, [wsConnected]);
 
   // Fetch recent commits
   useEffect(() => {
