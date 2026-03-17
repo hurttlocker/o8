@@ -13,6 +13,7 @@ import { AlertBell } from '@/components/shared/AlertBell';
 import { AlertTray } from '@/components/shared/AlertTray';
 import { AlertToast } from '@/components/shared/AlertToast';
 import { NavRail, type NavSection } from '@/components/desktop/NavRail';
+import { LiveOutput } from '@/components/desktop/LiveOutput';
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { IntentCanvas } from '@/components/desktop/IntentCanvas';
@@ -34,6 +35,12 @@ function DashboardInner() {
   const [rightWidth, setRightWidth] = useState(420);
   const [canvasHeight, setCanvasHeight] = useState(50); // percentage of center column
   const [activeSessionKey, setActiveSessionKey] = useState<string | undefined>();
+  const [liveOutputAgent, setLiveOutputAgent] = useState<{
+    name: string;
+    runtime: string;
+    sessionKey: string;
+  } | null>(null);
+  const [agentsJson, setAgentsJson] = useState('[]');
   const [activeWorkspace, setActiveWorkspace] = useState<string | undefined>();
   const [showMemoryView, setShowMemoryView] = useState(false);
   const [alertTrayOpen, setAlertTrayOpen] = useState(false);
@@ -103,9 +110,21 @@ function DashboardInner() {
 
   // ── Routing callbacks for AgentPanel ──
   const handleSelectSession = useCallback((sessionKey: string) => {
-    // Switch chat to selected session (no auto-transcript popup)
     setActiveSessionKey(sessionKey);
-  }, []);
+
+    // Show live output for non-OpenClaw sessions (Codex, Claude Code)
+    const agents = JSON.parse(agentsJson) as { name?: string; runtime?: string; sessionKey?: string }[];
+    const agent = agents.find(a => a.sessionKey === sessionKey);
+    if (agent && agent.runtime && agent.runtime !== 'openclaw') {
+      setLiveOutputAgent({
+        name: agent.name ?? 'Agent',
+        runtime: agent.runtime,
+        sessionKey,
+      });
+    } else {
+      setLiveOutputAgent(null);
+    }
+  }, [agentsJson]);
 
   const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
     openCanvasTab({
@@ -153,7 +172,6 @@ function DashboardInner() {
   }, []);
 
   // ── Feed agent data to alert engine + search ──
-  const [agentsJson, setAgentsJson] = useState('[]');
   const handleAgentsUpdate = useCallback((agents: unknown[]) => {
     // AgentDetail from AgentPanel is compatible with AgentSummary for alert detection
     // (has id, name, status, context, approvalStatus, lastEventAt, sessionKey)
@@ -499,6 +517,25 @@ function DashboardInner() {
             ) : null}
           </div>
         </div>}
+
+        {/* ── Live Agent Output (appears above canvas when agent selected) ── */}
+        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && liveOutputAgent && (
+          <div style={{
+            flex: '0 0 35%',
+            minHeight: 120,
+            maxHeight: '45%',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }}>
+            <LiveOutput
+              agentName={liveOutputAgent.name}
+              agentRuntime={liveOutputAgent.runtime}
+              sessionKey={liveOutputAgent.sessionKey}
+              onClose={() => setLiveOutputAgent(null)}
+            />
+          </div>
+        )}
 
         {/* Vertical drag handle between workspace and canvas */}
         {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && (<>
