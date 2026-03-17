@@ -16,6 +16,8 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import Image from 'next/image';
+import { useDesktopWebSocket } from './hooks/useDesktopWebSocket';
+import type { DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
 import {
   ArrowUp,
   Brain,
@@ -571,6 +573,8 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
   const [dragOver, setDragOver] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [streamingText, setStreamingText] = useState('');
+  const [wsConnected, setWsConnected] = useState(false);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
@@ -585,6 +589,67 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
     () => sessions.find(s => s.sessionKey === selectedKey),
     [sessions, selectedKey]
   );
+
+  const streamingTextRef = useRef('');
+
+  // ── WebSocket — real-time updates ──
+  const wsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
+    onChatDelta: (text: string) => {
+      streamingTextRef.current = text;
+      setStreamingText(text);
+      // Auto-scroll on streaming
+      if (stickToBottomRef.current && scrollRef.current) {
+        requestAnimationFrame(() => {
+          scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+        });
+      }
+    },
+    onChatDone: (text: string) => {
+      streamingTextRef.current = '';
+      setStreamingText('');
+      setSending(false);
+      // Inject final message — the next poll will reconcile
+      if (text) {
+        setTranscript(prev => {
+          if (prev.length > 0 && prev[prev.length - 1]?.text === text) return prev;
+          return [...prev, {
+            id: `ws:done:${Date.now()}`,
+            role: 'assistant' as const,
+            text,
+            timestampLabel: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+          }];
+        });
+      }
+    },
+    onChatError: () => {
+      streamingTextRef.current = '';
+      setStreamingText('');
+      setSending(false);
+    },
+    onInboxUpdate: (data: Record<string, unknown>) => {
+      const inbox = data as unknown as MobileInboxSnapshot;
+      if (inbox?.sessions) {
+        setSnapshot(inbox);
+        setSessions(inbox.sessions);
+      }
+    },
+    onHistoryUpdate: (sessionKey: string, entries: Array<Record<string, unknown>>) => {
+      if (sessionKey === selectedKey) {
+        const newEntries = entries as unknown as MobileTranscriptEntry[];
+        setTranscript(prev => {
+          const existingIds = new Set(prev.map(e => e.id));
+          const genuinelyNew = newEntries.filter(e => !existingIds.has(e.id));
+          if (genuinelyNew.length === 0) return prev;
+          return [...prev, ...genuinelyNew];
+        });
+      }
+    },
+  }), [selectedKey]);
+
+  const { isConnected } = useDesktopWebSocket(selectedKey || undefined, wsCallbacks);
+
+  // Sync WS connection state
+  useEffect(() => { setWsConnected(isConnected); }, [isConnected]);
 
   const isClaudeCode = selectedSession?.runtime === 'claude-code';
   const isCodexLocal = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'discovered';
@@ -1187,11 +1252,13 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
     }
   }, [selectedKey, fetchTranscript]);
 
+  // Safety-net poll: 30s when WS connected, 5s when disconnected
   useEffect(() => {
     if (!selectedKey) return;
-    const interval = setInterval(() => void fetchTranscript(selectedKey), 5000);
+    const ms = wsConnected ? 30_000 : 5_000;
+    const interval = setInterval(() => void fetchTranscript(selectedKey), ms);
     return () => clearInterval(interval);
-  }, [selectedKey, fetchTranscript]);
+  }, [selectedKey, fetchTranscript, wsConnected]);
 
   // Reset expanded group when picker closes
   useEffect(() => {
@@ -1663,8 +1730,50 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
           })
         )}
 
+        {/* ── Streaming Text (real-time from WS) ── */}
+        {streamingText && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 8,
+            paddingTop: 8,
+            paddingRight: 16,
+            paddingBottom: 4,
+            paddingLeft: 16,
+          }}>
+            <div style={{
+              maxWidth: '85%',
+              paddingTop: 10,
+              paddingRight: 16,
+              paddingBottom: 10,
+              paddingLeft: 16,
+              borderRadius: 18,
+              background: 'var(--t-panel-translucent)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              border: '1px solid var(--t-divider-subtle)',
+              fontSize: 14,
+              lineHeight: 1.5,
+              color: 'var(--t-text)',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}>
+              {streamingText}
+              <span style={{
+                display: 'inline-block',
+                width: 6, height: 14,
+                background: 'var(--t-text)',
+                opacity: 0.4,
+                marginLeft: 2,
+                animation: 'blink 1s step-end infinite',
+                verticalAlign: 'text-bottom',
+              }} />
+            </div>
+          </div>
+        )}
+
         {/* ── Typing Indicator ── */}
-        {agentRunning && (
+        {agentRunning && !streamingText && (
           <div style={{
             display: 'flex',
             alignItems: 'center',
