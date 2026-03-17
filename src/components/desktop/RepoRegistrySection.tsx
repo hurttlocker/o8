@@ -106,6 +106,15 @@ function normalizeSetupDraft(setup: RepoSetupConfig): RepoSetupConfig {
   };
 }
 
+function sortRepoEntries(entries: RepoRegistryEntry[]) {
+  return [...entries].sort((a, b) => {
+    const aTime = new Date(a.lastOpenedAt ?? a.addedAt).getTime();
+    const bTime = new Date(b.lastOpenedAt ?? b.addedAt).getTime();
+    if (aTime !== bTime) return bTime - aTime;
+    return a.name.localeCompare(b.name);
+  });
+}
+
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit) {
   const response = await fetch(input, init);
   const data = (await response.json().catch(() => ({}))) as T & JsonErrorShape;
@@ -836,7 +845,7 @@ export function RepoRegistrySection() {
     setLoadError(null);
     try {
       const data = await requestJson<{ repos: RepoRegistryEntry[] }>('/api/panel/repos');
-      setRepos(data.repos ?? []);
+      setRepos(sortRepoEntries(data.repos ?? []));
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : 'Unable to load repositories.');
     } finally {
@@ -915,7 +924,9 @@ export function RepoRegistrySection() {
       body: JSON.stringify({ action: 'update', id: repoId, setup }),
     });
 
-    setRepos((current) => current.map((repo) => (repo.id === repoId ? data.repo : repo)));
+    setRepos((current) => sortRepoEntries(
+      current.map((repo) => (repo.id === repoId ? data.repo : repo)),
+    ));
   }, []);
 
   const handleOpenGitHub = useCallback((repo: RepoRegistryEntry) => {
@@ -927,7 +938,9 @@ export function RepoRegistrySection() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'touch', id: repo.id }),
     }).then((data) => {
-      setRepos((current) => current.map((entry) => (entry.id === repo.id ? data.repo : entry)));
+      setRepos((current) => sortRepoEntries(
+        current.map((entry) => (entry.id === repo.id ? data.repo : entry)),
+      ));
     }).catch(() => null);
 
     window.open(githubUrl, '_blank', 'noopener,noreferrer');
@@ -989,7 +1002,9 @@ export function RepoRegistrySection() {
         body: JSON.stringify({ action: 'touch', id: workspaceRepo.id }),
       });
 
-      setRepos((current) => current.map((repo) => (repo.id === workspaceRepo.id ? touched.repo : repo)));
+      setRepos((current) => sortRepoEntries(
+        current.map((repo) => (repo.id === workspaceRepo.id ? touched.repo : repo)),
+      ));
     } catch (error) {
       setWorkspaceError(error instanceof Error ? error.message : 'Unable to create workspace.');
     } finally {
