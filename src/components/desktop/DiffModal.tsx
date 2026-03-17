@@ -10,6 +10,7 @@
 import { memo, useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronRight, FileText, FilePlus, FileMinus, FileEdit, X } from 'lucide-react';
+import { useDesktopWebSocket } from './hooks/useDesktopWebSocket';
 
 interface ChangedFile {
   path: string;
@@ -60,6 +61,17 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
 
+  const loadWorkspace = useCallback(async () => {
+    try {
+      const res = await fetch('/api/review/workspace');
+      if (!res.ok) return;
+      const data = await res.json();
+      setFiles(data.changedFiles ?? []);
+    } catch {
+      // silent
+    }
+  }, []);
+
   // Escape to close
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -73,15 +85,12 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch('/api/review/workspace');
-        if (!res.ok) return;
-        const data = await res.json();
-        setFiles(data.changedFiles ?? []);
+        await loadWorkspace();
       } catch { /* silent */ }
       finally { setLoading(false); }
     }
     void load();
-  }, []);
+  }, [loadWorkspace]);
 
   // Load file detail
   const selectFile = useCallback(async (path: string) => {
@@ -96,6 +105,16 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
     } catch { /* silent */ }
     finally { setDetailLoading(false); }
   }, []);
+
+  useDesktopWebSocket(undefined, {
+    onReviewUpdate: (data) => {
+      if ((data.event as string | undefined) !== 'file-changes') return;
+      void loadWorkspace();
+      if (selectedFile) {
+        void selectFile(selectedFile);
+      }
+    },
+  });
 
   const totalAdditions = files.reduce((sum, f) => sum + (f.additions ?? 0), 0);
   const totalDeletions = files.reduce((sum, f) => sum + (f.deletions ?? 0), 0);

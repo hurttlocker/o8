@@ -656,6 +656,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
       }
     },
     onReviewUpdate: (data: Record<string, unknown>) => {
+      if ((data.event as string | undefined) !== 'diff-stats') return;
       const d = data as { additions?: number; deletions?: number; files?: number };
       if (typeof d.additions === 'number') {
         setDiffStats({ additions: d.additions, deletions: d.deletions ?? 0, files: d.files ?? 0 });
