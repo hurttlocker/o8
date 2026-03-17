@@ -1,5 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { demoFleet } from '@/lib/demo/fleet';
 import { getOwnedCodexFleetAdditions } from '@/lib/codex/owned';
 import { getCodexDiscoveredFleetAdditions } from '@/lib/codex/sessions';
@@ -13,9 +13,6 @@ import type {
   SquadSummary,
 } from '@/lib/fleet/types';
 import type { RuntimeSession } from '@/lib/runtimes/types';
-
-const execFileAsync = promisify(execFile);
-const WORKSPACE_ROOT = process.env.CORTEX_IDE_WORKSPACE_ROOT || '/Users/marquisehurtt/clawd';
 
 type OpenClawRecentSession = {
   agentId?: string;
@@ -41,6 +38,17 @@ type OpenClawAgentMeta = {
   lastActiveAgeMs?: number;
 };
 
+type OpenClawAgentConfigEntry = {
+  id?: string;
+  model?: string | { primary?: string };
+  heartbeat?: { model?: string };
+};
+
+type OpenClawAgentConfigModels = {
+  primaryModel?: string;
+  heartbeatModel?: string;
+};
+
 type OpenClawStatusPayload = {
   gateway?: {
     reachable?: boolean;
@@ -58,13 +66,35 @@ type OpenClawStatusPayload = {
   };
 };
 
-function extractJsonPayload(raw: string) {
-  const firstBrace = raw.indexOf('{');
-  if (firstBrace === -1) {
-    throw new Error('OpenClaw status did not return JSON output.');
-  }
+function extractPrimaryModel(model?: string | { primary?: string }) {
+  if (typeof model === 'string') return model;
+  return model?.primary;
+}
 
-  return raw.slice(firstBrace);
+function readOpenClawAgentConfigModels(): Record<string, OpenClawAgentConfigModels> {
+  try {
+    const configPath = join(
+      process.env.HOME ?? '/Users/marquisehurtt',
+      '.openclaw',
+      'openclaw.json',
+    );
+    const raw = readFileSync(configPath, 'utf-8');
+    const parsed = JSON.parse(raw) as { agents?: { list?: OpenClawAgentConfigEntry[] } };
+
+    return Object.fromEntries(
+      (parsed.agents?.list ?? [])
+        .filter((agent): agent is OpenClawAgentConfigEntry & { id: string } => Boolean(agent.id))
+        .map((agent) => [
+          agent.id,
+          {
+            primaryModel: extractPrimaryModel(agent.model),
+            heartbeatModel: agent.heartbeat?.model,
+          },
+        ]),
+    );
+  } catch {
+    return {};
+  }
 }
 
 function relativeAge(ageMs?: number) {
@@ -98,12 +128,20 @@ function deriveSurfaceLabel(session: OpenClawRecentSession, isCurrentSession: bo
   return 'Direct session';
 }
 
+function deriveAgentId(session: OpenClawRecentSession) {
+  if (session.agentId) return session.agentId;
+  const match = session.key.match(/^agent:([^:]+):/);
+  return match?.[1];
+}
+
 function deriveSessionName(
   session: OpenClawRecentSession,
   agentMeta: Record<string, OpenClawAgentMeta>,
   isCurrentSession: boolean,
+  agentId?: string,
 ) {
-  const agentName = agentMeta[session.agentId ?? '']?.name ?? session.agentId ?? 'OpenClaw';
+  const resolvedAgentId = agentId ?? deriveAgentId(session);
+  const agentName = agentMeta[resolvedAgentId ?? '']?.name ?? resolvedAgentId ?? 'OpenClaw';
 
   if (isCurrentSession) return 'This chat';
   if (session.key.includes(':cron:')) return `${agentName} automation`;
@@ -315,6 +353,7 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
     // Use gateway REST API (<50ms) with CLI fallback (30-40s)
     const { getGatewayStatus } = await import('@/lib/openclaw/gateway-client');
     const parsed = await getGatewayStatus() as unknown as OpenClawStatusPayload;
+    const agentConfigModels = readOpenClawAgentConfigModels();
     const recent = (parsed.sessions?.recent ?? [])
       .filter((session) => !isDuplicateRunSurface(session.key))
       .slice(0, 10);
@@ -330,21 +369,25 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
     const primarySession = recent.find((session) => session.key === 'agent:main:main') ?? recent[0];
 
     const agents: AgentSummary[] = recent.map((session) => {
+      const agentId = deriveAgentId(session);
       const ageMs = session.age ?? Math.max(0, Date.now() - session.updatedAt);
       const isCurrentSession = session.key === primarySession.key && session.key === 'agent:main:main';
       const surfaceLabel = deriveSurfaceLabel(session, isCurrentSession);
       const status = deriveStatus(session);
       const alerts = Number(Boolean(session.abortedLastRun)) + Number((session.percentUsed ?? 0) >= 70);
-      const workspace = shortenPath(agentMeta[session.agentId ?? '']?.workspaceDir);
+      const workspace = shortenPath(agentMeta[agentId ?? '']?.workspaceDir);
       const branch = `surface/${surfaceLabel.toLowerCase().replace(/\s+/g, '-')}`;
-      const name = deriveSessionName(session, agentMeta, isCurrentSession);
+      const name = deriveSessionName(session, agentMeta, isCurrentSession, agentId);
+      const configuredModels = agentConfigModels[agentId ?? ''];
 
       return {
         id: session.key,
         name,
-        squadId: `squad-${session.agentId ?? 'openclaw'}`,
+        squadId: `squad-${agentId ?? 'openclaw'}`,
         runtime: 'openclaw',
         model: session.model ?? 'unknown',
+        primaryModel: configuredModels?.primaryModel,
+        heartbeatModel: configuredModels?.heartbeatModel,
         status,
         currentTask: deriveCurrentTask(session, surfaceLabel, isCurrentSession),
         workspace,

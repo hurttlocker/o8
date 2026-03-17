@@ -326,7 +326,8 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
     };
 
     pollApprovals(); // immediate
-    approvalPollRef.current = setInterval(pollApprovals, 5000);
+    // Poll fast only when likely to have approvals (agent running), otherwise slow
+    approvalPollRef.current = setInterval(pollApprovals, 15_000);
 
     return () => {
       if (approvalPollRef.current) clearInterval(approvalPollRef.current);

@@ -480,6 +480,69 @@ setInterval(() => {
   }
 }, PING_INTERVAL_MS);
 
+// ── Git watcher — push diff stats on changes ──
+
+import { watch, existsSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { resolve } from 'node:path';
+
+const REPO_ROOT = resolve(process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide');
+const GIT_DIR = resolve(REPO_ROOT, '.git');
+let lastDiffHash = '';
+let diffDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function broadcastDiffStats() {
+  const activeClients = [...clients.values()].filter(c => c.ws.readyState === WebSocket.OPEN);
+  if (activeClients.length === 0) return;
+
+  try {
+    const stat = execSync(
+      'git diff --shortstat origin/main..HEAD 2>/dev/null; git diff --shortstat 2>/dev/null',
+      { cwd: REPO_ROOT, encoding: 'utf-8', timeout: 5000 },
+    ).trim();
+
+    // Parse
+    let additions = 0, deletions = 0, files = 0;
+    for (const line of stat.split('\n').filter(Boolean)) {
+      const fm = line.match(/(\d+) files? changed/);
+      const am = line.match(/(\d+) insertions?\(\+\)/);
+      const dm = line.match(/(\d+) deletions?\(-\)/);
+      if (fm) files += parseInt(fm[1]);
+      if (am) additions += parseInt(am[1]);
+      if (dm) deletions += parseInt(dm[1]);
+    }
+
+    const hash = `${additions}:${deletions}:${files}`;
+    if (hash === lastDiffHash) return;
+    lastDiffHash = hash;
+
+    for (const client of activeClients) {
+      send(client, { channel: 'review', event: 'diff-stats', data: { additions, deletions, files } });
+    }
+  } catch { /* silent */ }
+}
+
+// Watch .git directory for changes (commits, merges, rebases)
+if (existsSync(GIT_DIR)) {
+  // Watch refs (branch tips change on commit/push)
+  const refsDir = resolve(GIT_DIR, 'refs');
+  if (existsSync(refsDir)) {
+    watch(refsDir, { recursive: true }, () => {
+      if (diffDebounceTimer) clearTimeout(diffDebounceTimer);
+      diffDebounceTimer = setTimeout(broadcastDiffStats, 500);
+    });
+  }
+  // Watch index (staged files change)
+  const indexFile = resolve(GIT_DIR, 'index');
+  if (existsSync(indexFile)) {
+    watch(indexFile, () => {
+      if (diffDebounceTimer) clearTimeout(diffDebounceTimer);
+      diffDebounceTimer = setTimeout(broadcastDiffStats, 500);
+    });
+  }
+  console.log(`[ws-server] Watching git at ${GIT_DIR} for diff changes`);
+}
+
 // Start everything
 connectGateway();
 startPollingLoops();
