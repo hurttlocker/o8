@@ -40,6 +40,7 @@ function DashboardInner() {
     runtime: string;
     sessionKey: string;
   } | null>(null);
+  const [liveOutputCollapsed, setLiveOutputCollapsed] = useState(false);
   const [agentsJson, setAgentsJson] = useState('[]');
   const [activeWorkspace, setActiveWorkspace] = useState<string | undefined>();
   const [showMemoryView, setShowMemoryView] = useState(false);
@@ -149,14 +150,21 @@ function DashboardInner() {
 
   const handleExpandWorkspace = useCallback((workspace: string, repo: string | null) => {
     setActiveWorkspace(workspace);
-    // Auto-open README tab for the expanded workspace
-    openCanvasTab({
-      id: `readme:${workspace}`,
-      kind: 'readme',
-      label: 'README',
-      resourceId: workspace,
-      meta: repo ? { repo } : undefined,
-    });
+    // Only open README tab if workspace actually has a README
+    fetch(`/api/panel/readme?workspace=${encodeURIComponent(workspace)}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.content) {
+          openCanvasTab({
+            id: `readme:${workspace}`,
+            kind: 'readme',
+            label: 'README',
+            resourceId: workspace,
+            meta: repo ? { repo } : undefined,
+          });
+        }
+      })
+      .catch(() => { /* no README, skip */ });
   }, [openCanvasTab]);
 
   const handleOpenGitLog = useCallback((workspace?: string) => {
@@ -553,7 +561,7 @@ function DashboardInner() {
             {liveOutputAgent && (
               <div style={{
                 flexShrink: 0,
-                maxHeight: '50%',
+                maxHeight: liveOutputCollapsed ? 'none' : '50%',
                 overflow: 'hidden',
                 display: 'flex',
                 flexDirection: 'column',
@@ -563,6 +571,7 @@ function DashboardInner() {
                   agentRuntime={liveOutputAgent.runtime}
                   sessionKey={liveOutputAgent.sessionKey}
                   onClose={() => setLiveOutputAgent(null)}
+                  onCollapseChange={setLiveOutputCollapsed}
                 />
               </div>
             )}
@@ -576,10 +585,11 @@ function DashboardInner() {
           </div>
         )}
 
-        {/* Live output even when no canvas tabs open — uses same drag handle above */}
+        {/* Live output even when no canvas tabs open — pinned to bottom */}
         {(!canvasTabs.length || !bottomPanelVisible) && liveOutputAgent && !showMemoryView && (activeNavSection as string) !== 'intent' && (activeNavSection as string) !== 'settings' && (
           <div style={{
-            flex: `0 0 ${canvasHeight}%`,
+            marginTop: 'auto',
+            flexShrink: 0,
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
@@ -589,6 +599,7 @@ function DashboardInner() {
               agentRuntime={liveOutputAgent.runtime}
               sessionKey={liveOutputAgent.sessionKey}
               onClose={() => setLiveOutputAgent(null)}
+              onCollapseChange={setLiveOutputCollapsed}
             />
           </div>
         )}

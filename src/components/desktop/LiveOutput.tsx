@@ -20,6 +20,7 @@ interface LiveOutputProps {
   agentRuntime: string;
   sessionKey: string;
   onClose: () => void;
+  onCollapseChange?: (collapsed: boolean) => void;
 }
 
 /* ── Diff line computation ── */
@@ -324,7 +325,7 @@ function FileSummaryBar({ diffs }: { diffs: DiffEntry[] }) {
 }
 
 /* ── Main Component ── */
-export function LiveOutput({ agentName, agentRuntime, sessionKey, onClose }: LiveOutputProps) {
+export function LiveOutput({ agentName, agentRuntime, sessionKey, onClose, onCollapseChange }: LiveOutputProps) {
   const [diffs, setDiffs] = useState<DiffEntry[]>([]);
   const [collapsed, setCollapsed] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -335,27 +336,22 @@ export function LiveOutput({ agentName, agentRuntime, sessionKey, onClose }: Liv
     try {
       // Use diffs API for Claude Code, fall back to transcript for others
       const isClaudeCode = sessionKey.startsWith('claude-code:');
+      const isCodex = sessionKey.startsWith('codex:');
 
+      // All three runtimes have diffs APIs
+      let url: string;
       if (isClaudeCode) {
-        const res = await fetch(`/api/claude-code/diffs?limit=30`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const newDiffs = (data.diffs ?? []) as DiffEntry[];
-        if (newDiffs.length !== prevCountRef.current) {
-          setDiffs(newDiffs);
-          prevCountRef.current = newDiffs.length;
-        }
+        url = '/api/claude-code/diffs?limit=30';
+      } else if (isCodex) {
+        url = '/api/codex/diffs?limit=30';
       } else {
-        // For Codex/OpenClaw — use transcript and extract file references
-        const url = sessionKey.startsWith('codex:')
-          ? `/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=30`
-          : `/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=30`;
-        const res = await fetch(url);
+        // OpenClaw — use transcript and extract file references
+        const histUrl = `/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=30`;
+        const res = await fetch(histUrl);
         if (!res.ok) return;
         const data = await res.json();
         const transcript = data.transcript ?? data.entries ?? [];
 
-        // Extract file mentions from assistant messages
         const extracted: DiffEntry[] = [];
         for (const entry of transcript) {
           if (entry.role !== 'assistant') continue;
@@ -375,6 +371,17 @@ export function LiveOutput({ agentName, agentRuntime, sessionKey, onClose }: Liv
           setDiffs(extracted);
           prevCountRef.current = extracted.length;
         }
+        return;
+      }
+
+      // Claude Code and Codex both have dedicated diffs APIs
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const data = await res.json();
+      const newDiffs = (data.diffs ?? []) as DiffEntry[];
+      if (newDiffs.length !== prevCountRef.current) {
+        setDiffs(newDiffs);
+        prevCountRef.current = newDiffs.length;
       }
     } catch { /* silent */ }
   }, [sessionKey]);
@@ -468,7 +475,7 @@ export function LiveOutput({ agentName, agentRuntime, sessionKey, onClose }: Liv
         <div style={{ flex: 1 }} />
         <button
           type="button"
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={() => { const next = !collapsed; setCollapsed(next); onCollapseChange?.(next); }}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', color: 'rgba(148, 163, 184, 0.4)' }}
         >
           <ChevronDown size={13} style={{ transition: 'transform 200ms', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
