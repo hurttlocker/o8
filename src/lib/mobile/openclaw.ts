@@ -109,6 +109,7 @@ async function _fetchMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
     .filter((agent) => (
       agent.runtime === 'openclaw'
         || agent.runtime === 'codex'
+        || agent.runtime === 'claude-code'
     ))
     .map((agent, index) => ({ agent, index }))
     .sort((left, right) => {
