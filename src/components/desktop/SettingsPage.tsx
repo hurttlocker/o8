@@ -27,6 +27,8 @@ interface GitHubRepo {
   updatedAt: string;
 }
 
+type GitHubActionKind = 'refresh' | 'switch' | 'logout';
+
 type SettingsTab = 'connectors' | 'agents' | 'appearance' | 'about';
 
 // ── SVG Icons ──
@@ -176,10 +178,24 @@ function ChevronDownIcon({ rotated }: { rotated?: boolean }) {
   );
 }
 
-function GitHubTab({ accounts, repos, loading }: {
+function GitHubTab({
+  accounts,
+  repos,
+  loading,
+  actionBusy,
+  actionNote,
+  onRefresh,
+  onSwitchAccount,
+  onDisconnect,
+}: {
   accounts: GitHubAccount[];
   repos: GitHubRepo[];
   loading: boolean;
+  actionBusy?: GitHubActionKind | null;
+  actionNote?: string | null;
+  onRefresh?: () => void;
+  onSwitchAccount?: (user: string) => void;
+  onDisconnect?: (user: string) => void;
 }) {
   const [reposExpanded, setReposExpanded] = useState(false);
 
@@ -194,6 +210,7 @@ function GitHubTab({ accounts, repos, loading }: {
   // Only show active accounts
   const activeAccounts = accounts.filter(a => a.active);
   const activeAccount = activeAccounts[0];
+  const inactiveAccounts = accounts.filter(a => !a.active);
   const connected = !!activeAccount;
 
   return (
@@ -214,8 +231,27 @@ function GitHubTab({ accounts, repos, loading }: {
               Source control, issues, and pull requests
             </p>
           </div>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading || actionBusy === 'refresh'}
+            style={{
+              marginLeft: 'auto',
+              padding: '7px 12px',
+              borderRadius: 8,
+              border: '1px solid var(--t-panel-border)',
+              background: 'var(--t-panel)',
+              color: 'var(--t-text-secondary)',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: loading || actionBusy === 'refresh' ? 'default' : 'pointer',
+              opacity: loading || actionBusy === 'refresh' ? 0.55 : 1,
+            }}
+          >
+            {actionBusy === 'refresh' ? 'Refreshing…' : 'Refresh'}
+          </button>
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto',
+            display: 'flex', alignItems: 'center', gap: 4,
             padding: '5px 12px', borderRadius: 8,
             background: connected ? 'rgba(34, 197, 94, 0.08)' : 'rgba(239, 68, 68, 0.08)',
             color: connected ? '#22c55e' : '#ef4444',
@@ -225,6 +261,21 @@ function GitHubTab({ accounts, repos, loading }: {
             {connected ? 'Connected' : 'Not Connected'}
           </div>
         </div>
+
+        {actionNote && (
+          <div style={{
+            marginBottom: 14,
+            padding: '10px 12px',
+            borderRadius: 10,
+            background: 'rgba(37, 99, 235, 0.06)',
+            border: '1px solid rgba(37, 99, 235, 0.12)',
+            color: 'var(--t-text-secondary)',
+            fontSize: 12,
+            lineHeight: 1.45,
+          }}>
+            {actionNote}
+          </div>
+        )}
 
         {/* Active Account */}
         {activeAccount && (
@@ -259,7 +310,7 @@ function GitHubTab({ accounts, repos, loading }: {
         )}
 
         {/* Actions */}
-        <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+        <div style={{ display: 'flex', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
           {connected ? (
             <>
               <button type="button" style={{
@@ -267,36 +318,82 @@ function GitHubTab({ accounts, repos, loading }: {
                 background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 12, fontWeight: 600,
                 cursor: 'pointer', transition: 'background 120ms',
               }}
+                onClick={() => activeAccount && onDisconnect?.(activeAccount.login)}
+                disabled={!activeAccount || actionBusy === 'logout'}
                 onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-panel)'; }}
               >
-                Disconnect
-              </button>
-              <button type="button" style={{
-                padding: '8px 16px', borderRadius: 10, border: '1px solid var(--t-panel-border)',
-                background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 12, fontWeight: 600,
-                cursor: 'pointer', transition: 'background 120ms',
-              }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-panel)'; }}
-              >
-                Switch Account
+                {actionBusy === 'logout' ? 'Disconnecting…' : `Disconnect ${activeAccount.login}`}
               </button>
             </>
           ) : (
-            <button type="button" style={{
-              padding: '8px 20px', borderRadius: 10, border: 'none',
-              background: 'var(--t-text)', color: '#fff', fontSize: 12, fontWeight: 600,
-              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-              transition: 'background 120ms',
-            }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-text-secondary)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-text)'; }}
-            >
-              <GitHubIcon size={14} /> Connect GitHub
-            </button>
+            <div style={{
+              padding: '10px 12px',
+              borderRadius: 10,
+              background: 'rgba(245, 158, 11, 0.08)',
+              border: '1px solid rgba(245, 158, 11, 0.18)',
+              color: 'var(--t-text-secondary)',
+              fontSize: 12,
+              lineHeight: 1.45,
+            }}>
+              In-app connect is not wired yet. For now, run <code style={{ background: 'var(--t-divider-subtle)', padding: '1px 4px', borderRadius: 4 }}>gh auth login --web</code> in the terminal, then hit refresh here.
+            </div>
           )}
         </div>
+
+        {inactiveAccounts.length > 0 && (
+          <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Other Accounts
+            </div>
+            {inactiveAccounts.map((account) => (
+              <div
+                key={account.login}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: 12,
+                  borderRadius: 10,
+                  background: 'var(--t-bg-subtle)',
+                  border: '1px solid var(--t-panel-border)',
+                }}
+              >
+                <img
+                  src={account.avatarUrl}
+                  alt={account.login}
+                  width={32}
+                  height={32}
+                  style={{ borderRadius: 16 }}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}>{account.login}</div>
+                  <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 2 }}>
+                    {account.protocol} · {account.scopes.length} scopes
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onSwitchAccount?.(account.login)}
+                  disabled={actionBusy === 'switch'}
+                  style={{
+                    padding: '7px 12px',
+                    borderRadius: 8,
+                    border: '1px solid var(--t-panel-border)',
+                    background: 'var(--t-panel)',
+                    color: 'var(--t-text-secondary)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: actionBusy === 'switch' ? 'default' : 'pointer',
+                    opacity: actionBusy === 'switch' ? 0.55 : 1,
+                  }}
+                >
+                  {actionBusy === 'switch' ? 'Switching…' : 'Make Active'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Repositories — Collapsible */}
@@ -323,11 +420,17 @@ function GitHubTab({ accounts, repos, loading }: {
         {reposExpanded && (
           <div style={{ padding: '8px 12px 12px', maxHeight: 300, overflowY: 'auto' }}>
             {repos.map((repo) => (
-              <div key={repo.nameWithOwner} style={{
+              <a
+                key={repo.nameWithOwner}
+                href={`https://github.com/${repo.nameWithOwner}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{
                 display: 'flex', alignItems: 'center', gap: 8,
                 padding: '7px 8px',
                 borderRadius: 8,
                 transition: 'background 80ms',
+                textDecoration: 'none',
               }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-panel-hover)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
@@ -341,7 +444,7 @@ function GitHubTab({ accounts, repos, loading }: {
                 <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
                   {repo.updatedAt}
                 </span>
-              </div>
+              </a>
             ))}
           </div>
         )}
@@ -1110,27 +1213,58 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<GitHubAccount[]>([]);
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
+  const [actionBusy, setActionBusy] = useState<GitHubActionKind | null>(null);
+  const [actionNote, setActionNote] = useState<string | null>(null);
 
   // Fetch GitHub status on mount
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const res = await fetch('/api/panel/github-status');
-        if (!res.ok) throw new Error('Failed to fetch');
-        const data = await res.json();
-        if (!cancelled) {
-          setAccounts(data.accounts || []);
-          setRepos(data.repos || []);
-        }
-      } catch {
-        // Fallback — show empty state
-      } finally {
-        if (!cancelled) setLoading(false);
+  const loadGitHubStatus = useCallback(async (showRefreshState = false) => {
+    try {
+      if (showRefreshState) {
+        setActionBusy('refresh');
+        setActionNote(null);
       }
+      const res = await fetch('/api/panel/github-status');
+      if (!res.ok) throw new Error('Failed to fetch');
+      const data = await res.json();
+      setAccounts(data.accounts || []);
+      setRepos(data.repos || []);
+    } catch {
+      setActionNote('Unable to refresh GitHub status right now.');
+    } finally {
+      setLoading(false);
+      if (showRefreshState) setActionBusy(null);
     }
-    load();
-    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    void loadGitHubStatus();
+  }, [loadGitHubStatus]);
+
+  const runGitHubAction = useCallback(async (action: Extract<GitHubActionKind, 'switch' | 'logout'>, user: string) => {
+    setActionBusy(action);
+    setActionNote(null);
+    try {
+      const res = await fetch('/api/panel/github-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, user }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'GitHub action failed');
+      }
+      setActionNote(data.note || 'GitHub settings updated.');
+      const refreshRes = await fetch('/api/panel/github-status');
+      if (refreshRes.ok) {
+        const refreshData = await refreshRes.json();
+        setAccounts(refreshData.accounts || []);
+        setRepos(refreshData.repos || []);
+      }
+    } catch (error) {
+      setActionNote(error instanceof Error ? error.message : 'GitHub action failed.');
+    } finally {
+      setActionBusy(null);
+    }
   }, []);
 
   return (
@@ -1170,7 +1304,16 @@ export function SettingsPage() {
       {/* Right content — full width */}
       <div style={{ flex: 1, minWidth: 0 }}>
         {activeTab === 'connectors' && (
-          <GitHubTab accounts={accounts} repos={repos} loading={loading} />
+          <GitHubTab
+            accounts={accounts}
+            repos={repos}
+            loading={loading}
+            actionBusy={actionBusy}
+            actionNote={actionNote}
+            onRefresh={() => { void loadGitHubStatus(true); }}
+            onSwitchAccount={(user) => { void runGitHubAction('switch', user); }}
+            onDisconnect={(user) => { void runGitHubAction('logout', user); }}
+          />
         )}
         {activeTab === 'agents' && (
           <AgentsTab />

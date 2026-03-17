@@ -53,9 +53,10 @@ export function formatDuration(minutes: number): string {
   return `${h}h ${m}m`;
 }
 
-export function formatTime(minutesSince9am: number): string {
-  const h = 9 + Math.floor(minutesSince9am / 60);
-  const m = minutesSince9am % 60;
+export function formatTime(minutesSinceAnchor: number): string {
+  // Anchor is 6 AM (matches API route rolling window)
+  const h = 6 + Math.floor(minutesSinceAnchor / 60);
+  const m = minutesSinceAnchor % 60;
   const period = h >= 12 ? 'PM' : 'AM';
   const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
@@ -66,7 +67,11 @@ export function formatTime(minutesSince9am: number): string {
 export function generateMockSegments(): TimelineSegment[] {
   const now = new Date();
   const startOfDay = new Date(now);
-  startOfDay.setHours(9, 0, 0, 0);
+  // Rolling 6 AM window — before 6 AM, anchor to yesterday 6 AM (matches API route)
+  if (now.getHours() < 6) {
+    startOfDay.setDate(startOfDay.getDate() - 1);
+  }
+  startOfDay.setHours(6, 0, 0, 0);
   const elapsed = Math.max(0, Math.floor((now.getTime() - startOfDay.getTime()) / 60000));
   if (elapsed === 0) return [{ kind: 'idle', startMin: 0, durationMin: 1 }];
 

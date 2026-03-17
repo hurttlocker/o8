@@ -20,8 +20,9 @@
  *   { type: "ping" }
  */
 
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, watch, existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { execSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -481,10 +482,6 @@ setInterval(() => {
 }, PING_INTERVAL_MS);
 
 // ── Git watcher — push diff stats on changes ──
-
-import { watch, existsSync } from 'node:fs';
-import { execSync } from 'node:child_process';
-import { resolve } from 'node:path';
 
 const REPO_ROOT = resolve(process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide');
 const GIT_DIR = resolve(REPO_ROOT, '.git');
