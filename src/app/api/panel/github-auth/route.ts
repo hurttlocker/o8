@@ -1,14 +1,15 @@
 import { execFileSync } from 'node:child_process';
 import { NextResponse } from 'next/server';
 
-type GitHubAuthAction = 'switch' | 'logout';
+type GitHubAuthAction = 'switch' | 'logout' | 'login_token';
 
 const DEFAULT_HOSTNAME = 'github.com';
 
-function execGh(args: string[]) {
+function execGh(args: string[], input?: string) {
   return execFileSync('gh', args, {
     encoding: 'utf-8',
     timeout: 15000,
+    input,
     env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/opt/homebrew/bin` },
   }).trim();
 }
@@ -29,14 +30,32 @@ export async function POST(request: Request) {
       action?: GitHubAuthAction;
       hostname?: string;
       user?: string;
+      token?: string;
     } | null;
 
     const action = payload?.action;
     const hostname = payload?.hostname?.trim() || DEFAULT_HOSTNAME;
     const user = payload?.user?.trim();
+    const token = payload?.token?.trim();
 
-    if (!action || (action !== 'switch' && action !== 'logout')) {
+    if (!action || (action !== 'switch' && action !== 'logout' && action !== 'login_token')) {
       return NextResponse.json({ error: 'Unsupported GitHub auth action.' }, { status: 400 });
+    }
+
+    if (action === 'login_token') {
+      if (!token) {
+        return NextResponse.json({ error: 'token is required.' }, { status: 400 });
+      }
+
+      execGh(
+        ['auth', 'login', '--hostname', hostname, '--git-protocol', 'https', '--with-token'],
+        `${token}\n`,
+      );
+      return NextResponse.json({
+        ok: true,
+        action,
+        note: 'GitHub PAT accepted by gh CLI. Refreshing local account state now.',
+      });
     }
 
     if (!user) {

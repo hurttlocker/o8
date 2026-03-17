@@ -556,7 +556,7 @@ function renderInline(text: string): React.ReactNode {
 
 // ── Main Component ──
 
-export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid }: { externalSessionKey?: string; onOpenDiff?: () => void; onOpenMermaid?: (code: string) => void } = {}) {
+export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onWsStatusChange }: { externalSessionKey?: string; onOpenDiff?: () => void; onOpenMermaid?: (code: string) => void; onWsStatusChange?: (status: 'connected' | 'connecting' | 'reconnecting' | 'disconnected') => void } = {}) {
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedKey, setSelectedKey] = useState<string>('');
@@ -609,10 +609,12 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid }: {
       streamingTextRef.current = '';
       setStreamingText('');
       setSending(false);
-      // Inject final message — the next poll will reconcile
+      // Inject final message — poll and history push will reconcile
       if (text) {
         setTranscript(prev => {
-          if (prev.length > 0 && prev[prev.length - 1]?.text === text) return prev;
+          // Dedup: check if this text already exists (from WS history push or prior done)
+          const lastFew = prev.slice(-3);
+          if (lastFew.some(e => e.role === 'assistant' && e.text === text)) return prev;
           return [...prev, {
             id: `ws:done:${Date.now()}`,
             role: 'assistant' as const,
@@ -639,9 +641,17 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid }: {
         const newEntries = entries as unknown as MobileTranscriptEntry[];
         setTranscript(prev => {
           const existingIds = new Set(prev.map(e => e.id));
-          const genuinelyNew = newEntries.filter(e => !existingIds.has(e.id));
+          // Also dedup by text against ws:done entries
+          const existingTexts = new Set(prev.filter(e => e.id.startsWith('ws:')).map(e => e.text));
+          const genuinelyNew = newEntries.filter(e =>
+            !existingIds.has(e.id) && !(e.role === 'assistant' && existingTexts.has(e.text))
+          );
           if (genuinelyNew.length === 0) return prev;
-          return [...prev, ...genuinelyNew];
+          // Replace ws:done entries with server versions (better IDs)
+          const cleaned = prev.filter(p =>
+            !p.id.startsWith('ws:') || !genuinelyNew.some(n => n.role === 'assistant' && n.text === p.text)
+          );
+          return [...cleaned, ...genuinelyNew];
         });
       }
     },
@@ -653,7 +663,10 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid }: {
     },
   }), [selectedKey]);
 
-  const { isConnected: wsConnected } = useDesktopWebSocket(selectedKey || undefined, wsCallbacks);
+  const { isConnected: wsConnected, connectionState } = useDesktopWebSocket(selectedKey || undefined, wsCallbacks);
+
+  // Report WS status to parent
+  useEffect(() => { onWsStatusChange?.(connectionState); }, [connectionState, onWsStatusChange]);
 
   const isClaudeCode = selectedSession?.runtime === 'claude-code';
   const isCodexLocal = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'discovered';

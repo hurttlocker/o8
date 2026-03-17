@@ -1,14 +1,12 @@
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
+import os from 'node:os';
 
-/**
- * /api/panel/timeline — Aggregates today's agent activity into timeline segments.
- *
- * Reads JSONL session files directly. OpenClaw JSONL format:
- * { type, id, parentId, timestamp, message: { role, content, tool_calls, name } }
- *
- * Roles: assistant, user, toolResult (tool output = coding activity)
- */
+// /api/panel/timeline — Aggregates today's agent activity into timeline segments.
+// Reads JSONL session files from three runtimes:
+//   1. OpenClaw  ~/.openclaw/agents/{name}/sessions/{id}.jsonl
+//   2. Claude Code  ~/.claude/projects/{proj}/{session}.jsonl
+//   3. Codex  ~/.codex/sessions/YYYY/MM/DD/rollout-{id}.jsonl
 
 interface TimelineSegment {
   kind: 'thinking' | 'coding' | 'testing' | 'error' | 'idle';
@@ -31,7 +29,10 @@ function execQuiet(cmd: string, opts?: { timeout?: number }): string {
   }
 }
 
-function classifyMessage(role: string, content: string, type: string): 'thinking' | 'coding' | 'testing' | 'error' | 'idle' {
+type SegmentKind = 'thinking' | 'coding' | 'testing' | 'error' | 'idle';
+
+/** Classify OpenClaw JSONL messages */
+function classifyMessage(role: string, content: string, type: string): SegmentKind {
   const lc = content.toLowerCase();
 
   // Tool results are direct evidence of coding activity
@@ -75,6 +76,144 @@ function classifyMessage(role: string, content: string, type: string): 'thinking
   return 'thinking';
 }
 
+/** Classify Claude Code JSONL messages — content blocks include tool_use / tool_result */
+function classifyClaudeCode(entry: any): SegmentKind {
+  const type = entry.type || '';
+  const content = entry.message?.content;
+
+  // system/progress/file-history = idle noise
+  if (type === 'system' || type === 'progress' || type === 'file-history-snapshot' || type === 'queue-operation') {
+    return 'idle';
+  }
+
+  // User messages = thinking (giving direction)
+  if (type === 'user') {
+    // Tool results come back as user messages with tool_result content blocks
+    if (Array.isArray(content)) {
+      for (const block of content) {
+        if (block.type === 'tool_result') return 'coding';
+      }
+    }
+    return 'thinking';
+  }
+
+  // Assistant messages — check for tool_use blocks
+  if (type === 'assistant' && Array.isArray(content)) {
+    for (const block of content) {
+      if (block.type === 'tool_use') {
+        const name = (block.name || '').toLowerCase();
+        // Testing tools
+        if (name === 'bash') {
+          const cmd = String(block.input?.command || '').toLowerCase();
+          if (cmd.includes('tsc --noemit') || cmd.includes('npm test') || cmd.includes('jest') || cmd.includes('vitest')) {
+            return 'testing';
+          }
+        }
+        return 'coding';
+      }
+    }
+    // Text-only assistant message = thinking
+    const text = content.filter((b: any) => b.type === 'text').map((b: any) => b.text || '').join(' ');
+    if (text.length < 150) return 'coding'; // short narration between tools
+    return 'thinking';
+  }
+
+  return 'thinking';
+}
+
+/** Classify Codex JSONL messages */
+function classifyCodex(entry: any): SegmentKind {
+  const type = entry.type || '';
+  const payload = entry.payload || {};
+  const payloadType = payload.type || '';
+
+  // Session meta, turn context = not activity
+  if (type === 'session_meta' || type === 'turn_context') return 'idle';
+
+  // Function calls and their output = coding
+  if (type === 'response_item') {
+    if (payloadType === 'function_call' || payloadType === 'function_call_output') {
+      const name = String(payload.name || '').toLowerCase();
+      const args = String(payload.arguments || '').toLowerCase();
+      // Testing patterns
+      if (name.includes('shell') || name.includes('bash') || name.includes('exec')) {
+        if (args.includes('test') || args.includes('jest') || args.includes('vitest') || args.includes('tsc')) {
+          return 'testing';
+        }
+      }
+      return 'coding';
+    }
+    if (payloadType === 'message') {
+      const role = payload.role || '';
+      if (role === 'user' || role === 'developer') return 'thinking';
+      return 'coding'; // assistant messages during a turn
+    }
+  }
+
+  // Event messages
+  if (type === 'event_msg') {
+    if (payloadType === 'task_complete' || payloadType === 'task_started') return 'coding';
+    if (payloadType === 'agent_message') return 'coding';
+    return 'thinking';
+  }
+
+  return 'thinking';
+}
+
+/** Generic segment accumulator — shared by all three runtimes */
+function accumulateSegments(
+  lines: string,
+  todayStart: Date,
+  agent: string,
+  classifier: (entry: any) => SegmentKind,
+  extractTimestamp: (entry: any) => string | undefined,
+): TimelineSegment[] {
+  const segments: TimelineSegment[] = [];
+  let currentKind: string | null = null;
+  let blockStart = 0;
+  let blockDur = 0;
+  let hasToday = false;
+
+  for (const line of lines.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const entry = JSON.parse(line);
+      const ts = extractTimestamp(entry);
+      if (!ts) continue;
+
+      const msgTime = new Date(ts);
+      if (isNaN(msgTime.getTime()) || msgTime < todayStart) continue;
+      hasToday = true;
+
+      const minSinceStart = Math.floor((msgTime.getTime() - todayStart.getTime()) / 60000);
+      const kind = classifier(entry);
+
+      if (currentKind === null) {
+        currentKind = kind;
+        blockStart = minSinceStart;
+        blockDur = 1;
+      } else if (kind === currentKind && minSinceStart - (blockStart + blockDur) < 3) {
+        blockDur = Math.max(blockDur, minSinceStart - blockStart + 1);
+      } else {
+        const gapMin = minSinceStart - (blockStart + blockDur);
+        segments.push({ kind: currentKind as SegmentKind, startMin: blockStart, durationMin: Math.max(blockDur, 1), agent });
+        if (gapMin >= 5) {
+          segments.push({ kind: 'idle', startMin: blockStart + blockDur, durationMin: gapMin, agent });
+        }
+        currentKind = kind;
+        blockStart = minSinceStart;
+        blockDur = 1;
+      }
+    } catch { continue; }
+  }
+
+  if (currentKind !== null && hasToday) {
+    segments.push({ kind: currentKind as SegmentKind, startMin: blockStart, durationMin: Math.max(blockDur, 1), agent });
+  }
+
+  return segments;
+}
+
 export async function GET() {
   try {
     const now = new Date();
@@ -86,77 +225,75 @@ export async function GET() {
     }
     todayStart.setHours(6, 0, 0, 0);
 
-    // Find today's session files across all agents
-    const lsRaw = execQuiet(`ls -t ~/.openclaw/agents/*/sessions/*.jsonl 2>/dev/null | head -15`);
-    const files = lsRaw.split('\n').filter(Boolean);
-
-    if (files.length === 0) {
-      return NextResponse.json({ segments: [], totalMinutes: 0, source: 'none' });
-    }
-
+    const home = os.homedir();
     const allSegments: TimelineSegment[] = [];
 
-    for (const file of files) {
+    // ── 1. OpenClaw sessions ──
+    const openclawFiles = execQuiet(`ls -t ${home}/.openclaw/agents/*/sessions/*.jsonl 2>/dev/null | head -15`);
+    for (const file of openclawFiles.split('\n').filter(Boolean)) {
       const agentMatch = file.match(/agents\/([^/]+)\//);
       const agent = agentMatch ? agentMatch[1] : 'unknown';
-
-      // Read last 500 lines for full day coverage
       const lines = execQuiet(`tail -500 "${file}" 2>/dev/null`, { timeout: 10000 });
       if (!lines) continue;
 
-      let currentKind: string | null = null;
-      let blockStart = 0;
-      let blockDur = 0;
-      let hasToday = false;
+      const openclawClassifier = (entry: any): SegmentKind => {
+        const inner = entry.message || {};
+        const role = inner.role || '';
+        const type = entry.type || '';
+        const content = typeof inner.content === 'string'
+          ? inner.content
+          : Array.isArray(inner.content)
+            ? inner.content.map((c: any) => (typeof c === 'string' ? c : c?.text || '')).join(' ')
+            : '';
+        return classifyMessage(role, content, type);
+      };
 
-      for (const line of lines.split('\n')) {
-        if (!line.trim()) continue;
-        try {
-          const entry = JSON.parse(line);
-          const ts = entry.timestamp;
-          if (!ts) continue;
+      allSegments.push(...accumulateSegments(lines, todayStart, agent, openclawClassifier, (e) => e.timestamp));
+    }
 
-          const msgTime = new Date(ts);
-          if (isNaN(msgTime.getTime()) || msgTime < todayStart) continue;
-          hasToday = true;
+    // ── 2. Claude Code sessions ──
+    const ccFiles = execQuiet(`ls -t ${home}/.claude/projects/*/*.jsonl 2>/dev/null | head -10`);
+    for (const file of ccFiles.split('\n').filter(Boolean)) {
+      // Extract project name from path: ~/.claude/projects/-Users-foo-bar/session.jsonl → bar
+      const projMatch = file.match(/projects\/([^/]+)\//);
+      const projEncoded = projMatch ? projMatch[1] : '';
+      const projName = projEncoded.split('-').filter(Boolean).pop() || 'claude-code';
+      const agent = `cc:${projName}`;
 
-          const minSinceStart = Math.floor((msgTime.getTime() - todayStart.getTime()) / 60000);
-          const inner = entry.message || {};
-          const role = inner.role || '';
-          const type = entry.type || '';
-          const content = typeof inner.content === 'string'
-            ? inner.content
-            : Array.isArray(inner.content)
-              ? inner.content.map((c: any) => (typeof c === 'string' ? c : c?.text || '')).join(' ')
-              : '';
+      const lines = execQuiet(`tail -500 "${file}" 2>/dev/null`, { timeout: 10000 });
+      if (!lines) continue;
 
-          const kind = classifyMessage(role, content, type);
+      allSegments.push(...accumulateSegments(lines, todayStart, agent, classifyClaudeCode, (e) => e.timestamp));
+    }
 
-          if (currentKind === null) {
-            currentKind = kind;
-            blockStart = minSinceStart;
-            blockDur = 1;
-          } else if (kind === currentKind && minSinceStart - (blockStart + blockDur) < 3) {
-            // Same kind and within 3 min — extend block
-            blockDur = Math.max(blockDur, minSinceStart - blockStart + 1);
-          } else {
-            // Different kind or gap
-            const gapMin = minSinceStart - (blockStart + blockDur);
-            allSegments.push({ kind: currentKind as any, startMin: blockStart, durationMin: Math.max(blockDur, 1), agent });
-            if (gapMin >= 5) {
-              allSegments.push({ kind: 'idle', startMin: blockStart + blockDur, durationMin: gapMin, agent });
-            }
-            currentKind = kind;
-            blockStart = minSinceStart;
-            blockDur = 1;
-          }
-        } catch { continue; }
-      }
+    // ── 3. Codex sessions ──
+    // Codex stores sessions in date-partitioned dirs: ~/.codex/sessions/YYYY/MM/DD/*.jsonl
+    const todayStr = `${todayStart.getFullYear()}/${String(todayStart.getMonth() + 1).padStart(2, '0')}/${String(todayStart.getDate()).padStart(2, '0')}`;
+    // Also check yesterday if we're in the early hours
+    const yesterday = new Date(todayStart);
+    yesterday.setDate(yesterday.getDate());
+    const nowDate = new Date();
+    const nowStr = `${nowDate.getFullYear()}/${String(nowDate.getMonth() + 1).padStart(2, '0')}/${String(nowDate.getDate()).padStart(2, '0')}`;
+    const codexDirs = new Set([todayStr, nowStr]);
+    const codexFiles: string[] = [];
+    for (const dir of codexDirs) {
+      const found = execQuiet(`ls -t ${home}/.codex/sessions/${dir}/*.jsonl 2>/dev/null | head -5`);
+      codexFiles.push(...found.split('\n').filter(Boolean));
+    }
 
-      // Flush last block
-      if (currentKind !== null && hasToday) {
-        allSegments.push({ kind: currentKind as any, startMin: blockStart, durationMin: Math.max(blockDur, 1), agent });
-      }
+    for (const file of codexFiles) {
+      // Extract a short label from the filename
+      const fileBase = file.split('/').pop() || '';
+      const agent = 'codex';
+
+      const lines = execQuiet(`tail -500 "${file}" 2>/dev/null`, { timeout: 10000 });
+      if (!lines) continue;
+
+      allSegments.push(...accumulateSegments(lines, todayStart, agent, classifyCodex, (e) => e.timestamp));
+    }
+
+    if (allSegments.length === 0) {
+      return NextResponse.json({ segments: [], totalMinutes: 0, source: 'none' });
     }
 
     // Sort by start time
@@ -240,7 +377,7 @@ export async function GET() {
       segments: final,
       totalMinutes,
       stats: kindTotals,
-      source: 'jsonl',
+      source: 'multi-runtime',
     });
   } catch {
     return NextResponse.json({ segments: [], error: 'internal' }, { status: 500 });
