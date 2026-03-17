@@ -233,6 +233,20 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
   const [drillSize, setDrillSize] = useState({ w: 520, h: 400 });
   const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
 
+  // ── Connected session panel state ──
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
+  const [sessionPanelPos, setSessionPanelPos] = useState({ x: 0, y: 0 });
+  const sessionDragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const agentCardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const sessionPanelRef = useRef<HTMLDivElement>(null);
+  // Force re-render connector line during drags
+  const [, forceUpdate] = useState(0);
+  const tickDrag = useCallback(() => forceUpdate(n => n + 1), []);
+
+  interface AgentSession { id: string; label: string; model: string; startTime: string; duration: string; messages: number; status: string }
+  const [agentSessions, setAgentSessions] = useState<AgentSession[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+
   const handleBarDoubleClick = useCallback((e: React.MouseEvent) => {
     // Open drill-down centered on click position
     const x = Math.max(20, e.clientX - 260);
@@ -260,6 +274,99 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   }, [drillPos]);
+
+  // Agent card click → open connected session panel
+  const handleAgentClick = useCallback((agentName: string) => {
+    if (selectedAgent === agentName) {
+      setSelectedAgent(null);
+      return;
+    }
+    // Position session panel to the right of the drill-down
+    const cardEl = agentCardRefs.current.get(agentName);
+    const cardRect = cardEl?.getBoundingClientRect();
+    setSessionPanelPos({
+      x: drillPos.x + drillSize.w + 40,
+      y: cardRect ? cardRect.top - 20 : drillPos.y,
+    });
+    setSelectedAgent(agentName);
+
+    // Fetch sessions for this agent
+    setSessionsLoading(true);
+    setAgentSessions([]);
+    fetch(`/api/panel/timeline?agent=${encodeURIComponent(agentName)}&sessions=true`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.sessions) {
+          setAgentSessions(data.sessions);
+        } else {
+          // Fallback: derive from segments
+          const agentSegs = segments.filter(s => s.agent === agentName);
+          if (agentSegs.length > 0) {
+            const firstSeg = agentSegs[0];
+            const lastSeg = agentSegs[agentSegs.length - 1];
+            const totalMin = agentSegs.reduce((s, x) => s + x.durationMin, 0);
+            setAgentSessions([{
+              id: `derived-${agentName}`,
+              label: `${agentName} — Today`,
+              model: '',
+              startTime: formatTime(firstSeg.startMin),
+              duration: formatDuration(totalMin),
+              messages: agentSegs.length,
+              status: 'active',
+            }]);
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => setSessionsLoading(false));
+  }, [selectedAgent, drillPos, drillSize, segments]);
+
+  // Session panel drag
+  const handleSessionDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    sessionDragRef.current = { startX: e.clientX, startY: e.clientY, originX: sessionPanelPos.x, originY: sessionPanelPos.y };
+    const onMove = (ev: MouseEvent) => {
+      if (!sessionDragRef.current) return;
+      setSessionPanelPos({
+        x: sessionDragRef.current.originX + (ev.clientX - sessionDragRef.current.startX),
+        y: sessionDragRef.current.originY + (ev.clientY - sessionDragRef.current.startY),
+      });
+      tickDrag();
+    };
+    const onUp = () => {
+      sessionDragRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [sessionPanelPos, tickDrag]);
+
+  // Also tick connector when drill panel drags
+  const handleDrillDragStartWrapped = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragRef.current = { startX: e.clientX, startY: e.clientY, originX: drillPos.x, originY: drillPos.y };
+    const onMove = (ev: MouseEvent) => {
+      if (!dragRef.current) return;
+      setDrillPos({
+        x: dragRef.current.originX + (ev.clientX - dragRef.current.startX),
+        y: dragRef.current.originY + (ev.clientY - dragRef.current.startY),
+      });
+      tickDrag();
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [drillPos, tickDrag]);
+
+  // Close session panel when drill closes
+  useEffect(() => {
+    if (!drillOpen) setSelectedAgent(null);
+  }, [drillOpen]);
 
   // Group segments by agent for drill-down
   const agentBreakdown = useMemo(() => {
@@ -542,7 +649,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
           }}>
             {/* Header — draggable */}
             <div
-              onMouseDown={handleDrillDragStart}
+              onMouseDown={handleDrillDragStartWrapped}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -590,12 +697,21 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
               gap: 14,
             }}>
               {agentBreakdown.map((entry) => (
-                <div key={entry.agent} style={{
-                  background: 'rgba(255, 255, 255, 0.1)',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                  borderRadius: 12,
-                  padding: 12,
-                }}>
+                <div
+                  key={entry.agent}
+                  ref={(el) => { if (el) agentCardRefs.current.set(entry.agent, el); }}
+                  onClick={() => handleAgentClick(entry.agent)}
+                  style={{
+                    background: selectedAgent === entry.agent ? 'rgba(37, 99, 235, 0.12)' : 'rgba(255, 255, 255, 0.1)',
+                    border: selectedAgent === entry.agent ? '1px solid rgba(37, 99, 235, 0.3)' : '1px solid rgba(255, 255, 255, 0.15)',
+                    borderRadius: 12,
+                    padding: 12,
+                    cursor: 'pointer',
+                    transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
+                  }}
+                  onMouseEnter={(e) => { if (selectedAgent !== entry.agent) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)'; }}
+                  onMouseLeave={(e) => { if (selectedAgent !== entry.agent) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'; }}
+                >
                   {/* Agent header */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -671,6 +787,209 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
               )}
             </div>
           </div>
+
+          {/* ── SVG Connector Line ── */}
+          {selectedAgent && (() => {
+            const cardEl = agentCardRefs.current.get(selectedAgent);
+            const panelEl = sessionPanelRef.current;
+            if (!cardEl) return null;
+            const cardRect = cardEl.getBoundingClientRect();
+            const panelX = sessionPanelPos.x;
+            const panelY = sessionPanelPos.y;
+
+            // Anchor points
+            const x1 = cardRect.right + 2;
+            const y1 = cardRect.top + cardRect.height / 2;
+            const x2 = panelX;
+            const y2 = panelY + 30; // ~header center
+            const cpOffset = Math.min(80, Math.abs(x2 - x1) * 0.4);
+
+            return (
+              <svg
+                style={{
+                  position: 'fixed', inset: 0,
+                  width: '100vw', height: '100vh',
+                  pointerEvents: 'none', zIndex: 9998,
+                }}
+              >
+                <defs>
+                  <linearGradient id="connectorGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#2563eb" stopOpacity="0.6" />
+                    <stop offset="100%" stopColor="#2563eb" stopOpacity="0.3" />
+                  </linearGradient>
+                </defs>
+                {/* Glow */}
+                <path
+                  d={`M ${x1} ${y1} C ${x1 + cpOffset} ${y1}, ${x2 - cpOffset} ${y2}, ${x2} ${y2}`}
+                  fill="none"
+                  stroke="rgba(37, 99, 235, 0.15)"
+                  strokeWidth="6"
+                  strokeLinecap="round"
+                />
+                {/* Main line */}
+                <path
+                  d={`M ${x1} ${y1} C ${x1 + cpOffset} ${y1}, ${x2 - cpOffset} ${y2}, ${x2} ${y2}`}
+                  fill="none"
+                  stroke="url(#connectorGrad)"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                />
+                {/* Dots at endpoints */}
+                <circle cx={x1} cy={y1} r="3" fill="#2563eb" opacity="0.5" />
+                <circle cx={x2} cy={y2} r="3" fill="#2563eb" opacity="0.5" />
+              </svg>
+            );
+          })()}
+
+          {/* ── Connected Session Panel ── */}
+          {selectedAgent && (
+            <div
+              ref={sessionPanelRef}
+              style={{
+                position: 'fixed',
+                left: sessionPanelPos.x,
+                top: sessionPanelPos.y,
+                width: 380,
+                maxHeight: 420,
+                zIndex: 9999,
+                background: 'rgba(255, 255, 255, 0.18)',
+                backdropFilter: 'blur(80px) saturate(2.2)',
+                WebkitBackdropFilter: 'blur(80px) saturate(2.2)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: 16,
+                boxShadow: '0 24px 80px rgba(0, 0, 0, 0.08), 0 8px 32px rgba(0, 0, 0, 0.04), inset 0 0.5px 0 rgba(255, 255, 255, 0.4), inset 0 -0.5px 0 rgba(255, 255, 255, 0.1)',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                animation: 'drillFadeIn 180ms cubic-bezier(0.32, 0.72, 0, 1)',
+              }}
+            >
+              {/* Header — draggable */}
+              <div
+                onMouseDown={handleSessionDragStart}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '12px 14px 10px',
+                  cursor: 'grab',
+                  userSelect: 'none',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{
+                    width: 20, height: 20, borderRadius: 6,
+                    background: 'rgba(37, 99, 235, 0.15)',
+                    border: '1px solid rgba(37, 99, 235, 0.25)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 10, fontWeight: 700, color: '#2563eb',
+                  }}>
+                    {selectedAgent[0]}
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
+                    {selectedAgent} Sessions
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedAgent(null)}
+                  aria-label="Close"
+                  style={{
+                    width: 22, height: 22, borderRadius: 11,
+                    border: 'none', background: 'rgba(255,255,255,0.12)',
+                    color: 'var(--t-text-muted)', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 13, fontWeight: 600, lineHeight: 1,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.2)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Session list */}
+              <div style={{
+                padding: '10px 14px 14px',
+                overflowY: 'auto',
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+              }}>
+                {sessionsLoading && (
+                  <div style={{ textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 11, padding: 16 }}>
+                    Loading sessions…
+                  </div>
+                )}
+
+                {!sessionsLoading && agentSessions.map((session) => (
+                  <div
+                    key={session.id}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.1)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: 10,
+                      padding: 10,
+                      cursor: 'pointer',
+                      transition: 'all 120ms ease',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)';
+                      e.currentTarget.style.border = '1px solid rgba(37, 99, 235, 0.2)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)';
+                      e.currentTarget.style.border = '1px solid rgba(255, 255, 255, 0.12)';
+                    }}
+                  >
+                    {/* Session label */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+                        {session.label}
+                      </span>
+                      <div style={{
+                        width: 6, height: 6, borderRadius: 3,
+                        background: session.status === 'active' ? '#34c759' : '#9ca3af',
+                      }} />
+                    </div>
+                    {/* Meta row */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{
+                        fontSize: 10, color: 'var(--t-text-muted)',
+                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                      }}>
+                        {session.startTime}
+                      </span>
+                      <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
+                      <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontWeight: 600 }}>
+                        {session.duration}
+                      </span>
+                      <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
+                      <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>
+                        {session.messages} msg{session.messages !== 1 ? 's' : ''}
+                      </span>
+                      {session.model && (
+                        <>
+                          <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
+                          <span style={{ fontSize: 10, color: 'var(--t-text-secondary)' }}>
+                            {session.model}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {!sessionsLoading && agentSessions.length === 0 && (
+                  <div style={{ textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 11, padding: 16 }}>
+                    No sessions found
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </>,
         document.body,
       )}
