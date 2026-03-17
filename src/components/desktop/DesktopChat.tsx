@@ -1206,7 +1206,8 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
     }
   }, [transcript, scrollToBottom]);
 
-  // ── Diff stats (poll every 30s) ──
+  // ── Diff stats (WS-driven + safety-net) ──
+  // WS pushes diff-stats on git changes; this poll is the safety-net
   useEffect(() => {
     async function fetchDiffStats() {
       try {
@@ -1222,9 +1223,10 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
       } catch { /* silent */ }
     }
     void fetchDiffStats();
-    const id = setInterval(fetchDiffStats, 30_000);
+    const ms = wsConnected ? 120_000 : 30_000; // 2min when WS connected, 30s fallback
+    const id = setInterval(fetchDiffStats, ms);
     return () => clearInterval(id);
-  }, []);
+  }, [wsConnected]);
 
   // ── External session key (from Agent Panel click) ──
   useEffect(() => {
