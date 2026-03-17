@@ -274,11 +274,13 @@ const AgentCard = memo(function AgentCard({
   expanded,
   onToggle,
   onSelectSession,
+  onSelectPR,
 }: {
   group: WorkspaceGroup;
   expanded: boolean;
   onToggle: () => void;
   onSelectSession?: (sessionKey: string) => void;
+  onSelectPR?: (prNumber: number, repo?: string) => void;
 }) {
   const model = group.primaryModel;
   const ctx = group.bestContextPct > 0 ? { usedPercent: group.bestContextPct } : null;
@@ -529,10 +531,15 @@ const AgentCard = memo(function AgentCard({
                     {pr && (
                       <>
                         <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
-                        <span style={{
-                          fontSize: 10, fontWeight: 600,
-                          color: pr.state === 'merged' ? '#8b5cf6' : pr.state === 'open' ? '#22c55e' : '#9ca3af',
-                        }}>
+                        <span
+                          onClick={(e) => { e.stopPropagation(); onSelectPR?.(pr.number, group.repo); }}
+                          style={{
+                            fontSize: 10, fontWeight: 600,
+                            color: pr.state === 'merged' ? '#8b5cf6' : pr.state === 'open' ? '#22c55e' : '#9ca3af',
+                            cursor: 'pointer',
+                          }}
+                          title={`View PR #${pr.number}`}
+                        >
                           #{pr.number}
                         </span>
                       </>
@@ -542,11 +549,22 @@ const AgentCard = memo(function AgentCard({
                 {/* Right side: diff stats + context ring */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 'auto' }}>
                   {diff && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 700,
-                      fontFamily: 'SF Mono, Menlo, monospace',
-                      display: 'flex', gap: 4, flexShrink: 0,
-                    }}>
+                    <span
+                      onClick={pr ? (e) => { e.stopPropagation(); onSelectPR?.(pr.number, group.repo); } : undefined}
+                      style={{
+                        fontSize: 10, fontWeight: 700,
+                        fontFamily: 'SF Mono, Menlo, monospace',
+                        display: 'flex', gap: 4, flexShrink: 0,
+                        cursor: pr ? 'pointer' : 'default',
+                        padding: pr ? '2px 6px' : 0,
+                        borderRadius: pr ? 6 : 0,
+                        background: pr ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
+                        transition: 'background 120ms ease',
+                      }}
+                      onMouseEnter={pr ? (e) => { e.currentTarget.style.background = 'rgba(37, 99, 235, 0.12)'; } : undefined}
+                      onMouseLeave={pr ? (e) => { e.currentTarget.style.background = 'rgba(37, 99, 235, 0.06)'; } : undefined}
+                      title={pr ? `View PR #${pr.number} diff` : undefined}
+                    >
                       <span style={{ color: '#22c55e' }}>+{diff.add.toLocaleString()}</span>
                       <span style={{ color: '#ef4444' }}>-{diff.del.toLocaleString()}</span>
                     </span>
@@ -1820,6 +1838,7 @@ export const AgentPanel = memo(function AgentPanel({
               expanded={expandedGroup === group.workspace}
               onToggle={() => setExpandedGroup(expandedGroup === group.workspace ? null : group.workspace)}
               onSelectSession={onSelectSession}
+              onSelectPR={onSelectPR}
             />
           ))
         )}

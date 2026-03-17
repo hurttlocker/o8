@@ -27,7 +27,18 @@ interface GitHubRepo {
   updatedAt: string;
 }
 
-type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token';
+interface GitHubDeviceFlowState {
+  flowId: string;
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete?: string;
+  expiresAt: number;
+  expiresInMinutes: number;
+  nextPollInMs: number;
+  note?: string;
+}
+
+type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device';
 
 type SettingsTab = 'connectors' | 'agents' | 'appearance' | 'about';
 
@@ -188,6 +199,9 @@ function GitHubTab({
   onSwitchAccount,
   onDisconnect,
   onLoginWithToken,
+  deviceFlowEnabled,
+  deviceFlow,
+  onStartDeviceFlow,
 }: {
   accounts: GitHubAccount[];
   repos: GitHubRepo[];
@@ -198,10 +212,14 @@ function GitHubTab({
   onSwitchAccount?: (user: string) => void;
   onDisconnect?: (user: string) => void;
   onLoginWithToken?: (token: string) => void;
+  deviceFlowEnabled?: boolean;
+  deviceFlow?: GitHubDeviceFlowState | null;
+  onStartDeviceFlow?: () => void;
 }) {
   const [reposExpanded, setReposExpanded] = useState(false);
   const [patToken, setPatToken] = useState('');
   const [commandCopied, setCommandCopied] = useState(false);
+  const [deviceCodeCopied, setDeviceCodeCopied] = useState(false);
   const browserLoginCommand = 'gh auth login --web --hostname github.com --git-protocol https --skip-ssh-key';
 
   async function copyBrowserLoginCommand() {
@@ -211,6 +229,17 @@ function GitHubTab({
       window.setTimeout(() => setCommandCopied(false), 1500);
     } catch {
       setCommandCopied(false);
+    }
+  }
+
+  async function copyDeviceCode() {
+    if (!deviceFlow?.userCode) return;
+    try {
+      await navigator.clipboard.writeText(deviceFlow.userCode);
+      setDeviceCodeCopied(true);
+      window.setTimeout(() => setDeviceCodeCopied(false), 1500);
+    } catch {
+      setDeviceCodeCopied(false);
     }
   }
 
@@ -351,12 +380,112 @@ function GitHubTab({
               fontSize: 12,
               lineHeight: 1.45,
             }}>
-              In-app connect is not wired yet. For now, run <code style={{ background: 'var(--t-divider-subtle)', padding: '1px 4px', borderRadius: 4 }}>gh auth login --web</code> in the terminal, then hit refresh here.
+              Use the recommended device login below for the best local flow, or fall back to <code style={{ background: 'var(--t-divider-subtle)', padding: '1px 4px', borderRadius: 4 }}>gh auth login --web</code> in a terminal if you prefer the raw CLI path.
             </div>
           )}
         </div>
 
         <div style={{ marginTop: 18, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+          <div style={{
+            padding: 14,
+            borderRadius: 12,
+            background: 'var(--t-bg-subtle)',
+            border: '1px solid var(--t-panel-border)',
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)', marginBottom: 6 }}>
+              Recommended: Device Login
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.45, marginBottom: 10 }}>
+              Best fit for Cortex&apos;s local `gh` flow. Sign in through GitHub in your browser, then let this panel complete the local CLI login automatically.
+            </div>
+            {!deviceFlow && (
+              <>
+                <button
+                  type="button"
+                  onClick={onStartDeviceFlow}
+                  disabled={!deviceFlowEnabled || actionBusy === 'login_device'}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 8,
+                    border: 'none',
+                    background: !deviceFlowEnabled || actionBusy === 'login_device' ? 'var(--t-divider-subtle)' : 'var(--t-text)',
+                    color: !deviceFlowEnabled || actionBusy === 'login_device' ? 'var(--t-text-faint)' : '#fff',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    cursor: !deviceFlowEnabled || actionBusy === 'login_device' ? 'default' : 'pointer',
+                  }}
+                >
+                  {actionBusy === 'login_device' ? 'Starting…' : 'Start Device Login'}
+                </button>
+                <div style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.45, marginTop: 10 }}>
+                  {deviceFlowEnabled
+                    ? 'This opens a GitHub device code flow and finishes by feeding the returned token into the local GitHub CLI.'
+                    : 'Requires `GITHUB_OAUTH_CLIENT_ID` plus device flow enabled on the GitHub OAuth app for this install.'}
+                </div>
+              </>
+            )}
+            {deviceFlow && (
+              <>
+                <div style={{
+                  padding: '12px 14px',
+                  borderRadius: 12,
+                  background: 'var(--t-panel)',
+                  border: '1px solid var(--t-panel-border)',
+                }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+                    Enter This Code
+                  </div>
+                  <div style={{
+                    fontSize: 22,
+                    fontWeight: 800,
+                    color: 'var(--t-text)',
+                    letterSpacing: '0.14em',
+                    fontFamily: '"SF Mono", Menlo, monospace',
+                  }}>
+                    {deviceFlow.userCode}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 8, lineHeight: 1.45 }}>
+                    {deviceFlow.note || 'Waiting for approval in GitHub…'} Expires in about {deviceFlow.expiresInMinutes} minute(s).
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => window.open(deviceFlow.verificationUriComplete || deviceFlow.verificationUri, '_blank', 'noopener,noreferrer')}
+                    style={{
+                      padding: '7px 12px',
+                      borderRadius: 8,
+                      border: '1px solid var(--t-panel-border)',
+                      background: 'var(--t-panel)',
+                      color: 'var(--t-text-secondary)',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Open GitHub
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void copyDeviceCode(); }}
+                    style={{
+                      padding: '7px 12px',
+                      borderRadius: 8,
+                      border: '1px solid var(--t-panel-border)',
+                      background: 'var(--t-panel)',
+                      color: 'var(--t-text-secondary)',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {deviceCodeCopied ? 'Copied' : 'Copy Code'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
           <div style={{
             padding: 14,
             borderRadius: 12,
@@ -1323,6 +1452,8 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<GitHubAccount[]>([]);
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
+  const [deviceFlowEnabled, setDeviceFlowEnabled] = useState(false);
+  const [deviceFlow, setDeviceFlow] = useState<GitHubDeviceFlowState | null>(null);
   const [actionBusy, setActionBusy] = useState<GitHubActionKind | null>(null);
   const [actionNote, setActionNote] = useState<string | null>(null);
 
@@ -1338,6 +1469,7 @@ export function SettingsPage() {
       const data = await res.json();
       setAccounts(data.accounts || []);
       setRepos(data.repos || []);
+      setDeviceFlowEnabled(Boolean(data.deviceFlowEnabled));
     } catch {
       setActionNote('Unable to refresh GitHub status right now.');
     } finally {
@@ -1379,6 +1511,82 @@ export function SettingsPage() {
       setActionBusy(null);
     }
   }, []);
+
+  const startDeviceFlow = useCallback(async () => {
+    setActionBusy('login_device');
+    setActionNote(null);
+    try {
+      const res = await fetch('/api/panel/github-device', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'start' }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Unable to start GitHub device login.');
+      }
+      setDeviceFlow({
+        flowId: data.flowId,
+        userCode: data.userCode,
+        verificationUri: data.verificationUri,
+        verificationUriComplete: data.verificationUriComplete,
+        expiresAt: data.expiresAt,
+        expiresInMinutes: data.expiresInMinutes,
+        nextPollInMs: data.nextPollInMs,
+        note: data.note,
+      });
+      setActionNote('GitHub device login started. Open GitHub, approve access, and this panel will finish the local sign-in.');
+    } catch (error) {
+      setActionNote(error instanceof Error ? error.message : 'Unable to start GitHub device login.');
+    } finally {
+      setActionBusy(null);
+    }
+  }, []);
+
+  const pollDeviceFlow = useCallback(async (flowId: string) => {
+    try {
+      const res = await fetch('/api/panel/github-device', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'poll', flowId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'GitHub device login failed.');
+      }
+
+      if (data.status === 'pending') {
+        setDeviceFlow((current) => current?.flowId === flowId ? {
+          ...current,
+          expiresAt: data.expiresAt ?? current.expiresAt,
+          expiresInMinutes: data.expiresInMinutes ?? current.expiresInMinutes,
+          nextPollInMs: data.nextPollInMs ?? current.nextPollInMs,
+          note: data.note ?? current.note,
+          verificationUri: data.verificationUri ?? current.verificationUri,
+          verificationUriComplete: data.verificationUriComplete ?? current.verificationUriComplete,
+        } : current);
+        return;
+      }
+
+      setDeviceFlow(null);
+      setActionNote(data.note || 'GitHub device login finished.');
+
+      if (data.status === 'complete') {
+        await loadGitHubStatus(true);
+      }
+    } catch (error) {
+      setDeviceFlow(null);
+      setActionNote(error instanceof Error ? error.message : 'GitHub device login failed.');
+    }
+  }, [loadGitHubStatus]);
+
+  useEffect(() => {
+    if (!deviceFlow?.flowId) return;
+    const timeout = window.setTimeout(() => {
+      void pollDeviceFlow(deviceFlow.flowId);
+    }, Math.max(1000, deviceFlow.nextPollInMs));
+    return () => window.clearTimeout(timeout);
+  }, [deviceFlow, pollDeviceFlow]);
 
   return (
     <div style={{
@@ -1427,6 +1635,9 @@ export function SettingsPage() {
             onSwitchAccount={(user) => { void runGitHubAction('switch', { user }); }}
             onDisconnect={(user) => { void runGitHubAction('logout', { user }); }}
             onLoginWithToken={(token) => { void runGitHubAction('login_token', { token }); }}
+            deviceFlowEnabled={deviceFlowEnabled}
+            deviceFlow={deviceFlow}
+            onStartDeviceFlow={() => { void startDeviceFlow(); }}
           />
         )}
         {activeTab === 'agents' && (

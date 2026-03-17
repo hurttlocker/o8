@@ -86,6 +86,12 @@ The right model is:
 
 ## Local preview
 
+Optional `.env.local` values:
+- `GEMINI_API_KEY` — enables Gemini-backed features
+- `GITHUB_OAUTH_CLIENT_ID` — enables in-app GitHub device login in Settings
+- `GITHUB_OAUTH_SCOPES` — optional override for requested GitHub OAuth scopes
+- `WS_TOKEN` — required for authenticated worktree/WebSocket routes when used
+
 ```bash
 cd /Users/marquisehurtt/clawd/repos/cortex-ide
 npm install
