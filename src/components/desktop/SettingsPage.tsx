@@ -26,7 +26,7 @@ interface GitHubRepo {
   updatedAt: string;
 }
 
-type SettingsTab = 'github' | 'agents' | 'appearance' | 'about';
+type SettingsTab = 'connectors' | 'agents' | 'appearance' | 'about';
 
 // ── SVG Icons ──
 
@@ -95,6 +95,17 @@ function InfoIcon() {
       <circle cx="12" cy="12" r="10"/>
       <line x1="12" y1="16" x2="12" y2="12"/>
       <line x1="12" y1="8" x2="12.01" y2="8"/>
+    </svg>
+  );
+}
+
+function PlugIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 22v-5"/>
+      <path d="M9 8V2"/>
+      <path d="M15 8V2"/>
+      <path d="M18 8v5a6 6 0 0 1-6 6v0a6 6 0 0 1-6-6V8z"/>
     </svg>
   );
 }
@@ -892,7 +903,7 @@ function AgentsTab() {
 // ── Main Settings Page ──
 
 export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('github');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('connectors');
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<GitHubAccount[]>([]);
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
@@ -947,7 +958,7 @@ export function SettingsPage() {
         }}>
           Settings
         </div>
-        <TabButton label="GitHub" icon={<GitHubIcon size={16} />} active={activeTab === 'github'} onClick={() => setActiveTab('github')} />
+        <TabButton label="Connectors" icon={<PlugIcon />} active={activeTab === 'connectors'} onClick={() => setActiveTab('connectors')} />
         <TabButton label="Agents" icon={<UsersIcon />} active={activeTab === 'agents'} onClick={() => setActiveTab('agents')} />
         <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
         <TabButton label="About" icon={<InfoIcon />} active={activeTab === 'about'} onClick={() => setActiveTab('about')} />
@@ -955,7 +966,7 @@ export function SettingsPage() {
 
       {/* Right content — full width */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        {activeTab === 'github' && (
+        {activeTab === 'connectors' && (
           <GitHubTab accounts={accounts} repos={repos} loading={loading} />
         )}
         {activeTab === 'agents' && (
