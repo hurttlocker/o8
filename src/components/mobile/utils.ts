@@ -216,6 +216,7 @@ export function sessionStatusSummary(
 export function threadLaneLabel(session: SessionSummary) {
   if (session.isCurrentSession) return 'Mister';
   if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') return 'Codex';
+  if (session.runtime === 'claude-code') return 'Claude Code';
   return session.runtime === 'openclaw' ? 'OpenClaw' : 'Session';
 }
 
@@ -757,7 +758,7 @@ export function projectSummary(sessions: SessionSummary[]): string {
   const runtimeCounts = new Map<string, number>();
   let runningCount = 0;
   for (const session of sessions) {
-    const label = session.runtime === 'codex' ? 'Codex' : 'OpenClaw';
+    const label = session.runtime === 'codex' ? 'Codex' : session.runtime === 'claude-code' ? 'Claude Code' : 'OpenClaw';
     runtimeCounts.set(label, (runtimeCounts.get(label) ?? 0) + 1);
     if (session.status === 'running' || session.status === 'reviewing') {
       runningCount += 1;
