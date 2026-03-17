@@ -22,12 +22,23 @@ export interface DesktopWsCallbacks {
   onInboxUpdate?: (inbox: Record<string, unknown>) => void;
   onHistoryUpdate?: (sessionKey: string, entries: Array<Record<string, unknown>>) => void;
   onReviewUpdate?: (data: Record<string, unknown>) => void;
+  // Terminal channel
+  onTerminalCreated?: (sessionName: string) => void;
+  onTerminalData?: (sessionName: string, data: string) => void;
+  onTerminalAttached?: (sessionName: string) => void;
+  onTerminalExited?: (sessionName: string, exitCode: number) => void;
+  onTerminalError?: (sessionName: string, error: string) => void;
 }
 
 interface UseDesktopWebSocketResult {
   connectionState: WsConnectionState;
   isConnected: boolean;
   switchSession: (sessionKey: string) => void;
+  sendTerminalCreate: (cols: number, rows: number) => void;
+  sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalInput: (sessionName: string, data: string) => void;
+  sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalDetach: (sessionName: string) => void;
 }
 
 const MAX_BACKOFF = 30_000;
@@ -79,6 +90,37 @@ export function useDesktopWebSocket(
     sessionKeyRef.current = key;
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'switch-session', sessionKey: key }));
+    }
+  }, []);
+
+  // Terminal commands
+  const sendTerminalCreate = useCallback((cols: number, rows: number) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'terminal-create', cols, rows }));
+    }
+  }, []);
+
+  const sendTerminalAttach = useCallback((sessionName: string, cols: number, rows: number) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'terminal-attach', sessionName, cols, rows }));
+    }
+  }, []);
+
+  const sendTerminalInput = useCallback((sessionName: string, data: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'terminal-input', sessionName, data }));
+    }
+  }, []);
+
+  const sendTerminalResize = useCallback((sessionName: string, cols: number, rows: number) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'terminal-resize', sessionName, cols, rows }));
+    }
+  }, []);
+
+  const sendTerminalDetach = useCallback((sessionName: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'terminal-detach', sessionName }));
     }
   }, []);
 
@@ -136,6 +178,20 @@ export function useDesktopWebSocket(
           }
           break;
 
+        case 'terminal':
+          if (eventType === 'created' && data) {
+            cbRef.current.onTerminalCreated?.(data.sessionName as string);
+          } else if (eventType === 'data' && data) {
+            cbRef.current.onTerminalData?.(data.sessionName as string, data.data as string);
+          } else if (eventType === 'attached' && data) {
+            cbRef.current.onTerminalAttached?.(data.sessionName as string);
+          } else if (eventType === 'exited' && data) {
+            cbRef.current.onTerminalExited?.(data.sessionName as string, (data.exitCode as number) ?? 0);
+          } else if (eventType === 'error' && data) {
+            cbRef.current.onTerminalError?.(data.sessionName as string, (data.error as string) ?? 'Unknown error');
+          }
+          break;
+
         case 'pong':
           break;
       }
@@ -189,5 +245,14 @@ export function useDesktopWebSocket(
     };
   }, []);
 
-  return { connectionState, isConnected: connectionState === 'connected', switchSession };
+  return {
+    connectionState,
+    isConnected: connectionState === 'connected',
+    switchSession,
+    sendTerminalCreate,
+    sendTerminalAttach,
+    sendTerminalInput,
+    sendTerminalResize,
+    sendTerminalDetach,
+  };
 }

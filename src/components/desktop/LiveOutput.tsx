@@ -1,7 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { X, ChevronDown, FileCode, FilePlus, PenLine, Eye } from 'lucide-react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { X, ChevronDown, FileCode, FilePlus, PenLine, Eye, Terminal } from 'lucide-react';
+
+/* ── Terminal Handle (ref-based API for parent → terminal communication) ── */
+export interface TerminalHandle {
+  writeToTerminal: (data: string) => void;
+  setTermError: (error: string) => void;
+  setTermExited: (exited: boolean) => void;
+}
 
 /* ── Types ── */
 interface DiffEntry {
@@ -16,11 +23,21 @@ interface DiffEntry {
 }
 
 interface LiveOutputProps {
-  agentName: string;
-  agentRuntime: string;
-  sessionKey: string;
-  onClose: () => void;
+  agentName?: string;
+  agentRuntime?: string;
+  sessionKey?: string;
+  onClose?: () => void;
   onCollapseChange?: (collapsed: boolean) => void;
+  tmuxSession?: string;
+  sendTerminalAttach?: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalInput?: (sessionName: string, data: string) => void;
+  sendTerminalResize?: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalDetach?: (sessionName: string) => void;
+  onTerminalData?: (sessionName: string, data: string) => void;
+  onTerminalAttached?: (sessionName: string) => void;
+  onTerminalExited?: (sessionName: string, exitCode: number) => void;
+  onTerminalError?: (sessionName: string, error: string) => void;
+  terminalRef?: React.Ref<TerminalHandle>;
 }
 
 /* ── Diff line computation ── */
@@ -28,10 +45,6 @@ function computeDiffLines(oldText: string, newText: string): { type: 'same' | 'a
   const oldLines = oldText.split('\n');
   const newLines = newText.split('\n');
   const result: { type: 'same' | 'add' | 'del'; text: string }[] = [];
-
-  // Simple diff: show removed lines first, then added lines
-  // For matching lines, show as 'same'
-  const maxLen = Math.max(oldLines.length, newLines.length);
 
   // Find common prefix
   let prefixLen = 0;
@@ -141,7 +154,7 @@ function DiffCard({ diff, isLatest }: { diff: DiffEntry; isLatest: boolean }) {
             fontFamily: 'ui-monospace, "SF Mono", Monaco, monospace',
           }}>
             {additions > 0 && <span style={{ color: '#34d399' }}>+{additions}</span>}
-            {deletions > 0 && <span style={{ color: '#93c5fd' }}>−{deletions}</span>}
+            {deletions > 0 && <span style={{ color: '#93c5fd' }}>-{deletions}</span>}
           </span>
         )}
         {isWrite && <span style={{ fontSize: 10, color: 'rgba(52, 211, 153, 0.6)', fontWeight: 500 }}>new</span>}
@@ -217,7 +230,7 @@ function DiffCard({ diff, isLatest }: { diff: DiffEntry; isLatest: boolean }) {
                     userSelect: 'none',
                     marginRight: 4,
                   }}>
-                    {line.type === 'add' ? '+' : '−'}
+                    {line.type === 'add' ? '+' : '-'}
                   </span>
                   {line.text}
                 </div>
@@ -316,7 +329,7 @@ function FileSummaryBar({ diffs }: { diffs: DiffEntry[] }) {
           <FileCode size={10} color="rgba(147, 197, 253, 0.5)" />
           {name}
           {stats.adds > 0 && <span style={{ color: '#34d399', fontWeight: 600 }}>+{stats.adds}</span>}
-          {stats.dels > 0 && <span style={{ color: '#93c5fd', fontWeight: 600 }}>−{stats.dels}</span>}
+          {stats.dels > 0 && <span style={{ color: '#93c5fd', fontWeight: 600 }}>-{stats.dels}</span>}
           {stats.tool === 'Write' && <span style={{ color: 'rgba(52, 211, 153, 0.5)' }}>new</span>}
         </span>
       ))}
@@ -324,28 +337,262 @@ function FileSummaryBar({ diffs }: { diffs: DiffEntry[] }) {
   );
 }
 
+/* ── Inline Terminal (xterm.js) ── */
+interface InlineTerminalProps {
+  tmuxSession: string;
+  sendTerminalAttach?: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalInput?: (sessionName: string, data: string) => void;
+  sendTerminalResize?: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalDetach?: (sessionName: string) => void;
+  onTerminalData?: (sessionName: string, data: string) => void;
+  onTerminalAttached?: (sessionName: string) => void;
+  onTerminalExited?: (sessionName: string, exitCode: number) => void;
+  onTerminalError?: (sessionName: string, error: string) => void;
+}
+
+const InlineTerminal = forwardRef<TerminalHandle, InlineTerminalProps>(function InlineTerminal({
+  tmuxSession,
+  sendTerminalAttach,
+  sendTerminalInput,
+  sendTerminalResize,
+  sendTerminalDetach,
+  onTerminalData,
+  onTerminalAttached,
+  onTerminalExited,
+  onTerminalError,
+}, ref) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const termRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fitAddonRef = useRef<any>(null);
+  const attachedRef = useRef(false);
+  const [termError, setTermError] = useState<string | null>(null);
+  const [termExited, setTermExited] = useState(false);
+
+  // Stable refs for callbacks
+  const onTerminalDataRef = useRef(onTerminalData);
+  const onTerminalAttachedRef = useRef(onTerminalAttached);
+  const onTerminalExitedRef = useRef(onTerminalExited);
+  const onTerminalErrorRef = useRef(onTerminalError);
+  useEffect(() => { onTerminalDataRef.current = onTerminalData; }, [onTerminalData]);
+  useEffect(() => { onTerminalAttachedRef.current = onTerminalAttached; }, [onTerminalAttached]);
+  useEffect(() => { onTerminalExitedRef.current = onTerminalExited; }, [onTerminalExited]);
+  useEffect(() => { onTerminalErrorRef.current = onTerminalError; }, [onTerminalError]);
+
+  // Initialize xterm.js
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    let disposed = false;
+
+    async function init() {
+      try {
+        // Dynamic import to avoid SSR issues
+        const [{ Terminal }, { FitAddon }] = await Promise.all([
+          import('@xterm/xterm'),
+          import('@xterm/addon-fit'),
+        ]);
+
+        if (disposed) return;
+
+        // Inject xterm CSS if not already present
+        if (!document.getElementById('xterm-css')) {
+          const link = document.createElement('link');
+          link.id = 'xterm-css';
+          link.rel = 'stylesheet';
+          link.href = '/xterm.css';
+          document.head.appendChild(link);
+        }
+
+        const term = new Terminal({
+          fontFamily: 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
+          fontSize: 12,
+          lineHeight: 1.3,
+          cursorBlink: true,
+          allowTransparency: true,
+          scrollback: 5000,
+          theme: {
+            background: 'transparent',
+            foreground: '#e2e8f0',
+            cursor: '#93c5fd',
+            cursorAccent: '#0a0c12',
+            selectionBackground: 'rgba(147, 197, 253, 0.25)',
+            selectionForeground: '#e2e8f0',
+            black: '#1e293b',
+            red: '#ef4444',
+            green: '#34d399',
+            yellow: '#f59e0b',
+            blue: '#93c5fd',
+            magenta: '#c084fc',
+            cyan: '#22d3ee',
+            white: '#e2e8f0',
+            brightBlack: '#475569',
+            brightRed: '#f87171',
+            brightGreen: '#6ee7b7',
+            brightYellow: '#fbbf24',
+            brightBlue: '#bfdbfe',
+            brightMagenta: '#d8b4fe',
+            brightCyan: '#67e8f9',
+            brightWhite: '#f8fafc',
+          },
+        });
+
+        const fitAddon = new FitAddon();
+        term.loadAddon(fitAddon);
+
+        if (!containerRef.current || disposed) {
+          term.dispose();
+          return;
+        }
+
+        term.open(containerRef.current);
+        fitAddon.fit();
+
+        termRef.current = term;
+        fitAddonRef.current = fitAddon;
+
+        // Send attach request
+        const { cols, rows } = term;
+        sendTerminalAttach?.(tmuxSession, cols, rows);
+
+        // Wire input: xterm → WS → tmux
+        term.onData((data) => {
+          sendTerminalInput?.(tmuxSession, data);
+        });
+
+        // ResizeObserver for auto-fit
+        const observer = new ResizeObserver(() => {
+          if (disposed || !fitAddonRef.current) return;
+          try {
+            fitAddonRef.current.fit();
+            const { cols: c, rows: r } = termRef.current;
+            sendTerminalResize?.(tmuxSession, c, r);
+          } catch { /* ignore resize errors during transitions */ }
+        });
+        if (containerRef.current) observer.observe(containerRef.current);
+
+        return () => {
+          observer.disconnect();
+        };
+      } catch (err) {
+        if (!disposed) {
+          setTermError(err instanceof Error ? err.message : 'Failed to initialize terminal');
+        }
+      }
+    }
+
+    const cleanupPromise = init();
+
+    return () => {
+      disposed = true;
+      sendTerminalDetach?.(tmuxSession);
+      cleanupPromise?.then(cleanup => cleanup?.());
+      if (termRef.current) {
+        termRef.current.dispose();
+        termRef.current = null;
+      }
+      fitAddonRef.current = null;
+      attachedRef.current = false;
+    };
+  }, [tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach]);
+
+  // Expose a method for parent to write data (used via useImperativeHandle above)
+  const writeToTerminal = useCallback((data: string) => {
+    if (!termRef.current) return;
+    try {
+      // data is base64 encoded
+      const decoded = atob(data);
+      termRef.current.write(decoded);
+    } catch { /* ignore decode errors */ }
+  }, []);
+
+  // Expose terminal methods to parent via React ref (replaces DOM-coupling pattern)
+  useImperativeHandle(ref, () => ({
+    writeToTerminal,
+    setTermError: (error: string) => setTermError(error),
+    setTermExited: (exited: boolean) => setTermExited(exited),
+  }), [writeToTerminal]);
+
+  if (termError) {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+        padding: 16,
+        gap: 8,
+      }}>
+        <Terminal size={16} color="rgba(239, 68, 68, 0.5)" />
+        <span style={{
+          fontSize: 12,
+          color: 'rgba(239, 68, 68, 0.6)',
+          fontFamily: 'ui-monospace, "SF Mono", Monaco, monospace',
+        }}>
+          {termError}
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      style={{
+        flex: 1,
+        minHeight: 0,
+        padding: 4,
+        overflow: 'hidden',
+      }}
+    />
+  );
+});
+
 /* ── Main Component ── */
-export function LiveOutput({ agentName, agentRuntime, sessionKey, onClose, onCollapseChange }: LiveOutputProps) {
+export function LiveOutput({
+  agentName,
+  agentRuntime,
+  sessionKey,
+  onClose,
+  onCollapseChange,
+  tmuxSession,
+  sendTerminalAttach,
+  sendTerminalInput,
+  sendTerminalResize,
+  sendTerminalDetach,
+  onTerminalData,
+  onTerminalAttached,
+  onTerminalExited,
+  onTerminalError,
+  terminalRef,
+}: LiveOutputProps) {
   const [diffs, setDiffs] = useState<DiffEntry[]>([]);
   const [collapsed, setCollapsed] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const prevCountRef = useRef(0);
+  const termContainerRef = useRef<HTMLDivElement>(null);
+
+  // Standalone terminal mode: tmuxSession provided but no agent session
+  const standaloneTerminal = !!tmuxSession && !sessionKey;
+
+  // Split ratio: percentage of space for diff cards (rest goes to terminal)
+  const [splitPct, setSplitPct] = useState(tmuxSession ? 35 : 100);
+  const splitDragging = useRef(false);
 
   const fetchDiffs = useCallback(async () => {
+    if (!sessionKey) return; // No diffs in standalone terminal mode
     try {
-      // Use diffs API for Claude Code, fall back to transcript for others
       const isClaudeCode = sessionKey.startsWith('claude-code:');
       const isCodex = sessionKey.startsWith('codex:');
 
-      // All three runtimes have diffs APIs
       let url: string;
       if (isClaudeCode) {
         url = '/api/claude-code/diffs?limit=30';
       } else if (isCodex) {
         url = '/api/codex/diffs?limit=30';
       } else {
-        // OpenClaw — use transcript and extract file references
         const histUrl = `/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=30`;
         const res = await fetch(histUrl);
         if (!res.ok) return;
@@ -374,7 +621,6 @@ export function LiveOutput({ agentName, agentRuntime, sessionKey, onClose, onCol
         return;
       }
 
-      // Claude Code and Codex both have dedicated diffs APIs
       const res = await fetch(url);
       if (!res.ok) return;
       const data = await res.json();
@@ -398,9 +644,40 @@ export function LiveOutput({ agentName, agentRuntime, sessionKey, onClose, onCol
     }
   }, [diffs]);
 
-  const runtimeLabel = agentRuntime === 'claude-code' ? 'Claude Code'
+  // Terminal data flow is now handled via React ref (terminalRef → InlineTerminal)
+  // Parent calls terminalRef.current.writeToTerminal() directly — no DOM coupling
+
+  // Handle drag for split resize
+  const startSplitDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    splitDragging.current = true;
+    const startY = e.clientY;
+    const startPct = splitPct;
+
+    const onMove = (ev: MouseEvent) => {
+      const parent = (e.target as HTMLElement).parentElement;
+      if (!parent) return;
+      const rect = parent.getBoundingClientRect();
+      const totalH = rect.height;
+      const deltaY = ev.clientY - startY;
+      const deltaPct = (deltaY / totalH) * 100;
+      setSplitPct(Math.min(Math.max(startPct + deltaPct, 10), 80));
+    };
+    const onUp = () => {
+      splitDragging.current = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [splitPct]);
+
+  const runtimeLabel = standaloneTerminal ? ''
+    : agentRuntime === 'claude-code' ? 'Claude Code'
     : agentRuntime === 'codex' ? 'Codex'
     : 'OpenClaw';
+
+  const headerName = standaloneTerminal ? 'Terminal' : (agentName ?? 'Agent');
 
   const totalAdds = diffs.reduce((sum, d) => {
     if (!d.oldText || !d.newText) return sum;
@@ -410,6 +687,8 @@ export function LiveOutput({ agentName, agentRuntime, sessionKey, onClose, onCol
     if (!d.oldText || !d.newText) return sum;
     return sum + computeDiffLines(d.oldText, d.newText).filter(l => l.type === 'del').length;
   }, 0);
+
+  const hasTerminal = !!tmuxSession;
 
   return (
     <div style={{
@@ -449,14 +728,37 @@ export function LiveOutput({ agentName, agentRuntime, sessionKey, onClose, onCol
           color: 'rgba(226, 232, 240, 0.85)',
           letterSpacing: '-0.01em',
         }}>
-          {agentName}
+          {headerName}
         </span>
-        <span style={{
+        {runtimeLabel && <span style={{
           fontSize: 10,
           color: 'rgba(148, 163, 184, 0.4)',
         }}>
           {runtimeLabel}
-        </span>
+        </span>}
+
+        {/* Terminal indicator */}
+        {hasTerminal && (
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 3,
+            paddingTop: 1,
+            paddingRight: 6,
+            paddingBottom: 1,
+            paddingLeft: 5,
+            borderRadius: 4,
+            background: 'rgba(147, 197, 253, 0.08)',
+            border: '1px solid rgba(147, 197, 253, 0.1)',
+            fontSize: 9,
+            fontWeight: 500,
+            color: 'rgba(147, 197, 253, 0.6)',
+            fontFamily: 'ui-monospace, "SF Mono", Monaco, monospace',
+          }}>
+            <Terminal size={9} />
+            tmux
+          </span>
+        )}
 
         {/* Total stats */}
         {(totalAdds > 0 || totalDels > 0) && (
@@ -468,7 +770,7 @@ export function LiveOutput({ agentName, agentRuntime, sessionKey, onClose, onCol
             gap: 4,
           }}>
             {totalAdds > 0 && <span style={{ color: 'rgba(52, 211, 153, 0.7)' }}>+{totalAdds}</span>}
-            {totalDels > 0 && <span style={{ color: 'rgba(147, 197, 253, 0.5)' }}>−{totalDels}</span>}
+            {totalDels > 0 && <span style={{ color: 'rgba(147, 197, 253, 0.5)' }}>-{totalDels}</span>}
           </span>
         )}
 
@@ -480,7 +782,7 @@ export function LiveOutput({ agentName, agentRuntime, sessionKey, onClose, onCol
         >
           <ChevronDown size={13} style={{ transition: 'transform 200ms', transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
         </button>
-        <button
+        {onClose && <button
           type="button"
           onClick={onClose}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, display: 'flex', color: 'rgba(148, 163, 184, 0.3)' }}
@@ -488,46 +790,109 @@ export function LiveOutput({ agentName, agentRuntime, sessionKey, onClose, onCol
           onMouseLeave={(e) => { (e.target as HTMLElement).style.color = 'rgba(148, 163, 184, 0.3)'; }}
         >
           <X size={13} />
-        </button>
+        </button>}
       </div>
 
       {/* File summary bar */}
-      {!collapsed && diffs.length > 0 && <FileSummaryBar diffs={diffs} />}
+      {!collapsed && !standaloneTerminal && diffs.length > 0 && <FileSummaryBar diffs={diffs} />}
 
-      {/* Diff cards */}
+      {/* Content area: diff cards + terminal split */}
       {!collapsed && (
-        <div
-          ref={scrollRef}
-          style={{
-            flex: 1,
-            overflow: 'auto',
-            paddingTop: 6,
-            paddingRight: 10,
-            paddingBottom: 10,
-            paddingLeft: 10,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 6,
-          }}
-        >
-          {diffs.length === 0 ? (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flex: 1,
-              gap: 8,
-            }}>
-              <FileCode size={24} color="rgba(148, 163, 184, 0.12)" />
-              <span style={{ fontSize: 12, color: 'rgba(148, 163, 184, 0.25)', fontStyle: 'italic' }}>
-                Watching for changes…
-              </span>
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          minHeight: 0,
+        }}>
+          {/* Diff cards section (hidden in standalone terminal mode) */}
+          {!standaloneTerminal && (
+            <div
+              ref={scrollRef}
+              style={{
+                flex: hasTerminal ? `0 0 ${splitPct}%` : 1,
+                overflow: 'auto',
+                paddingTop: 6,
+                paddingRight: 10,
+                paddingBottom: hasTerminal ? 2 : 10,
+                paddingLeft: 10,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+              }}
+            >
+              {diffs.length === 0 && !hasTerminal ? (
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flex: 1,
+                  gap: 8,
+                }}>
+                  <FileCode size={24} color="rgba(148, 163, 184, 0.12)" />
+                  <span style={{ fontSize: 12, color: 'rgba(148, 163, 184, 0.25)', fontStyle: 'italic' }}>
+                    Watching for changes...
+                  </span>
+                </div>
+              ) : (
+                diffs.map((diff, i) => (
+                  <DiffCard key={diff.id} diff={diff} isLatest={i === diffs.length - 1} />
+                ))
+              )}
             </div>
-          ) : (
-            diffs.map((diff, i) => (
-              <DiffCard key={diff.id} diff={diff} isLatest={i === diffs.length - 1} />
-            ))
+          )}
+
+          {/* Drag handle between cards and terminal (only when both visible) */}
+          {hasTerminal && !standaloneTerminal && (
+            <div
+              onMouseDown={startSplitDrag}
+              style={{
+                height: 5,
+                cursor: 'row-resize',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                background: 'rgba(147, 197, 253, 0.03)',
+              }}
+            >
+              <div style={{
+                width: 32,
+                height: 2,
+                borderRadius: 1,
+                backgroundColor: 'rgba(147, 197, 253, 0.15)',
+                transition: 'background-color 150ms',
+              }} />
+            </div>
+          )}
+
+          {/* Terminal section */}
+          {hasTerminal && (
+            <div
+              ref={termContainerRef}
+              style={{
+                flex: 1,
+                minHeight: 150,
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+                borderTop: standaloneTerminal ? 'none' : '1px solid rgba(147, 197, 253, 0.05)',
+              }}
+            >
+              <InlineTerminal
+                ref={terminalRef}
+                tmuxSession={tmuxSession!}
+                sendTerminalAttach={sendTerminalAttach}
+                sendTerminalInput={sendTerminalInput}
+                sendTerminalResize={sendTerminalResize}
+                sendTerminalDetach={sendTerminalDetach}
+                onTerminalData={onTerminalData}
+                onTerminalAttached={onTerminalAttached}
+                onTerminalExited={onTerminalExited}
+                onTerminalError={onTerminalError}
+              />
+            </div>
           )}
         </div>
       )}
