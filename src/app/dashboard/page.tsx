@@ -80,11 +80,14 @@ function DashboardInner() {
     sendTerminalDetach,
   } = useDesktopWebSocket(undefined, terminalWsCallbacks);
 
-  // Auto-create terminal on WS connect
+  // Auto-create terminal on WS connect, reset on disconnect
   useEffect(() => {
     if (termWsConnected && !termCreatedRef.current) {
       termCreatedRef.current = true;
       sendTerminalCreate(120, 30);
+    }
+    if (!termWsConnected) {
+      termCreatedRef.current = false;
     }
   }, [termWsConnected, sendTerminalCreate]);
 
@@ -585,47 +588,16 @@ function DashboardInner() {
           </div>
         )}
 
-        {/* Bottom — Live Output (if active) + Canvas (tabs + contextual content) */}
-        {canvasTabs.length > 0 && bottomPanelVisible && (
-          <div style={{ flex: `0 0 ${canvasHeight}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            {/* Always-on terminal */}
-            {dashTermSession && (
-              <div style={{
-                flexShrink: 0,
-                maxHeight: liveOutputCollapsed ? 'none' : '50%',
-                overflow: 'hidden',
-                display: 'flex',
-                flexDirection: 'column',
-              }}>
-                <LiveOutput
-                  onCollapseChange={setLiveOutputCollapsed}
-                  tmuxSession={dashTermSession}
-                  sendTerminalAttach={sendTerminalAttach}
-                  sendTerminalInput={sendTerminalInput}
-                  sendTerminalResize={sendTerminalResize}
-                  sendTerminalDetach={sendTerminalDetach}
-                  terminalRef={terminalRef}
-                />
-              </div>
-            )}
-            <Canvas
-              tabs={canvasTabs}
-              activeTabId={activeCanvasTabId}
-              onSelectTab={setActiveCanvasTabId}
-              onCloseTab={closeCanvasTab}
-              onSelectCommit={handleSelectCommit}
-            />
-          </div>
-        )}
-
-        {/* Always-on terminal when no canvas tabs open */}
-        {(!canvasTabs.length || !bottomPanelVisible) && dashTermSession && !showMemoryView && (activeNavSection as string) !== 'intent' && (activeNavSection as string) !== 'settings' && (activeNavSection as string) !== 'analytics' && (
+        {/* Terminal — always visible when dashTermSession is set */}
+        {dashTermSession && (
           <div style={{
-            flex: liveOutputCollapsed ? 'none' : `0 0 ${canvasHeight}%`,
-            marginTop: liveOutputCollapsed ? 'auto' : undefined,
+            flexShrink: 0,
+            minHeight: liveOutputCollapsed ? 0 : 180,
+            maxHeight: liveOutputCollapsed ? 0 : '40%',
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
+            transition: 'max-height 200ms ease, min-height 200ms ease',
           }}>
             <LiveOutput
               onCollapseChange={setLiveOutputCollapsed}
@@ -635,6 +607,19 @@ function DashboardInner() {
               sendTerminalResize={sendTerminalResize}
               sendTerminalDetach={sendTerminalDetach}
               terminalRef={terminalRef}
+            />
+          </div>
+        )}
+
+        {/* Bottom — Canvas (tabs + contextual content) */}
+        {canvasTabs.length > 0 && bottomPanelVisible && (
+          <div style={{ flex: `0 0 ${canvasHeight}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <Canvas
+              tabs={canvasTabs}
+              activeTabId={activeCanvasTabId}
+              onSelectTab={setActiveCanvasTabId}
+              onCloseTab={closeCanvasTab}
+              onSelectCommit={handleSelectCommit}
             />
           </div>
         )}
