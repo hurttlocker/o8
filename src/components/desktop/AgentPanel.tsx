@@ -437,10 +437,15 @@ const AgentCard = memo(function AgentCard({
               }}
               style={{
                 padding: '12px', borderRadius: 12,
-                background: 'var(--t-panel)',
-                border: '1px solid var(--t-panel-border)',
+                background: agent.status === 'running'
+                  ? 'linear-gradient(135deg, var(--t-panel) 0%, rgba(147, 197, 253, 0.03) 100%)'
+                  : 'var(--t-panel)',
+                border: agent.status === 'running'
+                  ? '1px solid rgba(147, 197, 253, 0.12)'
+                  : '1px solid var(--t-panel-border)',
                 cursor: agent.sessionKey ? 'pointer' : 'default',
                 transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
+                animation: agent.status === 'running' ? 'agentCardPulse 3s ease-in-out infinite' : 'none',
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.border = '1px solid rgba(37,99,235,0.12)';
@@ -1957,6 +1962,12 @@ export const AgentPanel = memo(function AgentPanel({
       {selectedIssue !== null ? (
         <IssueModal issueNumber={selectedIssue} onClose={() => setSelectedIssue(null)} />
       ) : null}
+      <style>{`
+        @keyframes agentCardPulse {
+          0%, 100% { border-color: rgba(147, 197, 253, 0.12); }
+          50% { border-color: rgba(147, 197, 253, 0.06); }
+        }
+      `}</style>
     </div>
   );
 });
