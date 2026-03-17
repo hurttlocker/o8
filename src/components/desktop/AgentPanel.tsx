@@ -200,7 +200,15 @@ function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
   const groups: WorkspaceGroup[] = [];
   for (const [workspace, wsAgents] of groupMap) {
     const repo = deriveRepo(workspace, wsAgents);
-    const displayName = repo === 'openclaw' ? 'OpenClaw' : repo;
+    const repoDisplayNames: Record<string, string> = {
+      'openclaw': 'OpenClaw',
+      'cortex-ide': 'Cortex IDE',
+      'cortex': 'Cortex',
+      'parasite-network': 'Parasite Network',
+      'spear-production': 'Spear',
+      'mybeautifulwife': 'Eyes Web',
+    };
+    const displayName = repoDisplayNames[repo] || repo;
 
     const hasRunning = wsAgents.some(a => a.status === 'running' || a.status === 'watching' || a.status === 'healthy');
     const bestContextPct = Math.max(0, ...wsAgents.map(a => a.context?.usedPercent ?? 0));
@@ -376,7 +384,18 @@ const AgentCard = memo(function AgentCard({
           const agentDot = isRunning ? '#22c55e' : '#9ca3af';
           const agentCtx = agent.context?.usedPercent ?? 0;
           const agentName = agent.name.replace(/\s*\(.*\)/, '').split(' ')[0];
-          const fullName = agent.surfaceLabel || agent.name;
+          // For OpenClaw agents: use session name to differentiate (Mister, Niot, Hawk, etc.)
+          // For repo agents: show runtime/editor name (Codex, Claude Code)
+          const isOpenClawGroup = group.repo === 'openclaw';
+          const nameLower = (agent.name || '').toLowerCase();
+          const modelLower = (agent.model || '').toLowerCase();
+          const isCodex = nameLower.includes('codex') || modelLower.includes('codex');
+          const isClaudeCode = nameLower.includes('claude code') || nameLower.includes('claude-code');
+          const fullName = isOpenClawGroup
+            ? (agent.surfaceLabel || agent.name)
+            : isCodex ? 'Codex'
+            : isClaudeCode ? 'Claude Code'
+            : (agent.surfaceLabel || agent.name);
           const branch = agent.currentTask || null;
           const progress = agentCtx > 0 ? agentCtx / 100 : 0;
           const model = agent.model ? agent.model.replace('claude-', '').replace(/-\d+$/, '').replace('openai-codex/', '').replace('anthropic/', '') : '';
