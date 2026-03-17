@@ -530,7 +530,7 @@ function DashboardInner() {
         {/* Vertical drag handle between workspace and canvas */}
         {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && (<>
 
-        {((canvasTabs.length > 0 && bottomPanelVisible) || liveOutputAgent) && (
+        {((canvasTabs.length > 0 && bottomPanelVisible) || (liveOutputAgent && !liveOutputCollapsed)) && (
           <div
             onMouseDown={startCanvasDrag}
             style={{
@@ -585,10 +585,11 @@ function DashboardInner() {
           </div>
         )}
 
-        {/* Live output even when no canvas tabs open — uses canvasHeight for drag resize */}
+        {/* Live output even when no canvas tabs open */}
         {(!canvasTabs.length || !bottomPanelVisible) && liveOutputAgent && !showMemoryView && (activeNavSection as string) !== 'intent' && (activeNavSection as string) !== 'settings' && (
           <div style={{
-            flex: `0 0 ${canvasHeight}%`,
+            flex: liveOutputCollapsed ? 'none' : `0 0 ${canvasHeight}%`,
+            marginTop: liveOutputCollapsed ? 'auto' : undefined,
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
