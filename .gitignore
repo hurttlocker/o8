@@ -14,3 +14,4 @@ coverage/
 src-tauri/target/
 mockups/
 mockups/
+chocolate-*.png

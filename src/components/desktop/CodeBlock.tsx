@@ -39,28 +39,28 @@ const MERMAID_THEME = {
   theme: 'base' as const,
   themeVariables: {
     // Primary: frost glass white with red accent borders
-    primaryColor: '#ffffff',
-    primaryTextColor: '#1e293b',
-    primaryBorderColor: '#e2e8f0',
+    primaryColor: 'var(--t-panel)',
+    primaryTextColor: 'var(--t-text)',
+    primaryBorderColor: 'var(--t-panel-border)',
     // Secondary: super light blue frost
     secondaryColor: '#f0f7ff',
-    secondaryTextColor: '#334155',
-    secondaryBorderColor: '#cbd5e1',
+    secondaryTextColor: 'var(--t-text)',
+    secondaryBorderColor: 'var(--t-text-faint)',
     // Tertiary: bright red (Cortex accent)
     tertiaryColor: '#fef2f2',
     tertiaryTextColor: '#991b1b',
     tertiaryBorderColor: '#ef4444',
     // Lines and text
-    lineColor: '#94a3b8',
-    textColor: '#1e293b',
+    lineColor: 'var(--t-text-muted)',
+    textColor: 'var(--t-text)',
     // Node defaults
-    mainBkg: '#ffffff',
-    nodeBorder: '#e2e8f0',
-    clusterBkg: '#f8fafc',
-    clusterBorder: '#e2e8f0',
-    titleColor: '#0f172a',
-    edgeLabelBackground: '#ffffff',
-    nodeTextColor: '#1e293b',
+    mainBkg: 'var(--t-panel)',
+    nodeBorder: 'var(--t-panel-border)',
+    clusterBkg: 'var(--t-bg-subtle)',
+    clusterBorder: 'var(--t-panel-border)',
+    titleColor: 'var(--t-text-strong)',
+    edgeLabelBackground: 'var(--t-panel)',
+    nodeTextColor: 'var(--t-text)',
     // Decision nodes (diamonds)
     cScale0: '#ef4444',
     // Typography
@@ -156,8 +156,8 @@ function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => vo
           paddingRight: 16,
           paddingBottom: 14,
           paddingLeft: 20,
-          borderBottom: '1px solid rgba(0,0,0,0.06)',
-          background: 'rgba(255,255,255,0.2)',
+          borderBottom: '1px solid var(--t-divider)',
+          background: 'var(--t-hover)',
         }}>
           <span style={{
             fontSize: 13,
@@ -184,7 +184,7 @@ function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => vo
             <span style={{
               fontSize: 12,
               fontWeight: 600,
-              color: '#64748b',
+              color: 'var(--t-text-secondary)',
               minWidth: 40,
               textAlign: 'center',
               fontFamily: 'SF Mono, ui-monospace, monospace',
@@ -210,7 +210,7 @@ function MermaidModal({ svgHtml, onClose }: { svgHtml: string; onClose: () => vo
               Fit
             </button>
 
-            <div style={{ width: 1, height: 20, background: 'rgba(0,0,0,0.08)', marginLeft: 8, marginRight: 8 }} />
+            <div style={{ width: 1, height: 20, background: 'var(--t-divider)', marginLeft: 8, marginRight: 8 }} />
 
             <button
               type="button"
@@ -262,9 +262,9 @@ const modalBtnStyle: React.CSSProperties = {
   width: 30,
   height: 30,
   borderRadius: 8,
-  border: '1px solid rgba(0,0,0,0.08)',
-  background: 'rgba(255,255,255,0.7)',
-  color: '#475569',
+  border: '1px solid var(--t-divider)',
+  background: 'var(--t-panel-translucent)',
+  color: 'var(--t-text-secondary)',
   cursor: 'pointer',
   fontSize: 13,
   fontWeight: 600,
@@ -340,8 +340,8 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
         justifyContent: 'center',
         alignItems: 'center',
         minHeight: svgHtml ? undefined : 60,
-        backgroundColor: '#fafbfd',
-        borderTop: '1px solid #e5e7eb',
+        backgroundColor: 'var(--t-bg-subtle)',
+        borderTop: '1px solid var(--t-divider)',
         backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,0.8) 0%, rgba(240,247,255,0.4) 100%)',
       }}
     >
@@ -366,13 +366,13 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
               width: 28,
               height: 28,
               borderRadius: 8,
-              border: '1px solid rgba(0,0,0,0.08)',
-              background: 'rgba(255,255,255,0.85)',
+              border: '1px solid var(--t-divider)',
+              background: 'var(--t-panel-translucent)',
               backdropFilter: 'blur(8px)',
-              color: '#64748b',
+              color: 'var(--t-text-secondary)',
               cursor: 'pointer',
               transition: 'all 150ms ease',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+              boxShadow: 'var(--t-panel-shadow)',
               paddingTop: 0,
               paddingRight: 0,
               paddingBottom: 0,
@@ -384,7 +384,7 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
           {modalOpen ? <MermaidModal svgHtml={svgHtml} onClose={() => setModalOpen(false)} /> : null}
         </>
       ) : (
-        <span style={{ fontSize: 12, color: '#9ca3af' }}>Rendering diagram…</span>
+        <span style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Rendering diagram…</span>
       )}
     </div>
   );
@@ -420,9 +420,9 @@ export const CodeBlock = memo(function CodeBlock({ code, language }: CodeBlockPr
       margin: '8px 0',
       borderRadius: 12,
       overflow: 'hidden',
-      backgroundColor: '#f8f9fa',
-      border: '1px solid #e5e7eb',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+      backgroundColor: 'var(--t-bg-subtle)',
+      border: '1px solid var(--t-divider)',
+      boxShadow: 'var(--t-panel-shadow)',
     }}>
       {/* Header bar */}
       <button
@@ -447,7 +447,7 @@ export const CodeBlock = memo(function CodeBlock({ code, language }: CodeBlockPr
         <span style={{
           fontSize: '0.75rem',
           fontWeight: 600,
-          color: isMermaid ? '#2563eb' : '#6b7280',
+          color: isMermaid ? '#2563eb' : 'var(--t-text-secondary)',
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
         }}>
@@ -457,7 +457,7 @@ export const CodeBlock = memo(function CodeBlock({ code, language }: CodeBlockPr
         {/* Line count */}
         <span style={{
           fontSize: '0.7rem',
-          color: '#9ca3af',
+          color: 'var(--t-text-muted)',
           marginRight: 'auto',
         }}>
           {lines.length} lines
@@ -474,7 +474,7 @@ export const CodeBlock = memo(function CodeBlock({ code, language }: CodeBlockPr
             alignItems: 'center',
             gap: 3,
             fontSize: '0.7rem',
-            color: copied ? '#22c55e' : '#9ca3af',
+            color: copied ? '#22c55e' : 'var(--t-text-muted)',
             cursor: 'pointer',
           }}
         >
@@ -487,7 +487,7 @@ export const CodeBlock = memo(function CodeBlock({ code, language }: CodeBlockPr
           size={13}
           strokeWidth={2}
           style={{
-            color: '#9ca3af',
+            color: 'var(--t-text-muted)',
             transition: 'transform 200ms ease',
             transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
           }}
@@ -507,12 +507,12 @@ export const CodeBlock = memo(function CodeBlock({ code, language }: CodeBlockPr
             paddingLeft: 14,
             fontSize: '0.82rem',
             lineHeight: 1.6,
-            color: '#1f2937',
+            color: 'var(--t-text)',
             fontFamily: '"SF Mono", "Menlo", "Monaco", "Cascadia Code", ui-monospace, monospace',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
-            borderTop: '1px solid #e5e7eb',
-            backgroundColor: '#ffffff',
+            borderTop: '1px solid var(--t-divider)',
+            backgroundColor: 'var(--t-panel)',
             maxHeight: 400,
             overflowY: 'auto',
           }}>

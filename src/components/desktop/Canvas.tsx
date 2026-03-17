@@ -81,8 +81,8 @@ export const Canvas = memo(function Canvas({
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      background: '#f8f9fc',
-      borderTop: '1px solid rgba(0,0,0,0.06)',
+      background: 'var(--t-bg-subtle)',
+      borderTop: '1px solid var(--t-divider)',
     }}>
       {/* Tab bar */}
       <div style={{
@@ -91,10 +91,10 @@ export const Canvas = memo(function Canvas({
         gap: 0,
         height: 36,
         flexShrink: 0,
-        background: 'rgba(255,255,255,0.72)',
+        background: 'var(--t-panel-translucent)',
         backdropFilter: 'blur(20px) saturate(1.6)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
+        borderBottom: '1px solid var(--t-divider)',
         paddingLeft: 8,
         paddingRight: 8,
         overflowX: 'auto',
@@ -116,10 +116,10 @@ export const Canvas = memo(function Canvas({
                 borderRadius: 8,
                 fontSize: 12,
                 fontWeight: isActive ? 600 : 400,
-                color: isActive ? '#1e293b' : '#64748b',
-                background: isActive ? 'rgba(255,255,255,0.9)' : 'transparent',
+                color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                background: isActive ? 'var(--t-panel)' : 'transparent',
                 boxShadow: isActive
-                  ? '0 1px 3px rgba(0,0,0,0.06), 0 0 0 0.5px rgba(0,0,0,0.04)'
+                  ? 'var(--t-panel-shadow)'
                   : 'none',
                 cursor: 'pointer',
                 transition: 'all 150ms ease',
@@ -150,17 +150,17 @@ export const Canvas = memo(function Canvas({
                   height: 16,
                   borderRadius: 4,
                   marginLeft: 2,
-                  color: '#94a3b8',
+                  color: 'var(--t-text-muted)',
                   cursor: 'pointer',
                   transition: 'all 100ms ease',
                 }}
                 onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.background = 'rgba(0,0,0,0.06)';
+                  (e.currentTarget as HTMLDivElement).style.background = 'var(--t-divider)';
                   (e.currentTarget as HTMLDivElement).style.color = '#ef4444';
                 }}
                 onMouseLeave={(e) => {
                   (e.currentTarget as HTMLDivElement).style.background = 'transparent';
-                  (e.currentTarget as HTMLDivElement).style.color = '#94a3b8';
+                  (e.currentTarget as HTMLDivElement).style.color = 'var(--t-text-muted)';
                 }}
               >
                 <X size={11} />
@@ -304,37 +304,37 @@ function TimelineExpanded() {
       height: '100%',
       overflow: 'auto',
       padding: 24,
-      background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
+      background: 'var(--t-bg-gradient)',
     }}>
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.02em', color: '#111827', margin: 0 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--t-text)', margin: 0 }}>
           SESSION REPLAY: {fmtDur(totalMin)} TOTAL
         </h2>
-        <p style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>
+        <p style={{ fontSize: 12, color: 'var(--t-text-muted)', marginTop: 4 }}>
           {fmtTime(0)} — {fmtTime(totalMin)} · Today
         </p>
       </div>
 
       {/* Scrubber bar */}
       <div style={{
-        background: '#fff',
+        background: 'var(--t-panel)',
         borderRadius: 14,
         padding: 20,
         marginBottom: 16,
-        border: '1px solid rgba(0,0,0,0.06)',
+        border: '1px solid var(--t-divider)',
       }}>
         {/* Progress bar */}
         <div style={{ height: 4, borderRadius: 2, background: '#e5e7eb', marginBottom: 16, position: 'relative' }}>
           <div style={{ height: '100%', borderRadius: 2, background: '#2563eb', width: '100%' }} />
           <div style={{
             position: 'absolute', right: -6, top: -4, width: 12, height: 12, borderRadius: 6,
-            background: '#2563eb', border: '2px solid #fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+            background: '#2563eb', border: '2px solid var(--t-panel)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
           }} />
         </div>
 
         {/* Segment bar */}
-        <div style={{ height: 32, borderRadius: 6, overflow: 'hidden', display: 'flex', background: '#f1f5f9' }}>
+        <div style={{ height: 32, borderRadius: 6, overflow: 'hidden', display: 'flex', background: 'var(--t-timeline-bar)' }}>
           {segments.map((seg, i) => (
             <div
               key={i}
@@ -359,8 +359,8 @@ function TimelineExpanded() {
             return (
               <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <div style={{ width: 10, height: 10, borderRadius: 2, background: colors[kind] }} />
-                <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>{labels[kind]}</span>
-                <span style={{ fontSize: 11, color: '#9ca3af' }}>({fmtDur(t)})</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text)' }}>{labels[kind]}</span>
+                <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>({fmtDur(t)})</span>
               </div>
             );
           })}
@@ -371,13 +371,13 @@ function TimelineExpanded() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         {/* Left — Recent Activity */}
         <div style={{
-          background: '#fff',
+          background: 'var(--t-panel)',
           borderRadius: 14,
           padding: 20,
-          border: '1px solid rgba(0,0,0,0.06)',
+          border: '1px solid var(--t-divider)',
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h3 style={{ fontSize: 12, fontWeight: 700, color: '#374151', letterSpacing: '0.04em', textTransform: 'uppercase', margin: 0 }}>
+            <h3 style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '0.04em', textTransform: 'uppercase', margin: 0 }}>
               Recent Activity
             </h3>
             <span style={{ fontSize: 10, color: '#22c55e', fontWeight: 600, background: 'rgba(34,197,94,0.1)', padding: '2px 8px', borderRadius: 6 }}>
@@ -386,11 +386,11 @@ function TimelineExpanded() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {segments.slice(-6).reverse().map((seg, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid rgba(0,0,0,0.04)' }}>
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--t-divider-subtle)' }}>
                 <div style={{ width: 8, height: 8, borderRadius: 4, background: colors[seg.kind], flexShrink: 0 }} />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 500, color: '#111827' }}>{seg.label}</div>
-                  <div style={{ fontSize: 10, color: '#9ca3af' }}>{fmtTime(seg.startMin)} · {fmtDur(seg.durationMin)}</div>
+                  <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--t-text)' }}>{seg.label}</div>
+                  <div style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{fmtTime(seg.startMin)} · {fmtDur(seg.durationMin)}</div>
                 </div>
               </div>
             ))}
@@ -399,12 +399,12 @@ function TimelineExpanded() {
 
         {/* Right — Agent Chain-of-Thought */}
         <div style={{
-          background: '#fff',
+          background: 'var(--t-panel)',
           borderRadius: 14,
           padding: 20,
-          border: '1px solid rgba(0,0,0,0.06)',
+          border: '1px solid var(--t-divider)',
         }}>
-          <h3 style={{ fontSize: 12, fontWeight: 700, color: '#374151', letterSpacing: '0.04em', textTransform: 'uppercase', margin: '0 0 16px' }}>
+          <h3 style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '0.04em', textTransform: 'uppercase', margin: '0 0 16px' }}>
             Agent Reasoning — Chain of Thought
           </h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -412,13 +412,13 @@ function TimelineExpanded() {
               <div key={i} style={{
                 padding: '10px 14px',
                 borderRadius: 10,
-                background: t.kind === 'error' ? 'rgba(239,68,68,0.06)' : 'rgba(0,0,0,0.02)',
+                background: t.kind === 'error' ? 'rgba(239,68,68,0.06)' : 'var(--t-hover)',
                 borderLeft: `3px solid ${colors[t.kind] || '#e5e7eb'}`,
               }}>
                 <div style={{ fontSize: 10, fontWeight: 600, color: colors[t.kind], textTransform: 'uppercase', marginBottom: 4 }}>
                   {labels[t.kind] || t.kind}
                 </div>
-                <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.5 }}>{t.text}</div>
+                <div style={{ fontSize: 12, color: 'var(--t-text)', lineHeight: 1.5 }}>{t.text}</div>
               </div>
             ))}
           </div>
@@ -427,12 +427,12 @@ function TimelineExpanded() {
 
       {/* Agent Orchestration Panel */}
       <div style={{
-        background: '#fff',
+        background: 'var(--t-panel)',
         borderRadius: 14,
         padding: 20,
-        border: '1px solid rgba(0,0,0,0.06)',
+        border: '1px solid var(--t-divider)',
       }}>
-        <h3 style={{ fontSize: 12, fontWeight: 700, color: '#374151', letterSpacing: '0.04em', textTransform: 'uppercase', margin: '0 0 20px' }}>
+        <h3 style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '0.04em', textTransform: 'uppercase', margin: '0 0 20px' }}>
           Agent Orchestration
         </h3>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', gap: 16, position: 'relative' }}>
@@ -449,11 +449,11 @@ function TimelineExpanded() {
             { name: 'HAWK', model: 'Codex', branch: 'reviewing PR', pct: 90, status: 'REVIEWING', task: 'QA Validation', color: '#f59e0b' },
           ].map((agent) => (
             <div key={agent.name} style={{
-              background: '#fff',
+              background: 'var(--t-panel)',
               borderRadius: 14,
               padding: '16px 20px',
-              border: '1px solid rgba(0,0,0,0.06)',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              border: '1px solid var(--t-divider)',
+              boxShadow: 'var(--t-panel-shadow)',
               zIndex: 1,
               minWidth: 180,
               textAlign: 'center',
@@ -461,22 +461,22 @@ function TimelineExpanded() {
               {/* Progress ring */}
               <div style={{ position: 'relative', width: 56, height: 56, margin: '0 auto 10px' }}>
                 <svg width={56} height={56} viewBox="0 0 56 56" style={{ transform: 'rotate(-90deg)' }}>
-                  <circle cx="28" cy="28" r="24" fill="none" stroke="#f1f5f9" strokeWidth="4" />
+                  <circle cx="28" cy="28" r="24" fill="none" stroke="var(--t-timeline-bar)" strokeWidth="4" />
                   <circle cx="28" cy="28" r="24" fill="none" stroke={agent.color} strokeWidth="4"
                     strokeDasharray={`${(agent.pct / 100) * 150.8} 150.8`}
                     strokeLinecap="round"
                   />
                 </svg>
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: '#111827' }}>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--t-text)' }}>
                   {agent.pct}%
                 </div>
               </div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#111827' }}>{agent.name}</div>
-              <div style={{ fontSize: 10, color: '#9ca3af' }}>({agent.model}) · {agent.branch}</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{agent.name}</div>
+              <div style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>({agent.model}) · {agent.branch}</div>
               <div style={{ fontSize: 10, fontWeight: 600, color: agent.color, marginTop: 6, textTransform: 'uppercase' }}>
                 {agent.status}
               </div>
-              <div style={{ fontSize: 10, color: '#6b7280' }}>{agent.task}</div>
+              <div style={{ fontSize: 10, color: 'var(--t-text-secondary)' }}>{agent.task}</div>
             </div>
           ))}
         </div>
@@ -533,7 +533,7 @@ const IssueViewer = memo(function IssueViewer({ issueNumber, repo }: { issueNumb
 
   if (loading) {
     return (
-      <div style={{ padding: 32, color: '#94a3b8', fontSize: 13 }}>
+      <div style={{ padding: 32, color: 'var(--t-text-muted)', fontSize: 13 }}>
         Loading issue #{issueNumber}...
       </div>
     );
@@ -572,7 +572,7 @@ const IssueViewer = memo(function IssueViewer({ issueNumber, repo }: { issueNumb
             fontSize: 20,
             fontWeight: 700,
             letterSpacing: '-0.03em',
-            color: '#1e293b',
+            color: 'var(--t-text-strong)',
             margin: 0,
             lineHeight: 1.3,
           }}>
@@ -584,7 +584,7 @@ const IssueViewer = memo(function IssueViewer({ issueNumber, repo }: { issueNumb
             gap: 12,
             marginTop: 8,
             fontSize: 12,
-            color: '#94a3b8',
+            color: 'var(--t-text-muted)',
           }}>
             <span>{detail.author}</span>
             <span>·</span>
@@ -599,7 +599,7 @@ const IssueViewer = memo(function IssueViewer({ issueNumber, repo }: { issueNumb
                 display: 'flex',
                 alignItems: 'center',
                 gap: 4,
-                color: '#64748b',
+                color: 'var(--t-text-secondary)',
                 textDecoration: 'none',
                 marginLeft: 'auto',
               }}
@@ -639,13 +639,13 @@ const IssueViewer = memo(function IssueViewer({ issueNumber, repo }: { issueNumb
 
       {/* Body */}
       <div style={{
-        background: 'rgba(255,255,255,0.8)',
+        background: 'var(--t-panel-translucent)',
         borderRadius: 14,
         padding: '20px 24px',
-        border: '1px solid rgba(0,0,0,0.04)',
+        border: '1px solid var(--t-divider-subtle)',
         fontSize: 14,
         lineHeight: 1.65,
-        color: '#334155',
+        color: 'var(--t-text)',
         letterSpacing: '-0.01em',
       }}>
         <MarkdownBody text={detail.body || '*No description.*'} />
@@ -689,7 +689,7 @@ const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: { sessio
 
   if (loading) {
     return (
-      <div style={{ padding: 32, color: '#94a3b8', fontSize: 13 }}>
+      <div style={{ padding: 32, color: 'var(--t-text-muted)', fontSize: 13 }}>
         Loading transcript...
       </div>
     );
@@ -705,7 +705,7 @@ const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: { sessio
       }}
     >
       {messages.length === 0 ? (
-        <div style={{ color: '#94a3b8', fontSize: 13, padding: 16 }}>
+        <div style={{ color: 'var(--t-text-muted)', fontSize: 13, padding: 16 }}>
           No messages in this session.
         </div>
       ) : (
@@ -717,18 +717,18 @@ const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: { sessio
               padding: '10px 14px',
               borderRadius: 12,
               background: msg.role === 'assistant'
-                ? 'rgba(255,255,255,0.8)'
+                ? 'var(--t-panel-translucent)'
                 : 'rgba(37, 99, 235, 0.04)',
-              border: '1px solid rgba(0,0,0,0.03)',
+              border: '1px solid var(--t-divider-subtle)',
               fontSize: 13,
               lineHeight: 1.55,
-              color: '#334155',
+              color: 'var(--t-text)',
             }}
           >
             <div style={{
               fontSize: 11,
               fontWeight: 600,
-              color: msg.role === 'assistant' ? '#64748b' : '#2563eb',
+              color: msg.role === 'assistant' ? 'var(--t-text-secondary)' : '#2563eb',
               marginBottom: 4,
               textTransform: 'uppercase',
               letterSpacing: '0.04em',
@@ -786,7 +786,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
   }, [filePath, workspace]);
 
   if (loading) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading file…</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading file…</div>;
   }
 
   const fileName = filePath.split('/').pop() ?? filePath;
@@ -799,16 +799,16 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
         paddingRight: 20,
         paddingBottom: 10,
         paddingLeft: 20,
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
-        background: 'rgba(255,255,255,0.4)',
+        borderBottom: '1px solid var(--t-divider)',
+        background: 'var(--t-panel-translucent)',
         display: 'flex',
         alignItems: 'center',
         gap: 10,
         flexShrink: 0,
       }}>
-        <FileText size={16} strokeWidth={1.8} style={{ color: '#94a3b8' }} />
-        <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{fileName}</span>
-        <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: '"SF Mono", ui-monospace, monospace' }}>{filePath}</span>
+        <FileText size={16} strokeWidth={1.8} style={{ color: 'var(--t-text-muted)' }} />
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--t-text)' }}>{fileName}</span>
+        <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>{filePath}</span>
 
         {hasDiff ? (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
@@ -826,7 +826,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
                   border: 'none',
                   fontSize: 11,
                   fontWeight: activeView === view ? 600 : 400,
-                  color: activeView === view ? '#2563eb' : '#64748b',
+                  color: activeView === view ? '#2563eb' : 'var(--t-text-secondary)',
                   background: activeView === view ? 'rgba(37,99,235,0.08)' : 'transparent',
                   cursor: 'pointer',
                   fontFamily: '-apple-system, system-ui, sans-serif',
@@ -853,7 +853,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
             fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
-            color: '#1e293b',
+            color: 'var(--t-text-strong)',
           }}>
             {renderDiffLines(diff)}
           </pre>
@@ -869,12 +869,12 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
             fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
-            color: '#1e293b',
+            color: 'var(--t-text-strong)',
           }}>
             {content}
           </pre>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#94a3b8' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>
             Could not load file content
           </div>
         )}
@@ -896,10 +896,10 @@ function CanvasEmpty() {
       height: '100%',
       minHeight: 200,
     }}>
-      <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.1, color: '#94a3b8' }}>◇</div>
+      <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.1, color: 'var(--t-text-muted)' }}>◇</div>
       <p style={{
         fontSize: 13,
-        color: '#b0b8c8',
+        color: 'var(--t-text-faint)',
         letterSpacing: '-0.01em',
       }}>
         Select an issue, agent, or file to open here
@@ -943,11 +943,11 @@ function GitLogViewer({ workspace, onSelectCommit }: { workspace: string; onSele
   }, [workspace]);
 
   if (loading) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading git log…</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading git log…</div>;
   }
 
   if (commits.length === 0) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#94a3b8' }}>No commits found</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>No commits found</div>;
   }
 
   return (
@@ -958,15 +958,15 @@ function GitLogViewer({ workspace, onSelectCommit }: { workspace: string; onSele
         paddingRight: 20,
         paddingBottom: 10,
         paddingLeft: 20,
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
-        background: 'rgba(255,255,255,0.4)',
+        borderBottom: '1px solid var(--t-divider)',
+        background: 'var(--t-panel-translucent)',
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
         gap: 10,
       }}>
-        <GitCommit size={16} strokeWidth={1.8} style={{ color: '#64748b' }} />
-        <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>Git History</span>
+        <GitCommit size={16} strokeWidth={1.8} style={{ color: 'var(--t-text-secondary)' }} />
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--t-text)' }}>Git History</span>
         <span style={{
           fontSize: 11,
           fontFamily: '"SF Mono", ui-monospace, monospace',
@@ -979,7 +979,7 @@ function GitLogViewer({ workspace, onSelectCommit }: { workspace: string; onSele
           color: '#3b82f6',
           fontWeight: 600,
         }}>{currentBranch}</span>
-        <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>{commits.length} commits</span>
+        <span style={{ fontSize: 11, color: 'var(--t-text-muted)', marginLeft: 'auto' }}>{commits.length} commits</span>
       </div>
 
       {/* Commit list */}
@@ -998,7 +998,7 @@ function GitLogViewer({ workspace, onSelectCommit }: { workspace: string; onSele
               paddingBottom: 10,
               paddingLeft: 20,
               border: 'none',
-              borderBottom: '1px solid rgba(0,0,0,0.03)',
+              borderBottom: '1px solid var(--t-divider-subtle)',
               background: 'transparent',
               cursor: 'pointer',
               textAlign: 'left',
@@ -1022,15 +1022,15 @@ function GitLogViewer({ workspace, onSelectCommit }: { workspace: string; onSele
                   top: 0,
                   width: 2,
                   height: 10,
-                  background: 'rgba(148, 163, 184, 0.3)',
+                  background: 'var(--t-divider)',
                 }} />
               ) : null}
               <div style={{
                 width: 8,
                 height: 8,
                 borderRadius: 4,
-                background: commit.refs.some(r => r.type === 'head') ? '#3b82f6' : '#cbd5e1',
-                border: commit.refs.some(r => r.type === 'head') ? '2px solid rgba(59,130,246,0.3)' : '2px solid rgba(0,0,0,0.04)',
+                background: commit.refs.some(r => r.type === 'head') ? '#3b82f6' : 'var(--t-text-faint)',
+                border: commit.refs.some(r => r.type === 'head') ? '2px solid rgba(59,130,246,0.3)' : '2px solid var(--t-divider-subtle)',
                 marginTop: 6,
                 flexShrink: 0,
                 zIndex: 1,
@@ -1039,7 +1039,7 @@ function GitLogViewer({ workspace, onSelectCommit }: { workspace: string; onSele
                 <div style={{
                   width: 2,
                   flex: 1,
-                  background: 'rgba(148, 163, 184, 0.3)',
+                  background: 'var(--t-divider)',
                   marginTop: 2,
                 }} />
               ) : null}
@@ -1051,7 +1051,7 @@ function GitLogViewer({ workspace, onSelectCommit }: { workspace: string; onSele
                 <span style={{
                   fontSize: 13,
                   fontWeight: 400,
-                  color: '#1e293b',
+                  color: 'var(--t-text-strong)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -1074,7 +1074,7 @@ function GitLogViewer({ workspace, onSelectCommit }: { workspace: string; onSele
                       ? { color: '#3b82f6', background: 'rgba(59,130,246,0.08)' }
                       : ref.type === 'tag'
                         ? { color: '#f59e0b', background: 'rgba(245,158,11,0.08)' }
-                        : { color: '#94a3b8', background: 'rgba(0,0,0,0.03)' }
+                        : { color: 'var(--t-text-muted)', background: 'var(--t-hover)' }
                     ),
                     fontFamily: '"SF Mono", ui-monospace, monospace',
                   }}>
@@ -1089,12 +1089,12 @@ function GitLogViewer({ workspace, onSelectCommit }: { workspace: string; onSele
                 gap: 8,
                 marginTop: 3,
                 fontSize: 11,
-                color: '#94a3b8',
+                color: 'var(--t-text-muted)',
               }}>
                 <span style={{
                   fontFamily: '"SF Mono", ui-monospace, monospace',
                   fontSize: 11,
-                  color: '#64748b',
+                  color: 'var(--t-text-secondary)',
                   fontWeight: 500,
                 }}>{commit.shortHash}</span>
                 <span>{commit.author}</span>
@@ -1140,7 +1140,7 @@ function ImagePreview({ filePath, workspace }: { filePath: string; workspace?: s
   const fileName = filePath.split('/').pop() ?? filePath;
 
   if (loading) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading image…</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading image…</div>;
   }
 
   if (error || !imageData) {
@@ -1161,16 +1161,16 @@ function ImagePreview({ filePath, workspace }: { filePath: string; workspace?: s
         paddingRight: 20,
         paddingBottom: 10,
         paddingLeft: 20,
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
-        background: 'rgba(255,255,255,0.4)',
+        borderBottom: '1px solid var(--t-divider)',
+        background: 'var(--t-panel-translucent)',
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
         gap: 10,
       }}>
-        <FileText size={16} strokeWidth={1.8} style={{ color: '#94a3b8' }} />
-        <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>{fileName}</span>
-        <span style={{ fontSize: 11, color: '#94a3b8' }}>{imageData.mimeType} · {sizeLabel}</span>
+        <FileText size={16} strokeWidth={1.8} style={{ color: 'var(--t-text-muted)' }} />
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--t-text)' }}>{fileName}</span>
+        <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{imageData.mimeType} · {sizeLabel}</span>
       </div>
 
       {/* Image */}
@@ -1267,11 +1267,11 @@ function DeployViewer({ project }: { project?: string }) {
   }, [project]);
 
   if (loading) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading deployments…</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading deployments…</div>;
   }
 
   if (deploys.length === 0) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#94a3b8' }}>No deployments found</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>No deployments found</div>;
   }
 
   return (
@@ -1282,17 +1282,17 @@ function DeployViewer({ project }: { project?: string }) {
         paddingRight: 20,
         paddingBottom: 10,
         paddingLeft: 20,
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
-        background: 'rgba(255,255,255,0.4)',
+        borderBottom: '1px solid var(--t-divider)',
+        background: 'var(--t-panel-translucent)',
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
         gap: 10,
       }}>
-        <Globe size={16} strokeWidth={1.8} style={{ color: '#64748b' }} />
-        <span style={{ fontSize: 14, fontWeight: 600, color: '#0f172a' }}>Deployments</span>
+        <Globe size={16} strokeWidth={1.8} style={{ color: 'var(--t-text-secondary)' }} />
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--t-text)' }}>Deployments</span>
         {project ? (
-          <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: '"SF Mono", ui-monospace, monospace' }}>{project}</span>
+          <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>{project}</span>
         ) : null}
       </div>
 
@@ -1318,7 +1318,7 @@ function DeployViewer({ project }: { project?: string }) {
                 paddingRight: 20,
                 paddingBottom: 12,
                 paddingLeft: 20,
-                borderBottom: '1px solid rgba(0,0,0,0.03)',
+                borderBottom: '1px solid var(--t-divider-subtle)',
               }}
             >
               {/* Status */}
@@ -1341,7 +1341,7 @@ function DeployViewer({ project }: { project?: string }) {
                     style={{
                       fontSize: 13,
                       fontWeight: 500,
-                      color: '#1e293b',
+                      color: 'var(--t-text-strong)',
                       textDecoration: 'none',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
@@ -1382,7 +1382,7 @@ function DeployViewer({ project }: { project?: string }) {
                 {commitMsg ? (
                   <div style={{
                     fontSize: 12,
-                    color: '#475569',
+                    color: 'var(--t-text-secondary)',
                     marginTop: 4,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -1399,7 +1399,7 @@ function DeployViewer({ project }: { project?: string }) {
                   gap: 6,
                   marginTop: 4,
                   fontSize: 11,
-                  color: '#94a3b8',
+                  color: 'var(--t-text-muted)',
                 }}>
                   {branch ? (
                     <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{branch}</span>
@@ -1407,7 +1407,7 @@ function DeployViewer({ project }: { project?: string }) {
                   {commitSha ? (
                     <>
                       <span>·</span>
-                      <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10, color: '#64748b' }}>{commitSha}</span>
+                      <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10, color: 'var(--t-text-secondary)' }}>{commitSha}</span>
                     </>
                   ) : null}
                   {author ? (
@@ -1463,11 +1463,11 @@ function ReadmeViewer({ workspace }: { workspace: string }) {
   }, [workspace]);
 
   if (loading) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading README…</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading README…</div>;
   }
 
   if (!content) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#94a3b8' }}>No README found in this workspace</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>No README found in this workspace</div>;
   }
 
   return (
@@ -1556,11 +1556,11 @@ function CIViewer({ repo }: { repo?: string }) {
   }, [selectedRun, repo]);
 
   if (loading) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading CI runs…</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading CI runs…</div>;
   }
 
   if (runs.length === 0) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#94a3b8' }}>No workflow runs found</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>No workflow runs found</div>;
   }
 
   return (
@@ -1569,9 +1569,9 @@ function CIViewer({ repo }: { repo?: string }) {
       <div style={{
         width: 340,
         flexShrink: 0,
-        borderRight: '1px solid rgba(0,0,0,0.06)',
+        borderRight: '1px solid var(--t-divider)',
         overflowY: 'auto',
-        background: 'rgba(248, 250, 252, 0.6)',
+        background: 'var(--t-bg-subtle)',
       }}>
         {runs.map((run) => {
           const color = ciColor(run.conclusion, run.status);
@@ -1597,7 +1597,7 @@ function CIViewer({ repo }: { repo?: string }) {
                 cursor: 'pointer',
                 textAlign: 'left',
                 fontFamily: '-apple-system, system-ui, sans-serif',
-                borderBottom: '1px solid rgba(0,0,0,0.04)',
+                borderBottom: '1px solid var(--t-divider-subtle)',
               }}
             >
               <span style={{
@@ -1612,12 +1612,12 @@ function CIViewer({ repo }: { repo?: string }) {
                 <div style={{
                   fontSize: 13,
                   fontWeight: isActive ? 600 : 400,
-                  color: '#1e293b',
+                  color: 'var(--t-text-strong)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                 }}>{run.displayTitle}</div>
-                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, display: 'flex', gap: 6, alignItems: 'center' }}>
+                <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 2, display: 'flex', gap: 6, alignItems: 'center' }}>
                   <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{run.headBranch}</span>
                   <span>·</span>
                   <span>{run.workflowName}</span>
@@ -1633,19 +1633,19 @@ function CIViewer({ repo }: { repo?: string }) {
       {/* Detail */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {!selectedRun ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#94a3b8' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>
             Select a run to view details
           </div>
         ) : detailLoading ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>
             Loading run details…
           </div>
         ) : runDetail ? (
           <div style={{ paddingTop: 16, paddingRight: 20, paddingBottom: 16, paddingLeft: 20 }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#0f172a', marginBottom: 8 }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text)', marginBottom: 8 }}>
               {runDetail.displayTitle}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#64748b', marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--t-text-secondary)', marginBottom: 16 }}>
               <span style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -1672,7 +1672,7 @@ function CIViewer({ repo }: { repo?: string }) {
             {/* Jobs */}
             {runDetail.jobs?.length > 0 ? (
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   Jobs
                 </div>
                 {runDetail.jobs.map((job, i) => {
@@ -1680,8 +1680,8 @@ function CIViewer({ repo }: { repo?: string }) {
                   return (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 4 }}>
                       <span style={{ color: jColor, fontWeight: 700 }}>{ciIcon(job.conclusion, job.status)}</span>
-                      <span style={{ color: '#1e293b' }}>{job.name}</span>
-                      <span style={{ fontSize: 11, color: '#94a3b8' }}>{job.conclusion || job.status}</span>
+                      <span style={{ color: 'var(--t-text-strong)' }}>{job.name}</span>
+                      <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{job.conclusion || job.status}</span>
                     </div>
                   );
                 })}
@@ -1691,7 +1691,7 @@ function CIViewer({ repo }: { repo?: string }) {
             {/* Logs */}
             {logs ? (
               <div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   Logs
                 </div>
                 <pre style={{
@@ -1702,10 +1702,10 @@ function CIViewer({ repo }: { repo?: string }) {
                   fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
-                  color: '#1e293b',
-                  background: 'rgba(0,0,0,0.02)',
+                  color: 'var(--t-text-strong)',
+                  background: 'var(--t-hover)',
                   borderRadius: 8,
-                  border: '1px solid rgba(0,0,0,0.06)',
+                  border: '1px solid var(--t-divider)',
                   maxHeight: 500,
                   overflowY: 'auto',
                 }}>
@@ -1810,7 +1810,7 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
   }, [activeSection, prNumber, repo, reviewComments.length]);
 
   if (loading) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>Loading PR…</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading PR…</div>;
   }
 
   if (error || !pr) {
@@ -1841,8 +1841,8 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
         paddingRight: 20,
         paddingBottom: 12,
         paddingLeft: 20,
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
-        background: 'rgba(255,255,255,0.4)',
+        borderBottom: '1px solid var(--t-divider)',
+        background: 'var(--t-panel-translucent)',
         flexShrink: 0,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -1862,11 +1862,11 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
           }}>
             {stateStyle.label}
           </span>
-          <span style={{ fontSize: 15, fontWeight: 600, color: '#0f172a' }}>
+          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text)' }}>
             #{pr.number} {pr.title}
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 12, color: '#64748b' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 12, color: 'var(--t-text-secondary)' }}>
           <span>{pr.author.login}</span>
           <span>wants to merge</span>
           <span style={{
@@ -1877,7 +1877,7 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
             paddingBottom: 1,
             paddingLeft: 5,
             borderRadius: 4,
-            background: 'rgba(0,0,0,0.04)',
+            background: 'var(--t-divider-subtle)',
           }}>{pr.headRefName}</span>
           <span>→</span>
           <span style={{
@@ -1888,7 +1888,7 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
             paddingBottom: 1,
             paddingLeft: 5,
             borderRadius: 4,
-            background: 'rgba(0,0,0,0.04)',
+            background: 'var(--t-divider-subtle)',
           }}>{pr.baseRefName}</span>
           <span>·</span>
           <span style={{ color: '#22c55e', fontWeight: 600 }}>+{pr.additions}</span>
@@ -1918,7 +1918,7 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                 border: 'none',
                 fontSize: 12,
                 fontWeight: activeSection === s.id ? 600 : 400,
-                color: activeSection === s.id ? '#2563eb' : '#64748b',
+                color: activeSection === s.id ? '#2563eb' : 'var(--t-text-secondary)',
                 background: activeSection === s.id ? 'rgba(37,99,235,0.08)' : 'transparent',
                 cursor: 'pointer',
                 fontFamily: '-apple-system, system-ui, sans-serif',
@@ -1937,7 +1937,7 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
             {/* CI Status */}
             {ciChecks.length > 0 ? (
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   CI Checks ({passedChecks}/{ciChecks.length} passed)
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -1948,7 +1948,7 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                         <span style={{ color: passed ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
                           {passed ? '✓' : '✗'}
                         </span>
-                        <span style={{ color: '#1e293b' }}>{check.name}</span>
+                        <span style={{ color: 'var(--t-text-strong)' }}>{check.name}</span>
                       </div>
                     );
                   })}
@@ -1959,7 +1959,7 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
             {/* Reviews */}
             {pr.reviews.length > 0 ? (
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   Reviews
                 </div>
                 {pr.reviews.map((review, i) => (
@@ -1970,8 +1970,8 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                     }}>
                       {review.state === 'APPROVED' ? '✓' : review.state === 'CHANGES_REQUESTED' ? '✗' : '○'}
                     </span>
-                    <span style={{ color: '#1e293b' }}>{review.author.login}</span>
-                    <span style={{ color: '#94a3b8' }}>{review.state.toLowerCase().replace('_', ' ')}</span>
+                    <span style={{ color: 'var(--t-text-strong)' }}>{review.author.login}</span>
+                    <span style={{ color: 'var(--t-text-muted)' }}>{review.state.toLowerCase().replace('_', ' ')}</span>
                   </div>
                 ))}
               </div>
@@ -2005,7 +2005,7 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                 <MarkdownBody text={pr.body} />
               </div>
             ) : (
-              <div style={{ fontSize: 13, color: '#94a3b8', fontStyle: 'italic' }}>No description provided</div>
+              <div style={{ fontSize: 13, color: 'var(--t-text-muted)', fontStyle: 'italic' }}>No description provided</div>
             )}
           </div>
         ) : null}
@@ -2020,11 +2020,11 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                   gap: 8,
                   paddingTop: 6,
                   paddingBottom: 6,
-                  borderBottom: '1px solid rgba(0,0,0,0.04)',
+                  borderBottom: '1px solid var(--t-divider-subtle)',
                   fontSize: 13,
                 }}>
-                  <FileText size={14} strokeWidth={1.8} style={{ color: '#94a3b8', flexShrink: 0 }} />
-                  <span style={{ flex: 1, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <FileText size={14} strokeWidth={1.8} style={{ color: 'var(--t-text-muted)', flexShrink: 0 }} />
+                  <span style={{ flex: 1, color: 'var(--t-text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {file.path}
                   </span>
                   <div style={{ display: 'flex', gap: 4, flexShrink: 0, fontSize: 11, fontWeight: 600 }}>
@@ -2034,7 +2034,7 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                 </div>
               ))
             ) : (
-              <div style={{ fontSize: 13, color: '#94a3b8' }}>No changed files data</div>
+              <div style={{ fontSize: 13, color: 'var(--t-text-muted)' }}>No changed files data</div>
             )}
             {pr.diffStat ? (
               <pre style={{
@@ -2042,7 +2042,7 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                 fontSize: '0.75rem',
                 lineHeight: 1.5,
                 fontFamily: '"SF Mono", ui-monospace, monospace',
-                color: '#64748b',
+                color: 'var(--t-text-secondary)',
                 whiteSpace: 'pre-wrap',
               }}>
                 {pr.diffStat}
@@ -2054,16 +2054,16 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
         {activeSection === 'comments' ? (
           <div>
             {allComments.length === 0 ? (
-              <div style={{ fontSize: 13, color: '#94a3b8' }}>No comments</div>
+              <div style={{ fontSize: 13, color: 'var(--t-text-muted)' }}>No comments</div>
             ) : (
               allComments.map((comment) => (
                 <div key={`${comment.kind}-${comment.id}`} style={{
                   marginBottom: 16,
                   paddingBottom: 16,
-                  borderBottom: '1px solid rgba(0,0,0,0.06)',
+                  borderBottom: '1px solid var(--t-divider)',
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12 }}>
-                    <span style={{ fontWeight: 600, color: '#1e293b' }}>{comment.user}</span>
+                    <span style={{ fontWeight: 600, color: 'var(--t-text-strong)' }}>{comment.user}</span>
                     {comment.kind === 'review' ? (
                       <span style={{
                         fontSize: 10,
@@ -2079,7 +2079,7 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                         {'path' in comment ? (comment as { path: string }).path : 'review'}
                       </span>
                     ) : null}
-                    <span style={{ color: '#94a3b8' }}>{formatAge(comment.created_at)}</span>
+                    <span style={{ color: 'var(--t-text-muted)' }}>{formatAge(comment.created_at)}</span>
                   </div>
                   <div style={{ fontSize: 13, lineHeight: 1.6 }}>
                     <MarkdownBody text={comment.body} />
@@ -2093,9 +2093,9 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
         {activeSection === 'reviews' ? (
           <div>
             {reviewsLoading ? (
-              <div style={{ fontSize: 13, color: '#94a3b8' }}>Loading review comments…</div>
+              <div style={{ fontSize: 13, color: 'var(--t-text-muted)' }}>Loading review comments…</div>
             ) : reviewComments.length === 0 ? (
-              <div style={{ fontSize: 13, color: '#94a3b8' }}>No inline review comments</div>
+              <div style={{ fontSize: 13, color: 'var(--t-text-muted)' }}>No inline review comments</div>
             ) : (
               (() => {
                 // Group comments into threads by file path
@@ -2118,14 +2118,14 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                       paddingBottom: 8,
                       paddingLeft: 12,
                       borderRadius: 8,
-                      background: 'rgba(0,0,0,0.02)',
+                      background: 'var(--t-hover)',
                       marginBottom: 8,
                     }}>
-                      <FileText size={13} strokeWidth={1.8} style={{ color: '#64748b', flexShrink: 0 }} />
+                      <FileText size={13} strokeWidth={1.8} style={{ color: 'var(--t-text-secondary)', flexShrink: 0 }} />
                       <span style={{
                         fontSize: 12,
                         fontWeight: 600,
-                        color: '#1e293b',
+                        color: 'var(--t-text-strong)',
                         fontFamily: '"SF Mono", ui-monospace, monospace',
                       }}>{path}</span>
                     </div>
@@ -2151,10 +2151,10 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                             fontFamily: '"SF Mono", ui-monospace, monospace',
                             whiteSpace: 'pre-wrap',
                             wordBreak: 'break-word',
-                            color: '#475569',
-                            background: 'rgba(0,0,0,0.02)',
+                            color: 'var(--t-text-secondary)',
+                            background: 'var(--t-hover)',
                             borderRadius: 6,
-                            border: '1px solid rgba(0,0,0,0.04)',
+                            border: '1px solid var(--t-divider-subtle)',
                             maxHeight: 120,
                             overflowY: 'auto',
                           }}>
@@ -2182,8 +2182,8 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                           marginBottom: 4,
                           fontSize: 12,
                         }}>
-                          <span style={{ fontWeight: 600, color: '#1e293b' }}>{comment.author}</span>
-                          <span style={{ color: '#94a3b8' }}>{formatAge(comment.createdAt)}</span>
+                          <span style={{ fontWeight: 600, color: 'var(--t-text-strong)' }}>{comment.author}</span>
+                          <span style={{ color: 'var(--t-text-muted)' }}>{formatAge(comment.createdAt)}</span>
                         </div>
 
                         {/* Comment body */}
@@ -2253,7 +2253,7 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#9ca3af' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>
         Loading commit…
       </div>
     );
@@ -2290,14 +2290,14 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
         paddingRight: 20,
         paddingBottom: 12,
         paddingLeft: 20,
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
-        background: 'rgba(255,255,255,0.4)',
+        borderBottom: '1px solid var(--t-divider)',
+        background: 'var(--t-panel-translucent)',
         flexShrink: 0,
       }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: '#0f172a', lineHeight: 1.4 }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text)', lineHeight: 1.4 }}>
           {commit.subject}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, fontSize: 12, color: '#64748b' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, fontSize: 12, color: 'var(--t-text-secondary)' }}>
           <span style={{
             fontFamily: '"SF Mono", ui-monospace, monospace',
             fontSize: 11,
@@ -2306,8 +2306,8 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
             paddingBottom: 2,
             paddingLeft: 6,
             borderRadius: 4,
-            background: 'rgba(0,0,0,0.04)',
-            color: '#475569',
+            background: 'var(--t-divider-subtle)',
+            color: 'var(--t-text-secondary)',
           }}>
             {commit.shortHash}
           </span>
@@ -2320,7 +2320,7 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
           <span>{commit.files.length} file{commit.files.length !== 1 ? 's' : ''}</span>
         </div>
         {commit.body ? (
-          <div style={{ marginTop: 8, fontSize: 13, color: '#475569', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+          <div style={{ marginTop: 8, fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
             {commit.body}
           </div>
         ) : null}
@@ -2332,9 +2332,9 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
         <div style={{
           width: 260,
           flexShrink: 0,
-          borderRight: '1px solid rgba(0,0,0,0.06)',
+          borderRight: '1px solid var(--t-divider)',
           overflowY: 'auto',
-          background: 'rgba(248, 250, 252, 0.6)',
+          background: 'var(--t-bg-subtle)',
         }}>
           {/* "All files" option */}
           <button
@@ -2357,7 +2357,7 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
               fontFamily: '-apple-system, system-ui, sans-serif',
               fontSize: 13,
               fontWeight: selectedFile === null ? 600 : 400,
-              color: '#1e293b',
+              color: 'var(--t-text-strong)',
             }}
           >
             All files ({commit.files.length})
@@ -2391,12 +2391,12 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
                   transition: 'all 100ms ease',
                 }}
               >
-                <FileText size={14} strokeWidth={1.8} style={{ color: '#94a3b8', flexShrink: 0 }} />
+                <FileText size={14} strokeWidth={1.8} style={{ color: 'var(--t-text-muted)', flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{
                     fontSize: 13,
                     fontWeight: isActive ? 600 : 400,
-                    color: '#1e293b',
+                    color: 'var(--t-text-strong)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -2404,7 +2404,7 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
                   {dirPath ? (
                     <div style={{
                       fontSize: 11,
-                      color: '#94a3b8',
+                      color: 'var(--t-text-muted)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
@@ -2415,7 +2415,7 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
                   {(file.additions ?? 0) > 0 ? <span style={{ color: '#22c55e' }}>+{file.additions}</span> : null}
                   {(file.deletions ?? 0) > 0 ? <span style={{ color: '#ef4444' }}>-{file.deletions}</span> : null}
                 </div>
-                <ChevronRight size={12} strokeWidth={2} style={{ color: '#cbd5e1', flexShrink: 0 }} />
+                <ChevronRight size={12} strokeWidth={2} style={{ color: 'var(--t-text-faint)', flexShrink: 0 }} />
               </button>
             );
           })}
@@ -2434,7 +2434,7 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
             fontFamily: '"SF Mono", "Menlo", "Monaco", ui-monospace, monospace',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
-            color: '#1e293b',
+            color: 'var(--t-text-strong)',
           }}>
             {renderDiffLines(activeDiff)}
           </pre>
@@ -2486,7 +2486,7 @@ function DiffStatusIcon({ status }: { status: string }) {
 
 function renderDiffLines(text: string) {
   return text.split('\n').map((line, i) => {
-    let color = '#1e293b';
+    let color = 'var(--t-text)';
     let bg = 'transparent';
     if (line.startsWith('+') && !line.startsWith('+++')) {
       color = '#166534';
@@ -2498,7 +2498,7 @@ function renderDiffLines(text: string) {
       color = '#6366f1';
       bg = 'rgba(99, 102, 241, 0.06)';
     } else if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
-      color = '#64748b';
+      color = 'var(--t-text-secondary)';
     }
     return (
       <div key={i} style={{ color, background: bg, paddingTop: 1, paddingBottom: 1 }}>
@@ -2555,14 +2555,14 @@ function DiffViewer() {
         paddingRight: 16,
         paddingBottom: 12,
         paddingLeft: 20,
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
-        background: 'rgba(255,255,255,0.4)',
+        borderBottom: '1px solid var(--t-divider)',
+        background: 'var(--t-panel-translucent)',
         flexShrink: 0,
       }}>
         <span style={{
           fontSize: 13,
           fontWeight: 700,
-          color: '#0f172a',
+          color: 'var(--t-text)',
           textTransform: 'uppercase',
           letterSpacing: '0.06em',
         }}>
@@ -2570,7 +2570,7 @@ function DiffViewer() {
         </span>
         <span style={{ fontSize: 12, fontWeight: 600, color: '#22c55e' }}>+{totalAdditions}</span>
         <span style={{ fontSize: 12, fontWeight: 600, color: '#ef4444' }}>-{totalDeletions}</span>
-        <span style={{ fontSize: 12, color: '#64748b' }}>
+        <span style={{ fontSize: 12, color: 'var(--t-text-secondary)' }}>
           {files.length} file{files.length !== 1 ? 's' : ''}
         </span>
       </div>
@@ -2581,14 +2581,14 @@ function DiffViewer() {
         <div style={{
           width: 260,
           flexShrink: 0,
-          borderRight: '1px solid rgba(0,0,0,0.06)',
+          borderRight: '1px solid var(--t-divider)',
           overflowY: 'auto',
-          background: 'rgba(248, 250, 252, 0.6)',
+          background: 'var(--t-bg-subtle)',
         }}>
           {loading ? (
-            <div style={{ padding: 20, fontSize: 13, color: '#9ca3af' }}>Loading…</div>
+            <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>Loading…</div>
           ) : files.length === 0 ? (
-            <div style={{ padding: 20, fontSize: 13, color: '#9ca3af' }}>Working tree clean</div>
+            <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>Working tree clean</div>
           ) : (
             files.map((file) => {
               const isActive = selectedFile === file.path;
@@ -2623,7 +2623,7 @@ function DiffViewer() {
                     <div style={{
                       fontSize: 13,
                       fontWeight: isActive ? 600 : 400,
-                      color: '#1e293b',
+                      color: 'var(--t-text-strong)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
@@ -2631,7 +2631,7 @@ function DiffViewer() {
                     {dirPath ? (
                       <div style={{
                         fontSize: 11,
-                        color: '#94a3b8',
+                        color: 'var(--t-text-muted)',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
@@ -2646,7 +2646,7 @@ function DiffViewer() {
                       <span style={{ color: '#ef4444' }}>-{file.deletions}</span>
                     ) : null}
                   </div>
-                  <ChevronRight size={12} strokeWidth={2} style={{ color: '#cbd5e1', flexShrink: 0 }} />
+                  <ChevronRight size={12} strokeWidth={2} style={{ color: 'var(--t-text-faint)', flexShrink: 0 }} />
                 </button>
               );
             })
@@ -2662,7 +2662,7 @@ function DiffViewer() {
               justifyContent: 'center',
               height: '100%',
               fontSize: 14,
-              color: '#94a3b8',
+              color: 'var(--t-text-muted)',
             }}>
               Select a file to see the diff
             </div>
@@ -2673,7 +2673,7 @@ function DiffViewer() {
               justifyContent: 'center',
               height: '100%',
               fontSize: 13,
-              color: '#9ca3af',
+              color: 'var(--t-text-muted)',
             }}>
               Loading diff…
             </div>
@@ -2684,14 +2684,14 @@ function DiffViewer() {
                 paddingRight: 16,
                 paddingBottom: 12,
                 paddingLeft: 16,
-                borderBottom: '1px solid rgba(0,0,0,0.06)',
-                background: 'rgba(255,255,255,0.3)',
+                borderBottom: '1px solid var(--t-divider)',
+                background: 'var(--t-panel-translucent)',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 10,
               }}>
                 <DiffStatusIcon status={fileDetail.status} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{fileDetail.path}</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text-strong)' }}>{fileDetail.path}</span>
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, fontSize: 11, fontWeight: 600 }}>
                   <span style={{ color: '#22c55e' }}>+{fileDetail.additions ?? 0}</span>
                   <span style={{ color: '#ef4444' }}>-{fileDetail.deletions ?? 0}</span>
@@ -2703,9 +2703,9 @@ function DiffViewer() {
                   paddingRight: 16,
                   paddingBottom: 8,
                   paddingLeft: 16,
-                  borderBottom: '1px solid rgba(0,0,0,0.04)',
+                  borderBottom: '1px solid var(--t-divider-subtle)',
                   fontSize: 12,
-                  color: '#64748b',
+                  color: 'var(--t-text-secondary)',
                 }}>
                   {fileDetail.commitSummary} — {fileDetail.commitAuthor} ({fileDetail.commitAge})
                 </div>
@@ -2721,7 +2721,7 @@ function DiffViewer() {
                 fontFamily: '"SF Mono", "Menlo", "Monaco", ui-monospace, monospace',
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
-                color: '#1e293b',
+                color: 'var(--t-text-strong)',
               }}>
                 {renderDiffLines(fileDetail.preview)}
               </pre>

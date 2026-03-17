@@ -161,12 +161,12 @@ function TimelineButton({ icon, label, onClick }: { icon: React.ReactNode; label
       onClick={onClick}
       style={{
         width: 24, height: 24, borderRadius: 12, border: 'none',
-        background: 'rgba(0,0,0,0.06)', color: '#374151',
+        background: 'var(--t-divider)', color: 'var(--t-text)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: 'pointer', transition: 'background 120ms', flexShrink: 0, padding: 0,
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.1)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.06)'; }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-divider)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-divider)'; }}
     >
       {icon}
     </button>
@@ -270,13 +270,13 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
       alignItems: 'center',
       padding: '0 16px 0 90px',
       gap: 12,
-      background: 'rgba(248, 250, 252, 0.85)',
+      background: 'var(--t-chrome-timeline)',
       backdropFilter: 'blur(12px)',
       WebkitBackdropFilter: 'blur(12px)',
-      borderBottom: '1px solid rgba(0, 0, 0, 0.04)',
+      borderBottom: '1px solid var(--t-divider-subtle)',
       fontSize: 11,
       fontWeight: 500,
-      color: '#6b7280',
+      color: 'var(--t-text-secondary)',
       letterSpacing: '-0.01em',
       position: 'relative',
       zIndex: 100,
@@ -285,7 +285,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
         <TimelineButton icon={<PlayIcon />} label="Play session replay" />
         {onExpand && <TimelineButton icon={<ExpandIcon />} label="Expand timeline" onClick={onExpand} />}
-        <span style={{ fontWeight: 600, color: '#374151', textTransform: 'uppercase', fontSize: 10, letterSpacing: '0.04em' }}>
+        <span style={{ fontWeight: 600, color: 'var(--t-text)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '0.04em' }}>
           Today: {formatDuration(totalSpan)}
         </span>
       </div>
@@ -301,7 +301,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
           borderRadius: 4,
           overflow: 'visible',
           display: 'flex',
-          background: '#f1f5f9',
+          background: 'var(--t-timeline-bar)',
           position: 'relative',
           cursor: 'crosshair',
         }}
@@ -329,8 +329,8 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
         {/* Hover scrubber line + badges */}
         {hoverX !== null && hoverMin !== null && (() => {
           const seg = hoveredSegIdx !== null ? segments[hoveredSegIdx] : null;
-          const lineColor = seg ? SEGMENT_COLORS[seg.kind] : '#111827';
-          const badgeBg = seg ? SEGMENT_COLORS[seg.kind] : '#111827';
+          const lineColor = seg ? SEGMENT_COLORS[seg.kind] : 'var(--t-text)';
+          const badgeBg = seg ? SEGMENT_COLORS[seg.kind] : 'var(--t-text)';
           const kindLabel = seg ? SEGMENT_LABELS[seg.kind] : '';
           const durLabel = seg ? formatDuration(seg.durationMin) : '';
           const agentLabel = seg?.agent ? ` · ${seg.agent}` : '';
@@ -359,8 +359,8 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                 marginBottom: 8,
                 padding: '3px 8px',
                 borderRadius: 6,
-                background: '#111827',
-                color: '#fff',
+                background: 'var(--t-text)',
+                color: 'var(--t-panel)',
                 fontSize: 10,
                 fontWeight: 600,
                 whiteSpace: 'nowrap',
@@ -428,7 +428,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
               bottom: -14,
               transform: 'translateX(-50%)',
               fontSize: 8,
-              color: '#b0b8c4',
+              color: 'var(--t-text-faint)',
               fontWeight: 500,
               pointerEvents: 'none',
               whiteSpace: 'nowrap',
@@ -447,7 +447,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
           return (
             <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
               <div style={{ width: 6, height: 6, borderRadius: 3, background: SEGMENT_COLORS[kind], flexShrink: 0 }} />
-              <span style={{ fontSize: 10, color: '#9ca3af' }}>{formatDuration(total)}</span>
+              <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{formatDuration(total)}</span>
             </div>
           );
         })}

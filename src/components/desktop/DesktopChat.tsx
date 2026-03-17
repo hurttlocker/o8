@@ -137,7 +137,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName,
         {showTimestamp ? (
           <span className="remodex-turn-time">
             {entry.id.startsWith('local-') ? (
-              <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Sending…</span>
+              <span style={{ color: 'var(--t-text-muted)', fontStyle: 'italic' }}>Sending…</span>
             ) : (
               entry.timestampLabel ?? 'now'
             )}
@@ -334,9 +334,9 @@ function renderMarkdownBlocks(text: string): RenderedBlock[] {
               overflowX: 'auto',
               margin: '12px 0',
               borderRadius: 12,
-              border: '1px solid #e5e7eb',
-              backgroundColor: '#ffffff',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              border: '1px solid var(--t-divider)',
+              backgroundColor: 'var(--t-panel)',
+              boxShadow: '0 1px 3px var(--t-divider-subtle)',
             }}>
               <table style={{
                 width: '100%',
@@ -351,10 +351,10 @@ function renderMarkdownBlocks(text: string): RenderedBlock[] {
                         padding: '10px 14px',
                         fontSize: '0.8rem',
                         fontWeight: 600,
-                        color: '#6b7280',
+                        color: 'var(--t-text-secondary)',
                         textTransform: 'uppercase',
                         letterSpacing: '0.04em',
-                        borderBottom: '2px solid #e5e7eb',
+                        borderBottom: '2px solid var(--t-divider)',
                         whiteSpace: 'nowrap',
                       }}>
                         {renderInline(cell)}
@@ -367,15 +367,15 @@ function renderMarkdownBlocks(text: string): RenderedBlock[] {
                     const cells = parseCells(row);
                     return (
                       <tr key={ri} style={{
-                        backgroundColor: ri % 2 === 0 ? '#ffffff' : '#f9fafb',
+                        backgroundColor: ri % 2 === 0 ? 'var(--t-panel)' : 'var(--t-bg)',
                       }}>
                         {cells.map((cell, ci) => (
                           <td key={ci} style={{
                             textAlign: 'left',
                             padding: '10px 14px',
                             fontSize: '0.85rem',
-                            color: '#1f2937',
-                            borderBottom: '1px solid #f3f4f6',
+                            color: 'var(--t-text)',
+                            borderBottom: '1px solid var(--t-divider-subtle)',
                           }}>
                             {renderInline(cell)}
                           </td>
@@ -460,8 +460,8 @@ function ChatImage({ src, alt }: { src: string; alt: string }) {
           marginTop: 8,
           marginBottom: 8,
           cursor: 'zoom-in',
-          boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
-          border: '1px solid rgba(0,0,0,0.06)',
+          boxShadow: '0 2px 12px var(--t-divider)',
+          border: '1px solid var(--t-divider)',
           display: 'block',
         }}
       />
@@ -1236,8 +1236,8 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        background: '#f5f7fb',
-        borderLeft: '1px solid rgba(0,0,0,0.06)',
+        background: 'var(--t-bg)',
+        borderLeft: '1px solid var(--t-divider)',
         position: 'relative',
         outline: dragOver ? '2px solid #3b82f6' : 'none',
         outlineOffset: -2,
@@ -1264,7 +1264,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
             paddingBottom: 16,
             paddingLeft: 32,
             borderRadius: 16,
-            background: 'rgba(255,255,255,0.9)',
+            background: 'var(--t-panel-translucent)',
             border: '2px dashed #3b82f6',
             fontSize: 15,
             fontWeight: 600,
@@ -1296,8 +1296,8 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
           alignItems: 'center',
           gap: '12px',
           padding: '14px 16px',
-          borderBottom: '1px solid rgba(0,0,0,0.06)',
-          background: 'rgba(255,255,255,0.82)',
+          borderBottom: '1px solid var(--t-divider)',
+          background: 'var(--t-panel-translucent)',
           backdropFilter: 'blur(20px) saturate(1.4)',
           WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
           flexShrink: 0,
@@ -1317,16 +1317,16 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
               width: '100%',
               padding: '8px 12px',
               margin: 0,
-              border: '1px solid rgba(0,0,0,0.06)',
+              border: '1px solid var(--t-divider)',
               borderRadius: 12,
-              background: pickerOpen ? 'rgba(0,0,0,0.04)' : 'rgba(0,0,0,0.02)',
+              background: pickerOpen ? 'var(--t-divider-subtle)' : 'var(--t-hover)',
               cursor: 'pointer',
               textAlign: 'left',
               WebkitTapHighlightColor: 'transparent',
               transition: 'background 180ms ease, border-color 180ms ease',
             }}
-            onMouseEnter={(e) => { if (!pickerOpen) e.currentTarget.style.background = 'rgba(0,0,0,0.04)'; }}
-            onMouseLeave={(e) => { if (!pickerOpen) e.currentTarget.style.background = 'rgba(0,0,0,0.02)'; }}
+            onMouseEnter={(e) => { if (!pickerOpen) e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
+            onMouseLeave={(e) => { if (!pickerOpen) e.currentTarget.style.background = 'var(--t-hover)'; }}
             aria-label="Switch session"
             aria-expanded={pickerOpen}
           >
@@ -1347,7 +1347,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
               <div style={{
                 fontSize: 14,
                 fontWeight: 600,
-                color: '#111827',
+                color: 'var(--t-text)',
                 letterSpacing: '-0.01em',
                 lineHeight: 1.3,
                 overflow: 'hidden',
@@ -1358,7 +1358,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
               </div>
               <div style={{
                 fontSize: 11.5,
-                color: '#8e8e93',
+                color: 'var(--t-text-muted)',
                 lineHeight: 1.3,
                 marginTop: 1,
                 overflow: 'hidden',
@@ -1375,7 +1375,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
               strokeWidth={2}
               style={{
                 flexShrink: 0,
-                color: '#c7c7cc',
+                color: 'var(--t-text-faint)',
                 transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
                 transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
               }}
@@ -1391,7 +1391,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
               right: '-12px',
               zIndex: 100,
               borderRadius: '14px',
-              background: 'rgba(255, 255, 255, 0.96)',
+              background: 'var(--t-panel)',
               backdropFilter: 'blur(40px) saturate(1.8)',
               WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
               boxShadow: '0 20px 60px rgba(15, 23, 42, 0.18), 0 1px 3px rgba(15, 23, 42, 0.08)',
@@ -1456,14 +1456,14 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
                       <div style={{
                         fontSize: '14px',
                         fontWeight: containsSelected ? 600 : 500,
-                        color: containsSelected ? '#2563eb' : '#111827',
+                        color: containsSelected ? '#2563eb' : 'var(--t-text)',
                         lineHeight: 1.3,
                       }}>
                         {group.projectName}
                       </div>
                       <div style={{
                         fontSize: '12px',
-                        color: '#8e8e93',
+                        color: 'var(--t-text-muted)',
                         lineHeight: 1.3,
                         marginTop: '1px',
                       }}>
@@ -1479,7 +1479,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
                         strokeWidth={2.2}
                         style={{
                           flexShrink: 0,
-                          color: '#8e8e93',
+                          color: 'var(--t-text-muted)',
                           transition: 'transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
                           transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
                         }}
@@ -1546,7 +1546,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
                               <div style={{
                                 fontSize: '13px',
                                 fontWeight: isActive ? 600 : 400,
-                                color: isActive ? '#2563eb' : '#111827',
+                                color: isActive ? '#2563eb' : 'var(--t-text)',
                                 lineHeight: 1.3,
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
@@ -1557,7 +1557,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
                               {subtitle ? (
                                 <div style={{
                                   fontSize: '11px',
-                                  color: '#8e8e93',
+                                  color: 'var(--t-text-muted)',
                                   lineHeight: 1.3,
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
@@ -1580,7 +1580,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
                   {gi < projectGroups.length - 1 ? (
                     <div style={{
                       height: '1px',
-                      background: 'rgba(15, 23, 42, 0.06)',
+                      background: 'var(--t-divider)',
                       margin: '4px 12px',
                     }} />
                   ) : null}
@@ -1604,9 +1604,9 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
             paddingBottom: 6,
             paddingLeft: 12,
             borderRadius: 999,
-            border: diffStats.files > 0 ? '1px solid rgba(37, 99, 235, 0.12)' : '1px solid rgba(0,0,0,0.06)',
-            background: diffStats.files > 0 ? 'rgba(37, 99, 235, 0.04)' : 'rgba(0,0,0,0.03)',
-            color: '#8e8e93',
+            border: diffStats.files > 0 ? '1px solid rgba(37, 99, 235, 0.12)' : '1px solid var(--t-divider)',
+            background: diffStats.files > 0 ? 'rgba(37, 99, 235, 0.04)' : 'var(--t-hover)',
+            color: 'var(--t-text-muted)',
             fontSize: 12,
             fontWeight: 500,
             cursor: 'pointer',
@@ -1616,7 +1616,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
         >
           <span style={{ color: '#22c55e', fontWeight: 600 }}>+{diffStats.additions}</span>
           <span style={{ color: '#ef4444', fontWeight: 600 }}>-{diffStats.deletions}</span>
-          <span style={{ color: '#8e8e93' }}>{diffStats.files} file{diffStats.files !== 1 ? 's' : ''}</span>
+          <span style={{ color: 'var(--t-text-muted)' }}>{diffStats.files} file{diffStats.files !== 1 ? 's' : ''}</span>
           <SlidersHorizontal size={13} strokeWidth={2} />
         </button>
       </header>
@@ -1683,17 +1683,17 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
               paddingBottom: 10,
               paddingLeft: 16,
               borderRadius: 18,
-              background: 'rgba(248, 250, 252, 0.9)',
+              background: 'var(--t-panel-translucent)',
               backdropFilter: 'blur(8px)',
               WebkitBackdropFilter: 'blur(8px)',
-              border: '1px solid rgba(0,0,0,0.04)',
+              border: '1px solid var(--t-divider-subtle)',
             }}>
               <span className="remodex-typing-dot" style={{ animationDelay: '0ms' }} />
               <span className="remodex-typing-dot" style={{ animationDelay: '150ms' }} />
               <span className="remodex-typing-dot" style={{ animationDelay: '300ms' }} />
               <span style={{
                 fontSize: 11,
-                color: '#94a3b8',
+                color: 'var(--t-text-muted)',
                 marginLeft: 6,
                 fontWeight: 500,
               }}>
@@ -1734,7 +1734,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
           width: 36,
           height: 4,
           borderRadius: 2,
-          backgroundColor: 'rgba(0,0,0,0.1)',
+          backgroundColor: 'var(--t-divider)',
           transition: 'background-color 150ms',
         }} />
       </div>
@@ -1792,8 +1792,8 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
                 flexShrink: 0,
                 borderRadius: 10,
                 overflow: 'hidden',
-                border: '1px solid rgba(0,0,0,0.08)',
-                background: 'rgba(255,255,255,0.8)',
+                border: '1px solid var(--t-divider)',
+                background: 'var(--t-panel-translucent)',
               }}>
                 {f.preview ? (
                   <img src={f.preview} alt={f.name} style={{
@@ -1810,7 +1810,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: 10,
-                    color: '#64748b',
+                    color: 'var(--t-text-secondary)',
                     textAlign: 'center',
                     padding: 4,
                     wordBreak: 'break-all',
@@ -1971,8 +1971,8 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
                   padding: '0 0.82rem',
                   borderRadius: 999,
                   border: 'none',
-                  background: chatSendDisabled ? '#d1d5db' : '#ef4444',
-                  color: chatSendDisabled ? '#9ca3af' : '#ffffff',
+                  background: chatSendDisabled ? 'var(--t-text-faint)' : '#ef4444',
+                  color: chatSendDisabled ? 'var(--t-text-muted)' : '#ffffff',
                   fontSize: '0.84rem',
                   fontWeight: 700,
                   boxShadow: chatSendDisabled ? 'none' : '0 4px 14px rgba(239, 68, 68, 0.4)',
@@ -2000,11 +2000,11 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
           gap: 8,
           padding: '6px 12px',
           marginTop: 6,
-          background: 'rgba(255, 255, 255, 0.72)',
+          background: 'var(--t-chrome)',
           backdropFilter: 'blur(20px) saturate(1.4)',
           WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
           borderRadius: 999,
-          border: '1px solid rgba(0,0,0,0.04)',
+          border: '1px solid var(--t-divider-subtle)',
         }}>
           {/* Context pressure */}
           {(() => {
@@ -2024,7 +2024,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
                 <span style={{
                   fontSize: 12,
                   fontWeight: 600,
-                  color: 'rgba(17, 24, 39, 0.72)',
+                  color: 'var(--t-text-secondary)',
                 }}>
                   {pct}% used
                 </span>
@@ -2032,14 +2032,14 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
             );
           })()}
 
-          <span style={{ color: 'rgba(17, 24, 39, 0.24)', fontSize: 12 }}>·</span>
+          <span style={{ color: 'var(--t-text-faint)', fontSize: 12 }}>·</span>
 
           {/* Branch */}
-          <GitBranch size={12} strokeWidth={1.6} style={{ color: 'rgba(17, 24, 39, 0.42)', flexShrink: 0 }} />
+          <GitBranch size={12} strokeWidth={1.6} style={{ color: 'var(--t-text-muted)', flexShrink: 0 }} />
           <span style={{
             fontSize: 12,
             fontWeight: 500,
-            color: 'rgba(17, 24, 39, 0.52)',
+            color: 'var(--t-text-muted)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',

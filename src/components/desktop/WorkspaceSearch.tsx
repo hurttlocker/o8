@@ -117,14 +117,14 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
         paddingBottom: 7,
         paddingLeft: 14,
         borderRadius: 12,
-        background: focused ? 'rgba(255, 255, 255, 0.85)' : 'rgba(255, 255, 255, 0.45)',
+        background: focused ? 'var(--t-panel)' : 'var(--t-panel-translucent)',
         backdropFilter: 'blur(20px) saturate(1.6)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-        border: focused ? '1px solid rgba(59, 130, 246, 0.2)' : '1px solid rgba(0, 0, 0, 0.04)',
-        boxShadow: focused ? '0 4px 24px rgba(0, 0, 0, 0.06)' : 'none',
+        border: focused ? '1px solid rgba(59, 130, 246, 0.2)' : '1px solid var(--t-divider-subtle)',
+        boxShadow: focused ? '0 4px 24px var(--t-panel-shadow)' : 'none',
         transition: 'all 200ms ease',
       }}>
-        <Search size={14} strokeWidth={1.8} style={{ color: '#94a3b8', flexShrink: 0 }} />
+        <Search size={14} strokeWidth={1.8} style={{ color: 'var(--t-text-muted)', flexShrink: 0 }} />
         <input
           ref={inputRef}
           type="text"
@@ -139,7 +139,7 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
             background: 'transparent',
             outline: 'none',
             fontSize: 13,
-            color: '#1e293b',
+            color: 'var(--t-text)',
             fontFamily: '-apple-system, system-ui, sans-serif',
             fontWeight: 400,
             letterSpacing: '-0.01em',
@@ -156,7 +156,7 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
               background: 'transparent',
               padding: 2,
               cursor: 'pointer',
-              color: '#94a3b8',
+              color: 'var(--t-text-muted)',
             }}
           >
             <X size={13} strokeWidth={2} />
@@ -164,8 +164,8 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
         ) : (
           <kbd style={{
             fontSize: 10,
-            color: '#b0b8c8',
-            background: 'rgba(0,0,0,0.04)',
+            color: 'var(--t-text-faint)',
+            background: 'var(--t-divider-subtle)',
             padding: '2px 5px',
             borderRadius: 4,
             fontFamily: '-apple-system, system-ui, sans-serif',
@@ -184,15 +184,15 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
           maxHeight: 360,
           overflowY: 'auto',
           borderRadius: 14,
-          background: 'rgba(255, 255, 255, 0.92)',
+          background: 'var(--t-panel)',
           backdropFilter: 'blur(24px) saturate(1.8)',
           WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
-          border: '1px solid rgba(0, 0, 0, 0.06)',
-          boxShadow: '0 12px 40px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.04)',
+          border: '1px solid var(--t-divider)',
+          boxShadow: 'var(--t-panel-shadow)',
           zIndex: 100,
         }}>
           {loading && results.length === 0 ? (
-            <div style={{ padding: '16px 18px', fontSize: 12, color: '#94a3b8' }}>
+            <div style={{ padding: '16px 18px', fontSize: 12, color: 'var(--t-text-muted)' }}>
               Searching…
             </div>
           ) : (
@@ -222,7 +222,7 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
                     paddingBottom: 10,
                     paddingLeft: 16,
                     border: 'none',
-                    borderBottom: i < results.length - 1 ? '1px solid rgba(0,0,0,0.03)' : 'none',
+                    borderBottom: i < results.length - 1 ? '1px solid var(--t-divider-subtle)' : 'none',
                     background: isSelected ? 'rgba(59, 130, 246, 0.06)' : 'transparent',
                     cursor: 'pointer',
                     textAlign: 'left',
@@ -232,7 +232,7 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
                 >
                   <FileText size={14} strokeWidth={1.5} style={{
                     flexShrink: 0,
-                    color: result.matchType === 'filename' ? '#3b82f6' : '#94a3b8',
+                    color: result.matchType === 'filename' ? '#3b82f6' : 'var(--t-text-muted)',
                     marginTop: 1,
                   }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -240,7 +240,7 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
                       <span style={{
                         fontSize: 13,
                         fontWeight: 500,
-                        color: '#0f172a',
+                        color: 'var(--t-text)',
                       }}>{fileName}</span>
                       {result.line > 0 ? (
                         <span style={{
@@ -253,7 +253,7 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
                       {dirPath ? (
                         <span style={{
                           fontSize: 10,
-                          color: '#b0b8c8',
+                          color: 'var(--t-text-faint)',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
@@ -263,7 +263,7 @@ export const WorkspaceSearch = memo(function WorkspaceSearch({ workspace, onSele
                     {result.text ? (
                       <div style={{
                         fontSize: 11,
-                        color: '#64748b',
+                        color: 'var(--t-text-secondary)',
                         marginTop: 3,
                         fontFamily: '"SF Mono", ui-monospace, monospace',
                         lineHeight: 1.4,

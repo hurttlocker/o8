@@ -286,12 +286,12 @@ function GitHubTab({ accounts, repos, loading }: {
           ) : (
             <button type="button" style={{
               padding: '8px 20px', borderRadius: 10, border: 'none',
-              background: '#111827', color: '#fff', fontSize: 12, fontWeight: 600,
+              background: 'var(--t-text)', color: '#fff', fontSize: 12, fontWeight: 600,
               cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
               transition: 'background 120ms',
             }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = '#374151'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = '#111827'; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-text-secondary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-text)'; }}
             >
               <GitHubIcon size={14} /> Connect GitHub
             </button>
@@ -358,7 +358,7 @@ function PlaceholderTab({ title, description }: { title: string; description: st
       background: 'var(--t-panel)',
       borderRadius: 14,
       padding: 32,
-      border: '1px solid rgba(0,0,0,0.06)',
+      border: '1px solid var(--t-panel-border)',
       textAlign: 'center',
     }}>
       <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)', margin: '0 0 6px' }}>{title}</h3>
@@ -421,7 +421,7 @@ function ContextBar({ percent, trend }: { percent: number; trend: string }) {
         flex: 1,
         height: 6,
         borderRadius: 3,
-        background: 'rgba(0,0,0,0.06)',
+        background: 'var(--t-divider)',
         overflow: 'hidden',
       }}>
         <div style={{
@@ -481,8 +481,8 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill, killing }: {
       padding: '14px 16px',
       borderRadius: 12,
       background: 'var(--t-panel)',
-      border: '1px solid rgba(0,0,0,0.06)',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+      border: '1px solid var(--t-panel-border)',
+      boxShadow: 'var(--t-panel-shadow)',
       transition: 'box-shadow 120ms',
     }}>
       {/* Status + Icon */}
@@ -492,8 +492,8 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill, killing }: {
         borderRadius: 10,
         display: 'grid',
         placeItems: 'center',
-        background: isOpenClaw ? 'rgba(37, 99, 235, 0.06)' : 'rgba(0,0,0,0.03)',
-        color: isOpenClaw ? '#2563eb' : '#6b7280',
+        background: isOpenClaw ? 'rgba(37, 99, 235, 0.06)' : 'var(--t-hover)',
+        color: isOpenClaw ? '#2563eb' : 'var(--t-text-secondary)',
         fontSize: 14,
         fontWeight: 700,
         flexShrink: 0,
@@ -511,8 +511,8 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill, killing }: {
             fontWeight: 600,
             padding: '1px 7px',
             borderRadius: 5,
-            background: agent.status === 'running' ? 'rgba(34, 197, 94, 0.08)' : 'rgba(0,0,0,0.04)',
-            color: agent.status === 'running' ? '#22c55e' : '#9ca3af',
+            background: agent.status === 'running' ? 'rgba(34, 197, 94, 0.08)' : 'var(--t-divider-subtle)',
+            color: agent.status === 'running' ? '#22c55e' : 'var(--t-text-muted)',
           }}>
             {agent.status}
           </span>
@@ -546,7 +546,7 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill, killing }: {
             style={{
               padding: '6px 12px',
               borderRadius: 8,
-              border: '1px solid rgba(0,0,0,0.08)',
+              border: '1px solid var(--t-btn-secondary-border)',
               background: 'var(--t-panel)',
               color: 'var(--t-text-secondary)',
               fontSize: 11,
@@ -554,8 +554,8 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill, killing }: {
               cursor: 'pointer',
               transition: 'background 120ms',
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-panel)'; }}
           >
             Configure
           </button>
@@ -569,7 +569,7 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill, killing }: {
               padding: '6px 12px',
               borderRadius: 8,
               border: killing ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid rgba(239, 68, 68, 0.2)',
-              background: killing ? 'rgba(239, 68, 68, 0.08)' : '#fff',
+              background: killing ? 'rgba(239, 68, 68, 0.08)' : 'var(--t-panel)',
               color: '#ef4444',
               fontSize: 11,
               fontWeight: 600,
@@ -585,7 +585,7 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill, killing }: {
             }}
             onMouseLeave={(e) => {
               if (!killing) {
-                e.currentTarget.style.background = '#fff';
+                e.currentTarget.style.background = 'var(--t-panel)';
                 e.currentTarget.style.borderColor = 'rgba(239, 68, 68, 0.2)';
               }
             }}
@@ -644,7 +644,7 @@ function AgentEditModal({ agent, onClose, onSave }: {
         padding: 28,
         width: 420,
         maxWidth: '90vw',
-        boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+        boxShadow: 'var(--t-panel-shadow)',
       }} onClick={(e) => e.stopPropagation()}>
         <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--t-text)', margin: '0 0 4px' }}>
           Configure Agent
@@ -655,7 +655,7 @@ function AgentEditModal({ agent, onClose, onSave }: {
 
         {/* Model selector */}
         <label style={{ display: 'block', marginBottom: 16 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text-secondary)', display: 'block', marginBottom: 6 }}>
             Model
           </span>
           <select
@@ -665,7 +665,7 @@ function AgentEditModal({ agent, onClose, onSave }: {
               width: '100%',
               padding: '10px 12px',
               borderRadius: 10,
-              border: '1px solid rgba(0,0,0,0.1)',
+              border: '1px solid var(--t-input-border)',
               background: 'var(--t-panel)',
               fontSize: 13,
               color: 'var(--t-text)',
@@ -696,13 +696,13 @@ function AgentEditModal({ agent, onClose, onSave }: {
           marginBottom: 20,
         }}>
           Model changes take effect on the next session or after a restart.
-          This uses the OpenClaw <code style={{ background: 'rgba(0,0,0,0.04)', padding: '1px 4px', borderRadius: 3 }}>session_status</code> model override.
+          This uses the OpenClaw <code style={{ background: 'var(--t-divider-subtle)', padding: '1px 4px', borderRadius: 3 }}>session_status</code> model override.
         </div>
 
         {/* Actions */}
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button type="button" onClick={onClose} style={{
-            padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.08)',
+            padding: '8px 16px', borderRadius: 10, border: '1px solid var(--t-btn-secondary-border)',
             background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
           }}>
             Cancel
@@ -820,26 +820,26 @@ function AgentsTab() {
         padding: '14px 20px',
         borderRadius: 14,
         background: 'var(--t-panel)',
-        border: '1px solid rgba(0,0,0,0.06)',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        border: '1px solid var(--t-panel-border)',
+        boxShadow: 'var(--t-panel-shadow)',
       }}>
         <div style={{ textAlign: 'center', flex: 1 }}>
           <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--t-text)' }}>{agents.length}</div>
           <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Agents</div>
         </div>
-        <div style={{ width: 1, background: 'rgba(0,0,0,0.06)' }} />
+        <div style={{ width: 1, background: 'var(--t-divider)' }} />
         <div style={{ textAlign: 'center', flex: 1 }}>
           <div style={{ fontSize: 22, fontWeight: 800, color: '#22c55e' }}>
             {agents.filter(a => a.status === 'running').length}
           </div>
           <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Running</div>
         </div>
-        <div style={{ width: 1, background: 'rgba(0,0,0,0.06)' }} />
+        <div style={{ width: 1, background: 'var(--t-divider)' }} />
         <div style={{ textAlign: 'center', flex: 1 }}>
           <div style={{ fontSize: 22, fontWeight: 800, color: '#3b82f6' }}>{squads.length}</div>
           <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Squads</div>
         </div>
-        <div style={{ width: 1, background: 'rgba(0,0,0,0.06)' }} />
+        <div style={{ width: 1, background: 'var(--t-divider)' }} />
         <div style={{ textAlign: 'center', flex: 1 }}>
           <div style={{ fontSize: 22, fontWeight: 800, color: '#f59e0b' }}>
             {agents.filter(a => a.runtime === 'openclaw').length}
@@ -866,12 +866,12 @@ function AgentsTab() {
               <span style={{
                 fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)',
                 padding: '1px 8px', borderRadius: 5,
-                background: 'rgba(0,0,0,0.04)',
+                background: 'var(--t-divider-subtle)',
               }}>
                 {members.length}
               </span>
               {squad && (
-                <span style={{ fontSize: 10, color: '#b0b8c4', marginLeft: 'auto' }}>
+                <span style={{ fontSize: 10, color: 'var(--t-text-faint)', marginLeft: 'auto' }}>
                   {squad.throughputLabel}
                 </span>
               )}
