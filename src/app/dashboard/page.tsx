@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useDesktopWebSocket, type DesktopWsCallbacks } from '@/components/desktop/hooks/useDesktopWebSocket';
 import type { WsConnectionState } from '@/components/desktop/hooks/useDesktopWebSocket';
 import type { TerminalHandle } from '@/components/desktop/LiveOutput';
+import { TerminalWorkspace, type TerminalTabHandle } from '@/components/desktop/TerminalWorkspace';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 // WorkspacesPanel merged into AgentPanel — unified agent+workspace view
 import { DesktopChat } from '@/components/desktop/DesktopChat';
@@ -43,6 +44,7 @@ function DashboardInner() {
   const [dashTermSession, setDashTermSession] = useState<string | null>(null);
   const termCreatedRef = useRef(false);
   const terminalRef = useRef<TerminalHandle>(null);
+  const termWorkspaceRef = useRef<TerminalTabHandle>(null);
   const [agentsJson, setAgentsJson] = useState('[]');
   const [activeWorkspace, setActiveWorkspace] = useState<string | undefined>();
   const [showMemoryView, setShowMemoryView] = useState(false);
@@ -55,19 +57,23 @@ function DashboardInner() {
   const [thoughtsOpen, setThoughtsOpen] = useState(false);
   const [wsStatus, setWsStatus] = useState<WsConnectionState>('disconnected');
 
-  // Terminal WS hook — uses React ref instead of DOM queries
+  // Terminal WS hook — routes events to TerminalWorkspace (multi-tab)
   const terminalWsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
     onTerminalCreated: (sessionName: string) => {
       setDashTermSession(sessionName);
+      termWorkspaceRef.current?.onSessionCreated(sessionName);
     },
-    onTerminalData: (_sessionName: string, data: string) => {
+    onTerminalData: (sessionName: string, data: string) => {
       terminalRef.current?.writeToTerminal(data);
+      termWorkspaceRef.current?.writeToTerminal(sessionName, data);
     },
-    onTerminalError: (_sessionName: string, error: string) => {
+    onTerminalError: (sessionName: string, error: string) => {
       terminalRef.current?.setTermError(error);
+      termWorkspaceRef.current?.setTermError(sessionName, error);
     },
-    onTerminalExited: (_sessionName: string, _exitCode: number) => {
+    onTerminalExited: (sessionName: string, _exitCode: number) => {
       terminalRef.current?.setTermExited(true);
+      termWorkspaceRef.current?.setTermExited(sessionName);
     },
   }), []);
 
@@ -80,16 +86,7 @@ function DashboardInner() {
     sendTerminalDetach,
   } = useDesktopWebSocket(undefined, terminalWsCallbacks);
 
-  // Auto-create terminal on WS connect, reset on disconnect
-  useEffect(() => {
-    if (termWsConnected && !termCreatedRef.current) {
-      termCreatedRef.current = true;
-      sendTerminalCreate(120, 30);
-    }
-    if (!termWsConnected) {
-      termCreatedRef.current = false;
-    }
-  }, [termWsConnected, sendTerminalCreate]);
+  // Terminal auto-creation now handled by TerminalWorkspace component
 
   // ── Alert system ──
   const {
@@ -520,16 +517,40 @@ function DashboardInner() {
           </div>
         )}
 
-        {/* Top — workspace area with search */}
-        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && <div style={{
+        {/* Terminal-first workspace — fills center column */}
+        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (
+          <TerminalWorkspace
+            ref={termWorkspaceRef}
+            sendTerminalCreate={sendTerminalCreate}
+            sendTerminalAttach={sendTerminalAttach}
+            sendTerminalInput={sendTerminalInput}
+            sendTerminalResize={sendTerminalResize}
+            sendTerminalDetach={sendTerminalDetach}
+            termWsConnected={termWsConnected}
+          />
+        )}
+
+        {/* Canvas — only when tabs open, overlays below terminal */}
+        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && canvasTabs.length > 0 && bottomPanelVisible && (
+          <div style={{ flex: `0 0 ${canvasHeight}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            <Canvas
+              tabs={canvasTabs}
+              activeTabId={activeCanvasTabId}
+              onSelectTab={setActiveCanvasTabId}
+              onCloseTab={closeCanvasTab}
+              onSelectCommit={handleSelectCommit}
+            />
+          </div>
+        )}
+
+        {/* REMOVED: Old workspace placeholder + terminal band + canvas layout */}
+        {false && <div style={{
           flex: canvasTabs.length > 0 ? `0 0 ${100 - canvasHeight}%` : 1,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
           background: 'var(--t-bg-gradient)',
         }}>
-          {/* Search moved to TitleBar */}
-          {/* Workspace content area */}
           <div style={{
             flex: 1,
             display: 'flex',
@@ -560,70 +581,6 @@ function DashboardInner() {
             ) : null}
           </div>
         </div>}
-
-        {/* Vertical drag handle between workspace and canvas */}
-        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (<>
-
-        {((canvasTabs.length > 0 && bottomPanelVisible) || (dashTermSession && !liveOutputCollapsed)) && (
-          <div
-            onMouseDown={startCanvasDrag}
-            style={{
-              height: 6,
-              cursor: 'row-resize',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              zIndex: 10,
-              background: 'var(--t-divider-subtle)',
-            }}
-          >
-            <div style={{
-              width: 40,
-              height: 3,
-              borderRadius: 2,
-              backgroundColor: 'var(--t-drag-handle)',
-              transition: 'background-color 150ms',
-            }} />
-          </div>
-        )}
-
-        {/* Terminal — always visible when dashTermSession is set */}
-        {dashTermSession && (
-          <div style={{
-            flexShrink: 0,
-            minHeight: liveOutputCollapsed ? 0 : 180,
-            maxHeight: liveOutputCollapsed ? 0 : '40%',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            transition: 'max-height 200ms ease, min-height 200ms ease',
-          }}>
-            <LiveOutput
-              onCollapseChange={setLiveOutputCollapsed}
-              tmuxSession={dashTermSession}
-              sendTerminalAttach={sendTerminalAttach}
-              sendTerminalInput={sendTerminalInput}
-              sendTerminalResize={sendTerminalResize}
-              sendTerminalDetach={sendTerminalDetach}
-              terminalRef={terminalRef}
-            />
-          </div>
-        )}
-
-        {/* Bottom — Canvas (tabs + contextual content) */}
-        {canvasTabs.length > 0 && bottomPanelVisible && (
-          <div style={{ flex: `0 0 ${canvasHeight}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <Canvas
-              tabs={canvasTabs}
-              activeTabId={activeCanvasTabId}
-              onSelectTab={setActiveCanvasTabId}
-              onCloseTab={closeCanvasTab}
-              onSelectCommit={handleSelectCommit}
-            />
-          </div>
-        )}
-        </>)}
       </div>
 
       {/* ── Right drag handle ── */}
