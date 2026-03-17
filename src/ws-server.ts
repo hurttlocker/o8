@@ -684,13 +684,17 @@ function removeClientFromTerminal(clientId: string, sessionName: string) {
     try { attachment.ptyProcess.kill(); } catch { /* already gone */ }
     terminalAttachments.delete(sessionName);
 
-    // Kill dashboard-created tmux sessions (cortex-dash-*) since they're ephemeral.
+    // Kill dashboard tmux sessions after a grace period (allows reconnection on hot reload).
     // Agent-launched sessions (cortex-codex-*, cortex-claude-*) persist for reattach.
     if (sessionName.startsWith('cortex-dash-')) {
-      try {
-        execSync(`tmux kill-session -t ${sessionName} 2>/dev/null`, { timeout: 3000 });
-        console.log(`[ws-server] Killed ephemeral tmux session: ${sessionName}`);
-      } catch { /* already gone */ }
+      setTimeout(() => {
+        // Only kill if no one reattached during the grace period
+        if (terminalAttachments.has(sessionName)) return;
+        try {
+          execSync(`tmux kill-session -t ${sessionName} 2>/dev/null`, { timeout: 3000 });
+          console.log(`[ws-server] Killed ephemeral tmux session: ${sessionName} (after grace period)`);
+        } catch { /* already gone */ }
+      }, 10_000);
     }
   }
 }
@@ -984,23 +988,9 @@ reviewPollTimer = setInterval(() => {
 }, REVIEW_POLL_INTERVAL_MS);
 if (reviewPollTimer.unref) reviewPollTimer.unref();
 
-// Clean up stale dashboard tmux sessions from previous runs
-try {
-  const staleOut = execSync('tmux list-sessions -F "#{session_name}" 2>/dev/null', {
-    encoding: 'utf-8',
-    timeout: 3000,
-  });
-  const staleSessions = staleOut.trim().split('\n').filter(n => n.startsWith('cortex-dash-'));
-  for (const name of staleSessions) {
-    try {
-      execSync(`tmux kill-session -t ${name} 2>/dev/null`, { timeout: 3000 });
-      console.log(`[ws-server] Cleaned up stale tmux session: ${name}`);
-    } catch { /* already gone */ }
-  }
-  if (staleSessions.length > 0) {
-    console.log(`[ws-server] Cleaned ${staleSessions.length} stale dashboard tmux sessions`);
-  }
-} catch { /* tmux not running or no sessions — fine */ }
+// Don't purge tmux sessions on startup — the reuse logic in handleTerminalCreate
+// will find and reattach to existing cortex-dash-* sessions. Purging here races
+// with clients that reconnect immediately after a hot reload.
 
 // Start everything
 connectGateway();
