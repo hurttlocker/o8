@@ -112,10 +112,10 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
         }}>
           <Check size={28} strokeWidth={2.5} style={{ color: '#22c55e' }} />
         </div>
-        <div style={{ fontSize: 18, fontWeight: 600, color: '#0f172a' }}>
+        <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--t-text)' }}>
           Issue #{created.number} created
         </div>
-        <div style={{ fontSize: 13, color: '#64748b' }}>
+        <div style={{ fontSize: 13, color: 'var(--t-text-secondary)' }}>
           {repo || 'hurttlocker/cortex-ide'}
         </div>
       </div>
@@ -134,16 +134,16 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
         paddingRight: 24,
         paddingBottom: 12,
         paddingLeft: 24,
-        borderBottom: '1px solid rgba(0,0,0,0.06)',
-        background: 'rgba(255,255,255,0.4)',
+        borderBottom: '1px solid var(--t-divider)',
+        background: 'var(--t-panel-translucent)',
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
       }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 600, color: '#0f172a' }}>New Issue</div>
-          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+          <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text)' }}>New Issue</div>
+          <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 2, fontFamily: '"SF Mono", ui-monospace, monospace' }}>
             {repo || 'hurttlocker/cortex-ide'}
           </div>
         </div>
@@ -158,11 +158,11 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
               paddingBottom: 6,
               paddingLeft: 14,
               borderRadius: 8,
-              border: '1px solid rgba(0,0,0,0.08)',
-              background: preview ? 'rgba(37,99,235,0.06)' : 'rgba(255,255,255,0.6)',
+              border: '1px solid var(--t-panel-border)',
+              background: preview ? 'rgba(37,99,235,0.06)' : 'var(--t-panel-translucent)',
               fontSize: 12,
               fontWeight: 500,
-              color: preview ? '#2563eb' : '#64748b',
+              color: preview ? '#2563eb' : 'var(--t-text-secondary)',
               cursor: 'pointer',
               fontFamily: '-apple-system, system-ui, sans-serif',
             }}
@@ -218,7 +218,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
               background: creating || !title.trim() ? '#d1d5db' : '#ef4444',
               fontSize: 12,
               fontWeight: 600,
-              color: creating || !title.trim() ? '#9ca3af' : '#ffffff',
+              color: creating || !title.trim() ? 'var(--t-text-muted)' : '#ffffff',
               cursor: creating || !title.trim() ? 'default' : 'pointer',
               boxShadow: creating || !title.trim() ? 'none' : '0 2px 8px rgba(239,68,68,0.3)',
               display: 'flex',
@@ -256,7 +256,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
         {preview ? (
           /* Preview mode */
           <div>
-            <h2 style={{ fontSize: 18, fontWeight: 600, color: '#0f172a', marginBottom: 16 }}>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--t-text)', marginBottom: 16 }}>
               {title || 'Untitled Issue'}
             </h2>
             {labels.length > 0 ? (
@@ -281,7 +281,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
             {body ? (
               <MarkdownBody text={body} />
             ) : (
-              <div style={{ fontSize: 13, color: '#94a3b8', fontStyle: 'italic' }}>No description</div>
+              <div style={{ fontSize: 13, color: 'var(--t-text-muted)', fontStyle: 'italic' }}>No description</div>
             )}
           </div>
         ) : (
@@ -289,7 +289,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {/* Title */}
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t-text-secondary)', marginBottom: 6 }}>
                 Title
               </label>
               <input
@@ -304,13 +304,13 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
                   paddingBottom: 10,
                   paddingLeft: 14,
                   borderRadius: 10,
-                  border: '1px solid rgba(0,0,0,0.08)',
-                  background: 'rgba(255,255,255,0.7)',
+                  border: '1px solid var(--t-input-border)',
+                  background: 'var(--t-input-bg)',
                   backdropFilter: 'blur(12px)',
                   WebkitBackdropFilter: 'blur(12px)',
                   fontSize: 14,
                   fontWeight: 500,
-                  color: '#0f172a',
+                  color: 'var(--t-text)',
                   outline: 'none',
                   fontFamily: '-apple-system, system-ui, sans-serif',
                   boxSizing: 'border-box',
@@ -320,7 +320,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
 
             {/* Body */}
             <div style={{ flex: 1 }}>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t-text-secondary)', marginBottom: 6 }}>
                 Description
               </label>
               <textarea
@@ -335,12 +335,12 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
                   paddingBottom: 12,
                   paddingLeft: 14,
                   borderRadius: 10,
-                  border: '1px solid rgba(0,0,0,0.08)',
-                  background: 'rgba(255,255,255,0.7)',
+                  border: '1px solid var(--t-input-border)',
+                  background: 'var(--t-input-bg)',
                   backdropFilter: 'blur(12px)',
                   WebkitBackdropFilter: 'blur(12px)',
                   fontSize: 13,
-                  color: '#1e293b',
+                  color: 'var(--t-text)',
                   lineHeight: 1.7,
                   outline: 'none',
                   resize: 'vertical',
@@ -352,7 +352,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
 
             {/* Labels */}
             <div>
-              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#475569', marginBottom: 6 }}>
+              <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--t-text-secondary)', marginBottom: 6 }}>
                 Labels
               </label>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -382,7 +382,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
                         background: 'transparent',
                         padding: 0,
                         cursor: 'pointer',
-                        color: '#94a3b8',
+                        color: 'var(--t-text-muted)',
                         marginLeft: 2,
                       }}
                     >
@@ -409,10 +409,10 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
                     paddingBottom: 6,
                     paddingLeft: 10,
                     borderRadius: 6,
-                    border: '1px solid rgba(0,0,0,0.06)',
+                    border: '1px solid var(--t-divider)',
                     background: 'transparent',
                     fontSize: 12,
-                    color: '#1e293b',
+                    color: 'var(--t-text)',
                     outline: 'none',
                     fontFamily: '-apple-system, system-ui, sans-serif',
                   }}
@@ -424,7 +424,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
             {!enhanced && (title.trim() || body.trim()) ? (
               <div style={{
                 fontSize: 12,
-                color: '#94a3b8',
+                color: 'var(--t-text-muted)',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,

@@ -64,6 +64,8 @@ interface AgentDetail {
     state: 'open' | 'merged' | 'closed';
     url: string;
   };
+  localDiff?: { additions: number; deletions: number; changedFiles: number };
+  activity?: { coding: number; thinking: number; testing: number; idle: number };
   workspaceStatus?: 'in_progress' | 'in_review' | 'done' | 'idle' | 'cancelled';
 }
 
@@ -271,11 +273,11 @@ const AgentCard = memo(function AgentCard({
   return (
     <div style={{
       background: 'rgba(255, 255, 255, 0.7)',
-      border: expanded ? '1px solid rgba(37, 99, 235, 0.15)' : '1px solid rgba(0, 0, 0, 0.06)',
+      border: expanded ? '1px solid rgba(37, 99, 235, 0.15)' : '1px solid var(--t-panel-border)',
       borderRadius: 14,
       backdropFilter: 'blur(20px)',
       WebkitBackdropFilter: 'blur(20px)',
-      boxShadow: expanded ? '0 2px 8px rgba(37,99,235,0.06)' : '0 1px 3px rgba(0,0,0,0.04)',
+      boxShadow: expanded ? '0 2px 8px rgba(37,99,235,0.06)' : 'var(--t-panel-shadow)',
       transition: 'all 200ms ease',
       overflow: 'hidden',
     }}>
@@ -291,7 +293,7 @@ const AgentCard = memo(function AgentCard({
         }}
       >
         {/* GitHub icon */}
-        <div style={{ color: '#6b7280', flexShrink: 0 }}>
+        <div style={{ color: 'var(--t-text-secondary)', flexShrink: 0 }}>
           <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor" style={{ display: 'block' }}>
             <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
           </svg>
@@ -301,7 +303,7 @@ const AgentCard = memo(function AgentCard({
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{
-              fontSize: 13, fontWeight: 700, color: '#1e293b',
+              fontSize: 13, fontWeight: 700, color: 'var(--t-text-strong)',
               letterSpacing: '-0.01em',
             }}>{group.displayName}</span>
           </div>
@@ -327,7 +329,7 @@ const AgentCard = memo(function AgentCard({
                   }} />
                   <span style={{
                     fontSize: 11, fontWeight: 600,
-                    color: isRunning ? '#374151' : '#9ca3af',
+                    color: isRunning ? 'var(--t-text)' : 'var(--t-text-muted)',
                   }}>
                     {dotLabel}
                   </span>
@@ -358,8 +360,8 @@ const AgentCard = memo(function AgentCard({
             </div>
           )}
           {expanded
-            ? <ChevronDown size={14} strokeWidth={2} style={{ color: '#94a3b8' }} />
-            : <ChevronRight size={14} strokeWidth={2} style={{ color: '#cbd5e1' }} />
+            ? <ChevronDown size={14} strokeWidth={2} style={{ color: 'var(--t-text-muted)' }} />
+            : <ChevronRight size={14} strokeWidth={2} style={{ color: 'var(--t-text-faint)' }} />
           }
         </div>
       </div>
@@ -369,7 +371,7 @@ const AgentCard = memo(function AgentCard({
         <div style={{ padding: '0 14px 8px' }}>
           <div style={{
             height: 3, borderRadius: 2,
-            background: 'rgba(0,0,0,0.04)', overflow: 'hidden',
+            background: 'var(--t-divider-subtle)', overflow: 'hidden',
           }}>
             <div style={{
               height: '100%',
@@ -424,6 +426,7 @@ const AgentCard = memo(function AgentCard({
           const progress = agentCtx > 0 ? agentCtx / 100 : 0;
           const agentModel = agent.model ? agent.model.replace('claude-', '').replace(/-\d+$/, '').replace('openai-codex/', '').replace('anthropic/', '') : '';
           const pr = agent.pr;
+          const diff = pr ? { add: pr.additions, del: pr.deletions } : agent.localDiff ? { add: agent.localDiff.additions, del: agent.localDiff.deletions } : null;
 
           return (
             <div
@@ -434,8 +437,8 @@ const AgentCard = memo(function AgentCard({
               }}
               style={{
                 padding: '12px', borderRadius: 12,
-                background: '#fff',
-                border: '1px solid rgba(0,0,0,0.06)',
+                background: 'var(--t-panel)',
+                border: '1px solid var(--t-panel-border)',
                 cursor: agent.sessionKey ? 'pointer' : 'default',
                 transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
               }}
@@ -444,7 +447,7 @@ const AgentCard = memo(function AgentCard({
                 e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.06)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.border = '1px solid rgba(0,0,0,0.06)';
+                e.currentTarget.style.border = '1px solid var(--t-panel-border)';
                 e.currentTarget.style.boxShadow = 'none';
               }}
             >
@@ -462,21 +465,21 @@ const AgentCard = memo(function AgentCard({
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#111827', letterSpacing: '-0.02em' }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
                       {fullName}
                     </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2, flexWrap: 'wrap' }}>
                     {agentModel && (
-                      <span style={{ fontSize: 10, color: '#94a3b8', letterSpacing: '-0.01em' }}>
+                      <span style={{ fontSize: 10, color: 'var(--t-text-muted)', letterSpacing: '-0.01em' }}>
                         {agentModel}
                       </span>
                     )}
                     {branch && (
                       <>
-                        <span style={{ fontSize: 9, color: '#d1d5db' }}>·</span>
+                        <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
                         <span style={{
-                          fontSize: 10, color: '#6b7280',
+                          fontSize: 10, color: 'var(--t-text-secondary)',
                           fontFamily: 'SF Mono, Menlo, monospace',
                           maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                         }}>
@@ -486,7 +489,7 @@ const AgentCard = memo(function AgentCard({
                     )}
                     {pr && (
                       <>
-                        <span style={{ fontSize: 9, color: '#d1d5db' }}>·</span>
+                        <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
                         <span style={{
                           fontSize: 10, fontWeight: 600,
                           color: pr.state === 'merged' ? '#8b5cf6' : pr.state === 'open' ? '#22c55e' : '#9ca3af',
@@ -501,7 +504,7 @@ const AgentCard = memo(function AgentCard({
                 {progress > 0 && (
                   <div style={{ position: 'relative', width: 32, height: 32, flexShrink: 0 }}>
                     <svg width={32} height={32} style={{ display: 'block', transform: 'rotate(-90deg)' }}>
-                      <circle cx={16} cy={16} r={13} fill="none" stroke="rgba(0,0,0,0.04)" strokeWidth={2} />
+                      <circle cx={16} cy={16} r={13} fill="none" stroke="var(--t-divider-subtle)" strokeWidth={2} />
                       <circle cx={16} cy={16} r={13} fill="none" stroke={ctxColor(agentCtx)} strokeWidth={2}
                         strokeDasharray={2 * Math.PI * 13}
                         strokeDashoffset={2 * Math.PI * 13 * (1 - progress)}
@@ -525,33 +528,35 @@ const AgentCard = memo(function AgentCard({
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
                 <div style={{
                   display: 'flex', height: 4, borderRadius: 2, overflow: 'hidden',
-                  flex: 1, background: 'rgba(0,0,0,0.03)',
+                  flex: 1, background: 'var(--t-hover)',
                 }}>
-                  {isRunning ? (
+                  {agent.activity ? (
                     <>
-                      <div style={{ flex: 0.5, background: '#2563eb' }} />
-                      <div style={{ flex: 0.2, background: '#93c5fd' }} />
-                      <div style={{ flex: 0.15, background: '#f59e0b' }} />
-                      <div style={{ flex: 0.15, background: '#e5e7eb' }} />
+                      {agent.activity.coding > 0 && <div style={{ flex: agent.activity.coding, background: '#2563eb' }} />}
+                      {agent.activity.thinking > 0 && <div style={{ flex: agent.activity.thinking, background: '#93c5fd' }} />}
+                      {agent.activity.testing > 0 && <div style={{ flex: agent.activity.testing, background: '#f59e0b' }} />}
+                      {agent.activity.idle > 0 && <div style={{ flex: agent.activity.idle, background: '#e5e7eb' }} />}
                     </>
+                  ) : isRunning ? (
+                    <div style={{ flex: 1, background: '#2563eb' }} />
                   ) : (
-                    <div style={{ flex: 1, background: ctxColor(agentCtx) || '#e5e7eb' }} />
+                    <div style={{ flex: 1, background: '#e5e7eb' }} />
                   )}
                 </div>
                 {/* Diff stats badge */}
-                {pr && (
+                {diff && (
                   <span style={{
                     fontSize: 10, fontWeight: 700, flexShrink: 0,
                     fontFamily: 'SF Mono, Menlo, monospace',
                     display: 'flex', gap: 4,
                   }}>
-                    <span style={{ color: '#22c55e' }}>+{pr.additions}</span>
-                    <span style={{ color: '#ef4444' }}>-{pr.deletions}</span>
+                    <span style={{ color: '#22c55e' }}>+{diff.add}</span>
+                    <span style={{ color: '#ef4444' }}>-{diff.del}</span>
                   </span>
                 )}
                 {agentCtx > 0 && (
                   <span style={{
-                    fontSize: 10, fontWeight: 600, color: '#94a3b8', flexShrink: 0,
+                    fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', flexShrink: 0,
                     fontFamily: 'SF Mono, Menlo, monospace',
                   }}>
                     ctx {agentCtx}%
@@ -564,7 +569,7 @@ const AgentCard = memo(function AgentCard({
 
         return (
           <div style={{
-            borderTop: '1px solid rgba(0,0,0,0.04)',
+            borderTop: '1px solid var(--t-divider-subtle)',
             padding: '6px 10px 10px',
           }}>
             {statusGroups.filter(g => g.agents.length > 0).map(g => (
@@ -581,7 +586,7 @@ const AgentCard = memo(function AgentCard({
                   }} />
                   {g.label}
                   <span style={{
-                    fontSize: 9, fontWeight: 600, color: '#9ca3af',
+                    fontSize: 9, fontWeight: 600, color: 'var(--t-text-muted)',
                     marginLeft: 'auto',
                   }}>
                     {g.agents.length}
@@ -616,7 +621,7 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
   }
 
   if (!items.length) {
-    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>No recent activity</div>;
+    return <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>No recent activity</div>;
   }
 
   return (
@@ -636,7 +641,7 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
                 paddingRight: 14,
                 paddingBottom: 10,
                 paddingLeft: 14,
-                borderBottom: '1px solid rgba(0,0,0,0.03)',
+                borderBottom: '1px solid var(--t-divider-subtle)',
                 cursor: onSelectCommit ? 'pointer' : 'default',
                 transition: 'background 100ms ease',
               }}
@@ -659,7 +664,7 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{
                   fontSize: 13,
-                  color: '#1e293b',
+                  color: 'var(--t-text-strong)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -667,8 +672,8 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
                 }}>
                   {c.message}
                 </div>
-                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, display: 'flex', gap: 6 }}>
-                  <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', color: '#64748b' }}>{c.hash}</span>
+                <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 2, display: 'flex', gap: 6 }}>
+                  <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', color: 'var(--t-text-secondary)' }}>{c.hash}</span>
                   <span>·</span>
                   <span>{c.age}</span>
                 </div>
@@ -688,7 +693,7 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
             paddingRight: 14,
             paddingBottom: 10,
             paddingLeft: 14,
-            borderBottom: '1px solid rgba(0,0,0,0.03)',
+            borderBottom: '1px solid var(--t-divider-subtle)',
           }}>
             <div style={{
               width: 22,
@@ -706,7 +711,7 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{
                 fontSize: 13,
-                color: '#1e293b',
+                color: 'var(--t-text-strong)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -714,7 +719,7 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
               }}>
                 {e.title}
               </div>
-              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
+              <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 2 }}>
                 {e.timestamp}
               </div>
             </div>
@@ -729,7 +734,7 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
 
 const IssuesList = memo(function IssuesList({ issues, onSelect }: { issues: GHIssue[]; onSelect: (num: number) => void }) {
   if (!issues.length) {
-    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>No open issues</div>;
+    return <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>No open issues</div>;
   }
 
   return (
@@ -746,18 +751,18 @@ const IssuesList = memo(function IssuesList({ issues, onSelect }: { issues: GHIs
             paddingRight: 14,
             paddingBottom: 10,
             paddingLeft: 14,
-            borderBottom: '1px solid rgba(0,0,0,0.04)',
+            borderBottom: '1px solid var(--t-divider-subtle)',
             cursor: 'pointer',
             transition: 'background 100ms ease',
           }}
         >
-          <BookOpen size={14} strokeWidth={1.8} style={{ color: '#94a3b8', marginTop: 2, flexShrink: 0 }} />
+          <BookOpen size={14} strokeWidth={1.8} style={{ color: 'var(--t-text-muted)', marginTop: 2, flexShrink: 0 }} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 12, color: '#ef4444', fontWeight: 600, fontFamily: '"SF Mono", ui-monospace, monospace' }}>#{issue.number}</span>
               <span style={{
                 fontSize: 13,
-                color: '#1e293b',
+                color: 'var(--t-text-strong)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
@@ -789,7 +794,7 @@ const IssuesList = memo(function IssuesList({ issues, onSelect }: { issues: GHIs
               </div>
             ) : null}
           </div>
-          <ChevronRight size={13} strokeWidth={2} style={{ color: '#cbd5e1', marginTop: 3, flexShrink: 0 }} />
+          <ChevronRight size={13} strokeWidth={2} style={{ color: 'var(--t-text-faint)', marginTop: 3, flexShrink: 0 }} />
         </div>
       ))}
     </div>
@@ -806,7 +811,7 @@ const prStateColor: Record<string, string> = {
 
 const PRList = memo(function PRList({ prs, onSelect }: { prs: GHPullRequest[]; onSelect?: (num: number) => void }) {
   if (!prs.length) {
-    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>No pull requests</div>;
+    return <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>No pull requests</div>;
   }
 
   return (
@@ -825,7 +830,7 @@ const PRList = memo(function PRList({ prs, onSelect }: { prs: GHPullRequest[]; o
               paddingRight: 14,
               paddingBottom: 10,
               paddingLeft: 14,
-              borderBottom: '1px solid rgba(0,0,0,0.04)',
+              borderBottom: '1px solid var(--t-divider-subtle)',
               cursor: onSelect ? 'pointer' : 'default',
               transition: 'background 100ms ease',
             }}
@@ -856,7 +861,7 @@ const PRList = memo(function PRList({ prs, onSelect }: { prs: GHPullRequest[]; o
                 </span>
                 <span style={{
                   fontSize: 13,
-                  color: '#1e293b',
+                  color: 'var(--t-text-strong)',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -865,7 +870,7 @@ const PRList = memo(function PRList({ prs, onSelect }: { prs: GHPullRequest[]; o
                   {pr.title}
                 </span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, fontSize: 11, color: '#94a3b8' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, fontSize: 11, color: 'var(--t-text-muted)' }}>
                 <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{pr.headRefName}</span>
                 <span>·</span>
                 <span style={{ color: '#22c55e', fontWeight: 600 }}>+{pr.additions}</span>
@@ -894,7 +899,7 @@ const PRList = memo(function PRList({ prs, onSelect }: { prs: GHPullRequest[]; o
                 </div>
               ) : null}
             </div>
-            <ChevronRight size={13} strokeWidth={2} style={{ color: '#cbd5e1', marginTop: 3, flexShrink: 0 }} />
+            <ChevronRight size={13} strokeWidth={2} style={{ color: 'var(--t-text-faint)', marginTop: 3, flexShrink: 0 }} />
           </div>
         );
       })}
@@ -969,13 +974,13 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
           paddingRight: 20,
           paddingBottom: 16,
           paddingLeft: 24,
-          borderBottom: '1px solid rgba(0,0,0,0.06)',
+          borderBottom: '1px solid var(--t-panel-border)',
           background: 'rgba(255,255,255,0.2)',
           flexShrink: 0,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
             {loading ? (
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#64748b' }}>Loading…</span>
+              <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--t-text-secondary)' }}>Loading…</span>
             ) : detail ? (
               <>
                 <span style={{ fontSize: 13, fontWeight: 700, color: '#ef4444', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
@@ -984,7 +989,7 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
                 <span style={{
                   fontSize: 15,
                   fontWeight: 700,
-                  color: '#0f172a',
+                  color: 'var(--t-text)',
                   letterSpacing: '-0.01em',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -1020,7 +1025,7 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
               width: 30,
               height: 30,
               borderRadius: 8,
-              border: '1px solid rgba(0,0,0,0.08)',
+              border: '1px solid var(--t-btn-secondary-border)',
               background: 'rgba(255,255,255,0.7)',
               color: '#ef4444',
               cursor: 'pointer',
@@ -1044,15 +1049,15 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
               paddingRight: 24,
               paddingBottom: 12,
               paddingLeft: 24,
-              borderBottom: '1px solid rgba(0,0,0,0.04)',
+              borderBottom: '1px solid var(--t-divider-subtle)',
               display: 'flex',
               alignItems: 'center',
               gap: 12,
               flexWrap: 'wrap',
               fontSize: 12,
-              color: '#64748b',
+              color: 'var(--t-text-secondary)',
             }}>
-              <span>by <strong style={{ color: '#1e293b' }}>{detail.author}</strong></span>
+              <span>by <strong style={{ color: 'var(--t-text-strong)' }}>{detail.author}</strong></span>
               <span>·</span>
               <span>{new Date(detail.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
               <span>·</span>
@@ -1090,7 +1095,7 @@ const IssueModal = memo(function IssueModal({ issueNumber, onClose }: { issueNum
               {detail.body ? (
                 <MarkdownBody text={detail.body} />
               ) : (
-                <p style={{ fontSize: '0.9rem', color: '#94a3b8', fontStyle: 'italic' }}>
+                <p style={{ fontSize: '0.9rem', color: 'var(--t-text-muted)', fontStyle: 'italic' }}>
                   No description provided.
                 </p>
               )}
@@ -1164,11 +1169,11 @@ function CIList({ repo, onOpenCI }: { repo: string | null; onOpenCI?: (repo: str
   }, [repo]);
 
   if (loading) {
-    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>Loading CI runs…</div>;
+    return <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>Loading CI runs…</div>;
   }
 
   if (runs.length === 0) {
-    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>No workflow runs found</div>;
+    return <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>No workflow runs found</div>;
   }
 
   return (
@@ -1191,7 +1196,7 @@ function CIList({ repo, onOpenCI }: { repo: string | null; onOpenCI?: (repo: str
               paddingBottom: 8,
               paddingLeft: 14,
               border: 'none',
-              borderBottom: '1px solid rgba(0,0,0,0.04)',
+              borderBottom: '1px solid var(--t-divider-subtle)',
               background: 'transparent',
               cursor: 'pointer',
               textAlign: 'left',
@@ -1210,14 +1215,14 @@ function CIList({ repo, onOpenCI }: { repo: string | null; onOpenCI?: (repo: str
               <div style={{
                 fontSize: 12,
                 fontWeight: 400,
-                color: '#1e293b',
+                color: 'var(--t-text-strong)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}>{run.displayTitle}</div>
               <div style={{
                 fontSize: 10,
-                color: '#94a3b8',
+                color: 'var(--t-text-muted)',
                 marginTop: 2,
                 display: 'flex',
                 gap: 4,
@@ -1291,11 +1296,11 @@ function DeployList({ onOpenDeploy }: { onOpenDeploy?: (project?: string) => voi
   }, []);
 
   if (loading) {
-    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>Loading deployments…</div>;
+    return <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>Loading deployments…</div>;
   }
 
   if (deploys.length === 0) {
-    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>No deployments found</div>;
+    return <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>No deployments found</div>;
   }
 
   return (
@@ -1319,7 +1324,7 @@ function DeployList({ onOpenDeploy }: { onOpenDeploy?: (project?: string) => voi
               paddingBottom: 8,
               paddingLeft: 14,
               border: 'none',
-              borderBottom: '1px solid rgba(0,0,0,0.04)',
+              borderBottom: '1px solid var(--t-divider-subtle)',
               background: 'transparent',
               cursor: 'pointer',
               textAlign: 'left',
@@ -1333,14 +1338,14 @@ function DeployList({ onOpenDeploy }: { onOpenDeploy?: (project?: string) => voi
               <div style={{
                 fontSize: 12,
                 fontWeight: 400,
-                color: '#1e293b',
+                color: 'var(--t-text-strong)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
               }}>
                 {d.meta?.githubCommitMessage || d.url}
               </div>
-              <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 2, display: 'flex', gap: 4, alignItems: 'center' }}>
+              <div style={{ fontSize: 10, color: 'var(--t-text-muted)', marginTop: 2, display: 'flex', gap: 4, alignItems: 'center' }}>
                 <span style={{ fontWeight: 500, color: d.target === 'production' ? '#22c55e' : '#94a3b8' }}>
                   {d.target === 'production' ? 'prod' : 'preview'}
                 </span>
@@ -1389,14 +1394,14 @@ function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
           paddingBottom: 4,
           paddingLeft: 14 + depth * 16,
           fontSize: 12,
-          color: isChanged ? '#2563eb' : '#64748b',
+          color: isChanged ? '#2563eb' : 'var(--t-text-secondary)',
           fontWeight: isChanged ? 500 : 400,
           fontFamily: '"SF Mono", ui-monospace, monospace',
           cursor: 'pointer',
           transition: 'color 100ms',
         }}
       >
-        <FileText size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: isChanged ? '#3b82f6' : '#94a3b8' }} />
+        <FileText size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: isChanged ? '#3b82f6' : 'var(--t-text-muted)' }} />
         {node.name}
         {isChanged ? (
           <span style={{
@@ -1426,7 +1431,7 @@ function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
           paddingLeft: 14 + depth * 16,
           fontSize: 12,
           fontWeight: 500,
-          color: hasChangedChild ? '#1e40af' : '#1e293b',
+          color: hasChangedChild ? '#1e40af' : 'var(--t-text)',
           cursor: 'pointer',
           transition: 'color 100ms',
         }}
@@ -1437,8 +1442,8 @@ function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
         }
         {node.name}
         {open
-          ? <ChevronDown size={11} strokeWidth={2} style={{ color: '#94a3b8' }} />
-          : <ChevronRight size={11} strokeWidth={2} style={{ color: '#94a3b8' }} />
+          ? <ChevronDown size={11} strokeWidth={2} style={{ color: 'var(--t-text-muted)' }} />
+          : <ChevronRight size={11} strokeWidth={2} style={{ color: 'var(--t-text-muted)' }} />
         }
         {hasChangedChild && !open ? (
           <span style={{
@@ -1470,7 +1475,7 @@ const FileTree = memo(function FileTree({ tree, changedFiles, onSelectFile }: {
   onSelectFile?: (path: string) => void;
 }) {
   if (!tree.length) {
-    return <div style={{ padding: 20, fontSize: 13, color: '#94a3b8' }}>No files found</div>;
+    return <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>No files found</div>;
   }
 
   return (
@@ -1517,7 +1522,7 @@ function MemoryTabContent({ onOpenMemory }: { onOpenMemory?: () => void }) {
           paddingBottom: 12,
           paddingLeft: 16,
           borderRadius: 10,
-          border: '1px solid rgba(0,0,0,0.06)',
+          border: '1px solid var(--t-panel-border)',
           background: 'linear-gradient(135deg, #0a0e1a 0%, #1e293b 100%)',
           color: '#e2e8f0',
           fontSize: 13,
@@ -1532,7 +1537,7 @@ function MemoryTabContent({ onOpenMemory }: { onOpenMemory?: () => void }) {
         <Cpu size={16} strokeWidth={1.8} style={{ color: '#3b82f6' }} />
         Open Memory Visualization
       </button>
-      <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 8, lineHeight: 1.5 }}>
+      <p style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 8, lineHeight: 1.5 }}>
         Living particle view of Cortex knowledge. Heavy facts sink, fresh facts float. Hover to inspect.
       </p>
     </div>
@@ -1630,10 +1635,10 @@ export const AgentPanel = memo(function AgentPanel({
         const res = await fetch('/api/panel/workspaces');
         if (!res.ok) return;
         const data = await res.json();
-        const wsMap = new Map<string, { branch: string; pr: AgentDetail['pr']; workspaceStatus: AgentDetail['workspaceStatus'] }>();
+        const wsMap = new Map<string, { branch: string; pr: AgentDetail['pr']; localDiff: AgentDetail['localDiff']; activity: AgentDetail['activity']; workspaceStatus: AgentDetail['workspaceStatus'] }>();
         for (const ws of data.workspaces ?? []) {
           if (ws.sessionKey) {
-            wsMap.set(ws.sessionKey, { branch: ws.branch, pr: ws.pr, workspaceStatus: ws.status });
+            wsMap.set(ws.sessionKey, { branch: ws.branch, pr: ws.pr, localDiff: ws.localDiff, activity: ws.activity, workspaceStatus: ws.status });
           }
         }
         // Merge into agents
@@ -1641,7 +1646,7 @@ export const AgentPanel = memo(function AgentPanel({
           const enriched = prev.map(a => {
             const ws = wsMap.get(a.sessionKey);
             if (!ws) return a;
-            return { ...a, branch: ws.branch, pr: ws.pr || undefined, workspaceStatus: ws.workspaceStatus };
+            return { ...a, branch: ws.branch, pr: ws.pr || undefined, localDiff: ws.localDiff || undefined, activity: ws.activity || undefined, workspaceStatus: ws.workspaceStatus };
           });
           return JSON.stringify(enriched) === JSON.stringify(prev) ? prev : enriched;
         });
@@ -1743,7 +1748,7 @@ export const AgentPanel = memo(function AgentPanel({
       scrollbarWidth: 'none',
       msOverflowStyle: 'none',
       WebkitOverflowScrolling: 'touch',
-      background: '#f5f7fb',
+      background: 'var(--t-bg-subtle)',
     } as React.CSSProperties}
     className="hide-scrollbar"
     >
@@ -1770,7 +1775,7 @@ export const AgentPanel = memo(function AgentPanel({
         <div style={{
           fontSize: 11,
           fontWeight: 700,
-          color: '#94a3b8',
+          color: 'var(--t-text-muted)',
           textTransform: 'uppercase',
           letterSpacing: '0.08em',
           paddingLeft: 2,
@@ -1779,7 +1784,7 @@ export const AgentPanel = memo(function AgentPanel({
           Agents
         </div>
         {workspaceGroups.length === 0 ? (
-          <div style={{ fontSize: 13, color: '#94a3b8', padding: '8px 2px' }}>Loading agents…</div>
+          <div style={{ fontSize: 13, color: 'var(--t-text-muted)', padding: '8px 2px' }}>Loading agents…</div>
         ) : (
           workspaceGroups.map((group) => (
             <AgentCard
@@ -1824,7 +1829,7 @@ export const AgentPanel = memo(function AgentPanel({
                 border: 'none',
                 borderBottom: isActive ? '2px solid #ef4444' : '2px solid transparent',
                 background: 'transparent',
-                color: isActive ? '#1e293b' : '#94a3b8',
+                color: isActive ? 'var(--t-text)' : 'var(--t-text-muted)',
                 fontSize: 12,
                 fontWeight: isActive ? 600 : 400,
                 cursor: 'pointer',
@@ -1847,14 +1852,14 @@ export const AgentPanel = memo(function AgentPanel({
           paddingBottom: 4,
           paddingLeft: 14,
           fontSize: 11,
-          color: '#94a3b8',
+          color: 'var(--t-text-muted)',
           display: 'flex',
           alignItems: 'center',
           gap: 4,
-          borderTop: '1px solid rgba(0,0,0,0.04)',
+          borderTop: '1px solid var(--t-divider-subtle)',
           marginTop: 4,
         }}>
-          <span style={{ fontWeight: 600, color: '#64748b' }}>
+          <span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>
             {workspaceGroups.find(g => g.workspace === expandedGroup)?.displayName ?? 'All'}
           </span>
           {activeRepo ? (
@@ -1875,10 +1880,10 @@ export const AgentPanel = memo(function AgentPanel({
                   paddingBottom: 2,
                   paddingLeft: 6,
                   borderRadius: 4,
-                  border: '1px solid rgba(0,0,0,0.08)',
-                  background: 'rgba(255,255,255,0.6)',
+                  border: '1px solid var(--t-btn-secondary-border)',
+                  background: 'var(--t-panel-hover)',
                   fontSize: 10,
-                  color: '#64748b',
+                  color: 'var(--t-text-secondary)',
                   cursor: 'pointer',
                   fontFamily: '-apple-system, system-ui, sans-serif',
                   fontWeight: 500,
@@ -1901,10 +1906,10 @@ export const AgentPanel = memo(function AgentPanel({
                   paddingBottom: 2,
                   paddingLeft: 6,
                   borderRadius: 4,
-                  border: '1px solid rgba(0,0,0,0.08)',
-                  background: 'rgba(255,255,255,0.6)',
+                  border: '1px solid var(--t-btn-secondary-border)',
+                  background: 'var(--t-panel-hover)',
                   fontSize: 10,
-                  color: '#64748b',
+                  color: 'var(--t-text-secondary)',
                   cursor: 'pointer',
                   fontFamily: '-apple-system, system-ui, sans-serif',
                   fontWeight: 500,
@@ -1922,7 +1927,7 @@ export const AgentPanel = memo(function AgentPanel({
       <div style={{
         flex: 1,
         overflowY: 'auto',
-        borderTop: expandedGroup && activeTab !== 'activity' ? 'none' : '1px solid rgba(0,0,0,0.04)',
+        borderTop: expandedGroup && activeTab !== 'activity' ? 'none' : '1px solid var(--t-divider-subtle)',
         marginTop: expandedGroup && activeTab !== 'activity' ? 0 : 4,
       }}>
         {activeTab === 'activity' ? <ActivityFeed events={events} commits={commits} onSelectCommit={onSelectCommit} /> : null}
@@ -1951,11 +1956,11 @@ export const AgentPanel = memo(function AgentPanel({
                   paddingBottom: 4,
                   paddingLeft: 8,
                   borderRadius: 6,
-                  border: '1px solid rgba(0,0,0,0.08)',
-                  background: 'rgba(255,255,255,0.6)',
+                  border: '1px solid var(--t-btn-secondary-border)',
+                  background: 'var(--t-panel-hover)',
                   fontSize: 11,
                   fontWeight: 500,
-                  color: '#64748b',
+                  color: 'var(--t-text-secondary)',
                   cursor: 'pointer',
                   fontFamily: '-apple-system, system-ui, sans-serif',
                 }}

@@ -112,7 +112,7 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
         justifyContent: 'center',
         backdropFilter: 'blur(40px) saturate(200%) brightness(1.05)',
         WebkitBackdropFilter: 'blur(40px) saturate(200%) brightness(1.05)',
-        backgroundColor: 'rgba(255, 255, 255, 0.15)',
+        backgroundColor: 'var(--t-panel-translucent)',
         animation: 'fadeIn 200ms ease',
       }}
     >
@@ -127,9 +127,9 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          background: 'linear-gradient(135deg, rgba(255,255,255,0.45) 0%, rgba(240,247,255,0.25) 100%)',
-          border: '1px solid rgba(255,255,255,0.35)',
-          boxShadow: '0 32px 80px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.03), inset 0 1px 0 rgba(255,255,255,0.6)',
+          background: 'var(--t-panel-translucent)',
+          border: '1px solid var(--t-panel-border)',
+          boxShadow: 'var(--t-panel-shadow)',
           backdropFilter: 'blur(60px) saturate(180%)',
           WebkitBackdropFilter: 'blur(60px) saturate(180%)',
         }}
@@ -143,15 +143,15 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
           paddingRight: 16,
           paddingBottom: 14,
           paddingLeft: 20,
-          borderBottom: '1px solid rgba(0,0,0,0.06)',
-          background: 'rgba(255,255,255,0.2)',
+          borderBottom: '1px solid var(--t-divider)',
+          background: 'var(--t-panel-translucent)',
           flexShrink: 0,
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{
               fontSize: 13,
               fontWeight: 700,
-              color: '#0f172a',
+              color: 'var(--t-text)',
               textTransform: 'uppercase',
               letterSpacing: '0.06em',
               fontFamily: '-apple-system, system-ui, sans-serif',
@@ -170,7 +170,7 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
             }}>-{totalDeletions}</span>
             <span style={{
               fontSize: 12,
-              color: '#64748b',
+              color: 'var(--t-text-secondary)',
             }}>{files.length} file{files.length !== 1 ? 's' : ''}</span>
           </div>
 
@@ -185,8 +185,8 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
               width: 30,
               height: 30,
               borderRadius: 8,
-              border: '1px solid rgba(0,0,0,0.08)',
-              background: 'rgba(255,255,255,0.7)',
+              border: '1px solid var(--t-divider)',
+              background: 'var(--t-panel-translucent)',
               color: '#ef4444',
               cursor: 'pointer',
               paddingTop: 0,
@@ -209,14 +209,14 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
           <div style={{
             width: 280,
             flexShrink: 0,
-            borderRight: '1px solid rgba(0,0,0,0.06)',
+            borderRight: '1px solid var(--t-divider)',
             overflowY: 'auto',
-            background: 'rgba(255,255,255,0.1)',
+            background: 'var(--t-panel-translucent)',
           }}>
             {loading ? (
-              <div style={{ padding: 20, fontSize: 13, color: '#9ca3af' }}>Loading…</div>
+              <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>Loading…</div>
             ) : files.length === 0 ? (
-              <div style={{ padding: 20, fontSize: 13, color: '#9ca3af' }}>Working tree clean</div>
+              <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>Working tree clean</div>
             ) : (
               files.map((file) => {
                 const isActive = selectedFile === file.path;
@@ -251,7 +251,7 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
                       <div style={{
                         fontSize: 13,
                         fontWeight: isActive ? 600 : 400,
-                        color: '#1e293b',
+                        color: 'var(--t-text)',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
@@ -259,7 +259,7 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
                       {dirPath ? (
                         <div style={{
                           fontSize: 11,
-                          color: '#94a3b8',
+                          color: 'var(--t-text-muted)',
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
                           whiteSpace: 'nowrap',
@@ -274,7 +274,7 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
                         <span style={{ color: '#ef4444' }}>-{file.deletions}</span>
                       ) : null}
                     </div>
-                    <ChevronRight size={12} strokeWidth={2} style={{ color: '#cbd5e1', flexShrink: 0 }} />
+                    <ChevronRight size={12} strokeWidth={2} style={{ color: 'var(--t-text-faint)', flexShrink: 0 }} />
                   </button>
                 );
               })
@@ -285,7 +285,7 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
           <div style={{
             flex: 1,
             overflowY: 'auto',
-            background: 'rgba(255,255,255,0.05)',
+            background: 'transparent',
           }}>
             {!selectedFile ? (
               <div style={{
@@ -294,7 +294,7 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
                 justifyContent: 'center',
                 height: '100%',
                 fontSize: 14,
-                color: '#94a3b8',
+                color: 'var(--t-text-muted)',
               }}>
                 Select a file to see the diff
               </div>
@@ -305,7 +305,7 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
                 justifyContent: 'center',
                 height: '100%',
                 fontSize: 13,
-                color: '#9ca3af',
+                color: 'var(--t-text-muted)',
               }}>
                 Loading diff…
               </div>
@@ -317,14 +317,14 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
                   paddingRight: 16,
                   paddingBottom: 12,
                   paddingLeft: 16,
-                  borderBottom: '1px solid rgba(0,0,0,0.06)',
-                  background: 'rgba(255,255,255,0.15)',
+                  borderBottom: '1px solid var(--t-divider)',
+                  background: 'var(--t-panel-translucent)',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 10,
                 }}>
                   <StatusIcon status={fileDetail.status} />
-                  <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{fileDetail.path}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}>{fileDetail.path}</span>
                   <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, fontSize: 11, fontWeight: 600 }}>
                     <span style={{ color: '#22c55e' }}>+{fileDetail.additions ?? 0}</span>
                     <span style={{ color: '#ef4444' }}>-{fileDetail.deletions ?? 0}</span>
@@ -336,9 +336,9 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
                     paddingRight: 16,
                     paddingBottom: 8,
                     paddingLeft: 16,
-                    borderBottom: '1px solid rgba(0,0,0,0.04)',
+                    borderBottom: '1px solid var(--t-divider-subtle)',
                     fontSize: 12,
-                    color: '#64748b',
+                    color: 'var(--t-text-secondary)',
                   }}>
                     {fileDetail.commitSummary} — {fileDetail.commitAuthor} ({fileDetail.commitAge})
                   </div>
@@ -355,7 +355,7 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
                   fontFamily: '"SF Mono", "Menlo", "Monaco", ui-monospace, monospace',
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
-                  color: '#1e293b',
+                  color: 'var(--t-text)',
                 }}>
                   {renderDiffLines(fileDetail.preview)}
                 </pre>
@@ -383,7 +383,7 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
 /** Render diff lines with +/- coloring */
 function renderDiffLines(text: string) {
   return text.split('\n').map((line, i) => {
-    let color = '#1e293b';
+    let color = 'var(--t-text)';
     let bg = 'transparent';
 
     if (line.startsWith('+') && !line.startsWith('+++')) {
@@ -396,7 +396,7 @@ function renderDiffLines(text: string) {
       color = '#6366f1';
       bg = 'rgba(99, 102, 241, 0.06)';
     } else if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
-      color = '#64748b';
+      color = 'var(--t-text-secondary)';
     }
 
     return (
