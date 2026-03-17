@@ -38,6 +38,7 @@ export async function POST(req: NextRequest) {
   const args = [
     '-p', message,
     '--output-format', 'stream-json',
+    '--verbose',
     '--dangerously-skip-permissions',
   ];
 
