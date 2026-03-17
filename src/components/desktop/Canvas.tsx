@@ -18,21 +18,29 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   BookOpen,
+  Check,
   ChevronDown,
   ChevronRight,
   Clock,
+  Clipboard,
   ExternalLink,
   FileEdit,
   FileMinus,
   FilePlus,
   FileText,
   GitCommit,
+  GitMerge,
   Globe,
+  Hexagon,
   MessageSquare,
   Plus,
   Radio,
+  RotateCcw,
+  Send,
   Terminal,
+  Trash2,
   X,
+  XCircle,
 } from 'lucide-react';
 import { MarkdownBody } from './MarkdownBody';
 import { IssueCreator } from './IssueCreator';
@@ -40,7 +48,7 @@ import { GraphExplorer3D } from './GraphExplorer3D';
 
 // ── Tab Types ──
 
-export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'git-log' | 'image' | 'deploy' | 'memory' | 'welcome' | 'timeline';
+export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'git-log' | 'image' | 'deploy' | 'memory' | 'welcome' | 'timeline' | 'mermaid';
 
 export interface CanvasTab {
   id: string;
@@ -204,6 +212,7 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
     case 'memory': return <Radio size={size} />;
     case 'welcome': return <BookOpen size={size} />;
     case 'timeline': return <Clock size={size} />;
+    case 'mermaid': return <Hexagon size={size} />;
   }
 }
 
@@ -241,6 +250,8 @@ const TabContent = memo(function TabContent({ tab, onSelectCommit }: { tab: Canv
       return <CanvasEmpty />;
     case 'timeline':
       return <TimelineExpanded />;
+    case 'mermaid':
+      return <MermaidViewer code={tab.resourceId} />;
     default:
       return <CanvasEmpty />;
   }
@@ -1763,6 +1774,43 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
     line: number | null; createdAt: string; diffHunk: string; inReplyTo: number | null;
   }[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [commentText, setCommentText] = useState('');
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [actionResult, setActionResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const submitAction = useCallback(async (action: string, comment?: string) => {
+    setActionLoading(action);
+    setActionResult(null);
+    try {
+      const res = await fetch(`/api/panel/prs/${prNumber}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, repo, comment }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Request failed');
+      const labels: Record<string, string> = {
+        approved: 'PR approved',
+        changes_requested: 'Changes requested',
+        commented: 'Comment posted',
+        merged: 'PR merged',
+        closed: 'PR closed',
+      };
+      setActionResult({ type: 'success', message: labels[data.action] || 'Done' });
+      setCommentText('');
+      // Refresh PR data
+      const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
+      const fresh = await fetch(`/api/panel/prs/${prNumber}${repoParam}`);
+      if (fresh.ok) {
+        const freshData = await fresh.json();
+        setPr(freshData.pr);
+      }
+    } catch (err) {
+      setActionResult({ type: 'error', message: err instanceof Error ? err.message : 'Failed' });
+    } finally {
+      setActionLoading(null);
+    }
+  }, [prNumber, repo]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1902,8 +1950,8 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
           </div>
         ) : null}
 
-        {/* Section tabs */}
-        <div style={{ display: 'flex', gap: 2, marginTop: 10 }}>
+        {/* Section tabs + actions row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginTop: 10 }}>
           {sections.map((s) => (
             <button
               key={s.id}
@@ -1927,8 +1975,179 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
               {s.label}{s.count !== undefined ? ` (${s.count})` : ''}
             </button>
           ))}
+
+          {/* Action buttons — only for open PRs */}
+          {pr.state === 'OPEN' && (
+            <>
+              <div style={{ flex: 1 }} />
+              <button
+                type="button"
+                onClick={() => submitAction('approve', commentText || undefined)}
+                disabled={actionLoading !== null}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingTop: 5,
+                  paddingRight: 10,
+                  paddingBottom: 5,
+                  paddingLeft: 8,
+                  borderRadius: 8,
+                  border: '1px solid rgba(34, 197, 94, 0.2)',
+                  background: actionLoading === 'approve' ? 'rgba(34,197,94,0.15)' : 'rgba(34,197,94,0.06)',
+                  color: '#22c55e',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: actionLoading ? 'wait' : 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}
+              >
+                <Check size={12} strokeWidth={2.5} />
+                Approve
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!commentText) { setActiveSection('comments'); return; }
+                  submitAction('request-changes', commentText);
+                }}
+                disabled={actionLoading !== null}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingTop: 5,
+                  paddingRight: 10,
+                  paddingBottom: 5,
+                  paddingLeft: 8,
+                  borderRadius: 8,
+                  border: '1px solid rgba(239, 68, 68, 0.2)',
+                  background: actionLoading === 'request-changes' ? 'rgba(239,68,68,0.15)' : 'rgba(239,68,68,0.06)',
+                  color: '#ef4444',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: actionLoading ? 'wait' : 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}
+              >
+                <XCircle size={12} strokeWidth={2.5} />
+                Changes
+              </button>
+              <button
+                type="button"
+                onClick={() => submitAction('merge')}
+                disabled={actionLoading !== null}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingTop: 5,
+                  paddingRight: 10,
+                  paddingBottom: 5,
+                  paddingLeft: 8,
+                  borderRadius: 8,
+                  border: '1px solid rgba(139, 92, 246, 0.2)',
+                  background: actionLoading === 'merge' ? 'rgba(139,92,246,0.15)' : 'rgba(139,92,246,0.06)',
+                  color: '#8b5cf6',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: actionLoading ? 'wait' : 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}
+              >
+                <GitMerge size={12} strokeWidth={2.5} />
+                Merge
+              </button>
+            </>
+          )}
         </div>
+
+        {/* Action result toast */}
+        {actionResult && (
+          <div style={{
+            marginTop: 6,
+            paddingTop: 4,
+            paddingRight: 10,
+            paddingBottom: 4,
+            paddingLeft: 10,
+            borderRadius: 6,
+            fontSize: 11,
+            fontWeight: 500,
+            color: actionResult.type === 'success' ? '#22c55e' : '#ef4444',
+            background: actionResult.type === 'success' ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)',
+          }}>
+            {actionResult.message}
+          </div>
+        )}
       </div>
+
+      {/* Comment compose bar — for open PRs */}
+      {pr.state === 'OPEN' && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          paddingTop: 6,
+          paddingRight: 20,
+          paddingBottom: 6,
+          paddingLeft: 20,
+          borderBottom: '1px solid var(--t-divider)',
+          background: 'var(--t-hover)',
+          flexShrink: 0,
+        }}>
+          <input
+            type="text"
+            placeholder="Add a comment..."
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey && commentText.trim()) {
+                e.preventDefault();
+                submitAction('comment', commentText);
+              }
+            }}
+            style={{
+              flex: 1,
+              border: '1px solid var(--t-divider)',
+              borderRadius: 8,
+              paddingTop: 6,
+              paddingRight: 10,
+              paddingBottom: 6,
+              paddingLeft: 10,
+              fontSize: 12,
+              background: 'var(--t-panel)',
+              color: 'var(--t-text)',
+              outline: 'none',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => { if (commentText.trim()) submitAction('comment', commentText); }}
+            disabled={!commentText.trim() || actionLoading !== null}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              paddingTop: 6,
+              paddingRight: 10,
+              paddingBottom: 6,
+              paddingLeft: 10,
+              borderRadius: 8,
+              border: 'none',
+              background: commentText.trim() ? '#2563eb' : 'var(--t-divider)',
+              color: commentText.trim() ? '#fff' : 'var(--t-text-muted)',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: commentText.trim() ? 'pointer' : 'default',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
+            <Send size={11} />
+            Comment
+          </button>
+        </div>
+      )}
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', paddingTop: 16, paddingRight: 20, paddingBottom: 16, paddingLeft: 20 }}>
@@ -2484,28 +2703,354 @@ function DiffStatusIcon({ status }: { status: string }) {
   }
 }
 
+function DiffHunk({ hunkHeader, lines, startIndex, defaultExpanded }: {
+  hunkHeader: string;
+  lines: string[];
+  startIndex: number;
+  defaultExpanded: boolean;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  // Parse line numbers from @@ -old,len +new,len @@
+  const hunkMatch = hunkHeader.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+  let oldLine = hunkMatch ? parseInt(hunkMatch[1], 10) : 1;
+  let newLine = hunkMatch ? parseInt(hunkMatch[2], 10) : 1;
+
+  return (
+    <div>
+      <div
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          paddingTop: 4,
+          paddingRight: 12,
+          paddingBottom: 4,
+          paddingLeft: 8,
+          background: 'rgba(99, 102, 241, 0.06)',
+          color: '#6366f1',
+          fontSize: '0.75rem',
+          fontFamily: '"SF Mono", ui-monospace, monospace',
+          cursor: 'pointer',
+          userSelect: 'none',
+          borderTop: '1px solid var(--t-divider-subtle)',
+          borderBottom: '1px solid var(--t-divider-subtle)',
+        }}
+      >
+        <ChevronRight
+          size={11}
+          style={{
+            transition: 'transform 150ms ease',
+            transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+            flexShrink: 0,
+          }}
+        />
+        <span style={{ flex: 1 }}>{hunkHeader}</span>
+        <span style={{ color: 'var(--t-text-muted)', fontSize: 10 }}>{lines.length} lines</span>
+      </div>
+      {expanded && lines.map((line, i) => {
+        let color = 'var(--t-text)';
+        let bg = 'transparent';
+        let leftNum: string = '';
+        let rightNum: string = '';
+
+        if (line.startsWith('+') && !line.startsWith('+++')) {
+          color = '#166534';
+          bg = 'rgba(34, 197, 94, 0.08)';
+          rightNum = String(newLine++);
+        } else if (line.startsWith('-') && !line.startsWith('---')) {
+          color = '#991b1b';
+          bg = 'rgba(239, 68, 68, 0.08)';
+          leftNum = String(oldLine++);
+        } else {
+          leftNum = String(oldLine++);
+          rightNum = String(newLine++);
+        }
+
+        return (
+          <div key={startIndex + i} style={{ display: 'flex', color, background: bg }}>
+            <span style={{
+              width: 42,
+              flexShrink: 0,
+              textAlign: 'right',
+              paddingRight: 6,
+              color: 'var(--t-text-faint)',
+              fontSize: '0.7rem',
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+              userSelect: 'none',
+              borderRight: '1px solid var(--t-divider-subtle)',
+            }}>{leftNum}</span>
+            <span style={{
+              width: 42,
+              flexShrink: 0,
+              textAlign: 'right',
+              paddingRight: 6,
+              color: 'var(--t-text-faint)',
+              fontSize: '0.7rem',
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+              userSelect: 'none',
+              borderRight: '1px solid var(--t-divider-subtle)',
+            }}>{rightNum}</span>
+            <span style={{
+              flex: 1,
+              paddingLeft: 8,
+              paddingTop: 1,
+              paddingBottom: 1,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}>{line || '\u00A0'}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function renderDiffLines(text: string) {
-  return text.split('\n').map((line, i) => {
-    let color = 'var(--t-text)';
-    let bg = 'transparent';
-    if (line.startsWith('+') && !line.startsWith('+++')) {
-      color = '#166534';
-      bg = 'rgba(34, 197, 94, 0.08)';
-    } else if (line.startsWith('-') && !line.startsWith('---')) {
-      color = '#991b1b';
-      bg = 'rgba(239, 68, 68, 0.08)';
-    } else if (line.startsWith('@@')) {
-      color = '#6366f1';
-      bg = 'rgba(99, 102, 241, 0.06)';
+  // Split into hunks for collapsible rendering
+  const allLines = text.split('\n');
+  const hunks: { header: string; lines: string[]; startIndex: number }[] = [];
+  const preamble: string[] = [];
+  let currentHunk: { header: string; lines: string[]; startIndex: number } | null = null;
+
+  allLines.forEach((line, i) => {
+    if (line.startsWith('@@')) {
+      if (currentHunk) hunks.push(currentHunk);
+      currentHunk = { header: line, lines: [], startIndex: i + 1 };
+    } else if (currentHunk) {
+      currentHunk.lines.push(line);
     } else if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) {
-      color = 'var(--t-text-secondary)';
+      preamble.push(line);
+    } else {
+      preamble.push(line);
     }
+  });
+  if (currentHunk) hunks.push(currentHunk);
+
+  // If no hunks found, fall back to simple rendering
+  if (hunks.length === 0) {
+    return allLines.map((line, i) => {
+      let color = 'var(--t-text)';
+      let bg = 'transparent';
+      if (line.startsWith('+') && !line.startsWith('+++')) { color = '#166534'; bg = 'rgba(34, 197, 94, 0.08)'; }
+      else if (line.startsWith('-') && !line.startsWith('---')) { color = '#991b1b'; bg = 'rgba(239, 68, 68, 0.08)'; }
+      else if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) { color = 'var(--t-text-secondary)'; }
+      return <div key={i} style={{ color, background: bg, paddingTop: 1, paddingBottom: 1, paddingLeft: 8 }}>{line || '\u00A0'}</div>;
+    });
+  }
+
+  return (
+    <>
+      {preamble.map((line, i) => (
+        <div key={`pre-${i}`} style={{ color: 'var(--t-text-secondary)', paddingTop: 1, paddingBottom: 1, paddingLeft: 8 }}>{line || '\u00A0'}</div>
+      ))}
+      {hunks.map((hunk, i) => (
+        <DiffHunk
+          key={`hunk-${i}`}
+          hunkHeader={hunk.header}
+          lines={hunk.lines}
+          startIndex={hunk.startIndex}
+          defaultExpanded={hunks.length <= 5}
+        />
+      ))}
+    </>
+  );
+}
+
+// ── Mermaid Viewer (Canvas tab — zoom/pan diagram) ──
+
+function MermaidViewer({ code }: { code: string }) {
+  const [svgHtml, setSvgHtml] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [scale, setScale] = useState(2);
+  const [translate, setTranslate] = useState({ x: 0, y: 0 });
+  const dragging = useRef(false);
+  const lastPos = useRef({ x: 0, y: 0 });
+
+  useEffect(() => {
+    let cancelled = false;
+    async function render() {
+      try {
+        const mermaid = (await import('mermaid')).default;
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: 'base' as const,
+          themeVariables: {
+            primaryColor: 'var(--t-panel)',
+            primaryTextColor: 'var(--t-text)',
+            primaryBorderColor: 'var(--t-panel-border)',
+            secondaryColor: '#f0f7ff',
+            secondaryTextColor: 'var(--t-text)',
+            secondaryBorderColor: 'var(--t-text-faint)',
+            tertiaryColor: '#fef2f2',
+            tertiaryTextColor: '#991b1b',
+            tertiaryBorderColor: '#ef4444',
+            lineColor: 'var(--t-text-muted)',
+            textColor: 'var(--t-text)',
+            mainBkg: 'var(--t-panel)',
+            nodeBorder: 'var(--t-panel-border)',
+            clusterBkg: 'var(--t-bg-subtle)',
+            clusterBorder: 'var(--t-panel-border)',
+            titleColor: 'var(--t-text-strong)',
+            edgeLabelBackground: 'var(--t-panel)',
+            nodeTextColor: 'var(--t-text)',
+            cScale0: '#ef4444',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+            fontSize: '14px',
+          },
+          securityLevel: 'loose',
+        });
+        const id = `mermaid-canvas-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+        const { svg } = await mermaid.render(id, code);
+        if (!cancelled) setSvgHtml(svg);
+      } catch (err) {
+        if (!cancelled) setError(String(err));
+      }
+    }
+    void render();
+    return () => { cancelled = true; };
+  }, [code]);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -0.15 : 0.15;
+    setScale(s => Math.min(Math.max(s + delta, 0.25), 10));
+  }, []);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    dragging.current = true;
+    lastPos.current = { x: e.clientX, y: e.clientY };
+  }, []);
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!dragging.current) return;
+    const dx = e.clientX - lastPos.current.x;
+    const dy = e.clientY - lastPos.current.y;
+    lastPos.current = { x: e.clientX, y: e.clientY };
+    setTranslate(t => ({ x: t.x + dx, y: t.y + dy }));
+  }, []);
+
+  const handleMouseUp = useCallback(() => { dragging.current = false; }, []);
+
+  if (error) {
     return (
-      <div key={i} style={{ color, background: bg, paddingTop: 1, paddingBottom: 1 }}>
-        {line || '\u00A0'}
+      <div style={{ padding: 20, fontSize: 13, color: '#ef4444', fontFamily: 'ui-monospace, monospace' }}>
+        Mermaid render error: {error}
       </div>
     );
-  });
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingTop: 10,
+        paddingRight: 14,
+        paddingBottom: 10,
+        paddingLeft: 16,
+        borderBottom: '1px solid var(--t-divider)',
+        flexShrink: 0,
+      }}>
+        <span style={{
+          fontSize: 13,
+          fontWeight: 700,
+          color: '#2563eb',
+          textTransform: 'uppercase',
+          letterSpacing: '0.06em',
+          fontFamily: '-apple-system, system-ui, sans-serif',
+        }}>
+          Mermaid Diagram
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            type="button"
+            onClick={() => setScale(s => Math.max(s - 0.5, 0.25))}
+            title="Zoom out"
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 28, height: 28, borderRadius: 8,
+              border: '1px solid var(--t-divider)', background: 'var(--t-panel-translucent)',
+              color: 'var(--t-text-secondary)', cursor: 'pointer',
+              paddingTop: 0, paddingRight: 0, paddingBottom: 0, paddingLeft: 0,
+            }}
+          >
+            <span style={{ fontSize: 16, lineHeight: 1 }}>-</span>
+          </button>
+          <span style={{
+            fontSize: 12, fontWeight: 600, color: 'var(--t-text-secondary)',
+            minWidth: 40, textAlign: 'center',
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+          }}>
+            {Math.round(scale * 100)}%
+          </span>
+          <button
+            type="button"
+            onClick={() => setScale(s => Math.min(s + 0.5, 10))}
+            title="Zoom in"
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              width: 28, height: 28, borderRadius: 8,
+              border: '1px solid var(--t-divider)', background: 'var(--t-panel-translucent)',
+              color: 'var(--t-text-secondary)', cursor: 'pointer',
+              paddingTop: 0, paddingRight: 0, paddingBottom: 0, paddingLeft: 0,
+            }}
+          >
+            <span style={{ fontSize: 16, lineHeight: 1 }}>+</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => { setScale(2); setTranslate({ x: 0, y: 0 }); }}
+            title="Reset zoom"
+            style={{
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              height: 28, borderRadius: 8, paddingLeft: 8, paddingRight: 8,
+              paddingTop: 0, paddingBottom: 0,
+              border: '1px solid var(--t-divider)', background: 'var(--t-panel-translucent)',
+              color: 'var(--t-text-secondary)', cursor: 'pointer',
+              fontSize: 11, fontWeight: 600,
+            }}
+          >
+            Fit
+          </button>
+        </div>
+      </div>
+      {/* Diagram area */}
+      <div
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+        style={{
+          flex: 1,
+          overflow: 'hidden',
+          cursor: dragging.current ? 'grabbing' : 'grab',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundImage: 'linear-gradient(135deg, rgba(255,255,255,0.8) 0%, rgba(240,247,255,0.4) 100%)',
+        }}
+      >
+        {svgHtml ? (
+          <div
+            dangerouslySetInnerHTML={{ __html: svgHtml }}
+            style={{
+              transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
+              transformOrigin: 'center center',
+              transition: dragging.current ? 'none' : 'transform 100ms ease',
+            }}
+          />
+        ) : (
+          <span style={{ fontSize: 13, color: 'var(--t-text-muted)' }}>Rendering diagram...</span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function DiffViewer() {
@@ -2514,19 +3059,23 @@ function DiffViewer() {
   const [fileDetail, setFileDetail] = useState<FileDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [commitMsg, setCommitMsg] = useState('');
+  const [commitLoading, setCommitLoading] = useState(false);
+  const [actionToast, setActionToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [copiedPath, setCopiedPath] = useState<string | null>(null);
+
+  const refreshFiles = useCallback(async () => {
+    try {
+      const res = await fetch('/api/review/workspace');
+      if (!res.ok) return;
+      const data = await res.json();
+      setFiles(data.changedFiles ?? []);
+    } catch { /* silent */ }
+  }, []);
 
   useEffect(() => {
-    async function load() {
-      try {
-        const res = await fetch('/api/review/workspace');
-        if (!res.ok) return;
-        const data = await res.json();
-        setFiles(data.changedFiles ?? []);
-      } catch { /* silent */ }
-      finally { setLoading(false); }
-    }
-    void load();
-  }, []);
+    void refreshFiles().then(() => setLoading(false));
+  }, [refreshFiles]);
 
   const selectFile = useCallback(async (path: string) => {
     setSelectedFile(path);
@@ -2540,6 +3089,53 @@ function DiffViewer() {
     } catch { /* silent */ }
     finally { setDetailLoading(false); }
   }, []);
+
+  const copyPath = useCallback((path: string) => {
+    void navigator.clipboard.writeText(path);
+    setCopiedPath(path);
+    setTimeout(() => setCopiedPath(null), 1500);
+  }, []);
+
+  const discardFile = useCallback(async (path: string) => {
+    try {
+      const res = await fetch('/api/review/discard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      setActionToast({ type: 'success', message: `Discarded ${path.split('/').pop()}` });
+      if (selectedFile === path) { setSelectedFile(null); setFileDetail(null); }
+      await refreshFiles();
+    } catch (err) {
+      setActionToast({ type: 'error', message: err instanceof Error ? err.message : 'Failed' });
+    }
+  }, [selectedFile, refreshFiles]);
+
+  const stageAndCommit = useCallback(async () => {
+    if (!commitMsg.trim()) return;
+    setCommitLoading(true);
+    setActionToast(null);
+    try {
+      const res = await fetch('/api/review/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: commitMsg }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Commit failed');
+      setActionToast({ type: 'success', message: data.message || 'Committed' });
+      setCommitMsg('');
+      setSelectedFile(null);
+      setFileDetail(null);
+      await refreshFiles();
+    } catch (err) {
+      setActionToast({ type: 'error', message: err instanceof Error ? err.message : 'Commit failed' });
+    } finally {
+      setCommitLoading(false);
+    }
+  }, [commitMsg, refreshFiles]);
 
   const totalAdditions = files.reduce((sum, f) => sum + (f.additions ?? 0), 0);
   const totalDeletions = files.reduce((sum, f) => sum + (f.deletions ?? 0), 0);
@@ -2573,7 +3169,86 @@ function DiffViewer() {
         <span style={{ fontSize: 12, color: 'var(--t-text-secondary)' }}>
           {files.length} file{files.length !== 1 ? 's' : ''}
         </span>
+        <div style={{ flex: 1 }} />
+        <button
+          type="button"
+          onClick={() => { setLoading(true); void refreshFiles().then(() => setLoading(false)); }}
+          title="Refresh"
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 28, height: 28, borderRadius: 6,
+            border: '1px solid var(--t-divider)', background: 'transparent',
+            color: 'var(--t-text-secondary)', cursor: 'pointer', padding: 0,
+          }}
+        >
+          <RotateCcw size={13} />
+        </button>
       </div>
+
+      {/* Stage + Commit bar */}
+      {files.length > 0 && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          paddingTop: 6,
+          paddingRight: 16,
+          paddingBottom: 6,
+          paddingLeft: 20,
+          borderBottom: '1px solid var(--t-divider)',
+          background: 'var(--t-hover)',
+          flexShrink: 0,
+        }}>
+          <input
+            type="text"
+            placeholder="Commit message..."
+            value={commitMsg}
+            onChange={(e) => setCommitMsg(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && commitMsg.trim()) { e.preventDefault(); void stageAndCommit(); } }}
+            style={{
+              flex: 1,
+              border: '1px solid var(--t-divider)',
+              borderRadius: 8,
+              paddingTop: 6, paddingRight: 10, paddingBottom: 6, paddingLeft: 10,
+              fontSize: 12,
+              background: 'var(--t-panel)',
+              color: 'var(--t-text)',
+              outline: 'none',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => void stageAndCommit()}
+            disabled={!commitMsg.trim() || commitLoading}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              paddingTop: 6, paddingRight: 12, paddingBottom: 6, paddingLeft: 10,
+              borderRadius: 8, border: 'none',
+              background: commitMsg.trim() ? '#22c55e' : 'var(--t-divider)',
+              color: commitMsg.trim() ? '#fff' : 'var(--t-text-muted)',
+              fontSize: 11, fontWeight: 600,
+              cursor: commitMsg.trim() ? 'pointer' : 'default',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
+            <Check size={12} />
+            {commitLoading ? 'Committing...' : 'Stage All + Commit'}
+          </button>
+        </div>
+      )}
+
+      {/* Action toast */}
+      {actionToast && (
+        <div style={{
+          paddingTop: 4, paddingRight: 20, paddingBottom: 4, paddingLeft: 20,
+          fontSize: 11, fontWeight: 500, flexShrink: 0,
+          color: actionToast.type === 'success' ? '#22c55e' : '#ef4444',
+          background: actionToast.type === 'success' ? 'rgba(34,197,94,0.06)' : 'rgba(239,68,68,0.06)',
+        }}>
+          {actionToast.message}
+        </div>
+      )}
 
       {/* Body: file list + diff preview */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
@@ -2596,58 +3271,99 @@ function DiffViewer() {
               const dirPath = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
 
               return (
-                <button
+                <div
                   key={file.path}
-                  type="button"
-                  onClick={() => void selectFile(file.path)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 8,
-                    width: '100%',
-                    paddingTop: 10,
-                    paddingRight: 12,
-                    paddingBottom: 10,
-                    paddingLeft: 14,
-                    border: 'none',
                     borderLeft: isActive ? '2px solid #2563eb' : '2px solid transparent',
                     background: isActive ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    fontFamily: '-apple-system, system-ui, sans-serif',
                     transition: 'all 100ms ease',
                   }}
                 >
-                  <DiffStatusIcon status={file.status} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontSize: 13,
-                      fontWeight: isActive ? 600 : 400,
-                      color: 'var(--t-text-strong)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}>{fileName}</div>
-                    {dirPath ? (
+                  <button
+                    type="button"
+                    onClick={() => void selectFile(file.path)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      flex: 1,
+                      minWidth: 0,
+                      paddingTop: 10,
+                      paddingRight: 4,
+                      paddingBottom: 10,
+                      paddingLeft: 12,
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                    }}
+                  >
+                    <DiffStatusIcon status={file.status} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
-                        fontSize: 11,
-                        color: 'var(--t-text-muted)',
+                        fontSize: 13,
+                        fontWeight: isActive ? 600 : 400,
+                        color: 'var(--t-text-strong)',
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
-                      }}>{dirPath}</div>
-                    ) : null}
+                      }}>{fileName}</div>
+                      {dirPath ? (
+                        <div style={{
+                          fontSize: 11,
+                          color: 'var(--t-text-muted)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>{dirPath}</div>
+                      ) : null}
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, flexShrink: 0, fontSize: 11, fontWeight: 600 }}>
+                      {(file.additions ?? 0) > 0 ? (
+                        <span style={{ color: '#22c55e' }}>+{file.additions}</span>
+                      ) : null}
+                      {(file.deletions ?? 0) > 0 ? (
+                        <span style={{ color: '#ef4444' }}>-{file.deletions}</span>
+                      ) : null}
+                    </div>
+                  </button>
+                  {/* Quick actions */}
+                  <div style={{ display: 'flex', gap: 2, paddingRight: 6, flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      title="Copy path"
+                      onClick={(e) => { e.stopPropagation(); copyPath(file.path); }}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        width: 22, height: 22, borderRadius: 4,
+                        border: 'none', background: 'transparent',
+                        color: copiedPath === file.path ? '#22c55e' : 'var(--t-text-faint)',
+                        cursor: 'pointer', padding: 0,
+                      }}
+                    >
+                      {copiedPath === file.path ? <Check size={11} /> : <Clipboard size={11} />}
+                    </button>
+                    <button
+                      type="button"
+                      title="Discard changes"
+                      onClick={(e) => { e.stopPropagation(); void discardFile(file.path); }}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        width: 22, height: 22, borderRadius: 4,
+                        border: 'none', background: 'transparent',
+                        color: 'var(--t-text-faint)',
+                        cursor: 'pointer', padding: 0,
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = '#ef4444'; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--t-text-faint)'; }}
+                    >
+                      <Trash2 size={11} />
+                    </button>
                   </div>
-                  <div style={{ display: 'flex', gap: 4, flexShrink: 0, fontSize: 11, fontWeight: 600 }}>
-                    {(file.additions ?? 0) > 0 ? (
-                      <span style={{ color: '#22c55e' }}>+{file.additions}</span>
-                    ) : null}
-                    {(file.deletions ?? 0) > 0 ? (
-                      <span style={{ color: '#ef4444' }}>-{file.deletions}</span>
-                    ) : null}
-                  </div>
-                  <ChevronRight size={12} strokeWidth={2} style={{ color: 'var(--t-text-faint)', flexShrink: 0 }} />
-                </button>
+                </div>
               );
             })
           )}
@@ -2692,9 +3408,37 @@ function DiffViewer() {
               }}>
                 <DiffStatusIcon status={fileDetail.status} />
                 <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text-strong)' }}>{fileDetail.path}</span>
-                <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, fontSize: 11, fontWeight: 600 }}>
-                  <span style={{ color: '#22c55e' }}>+{fileDetail.additions ?? 0}</span>
-                  <span style={{ color: '#ef4444' }}>-{fileDetail.deletions ?? 0}</span>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#22c55e' }}>+{fileDetail.additions ?? 0}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#ef4444' }}>-{fileDetail.deletions ?? 0}</span>
+                  <button
+                    type="button"
+                    title="Copy path"
+                    onClick={() => copyPath(fileDetail.path)}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 26, height: 26, borderRadius: 6, marginLeft: 4,
+                      border: '1px solid var(--t-divider)', background: 'transparent',
+                      color: copiedPath === fileDetail.path ? '#22c55e' : 'var(--t-text-secondary)',
+                      cursor: 'pointer', padding: 0,
+                    }}
+                  >
+                    {copiedPath === fileDetail.path ? <Check size={12} /> : <Clipboard size={12} />}
+                  </button>
+                  <button
+                    type="button"
+                    title="Discard changes"
+                    onClick={() => void discardFile(fileDetail.path)}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 26, height: 26, borderRadius: 6,
+                      border: '1px solid rgba(239,68,68,0.2)', background: 'transparent',
+                      color: '#ef4444',
+                      cursor: 'pointer', padding: 0,
+                    }}
+                  >
+                    <Trash2 size={12} />
+                  </button>
                 </div>
               </div>
               {fileDetail.commitSummary ? (
@@ -2712,15 +3456,13 @@ function DiffViewer() {
               ) : null}
               <pre style={{
                 margin: 0,
-                paddingTop: 14,
-                paddingRight: 16,
+                paddingTop: 4,
+                paddingRight: 0,
                 paddingBottom: 14,
-                paddingLeft: 16,
+                paddingLeft: 0,
                 fontSize: '0.8rem',
                 lineHeight: 1.65,
                 fontFamily: '"SF Mono", "Menlo", "Monaco", ui-monospace, monospace',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
                 color: 'var(--t-text-strong)',
               }}>
                 {renderDiffLines(fileDetail.preview)}

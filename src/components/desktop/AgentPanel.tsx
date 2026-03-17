@@ -43,6 +43,8 @@ interface AgentDetail {
   name: string;
   squadId: string;
   model: string;
+  primaryModel?: string;
+  heartbeatModel?: string;
   status: string;
   currentTask: string;
   workspace: string;
@@ -167,6 +169,16 @@ function ctxColor(pct: number) {
   return '#22c55e';
 }
 
+function formatModelLabel(model: string) {
+  return model
+    .replace('claude-opus-4-6', 'Opus 4.6')
+    .replace('claude-sonnet-4-20250514', 'Sonnet 4')
+    .replace('claude-haiku-4-5-20251001', 'Haiku 4.5')
+    .replace('gemini-3-flash-preview', 'Gemini 3 Flash')
+    .replace(/^openai-codex\//, '')
+    .replace(/^anthropic\//, '');
+}
+
 // ── Workspace grouping (matches chat session picker) ──
 
 interface WorkspaceGroup {
@@ -180,7 +192,7 @@ interface WorkspaceGroup {
   totalAlerts: number;
 }
 
-function deriveRepo(workspace: string, agents: AgentDetail[]): string {
+function deriveRepo(workspace: string): string {
   const path = workspace.replace(/^~\//, '');
 
   // Unknown or empty workspace — group under OpenClaw
@@ -213,7 +225,7 @@ function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
 
   const groups: WorkspaceGroup[] = [];
   for (const [workspace, wsAgents] of groupMap) {
-    const repo = deriveRepo(workspace, wsAgents);
+    const repo = deriveRepo(workspace);
     const repoDisplayNames: Record<string, string> = {
       'openclaw': 'OpenClaw',
       'cortex-ide': 'Cortex IDE',
@@ -226,7 +238,7 @@ function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
 
     const hasRunning = wsAgents.some(a => a.status === 'running' || a.status === 'watching' || a.status === 'healthy');
     const bestContextPct = Math.max(0, ...wsAgents.map(a => a.context?.usedPercent ?? 0));
-    const primary = wsAgents.find(a => !a.id.includes('cron') && !a.id.includes('discord') && !a.id.includes('telegram'));
+    const primary = wsAgents.find(a => !a.id.includes('cron') && !a.id.includes('discord') && !a.id.includes('telegram')) ?? wsAgents[0];
     const totalAlerts = wsAgents.reduce((sum, a) => sum + (a.alerts ?? 0), 0);
 
     groups.push({
@@ -236,7 +248,7 @@ function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
       agents: wsAgents,
       hasRunning,
       bestContextPct,
-      primaryModel: primary?.model ?? '',
+      primaryModel: primary?.primaryModel ?? primary?.model ?? '',
       totalAlerts,
     });
   }
@@ -266,7 +278,6 @@ const AgentCard = memo(function AgentCard({
   onToggle: () => void;
   onSelectSession?: (sessionKey: string) => void;
 }) {
-  const dotColor = group.hasRunning ? '#22c55e' : '#6b7280';
   const model = group.primaryModel;
   const ctx = group.bestContextPct > 0 ? { usedPercent: group.bestContextPct } : null;
 
@@ -306,6 +317,22 @@ const AgentCard = memo(function AgentCard({
               fontSize: 13, fontWeight: 700, color: 'var(--t-text-strong)',
               letterSpacing: '-0.01em',
             }}>{group.displayName}</span>
+            {model && (
+              <span style={{
+                fontSize: 10,
+                fontWeight: 600,
+                color: 'var(--t-text-muted)',
+                padding: '2px 6px',
+                borderRadius: 999,
+                background: 'var(--t-divider-subtle)',
+                maxWidth: 150,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {formatModelLabel(model)}
+              </span>
+            )}
           </div>
           {/* Agent dots row — shows who's on this repo */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
@@ -424,7 +451,7 @@ const AgentCard = memo(function AgentCard({
             : (agent.surfaceLabel || agent.name);
           const branch = agent.branch || agent.currentTask || null;
           const progress = agentCtx > 0 ? agentCtx / 100 : 0;
-          const agentModel = agent.model ? agent.model.replace('claude-', '').replace(/-\d+$/, '').replace('openai-codex/', '').replace('anthropic/', '') : '';
+          const agentModel = agent.model ? formatModelLabel(agent.model) : '';
           const pr = agent.pr;
           const diff = pr ? { add: pr.additions, del: pr.deletions } : agent.localDiff ? { add: agent.localDiff.additions, del: agent.localDiff.deletions } : null;
 

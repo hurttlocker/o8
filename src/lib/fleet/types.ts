@@ -83,6 +83,8 @@ export interface AgentSummary {
   squadId: string;
   runtime: string;
   model: string;
+  primaryModel?: string;
+  heartbeatModel?: string;
   status: AgentStatus;
   currentTask: string;
   workspace: string;

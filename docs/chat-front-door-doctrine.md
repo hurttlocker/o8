@@ -121,7 +121,7 @@ Not via a total page identity swap.
 
 ## RuntimeSurface / TerminalSession doctrine
 
-The next architectural move should be a bounded **RuntimeSurface / TerminalSession** layer.
+The bounded **RuntimeSurface / TerminalSession** layer is now in place.
 
 Its purpose is to bring real execution surfaces into Cortex IDE without making the UI runtime-vendor-specific.
 

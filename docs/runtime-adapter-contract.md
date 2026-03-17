@@ -1,6 +1,7 @@
 # Runtime Adapter Contract
 
-This doc is the first implementation pass for issue **#11**.
+This doc started with issue **#11** and now reflects the shipped
+**RuntimeSurface / TerminalSession** layer from issue **#25**.
 
 ## Goal
 
@@ -23,8 +24,20 @@ Why:
 
 ## Current implementation surface
 
-The draft TypeScript contract lives in:
+The adapter-facing contract lives in:
 - `src/lib/runtime/adapter.ts`
+
+The product-facing RuntimeSurface contract lives in:
+- `src/lib/fleet/types.ts`
+
+Current population paths:
+- `src/lib/openclaw/fleet.ts`
+- `src/lib/codex/sessions.ts`
+- `src/lib/codex/owned.ts`
+
+Current UI consumers:
+- `src/components/session-operator-panel.tsx`
+- `src/components/command-center-shell.tsx`
 
 ## Design rules
 
@@ -42,7 +55,7 @@ Karpathy explicitly called out usage/stats. Cost, context pressure, and state ha
 ### 4. Pause is not assumed
 Different runtimes mean different semantics. If pause is not real yet, the adapter should say so instead of lying.
 
-## Draft contract surface
+## Current contract surface
 
 ### Required methods
 - `spawn(request)`
@@ -60,7 +73,7 @@ Different runtimes mean different semantics. If pause is not real yet, the adapt
 - cost telemetry
 
 ### Product-facing outcome
-The adapter layer should be able to populate a truthful RuntimeSurface that includes:
+The adapter layer now populates a truthful RuntimeSurface that includes:
 - identity (`id`, `runtime`, `title`, `cwd`, `branch` when available)
 - state (`running`, `idle`, `blocked`, `exited`, `unknown`)
 - explicit capabilities (`attach`, `readTail`, `sendInput`, `interrupt`, `resize`, `diffContext`, `reviewContext`)
@@ -78,9 +91,9 @@ Why:
 - session lifecycle already exists
 - approvals, artifacts, and chat/tool surfaces already exist
 
-## Current MVP status
+## Current shipped status
 
-The live bridge MVP now wires the first truthful operator actions through the OpenClaw gateway:
+The live bridge MVP wires the first truthful operator actions through the OpenClaw gateway:
 - `chat.history` for sanitized transcript / session-log viewing
 - `chat.send` for explicit steer actions on an existing session
 - `chat.abort` for explicit interrupt / stop actions on an existing session
@@ -88,6 +101,11 @@ The live bridge MVP now wires the first truthful operator actions through the Op
 Important truth guardrail:
 - **spawn is still intentionally disabled in the live bridge UI**
 - the shell mirrors existing sessions first and only adds runtime control where it is semantically honest
+
+The RuntimeSurface layer is also populated for:
+- discovered Codex terminal sessions
+- IDE-owned Codex sessions with lifecycle metadata
+- discovered Claude Code terminal sessions
 
 ## Later targets
 - Codex CLI / app-server
