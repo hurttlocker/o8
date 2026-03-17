@@ -22,7 +22,7 @@
 
 import { readFileSync, watch, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execSync, execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -32,8 +32,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 const WS_PORT = Number(process.env.WS_PORT ?? 3002);
 const NEXT_ORIGIN = process.env.NEXT_ORIGIN ?? 'http://127.0.0.1:3001';
 const PING_INTERVAL_MS = 25_000;
-const INBOX_POLL_MS = 3_000;
-const HISTORY_POLL_MS = 2_000;
+const FETCH_TIMEOUT_MS = 8_000;
+const BACKPRESSURE_LIMIT = 64 * 1024; // 64KB — skip sends if client buffer exceeds this
 
 interface GatewayConfig {
   port: number;
@@ -79,7 +79,7 @@ let gatewayWs: WebSocket | null = null;
 let gatewayConnecting = false;
 let gatewayBackoff = 1000;
 let gatewayReconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let gatewayInstanceId = randomUUID();
+const gatewayInstanceId = randomUUID();
 let gatewayRequestCounter = 0;
 const chatListeners = new Set<(delta: ChatDelta) => void>();
 
@@ -195,6 +195,7 @@ async function fetchSync(body: Record<string, unknown>): Promise<Record<string, 
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!res.ok) return null;
     return await res.json() as Record<string, unknown>;
@@ -212,8 +213,22 @@ function extractText(delta: ChatDelta): string {
 }
 
 function send(client: ClientState, msg: Record<string, unknown>) {
-  if (client.ws.readyState === WebSocket.OPEN) {
-    client.ws.send(JSON.stringify(msg));
+  if (client.ws.readyState !== WebSocket.OPEN) return;
+  if (client.ws.bufferedAmount > BACKPRESSURE_LIMIT) return; // drop if client can't keep up
+  client.ws.send(JSON.stringify(msg));
+}
+
+function sendRaw(client: ClientState, preStringified: string) {
+  if (client.ws.readyState !== WebSocket.OPEN) return;
+  if (client.ws.bufferedAmount > BACKPRESSURE_LIMIT) return;
+  client.ws.send(preStringified);
+}
+
+function broadcast(msg: Record<string, unknown>, filter?: (c: ClientState) => boolean) {
+  const json = JSON.stringify(msg);
+  for (const client of clients.values()) {
+    if (filter && !filter(client)) continue;
+    sendRaw(client, json);
   }
 }
 
@@ -280,21 +295,17 @@ async function syncClientHistory(client: ClientState) {
 
 function onChatDelta(delta: ChatDelta) {
   const text = extractText(delta);
+  const sessionFilter = (c: ClientState) => c.sessionKey === delta.sessionKey;
 
-  for (const client of clients.values()) {
-    if (client.sessionKey !== delta.sessionKey) continue;
-
-    if (delta.state === 'delta') {
-      send(client, { channel: 'chat', event: 'delta', data: { text, runId: delta.runId, seq: delta.seq } });
-    } else if (delta.state === 'done') {
-      send(client, { channel: 'chat', event: 'done', data: { text, runId: delta.runId, seq: delta.seq } });
-      // Event-driven push: immediately sync history + inbox on completion
-      setTimeout(() => pushHistoryForSession(delta.sessionKey), 500);
-      scheduleEventDrivenInboxPush();
-    } else if (delta.state === 'error' || delta.state === 'aborted') {
-      send(client, { channel: 'chat', event: 'error', data: { state: delta.state, error: delta.error, runId: delta.runId } });
-      scheduleEventDrivenInboxPush();
-    }
+  if (delta.state === 'delta') {
+    broadcast({ channel: 'chat', event: 'delta', data: { text, runId: delta.runId, seq: delta.seq } }, sessionFilter);
+  } else if (delta.state === 'done') {
+    broadcast({ channel: 'chat', event: 'done', data: { text, runId: delta.runId, seq: delta.seq } }, sessionFilter);
+    setTimeout(() => pushHistoryForSession(delta.sessionKey), 500);
+    scheduleEventDrivenInboxPush();
+  } else if (delta.state === 'error' || delta.state === 'aborted') {
+    broadcast({ channel: 'chat', event: 'error', data: { state: delta.state, error: delta.error, runId: delta.runId } }, sessionFilter);
+    scheduleEventDrivenInboxPush();
   }
 }
 
@@ -368,10 +379,8 @@ function startPollingLoops() {
       if (hash === lastConflictHash) return;
       lastConflictHash = hash;
 
-      // Push to all clients
-      for (const client of activeClients) {
-        send(client, { channel: 'conflicts', event: 'update', data: report });
-      }
+      // Push to all clients (pre-stringify once)
+      broadcast({ channel: 'conflicts', event: 'update', data: report });
     } catch {
       // Non-critical — conflict scanning is best-effort
     }
@@ -415,6 +424,10 @@ const WS_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
 const wss = new WebSocketServer({
   server: httpServer,
   path: '/ws',
+  perMessageDeflate: {
+    zlibDeflateOptions: { level: 1 }, // fast compression — good enough for JSON
+    threshold: 128, // only compress messages > 128 bytes
+  },
   verifyClient: (info, done) => {
     const url = new URL(info.req.url ?? '', `http://${info.req.headers.host}`);
     const token = url.searchParams.get('token');
@@ -489,16 +502,16 @@ let lastDiffHash = '';
 let diffDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 function broadcastDiffStats() {
-  const activeClients = [...clients.values()].filter(c => c.ws.readyState === WebSocket.OPEN);
-  if (activeClients.length === 0) return;
+  if (clients.size === 0) return;
 
-  try {
-    const stat = execSync(
-      'git diff --shortstat origin/main..HEAD 2>/dev/null; git diff --shortstat 2>/dev/null',
-      { cwd: REPO_ROOT, encoding: 'utf-8', timeout: 5000 },
-    ).trim();
+  execFile('sh', ['-c', 'git diff --shortstat origin/main..HEAD 2>/dev/null; git diff --shortstat 2>/dev/null'], {
+    cwd: REPO_ROOT,
+    encoding: 'utf-8',
+    timeout: 5000,
+  }, (err, stdout) => {
+    if (err || !stdout) return;
+    const stat = stdout.trim();
 
-    // Parse
     let additions = 0, deletions = 0, files = 0;
     for (const line of stat.split('\n').filter(Boolean)) {
       const fm = line.match(/(\d+) files? changed/);
@@ -513,10 +526,8 @@ function broadcastDiffStats() {
     if (hash === lastDiffHash) return;
     lastDiffHash = hash;
 
-    for (const client of activeClients) {
-      send(client, { channel: 'review', event: 'diff-stats', data: { additions, deletions, files } });
-    }
-  } catch { /* silent */ }
+    broadcast({ channel: 'review', event: 'diff-stats', data: { additions, deletions, files } });
+  });
 }
 
 // Watch .git directory for changes (commits, merges, rebases)
@@ -571,3 +582,35 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 httpServer.listen(WS_PORT, '0.0.0.0', () => {
   console.log(`[ws-server] Cortex IDE WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
 });
+
+// ── Graceful shutdown ──
+
+function shutdown(signal: string) {
+  console.log(`[ws-server] ${signal} received — shutting down gracefully`);
+
+  // Close gateway connection
+  if (gatewayWs) {
+    gatewayWs.close(1001, 'server shutting down');
+    gatewayWs = null;
+  }
+
+  // Send close frame to every client so they reconnect cleanly
+  for (const client of clients.values()) {
+    try { client.ws.close(1001, 'server shutting down'); } catch { /* already gone */ }
+  }
+  clients.clear();
+
+  // Close HTTP + WS server, then exit
+  wss.close(() => {
+    httpServer.close(() => {
+      console.log('[ws-server] Clean shutdown complete');
+      process.exit(0);
+    });
+  });
+
+  // Force exit after 3s if something hangs
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
