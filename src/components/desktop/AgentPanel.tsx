@@ -38,7 +38,9 @@ import {
 } from 'lucide-react';
 import { MarkdownBody } from './MarkdownBody';
 import { RepoRegistrySection } from './RepoRegistrySection';
+import { WorktreeBadge } from '@/components/mobile/WorktreeBadge';
 import { formatModelLabel } from '@/lib/format';
+import type { WorktreeInfo } from '@/lib/worktree/types';
 
 // ── Types ──
 
@@ -73,6 +75,8 @@ interface AgentDetail {
   localDiff?: { additions: number; deletions: number; changedFiles: number };
   activity?: { coding: number; thinking: number; testing: number; idle: number };
   workspaceStatus?: 'in_progress' | 'in_review' | 'done' | 'idle' | 'cancelled';
+  tmuxSession?: string;
+  worktree?: WorktreeInfo;
 }
 
 interface EventEntry {
@@ -245,6 +249,15 @@ function deriveRepo(workspace: string): string {
 
   // Unknown or empty workspace — group under OpenClaw
   if (!path || path === 'unknown') return 'openclaw';
+
+  if (path.includes('/.cortex-worktrees/')) {
+    const repoRoot = path.split('/.cortex-worktrees/')[0] ?? '';
+    return repoRoot.split('/').pop() || 'openclaw';
+  }
+  if (path.includes('/.claude/worktrees/')) {
+    const repoRoot = path.split('/.claude/worktrees/')[0] ?? '';
+    return repoRoot.split('/').pop() || 'openclaw';
+  }
 
   // Explicit repo path
   if (path.includes('repos/')) {
@@ -587,6 +600,11 @@ const AgentCard = memo(function AgentCard({
                       </>
                     )}
                   </div>
+                  {agent.worktree ? (
+                    <div style={{ marginTop: 4 }}>
+                      <WorktreeBadge worktree={agent.worktree} />
+                    </div>
+                  ) : null}
                 </div>
                 {/* Right side: diff stats + context ring */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 'auto' }}>
@@ -1696,10 +1714,11 @@ export const AgentPanel = memo(function AgentPanel({
   useEffect(() => {
     async function fetchAll() {
       try {
-        // Fetch both in parallel
-        const [invRes, wsRes] = await Promise.all([
+        // Fetch inventory, workspace enrichments, and registered repos in parallel
+        const [invRes, wsRes, repoRes] = await Promise.all([
           fetch('/api/runtime/inventory').catch(() => null),
           fetch('/api/panel/workspaces').catch(() => null),
+          fetch('/api/panel/repos').catch(() => null),
         ]);
 
         // Parse inventory
@@ -1708,7 +1727,6 @@ export const AgentPanel = memo(function AgentPanel({
           const data = await invRes.json();
           newAgents = data.agents ?? [];
           setEvents(prev => JSON.stringify(prev) === JSON.stringify(data.events ?? []) ? prev : (data.events ?? []));
-          if (onAgentsUpdate) onAgentsUpdate(newAgents);
         }
 
         // Parse workspace data
@@ -1722,13 +1740,46 @@ export const AgentPanel = memo(function AgentPanel({
           }
         }
 
+        const worktreeMap = new Map<string, WorktreeInfo>();
+        if (repoRes?.ok) {
+          const repoData = await repoRes.json() as { repos?: Array<{ localPath: string }> };
+          const summaries = await Promise.all(
+            (repoData.repos ?? []).map(async (repo) => {
+              try {
+                const res = await fetch(`/api/worktrees?repo=${encodeURIComponent(repo.localPath)}`);
+                if (!res.ok) return null;
+                return await res.json() as { worktrees?: WorktreeInfo[] };
+              } catch {
+                return null;
+              }
+            }),
+          );
+
+          for (const summary of summaries) {
+            for (const worktree of summary?.worktrees ?? []) {
+              if (worktree.sessionKey) {
+                worktreeMap.set(worktree.sessionKey, worktree);
+              }
+            }
+          }
+        }
+
         // Merge: always enrich agents with workspace data before setting state
         const enriched = newAgents.map(a => {
           const ws = wsMap.get(a.sessionKey);
-          if (!ws) return a;
-          return { ...a, branch: ws.branch, pr: ws.pr || undefined, localDiff: ws.localDiff || undefined, workspaceStatus: ws.workspaceStatus };
+          const worktree = worktreeMap.get(a.sessionKey);
+          if (!ws && !worktree) return a;
+          return {
+            ...a,
+            branch: ws?.branch ?? a.branch,
+            pr: ws?.pr || a.pr,
+            localDiff: ws?.localDiff || a.localDiff,
+            workspaceStatus: ws?.workspaceStatus ?? a.workspaceStatus,
+            worktree: worktree ?? a.worktree,
+          };
         });
 
+        if (onAgentsUpdate) onAgentsUpdate(enriched);
         setAgents(prev => JSON.stringify(prev) === JSON.stringify(enriched) ? prev : enriched);
       } catch { /* silent */ }
     }
@@ -1981,7 +2032,10 @@ export const AgentPanel = memo(function AgentPanel({
       </div>
       )}
 
-      <RepoRegistrySection />
+      <RepoRegistrySection
+        onLaunchComplete={() => { fetchNowRef.current(); }}
+        onSelectSession={onSelectSession}
+      />
 
       {/* ── Tab Bar ── */}
       <div style={{
