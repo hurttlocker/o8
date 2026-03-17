@@ -585,11 +585,10 @@ function DashboardInner() {
           </div>
         )}
 
-        {/* Live output even when no canvas tabs open — pinned to bottom */}
+        {/* Live output even when no canvas tabs open — uses canvasHeight for drag resize */}
         {(!canvasTabs.length || !bottomPanelVisible) && liveOutputAgent && !showMemoryView && (activeNavSection as string) !== 'intent' && (activeNavSection as string) !== 'settings' && (
           <div style={{
-            marginTop: 'auto',
-            flexShrink: 0,
+            flex: `0 0 ${canvasHeight}%`,
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
