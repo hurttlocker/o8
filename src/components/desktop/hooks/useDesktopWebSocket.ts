@@ -173,8 +173,8 @@ export function useDesktopWebSocket(
           break;
 
         case 'review':
-          if (eventType === 'update' && data) {
-            cbRef.current.onReviewUpdate?.(data);
+          if (data) {
+            cbRef.current.onReviewUpdate?.({ event: eventType, ...data });
           }
           break;
 

@@ -1,7 +1,8 @@
 'use client';
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { X, ChevronDown, FileCode, FilePlus, PenLine, Eye, Terminal } from 'lucide-react';
+import { useDesktopWebSocket, type DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
 
 /* ── Terminal Handle (ref-based API for parent → terminal communication) ── */
 export interface TerminalHandle {
@@ -573,6 +574,7 @@ export function LiveOutput({
   const pollRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const prevCountRef = useRef(0);
   const termContainerRef = useRef<HTMLDivElement>(null);
+  const fetchNowRef = useRef<() => void>(() => {});
 
   // Standalone terminal mode: tmuxSession provided but no agent session
   const standaloneTerminal = !!tmuxSession && !sessionKey;
@@ -632,11 +634,32 @@ export function LiveOutput({
     } catch { /* silent */ }
   }, [sessionKey]);
 
+  const wsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
+    onReviewUpdate: (data: Record<string, unknown>) => {
+      if (!sessionKey) return;
+      const event = data.event as string | undefined;
+      if (event !== 'file-changes' && event !== 'diff-stats') return;
+      const eventSessionKey = data.sessionKey as string | undefined;
+      if (eventSessionKey && eventSessionKey !== sessionKey) return;
+      fetchNowRef.current();
+    },
+  }), [sessionKey]);
+
+  const { isConnected: reviewWsConnected } = useDesktopWebSocket(undefined, wsCallbacks);
+
   useEffect(() => {
-    void fetchDiffs();
-    pollRef.current = setInterval(fetchDiffs, 4000);
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  }, [fetchDiffs]);
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    fetchNowRef.current = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => { void fetchDiffs(); }, 150);
+    };
+    fetchNowRef.current();
+    pollRef.current = setInterval(() => { void fetchDiffs(); }, reviewWsConnected ? 15_000 : 4_000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
+  }, [fetchDiffs, reviewWsConnected]);
 
   useEffect(() => {
     if (scrollRef.current) {
