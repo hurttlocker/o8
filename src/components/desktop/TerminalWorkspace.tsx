@@ -29,13 +29,27 @@ interface TerminalWorkspaceProps {
 }
 
 const CLI_AGENTS = [
-  { id: 'shell', label: 'Terminal', icon: '⬛', command: null },
-  { id: 'claude', label: 'Claude Code', icon: '🟣', command: 'claude' },
-  { id: 'codex', label: 'Codex', icon: '🟢', command: 'codex' },
-  { id: 'gemini', label: 'Gemini CLI', icon: '🔵', command: 'gemini' },
-  { id: 'opencode', label: 'OpenCode', icon: '🟠', command: 'opencode' },
-  { id: 'aider', label: 'Aider', icon: '🟡', command: 'aider' },
+  { id: 'shell', label: 'Terminal', color: '#64748b', command: null },
+  { id: 'claude', label: 'Claude Code', color: '#a855f7', command: 'claude' },
+  { id: 'codex', label: 'Codex', color: '#22c55e', command: 'codex' },
+  { id: 'gemini', label: 'Gemini CLI', color: '#3b82f6', command: 'gemini' },
+  { id: 'opencode', label: 'OpenCode', color: '#f97316', command: 'opencode' },
+  { id: 'aider', label: 'Aider', color: '#eab308', command: 'aider' },
 ];
+
+/** Small colored dot for tab/picker items */
+function AgentDot({ color, size = 8 }: { color: string; size?: number }) {
+  return (
+    <span style={{
+      display: 'inline-block',
+      width: size,
+      height: size,
+      borderRadius: '50%',
+      background: color,
+      flexShrink: 0,
+    }} />
+  );
+}
 
 /* ── Inline xterm.js Terminal ── */
 
@@ -299,7 +313,11 @@ const TabBar = memo(function TabBar({
                 borderBottom: isActive ? '2px solid #93c5fd' : '2px solid transparent',
               }}
             >
-              <span style={{ fontSize: 12 }}>{agent?.icon ?? '⬛'}</span>
+              {tab.cliAgent === 'shell' ? (
+                <TerminalIcon size={12} style={{ color: '#94a3b8' }} />
+              ) : (
+                <AgentDot color={agent?.color ?? '#64748b'} />
+              )}
               <span>{tab.label}</span>
               {tabs.length > 1 && (
                 <span
@@ -422,11 +440,17 @@ const TabBar = memo(function TabBar({
                 onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
                 onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
               >
-                <span style={{ fontSize: 16, width: 20, textAlign: 'center' }}>{agent.icon}</span>
+                <span style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {agent.id === 'shell' ? (
+                    <TerminalIcon size={14} style={{ color: '#94a3b8' }} />
+                  ) : (
+                    <AgentDot color={agent.color} size={10} />
+                  )}
+                </span>
                 <div>
                   <div style={{ fontWeight: 500 }}>{agent.label}</div>
                   {agent.command && (
-                    <div style={{ fontSize: 11, color: '#475569', fontFamily: 'ui-monospace, monospace' }}>
+                    <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'ui-monospace, monospace' }}>
                       $ {agent.command}
                     </div>
                   )}
@@ -551,10 +575,10 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
         if (tab.tmuxSession && pendingCliCommands.current.has(tab.id)) {
           const command = pendingCliCommands.current.get(tab.id)!;
           pendingCliCommands.current.delete(tab.id);
-          // Small delay to let terminal initialize
+          // Delay to let xterm + tmux fully initialize before sending CLI command
           setTimeout(() => {
             sendTerminalInput(tab.tmuxSession!, command + '\n');
-          }, 500);
+          }, 1200);
         }
       }
     }, [tabs, sendTerminalInput]);

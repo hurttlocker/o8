@@ -491,7 +491,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
 
   try {
     execSync(
-      `tmux new-session -d -s ${sessionName} -x ${cols} -y ${rows}`,
+      `tmux new-session -d -s ${sessionName} -x ${cols} -y ${rows} \\; set-option status off`,
       { encoding: 'utf-8', timeout: 5000 },
     );
     console.log(`[ws-server] Created tmux session: ${sessionName}`);
