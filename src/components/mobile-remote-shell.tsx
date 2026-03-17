@@ -1,8 +1,8 @@
 'use client';
 import {
   useEffect,
-  useMemo,
   useRef,
+  useState,
   type CSSProperties,
 } from 'react';
 import type { RuntimeReviewPacket } from '@/lib/fleet/types';
@@ -32,6 +32,7 @@ const ControlsSheet = dynamic(() => import('./mobile/ControlsSheet').then((m) =>
 const CostsDashboard = dynamic(() => import('./mobile/CostsDashboard').then((m) => ({ default: m.CostsDashboard })), { ssr: false, ...shimmerFallback });
 const DiffOverlay = dynamic(() => import('./mobile/DiffOverlay').then((m) => ({ default: m.DiffOverlay })), { ssr: false, ...shimmerFallback });
 const TokenUsageSummary = dynamic(() => import('./mobile/TokenUsageSummary').then((m) => ({ default: m.TokenUsageSummary })), { ssr: false, ...shimmerFallback });
+const MobileTerminal = dynamic(() => import('./mobile/MobileTerminal').then((m) => ({ default: m.MobileTerminal })), { ssr: false, ...shimmerFallback });
 
 // Cortex memory surfaces (#78-#85) — typed via explicit generic param
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -89,6 +90,11 @@ function MobileRemoteShellInner({
   initialReviewFile?: MobileReviewFileResponse['file'] | null;
   initialOwnedReviewPacket?: RuntimeReviewPacket | null;
 }) {
+  const [detailTabState, setDetailTabState] = useState<{
+    sessionId: string | null;
+    tab: 'chat' | 'terminal';
+  }>({ sessionId: null, tab: 'chat' });
+
   // ── All state lives in useMobileState ──
   const state = useMobileState({ initialSnapshot, initialTranscript, initialReviewFile, initialOwnedReviewPacket });
 
@@ -245,6 +251,13 @@ function MobileRemoteShellInner({
   const ownedQueuedTurn = Boolean(pendingOwnedTurn) || transcriptActionState === 'steering';
   const canResumeOwnedCodex = Boolean(isOwnedCodexSession && selectedSession?.runtimeSurface?.capabilities.sendInput && !ownedQueuedTurn);
   const canInterruptOwnedCodex = Boolean(isOwnedCodexSession && selectedSession?.runtimeSurface?.capabilities.interrupt);
+  const hasTerminalSession = Boolean(selectedSession?.tmuxSession);
+  const detailTab = detailTabState.sessionId === selectedSession?.id
+    ? detailTabState.tab
+    : hasTerminalSession
+      ? 'terminal'
+      : 'chat';
+  const terminalActive = hasTerminalSession && detailTab === 'terminal';
 
   // Track compose bar height via ResizeObserver for dynamic pill positioning
   const bottomDockRef = useRef<HTMLDivElement>(null);
@@ -328,63 +341,115 @@ function MobileRemoteShellInner({
             transcriptError={transcriptError}
             selectedReviewPacketError={selectedReviewPacketError}
           />
-          <ChatView
-            transcriptEntries={transcriptEntries}
-            selectedSession={selectedSession}
-            isOwnedCodexSession={isOwnedCodexSession}
-            transcriptLoading={transcriptLoading}
-            isRefreshing={surfaceRefreshing}
-            composeHeight={state.composeHeight}
-            selectedReviewFile={selectedReviewFile}
-            streamingText={streamingText}
-            waitingForResponse={waitingForResponse}
-            hydrated={hydrated}
-            seenMessageIdsRef={seenMessageIdsRef}
-            agentDisplayName={agentDisplayName}
-            renderMessageBody={renderMessageBody}
-            expandedMedia={expandedMedia}
-            setExpandedMedia={setExpandedMedia}
-            onOpenDiff={actions.openDiffViewer}
-            onScrollToLatestMessage={scrollToLatestMessage}
-            actionState={transcriptActionState}
-          />
-          <ApprovalStack
-            pendingApprovals={pendingApprovals}
-            resolvedApprovals={resolvedApprovals}
-            onApprove={(a) => actions.handleApprovalDecision(a, 'approved')}
-            onReject={(a) => actions.handleApprovalDecision(a, 'rejected')}
-          />
+          {hasTerminalSession ? (
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                padding: '8px 14px 0',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setDetailTabState({ sessionId: selectedSession?.id ?? null, tab: 'terminal' })}
+                style={{
+                  flex: 1,
+                  minHeight: 36,
+                  borderRadius: 12,
+                  border: detailTab === 'terminal' ? '1px solid rgba(239, 68, 68, 0.18)' : '1px solid rgba(15, 23, 42, 0.08)',
+                  background: detailTab === 'terminal' ? 'rgba(239, 68, 68, 0.08)' : 'rgba(255, 255, 255, 0.72)',
+                  color: detailTab === 'terminal' ? '#b91c1c' : '#475569',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Terminal
+              </button>
+              <button
+                type="button"
+                onClick={() => setDetailTabState({ sessionId: selectedSession?.id ?? null, tab: 'chat' })}
+                style={{
+                  flex: 1,
+                  minHeight: 36,
+                  borderRadius: 12,
+                  border: detailTab === 'chat' ? '1px solid rgba(239, 68, 68, 0.18)' : '1px solid rgba(15, 23, 42, 0.08)',
+                  background: detailTab === 'chat' ? 'rgba(239, 68, 68, 0.08)' : 'rgba(255, 255, 255, 0.72)',
+                  color: detailTab === 'chat' ? '#b91c1c' : '#475569',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Chat
+              </button>
+            </div>
+          ) : null}
+          {terminalActive ? (
+            <MobileTerminal tmuxSession={selectedSession!.tmuxSession!} />
+          ) : (
+            <>
+              <ChatView
+                transcriptEntries={transcriptEntries}
+                selectedSession={selectedSession}
+                isOwnedCodexSession={isOwnedCodexSession}
+                transcriptLoading={transcriptLoading}
+                isRefreshing={surfaceRefreshing}
+                composeHeight={state.composeHeight}
+                selectedReviewFile={selectedReviewFile}
+                streamingText={streamingText}
+                waitingForResponse={waitingForResponse}
+                hydrated={hydrated}
+                seenMessageIdsRef={seenMessageIdsRef}
+                agentDisplayName={agentDisplayName}
+                renderMessageBody={renderMessageBody}
+                expandedMedia={expandedMedia}
+                setExpandedMedia={setExpandedMedia}
+                onOpenDiff={actions.openDiffViewer}
+                onScrollToLatestMessage={scrollToLatestMessage}
+                actionState={transcriptActionState}
+              />
+              <ApprovalStack
+                pendingApprovals={pendingApprovals}
+                resolvedApprovals={resolvedApprovals}
+                onApprove={(a) => actions.handleApprovalDecision(a, 'approved')}
+                onReject={(a) => actions.handleApprovalDecision(a, 'rejected')}
+              />
+            </>
+          )}
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
         <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
-          <div className="remodex-compose-shell">
-            <ComposeBar
-              session={selectedSession}
-              sessionKey={selectedSessionKey}
-              draft={transcriptDraft}
-              attachments={transcriptAttachments}
-              actionState={transcriptActionState}
-              enhancing={enhancing}
-              preEnhanceDraft={preEnhanceDraft}
-              isChatSession={isChatSession}
-              canResumeOwnedCodex={canResumeOwnedCodex}
-              canInterruptOwnedCodex={canInterruptOwnedCodex}
-              selectedReviewPacket={selectedReviewPacket}
-              reviewFiles={reviewFiles}
-              ownedAvailability={ownedAvailability}
-              ownedReviewDisposition={ownedReviewDisposition}
-              ownedQueuedTurn={ownedQueuedTurn}
-              surfaceRefreshing={surfaceRefreshing}
-              actionNote={transcriptActionNote}
-              compactLine={compactLine}
-              agentDisplayName={agentDisplayName}
-              composeRef={composeRef}
-              fileInputRef={fileInputRef}
-              handlers={actions.composeBarHandlers}
-              onOpenRecall={() => setCortexRecallOpen(true)}
-              onModelPillTap={() => setSessionInfoOpen(true)}
-            />
-          </div>
+          {!terminalActive ? (
+            <div className="remodex-compose-shell">
+              <ComposeBar
+                session={selectedSession}
+                sessionKey={selectedSessionKey}
+                draft={transcriptDraft}
+                attachments={transcriptAttachments}
+                actionState={transcriptActionState}
+                enhancing={enhancing}
+                preEnhanceDraft={preEnhanceDraft}
+                isChatSession={isChatSession}
+                canResumeOwnedCodex={canResumeOwnedCodex}
+                canInterruptOwnedCodex={canInterruptOwnedCodex}
+                selectedReviewPacket={selectedReviewPacket}
+                reviewFiles={reviewFiles}
+                ownedAvailability={ownedAvailability}
+                ownedReviewDisposition={ownedReviewDisposition}
+                ownedQueuedTurn={ownedQueuedTurn}
+                surfaceRefreshing={surfaceRefreshing}
+                actionNote={transcriptActionNote}
+                compactLine={compactLine}
+                agentDisplayName={agentDisplayName}
+                composeRef={composeRef}
+                fileInputRef={fileInputRef}
+                handlers={actions.composeBarHandlers}
+                onOpenRecall={() => setCortexRecallOpen(true)}
+                onModelPillTap={() => setSessionInfoOpen(true)}
+              />
+            </div>
+          ) : null}
           <RuntimeBar
             snapshot={snapshot}
             selectedSession={selectedSession}
