@@ -5,6 +5,7 @@
   "private": true,
   "main": "src/app/layout.tsx",
   "scripts": {
+    "predev:cleanup": "lsof -ti :3001 -sTCP:LISTEN | xargs kill -9 2>/dev/null; lsof -ti :3002 -sTCP:LISTEN | xargs kill -9 2>/dev/null; true",
     "dev": "next dev -p 3001",
     "dev:ws": "tsx src/ws-server.ts",
     "dev:all": "npm run dev & npm run dev:ws &",
@@ -12,7 +13,7 @@
     "start": "next start -p 3001",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "desktop:dev": "concurrently -k -s first \"npm run dev\" \"npm run dev:ws\"",
+    "desktop:dev": "npm run predev:cleanup && concurrently -k -s first \"npm run dev\" \"npm run dev:ws\"",
     "tauri:dev": "cargo tauri dev",
     "tauri:build": "cargo tauri build"
   },
