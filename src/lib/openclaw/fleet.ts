@@ -423,11 +423,19 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
     const ownedThreadIds = new Set(ownedCodex.ownedThreadIds);
     // Only show discovered codex sessions that have a live process (active PID)
     // or are IDE-owned. Filter out stale SQLite session records.
-    const filteredDiscoveredAgents = codexDiscovery.agents.filter((agent) => {
-      if (ownedThreadIds.has(agent.sessionId ?? '')) return false; // handled by owned
-      // Only include if the agent has an active process (running status from live PID)
+    // Then deduplicate: only keep the most recent running thread per workspace+branch
+    const runningDiscovered = codexDiscovery.agents.filter((agent) => {
+      if (ownedThreadIds.has(agent.sessionId ?? '')) return false;
       return agent.status === 'running';
     });
+    // Deduplicate: one agent per workspace+branch (keep first = most recent,
+    // since discovery sorts by updated_at desc)
+    const deduped = new Map<string, typeof runningDiscovered[number]>();
+    for (const agent of runningDiscovered) {
+      const key = `${agent.workspace}::${agent.branch}`;
+      if (!deduped.has(key)) deduped.set(key, agent);
+    }
+    const filteredDiscoveredAgents = [...deduped.values()];
     const filteredDiscoveredAgentIds = new Set(filteredDiscoveredAgents.map((agent) => agent.id));
     const filteredDiscoveredEvents = codexDiscovery.events.filter((event) => filteredDiscoveredAgentIds.has(event.agentId ?? ''));
     const filteredDiscoveredArtifacts = codexDiscovery.artifacts.filter(
