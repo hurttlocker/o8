@@ -17,6 +17,7 @@ import { Check, ChevronDown, Copy, Expand, Minus, Plus, X } from 'lucide-react';
 interface CodeBlockProps {
   code: string;
   language?: string;
+  onOpenMermaid?: (code: string) => void;
 }
 
 const LANG_ALIASES: Record<string, string> = {
@@ -278,7 +279,7 @@ const modalBtnStyle: React.CSSProperties = {
 
 // ── Mermaid Diagram (inline + expand) ──
 
-const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) {
+const MermaidDiagram = memo(function MermaidDiagram({ code, onOpenMermaid }: { code: string; onOpenMermaid?: (code: string) => void }) {
   const [svgHtml, setSvgHtml] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
@@ -354,7 +355,7 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
           {/* Expand button */}
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); setModalOpen(true); }}
+            onClick={(e) => { e.stopPropagation(); onOpenMermaid ? onOpenMermaid(code) : setModalOpen(true); }}
             title="Expand diagram"
             style={{
               position: 'absolute',
@@ -390,7 +391,7 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
   );
 });
 
-export const CodeBlock = memo(function CodeBlock({ code, language }: CodeBlockProps) {
+export const CodeBlock = memo(function CodeBlock({ code, language, onOpenMermaid }: CodeBlockProps) {
   const lines = code.split('\n');
   const label = formatLabel(language);
   const isMermaid = language?.toLowerCase() === 'mermaid';
@@ -497,7 +498,7 @@ export const CodeBlock = memo(function CodeBlock({ code, language }: CodeBlockPr
       {/* Content */}
       {expanded ? (
         isMermaid ? (
-          <MermaidDiagram code={code} />
+          <MermaidDiagram code={code} onOpenMermaid={onOpenMermaid} />
         ) : (
           <pre style={{
             margin: 0,

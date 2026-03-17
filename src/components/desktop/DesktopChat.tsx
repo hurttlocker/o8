@@ -271,7 +271,7 @@ function renderMarkdownBlocks(text: string): RenderedBlock[] {
       const raw = codeLines.join('\n');
       blocks.push({
         rawText: lang?.toLowerCase() === 'mermaid' ? 'diagram' : raw,
-        element: <CodeBlock key={`code-${i}`} code={raw} language={lang || undefined} />,
+        element: <CodeBlock key={`code-${i}`} code={raw} language={lang || undefined} onOpenMermaid={onOpenMermaid} />,
       });
       continue;
     }
@@ -555,7 +555,7 @@ function renderInline(text: string): React.ReactNode {
 
 // ── Main Component ──
 
-export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessionKey?: string; onOpenDiff?: () => void } = {}) {
+export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid }: { externalSessionKey?: string; onOpenDiff?: () => void; onOpenMermaid?: (code: string) => void } = {}) {
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedKey, setSelectedKey] = useState<string>('');
@@ -642,6 +642,12 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
           if (genuinelyNew.length === 0) return prev;
           return [...prev, ...genuinelyNew];
         });
+      }
+    },
+    onReviewUpdate: (data: Record<string, unknown>) => {
+      const d = data as { additions?: number; deletions?: number; files?: number };
+      if (typeof d.additions === 'number') {
+        setDiffStats({ additions: d.additions, deletions: d.deletions ?? 0, files: d.files ?? 0 });
       }
     },
   }), [selectedKey]);
@@ -1137,10 +1143,6 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         }).catch(() => {});
-        // Quick poll for response (500ms, 1.5s, 3s)
-        setTimeout(() => void fetchTranscript(selectedKey), 500);
-        setTimeout(() => void fetchTranscript(selectedKey), 1500);
-        setTimeout(() => void fetchTranscript(selectedKey), 3000);
       }
     } catch { /* silent */ }
     finally {
@@ -1160,9 +1162,8 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionKey: selectedKey, action: 'stop' }),
       });
-      // Quick poll for updated transcript
-      setTimeout(() => void fetchTranscript(selectedKey), 500);
-      setTimeout(() => void fetchTranscript(selectedKey), 1500);
+      // Single poll after stop — WS will push the rest
+      setTimeout(() => void fetchTranscript(selectedKey), 1000);
     } catch { /* silent */ }
     finally {
       setStopping(false);
