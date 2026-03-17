@@ -477,9 +477,9 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   const cols = typeof msg.cols === 'number' ? msg.cols : 120;
   const rows = typeof msg.rows === 'number' ? msg.rows : 30;
 
-  // Reuse an existing dashboard tmux session if one exists (avoids accumulation)
+  // Reuse an existing unattached dashboard tmux session if one exists
   const existing = findExistingDashSession();
-  if (existing) {
+  if (existing && !terminalAttachments.has(existing)) {
     console.log(`[ws-server] Reusing existing tmux session: ${existing}`);
     sendTerminal(client, 'created', { sessionName: existing });
     handleTerminalAttach(client, { sessionName: existing, cols, rows });
