@@ -19,6 +19,7 @@ import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { IntentCanvas } from '@/components/desktop/IntentCanvas';
 import { SettingsPage } from '@/components/desktop/SettingsPage';
+import { AnalyticsPage } from '@/components/desktop/AnalyticsPage';
 import { ThoughtsCard } from '@/components/desktop/ThoughtsCard';
 
 export default function DashboardPage() {
@@ -452,6 +453,13 @@ function DashboardInner() {
         {activeNavSection === 'settings' && !showMemoryView && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <SettingsPage />
+          </div>
+        )}
+
+        {/* Full-screen Analytics */}
+        {activeNavSection === 'analytics' && !showMemoryView && (
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <AnalyticsPage />
           </div>
         )}
 
