@@ -1,7 +1,9 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { useDesktopWebSocket, type DesktopWsCallbacks } from '@/components/desktop/hooks/useDesktopWebSocket';
 import type { WsConnectionState } from '@/components/desktop/hooks/useDesktopWebSocket';
+import type { TerminalHandle } from '@/components/desktop/LiveOutput';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 // WorkspacesPanel merged into AgentPanel — unified agent+workspace view
 import { DesktopChat } from '@/components/desktop/DesktopChat';
@@ -37,12 +39,10 @@ function DashboardInner() {
   const [rightWidth, setRightWidth] = useState(420);
   const [canvasHeight, setCanvasHeight] = useState(50); // percentage of center column
   const [activeSessionKey, setActiveSessionKey] = useState<string | undefined>();
-  const [liveOutputAgent, setLiveOutputAgent] = useState<{
-    name: string;
-    runtime: string;
-    sessionKey: string;
-  } | null>(null);
   const [liveOutputCollapsed, setLiveOutputCollapsed] = useState(false);
+  const [dashTermSession, setDashTermSession] = useState<string | null>(null);
+  const termCreatedRef = useRef(false);
+  const terminalRef = useRef<TerminalHandle>(null);
   const [agentsJson, setAgentsJson] = useState('[]');
   const [activeWorkspace, setActiveWorkspace] = useState<string | undefined>();
   const [showMemoryView, setShowMemoryView] = useState(false);
@@ -54,6 +54,39 @@ function DashboardInner() {
   const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
   const [thoughtsOpen, setThoughtsOpen] = useState(false);
   const [wsStatus, setWsStatus] = useState<WsConnectionState>('disconnected');
+
+  // Terminal WS hook — uses React ref instead of DOM queries
+  const terminalWsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
+    onTerminalCreated: (sessionName: string) => {
+      setDashTermSession(sessionName);
+    },
+    onTerminalData: (_sessionName: string, data: string) => {
+      terminalRef.current?.writeToTerminal(data);
+    },
+    onTerminalError: (_sessionName: string, error: string) => {
+      terminalRef.current?.setTermError(error);
+    },
+    onTerminalExited: (_sessionName: string, _exitCode: number) => {
+      terminalRef.current?.setTermExited(true);
+    },
+  }), []);
+
+  const {
+    isConnected: termWsConnected,
+    sendTerminalCreate,
+    sendTerminalAttach,
+    sendTerminalInput,
+    sendTerminalResize,
+    sendTerminalDetach,
+  } = useDesktopWebSocket(undefined, terminalWsCallbacks);
+
+  // Auto-create terminal on WS connect
+  useEffect(() => {
+    if (termWsConnected && !termCreatedRef.current) {
+      termCreatedRef.current = true;
+      sendTerminalCreate(120, 30);
+    }
+  }, [termWsConnected, sendTerminalCreate]);
 
   // ── Alert system ──
   const {
@@ -114,22 +147,9 @@ function DashboardInner() {
 
   // ── Routing callbacks for AgentPanel ──
   const handleSelectSession = useCallback((sessionKey: string) => {
+    // Agent clicks only change the chat session — terminal is independent
     setActiveSessionKey(sessionKey);
-
-    // Show live output for any agent session
-    const agents = JSON.parse(agentsJson) as { name?: string; runtime?: string; sessionKey?: string }[];
-    const agent = agents.find(a => a.sessionKey === sessionKey);
-    if (agent) {
-      const name = agent.runtime === 'claude-code' ? 'Claude Code'
-        : agent.runtime === 'codex' ? 'Codex'
-        : agent.name ?? 'Mister';
-      setLiveOutputAgent({
-        name,
-        runtime: agent.runtime ?? 'openclaw',
-        sessionKey,
-      });
-    }
-  }, [agentsJson]);
+  }, []);
 
   const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
     openCanvasTab({
@@ -541,7 +561,7 @@ function DashboardInner() {
         {/* Vertical drag handle between workspace and canvas */}
         {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (<>
 
-        {((canvasTabs.length > 0 && bottomPanelVisible) || (liveOutputAgent && !liveOutputCollapsed)) && (
+        {((canvasTabs.length > 0 && bottomPanelVisible) || (dashTermSession && !liveOutputCollapsed)) && (
           <div
             onMouseDown={startCanvasDrag}
             style={{
@@ -568,8 +588,8 @@ function DashboardInner() {
         {/* Bottom — Live Output (if active) + Canvas (tabs + contextual content) */}
         {canvasTabs.length > 0 && bottomPanelVisible && (
           <div style={{ flex: `0 0 ${canvasHeight}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            {/* Live Agent Output — sits directly on top of canvas tabs */}
-            {liveOutputAgent && (
+            {/* Always-on terminal */}
+            {dashTermSession && (
               <div style={{
                 flexShrink: 0,
                 maxHeight: liveOutputCollapsed ? 'none' : '50%',
@@ -578,11 +598,13 @@ function DashboardInner() {
                 flexDirection: 'column',
               }}>
                 <LiveOutput
-                  agentName={liveOutputAgent.name}
-                  agentRuntime={liveOutputAgent.runtime}
-                  sessionKey={liveOutputAgent.sessionKey}
-                  onClose={() => setLiveOutputAgent(null)}
                   onCollapseChange={setLiveOutputCollapsed}
+                  tmuxSession={dashTermSession}
+                  sendTerminalAttach={sendTerminalAttach}
+                  sendTerminalInput={sendTerminalInput}
+                  sendTerminalResize={sendTerminalResize}
+                  sendTerminalDetach={sendTerminalDetach}
+                  terminalRef={terminalRef}
                 />
               </div>
             )}
@@ -596,8 +618,8 @@ function DashboardInner() {
           </div>
         )}
 
-        {/* Live output even when no canvas tabs open */}
-        {(!canvasTabs.length || !bottomPanelVisible) && liveOutputAgent && !showMemoryView && (activeNavSection as string) !== 'intent' && (activeNavSection as string) !== 'settings' && (activeNavSection as string) !== 'analytics' && (
+        {/* Always-on terminal when no canvas tabs open */}
+        {(!canvasTabs.length || !bottomPanelVisible) && dashTermSession && !showMemoryView && (activeNavSection as string) !== 'intent' && (activeNavSection as string) !== 'settings' && (activeNavSection as string) !== 'analytics' && (
           <div style={{
             flex: liveOutputCollapsed ? 'none' : `0 0 ${canvasHeight}%`,
             marginTop: liveOutputCollapsed ? 'auto' : undefined,
@@ -606,11 +628,13 @@ function DashboardInner() {
             flexDirection: 'column',
           }}>
             <LiveOutput
-              agentName={liveOutputAgent.name}
-              agentRuntime={liveOutputAgent.runtime}
-              sessionKey={liveOutputAgent.sessionKey}
-              onClose={() => setLiveOutputAgent(null)}
               onCollapseChange={setLiveOutputCollapsed}
+              tmuxSession={dashTermSession}
+              sendTerminalAttach={sendTerminalAttach}
+              sendTerminalInput={sendTerminalInput}
+              sendTerminalResize={sendTerminalResize}
+              sendTerminalDetach={sendTerminalDetach}
+              terminalRef={terminalRef}
             />
           </div>
         )}
