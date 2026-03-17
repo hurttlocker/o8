@@ -673,7 +673,7 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
           top: position.y,
           width: minimized ? 220 : size.w,
           height: minimized ? 'auto' : (size.h > 0 ? size.h : 'auto'),
-          zIndex: 9999,
+          zIndex: 10001,
           borderRadius: minimized ? 12 : 18,
           background: 'var(--t-panel-translucent)',
           backdropFilter: 'blur(50px) saturate(180%)',
