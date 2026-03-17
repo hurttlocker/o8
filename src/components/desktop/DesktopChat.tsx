@@ -658,7 +658,12 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
   const fetchTranscript = useCallback(async (key: string) => {
     if (!key) return;
     try {
-      const res = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(key)}&limit=50`);
+      // Route to Claude Code transcript API for claude-code sessions
+      const isCC = key.startsWith('claude-code:');
+      const url = isCC
+        ? `/api/claude-code/transcript?sessionKey=${encodeURIComponent(key)}&limit=50`
+        : `/api/mobile/history?sessionKey=${encodeURIComponent(key)}&limit=50`;
+      const res = await fetch(url);
       if (!res.ok) return;
       const data = await res.json();
       const serverEntries: MobileTranscriptEntry[] = data.transcript ?? data.entries ?? [];
