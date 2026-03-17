@@ -53,6 +53,18 @@ function deriveRepo(workspace: string): string {
   return '';
 }
 
+// Map OpenClaw agent session keys to the repos they actively work on
+// This is how the agent cards show the correct repo's diff
+function getAgentActiveRepo(sessionKey: string): { repo: string; path: string } | null {
+  const HOME = process.env.HOME || '/Users/marquisehurtt';
+  const map: Record<string, { repo: string; path: string }> = {
+    'agent:main:main': { repo: 'cortex-ide', path: `${HOME}/clawd/repos/cortex-ide` },
+    'agent:ace:main': { repo: 'cortex', path: `${HOME}/clawd/repos/cortex` },
+    'agent:hawk:main': { repo: 'cortex', path: `${HOME}/clawd/repos/cortex` },
+  };
+  return map[sessionKey] || null;
+}
+
 function resolveWorkspacePath(workspace: string): string {
   return workspace.replace(/^~/, process.env.HOME || '/Users/marquisehurtt');
 }
