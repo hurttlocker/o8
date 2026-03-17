@@ -14,7 +14,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { access, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
@@ -391,6 +391,9 @@ export class WorktreeManager {
     const entry = meta[worktreeId];
     if (entry) {
       entry.sessionKey = sessionKey;
+      if (entry.status === 'creating' || entry.status === 'setup') {
+        entry.status = 'active';
+      }
       await this.writeMetaStore({ version: 1, worktrees: meta });
     }
   }

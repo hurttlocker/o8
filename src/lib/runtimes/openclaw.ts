@@ -25,13 +25,25 @@ import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 const capabilities: RuntimeCapabilities = {
   discover: true,
   readTranscript: true,
-  launch: false, // Mirror-only — OpenClaw sessions are created externally
+  launch: true,
   resume: true,
   interrupt: true,
   reviewDiffs: true,
   costTelemetry: true,
   streaming: true,
 };
+
+async function resolveOpenClawLaunchSurface() {
+  const snapshot = await getRuntimeInventorySnapshot();
+  const primary = snapshot.meta.primarySessionKey
+    ? snapshot.agents.find((agent) => agent.runtime === 'openclaw' && agent.sessionKey === snapshot.meta.primarySessionKey)
+    : null;
+
+  return primary
+    ?? snapshot.agents.find((agent) => agent.runtime === 'openclaw' && agent.isCurrentSession)
+    ?? snapshot.agents.find((agent) => agent.runtime === 'openclaw')
+    ?? null;
+}
 
 export const openclawRuntime: AgentRuntime = {
   id: 'openclaw',
@@ -40,6 +52,7 @@ export const openclawRuntime: AgentRuntime = {
 
   async discoverSessions(): Promise<RuntimeSession[]> {
     const snapshot = await getRuntimeInventorySnapshot();
+
     return snapshot.agents
       .filter((agent) => agent.runtime === 'openclaw')
       .map((agent) => ({
@@ -75,15 +88,27 @@ export const openclawRuntime: AgentRuntime = {
     }));
   },
 
-  async launch(_opts: LaunchOptions): Promise<RuntimeActionResult> {
+  async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
+    const target = await resolveOpenClawLaunchSurface();
+    if (!target) {
+      return {
+        ok: false,
+        note: 'No live OpenClaw session is available to receive a task dispatch right now.',
+      };
+    }
+
+    const repoHint = opts.cwd ? `Repository: ${opts.cwd}\n\n` : '';
+    await steerOpenClawSession(target.sessionKey, `${repoHint}${opts.prompt}`, []);
+
     return {
-      ok: false,
-      note: 'OpenClaw sessions are created externally. Use the OpenClaw CLI or gateway to spawn new sessions.',
+      ok: true,
+      note: `Dispatched task to ${target.name} on ${target.sessionKey}. OpenClaw launch currently reuses the live mirrored session instead of creating a new owned surface.`,
+      sessionKey: target.sessionKey,
     };
   },
 
   async resume(sessionKey: string, message: string): Promise<RuntimeActionResult> {
-    const result = await steerOpenClawSession(sessionKey, message, []);
+    await steerOpenClawSession(sessionKey, message, []);
     return {
       ok: true,
       note: 'Sent.',
@@ -102,7 +127,7 @@ export const openclawRuntime: AgentRuntime = {
     };
   },
 
-  async getChangedFiles(_sessionKey: string): Promise<RuntimeChangedFile[]> {
+  async getChangedFiles(): Promise<RuntimeChangedFile[]> {
     // OpenClaw review context comes through the fleet snapshot, not per-session query
     return [];
   },

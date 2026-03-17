@@ -86,6 +86,8 @@ export interface RuntimeSession {
   pid?: number;
   /** Context window usage percentage (0-100) */
   contextUsedPercent?: number;
+  /** tmux session name for interactive terminal attachment */
+  tmuxSession?: string;
 }
 
 // ── Transcript ──
@@ -139,6 +141,8 @@ export interface LaunchOptions {
   cwd: string;
   prompt: string;
   model?: string;
+  worktreeFlag?: string;
+  worktreePath?: string;
 }
 
 // ── Telemetry ──

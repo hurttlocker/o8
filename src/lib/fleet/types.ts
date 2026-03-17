@@ -102,6 +102,7 @@ export interface AgentSummary {
   tokenUsage?: TokenUsageSnapshot;
   runtimeSurface?: RuntimeSurfaceSummary;
   activity?: AgentActivity;
+  tmuxSession?: string;
 }
 
 export interface SquadSummary {
