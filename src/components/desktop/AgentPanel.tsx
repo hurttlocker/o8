@@ -1644,8 +1644,13 @@ export const AgentPanel = memo(function AgentPanel({
       display: 'flex',
       flexDirection: 'column',
       overflow: 'auto',
+      scrollbarWidth: 'none',
+      msOverflowStyle: 'none',
+      WebkitOverflowScrolling: 'touch',
       background: '#f5f7fb',
-    }}>
+    } as React.CSSProperties}
+    className="hide-scrollbar"
+    >
       {/* ── Titlebar spacer ── */}
       <div style={{
         height: 38,

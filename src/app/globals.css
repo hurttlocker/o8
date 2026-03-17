@@ -4721,3 +4721,8 @@ body:has(.remodex-diff-overlay) {
   40% { transform: rotate(-6deg); }
   50% { transform: rotate(0deg); }
 }
+
+/* Hide scrollbar — AgentPanel */
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
