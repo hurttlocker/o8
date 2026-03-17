@@ -157,7 +157,7 @@ function ProgressRing({ pct, color, size = 56 }: { pct: number; color: string; s
   return (
     <div style={{ position: 'relative', width: size, height: size }}>
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: 'rotate(-90deg)' }}>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth="4" />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--t-divider-subtle)" strokeWidth="4" />
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth="4"
           strokeDasharray={`${(pct / 100) * circ} ${circ}`}
           strokeLinecap="round"
@@ -165,7 +165,7 @@ function ProgressRing({ pct, color, size = 56 }: { pct: number; color: string; s
       </svg>
       <div style={{
         position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 13, fontWeight: 700, color: '#111827',
+        fontSize: 13, fontWeight: 700, color: 'var(--t-text)',
       }}>
         {pct}%
       </div>
@@ -192,26 +192,26 @@ function AgentLaneCard({ agent }: { agent: AgentLane }) {
     }}>
       {/* Agent header card */}
       <div style={{
-        background: '#fff',
+        background: 'var(--t-panel)',
         borderRadius: 14,
         padding: 16,
-        border: '1px solid rgba(0,0,0,0.06)',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        border: '1px solid var(--t-panel-border)',
+        boxShadow: 'var(--t-panel-shadow)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <ProgressRing pct={agent.contextPct} color={agent.color} size={48} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>{agent.name}</span>
-              <span style={{ fontSize: 10, color: '#9ca3af', fontWeight: 500 }}>({agent.model})</span>
+              <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)' }}>{agent.name}</span>
+              <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontWeight: 500 }}>({agent.model})</span>
               <div style={{
                 width: 6, height: 6, borderRadius: 3, background: statusColor, flexShrink: 0,
               }} />
             </div>
-            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <div style={{ fontSize: 11, color: 'var(--t-text-secondary)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {agent.currentTask}
             </div>
-            <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>
+            <div style={{ fontSize: 10, color: 'var(--t-text-muted)', marginTop: 2 }}>
               Queue: {agent.queueDepth} tasks · ctx {agent.contextPct}%
             </div>
           </div>
@@ -221,27 +221,27 @@ function AgentLaneCard({ agent }: { agent: AgentLane }) {
       {/* Activity stream */}
       <div style={{
         flex: 1,
-        background: '#fff',
+        background: 'var(--t-panel)',
         borderRadius: 14,
         padding: 12,
-        border: '1px solid rgba(0,0,0,0.06)',
+        border: '1px solid var(--t-panel-border)',
         overflow: 'auto',
       }}>
-        <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
           Activity
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {agent.activities.map((act, i) => (
             <div key={i} style={{
               display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 0',
-              borderBottom: i < agent.activities.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none',
+              borderBottom: i < agent.activities.length - 1 ? '1px solid var(--t-divider-subtle)' : 'none',
             }}>
               <div style={{ color: agent.color, marginTop: 1 }}>
                 <ActivityIcon type={act.type} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 11, color: '#374151', lineHeight: 1.4 }}>{act.text}</div>
-                <div style={{ fontSize: 9, color: '#b0b8c4', marginTop: 1 }}>
+                <div style={{ fontSize: 11, color: 'var(--t-text)', lineHeight: 1.4 }}>{act.text}</div>
+                <div style={{ fontSize: 9, color: 'var(--t-text-faint)', marginTop: 1 }}>
                   {act.time}{act.meta ? ` · ${act.meta}` : ''}
                 </div>
               </div>
@@ -261,7 +261,7 @@ export function IntentCanvas() {
       height: '100%',
       overflow: 'auto',
       padding: 20,
-      background: 'linear-gradient(180deg, #f0f4f8 0%, #e8edf4 100%)',
+      background: 'var(--t-bg)',
       display: 'flex',
       flexDirection: 'column',
       gap: 16,
@@ -273,10 +273,10 @@ export function IntentCanvas() {
         justifyContent: 'space-between',
       }}>
         <div>
-          <h2 style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.02em', color: '#111827', margin: 0 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--t-text)', margin: 0 }}>
             Fleet Command
           </h2>
-          <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0 0' }}>
+          <p style={{ fontSize: 11, color: 'var(--t-text-muted)', margin: '2px 0 0' }}>
             3 agents · 2 idle · 1 active · {TASK_QUEUE.length} queued
           </p>
         </div>
@@ -311,12 +311,12 @@ export function IntentCanvas() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: 12 }}>
         {/* Handoffs */}
         <div style={{
-          background: '#fff',
+          background: 'var(--t-panel)',
           borderRadius: 14,
           padding: 16,
-          border: '1px solid rgba(0,0,0,0.06)',
+          border: '1px solid var(--t-panel-border)',
         }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
             Recent Handoffs
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -324,13 +324,13 @@ export function IntentCanvas() {
               <div key={i} style={{
                 display: 'flex', alignItems: 'center', gap: 8, fontSize: 11,
               }}>
-                <span style={{ fontWeight: 600, color: AGENTS.find(a => a.name === h.from)?.color || '#374151' }}>{h.from}</span>
+                <span style={{ fontWeight: 600, color: AGENTS.find(a => a.name === h.from)?.color || 'var(--t-text)' }}>{h.from}</span>
                 <ArrowRightIcon />
-                <span style={{ fontWeight: 600, color: AGENTS.find(a => a.name === h.to)?.color || '#374151' }}>{h.to}</span>
-                <span style={{ color: '#6b7280', flex: 1 }}>{h.label}</span>
+                <span style={{ fontWeight: 600, color: AGENTS.find(a => a.name === h.to)?.color || 'var(--t-text)' }}>{h.to}</span>
+                <span style={{ color: 'var(--t-text-secondary)', flex: 1 }}>{h.label}</span>
                 <span style={{
                   fontSize: 9, fontWeight: 600, textTransform: 'uppercase',
-                  color: h.status === 'complete' ? '#22c55e' : h.status === 'active' ? '#2563eb' : '#9ca3af',
+                  color: h.status === 'complete' ? '#22c55e' : h.status === 'active' ? '#2563eb' : 'var(--t-text-muted)',
                 }}>{h.status}</span>
               </div>
             ))}
@@ -339,33 +339,33 @@ export function IntentCanvas() {
 
         {/* Task Queue */}
         <div style={{
-          background: '#fff',
+          background: 'var(--t-panel)',
           borderRadius: 14,
           padding: 16,
-          border: '1px solid rgba(0,0,0,0.06)',
+          border: '1px solid var(--t-panel-border)',
         }}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 10 }}>
             Task Queue
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {TASK_QUEUE.map((task, i) => (
               <div key={i} style={{
                 display: 'flex', alignItems: 'center', gap: 10, padding: '6px 0',
-                borderBottom: i < TASK_QUEUE.length - 1 ? '1px solid rgba(0,0,0,0.04)' : 'none',
+                borderBottom: i < TASK_QUEUE.length - 1 ? '1px solid var(--t-divider-subtle)' : 'none',
               }}>
                 <span style={{
                   fontSize: 9, fontWeight: 700, textTransform: 'uppercase', padding: '2px 6px', borderRadius: 4,
-                  background: task.priority === 'p0' ? 'rgba(239,68,68,0.1)' : task.priority === 'p1' ? 'rgba(37,99,235,0.1)' : 'rgba(0,0,0,0.04)',
-                  color: task.priority === 'p0' ? '#ef4444' : task.priority === 'p1' ? '#2563eb' : '#9ca3af',
+                  background: task.priority === 'p0' ? 'rgba(239,68,68,0.1)' : task.priority === 'p1' ? 'rgba(37,99,235,0.1)' : 'var(--t-divider-subtle)',
+                  color: task.priority === 'p0' ? '#ef4444' : task.priority === 'p1' ? '#2563eb' : 'var(--t-text-muted)',
                 }}>
                   {task.priority}
                 </span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>{task.issue}</span>
-                <span style={{ fontSize: 11, color: '#6b7280', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.title}</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text)' }}>{task.issue}</span>
+                <span style={{ fontSize: 11, color: 'var(--t-text-secondary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.title}</span>
                 <span style={{
                   fontSize: 10, fontWeight: 500, padding: '2px 8px', borderRadius: 6,
                   background: `${AGENTS.find(a => a.name === task.suggested)?.color || '#9ca3af'}15`,
-                  color: AGENTS.find(a => a.name === task.suggested)?.color || '#9ca3af',
+                  color: AGENTS.find(a => a.name === task.suggested)?.color || 'var(--t-text-muted)',
                 }}>
                   → {task.suggested}
                 </span>

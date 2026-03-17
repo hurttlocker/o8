@@ -156,7 +156,7 @@ function ProgressRing({ progress, size = 20 }: { progress: number; size?: number
 
   return (
     <svg width={size} height={size} style={{ display: 'block', flexShrink: 0, transform: 'rotate(-90deg)' }}>
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(0,0,0,0.06)" strokeWidth={2.5} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--t-divider)" strokeWidth={2.5} />
       <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#2563eb" strokeWidth={2.5}
         strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round"
         style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(0.32, 0.72, 0, 1)' }}
@@ -171,13 +171,13 @@ function MiniTimeline({ segments }: { segments: TimelineSegment[] }) {
   return (
     <div style={{
       display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden',
-      width: 80, flexShrink: 0, background: 'rgba(0,0,0,0.04)',
+      width: 80, flexShrink: 0, background: 'var(--t-divider-subtle)',
     }}>
       {segments.map((seg, i) => (
         <div key={i} style={{
           flex: seg.fraction,
           background: TIMELINE_COLORS[seg.kind] || '#e5e7eb',
-          borderRight: i < segments.length - 1 ? '0.5px solid rgba(255,255,255,0.5)' : 'none',
+          borderRight: i < segments.length - 1 ? '0.5px solid var(--t-panel-translucent)' : 'none',
         }} />
       ))}
     </div>
@@ -199,7 +199,7 @@ function StatusSection({ status, cards }: { status: WorkspaceStatus; cards: Work
   return (
     <div style={{ marginBottom: 12 }}>
       <div style={{
-        fontSize: 11, fontWeight: 700, color: '#6b7280',
+        fontSize: 11, fontWeight: 700, color: 'var(--t-text-secondary)',
         marginBottom: 6, padding: '0 2px',
         letterSpacing: '-0.01em',
       }}>
@@ -222,23 +222,23 @@ function WorkspaceCardView({ card }: { card: WorkspaceCard }) {
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
         padding: '10px 12px', borderRadius: 12,
-        background: 'rgba(0,0,0,0.02)',
-        border: '1px solid rgba(0,0,0,0.04)',
+        background: 'var(--t-hover)',
+        border: '1px solid var(--t-divider-subtle)',
         cursor: 'pointer',
         transition: 'background 120ms',
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.04)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.02)'; }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
       >
         <CheckCircleIcon />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: 12, fontWeight: 600, color: '#374151',
+            fontSize: 12, fontWeight: 600, color: 'var(--t-text)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>
             {card.prTitle || card.repo}
           </div>
-          <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 1 }}>
+          <div style={{ fontSize: 10, color: 'var(--t-text-muted)', marginTop: 1 }}>
             Merged PR #{card.prNumber}
           </div>
         </div>
@@ -259,10 +259,10 @@ function WorkspaceCardView({ card }: { card: WorkspaceCard }) {
       onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(37, 99, 235, 0.06)'; }}
       onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(37, 99, 235, 0.03)'; }}
       >
-        <div style={{ color: '#6b7280' }}><PRIcon /></div>
+        <div style={{ color: 'var(--t-text-secondary)' }}><PRIcon /></div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: 12, fontWeight: 600, color: '#374151',
+            fontSize: 12, fontWeight: 600, color: 'var(--t-text)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>
             PR #{card.prNumber}: {card.prTitle}
@@ -301,26 +301,26 @@ function WorkspaceCardView({ card }: { card: WorkspaceCard }) {
     <div style={{
       display: 'flex', alignItems: 'center', gap: 8,
       padding: '10px 12px', borderRadius: 12,
-      background: 'rgba(0,0,0,0.02)',
-      border: '1px solid rgba(0,0,0,0.05)',
+      background: 'var(--t-hover)',
+      border: '1px solid var(--t-divider)',
       cursor: 'pointer',
       transition: 'background 120ms',
     }}
-    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.04)'; }}
-    onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.02)'; }}
+    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
+    onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
     >
-      <div style={{ color: '#6b7280' }}><GitHubIcon /></div>
+      <div style={{ color: 'var(--t-text-secondary)' }}><GitHubIcon /></div>
       <div style={{
-        fontSize: 12, fontWeight: 600, color: '#111827',
+        fontSize: 12, fontWeight: 600, color: 'var(--t-text)',
         letterSpacing: '-0.01em', flexShrink: 0,
       }}>
         {card.repo}
       </div>
       {card.branch && (
         <span style={{
-          fontSize: 9, fontWeight: 500, color: '#6b7280',
+          fontSize: 9, fontWeight: 500, color: 'var(--t-text-secondary)',
           padding: '2px 6px', borderRadius: 5,
-          background: 'rgba(0,0,0,0.04)',
+          background: 'var(--t-divider-subtle)',
           fontFamily: 'SF Mono, Menlo, monospace',
           maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           flexShrink: 1,
@@ -335,7 +335,7 @@ function WorkspaceCardView({ card }: { card: WorkspaceCard }) {
             background: card.agentColor || '#9ca3af',
             display: 'block',
           }} />
-          <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text)' }}>
             {card.agent}
           </span>
         </div>
@@ -372,7 +372,7 @@ export function WorkspacesPanel() {
 
   return (
     <div style={{
-      borderBottom: '1px solid rgba(0,0,0,0.06)',
+      borderBottom: '1px solid var(--t-divider)',
       fontFamily: '-apple-system, system-ui, BlinkMacSystemFont, sans-serif',
     }}>
       {/* Header */}
@@ -388,16 +388,16 @@ export function WorkspacesPanel() {
       >
         <ChevronIcon collapsed={collapsed} />
         <span style={{
-          fontSize: 11, fontWeight: 800, color: '#111827',
+          fontSize: 11, fontWeight: 800, color: 'var(--t-text)',
           letterSpacing: '0.06em', textTransform: 'uppercase',
           flex: 1,
         }}>
           Workspaces
         </span>
         <span style={{
-          fontSize: 10, fontWeight: 600, color: '#9ca3af',
+          fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)',
           padding: '1px 6px', borderRadius: 5,
-          background: 'rgba(0,0,0,0.04)',
+          background: 'var(--t-divider-subtle)',
         }}>
           {workspaces.filter(w => w.status === 'in_progress').length} active
         </span>

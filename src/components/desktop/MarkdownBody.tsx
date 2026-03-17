@@ -54,7 +54,7 @@ function ImageLightbox({ src, alt, onClose }: { src: string; alt: string; onClos
           borderRadius: 18,
           border: 'none',
           background: 'rgba(255,255,255,0.15)',
-          color: '#ffffff',
+          color: 'var(--t-panel)',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
@@ -101,8 +101,8 @@ function InlineImage({ src, alt }: { src: string; alt: string }) {
           marginTop: 8,
           marginBottom: 8,
           cursor: 'zoom-in',
-          boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
-          border: '1px solid rgba(0,0,0,0.06)',
+          boxShadow: 'var(--t-panel-shadow)',
+          border: '1px solid var(--t-divider)',
           display: 'block',
         }}
       />
@@ -125,7 +125,7 @@ function renderInline(text: string): React.ReactNode {
     if (part.startsWith('`') && part.endsWith('`')) {
       return (
         <code key={i} style={{
-          background: 'rgba(0,0,0,0.05)',
+          background: 'var(--t-code-bg)',
           paddingTop: 1,
           paddingRight: 5,
           paddingBottom: 1,
@@ -198,7 +198,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
         <h4 key={key++} style={{
           fontSize: '0.95rem',
           fontWeight: 700,
-          color: '#0f172a',
+          color: 'var(--t-text-strong)',
           marginTop: 20,
           marginBottom: 8,
           letterSpacing: '-0.01em',
@@ -214,7 +214,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
         <h3 key={key++} style={{
           fontSize: '1.05rem',
           fontWeight: 700,
-          color: '#0f172a',
+          color: 'var(--t-text-strong)',
           marginTop: 24,
           marginBottom: 10,
           letterSpacing: '-0.01em',
@@ -230,7 +230,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
         <h2 key={key++} style={{
           fontSize: '1.2rem',
           fontWeight: 700,
-          color: '#0f172a',
+          color: 'var(--t-text-strong)',
           marginTop: 28,
           marginBottom: 12,
           letterSpacing: '-0.02em',
@@ -247,7 +247,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
       elements.push(
         <hr key={key++} style={{
           border: 'none',
-          borderTop: '1px solid rgba(0,0,0,0.08)',
+          borderTop: '1px solid var(--t-divider)',
           marginTop: 16,
           marginBottom: 16,
         }} />
@@ -273,7 +273,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
           borderLeft: '3px solid #ef4444',
           background: 'rgba(239, 68, 68, 0.04)',
           borderRadius: '0 8px 8px 0',
-          color: '#475569',
+          color: 'var(--t-text-secondary)',
           fontSize: '0.9rem',
           lineHeight: 1.6,
         }}>
@@ -298,7 +298,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
           paddingLeft: 20,
           fontSize: '0.9rem',
           lineHeight: 1.7,
-          color: '#1e293b',
+          color: 'var(--t-text)',
         }}>
           {items.map((item) => (
             <li key={item.idx} style={{ marginBottom: 3 }}>{renderInline(item.text)}</li>
@@ -321,7 +321,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
           paddingLeft: 20,
           fontSize: '0.9rem',
           lineHeight: 1.7,
-          color: '#1e293b',
+          color: 'var(--t-text)',
         }}>
           {items.map((item) => (
             <li key={item.idx} style={{ marginBottom: 3 }}>{renderInline(item.text)}</li>
@@ -350,9 +350,9 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
             overflowX: 'auto',
             margin: '12px 0',
             borderRadius: 12,
-            border: '1px solid rgba(0,0,0,0.08)',
-            backgroundColor: 'rgba(255,255,255,0.6)',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+            border: '1px solid var(--t-divider)',
+            backgroundColor: 'var(--t-panel-translucent)',
+            boxShadow: 'var(--t-panel-shadow)',
           }}>
             <table style={{
               width: '100%',
@@ -369,11 +369,11 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
                       paddingBottom: 10,
                       paddingLeft: 14,
                       fontWeight: 600,
-                      color: '#64748b',
+                      color: 'var(--t-text-secondary)',
                       textTransform: 'uppercase',
                       letterSpacing: '0.04em',
                       fontSize: '0.75rem',
-                      borderBottom: '2px solid rgba(0,0,0,0.08)',
+                      borderBottom: '2px solid var(--t-divider)',
                       whiteSpace: 'nowrap',
                     }}>
                       {renderInline(cell)}
@@ -386,7 +386,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
                   const cells = parseCells(row);
                   return (
                     <tr key={ri} style={{
-                      borderBottom: '1px solid rgba(0,0,0,0.04)',
+                      borderBottom: '1px solid var(--t-divider-subtle)',
                     }}>
                       {cells.map((cell, ci) => (
                         <td key={ci} style={{
@@ -394,7 +394,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
                           paddingRight: 14,
                           paddingBottom: 8,
                           paddingLeft: 14,
-                          color: '#1e293b',
+                          color: 'var(--t-text)',
                         }}>
                           {renderInline(cell)}
                         </td>
@@ -432,7 +432,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
               alignItems: 'flex-start',
               gap: 8,
               marginBottom: 3,
-              color: item.checked ? '#94a3b8' : '#1e293b',
+              color: item.checked ? 'var(--t-text-muted)' : 'var(--t-text)',
               textDecoration: item.checked ? 'line-through' : 'none',
             }}>
               <span style={{ fontSize: 14, marginTop: 2 }}>{item.checked ? '☑' : '☐'}</span>
@@ -488,7 +488,7 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
         margin: '6px 0',
         fontSize: '0.9rem',
         lineHeight: 1.7,
-        color: '#1e293b',
+        color: 'var(--t-text)',
       }}>
         {renderInline(line)}
       </p>

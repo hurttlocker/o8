@@ -674,11 +674,11 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
           height: minimized ? 'auto' : (size.h > 0 ? size.h : 'auto'),
           zIndex: 9999,
           borderRadius: minimized ? 12 : 18,
-          background: 'rgba(255, 255, 255, 0.45)',
+          background: 'var(--t-panel-translucent)',
           backdropFilter: 'blur(50px) saturate(180%)',
           WebkitBackdropFilter: 'blur(50px) saturate(180%)',
-          border: '1px solid rgba(255, 255, 255, 0.35)',
-          boxShadow: '0 24px 80px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06), inset 0 0.5px 0 rgba(255,255,255,0.5)',
+          border: '1px solid var(--t-panel-border)',
+          boxShadow: 'var(--t-panel-shadow)',
           overflow: 'visible',
           display: 'flex',
           flexDirection: 'column',
@@ -696,13 +696,13 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
             padding: minimized ? '8px 12px' : '10px 14px',
             cursor: 'grab',
             userSelect: 'none',
-            borderBottom: minimized ? 'none' : '1px solid rgba(0,0,0,0.04)',
+            borderBottom: minimized ? 'none' : '1px solid var(--t-divider-subtle)',
             flexShrink: 0,
           }}
         >
           <GripIcon />
           <span style={{
-            fontSize: 12, fontWeight: 700, color: '#111827',
+            fontSize: 12, fontWeight: 700, color: 'var(--t-text)',
             letterSpacing: '-0.01em', flex: 1,
           }}>
             {inTaskChat && chatMessages.length > 0 ? targetAgent.name : 'Thoughts'}
@@ -724,8 +724,8 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
             <span style={{
               fontSize: 9, fontWeight: 600, textTransform: 'uppercase',
               padding: '2px 7px', borderRadius: 5,
-              background: mode === 'issue' ? 'rgba(37,99,235,0.1)' : 'rgba(0,0,0,0.05)',
-              color: mode === 'issue' ? '#2563eb' : '#6b7280',
+              background: mode === 'issue' ? 'rgba(37,99,235,0.1)' : 'var(--t-hover)',
+              color: mode === 'issue' ? '#2563eb' : 'var(--t-text-secondary)',
               letterSpacing: '0.03em',
             }}>
               {mode === 'issue' ? 'Issue' : 'Task'}
@@ -758,20 +758,20 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
           {inTaskChat && chatMessages.length > 0 && !minimized && (
             <button type="button" onClick={handleReset} title="New thought" style={{
               background: 'none', border: 'none', cursor: 'pointer', padding: 4,
-              color: '#9ca3af', display: 'flex', borderRadius: 6, fontSize: 11, fontWeight: 600,
+              color: 'var(--t-text-muted)', display: 'flex', borderRadius: 6, fontSize: 11, fontWeight: 600,
             }}>
               New
             </button>
           )}
           <button type="button" onClick={() => setMinimized(v => !v)} style={{
             background: 'none', border: 'none', cursor: 'pointer', padding: 4,
-            color: '#9ca3af', display: 'flex', borderRadius: 6,
+            color: 'var(--t-text-muted)', display: 'flex', borderRadius: 6,
           }}>
             <MinimizeIcon />
           </button>
           <button type="button" onClick={onClose} style={{
             background: 'none', border: 'none', cursor: 'pointer', padding: 4,
-            color: '#9ca3af', display: 'flex', borderRadius: 6,
+            color: 'var(--t-text-muted)', display: 'flex', borderRadius: 6,
           }}>
             <XIcon />
           </button>
@@ -794,7 +794,7 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 8,
-                borderBottom: '1px solid rgba(0,0,0,0.06)',
+                borderBottom: '1px solid var(--t-divider)',
                 flexShrink: 0,
                 maxHeight: 200,
                 overflowY: 'auto',
@@ -824,7 +824,7 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                         <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                       </svg>
                       <span style={{
-                        fontSize: 11, fontWeight: 700, color: '#111827',
+                        fontSize: 11, fontWeight: 700, color: 'var(--t-text)',
                         letterSpacing: '-0.01em', flex: 1,
                       }}>
                         {approval.agent} — {approval.title}
@@ -850,7 +850,7 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
 
                     {/* Description */}
                     <div style={{
-                      fontSize: 11, color: '#4b5563', lineHeight: 1.5,
+                      fontSize: 11, color: 'var(--t-text-secondary)', lineHeight: 1.5,
                       marginBottom: approval.command ? 6 : 8,
                     }}>
                       {approval.description}
@@ -860,9 +860,9 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                     {approval.command && (
                       <div style={{
                         padding: '6px 8px', borderRadius: 8,
-                        background: 'rgba(0,0,0,0.04)',
+                        background: 'var(--t-code-bg)',
                         fontFamily: 'SF Mono, Menlo, monospace',
-                        fontSize: 10, color: '#374151',
+                        fontSize: 10, color: 'var(--t-text)',
                         marginBottom: 8, whiteSpace: 'pre-wrap',
                         wordBreak: 'break-all', lineHeight: 1.4,
                       }}>
@@ -938,7 +938,7 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                       </svg>
                       Issue
                     </div>
-                    <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>
+                    <div style={{ fontSize: 10, color: 'var(--t-text-secondary)', lineHeight: 1.4 }}>
                       Creates a GitHub issue, assigns an agent, generates a plan for your review, then executes.
                     </div>
                   </button>
@@ -949,27 +949,27 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                     onClick={() => { setMode('task'); setTimeout(() => inputRef.current?.focus(), 50); }}
                     style={{
                       flex: 1, padding: '12px 14px', borderRadius: 12,
-                      border: '1px solid rgba(0, 0, 0, 0.08)',
-                      background: 'rgba(0, 0, 0, 0.02)',
+                      border: '1px solid var(--t-divider)',
+                      background: 'var(--t-hover)',
                       cursor: 'pointer', textAlign: 'left',
                       transition: 'background 120ms, border-color 120ms',
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
-                      e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.15)';
+                      e.currentTarget.style.background = 'var(--t-panel-hover)';
+                      e.currentTarget.style.borderColor = 'var(--t-divider-strong)';
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'rgba(0, 0, 0, 0.02)';
-                      e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.08)';
+                      e.currentTarget.style.background = 'var(--t-hover)';
+                      e.currentTarget.style.borderColor = 'var(--t-divider)';
                     }}
                   >
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#374151', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
                       <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block' }}>
                         <polyline points="22 12 16 12 14 15 10 9 8 12 2 12"/>
                       </svg>
                       Task
                     </div>
-                    <div style={{ fontSize: 10, color: '#6b7280', lineHeight: 1.4 }}>
+                    <div style={{ fontSize: 10, color: 'var(--t-text-secondary)', lineHeight: 1.4 }}>
                       Quick chat with your main agent. Conversation stays right here — doesn&apos;t touch the main chat.
                     </div>
                   </button>
@@ -981,7 +981,7 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                   }}>
                     <div style={{
                       fontSize: 9, fontWeight: 700, textTransform: 'uppercase',
-                      color: '#9ca3af', letterSpacing: '0.05em', padding: '0 2px',
+                      color: 'var(--t-text-muted)', letterSpacing: '0.05em', padding: '0 2px',
                     }}>
                       Suggested
                     </div>
@@ -1001,36 +1001,36 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                           border: `1px solid ${
                             s.priority === 'critical' ? 'rgba(239, 68, 68, 0.15)'
                             : s.priority === 'warn' ? 'rgba(245, 158, 11, 0.12)'
-                            : 'rgba(0, 0, 0, 0.06)'
+                            : 'var(--t-divider)'
                           }`,
                           background: s.priority === 'critical' ? 'rgba(239, 68, 68, 0.04)'
                             : s.priority === 'warn' ? 'rgba(245, 158, 11, 0.04)'
-                            : 'rgba(0, 0, 0, 0.02)',
+                            : 'var(--t-hover)',
                           cursor: 'pointer',
                           transition: 'background 120ms',
                         }}
-                        onMouseEnter={(e) => { e.currentTarget.style.background = s.priority === 'critical' ? 'rgba(239, 68, 68, 0.08)' : s.priority === 'warn' ? 'rgba(245, 158, 11, 0.08)' : 'rgba(0, 0, 0, 0.04)'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.background = s.priority === 'critical' ? 'rgba(239, 68, 68, 0.04)' : s.priority === 'warn' ? 'rgba(245, 158, 11, 0.04)' : 'rgba(0, 0, 0, 0.02)'; }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = s.priority === 'critical' ? 'rgba(239, 68, 68, 0.08)' : s.priority === 'warn' ? 'rgba(245, 158, 11, 0.08)' : 'var(--t-panel-hover)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = s.priority === 'critical' ? 'rgba(239, 68, 68, 0.04)' : s.priority === 'warn' ? 'rgba(245, 158, 11, 0.04)' : 'var(--t-hover)'; }}
                       >
                         <span style={{
                           width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
                           background: s.priority === 'critical' ? '#ef4444'
-                            : s.priority === 'warn' ? '#f59e0b' : '#9ca3af',
+                            : s.priority === 'warn' ? '#f59e0b' : 'var(--t-text-muted)',
                         }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{
-                            fontSize: 11, color: '#374151', lineHeight: 1.4,
+                            fontSize: 11, color: 'var(--t-text)', lineHeight: 1.4,
                             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                           }}>
                             {s.text}
                           </div>
                           <div style={{
-                            fontSize: 9, color: '#9ca3af', marginTop: 1,
+                            fontSize: 9, color: 'var(--t-text-muted)', marginTop: 1,
                           }}>
                             → {s.agent.name}
                           </div>
                         </div>
-                        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" style={{ display: 'block', flexShrink: 0 }}>
+                        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="2" strokeLinecap="round" style={{ display: 'block', flexShrink: 0 }}>
                           <polyline points="9 18 15 12 9 6"/>
                         </svg>
                       </button>
@@ -1045,19 +1045,19 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                     onClick={handleTestApproval}
                     style={{
                       marginTop: 8, padding: '6px 0', borderRadius: 8,
-                      border: '1px dashed rgba(0,0,0,0.1)',
-                      background: 'transparent', color: '#9ca3af',
+                      border: '1px dashed var(--t-divider)',
+                      background: 'transparent', color: 'var(--t-text-muted)',
                       fontSize: 10, fontWeight: 500, cursor: 'pointer',
                       letterSpacing: '-0.01em',
                       transition: 'color 120ms, border-color 120ms',
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.color = '#6b7280';
-                      e.currentTarget.style.borderColor = 'rgba(0,0,0,0.2)';
+                      e.currentTarget.style.color = 'var(--t-text-secondary)';
+                      e.currentTarget.style.borderColor = 'var(--t-divider-strong)';
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.color = '#9ca3af';
-                      e.currentTarget.style.borderColor = 'rgba(0,0,0,0.1)';
+                      e.currentTarget.style.color = 'var(--t-text-muted)';
+                      e.currentTarget.style.borderColor = 'var(--t-divider)';
                     }}
                   >
                     Simulate approval request
@@ -1074,7 +1074,7 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                     <button type="button" onClick={() => setMode('pick')} style={{
                       background: 'none', border: 'none', cursor: 'pointer', padding: 0,
-                      fontSize: 11, color: '#9ca3af', fontWeight: 500,
+                      fontSize: 11, color: 'var(--t-text-muted)', fontWeight: 500,
                     }}>
                       ← back
                     </button>
@@ -1104,9 +1104,9 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                         flex: size.h > 0 ? 1 : undefined,
                         maxHeight: size.h > 0 ? 'none' : 160,
                         padding: '10px 80px 10px 12px', borderRadius: 12,
-                        border: '1px solid rgba(0,0,0,0.06)',
-                        background: 'rgba(255,255,255,0.35)',
-                        fontSize: 13, color: '#111827', resize: 'none',
+                        border: '1px solid var(--t-input-border)',
+                        background: 'var(--t-input-bg)',
+                        fontSize: 13, color: 'var(--t-text)', resize: 'none',
                         outline: 'none', fontFamily: 'inherit', lineHeight: 1.5,
                         letterSpacing: '-0.01em', boxSizing: 'border-box',
                       }}
@@ -1128,7 +1128,7 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                     padding: '8px 12px', borderRadius: 10,
                     background: 'rgba(37, 99, 235, 0.06)',
                     border: '1px solid rgba(37, 99, 235, 0.1)',
-                    marginBottom: 12, fontSize: 12, color: '#374151',
+                    marginBottom: 12, fontSize: 12, color: 'var(--t-text)',
                     lineHeight: 1.5, fontStyle: 'italic',
                   }}>
                     &ldquo;{workflow.summary}&rdquo;
@@ -1151,13 +1151,13 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                         }}>
                           <StepIndicator step={step.key} currentStep={workflow.step} />
                           <span style={{
-                            fontSize: 12, color: si === currentStepIdx ? '#111827' : '#6b7280',
+                            fontSize: 12, color: si === currentStepIdx ? 'var(--t-text)' : 'var(--t-text-secondary)',
                             fontWeight: si === currentStepIdx ? 600 : 400,
                           }}>
                             {step.label}
                           </span>
                           {step.key === 'creating' && workflow.repo && si <= currentStepIdx && (
-                            <span style={{ fontSize: 10, color: '#9ca3af', marginLeft: 'auto' }}>{workflow.repo}</span>
+                            <span style={{ fontSize: 10, color: 'var(--t-text-muted)', marginLeft: 'auto' }}>{workflow.repo}</span>
                           )}
                           {step.key === 'assigning' && workflow.agent && si <= currentStepIdx && (
                             <span style={{ fontSize: 10, color: '#22c55e', fontWeight: 600, marginLeft: 'auto' }}>{workflow.agent}</span>
@@ -1176,8 +1176,8 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                   <div style={{ marginTop: 12 }}>
                     <div style={{
                       padding: '10px 12px', borderRadius: 10,
-                      background: 'rgba(0,0,0,0.02)', border: '1px solid rgba(0,0,0,0.06)',
-                      fontSize: 11, color: '#374151', lineHeight: 1.6, marginBottom: 10,
+                      background: 'var(--t-hover)', border: '1px solid var(--t-divider)',
+                      fontSize: 11, color: 'var(--t-text)', lineHeight: 1.6, marginBottom: 10,
                     }}>
                       {workflow.plan}
                     </div>
@@ -1190,8 +1190,8 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                       </button>
                       <button type="button" style={{
                         flex: 1, padding: '8px 0', borderRadius: 10,
-                        border: '1px solid rgba(0,0,0,0.1)', background: 'rgba(255,255,255,0.5)',
-                        color: '#6b7280', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                        border: '1px solid var(--t-btn-secondary-border)', background: 'var(--t-btn-secondary-bg)',
+                        color: 'var(--t-text-secondary)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
                       }}>
                         Edit Plan
                       </button>
@@ -1231,13 +1231,13 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                       display: 'flex', flexDirection: 'column', alignItems: 'center',
                       justifyContent: 'center', flex: 1, gap: 6, padding: '20px 0',
                     }}>
-                      <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center', lineHeight: 1.5 }}>
+                      <div style={{ fontSize: 11, color: 'var(--t-text-muted)', textAlign: 'center', lineHeight: 1.5 }}>
                         Quick chat with your main agent.<br/>
                         The main chat panel stays untouched.
                       </div>
                       <button type="button" onClick={() => setMode('pick')} style={{
                         background: 'none', border: 'none', cursor: 'pointer',
-                        fontSize: 10, color: '#9ca3af', fontWeight: 500, marginTop: 4,
+                        fontSize: 10, color: 'var(--t-text-muted)', fontWeight: 500, marginTop: 4,
                       }}>
                         ← back to picker
                       </button>
@@ -1255,12 +1255,12 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                         borderRadius: msg.role === 'user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
                         background: msg.role === 'user'
                           ? 'rgba(37, 99, 235, 0.12)'
-                          : 'rgba(255, 255, 255, 0.6)',
+                          : 'var(--t-panel-translucent)',
                         border: msg.role === 'user'
                           ? '1px solid rgba(37, 99, 235, 0.15)'
-                          : '1px solid rgba(0,0,0,0.06)',
+                          : '1px solid var(--t-divider)',
                         fontSize: 12,
-                        color: '#111827',
+                        color: 'var(--t-text)',
                         lineHeight: 1.5,
                         letterSpacing: '-0.01em',
                         whiteSpace: 'pre-wrap',
@@ -1277,14 +1277,14 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                       alignSelf: 'flex-start',
                       padding: '8px 14px',
                       borderRadius: '14px 14px 14px 4px',
-                      background: 'rgba(255, 255, 255, 0.6)',
-                      border: '1px solid rgba(0,0,0,0.06)',
+                      background: 'var(--t-panel-translucent)',
+                      border: '1px solid var(--t-divider)',
                       display: 'flex', gap: 4, alignItems: 'center',
                     }}>
                       {[0, 1, 2].map((i) => (
                         <div key={i} style={{
                           width: 5, height: 5, borderRadius: '50%',
-                          background: '#9ca3af',
+                          background: 'var(--t-text-muted)',
                           animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
                         }} />
                       ))}
@@ -1297,7 +1297,7 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                 {/* Compose bar with agent picker */}
                 <div style={{
                   padding: '8px 12px 12px',
-                  borderTop: '1px solid rgba(0,0,0,0.04)',
+                  borderTop: '1px solid var(--t-divider-subtle)',
                   flexShrink: 0,
                 }}>
                   {/* Agent picker row */}
@@ -1308,14 +1308,14 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                       style={{
                         display: 'flex', alignItems: 'center', gap: 5,
                         padding: '4px 8px', borderRadius: 8,
-                        border: '1px solid rgba(0,0,0,0.06)',
-                        background: 'rgba(255,255,255,0.4)',
+                        border: '1px solid var(--t-divider)',
+                        background: 'var(--t-panel-translucent)',
                         cursor: 'pointer', fontSize: 11, fontWeight: 600,
                         color: targetAgent.color, letterSpacing: '-0.01em',
                         transition: 'background 120ms',
                       }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.7)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.4)'; }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-panel-hover)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-panel-translucent)'; }}
                     >
                       <span style={{
                         width: 8, height: 8, borderRadius: '50%',
@@ -1337,11 +1337,11 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                         position: 'absolute', bottom: '100%', left: 0,
                         marginBottom: 4, minWidth: 160,
                         borderRadius: 12, padding: 4,
-                        background: 'rgba(255, 255, 255, 0.85)',
+                        background: 'var(--t-panel-translucent)',
                         backdropFilter: 'blur(40px) saturate(180%)',
                         WebkitBackdropFilter: 'blur(40px) saturate(180%)',
-                        border: '1px solid rgba(255, 255, 255, 0.4)',
-                        boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)',
+                        border: '1px solid var(--t-panel-border)',
+                        boxShadow: 'var(--t-panel-shadow)',
                         zIndex: 10,
                       }}>
                         {AGENTS.map((agent) => (
@@ -1366,7 +1366,7 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                               transition: 'background 100ms',
                             }}
                             onMouseEnter={(e) => {
-                              if (targetAgent.key !== agent.key) e.currentTarget.style.background = 'rgba(0,0,0,0.04)';
+                              if (targetAgent.key !== agent.key) e.currentTarget.style.background = 'var(--t-hover)';
                             }}
                             onMouseLeave={(e) => {
                               if (targetAgent.key !== agent.key) e.currentTarget.style.background = 'transparent';
@@ -1378,7 +1378,7 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                             }} />
                             <div>
                               <div style={{ fontSize: 12, fontWeight: 600, color: agent.color }}>{agent.name}</div>
-                              <div style={{ fontSize: 9, color: '#9ca3af', fontFamily: 'SF Mono, Menlo, monospace' }}>
+                              <div style={{ fontSize: 9, color: 'var(--t-text-muted)', fontFamily: 'SF Mono, Menlo, monospace' }}>
                                 {agent.key}
                               </div>
                             </div>
@@ -1407,9 +1407,9 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                       style={{
                         width: '100%', minHeight: 36, maxHeight: 80,
                         padding: '8px 76px 8px 12px', borderRadius: 12,
-                        border: '1px solid rgba(0,0,0,0.06)',
-                        background: waitingForReply ? 'rgba(0,0,0,0.02)' : 'rgba(255,255,255,0.35)',
-                        fontSize: 12, color: '#111827', resize: 'none',
+                        border: '1px solid var(--t-input-border)',
+                        background: waitingForReply ? 'var(--t-hover)' : 'var(--t-input-bg)',
+                        fontSize: 12, color: 'var(--t-text)', resize: 'none',
                         outline: 'none', fontFamily: 'inherit', lineHeight: 1.4,
                         boxSizing: 'border-box',
                         opacity: waitingForReply ? 0.5 : 1,
@@ -1501,8 +1501,8 @@ function InputButtons({
       <button type="button" onClick={onEnhance} disabled={!input.trim() || enhancing}
         title="Enhance with AI" style={{
           width: sz, height: sz, borderRadius: 7, border: 'none',
-          background: input.trim() ? 'rgba(37, 99, 235, 0.1)' : 'rgba(0,0,0,0.04)',
-          color: enhancing ? '#93c5fd' : input.trim() ? '#2563eb' : '#b0b8c4',
+          background: input.trim() ? 'rgba(37, 99, 235, 0.1)' : 'var(--t-hover)',
+          color: enhancing ? '#93c5fd' : input.trim() ? '#2563eb' : 'var(--t-text-faint)',
           cursor: input.trim() && !enhancing ? 'pointer' : 'default',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           transition: 'background 120ms, color 120ms',
@@ -1512,8 +1512,8 @@ function InputButtons({
       </button>
       <button type="button" onClick={onSubmit} disabled={!input.trim()} style={{
         width: sendSz, height: sendSz, borderRadius: 8, border: 'none',
-        background: input.trim() ? '#2563eb' : 'rgba(0,0,0,0.06)',
-        color: input.trim() ? '#fff' : '#b0b8c4',
+        background: input.trim() ? '#2563eb' : 'var(--t-divider)',
+        color: input.trim() ? '#fff' : 'var(--t-text-faint)',
         cursor: input.trim() ? 'pointer' : 'default',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         transition: 'background 120ms',
