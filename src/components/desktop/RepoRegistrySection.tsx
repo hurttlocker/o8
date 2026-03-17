@@ -11,6 +11,7 @@ import {
   FolderOpen,
   GitBranch,
   Plus,
+  PlayCircle,
   Settings2,
   Trash2,
   X,
@@ -31,6 +32,14 @@ interface WorkspaceCreateResult {
   branch: string;
   path: string;
   baseBranch: string;
+}
+
+interface LaunchAgentResult {
+  surfaceId: string;
+  runtime: string;
+  note: string;
+  cwd: string;
+  worktree: WorkspaceCreateResult | null;
 }
 
 function formatRelativeTime(value: string | null) {
@@ -360,6 +369,7 @@ function SetupModeButton({
 function RepoCard({
   repo,
   workspaceNotice,
+  onLaunchAgent,
   onCreateWorkspace,
   onOpenGitHub,
   onRemove,
@@ -367,6 +377,7 @@ function RepoCard({
 }: {
   repo: RepoRegistryEntry;
   workspaceNotice: WorkspaceCreateResult | null;
+  onLaunchAgent: (repo: RepoRegistryEntry) => void;
   onCreateWorkspace: (repo: RepoRegistryEntry) => void;
   onOpenGitHub: (repo: RepoRegistryEntry) => void;
   onRemove: (repo: RepoRegistryEntry) => void;
@@ -565,10 +576,15 @@ function RepoCard({
           }}
         >
           <RepoActionButton
+            label="Launch Agent"
+            icon={<PlayCircle size={12} strokeWidth={2} />}
+            onClick={() => onLaunchAgent(repo)}
+            active
+          />
+          <RepoActionButton
             label="New Workspace"
             icon={<Plus size={12} strokeWidth={2.5} />}
             onClick={() => onCreateWorkspace(repo)}
-            active
           />
           <RepoActionButton
             label="Settings"
@@ -814,7 +830,13 @@ function RepoCard({
   );
 }
 
-export function RepoRegistrySection() {
+export function RepoRegistrySection({
+  onSelectSession,
+  onLaunchComplete,
+}: {
+  onSelectSession?: (sessionKey: string) => void;
+  onLaunchComplete?: () => void;
+} = {}) {
   const [repos, setRepos] = useState<RepoRegistryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -835,6 +857,16 @@ export function RepoRegistrySection() {
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [workspaceResult, setWorkspaceResult] = useState<WorkspaceCreateResult | null>(null);
   const [workspaceNotice, setWorkspaceNotice] = useState<Record<string, WorkspaceCreateResult>>({});
+
+  const [launchRepo, setLaunchRepo] = useState<RepoRegistryEntry | null>(null);
+  const [launchRuntime, setLaunchRuntime] = useState<'codex' | 'claude-code' | 'openclaw'>('codex');
+  const [launchTaskName, setLaunchTaskName] = useState('');
+  const [launchPrompt, setLaunchPrompt] = useState('');
+  const [launchBaseBranch, setLaunchBaseBranch] = useState('');
+  const [launchUseSetup, setLaunchUseSetup] = useState(true);
+  const [launchLoading, setLaunchLoading] = useState(false);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [launchResult, setLaunchResult] = useState<LaunchAgentResult | null>(null);
 
   const [removeTarget, setRemoveTarget] = useState<RepoRegistryEntry | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
@@ -945,6 +977,92 @@ export function RepoRegistrySection() {
 
     window.open(githubUrl, '_blank', 'noopener,noreferrer');
   }, []);
+
+  const openLaunchModal = useCallback((repo: RepoRegistryEntry) => {
+    setLaunchRepo(repo);
+    setLaunchRuntime('codex');
+    setLaunchTaskName(defaultWorkspaceName(repo.name));
+    setLaunchPrompt(`Work on ${repo.name}. Start by reading CLAUDE.md and the relevant issue context, then implement the requested change.`);
+    setLaunchBaseBranch(repo.defaultBranch);
+    setLaunchUseSetup(repo.setup.installOnCreateWorkspace);
+    setLaunchError(null);
+    setLaunchResult(null);
+  }, []);
+
+  const closeLaunchModal = useCallback(() => {
+    setLaunchRepo(null);
+    setLaunchRuntime('codex');
+    setLaunchTaskName('');
+    setLaunchPrompt('');
+    setLaunchBaseBranch('');
+    setLaunchUseSetup(true);
+    setLaunchLoading(false);
+    setLaunchError(null);
+    setLaunchResult(null);
+  }, []);
+
+  const handleLaunchAgent = useCallback(async () => {
+    if (!launchRepo) return;
+
+    const taskName = launchTaskName.trim();
+    const prompt = launchPrompt.trim();
+    if (!taskName) {
+      setLaunchError('Task name is required.');
+      return;
+    }
+    if (!prompt) {
+      setLaunchError('Launch prompt is required.');
+      return;
+    }
+
+    setLaunchLoading(true);
+    setLaunchError(null);
+
+    try {
+      const data = await requestJson<LaunchAgentResult>('/api/runtime/launch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          runtime: launchRuntime,
+          repoPath: launchRepo.localPath,
+          prompt,
+          taskName,
+          baseBranch: launchBaseBranch.trim() || undefined,
+          skipSetup: !launchUseSetup,
+        }),
+      });
+
+      setLaunchResult(data);
+
+      const touched = await requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'touch', id: launchRepo.id }),
+      });
+
+      setRepos((current) => sortRepoEntries(
+        current.map((repo) => (repo.id === launchRepo.id ? touched.repo : repo)),
+      ));
+
+      onLaunchComplete?.();
+      if (data.surfaceId) {
+        onSelectSession?.(data.surfaceId);
+      }
+    } catch (error) {
+      setLaunchError(error instanceof Error ? error.message : 'Unable to launch agent.');
+    } finally {
+      setLaunchLoading(false);
+    }
+  }, [
+    launchBaseBranch,
+    launchPrompt,
+    launchRepo,
+    launchRuntime,
+    launchTaskName,
+    launchUseSetup,
+    onLaunchComplete,
+    onSelectSession,
+  ]);
 
   const openWorkspaceModal = useCallback((repo: RepoRegistryEntry) => {
     setWorkspaceRepo(repo);
@@ -1198,6 +1316,7 @@ export function RepoRegistrySection() {
                 key={repo.id}
                 repo={repo}
                 workspaceNotice={workspaceNotice[repo.id] ?? null}
+                onLaunchAgent={openLaunchModal}
                 onCreateWorkspace={openWorkspaceModal}
                 onOpenGitHub={handleOpenGitHub}
                 onRemove={setRemoveTarget}
@@ -1575,6 +1694,275 @@ export function RepoRegistrySection() {
             }}
           >
             {workspaceLoading ? 'Creating…' : workspaceResult ? 'Create Another' : 'Create Workspace'}
+          </button>
+        </div>
+      </GlassModal>
+
+      <GlassModal
+        open={launchRepo !== null}
+        onClose={closeLaunchModal}
+        title={launchRepo ? `Launch Agent · ${launchRepo.name}` : 'Launch Agent'}
+        subtitle="This runs through the runtime launch route, prepares a worktree when isolation is needed, and links the resulting owned surface back to the repo."
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+            Runtime
+          </div>
+          <select
+            value={launchRuntime}
+            onChange={(event) => setLaunchRuntime(event.currentTarget.value as 'codex' | 'claude-code' | 'openclaw')}
+            style={{
+              width: '100%',
+              minHeight: 40,
+              padding: '10px 12px',
+              borderRadius: 12,
+              border: '1px solid var(--t-btn-secondary-border)',
+              background: 'rgba(255, 255, 255, 0.55)',
+              color: 'var(--t-text)',
+              fontSize: 13,
+              fontFamily: '-apple-system, system-ui, sans-serif',
+              outline: 'none',
+            }}
+          >
+            <option value="codex">Codex</option>
+            <option value="claude-code">Claude Code</option>
+            <option value="openclaw">OpenClaw</option>
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+            Task name
+          </div>
+          <input
+            value={launchTaskName}
+            onChange={(event) => setLaunchTaskName(event.currentTarget.value)}
+            placeholder="cortex-issue-131"
+            style={{
+              width: '100%',
+              minHeight: 40,
+              padding: '10px 12px',
+              borderRadius: 12,
+              border: '1px solid var(--t-btn-secondary-border)',
+              background: 'rgba(255, 255, 255, 0.55)',
+              color: 'var(--t-text)',
+              fontSize: 13,
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+              outline: 'none',
+            }}
+          />
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+            Launch prompt
+          </div>
+          <textarea
+            value={launchPrompt}
+            onChange={(event) => setLaunchPrompt(event.currentTarget.value)}
+            rows={6}
+            placeholder="Describe the task for the agent."
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              borderRadius: 12,
+              border: '1px solid var(--t-btn-secondary-border)',
+              background: 'rgba(255, 255, 255, 0.55)',
+              color: 'var(--t-text)',
+              fontSize: 13,
+              fontFamily: '-apple-system, system-ui, sans-serif',
+              lineHeight: 1.5,
+              outline: 'none',
+              resize: 'vertical',
+            }}
+          />
+        </div>
+
+        {launchRuntime === 'openclaw' ? (
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 12,
+              border: '1px solid rgba(37, 99, 235, 0.12)',
+              background: 'rgba(239, 246, 255, 0.78)',
+              fontSize: 11,
+              lineHeight: 1.5,
+              color: '#1d4ed8',
+            }}
+          >
+            OpenClaw launch dispatches the task into the live mirrored session instead of creating a repo worktree. Base branch and setup controls do not apply on that lane.
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+                Base branch
+              </div>
+              <input
+                value={launchBaseBranch}
+                onChange={(event) => setLaunchBaseBranch(event.currentTarget.value)}
+                placeholder="main"
+                style={{
+                  width: '100%',
+                  minHeight: 40,
+                  padding: '10px 12px',
+                  borderRadius: 12,
+                  border: '1px solid var(--t-btn-secondary-border)',
+                  background: 'rgba(255, 255, 255, 0.55)',
+                  color: 'var(--t-text)',
+                  fontSize: 13,
+                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 10,
+                cursor: 'pointer',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={launchUseSetup}
+                onChange={(event) => setLaunchUseSetup(event.currentTarget.checked)}
+                style={{
+                  marginTop: 2,
+                  accentColor: '#ef4444',
+                }}
+              />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+                  Run dependency setup if a worktree is created
+                </div>
+                <div
+                  style={{
+                    marginTop: 4,
+                    fontSize: 11,
+                    color: 'var(--t-text-muted)',
+                    lineHeight: 1.45,
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                  }}
+                >
+                  {launchRepo?.setup.installCommand ?? 'No install command detected'}
+                </div>
+              </div>
+            </label>
+          </>
+        )}
+
+        {launchError ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+              padding: 12,
+              borderRadius: 12,
+              border: '1px solid rgba(239, 68, 68, 0.18)',
+              background: 'rgba(254, 242, 242, 0.82)',
+              color: '#991b1b',
+              fontSize: 12,
+              lineHeight: 1.45,
+            }}
+          >
+            <AlertCircle size={14} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{launchError}</span>
+          </div>
+        ) : null}
+
+        {launchResult ? (
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 12,
+              border: '1px solid rgba(34, 197, 94, 0.18)',
+              background: 'rgba(240, 253, 244, 0.85)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 12,
+                fontWeight: 700,
+                color: '#166534',
+              }}
+            >
+              <CheckCircle2 size={14} strokeWidth={2} />
+              Agent launched
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '92px 1fr', gap: '6px 10px', fontSize: 12 }}>
+              <span style={{ color: 'var(--t-text-muted)' }}>Runtime</span>
+              <span style={{ color: 'var(--t-text)', fontWeight: 600 }}>{launchResult.runtime}</span>
+              <span style={{ color: 'var(--t-text-muted)' }}>Surface</span>
+              <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace', wordBreak: 'break-all' }}>
+                {launchResult.surfaceId}
+              </span>
+              <span style={{ color: 'var(--t-text-muted)' }}>CWD</span>
+              <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace', wordBreak: 'break-all' }}>
+                {shortenPath(launchResult.cwd)}
+              </span>
+              {launchResult.worktree ? (
+                <>
+                  <span style={{ color: 'var(--t-text-muted)' }}>Worktree</span>
+                  <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace', wordBreak: 'break-all' }}>
+                    {launchResult.worktree.branch}
+                  </span>
+                </>
+              ) : null}
+            </div>
+            <div style={{ fontSize: 11, lineHeight: 1.5, color: '#166534' }}>
+              {launchResult.note}
+            </div>
+          </div>
+        ) : null}
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
+          <button
+            type="button"
+            onClick={closeLaunchModal}
+            style={{
+              minHeight: 36,
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid var(--t-btn-secondary-border)',
+              background: 'var(--t-panel-hover)',
+              color: 'var(--t-text-secondary)',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
+            {launchResult ? 'Close' : 'Cancel'}
+          </button>
+          <button
+            type="button"
+            onClick={handleLaunchAgent}
+            disabled={launchLoading}
+            style={{
+              minHeight: 36,
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid rgba(239, 68, 68, 0.2)',
+              background: 'rgba(239, 68, 68, 0.08)',
+              color: '#b91c1c',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: launchLoading ? 'not-allowed' : 'pointer',
+              opacity: launchLoading ? 0.45 : 1,
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
+            {launchLoading ? 'Launching…' : launchResult ? 'Launch Another' : 'Launch Agent'}
           </button>
         </div>
       </GlassModal>

@@ -42,6 +42,14 @@ interface WorkspaceEntry {
 
 function deriveRepo(workspace: string): string {
   const path = workspace.replace(/^~\//, '');
+  if (path.includes('/.cortex-worktrees/')) {
+    const repoRoot = path.split('/.cortex-worktrees/')[0] ?? '';
+    return repoRoot.split('/').pop() || '';
+  }
+  if (path.includes('/.claude/worktrees/')) {
+    const repoRoot = path.split('/.claude/worktrees/')[0] ?? '';
+    return repoRoot.split('/').pop() || '';
+  }
   if (path.includes('repos/')) {
     const parts = path.split('repos/');
     return parts[1]?.split('/')[0] || '';
