@@ -8,6 +8,7 @@ import { Canvas, CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
 import { GraphExplorer3D } from '@/components/desktop/GraphExplorer3D';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
+import { ThemeProvider } from '@/lib/theme/context';
 import { AlertBell } from '@/components/shared/AlertBell';
 import { AlertTray } from '@/components/shared/AlertTray';
 import { AlertToast } from '@/components/shared/AlertToast';
@@ -20,9 +21,11 @@ import { ThoughtsCard } from '@/components/desktop/ThoughtsCard';
 
 export default function DashboardPage() {
   return (
-    <AlertProvider>
-      <DashboardInner />
-    </AlertProvider>
+    <ThemeProvider>
+      <AlertProvider>
+        <DashboardInner />
+      </AlertProvider>
+    </ThemeProvider>
   );
 }
 
@@ -277,8 +280,8 @@ function DashboardInner() {
       height: '100vh',
       display: 'flex',
       flexDirection: 'column',
-      background: '#eef1f6',
-      color: '#1e293b',
+      background: 'var(--t-bg)',
+      color: 'var(--t-text)',
       fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif',
       overflow: 'hidden',
     }}>
@@ -359,7 +362,7 @@ function DashboardInner() {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        borderRight: '1px solid rgba(0,0,0,0.06)',
+        borderRight: '1px solid var(--t-divider)',
         position: 'relative',
       }}>
         <AgentPanel
@@ -395,7 +398,7 @@ function DashboardInner() {
           width: 3,
           height: 40,
           borderRadius: 2,
-          backgroundColor: 'rgba(0,0,0,0.08)',
+          backgroundColor: 'var(--t-drag-handle)',
           transition: 'background-color 150ms',
         }} />
       </div>}
@@ -462,7 +465,7 @@ function DashboardInner() {
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          background: 'linear-gradient(180deg, #f0f4f8 0%, #e8edf4 100%)',
+          background: 'var(--t-bg-gradient)',
         }}>
           {/* Search moved to TitleBar */}
           {/* Workspace content area */}
@@ -474,19 +477,19 @@ function DashboardInner() {
           }}>
             {!canvasTabs.length ? (
               <div style={{ textAlign: 'center', maxWidth: 480 }}>
-                <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.12, color: '#94a3b8' }}>◇</div>
+                <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.12, color: 'var(--t-workspace-icon)' }}>◇</div>
                 <h1 style={{
                   fontSize: 24,
                   fontWeight: 700,
                   letterSpacing: '-0.03em',
                   marginBottom: 8,
-                  color: '#1e293b',
+                  color: 'var(--t-text)',
                 }}>
                   Workspace
                 </h1>
                 <p style={{
                   fontSize: 14,
-                  color: '#94a3b8',
+                  color: 'var(--t-text-muted)',
                   lineHeight: 1.5,
                   letterSpacing: '-0.01em',
                 }}>
@@ -511,14 +514,14 @@ function DashboardInner() {
               justifyContent: 'center',
               flexShrink: 0,
               zIndex: 10,
-              background: 'rgba(0,0,0,0.02)',
+              background: 'var(--t-divider-subtle)',
             }}
           >
             <div style={{
               width: 40,
               height: 3,
               borderRadius: 2,
-              backgroundColor: 'rgba(0,0,0,0.08)',
+              backgroundColor: 'var(--t-drag-handle)',
               transition: 'background-color 150ms',
             }} />
           </div>
@@ -556,7 +559,7 @@ function DashboardInner() {
           width: 3,
           height: 40,
           borderRadius: 2,
-          backgroundColor: 'rgba(0,0,0,0.08)',
+          backgroundColor: 'var(--t-drag-handle)',
           transition: 'background-color 150ms',
         }} />
       </div>}
@@ -566,7 +569,7 @@ function DashboardInner() {
         width: rightWidth,
         flexShrink: 0,
         height: '100%',
-        borderLeft: '1px solid rgba(0,0,0,0.06)',
+        borderLeft: '1px solid var(--t-divider)',
       }}>
         <DesktopChat
           externalSessionKey={activeSessionKey}

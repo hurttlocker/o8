@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { useTheme } from '@/lib/theme/context';
 
 // ── Types ──
 
@@ -131,7 +132,7 @@ function TabButton({ label, icon, active, onClick }: {
         borderRadius: 10,
         border: 'none',
         background: active ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
-        color: active ? '#2563eb' : '#6b7280',
+        color: active ? '#2563eb' : 'var(--t-text-secondary)',
         fontSize: 13,
         fontWeight: active ? 600 : 500,
         cursor: 'pointer',
@@ -184,7 +185,7 @@ function GitHubTab({ accounts, repos, loading }: {
 
   if (loading) {
     return (
-      <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+      <div style={{ padding: 40, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
         Checking GitHub connection...
       </div>
     );
@@ -199,17 +200,17 @@ function GitHubTab({ accounts, repos, loading }: {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Connection Status Card */}
       <div style={{
-        background: '#fff',
+        background: 'var(--t-panel)',
         borderRadius: 14,
         padding: 24,
-        border: '1px solid rgba(0,0,0,0.06)',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        border: '1px solid var(--t-panel-border)',
+        boxShadow: 'var(--t-panel-shadow)',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-          <div style={{ color: '#111827' }}><GitHubIcon size={28} /></div>
+          <div style={{ color: 'var(--t-text)' }}><GitHubIcon size={28} /></div>
           <div>
-            <h3 style={{ fontSize: 17, fontWeight: 700, color: '#111827', margin: 0 }}>GitHub</h3>
-            <p style={{ fontSize: 11, color: '#9ca3af', margin: '2px 0 0' }}>
+            <h3 style={{ fontSize: 17, fontWeight: 700, color: 'var(--t-text)', margin: 0 }}>GitHub</h3>
+            <p style={{ fontSize: 11, color: 'var(--t-text-muted)', margin: '2px 0 0' }}>
               Source control, issues, and pull requests
             </p>
           </div>
@@ -243,10 +244,10 @@ function GitHubTab({ accounts, repos, loading }: {
             />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>{activeAccount.login}</span>
-                {activeAccount.name && <span style={{ fontSize: 12, color: '#6b7280' }}>{activeAccount.name}</span>}
+                <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)' }}>{activeAccount.login}</span>
+                {activeAccount.name && <span style={{ fontSize: 12, color: 'var(--t-text-secondary)' }}>{activeAccount.name}</span>}
               </div>
-              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>
+              <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 3 }}>
                 Protocol: {activeAccount.protocol} · {activeAccount.scopes.length} scopes · {repos.length} repositories
               </div>
               {/* Scopes inline */}
@@ -262,22 +263,22 @@ function GitHubTab({ accounts, repos, loading }: {
           {connected ? (
             <>
               <button type="button" style={{
-                padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.08)',
-                background: '#fff', color: '#6b7280', fontSize: 12, fontWeight: 600,
+                padding: '8px 16px', borderRadius: 10, border: '1px solid var(--t-panel-border)',
+                background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 12, fontWeight: 600,
                 cursor: 'pointer', transition: 'background 120ms',
               }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-panel)'; }}
               >
                 Disconnect
               </button>
               <button type="button" style={{
-                padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.08)',
-                background: '#fff', color: '#6b7280', fontSize: 12, fontWeight: 600,
+                padding: '8px 16px', borderRadius: 10, border: '1px solid var(--t-panel-border)',
+                background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 12, fontWeight: 600,
                 cursor: 'pointer', transition: 'background 120ms',
               }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.03)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-panel)'; }}
               >
                 Switch Account
               </button>
@@ -300,10 +301,10 @@ function GitHubTab({ accounts, repos, loading }: {
 
       {/* Repositories — Collapsible */}
       <div style={{
-        background: '#fff',
+        background: 'var(--t-panel)',
         borderRadius: 14,
-        border: '1px solid rgba(0,0,0,0.06)',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+        border: '1px solid var(--t-panel-border)',
+        boxShadow: 'var(--t-panel-shadow)',
         overflow: 'hidden',
       }}>
         <button
@@ -312,8 +313,8 @@ function GitHubTab({ accounts, repos, loading }: {
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             width: '100%', padding: '14px 20px', border: 'none', background: 'transparent',
-            cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#111827',
-            borderBottom: reposExpanded ? '1px solid rgba(0,0,0,0.04)' : 'none',
+            cursor: 'pointer', fontSize: 13, fontWeight: 700, color: 'var(--t-text)',
+            borderBottom: reposExpanded ? '1px solid var(--t-divider-subtle)' : 'none',
           }}
         >
           <span>Repositories ({repos.length})</span>
@@ -328,16 +329,16 @@ function GitHubTab({ accounts, repos, loading }: {
                 borderRadius: 8,
                 transition: 'background 80ms',
               }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.02)'; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-panel-hover)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
               >
                 <div style={{ color: repo.isPrivate ? '#f59e0b' : '#22c55e' }}>
                   {repo.isPrivate ? <LockIcon /> : <GlobeIcon />}
                 </div>
-                <span style={{ fontSize: 12, fontWeight: 500, color: '#374151', flex: 1 }}>
+                <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--t-text)', flex: 1 }}>
                   {repo.nameWithOwner}
                 </span>
-                <span style={{ fontSize: 10, color: '#b0b8c4' }}>
+                <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
                   {repo.updatedAt}
                 </span>
               </div>
@@ -354,14 +355,14 @@ function GitHubTab({ accounts, repos, loading }: {
 function PlaceholderTab({ title, description }: { title: string; description: string }) {
   return (
     <div style={{
-      background: '#fff',
+      background: 'var(--t-panel)',
       borderRadius: 14,
       padding: 32,
       border: '1px solid rgba(0,0,0,0.06)',
       textAlign: 'center',
     }}>
-      <h3 style={{ fontSize: 15, fontWeight: 700, color: '#111827', margin: '0 0 6px' }}>{title}</h3>
-      <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>{description}</p>
+      <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)', margin: '0 0 6px' }}>{title}</h3>
+      <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: 0 }}>{description}</p>
     </div>
   );
 }
@@ -431,7 +432,7 @@ function ContextBar({ percent, trend }: { percent: number; trend: string }) {
           transition: 'width 300ms ease',
         }} />
       </div>
-      <span style={{ fontSize: 10, fontWeight: 600, color: '#6b7280', minWidth: 32, textAlign: 'right' }}>
+      <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-secondary)', minWidth: 32, textAlign: 'right' }}>
         {percent}%
       </span>
       {trend === 'rising' && (
@@ -479,7 +480,7 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill, killing }: {
       gap: 14,
       padding: '14px 16px',
       borderRadius: 12,
-      background: '#fff',
+      background: 'var(--t-panel)',
       border: '1px solid rgba(0,0,0,0.06)',
       boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
       transition: 'box-shadow 120ms',
@@ -504,7 +505,7 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill, killing }: {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
           <StatusDot status={agent.status} />
-          <span style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>{shortName}</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)' }}>{shortName}</span>
           <span style={{
             fontSize: 10,
             fontWeight: 600,
@@ -516,12 +517,12 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill, killing }: {
             {agent.status}
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: '#9ca3af' }}>
-          <span style={{ fontWeight: 600, color: '#6b7280' }}>{shortModel}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--t-text-muted)' }}>
+          <span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>{shortModel}</span>
           {heartbeatLabel && (
             <>
               <span>·</span>
-              <span style={{ color: '#9ca3af' }}>HB {heartbeatLabel}</span>
+              <span style={{ color: 'var(--t-text-muted)' }}>HB {heartbeatLabel}</span>
             </>
           )}
           <span>·</span>
@@ -546,8 +547,8 @@ function AgentCard({ agent, isOpenClaw, onEdit, onKill, killing }: {
               padding: '6px 12px',
               borderRadius: 8,
               border: '1px solid rgba(0,0,0,0.08)',
-              background: '#fff',
-              color: '#6b7280',
+              background: 'var(--t-panel)',
+              color: 'var(--t-text-secondary)',
               fontSize: 11,
               fontWeight: 600,
               cursor: 'pointer',
@@ -638,17 +639,17 @@ function AgentEditModal({ agent, onClose, onSave }: {
       backdropFilter: 'blur(8px)',
     }} onClick={onClose}>
       <div style={{
-        background: '#fff',
+        background: 'var(--t-panel)',
         borderRadius: 18,
         padding: 28,
         width: 420,
         maxWidth: '90vw',
         boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
       }} onClick={(e) => e.stopPropagation()}>
-        <h3 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: '0 0 4px' }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--t-text)', margin: '0 0 4px' }}>
           Configure Agent
         </h3>
-        <p style={{ fontSize: 12, color: '#9ca3af', margin: '0 0 20px' }}>
+        <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: '0 0 20px' }}>
           {agent.id}
         </p>
 
@@ -665,9 +666,9 @@ function AgentEditModal({ agent, onClose, onSave }: {
               padding: '10px 12px',
               borderRadius: 10,
               border: '1px solid rgba(0,0,0,0.1)',
-              background: '#fff',
+              background: 'var(--t-panel)',
               fontSize: 13,
-              color: '#111827',
+              color: 'var(--t-text)',
               cursor: 'pointer',
               appearance: 'none',
               WebkitAppearance: 'none',
@@ -690,7 +691,7 @@ function AgentEditModal({ agent, onClose, onSave }: {
           background: 'rgba(37, 99, 235, 0.04)',
           border: '1px solid rgba(37, 99, 235, 0.08)',
           fontSize: 11,
-          color: '#6b7280',
+          color: 'var(--t-text-secondary)',
           lineHeight: 1.5,
           marginBottom: 20,
         }}>
@@ -702,7 +703,7 @@ function AgentEditModal({ agent, onClose, onSave }: {
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button type="button" onClick={onClose} style={{
             padding: '8px 16px', borderRadius: 10, border: '1px solid rgba(0,0,0,0.08)',
-            background: '#fff', color: '#6b7280', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
           }}>
             Cancel
           </button>
@@ -795,7 +796,7 @@ function AgentsTab() {
 
   if (loading) {
     return (
-      <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+      <div style={{ padding: 40, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
         Loading agent fleet...
       </div>
     );
@@ -818,32 +819,32 @@ function AgentsTab() {
         gap: 16,
         padding: '14px 20px',
         borderRadius: 14,
-        background: '#fff',
+        background: 'var(--t-panel)',
         border: '1px solid rgba(0,0,0,0.06)',
         boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
       }}>
         <div style={{ textAlign: 'center', flex: 1 }}>
-          <div style={{ fontSize: 22, fontWeight: 800, color: '#111827' }}>{agents.length}</div>
-          <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Agents</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--t-text)' }}>{agents.length}</div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Agents</div>
         </div>
         <div style={{ width: 1, background: 'rgba(0,0,0,0.06)' }} />
         <div style={{ textAlign: 'center', flex: 1 }}>
           <div style={{ fontSize: 22, fontWeight: 800, color: '#22c55e' }}>
             {agents.filter(a => a.status === 'running').length}
           </div>
-          <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Running</div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Running</div>
         </div>
         <div style={{ width: 1, background: 'rgba(0,0,0,0.06)' }} />
         <div style={{ textAlign: 'center', flex: 1 }}>
           <div style={{ fontSize: 22, fontWeight: 800, color: '#3b82f6' }}>{squads.length}</div>
-          <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Squads</div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Squads</div>
         </div>
         <div style={{ width: 1, background: 'rgba(0,0,0,0.06)' }} />
         <div style={{ textAlign: 'center', flex: 1 }}>
           <div style={{ fontSize: 22, fontWeight: 800, color: '#f59e0b' }}>
             {agents.filter(a => a.runtime === 'openclaw').length}
           </div>
-          <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>OpenClaw</div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>OpenClaw</div>
         </div>
       </div>
 
@@ -859,11 +860,11 @@ function AgentsTab() {
               marginBottom: 10,
               paddingLeft: 4,
             }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)' }}>
                 {squad?.name || squadId}
               </span>
               <span style={{
-                fontSize: 10, fontWeight: 600, color: '#9ca3af',
+                fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)',
                 padding: '1px 8px', borderRadius: 5,
                 background: 'rgba(0,0,0,0.04)',
               }}>
@@ -903,6 +904,205 @@ function AgentsTab() {
   );
 }
 
+// ── Theme Preview Card ──
+
+function ThemePreviewCard({ theme, active, onSelect }: {
+  theme: import('@/lib/theme/themes').ThemeTokens;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  const p = theme.preview;
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      style={{
+        position: 'relative',
+        width: 200,
+        padding: 0,
+        border: active ? '2px solid #2563eb' : '2px solid var(--t-panel-border)',
+        borderRadius: 16,
+        background: 'var(--t-panel)',
+        cursor: 'pointer',
+        overflow: 'hidden',
+        transition: 'border-color 200ms, box-shadow 200ms',
+        boxShadow: active ? '0 0 0 3px rgba(37, 99, 235, 0.15)' : 'var(--t-panel-shadow)',
+      }}
+    >
+      {/* Mini dashboard preview */}
+      <div style={{
+        height: 120,
+        background: p.bg,
+        padding: 8,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+      }}>
+        {/* Title bar */}
+        <div style={{
+          height: 10,
+          borderRadius: 3,
+          background: p.titlebar,
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 4px',
+          gap: 2,
+        }}>
+          <div style={{ width: 3, height: 3, borderRadius: '50%', background: '#ef4444', opacity: 0.7 }} />
+          <div style={{ width: 3, height: 3, borderRadius: '50%', background: '#f59e0b', opacity: 0.7 }} />
+          <div style={{ width: 3, height: 3, borderRadius: '50%', background: '#22c55e', opacity: 0.7 }} />
+        </div>
+        {/* Body */}
+        <div style={{ flex: 1, display: 'flex', gap: 3 }}>
+          {/* Nav rail */}
+          <div style={{
+            width: 14,
+            borderRadius: 3,
+            background: p.nav,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            padding: '4px 0',
+            gap: 3,
+          }}>
+            <div style={{ width: 6, height: 6, borderRadius: 2, background: p.accent, opacity: 0.6 }} />
+            <div style={{ width: 6, height: 2, borderRadius: 1, background: p.textMuted, opacity: 0.3 }} />
+            <div style={{ width: 6, height: 2, borderRadius: 1, background: p.textMuted, opacity: 0.3 }} />
+          </div>
+          {/* Left panel */}
+          <div style={{
+            width: 44,
+            borderRadius: 3,
+            background: p.panel,
+            padding: 4,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 3,
+          }}>
+            <div style={{ height: 4, width: '70%', borderRadius: 1, background: p.text, opacity: 0.3 }} />
+            <div style={{ height: 12, borderRadius: 2, background: p.bg, opacity: 0.6 }} />
+            <div style={{ height: 12, borderRadius: 2, background: p.bg, opacity: 0.4 }} />
+            <div style={{ height: 12, borderRadius: 2, background: p.bg, opacity: 0.3 }} />
+          </div>
+          {/* Center workspace */}
+          <div style={{
+            flex: 1,
+            borderRadius: 3,
+            background: p.bg,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}>
+            <div style={{ width: 16, height: 16, borderRadius: 3, border: `1px solid ${p.textMuted}40`, opacity: 0.3 }} />
+          </div>
+          {/* Right panel (chat) */}
+          <div style={{
+            width: 44,
+            borderRadius: 3,
+            background: p.panel,
+            padding: 4,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'flex-end',
+            gap: 3,
+          }}>
+            <div style={{ height: 6, width: '80%', borderRadius: 2, background: p.accent, opacity: 0.25, alignSelf: 'flex-end' }} />
+            <div style={{ height: 8, width: '60%', borderRadius: 2, background: p.textMuted, opacity: 0.15 }} />
+            <div style={{ height: 10, borderRadius: 3, background: p.bg, opacity: 0.5 }} />
+          </div>
+        </div>
+      </div>
+
+      {/* Label */}
+      <div style={{
+        padding: '12px 14px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      }}>
+        <div>
+          <div style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: 'var(--t-text)',
+            textAlign: 'left',
+          }}>
+            {theme.name}
+          </div>
+          <div style={{
+            fontSize: 11,
+            color: 'var(--t-text-muted)',
+            textAlign: 'left',
+            marginTop: 1,
+          }}>
+            {theme.description}
+          </div>
+        </div>
+        {active && (
+          <div style={{
+            width: 20,
+            height: 20,
+            borderRadius: 10,
+            background: '#2563eb',
+            display: 'grid',
+            placeItems: 'center',
+            flexShrink: 0,
+          }}>
+            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </div>
+        )}
+      </div>
+    </button>
+  );
+}
+
+// ── Appearance Tab ──
+
+function AppearanceTab() {
+  const { themeId, setTheme, themes: themeList } = useTheme();
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Section: Themes */}
+      <div style={{
+        background: 'var(--t-panel)',
+        borderRadius: 14,
+        padding: 24,
+        border: '1px solid var(--t-panel-border)',
+        boxShadow: 'var(--t-panel-shadow)',
+      }}>
+        <div style={{ marginBottom: 4 }}>
+          <h3 style={{ fontSize: 17, fontWeight: 700, color: 'var(--t-text)', margin: 0 }}>
+            Theme
+          </h3>
+          <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: '4px 0 0' }}>
+            Choose how Cortex IDE looks. Accent colors and status indicators stay consistent across themes.
+          </p>
+        </div>
+
+        <div style={{
+          display: 'flex',
+          gap: 16,
+          marginTop: 20,
+          flexWrap: 'wrap',
+        }}>
+          {themeList.map((theme) => (
+            <ThemePreviewCard
+              key={theme.id}
+              theme={theme}
+              active={themeId === theme.id}
+              onSelect={() => setTheme(theme.id)}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Settings Page ──
 
 export function SettingsPage() {
@@ -938,7 +1138,7 @@ export function SettingsPage() {
       height: '100%',
       overflow: 'auto',
       padding: 24,
-      background: 'linear-gradient(180deg, #f0f4f8 0%, #e8edf4 100%)',
+      background: 'var(--t-bg-gradient)',
       display: 'flex',
       gap: 20,
     }}>
@@ -953,7 +1153,7 @@ export function SettingsPage() {
         <div style={{
           fontSize: 11,
           fontWeight: 600,
-          color: '#9ca3af',
+          color: 'var(--t-text-muted)',
           textTransform: 'uppercase',
           letterSpacing: '0.04em',
           padding: '8px 14px',
@@ -976,7 +1176,7 @@ export function SettingsPage() {
           <AgentsTab />
         )}
         {activeTab === 'appearance' && (
-          <PlaceholderTab title="Appearance" description="Theme, font size, density, and layout preferences. Coming soon." />
+          <AppearanceTab />
         )}
         {activeTab === 'about' && (
           <PlaceholderTab title="About Cortex IDE" description="Version 0.0.1 · Built with Next.js + Tauri · Powered by Cortex" />
