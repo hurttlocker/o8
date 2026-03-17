@@ -645,6 +645,14 @@ function DashboardInner() {
               resourceId: 'workspace',
             });
           }}
+          onOpenMermaid={(code) => {
+            openCanvasTab({
+              id: `mermaid:${code.slice(0, 40)}`,
+              kind: 'mermaid',
+              label: 'Diagram',
+              resourceId: code,
+            });
+          }}
         />
       </div>}
 

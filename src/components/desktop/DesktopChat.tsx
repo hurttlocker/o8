@@ -88,9 +88,10 @@ interface BubbleProps {
   isLatest: boolean;
   agentName: string;
   isNew?: boolean;
+  onOpenMermaid?: (code: string) => void;
 }
 
-const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName, isNew }: BubbleProps) {
+const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName, isNew, onOpenMermaid }: BubbleProps) {
   const isUser = entry.role === 'user';
   const hasText = Boolean(entry.text.trim());
   const hasMedia = Boolean(entry.media?.length);
@@ -151,8 +152,8 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName,
 
   // Parse markdown into blocks for point-to-play
   const mdBlocks = useMemo(
-    () => hasText ? renderMarkdownBlocks(entry.text) : [],
-    [entry.text, hasText],
+    () => hasText ? renderMarkdownBlocks(entry.text, onOpenMermaid) : [],
+    [entry.text, hasText, onOpenMermaid],
   );
 
   const [activeBlock, setActiveBlock] = useState<number | null>(null);
@@ -251,7 +252,7 @@ interface RenderedBlock {
   rawText: string;
 }
 
-function renderMarkdownBlocks(text: string): RenderedBlock[] {
+function renderMarkdownBlocks(text: string, onOpenMermaid?: (code: string) => void): RenderedBlock[] {
   const lines = text.split('\n');
   const blocks: RenderedBlock[] = [];
   let i = 0;
@@ -574,7 +575,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid }: {
   const [agentRunning, setAgentRunning] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [streamingText, setStreamingText] = useState('');
-  const [wsConnected, setWsConnected] = useState(false);
+  // wsConnected is derived from the WS hook below
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const seenIdsRef = useRef<Set<string>>(new Set());
@@ -652,10 +653,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid }: {
     },
   }), [selectedKey]);
 
-  const { isConnected } = useDesktopWebSocket(selectedKey || undefined, wsCallbacks);
-
-  // Sync WS connection state
-  useEffect(() => { setWsConnected(isConnected); }, [isConnected]);
+  const { isConnected: wsConnected } = useDesktopWebSocket(selectedKey || undefined, wsCallbacks);
 
   const isClaudeCode = selectedSession?.runtime === 'claude-code';
   const isCodexLocal = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'discovered';
@@ -747,7 +745,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid }: {
       let didChange = false;
       setTranscript(prev => {
         const optimistic = prev.filter(m => m.id.startsWith('local-'));
-        const realPrev = prev.filter(m => !m.id.startsWith('local-'));
+        let realPrev = prev.filter(m => !m.id.startsWith('local-'));
 
         // First load — accept full transcript
         if (realPrev.length === 0) {
@@ -782,11 +780,21 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid }: {
           }
         }
 
-        // Clear confirmed optimistic messages
-        const serverUserTexts = new Set(
-          [...realPrev, ...newFromServer].filter(e => e.role === 'user').map(e => e.text)
+        // Clear confirmed optimistic + WS-injected messages that server now has
+        const serverTexts = new Set(
+          [...realPrev, ...newFromServer].filter(e => !e.id.startsWith('local-') && !e.id.startsWith('ws:')).map(e => e.text)
         );
-        const pendingOptimistic = optimistic.filter(m => !serverUserTexts.has(m.text));
+        // WS-injected done messages get replaced by server versions
+        const wsInjected = realPrev.filter(e => e.id.startsWith('ws:'));
+        if (wsInjected.length > 0 && newFromServer.length > 0) {
+          // Remove WS entries whose text matches a server entry
+          const wsTexts = new Set(wsInjected.map(e => e.text));
+          const serverHasWs = newFromServer.some(e => wsTexts.has(e.text));
+          if (serverHasWs) {
+            realPrev = realPrev.filter(e => !e.id.startsWith('ws:') || !serverTexts.has(e.text));
+          }
+        }
+        const pendingOptimistic = optimistic.filter(m => !serverTexts.has(m.text));
 
         if (newFromServer.length === 0 && pendingOptimistic.length === optimistic.length) {
           return prev; // nothing changed
@@ -1726,6 +1734,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid }: {
                 isLatest={i === transcript.length - 1 && entry.role === 'assistant'}
                 agentName={currentAgentName}
                 isNew={isNew}
+                onOpenMermaid={onOpenMermaid}
               />
             );
           })

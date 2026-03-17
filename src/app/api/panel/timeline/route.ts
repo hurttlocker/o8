@@ -78,11 +78,13 @@ function classifyMessage(role: string, content: string, type: string): 'thinking
 export async function GET() {
   try {
     const now = new Date();
+    // Use a rolling 24h window anchored to 6 AM. Before 6 AM, show yesterday's activity.
     const todayStart = new Date(now);
-    todayStart.setHours(9, 0, 0, 0);
-    if (now < todayStart) {
-      return NextResponse.json({ segments: [], totalMinutes: 0 });
+    if (now.getHours() < 6) {
+      // Before 6 AM — anchor to yesterday 6 AM
+      todayStart.setDate(todayStart.getDate() - 1);
     }
+    todayStart.setHours(6, 0, 0, 0);
 
     // Find today's session files across all agents
     const lsRaw = execQuiet(`ls -t ~/.openclaw/agents/*/sessions/*.jsonl 2>/dev/null | head -15`);
