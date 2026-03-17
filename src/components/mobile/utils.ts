@@ -787,6 +787,11 @@ export function buildProjectGroups(
     const ageHours = daysMatch ? parseInt(daysMatch[1], 10) * 24 : hoursMatch ? parseInt(hoursMatch[1], 10) : 0;
     const isStale = ageHours > 4;
 
+    if (session.runtime === 'claude-code') {
+      // Claude Code sessions are already filtered to live PIDs by fleet
+      return session.status === 'running';
+    }
+
     if (session.runtime === 'codex') {
       const sourceLabel = session.runtimeSurface?.sourceLabel ?? '';
       const ownership = session.runtimeSurface?.ownership ?? '';
