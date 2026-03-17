@@ -84,6 +84,8 @@ export interface RuntimeSession {
   };
   /** Process ID if running locally */
   pid?: number;
+  /** Context window usage percentage (0-100) */
+  contextUsedPercent?: number;
 }
 
 // ── Transcript ──

@@ -105,8 +105,8 @@ function TitleBarButton({
   color?: string;
   hoverBg?: string;
 }) {
-  const defaultColor = color ?? '#6b7280';
-  const defaultHoverBg = hoverBg ?? 'rgba(0, 0, 0, 0.05)';
+  const defaultColor = color ?? 'var(--t-text-secondary)';
+  const defaultHoverBg = hoverBg ?? 'var(--t-hover)';
 
   return (
     <button
@@ -118,8 +118,8 @@ function TitleBarButton({
         height: 32,
         borderRadius: 8,
         border: 'none',
-        background: active ? 'rgba(0, 0, 0, 0.06)' : 'transparent',
-        color: active ? '#111827' : defaultColor,
+        background: active ? 'var(--t-panel-active)' : 'transparent',
+        color: active ? 'var(--t-text)' : defaultColor,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -153,7 +153,7 @@ function TitleBarSep() {
     <div style={{
       width: 1,
       height: 16,
-      background: 'rgba(0, 0, 0, 0.08)',
+      background: 'var(--t-divider)',
       margin: '0 4px',
       flexShrink: 0,
     }} />
@@ -225,10 +225,10 @@ export function TitleBar({
         alignItems: 'center',
         padding: '0 12px',
         gap: 4,
-        background: 'rgba(255, 255, 255, 0.72)',
+        background: 'var(--t-chrome)',
         backdropFilter: 'blur(20px) saturate(1.6)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-        borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
+        borderBottom: '1px solid var(--t-divider)',
         zIndex: 100,
         position: 'relative',
         ['WebkitAppRegion' as string]: 'drag',
@@ -291,9 +291,9 @@ export function TitleBar({
                 gap: 6,
                 padding: '6px 16px',
                 borderRadius: 10,
-                border: '1px solid rgba(0, 0, 0, 0.06)',
-                background: 'rgba(0, 0, 0, 0.03)',
-                color: '#8e8e93',
+                border: '1px solid var(--t-search-border)',
+                background: 'var(--t-search-bg)',
+                color: 'var(--t-text-muted)',
                 fontSize: 13,
                 fontWeight: 500,
                 letterSpacing: '-0.01em',
@@ -305,12 +305,12 @@ export function TitleBar({
                 ['WebkitAppRegion' as string]: 'no-drag',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
-                e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.1)';
+                e.currentTarget.style.background = 'var(--t-hover)';
+                e.currentTarget.style.borderColor = 'var(--t-input-border)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.03)';
-                e.currentTarget.style.borderColor = 'rgba(0, 0, 0, 0.06)';
+                e.currentTarget.style.background = 'var(--t-search-bg)';
+                e.currentTarget.style.borderColor = 'var(--t-search-border)';
               }}
             >
               <IconSearch />
@@ -318,9 +318,9 @@ export function TitleBar({
               <kbd style={{
                 fontSize: 10,
                 fontWeight: 500,
-                color: '#aeaeb2',
-                background: 'rgba(0, 0, 0, 0.04)',
-                border: '1px solid rgba(0, 0, 0, 0.06)',
+                color: 'var(--t-kbd-color)',
+                background: 'var(--t-kbd-bg)',
+                border: '1px solid var(--t-kbd-border)',
                 borderRadius: 4,
                 padding: '1px 5px',
                 marginLeft: 8,

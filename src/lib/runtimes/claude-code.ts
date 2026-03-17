@@ -74,6 +74,7 @@ interface ClaudeCodeMessage {
   message?: {
     role: string;
     content: MessageContent;
+    usage?: Record<string, number>;
   };
 }
 
@@ -148,6 +149,7 @@ interface SessionMeta {
   firstUserMessage?: string;
   cwd?: string;
   gitBranch?: string;
+  contextUsedPercent?: number;
 }
 
 async function discoverProjectSessions(projectDirName: string): Promise<SessionMeta[]> {
@@ -197,6 +199,24 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
         } catch { /* skip malformed lines */ }
       }
 
+      // Extract context % from last assistant message usage (read tail)
+      let contextUsedPercent: number | undefined;
+      const CLAUDE_CTX_WINDOW = 200_000;
+      const tailLines = lines.slice(-30).reverse();
+      for (const tl of tailLines) {
+        try {
+          const tp = JSON.parse(tl) as ClaudeCodeMessage;
+          if (tp.type === 'assistant' && tp.message?.usage) {
+            const u = tp.message.usage as Record<string, number>;
+            const totalIn = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+            if (totalIn > 0) {
+              contextUsedPercent = Math.min(100, Math.round(totalIn / CLAUDE_CTX_WINDOW * 100));
+              break;
+            }
+          }
+        } catch { /* skip */ }
+      }
+
       sessions.push({
         sessionId,
         projectDir,
@@ -206,6 +226,7 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
         firstUserMessage,
         cwd: cwd ?? projectPath,
         gitBranch,
+        contextUsedPercent,
       });
     } catch { /* skip unreadable files */ }
   }
@@ -312,6 +333,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         lastActivityAt: meta.lastModified,
         initialTask: meta.firstUserMessage,
         model: 'claude',
+        contextUsedPercent: meta.contextUsedPercent,
       };
     });
 
