@@ -122,28 +122,28 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
           allowTransparency: true,
           scrollback: 10000,
           theme: {
-            background: 'transparent',
-            foreground: '#e2e8f0',
-            cursor: '#93c5fd',
-            cursorAccent: '#0a0c12',
-            selectionBackground: 'rgba(147, 197, 253, 0.25)',
-            selectionForeground: '#e2e8f0',
+            background: '#ffffff',
+            foreground: '#1e293b',
+            cursor: '#3b82f6',
+            cursorAccent: '#ffffff',
+            selectionBackground: 'rgba(59, 130, 246, 0.18)',
+            selectionForeground: '#0f172a',
             black: '#1e293b',
-            red: '#ef4444',
-            green: '#34d399',
-            yellow: '#f59e0b',
-            blue: '#93c5fd',
-            magenta: '#c084fc',
-            cyan: '#22d3ee',
-            white: '#e2e8f0',
-            brightBlack: '#475569',
-            brightRed: '#f87171',
-            brightGreen: '#6ee7b7',
-            brightYellow: '#fbbf24',
-            brightBlue: '#bfdbfe',
-            brightMagenta: '#d8b4fe',
-            brightCyan: '#67e8f9',
-            brightWhite: '#f8fafc',
+            red: '#dc2626',
+            green: '#16a34a',
+            yellow: '#ca8a04',
+            blue: '#2563eb',
+            magenta: '#9333ea',
+            cyan: '#0891b2',
+            white: '#f1f5f9',
+            brightBlack: '#64748b',
+            brightRed: '#ef4444',
+            brightGreen: '#22c55e',
+            brightYellow: '#eab308',
+            brightBlue: '#3b82f6',
+            brightMagenta: '#a855f7',
+            brightCyan: '#06b6d4',
+            brightWhite: '#ffffff',
           },
         });
 
@@ -219,7 +219,7 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
         flex: 1,
         width: '100%',
         display: visible ? 'block' : 'none',
-        background: 'rgba(7, 10, 18, 0.85)',
+        background: '#ffffff',
         borderRadius: 0,
       }}
     />
@@ -261,8 +261,9 @@ const TabBar = memo(function TabBar({
       display: 'flex',
       alignItems: 'stretch',
       height: 36,
-      background: 'rgba(10, 14, 26, 0.95)',
-      borderBottom: '1px solid rgba(148, 163, 184, 0.08)',
+      marginTop: 20,
+      background: '#f8fafc',
+      borderBottom: '1px solid #e2e8f0',
       flexShrink: 0,
       overflow: 'hidden',
     }}>
@@ -286,9 +287,9 @@ const TabBar = memo(function TabBar({
                 paddingLeft: 12,
                 height: '100%',
                 border: 'none',
-                borderRight: '1px solid rgba(148, 163, 184, 0.06)',
-                background: isActive ? 'rgba(148, 163, 184, 0.08)' : 'transparent',
-                color: isActive ? '#e2e8f0' : '#64748b',
+                borderRight: '1px solid #e2e8f0',
+                background: isActive ? '#ffffff' : 'transparent',
+                color: isActive ? '#0f172a' : '#64748b',
                 fontSize: 12,
                 fontWeight: isActive ? 600 : 400,
                 fontFamily: 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
@@ -352,13 +353,13 @@ const TabBar = memo(function TabBar({
             paddingLeft: 10,
             border: 'none',
             background: 'transparent',
-            color: '#64748b',
+            color: '#94a3b8',
             fontSize: 12,
             cursor: 'pointer',
             transition: 'color 100ms',
           }}
-          onMouseEnter={(e) => { (e.target as HTMLElement).style.color = '#93c5fd'; }}
-          onMouseLeave={(e) => { (e.target as HTMLElement).style.color = '#64748b'; }}
+          onMouseEnter={(e) => { (e.target as HTMLElement).style.color = '#3b82f6'; }}
+          onMouseLeave={(e) => { (e.target as HTMLElement).style.color = '#94a3b8'; }}
         >
           <Plus size={14} />
           <ChevronDown size={10} />
@@ -373,13 +374,11 @@ const TabBar = memo(function TabBar({
             zIndex: 100,
             marginTop: 4,
             minWidth: 200,
-            background: 'rgba(15, 20, 35, 0.98)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            border: '1px solid rgba(148, 163, 184, 0.12)',
+            background: '#ffffff',
+            border: '1px solid #e2e8f0',
             borderRadius: 10,
             overflow: 'hidden',
-            boxShadow: '0 12px 40px rgba(0, 0, 0, 0.5)',
+            boxShadow: '0 12px 40px rgba(0, 0, 0, 0.12)',
           }}>
             <div style={{
               paddingTop: 8,
@@ -388,7 +387,7 @@ const TabBar = memo(function TabBar({
               paddingLeft: 10,
               fontSize: 10,
               fontWeight: 600,
-              color: '#475569',
+              color: '#94a3b8',
               letterSpacing: '0.05em',
               textTransform: 'uppercase',
             }}>
@@ -413,14 +412,14 @@ const TabBar = memo(function TabBar({
                   paddingLeft: 12,
                   border: 'none',
                   background: 'transparent',
-                  color: '#cbd5e1',
+                  color: '#1e293b',
                   fontSize: 13,
                   fontFamily: '-apple-system, system-ui, sans-serif',
                   cursor: 'pointer',
                   textAlign: 'left',
                   transition: 'background 100ms',
                 }}
-                onMouseEnter={(e) => { (e.currentTarget).style.background = 'rgba(148, 163, 184, 0.08)'; }}
+                onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
                 onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
               >
                 <span style={{ fontSize: 16, width: 20, textAlign: 'center' }}>{agent.icon}</span>
@@ -566,7 +565,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        background: 'rgba(7, 10, 18, 0.85)',
+        background: '#ffffff',
       }}>
         {/* Tab bar */}
         <TabBar
@@ -602,7 +601,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
                   display: tab.id === activeTabId ? 'flex' : 'none',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: '#475569',
+                  color: '#94a3b8',
                   fontSize: 13,
                   fontFamily: 'ui-monospace, monospace',
                   gap: 8,
@@ -621,7 +620,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#334155',
+              color: '#94a3b8',
               fontSize: 14,
             }}>
               <TerminalIcon size={18} style={{ marginRight: 8 }} />
