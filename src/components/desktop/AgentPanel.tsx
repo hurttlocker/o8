@@ -1652,6 +1652,7 @@ export const AgentPanel = memo(function AgentPanel({
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<Tab>('issues');
   const [activityOpen, setActivityOpen] = useState(false);
+  const [agentsOpen, setAgentsOpen] = useState(true);
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
@@ -1903,6 +1904,53 @@ export const AgentPanel = memo(function AgentPanel({
       </div>
 
       {/* ── Agent Cards ── */}
+      <div style={{ flexShrink: 0, paddingLeft: 14, paddingRight: 14, paddingTop: 0, paddingBottom: 0 }}>
+        <button
+          type="button"
+          onClick={() => setAgentsOpen(!agentsOpen)}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '8px 2px',
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            fontFamily: '-apple-system, system-ui, sans-serif',
+          }}
+        >
+          <Cpu size={12} strokeWidth={2} color={agentsOpen ? '#ef4444' : 'var(--t-text-muted)'} />
+          <span style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: agentsOpen ? 'var(--t-text)' : 'var(--t-text-muted)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+          }}>
+            Agents
+          </span>
+          <span style={{
+            fontSize: 10,
+            color: 'var(--t-text-faint)',
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+          }}>
+            {agents.length}
+          </span>
+          <span style={{
+            marginLeft: 'auto',
+            fontSize: 10,
+            color: 'var(--t-text-faint)',
+            display: 'flex', alignItems: 'center',
+          }}>
+            {agentsOpen
+              ? <ChevronDown size={12} strokeWidth={2} />
+              : <ChevronRight size={12} strokeWidth={2} />
+            }
+          </span>
+        </button>
+      </div>
+      {agentsOpen && (
       <div style={{
         flexShrink: 0,
         paddingTop: 0,
@@ -1915,17 +1963,6 @@ export const AgentPanel = memo(function AgentPanel({
         scrollbarWidth: 'thin',
         scrollbarColor: 'rgba(0,0,0,0.1) transparent',
       } as React.CSSProperties}>
-        <div style={{
-          fontSize: 11,
-          fontWeight: 700,
-          color: 'var(--t-text-muted)',
-          textTransform: 'uppercase',
-          letterSpacing: '0.08em',
-          paddingLeft: 2,
-          marginBottom: 2,
-        }}>
-          Agents
-        </div>
         {workspaceGroups.length === 0 ? (
           <div style={{ fontSize: 13, color: 'var(--t-text-muted)', padding: '8px 2px' }}>Loading agents…</div>
         ) : (
@@ -1941,6 +1978,7 @@ export const AgentPanel = memo(function AgentPanel({
           ))
         )}
       </div>
+      )}
 
       {/* ── Tab Bar ── */}
       <div style={{
