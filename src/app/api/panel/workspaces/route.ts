@@ -149,11 +149,13 @@ export async function GET() {
       }
     } catch { /* silent */ }
 
-    // 2. Collect unique repos from sessions
+    // 2. Collect unique repos from sessions + agent active repos
     const repoSet = new Set<string>();
     for (const s of sessions) {
       const repo = deriveRepo(s.workspace);
       if (repo) repoSet.add(repo);
+      const active = getAgentActiveRepo(s.sessionKey);
+      if (active) repoSet.add(active.repo);
     }
 
     // 3. Fetch PRs for each repo
@@ -209,8 +211,15 @@ export async function GET() {
         status = 'idle';
       }
 
-      // For agents without a PR, get local diff stats (skip clawd — OpenClaw agents don't code)
-      const localDiff = (!pr && repoName !== 'clawd') ? getLocalDiffStats(s.workspace) : null;
+      // For agents without a PR, get local diff stats
+      // OpenClaw agents: use their active repo, not clawd workspace
+      let diffWorkspace = s.workspace;
+      const activeRepo = getAgentActiveRepo(s.sessionKey);
+      if (activeRepo) {
+        diffWorkspace = activeRepo.path;
+        if (!repoName || repoName === 'clawd') repoName = activeRepo.repo;
+      }
+      const localDiff = (!pr && repoName !== 'clawd') ? getLocalDiffStats(diffWorkspace) : null;
       // Activity classification removed — top timeline handles this
 
       workspaces.push({
