@@ -1,8 +1,10 @@
 import type { AgentSummary } from '@/lib/fleet/types';
-import { continueOwnedCodexSession, interruptOwnedCodexSession, launchOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
+import { continueOwnedCodexSession, interruptOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
 import { abortOpenClawSession, steerOpenClawSession } from '@/lib/openclaw/chat';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
-import { getRuntime } from '@/lib/runtimes/registry';
+import { getRuntime, type RuntimeId } from '@/lib/runtimes';
+import { linkSessionToWorktree, prepareLaunchWorktree } from '@/lib/worktree';
+import type { WorktreeInfo } from '@/lib/worktree/types';
 
 export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt' | 'watch' | 'resolve' | 'launch';
 
@@ -29,6 +31,101 @@ export interface RuntimeActionResult {
   note: string;
   runId?: string;
   aborted?: boolean;
+}
+
+export interface RuntimeLaunchRequest {
+  runtime: RuntimeId;
+  prompt: string;
+  cwd?: string;
+  repoPath?: string;
+  taskName?: string;
+  baseBranch?: string;
+  isolate?: boolean;
+  skipSetup?: boolean;
+}
+
+export interface RuntimeLaunchResult {
+  ok: boolean;
+  runtime: RuntimeId;
+  surfaceId: string;
+  note: string;
+  cwd: string;
+  repoPath: string;
+  worktree: WorktreeInfo | null;
+}
+
+function summarizeTaskName(prompt: string) {
+  const compact = prompt
+    .split('\n')
+    .map((line) => line.trim())
+    .find(Boolean)
+    ?? 'agent-task';
+
+  return compact.replace(/\s+/g, ' ').slice(0, 80);
+}
+
+export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promise<RuntimeLaunchResult> {
+  const runtimeId = payload.runtime;
+  const prompt = payload.prompt?.trim();
+  const repoPath = payload.repoPath?.trim() || payload.cwd?.trim();
+
+  if (!runtimeId) {
+    throw new Error('runtime is required');
+  }
+  if (!prompt) {
+    throw new Error('prompt is required');
+  }
+  if (!repoPath) {
+    throw new Error('repoPath or cwd is required');
+  }
+
+  const runtime = getRuntime(runtimeId);
+  if (!runtime) {
+    throw new Error(`Runtime ${runtimeId} is not registered.`);
+  }
+  if (!runtime.capabilities.launch) {
+    throw new Error(`Runtime ${runtimeId} does not support launch.`);
+  }
+
+  const supportsWorktrees = runtimeId === 'codex' || runtimeId === 'claude-code';
+  const launchWorktree = supportsWorktrees
+    ? await prepareLaunchWorktree({
+        repoRoot: repoPath,
+        agentType: runtimeId,
+        taskName: payload.taskName?.trim() || summarizeTaskName(prompt),
+        baseBranch: payload.baseBranch?.trim() || undefined,
+        isolate: payload.isolate,
+        skipSetup: payload.skipSetup,
+      })
+    : null;
+
+  const cwd = launchWorktree?.cwd ?? repoPath;
+  const result = await runtime.launch({
+    cwd,
+    prompt,
+    worktreeFlag: launchWorktree?.claudeWorktreeFlag,
+    worktreePath: launchWorktree?.worktree?.path,
+  });
+
+  if (!result.ok || !result.sessionKey) {
+    throw new Error(result.note || `Unable to launch ${runtimeId}.`);
+  }
+
+  if (launchWorktree?.worktree) {
+    await linkSessionToWorktree(repoPath, launchWorktree.worktree.id, result.sessionKey);
+  }
+
+  return {
+    ok: true,
+    runtime: runtimeId,
+    surfaceId: result.sessionKey,
+    note: launchWorktree?.worktree
+      ? `${result.note} Worktree: ${launchWorktree.worktree.branch} at ${launchWorktree.worktree.path}.`
+      : result.note,
+    cwd,
+    repoPath,
+    worktree: launchWorktree?.worktree ?? null,
+  };
 }
 
 function findRuntimeAgent(snapshot: Awaited<ReturnType<typeof getRuntimeInventorySnapshot>>, surfaceId: string) {
@@ -249,7 +346,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
  * Doesn't require an existing surface — creates one from scratch.
  */
 export async function launchCodexFromMobile(cwd: string, prompt: string): Promise<RuntimeActionResult> {
-  const result = await launchOwnedCodexSession({ cwd, prompt });
+  const result = await launchRuntimeSurface({ runtime: 'codex', cwd, prompt });
   return {
     ok: result.ok,
     action: 'launch',
