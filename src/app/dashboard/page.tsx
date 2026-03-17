@@ -112,17 +112,18 @@ function DashboardInner() {
   const handleSelectSession = useCallback((sessionKey: string) => {
     setActiveSessionKey(sessionKey);
 
-    // Show live output for non-OpenClaw sessions (Codex, Claude Code)
+    // Show live output for any agent session
     const agents = JSON.parse(agentsJson) as { name?: string; runtime?: string; sessionKey?: string }[];
     const agent = agents.find(a => a.sessionKey === sessionKey);
-    if (agent && agent.runtime && agent.runtime !== 'openclaw') {
+    if (agent) {
+      const name = agent.runtime === 'claude-code' ? 'Claude Code'
+        : agent.runtime === 'codex' ? 'Codex'
+        : agent.name ?? 'Mister';
       setLiveOutputAgent({
-        name: agent.name ?? 'Agent',
-        runtime: agent.runtime,
+        name,
+        runtime: agent.runtime ?? 'openclaw',
         sessionKey,
       });
-    } else {
-      setLiveOutputAgent(null);
     }
   }, [agentsJson]);
 
@@ -518,25 +519,6 @@ function DashboardInner() {
           </div>
         </div>}
 
-        {/* ── Live Agent Output (appears above canvas when agent selected) ── */}
-        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && liveOutputAgent && (
-          <div style={{
-            flex: '0 0 35%',
-            minHeight: 120,
-            maxHeight: '45%',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-          }}>
-            <LiveOutput
-              agentName={liveOutputAgent.name}
-              agentRuntime={liveOutputAgent.runtime}
-              sessionKey={liveOutputAgent.sessionKey}
-              onClose={() => setLiveOutputAgent(null)}
-            />
-          </div>
-        )}
-
         {/* Vertical drag handle between workspace and canvas */}
         {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && (<>
 
@@ -564,15 +546,51 @@ function DashboardInner() {
           </div>
         )}
 
-        {/* Bottom — Canvas (tabs + contextual content) */}
+        {/* Bottom — Live Output (if active) + Canvas (tabs + contextual content) */}
         {canvasTabs.length > 0 && bottomPanelVisible && (
           <div style={{ flex: `0 0 ${canvasHeight}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+            {/* Live Agent Output — sits directly on top of canvas tabs */}
+            {liveOutputAgent && (
+              <div style={{
+                flexShrink: 0,
+                maxHeight: '50%',
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+              }}>
+                <LiveOutput
+                  agentName={liveOutputAgent.name}
+                  agentRuntime={liveOutputAgent.runtime}
+                  sessionKey={liveOutputAgent.sessionKey}
+                  onClose={() => setLiveOutputAgent(null)}
+                />
+              </div>
+            )}
             <Canvas
               tabs={canvasTabs}
               activeTabId={activeCanvasTabId}
               onSelectTab={setActiveCanvasTabId}
               onCloseTab={closeCanvasTab}
               onSelectCommit={handleSelectCommit}
+            />
+          </div>
+        )}
+
+        {/* Live output even when no canvas tabs open */}
+        {(!canvasTabs.length || !bottomPanelVisible) && liveOutputAgent && !showMemoryView && (activeNavSection as string) !== 'intent' && (activeNavSection as string) !== 'settings' && (
+          <div style={{
+            flexShrink: 0,
+            maxHeight: 200,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            marginTop: 'auto',
+          }}>
+            <LiveOutput
+              agentName={liveOutputAgent.name}
+              agentRuntime={liveOutputAgent.runtime}
+              sessionKey={liveOutputAgent.sessionKey}
+              onClose={() => setLiveOutputAgent(null)}
             />
           </div>
         )}

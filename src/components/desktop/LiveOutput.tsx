@@ -107,41 +107,44 @@ export function LiveOutput({ agentName, agentRuntime, sessionKey, onClose }: Liv
       const data = await res.json();
       const transcript = data.transcript ?? data.entries ?? [];
 
-      // Convert transcript to LiveOutputEvents — extract tool calls and file changes
+      // Convert ALL transcript entries to LiveOutputEvents
       const newEvents: LiveOutputEvent[] = [];
       for (const entry of transcript) {
-        if (entry.role !== 'assistant') continue;
-        const text = entry.text ?? '';
+        const text = (entry.text ?? '').trim();
+        if (!text || text.startsWith('<command')) continue;
 
-        // Extract tool calls (🔧 markers)
-        const toolMatches = text.matchAll(/🔧\s*\*?(\w[\w\s]*?)\*?\s*(?:\n|$)/g);
-        for (const match of toolMatches) {
-          newEvents.push({
-            id: `${entry.id}-tool-${match[1]}`,
-            type: 'tool_call',
-            name: match[1].trim(),
-            timestamp: Date.now() - (transcript.length - newEvents.length) * 2000,
-          });
-        }
+        if (entry.role === 'assistant') {
+          // Check for tool calls (🔧 markers)
+          const hasTools = text.includes('🔧');
+          if (hasTools) {
+            const toolMatches = text.matchAll(/🔧\s*\*?(\w[\w\s]*?)\*?\s*(?:\n|$)/g);
+            for (const match of toolMatches) {
+              newEvents.push({
+                id: `${entry.id}-tool-${match[1]}`,
+                type: 'tool_call',
+                name: match[1].trim(),
+                timestamp: Date.now() - (transcript.length - newEvents.length) * 1000,
+              });
+            }
+          }
 
-        // Extract file references (common patterns)
-        const fileMatches = text.matchAll(/(?:edit|write|read|create|modify)\w*\s+[`"]?([^\s`"]+\.\w{1,6})[`"]?/gi);
-        for (const match of fileMatches) {
+          // Always show assistant text as a message event
+          const cleanText = text.replace(/🔧\s*\*?\w[\w\s]*?\*?\s*\n?/g, '').trim();
+          if (cleanText.length > 5) {
+            newEvents.push({
+              id: entry.id,
+              type: 'message',
+              text: cleanText.slice(0, 200) + (cleanText.length > 200 ? '…' : ''),
+              timestamp: Date.now() - (transcript.length - newEvents.length) * 1000,
+            });
+          }
+        } else if (entry.role === 'user') {
+          // Show user messages too (dimmer styling handled by EventPill)
           newEvents.push({
-            id: `${entry.id}-file-${match[1]}`,
-            type: 'file_change',
-            name: match[1],
-            timestamp: Date.now() - (transcript.length - newEvents.length) * 2000,
-          });
-        }
-
-        // If no specific events extracted, show as message
-        if (newEvents.length === 0 && text.length > 10 && !text.startsWith('🔧')) {
-          newEvents.push({
-            id: entry.id,
+            id: `${entry.id}-user`,
             type: 'message',
-            text: text.slice(0, 120) + (text.length > 120 ? '…' : ''),
-            timestamp: Date.now(),
+            text: `▸ ${text.slice(0, 100)}${text.length > 100 ? '…' : ''}`,
+            timestamp: Date.now() - (transcript.length - newEvents.length) * 1000,
           });
         }
       }
