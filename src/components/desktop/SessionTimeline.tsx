@@ -243,7 +243,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
   const [, forceUpdate] = useState(0);
   const tickDrag = useCallback(() => forceUpdate(n => n + 1), []);
 
-  interface AgentSession { id: string; label: string; model: string; startTime: string; duration: string; messages: number; status: string; cost?: number; inputTokens?: number; outputTokens?: number; cacheTokens?: number }
+  interface AgentSession { id: string; label: string; model: string; startTime: string; duration: string; messages: number; status: string; cost?: number; inputTokens?: number; outputTokens?: number; cacheTokens?: number; active?: boolean }
   const [agentSessions, setAgentSessions] = useState<AgentSession[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [agentTotalCost, setAgentTotalCost] = useState<number>(0);
@@ -301,14 +301,15 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data?.sessions?.length > 0) {
-          const sessions: AgentSession[] = data.sessions.map((s: { id: string; model: string; messages: number; cost: number; inputTokens: number; outputTokens: number; cacheTokens: number }) => ({
+          const sessions: AgentSession[] = data.sessions.map((s: { id: string; model: string; messages: number; cost: number; inputTokens: number; outputTokens: number; cacheTokens: number; active?: boolean }) => ({
             id: s.id,
             label: s.id.slice(0, 8),
             model: s.model || '',
             startTime: '',
             duration: '',
             messages: s.messages,
-            status: 'active',
+            status: s.active ? 'active' : 'idle',
+            active: s.active,
             cost: s.cost,
             inputTokens: s.inputTokens,
             outputTokens: s.outputTokens,
@@ -956,12 +957,17 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                   <div
                     key={session.id}
                     style={{
-                      background: 'rgba(255, 255, 255, 0.1)',
-                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      background: session.active
+                        ? 'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(52,211,153,0.06) 100%)'
+                        : 'rgba(255, 255, 255, 0.1)',
+                      border: session.active
+                        ? '1px solid rgba(52, 211, 153, 0.25)'
+                        : '1px solid rgba(255, 255, 255, 0.12)',
                       borderRadius: 10,
                       padding: 10,
                       cursor: 'pointer',
                       transition: 'all 120ms ease',
+                      animation: session.active ? 'sessionPulse 3s ease-in-out infinite' : 'none',
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)';
