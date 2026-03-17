@@ -516,9 +516,9 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
             onClick={() => setDrillOpen(false)}
             style={{
               position: 'fixed', inset: 0, zIndex: 9998,
-              background: 'rgba(0, 0, 0, 0.15)',
-              backdropFilter: 'blur(2px)',
-              WebkitBackdropFilter: 'blur(2px)',
+              background: 'rgba(0, 0, 0, 0.08)',
+              backdropFilter: 'blur(4px)',
+              WebkitBackdropFilter: 'blur(4px)',
             }}
           />
           {/* Modal */}
@@ -529,12 +529,12 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
             width: drillSize.w,
             maxHeight: drillSize.h,
             zIndex: 9999,
-            background: 'rgba(255, 255, 255, 0.85)',
-            backdropFilter: 'blur(40px) saturate(1.8)',
-            WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-            border: '1px solid rgba(255, 255, 255, 0.5)',
+            background: 'rgba(255, 255, 255, 0.45)',
+            backdropFilter: 'blur(60px) saturate(2.0)',
+            WebkitBackdropFilter: 'blur(60px) saturate(2.0)',
+            border: '1px solid rgba(255, 255, 255, 0.35)',
             borderRadius: 16,
-            boxShadow: '0 24px 80px rgba(0, 0, 0, 0.18), 0 0 1px rgba(0, 0, 0, 0.1)',
+            boxShadow: '0 24px 80px rgba(0, 0, 0, 0.12), 0 8px 32px rgba(0, 0, 0, 0.06), inset 0 0.5px 0 rgba(255, 255, 255, 0.6)',
             overflow: 'hidden',
             display: 'flex',
             flexDirection: 'column',
@@ -550,7 +550,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                 padding: '14px 16px 10px',
                 cursor: 'grab',
                 userSelect: 'none',
-                borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.2)',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -567,14 +567,14 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                 aria-label="Close"
                 style={{
                   width: 24, height: 24, borderRadius: 12,
-                  border: 'none', background: 'rgba(0,0,0,0.06)',
+                  border: 'none', background: 'rgba(255,255,255,0.25)',
                   color: 'var(--t-text-muted)', cursor: 'pointer',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 14, fontWeight: 600, lineHeight: 1,
                   transition: 'background 120ms',
                 }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.12)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.06)'; }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.4)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.25)'; }}
               >
                 ×
               </button>
@@ -591,8 +591,8 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
             }}>
               {agentBreakdown.map((entry) => (
                 <div key={entry.agent} style={{
-                  background: 'rgba(255, 255, 255, 0.6)',
-                  border: '1px solid rgba(0, 0, 0, 0.05)',
+                  background: 'rgba(255, 255, 255, 0.25)',
+                  border: '1px solid rgba(255, 255, 255, 0.3)',
                   borderRadius: 12,
                   padding: 12,
                 }}>
@@ -601,8 +601,8 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <div style={{
                         width: 24, height: 24, borderRadius: 8,
-                        background: 'rgba(37, 99, 235, 0.08)',
-                        border: '1px solid rgba(37, 99, 235, 0.15)',
+                        background: 'rgba(37, 99, 235, 0.12)',
+                        border: '1px solid rgba(37, 99, 235, 0.2)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontSize: 11, fontWeight: 700, color: '#2563eb',
                       }}>
@@ -623,7 +623,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                   {/* Per-agent timeline bar */}
                   <div style={{
                     height: 10, borderRadius: 5, overflow: 'hidden',
-                    display: 'flex', background: 'rgba(0, 0, 0, 0.04)',
+                    display: 'flex', background: 'rgba(255, 255, 255, 0.15)',
                   }}>
                     {entry.segments.map((seg, i) => {
                       const agentTotal = entry.segments.reduce((s, x) => s + x.durationMin, 0);

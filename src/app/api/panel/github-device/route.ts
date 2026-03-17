@@ -5,7 +5,7 @@ import { NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type DeviceAction = 'start' | 'poll';
+type DeviceAction = 'start' | 'poll' | 'cancel';
 
 type DeviceFlowRecord = {
   flowId: string;
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
     } | null;
 
     const action = payload?.action;
-    if (!action || (action !== 'start' && action !== 'poll')) {
+    if (!action || (action !== 'start' && action !== 'poll' && action !== 'cancel')) {
       return NextResponse.json({ error: 'Unsupported GitHub device action.' }, { status: 400 });
     }
 
@@ -178,6 +178,15 @@ export async function POST(request: Request) {
     }
 
     const flow = flows.get(flowId);
+    if (action === 'cancel') {
+      if (flow) flows.delete(flowId);
+      return NextResponse.json({
+        ok: true,
+        status: 'cancelled',
+        note: 'GitHub device login cancelled.',
+      });
+    }
+
     if (!flow) {
       return NextResponse.json({ error: 'GitHub device flow not found. Start a new device login.' }, { status: 404 });
     }

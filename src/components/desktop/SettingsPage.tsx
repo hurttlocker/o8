@@ -39,7 +39,7 @@ interface GitHubDeviceFlowState {
   note?: string;
 }
 
-type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device';
+type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
 type SettingsTab = 'connectors' | 'agents' | 'appearance' | 'about';
 
@@ -179,6 +179,124 @@ function ScopeBadge({ scope }: { scope: string }) {
   );
 }
 
+function ScopeDiagnostic({
+  title,
+  status,
+  detail,
+}: {
+  title: string;
+  status: 'ready' | 'partial' | 'missing';
+  detail: string;
+}) {
+  const tone = status === 'ready'
+    ? { bg: 'rgba(34, 197, 94, 0.08)', border: 'rgba(34, 197, 94, 0.16)', text: '#166534', pill: '#22c55e', label: 'Ready' }
+    : status === 'partial'
+      ? { bg: 'rgba(245, 158, 11, 0.08)', border: 'rgba(245, 158, 11, 0.18)', text: '#92400e', pill: '#f59e0b', label: 'Partial' }
+      : { bg: 'rgba(239, 68, 68, 0.08)', border: 'rgba(239, 68, 68, 0.16)', text: '#991b1b', pill: '#ef4444', label: 'Missing' };
+
+  return (
+    <div style={{
+      padding: 12,
+      borderRadius: 10,
+      background: tone.bg,
+      border: `1px solid ${tone.border}`,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{title}</span>
+        <span style={{
+          padding: '2px 7px',
+          borderRadius: 999,
+          background: `${tone.pill}22`,
+          color: tone.text,
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '0.01em',
+          marginLeft: 'auto',
+        }}>
+          {tone.label}
+        </span>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--t-text-secondary)', lineHeight: 1.45 }}>
+        {detail}
+      </div>
+    </div>
+  );
+}
+
+function GitHubAvatar({
+  avatarUrl,
+  login,
+  size,
+}: {
+  avatarUrl?: string;
+  login: string;
+  size: number;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  if (!avatarUrl || failed) {
+    return (
+      <div style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        border: '1px solid rgba(37, 99, 235, 0.18)',
+        background: 'rgba(37, 99, 235, 0.08)',
+        color: '#2563eb',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+      }}>
+        <GitHubIcon size={Math.max(14, Math.floor(size * 0.48))} />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={avatarUrl}
+      alt={login}
+      width={size}
+      height={size}
+      onError={() => setFailed(true)}
+      style={{
+        borderRadius: size / 2,
+        border: '2px solid rgba(37, 99, 235, 0.2)',
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
+function QuickLink({
+  href,
+  label,
+}: {
+  href: string;
+  label: string;
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      style={{
+        padding: '7px 12px',
+        borderRadius: 8,
+        border: '1px solid var(--t-panel-border)',
+        background: 'var(--t-panel)',
+        color: 'var(--t-text-secondary)',
+        fontSize: 11,
+        fontWeight: 600,
+        textDecoration: 'none',
+      }}
+    >
+      {label}
+    </a>
+  );
+}
+
 // ── GitHub Tab Content ──
 
 function ChevronDownIcon({ rotated }: { rotated?: boolean }) {
@@ -203,6 +321,8 @@ function GitHubTab({
   deviceFlowEnabled,
   deviceFlow,
   onStartDeviceFlow,
+  onPollDeviceFlow,
+  onCancelDeviceFlow,
 }: {
   accounts: GitHubAccount[];
   repos: GitHubRepo[];
@@ -216,6 +336,8 @@ function GitHubTab({
   deviceFlowEnabled?: boolean;
   deviceFlow?: GitHubDeviceFlowState | null;
   onStartDeviceFlow?: () => void;
+  onPollDeviceFlow?: (flowId: string) => void;
+  onCancelDeviceFlow?: (flowId: string) => void;
 }) {
   const [reposExpanded, setReposExpanded] = useState(false);
   const [patToken, setPatToken] = useState('');
@@ -257,6 +379,57 @@ function GitHubTab({
   const activeAccount = activeAccounts[0];
   const inactiveAccounts = accounts.filter(a => !a.active);
   const connected = !!activeAccount;
+  const activeScopes = new Set(activeAccount?.scopes ?? []);
+  const hasRepo = activeScopes.has('repo');
+  const hasWorkflow = activeScopes.has('workflow');
+  const hasReadOrg = activeScopes.has('read:org');
+  const hasProject = activeScopes.has('project');
+  const diagnostics: Array<{ title: string; status: 'ready' | 'partial' | 'missing'; detail: string }> = [
+    {
+      title: 'Repo access',
+      status: hasRepo ? 'ready' : 'missing',
+      detail: hasRepo
+        ? 'Private and public repository operations are available through the local GitHub CLI session.'
+        : 'Missing `repo`. Private repository access and most operator GitHub actions will be blocked.',
+    },
+    {
+      title: 'Issues & PRs',
+      status: hasRepo ? 'ready' : 'missing',
+      detail: hasRepo
+        ? 'Issue, pull request, and review lanes have the scope they need.'
+        : 'Issue and pull-request workflows depend on `repo` scope for private repos.',
+    },
+    {
+      title: 'Workflow runs',
+      status: hasWorkflow ? 'ready' : hasRepo ? 'partial' : 'missing',
+      detail: hasWorkflow
+        ? 'GitHub Actions workflow visibility and updates are available.'
+        : hasRepo
+          ? 'Repository access is present, but `workflow` is missing so Actions-specific operations may be limited.'
+          : 'No workflow diagnostics yet because base repository scope is also missing.',
+    },
+    {
+      title: 'Org visibility',
+      status: hasReadOrg ? 'ready' : 'missing',
+      detail: hasReadOrg
+        ? 'Organization and team visibility is available for org-backed repos and routing.'
+        : 'Missing `read:org`. Organization membership and team-derived visibility can be incomplete.',
+    },
+    {
+      title: 'Projects',
+      status: hasProject ? 'ready' : 'partial',
+      detail: hasProject
+        ? 'GitHub Projects integrations can build on this auth state.'
+        : 'Missing `project`. Core repo workflows still work, but future project-board integrations will need more scope.',
+    },
+  ];
+  const quickLinks = activeAccount ? [
+    { label: 'Profile', href: `https://github.com/${activeAccount.login}` },
+    { label: 'Repositories', href: `https://github.com/${activeAccount.login}?tab=repositories` },
+    { label: 'Issues', href: 'https://github.com/issues' },
+    { label: 'Pull Requests', href: 'https://github.com/pulls' },
+    { label: 'Developer Settings', href: 'https://github.com/settings/developers' },
+  ] : [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -331,13 +504,7 @@ function GitHubTab({
             background: 'rgba(37, 99, 235, 0.03)',
             border: '1px solid rgba(37, 99, 235, 0.1)',
           }}>
-            <img
-              src={activeAccount.avatarUrl}
-              alt={activeAccount.login}
-              width={44}
-              height={44}
-              style={{ borderRadius: 22, border: '2px solid rgba(37, 99, 235, 0.2)' }}
-            />
+            <GitHubAvatar avatarUrl={activeAccount.avatarUrl} login={activeAccount.login} size={44} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)' }}>{activeAccount.login}</span>
@@ -350,6 +517,37 @@ function GitHubTab({
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
                 {activeAccount.scopes.map((s) => <ScopeBadge key={s} scope={s} />)}
               </div>
+            </div>
+          </div>
+        )}
+
+        {activeAccount && (
+          <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Quick Links
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {quickLinks.map((item) => (
+                <QuickLink key={item.label} href={item.href} label={item.label} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeAccount && (
+          <div style={{ marginTop: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Scope Diagnostics
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+              {diagnostics.map((item) => (
+                <ScopeDiagnostic
+                  key={item.title}
+                  title={item.title}
+                  status={item.status}
+                  detail={item.detail}
+                />
+              ))}
             </div>
           </div>
         )}
@@ -482,6 +680,40 @@ function GitHubTab({
                   >
                     {deviceCodeCopied ? 'Copied' : 'Copy Code'}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => onPollDeviceFlow?.(deviceFlow.flowId)}
+                    style={{
+                      padding: '7px 12px',
+                      borderRadius: 8,
+                      border: '1px solid var(--t-panel-border)',
+                      background: 'var(--t-panel)',
+                      color: 'var(--t-text-secondary)',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Poll Now
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onCancelDeviceFlow?.(deviceFlow.flowId)}
+                    disabled={actionBusy === 'cancel_device'}
+                    style={{
+                      padding: '7px 12px',
+                      borderRadius: 8,
+                      border: '1px solid rgba(239, 68, 68, 0.18)',
+                      background: 'rgba(239, 68, 68, 0.04)',
+                      color: '#b91c1c',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: actionBusy === 'cancel_device' ? 'default' : 'pointer',
+                      opacity: actionBusy === 'cancel_device' ? 0.6 : 1,
+                    }}
+                  >
+                    {actionBusy === 'cancel_device' ? 'Cancelling…' : 'Cancel'}
+                  </button>
                 </div>
               </>
             )}
@@ -599,37 +831,51 @@ function GitHubTab({
                   border: '1px solid var(--t-panel-border)',
                 }}
               >
-                <img
-                  src={account.avatarUrl}
-                  alt={account.login}
-                  width={32}
-                  height={32}
-                  style={{ borderRadius: 16 }}
-                />
+                <GitHubAvatar avatarUrl={account.avatarUrl} login={account.login} size={32} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}>{account.login}</div>
                   <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 2 }}>
                     {account.protocol} · {account.scopes.length} scopes
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => onSwitchAccount?.(account.login)}
-                  disabled={actionBusy === 'switch'}
-                  style={{
-                    padding: '7px 12px',
-                    borderRadius: 8,
-                    border: '1px solid var(--t-panel-border)',
-                    background: 'var(--t-panel)',
-                    color: 'var(--t-text-secondary)',
-                    fontSize: 11,
-                    fontWeight: 600,
-                    cursor: actionBusy === 'switch' ? 'default' : 'pointer',
-                    opacity: actionBusy === 'switch' ? 0.55 : 1,
-                  }}
-                >
-                  {actionBusy === 'switch' ? 'Switching…' : 'Make Active'}
-                </button>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    onClick={() => onSwitchAccount?.(account.login)}
+                    disabled={actionBusy === 'switch'}
+                    style={{
+                      padding: '7px 12px',
+                      borderRadius: 8,
+                      border: '1px solid var(--t-panel-border)',
+                      background: 'var(--t-panel)',
+                      color: 'var(--t-text-secondary)',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: actionBusy === 'switch' ? 'default' : 'pointer',
+                      opacity: actionBusy === 'switch' ? 0.55 : 1,
+                    }}
+                  >
+                    {actionBusy === 'switch' ? 'Switching…' : 'Make Active'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDisconnect?.(account.login)}
+                    disabled={actionBusy === 'logout'}
+                    style={{
+                      padding: '7px 12px',
+                      borderRadius: 8,
+                      border: '1px solid rgba(239, 68, 68, 0.18)',
+                      background: 'rgba(239, 68, 68, 0.04)',
+                      color: '#b91c1c',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: actionBusy === 'logout' ? 'default' : 'pointer',
+                      opacity: actionBusy === 'logout' ? 0.55 : 1,
+                    }}
+                  >
+                    {actionBusy === 'logout' ? 'Disconnecting…' : 'Disconnect'}
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -1621,6 +1867,27 @@ export function SettingsPage() {
     }
   }, [loadGitHubStatus]);
 
+  const cancelDeviceFlow = useCallback(async (flowId: string) => {
+    setActionBusy('cancel_device');
+    try {
+      const res = await fetch('/api/panel/github-device', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'cancel', flowId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Unable to cancel GitHub device login.');
+      }
+      setDeviceFlow(null);
+      setActionNote(data.note || 'GitHub device login cancelled.');
+    } catch (error) {
+      setActionNote(error instanceof Error ? error.message : 'Unable to cancel GitHub device login.');
+    } finally {
+      setActionBusy(null);
+    }
+  }, []);
+
   useEffect(() => {
     if (!deviceFlow?.flowId) return;
     const timeout = window.setTimeout(() => {
@@ -1679,6 +1946,8 @@ export function SettingsPage() {
             deviceFlowEnabled={deviceFlowEnabled}
             deviceFlow={deviceFlow}
             onStartDeviceFlow={() => { void startDeviceFlow(); }}
+            onPollDeviceFlow={(flowId) => { void pollDeviceFlow(flowId); }}
+            onCancelDeviceFlow={(flowId) => { void cancelDeviceFlow(flowId); }}
           />
         )}
         {activeTab === 'agents' && (
