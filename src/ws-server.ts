@@ -27,6 +27,16 @@ import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, WebSocket } from 'ws';
 
+// ── node-pty (optional — terminal feature) ──
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let pty: typeof import('node-pty') | null = null;
+try {
+  pty = require('node-pty');
+  console.log('[ws-server] node-pty loaded — terminal feature available');
+} catch {
+  console.log('[ws-server] node-pty not available — terminal feature disabled');
+}
+
 // ── Config ──
 
 const WS_PORT = Number(process.env.WS_PORT ?? 3002);
@@ -70,7 +80,25 @@ interface ClientState {
   inboxEtag: string | null;
   lastHistoryId: string | null;
   alive: boolean;
+  terminalSessions: Set<string>;
 }
+
+// ── Terminal attachment state ──
+
+interface TerminalAttachment {
+  id: string;
+  sessionName: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ptyProcess: any; // node-pty IPty
+  clientIds: Set<string>;
+  cols: number;
+  rows: number;
+  batchBuffer: string;
+  batchTimer: ReturnType<typeof setTimeout> | null;
+}
+
+const terminalAttachments = new Map<string, TerminalAttachment>();
+const TERMINAL_BATCH_MS = 16; // batch PTY output every 16ms (60fps)
 
 // ── Gateway connection (singleton) ──
 
@@ -255,6 +283,23 @@ function handleClientMessage(client: ClientState, raw: string) {
     case 'ping':
       send(client, { channel: 'pong', ts: Date.now() });
       break;
+
+    // ── Terminal commands ──
+    case 'terminal-create':
+      handleTerminalCreate(client, msg);
+      break;
+    case 'terminal-attach':
+      handleTerminalAttach(client, msg);
+      break;
+    case 'terminal-input':
+      handleTerminalInput(client, msg);
+      break;
+    case 'terminal-resize':
+      handleTerminalResize(client, msg);
+      break;
+    case 'terminal-detach':
+      handleTerminalDetach(client, msg);
+      break;
   }
 }
 
@@ -387,6 +432,219 @@ function startPollingLoops() {
   }, CONFLICT_SCAN_MS);
 }
 
+// ── Terminal handlers ──
+
+function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>) {
+  if (!pty) {
+    send(client, { channel: 'terminal', event: 'error', sessionName: '', error: 'Terminal not available (node-pty not installed)' });
+    return;
+  }
+
+  const cols = typeof msg.cols === 'number' ? msg.cols : 120;
+  const rows = typeof msg.rows === 'number' ? msg.rows : 30;
+  const shortId = randomUUID().slice(0, 8);
+  const sessionName = `cortex-dash-${shortId}`;
+
+  try {
+    // Create a new tmux session running bash
+    execSync(
+      `tmux new-session -d -s ${sessionName} -x ${cols} -y ${rows}`,
+      { encoding: 'utf-8', timeout: 5000 },
+    );
+    console.log(`[ws-server] Created tmux session: ${sessionName}`);
+
+    // Tell client the session name, then auto-attach
+    send(client, { channel: 'terminal', event: 'created', sessionName });
+    handleTerminalAttach(client, { sessionName, cols, rows });
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    console.error(`[ws-server] Failed to create terminal session:`, error);
+    send(client, { channel: 'terminal', event: 'error', sessionName: '', error: `Failed to create terminal: ${error}` });
+  }
+}
+
+function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>) {
+  const sessionName = msg.sessionName as string;
+  if (!sessionName || typeof sessionName !== 'string') {
+    send(client, { channel: 'terminal', event: 'error', sessionName: '', error: 'sessionName required' });
+    return;
+  }
+
+  if (!pty) {
+    send(client, { channel: 'terminal', event: 'error', sessionName, error: 'Terminal not available (node-pty not installed)' });
+    return;
+  }
+
+  const cols = typeof msg.cols === 'number' ? msg.cols : 120;
+  const rows = typeof msg.rows === 'number' ? msg.rows : 30;
+
+  // Check if we already have a PTY for this tmux session
+  let attachment = terminalAttachments.get(sessionName);
+
+  if (attachment) {
+    // Add this client to existing attachment
+    attachment.clientIds.add(client.id);
+    client.terminalSessions.add(sessionName);
+    send(client, { channel: 'terminal', event: 'attached', sessionName });
+    console.log(`[ws-server] Client ${client.id} attached to existing terminal ${sessionName}`);
+    return;
+  }
+
+  // Spawn a new PTY that attaches to the tmux session
+  try {
+    // Spawn via login shell — node-pty's posix_spawnp can fail to find tmux directly
+    const shellCmd = `tmux attach-session -t ${sessionName}`;
+    console.log(`[ws-server] Spawning terminal: ${shellCmd}`);
+
+    const ptyProcess = pty.spawn('/bin/bash', ['-l', '-c', shellCmd], {
+      name: 'xterm-256color',
+      cols,
+      rows,
+      cwd: process.env.HOME ?? '/tmp',
+      env: { ...process.env, TERM: 'xterm-256color' } as Record<string, string>,
+    });
+
+    attachment = {
+      id: randomUUID(),
+      sessionName,
+      ptyProcess,
+      clientIds: new Set([client.id]),
+      cols,
+      rows,
+      batchBuffer: '',
+      batchTimer: null,
+    };
+
+    terminalAttachments.set(sessionName, attachment);
+    client.terminalSessions.add(sessionName);
+
+    // Wire PTY output → batched WS broadcast
+    ptyProcess.onData((data: string) => {
+      const att = terminalAttachments.get(sessionName);
+      if (!att) return;
+
+      att.batchBuffer += data;
+
+      if (!att.batchTimer) {
+        att.batchTimer = setTimeout(() => {
+          const buffered = att.batchBuffer;
+          att.batchBuffer = '';
+          att.batchTimer = null;
+
+          if (!buffered) return;
+
+          const encoded = Buffer.from(buffered, 'utf-8').toString('base64');
+          const msg = JSON.stringify({
+            channel: 'terminal',
+            event: 'data',
+            sessionName,
+            data: encoded,
+          });
+
+          for (const cid of att.clientIds) {
+            const c = clients.get(cid);
+            if (c) sendRaw(c, msg);
+          }
+        }, TERMINAL_BATCH_MS);
+      }
+    });
+
+    ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
+      console.log(`[ws-server] Terminal PTY exited for ${sessionName} (code ${exitCode})`);
+      const att = terminalAttachments.get(sessionName);
+      if (!att) return;
+
+      if (att.batchTimer) clearTimeout(att.batchTimer);
+
+      // Flush remaining buffer
+      if (att.batchBuffer) {
+        const encoded = Buffer.from(att.batchBuffer, 'utf-8').toString('base64');
+        const flushMsg = JSON.stringify({
+          channel: 'terminal', event: 'data', sessionName, data: encoded,
+        });
+        for (const cid of att.clientIds) {
+          const c = clients.get(cid);
+          if (c) sendRaw(c, flushMsg);
+        }
+      }
+
+      // Notify all clients
+      const exitMsg = JSON.stringify({
+        channel: 'terminal', event: 'exited', sessionName, exitCode,
+      });
+      for (const cid of att.clientIds) {
+        const c = clients.get(cid);
+        if (c) {
+          sendRaw(c, exitMsg);
+          c.terminalSessions.delete(sessionName);
+        }
+      }
+
+      terminalAttachments.delete(sessionName);
+    });
+
+    send(client, { channel: 'terminal', event: 'attached', sessionName });
+    console.log(`[ws-server] Client ${client.id} attached to new terminal ${sessionName}`);
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    console.error(`[ws-server] Failed to attach terminal ${sessionName}:`, error);
+    send(client, { channel: 'terminal', event: 'error', sessionName, error });
+  }
+}
+
+function handleTerminalInput(client: ClientState, msg: Record<string, unknown>) {
+  const sessionName = msg.sessionName as string;
+  const data = msg.data as string;
+  if (!sessionName || typeof data !== 'string') return;
+
+  const attachment = terminalAttachments.get(sessionName);
+  if (!attachment || !attachment.clientIds.has(client.id)) return;
+
+  try {
+    attachment.ptyProcess.write(data);
+  } catch { /* PTY may have exited */ }
+}
+
+function handleTerminalResize(client: ClientState, msg: Record<string, unknown>) {
+  const sessionName = msg.sessionName as string;
+  const cols = msg.cols as number;
+  const rows = msg.rows as number;
+  if (!sessionName || typeof cols !== 'number' || typeof rows !== 'number') return;
+
+  const attachment = terminalAttachments.get(sessionName);
+  if (!attachment) return;
+
+  try {
+    attachment.ptyProcess.resize(cols, rows);
+    attachment.cols = cols;
+    attachment.rows = rows;
+  } catch { /* resize may fail if PTY exited */ }
+}
+
+function handleTerminalDetach(client: ClientState, msg: Record<string, unknown>) {
+  const sessionName = msg.sessionName as string;
+  if (!sessionName) return;
+  removeClientFromTerminal(client.id, sessionName);
+  send(client, { channel: 'terminal', event: 'detached', sessionName });
+}
+
+function removeClientFromTerminal(clientId: string, sessionName: string) {
+  const attachment = terminalAttachments.get(sessionName);
+  if (!attachment) return;
+
+  attachment.clientIds.delete(clientId);
+  const c = clients.get(clientId);
+  if (c) c.terminalSessions.delete(sessionName);
+
+  // If no more clients, destroy the PTY handle (tmux session persists independently)
+  if (attachment.clientIds.size === 0) {
+    console.log(`[ws-server] No clients left for terminal ${sessionName} — destroying PTY handle`);
+    if (attachment.batchTimer) clearTimeout(attachment.batchTimer);
+    try { attachment.ptyProcess.kill(); } catch { /* already gone */ }
+    terminalAttachments.delete(sessionName);
+  }
+}
+
 // ── Server startup ──
 
 const httpServer = createServer((req, res) => {
@@ -447,6 +705,7 @@ wss.on('connection', (ws) => {
     inboxEtag: null,
     lastHistoryId: null,
     alive: true,
+    terminalSessions: new Set(),
   };
 
   clients.set(client.id, client);
@@ -472,6 +731,10 @@ wss.on('connection', (ws) => {
   ws.on('pong', () => { client.alive = true; });
 
   ws.on('close', () => {
+    // Detach from all terminal sessions
+    for (const sessionName of client.terminalSessions) {
+      removeClientFromTerminal(client.id, sessionName);
+    }
     clients.delete(client.id);
     console.log(`[ws-server] Client disconnected: ${client.id} (${clients.size} total)`);
   });
@@ -593,6 +856,13 @@ function shutdown(signal: string) {
     gatewayWs.close(1001, 'server shutting down');
     gatewayWs = null;
   }
+
+  // Destroy all terminal PTY handles (tmux sessions persist independently)
+  for (const [name, att] of terminalAttachments) {
+    if (att.batchTimer) clearTimeout(att.batchTimer);
+    try { att.ptyProcess.kill(); } catch { /* already gone */ }
+  }
+  terminalAttachments.clear();
 
   // Send close frame to every client so they reconnect cleanly
   for (const client of clients.values()) {
