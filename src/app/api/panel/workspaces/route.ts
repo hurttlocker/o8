@@ -63,7 +63,8 @@ const DIFF_CACHE_TTL = 30_000;
 
 function getLocalDiffStats(workspace: string): { additions: number; deletions: number; changedFiles: number } | null {
   try {
-    const cwd = workspace === 'unknown'
+    const isClawd = workspace === 'unknown';
+    const cwd = isClawd
       ? (process.env.HOME || '/Users/marquisehurtt') + '/clawd'
       : resolveWorkspacePath(workspace);
 
@@ -71,12 +72,12 @@ function getLocalDiffStats(workspace: string): { additions: number; deletions: n
     const cached = diffCache.get(cwd);
     if (cached && Date.now() - cached.ts < DIFF_CACHE_TTL) return cached.data;
 
-    // Diff since last push: compare HEAD to origin/main (what's been pushed)
-    // This resets to 0 after each push, then builds up as new commits land
-    const diffStat = execSync(
-      'git diff --shortstat origin/main..HEAD 2>/dev/null; git diff --shortstat 2>/dev/null',
-      { cwd, encoding: 'utf-8', timeout: 5000 },
-    ).trim();
+    // For agent workspaces (clawd): show only uncommitted changes
+    // For code repos (cortex-ide etc): origin/main..HEAD + uncommitted (resets on push)
+    const cmd = isClawd
+      ? 'git diff --shortstat 2>/dev/null'
+      : 'git diff --shortstat origin/main..HEAD 2>/dev/null; git diff --shortstat 2>/dev/null';
+    const diffStat = execSync(cmd, { cwd, encoding: 'utf-8', timeout: 5000 }).trim();
 
     let additions = 0, deletions = 0, changedFiles = 0;
 
@@ -196,8 +197,8 @@ export async function GET() {
         status = 'idle';
       }
 
-      // For agents without a PR, get local diff stats
-      const localDiff = !pr ? getLocalDiffStats(s.workspace) : null;
+      // For agents without a PR, get local diff stats (skip clawd — OpenClaw agents don't code)
+      const localDiff = (!pr && repoName !== 'clawd') ? getLocalDiffStats(s.workspace) : null;
       // Activity classification removed — top timeline handles this
 
       workspaces.push({

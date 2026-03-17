@@ -1585,54 +1585,50 @@ export const AgentPanel = memo(function AgentPanel({
       .catch(() => setActiveRepo(null));
   }, [expandedGroup, onExpandWorkspace]);
 
-  // Fetch agent inventory (agents + events)
-  // Only update state when data actually changed (prevents flicker)
+  // Fetch agent inventory + workspace/PR data in single pass (prevents pop-in/out)
   useEffect(() => {
-    async function fetchInventory() {
+    async function fetchAll() {
       try {
-        const res = await fetch('/api/runtime/inventory');
-        if (!res.ok) return;
-        const data = await res.json();
-        const newAgents = data.agents ?? [];
-        setAgents(prev => JSON.stringify(prev) === JSON.stringify(newAgents) ? prev : newAgents);
-        setEvents(prev => JSON.stringify(prev) === JSON.stringify(data.events ?? []) ? prev : (data.events ?? []));
-        if (onAgentsUpdate) onAgentsUpdate(newAgents);
-      } catch { /* silent */ }
-    }
-    void fetchInventory();
-    const id = setInterval(fetchInventory, 30_000);
-    return () => clearInterval(id);
-  }, []);
+        // Fetch both in parallel
+        const [invRes, wsRes] = await Promise.all([
+          fetch('/api/runtime/inventory').catch(() => null),
+          fetch('/api/panel/workspaces').catch(() => null),
+        ]);
 
-  // Enrich agents with workspace/PR data
-  useEffect(() => {
-    if (agents.length === 0) return;
-    async function fetchWorkspaces() {
-      try {
-        const res = await fetch('/api/panel/workspaces');
-        if (!res.ok) return;
-        const data = await res.json();
-        const wsMap = new Map<string, { branch: string; pr: AgentDetail['pr']; localDiff: AgentDetail['localDiff']; activity: AgentDetail['activity']; workspaceStatus: AgentDetail['workspaceStatus'] }>();
-        for (const ws of data.workspaces ?? []) {
-          if (ws.sessionKey) {
-            wsMap.set(ws.sessionKey, { branch: ws.branch, pr: ws.pr, localDiff: ws.localDiff, activity: ws.activity, workspaceStatus: ws.status });
+        // Parse inventory
+        let newAgents: AgentDetail[] = [];
+        if (invRes?.ok) {
+          const data = await invRes.json();
+          newAgents = data.agents ?? [];
+          setEvents(prev => JSON.stringify(prev) === JSON.stringify(data.events ?? []) ? prev : (data.events ?? []));
+          if (onAgentsUpdate) onAgentsUpdate(newAgents);
+        }
+
+        // Parse workspace data
+        const wsMap = new Map<string, { branch: string; pr: AgentDetail['pr']; localDiff: AgentDetail['localDiff']; workspaceStatus: AgentDetail['workspaceStatus'] }>();
+        if (wsRes?.ok) {
+          const wsData = await wsRes.json();
+          for (const ws of wsData.workspaces ?? []) {
+            if (ws.sessionKey) {
+              wsMap.set(ws.sessionKey, { branch: ws.branch, pr: ws.pr, localDiff: ws.localDiff, workspaceStatus: ws.status });
+            }
           }
         }
-        // Merge into agents
-        setAgents(prev => {
-          const enriched = prev.map(a => {
-            const ws = wsMap.get(a.sessionKey);
-            if (!ws) return a;
-            return { ...a, branch: ws.branch, pr: ws.pr || undefined, localDiff: ws.localDiff || undefined, activity: ws.activity || undefined, workspaceStatus: ws.workspaceStatus };
-          });
-          return JSON.stringify(enriched) === JSON.stringify(prev) ? prev : enriched;
+
+        // Merge: always enrich agents with workspace data before setting state
+        const enriched = newAgents.map(a => {
+          const ws = wsMap.get(a.sessionKey);
+          if (!ws) return a;
+          return { ...a, branch: ws.branch, pr: ws.pr || undefined, localDiff: ws.localDiff || undefined, workspaceStatus: ws.workspaceStatus };
         });
+
+        setAgents(prev => JSON.stringify(prev) === JSON.stringify(enriched) ? prev : enriched);
       } catch { /* silent */ }
     }
-    void fetchWorkspaces();
-    const id = setInterval(fetchWorkspaces, 30_000);
+    void fetchAll();
+    const id = setInterval(fetchAll, 30_000);
     return () => clearInterval(id);
-  }, [agents.length]);
+  }, []);
 
   // Fetch recent commits
   useEffect(() => {
