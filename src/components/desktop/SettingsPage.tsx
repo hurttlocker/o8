@@ -433,16 +433,6 @@ function GitHubTab({
     { label: 'Developer Settings', href: 'https://github.com/settings/developers' },
   ] : [];
   const diagnosticsReadyCount = diagnostics.filter((item) => item.status === 'ready').length;
-  const activeDeviceFlow = deviceFlow ?? {
-    flowId: '',
-    userCode: '',
-    verificationUri: '',
-    verificationUriComplete: '',
-    expiresAt: 0,
-    expiresInMinutes: 0,
-    nextPollInMs: 1000,
-    note: '',
-  };
 
   useEffect(() => {
     try {
@@ -706,25 +696,25 @@ function GitHubTab({
                     <div style={{ padding: '12px 14px', borderRadius: 12, background: 'var(--t-panel)', border: '1px solid var(--t-panel-border)' }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>Enter This Code</div>
                       <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--t-text)', letterSpacing: '0.14em', fontFamily: '"SF Mono", Menlo, monospace' }}>
-                        {activeDeviceFlow.userCode}
+                        {deviceFlow.userCode}
                       </div>
                       <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 8, lineHeight: 1.45 }}>
-                        {activeDeviceFlow.note || 'Waiting for approval in GitHub…'} Expires in about {activeDeviceFlow.expiresInMinutes} minute(s).
+                        {deviceFlow.note || 'Waiting for approval in GitHub…'} Expires in about {deviceFlow.expiresInMinutes} minute(s).
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                      <button type="button" onClick={() => window.open(activeDeviceFlow.verificationUriComplete || activeDeviceFlow.verificationUri, '_blank', 'noopener,noreferrer')} style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--t-panel-border)', background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                      <button type="button" onClick={() => window.open(deviceFlow.verificationUriComplete || deviceFlow.verificationUri, '_blank', 'noopener,noreferrer')} style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--t-panel-border)', background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
                         Open GitHub
                       </button>
                       <button type="button" onClick={() => { void copyDeviceCode(); }} style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--t-panel-border)', background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
                         {deviceCodeCopied ? 'Copied' : 'Copy Code'}
                       </button>
-                      <button type="button" onClick={() => onPollDeviceFlow?.(activeDeviceFlow.flowId)} style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--t-panel-border)', background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                      <button type="button" onClick={() => onPollDeviceFlow?.(deviceFlow.flowId)} style={{ padding: '7px 12px', borderRadius: 8, border: '1px solid var(--t-panel-border)', background: 'var(--t-panel)', color: 'var(--t-text-secondary)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
                         Poll Now
                       </button>
                       <button
                         type="button"
-                        onClick={() => onCancelDeviceFlow?.(activeDeviceFlow.flowId)}
+                        onClick={() => onCancelDeviceFlow?.(deviceFlow.flowId)}
                         disabled={actionBusy === 'cancel_device'}
                         style={{
                           padding: '7px 12px',

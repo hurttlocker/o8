@@ -392,6 +392,13 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     window.addEventListener('mouseup', onUp);
   }, [drillPos, tickDrag]);
 
+  // Agent → repo mapping for issue fetching
+  const agentRepoMap: Record<string, string> = {
+    Mister: 'hurttlocker/cortex-ide',
+    Niot: 'hurttlocker/cortex',
+    Hawk: 'hurttlocker/cortex',
+  };
+
   // Open issues panel — spawns to the right of session panel
   const handleOpenIssues = useCallback(() => {
     setIssuesPanelPos({
@@ -400,16 +407,17 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     });
     setIssuesPanelOpen(true);
     setIssuesLoading(true);
-    fetch('/api/panel/issues')
+    const repo = (selectedAgent && agentRepoMap[selectedAgent]) || 'hurttlocker/cortex-ide';
+    fetch(`/api/panel/issues?repo=${encodeURIComponent(repo)}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data?.issues) {
-          setGhIssues(data.issues.filter((i: GHIssue) => i.state === 'open').slice(0, 20));
+          setGhIssues(data.issues.filter((i: GHIssue) => i.state.toLowerCase() === 'open').slice(0, 20));
         }
       })
       .catch(() => {})
       .finally(() => setIssuesLoading(false));
-  }, [sessionPanelPos]);
+  }, [sessionPanelPos, selectedAgent]);
 
   // Issues panel drag
   const handleIssuesDragStart = useCallback((e: React.MouseEvent) => {
@@ -436,11 +444,12 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
   const handleAssignIssue = useCallback(async (issueNumber: number) => {
     if (!selectedAgent) return;
     setAssigningIssue(issueNumber);
+    const repo = agentRepoMap[selectedAgent] || 'hurttlocker/cortex-ide';
     try {
       await fetch('/api/panel/assign-issue', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ issue: issueNumber, agent: selectedAgent }),
+        body: JSON.stringify({ issue: issueNumber, agent: selectedAgent, repo }),
       });
       // Remove from list after assignment
       setGhIssues(prev => prev.filter(i => i.number !== issueNumber));
@@ -1216,9 +1225,14 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                   <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}>
                     <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
                   </svg>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
-                    Assign to {selectedAgent}
-                  </span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
+                      Assign to {selectedAgent}
+                    </span>
+                    <span style={{ fontSize: 9, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                      {selectedAgent && agentRepoMap[selectedAgent] ? agentRepoMap[selectedAgent].split('/')[1] : 'cortex-ide'}
+                    </span>
+                  </div>
                 </div>
                 <button
                   type="button"
