@@ -1395,7 +1395,11 @@ export function DesktopChat({ externalSessionKey, onOpenDiff }: { externalSessio
                         const isRunning = session.status === 'running' || session.status === 'reviewing';
                         const sessionPercent = Math.round(session.context?.usedPercent ?? 0);
                         const sDotColor = isRunning ? '#34c759' : sessionPercent >= 75 ? '#ff9f0a' : '#8e8e93';
-                        const name = session.name ?? session.sessionKey ?? session.id;
+                        const rawName = session.name ?? session.sessionKey ?? session.id;
+                        const runtimeTag = session.runtime === 'claude-code' ? ' · Claude Code'
+                          : session.runtime === 'codex' ? ' · Codex'
+                          : '';
+                        const name = rawName + runtimeTag;
                         const subtitle = session.currentTask
                           ?? session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '')
                           ?? session.sessionKey
