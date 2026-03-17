@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { invalidateInboxCache } from '@/lib/mobile/openclaw';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,9 +22,27 @@ export async function POST(request: NextRequest) {
     // For codex terminals, find the PID from the session key or process list
     // Session keys look like: codex:019ceac7-4bc0-74d1-8d5e-d0f7aaf1a088
     const isCodex = sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-owned:');
+    const isClaudeCode = sessionKey.startsWith('claude-code:');
 
-    if (!isCodex) {
-      return NextResponse.json({ error: 'Only Codex/terminal sessions can be killed from here' }, { status: 400 });
+    if (!isCodex && !isClaudeCode) {
+      return NextResponse.json({ error: 'Only Codex/Claude Code sessions can be killed from here' }, { status: 400 });
+    }
+
+    // Claude Code sessions — extract PID from session key (claude-code:live-PID)
+    if (isClaudeCode) {
+      const pidMatch = sessionKey.match(/live-(\d+)$/);
+      if (pidMatch) {
+        const pid = Number(pidMatch[1]);
+        try {
+          process.kill(pid, 'SIGTERM');
+          invalidateInboxCache();
+          return NextResponse.json({ success: true, method: 'claude-code-pid', pid });
+        } catch {
+          invalidateInboxCache();
+          return NextResponse.json({ success: true, method: 'already-dead', pid });
+        }
+      }
+      return NextResponse.json({ error: 'Could not extract PID from Claude Code session key' }, { status: 400 });
     }
 
     // Try to find and kill the codex process
@@ -31,9 +50,10 @@ export async function POST(request: NextRequest) {
     if (payload?.pid && Number.isFinite(payload.pid)) {
       try {
         process.kill(payload.pid, 'SIGTERM');
+        invalidateInboxCache();
         return NextResponse.json({ success: true, method: 'direct-pid', pid: payload.pid });
       } catch (e) {
-        // Process might already be dead
+        invalidateInboxCache();
         return NextResponse.json({ success: true, method: 'already-dead', pid: payload.pid });
       }
     }
@@ -69,6 +89,7 @@ export async function POST(request: NextRequest) {
         if (cmdLine.includes(sessionId) || codexPids.length === 1) {
           process.kill(pid, 'SIGTERM');
           killed = true;
+          invalidateInboxCache();
           return NextResponse.json({ success: true, method: 'matched-pid', pid });
         }
       } catch { /* process might have died during check */ }

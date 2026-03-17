@@ -81,6 +81,11 @@ function summarizeTranscript(text: string) {
 }
 
 let inboxCache: { snapshot: MobileInboxSnapshot; timestamp: number } | null = null;
+
+/** Invalidate the inbox cache — call after killing a session */
+export function invalidateInboxCache() {
+  inboxCache = null;
+}
 let inboxInflight: Promise<MobileInboxSnapshot> | null = null;
 const INBOX_CACHE_TTL = 8000; // 8 seconds — generous idle TTL
 
