@@ -101,6 +101,7 @@ function pendingResponse(flow: DeviceFlowRecord, note: string) {
     verificationUri: flow.verificationUri,
     verificationUriComplete: flow.verificationUriComplete,
     expiresAt: flow.expiresAt,
+    expiresInMinutes: Math.max(1, Math.ceil((flow.expiresAt - Date.now()) / 60000)),
     nextPollInMs: Math.max(1000, flow.nextPollAt - Date.now()),
     note,
   });
@@ -165,6 +166,7 @@ export async function POST(request: Request) {
         verificationUri: flow.verificationUri,
         verificationUriComplete: flow.verificationUriComplete,
         expiresAt: flow.expiresAt,
+        expiresInMinutes: Math.max(1, Math.ceil((flow.expiresAt - Date.now()) / 60000)),
         nextPollInMs: intervalMs,
         note: 'Open GitHub, enter the code, and this panel will finish the local gh login automatically.',
       });
