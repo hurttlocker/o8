@@ -783,11 +783,14 @@ function AgentsTab() {
       });
       const result = await res.json();
       if (result.success) {
+        // Instant removal — don't wait for re-fetch
         setAgents(prev => prev.filter(a => a.id !== agent.id));
       }
+      // Re-fetch after process has time to die (500ms), then again at 2s for confirmation
+      setTimeout(fetchFleet, 500);
       setTimeout(fetchFleet, 2000);
     } catch { /* silent */ }
-    finally { setTimeout(() => setKillingId(null), 1000); }
+    finally { setTimeout(() => setKillingId(null), 500); }
   }, [fetchFleet]);
 
   if (loading) {
