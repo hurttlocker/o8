@@ -1062,6 +1062,22 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
   }
 });
 
+// Kill all stale cortex-dash-* tmux sessions on startup (clean slate)
+try {
+  const sessions = execSync('tmux list-sessions -F "#{session_name}" 2>/dev/null || true', { encoding: 'utf-8' })
+    .trim()
+    .split('\n')
+    .filter(s => s.startsWith('cortex-dash-'));
+  for (const s of sessions) {
+    try {
+      execSync(`tmux kill-session -t ${s}`, { encoding: 'utf-8' });
+    } catch { /* already gone */ }
+  }
+  if (sessions.length > 0) {
+    console.log(`[ws-server] Cleaned up ${sessions.length} stale tmux session(s)`);
+  }
+} catch { /* tmux not running — fine */ }
+
 httpServer.listen(WS_PORT, '0.0.0.0', () => {
   console.log(`[ws-server] Cortex IDE WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
 });
