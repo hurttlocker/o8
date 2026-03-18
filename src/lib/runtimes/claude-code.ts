@@ -413,7 +413,9 @@ export const claudeCodeRuntime: AgentRuntime = {
       };
     });
 
-    // Create synthetic sessions for live Claude Code processes that don't match any project
+    // Create sessions for live Claude Code processes that don't match a recent session.
+    // Instead of synthetic IDs, find the REAL most-recent JSONL in the matching project dir
+    // so transcript and resume actually work.
     const matchedCwds = new Set(
       allSessions
         .filter((m) => inferSessionStatus(m, liveProcesses) === 'running')
@@ -423,30 +425,95 @@ export const claudeCodeRuntime: AgentRuntime = {
 
     for (const proc of liveProcesses) {
       if (!proc.cwd) continue;
-      // Check if this process CWD is already covered by a project session
       const alreadyMatched = [...matchedCwds].some(
         (cwd) => cwd && (proc.cwd!.startsWith(cwd) || cwd.startsWith(proc.cwd!)),
       );
       if (alreadyMatched) continue;
 
-      // Create a synthetic session for this unmatched live process
+      // Find the project dir for this CWD
+      const encodedDir = `-${proc.cwd.replace(/^\/+/, '').replace(/\//g, '-')}`;
+      const projectDirPath = path.join(CLAUDE_PROJECTS_DIR, encodedDir);
+      let realSessionId: string | undefined;
+      let realJsonlPath: string | undefined;
+      let contextUsedPercent: number | undefined;
+      let firstUserMessage: string | undefined;
+      let gitBranch: string | undefined;
+
+      try {
+        const dirEntries = await readdir(projectDirPath);
+        const jsonlFiles = dirEntries.filter((e) => e.endsWith('.jsonl'));
+        if (jsonlFiles.length > 0) {
+          // Find most recently modified JSONL
+          const withStats = await Promise.all(
+            jsonlFiles.map(async (f) => {
+              const fp = path.join(projectDirPath, f);
+              const s = await stat(fp).catch(() => null);
+              return { file: f, mtime: s?.mtimeMs ?? 0, path: fp };
+            }),
+          );
+          withStats.sort((a, b) => b.mtime - a.mtime);
+          const best = withStats[0];
+          realSessionId = best.file.replace('.jsonl', '');
+          realJsonlPath = best.path;
+
+          // Read tail for context % and metadata
+          try {
+            const content = await readFile(best.path, 'utf-8');
+            const lines = content.split('\n').filter(Boolean);
+            // Metadata from head
+            for (const line of lines.slice(0, 20)) {
+              try {
+                const p = JSON.parse(line) as ClaudeCodeMessage;
+                if (p.gitBranch && !gitBranch) gitBranch = p.gitBranch;
+                if (p.type === 'user' && p.message?.content && !firstUserMessage) {
+                  const text = typeof p.message.content === 'string'
+                    ? p.message.content
+                    : extractTextFromContent(p.message.content);
+                  firstUserMessage = text.slice(0, 200);
+                }
+                if (gitBranch && firstUserMessage) break;
+              } catch { /* skip */ }
+            }
+            // Context from tail
+            const CLAUDE_CTX_WINDOW = 200_000;
+            const tailLines = lines.slice(-30).reverse();
+            for (const tl of tailLines) {
+              try {
+                const tp = JSON.parse(tl) as ClaudeCodeMessage;
+                if (tp.type === 'assistant' && tp.message?.usage) {
+                  const u = tp.message.usage as Record<string, number>;
+                  const totalIn = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+                  if (totalIn > 0) {
+                    contextUsedPercent = Math.min(100, Math.round(totalIn / CLAUDE_CTX_WINDOW * 100));
+                    break;
+                  }
+                }
+              } catch { /* skip */ }
+            }
+          } catch { /* couldn't read JSONL */ }
+        }
+      } catch { /* project dir doesn't exist */ }
+
       const dirName = proc.cwd.split('/').pop() || 'unknown';
+      const displayName = `${dirName}${gitBranch ? ` • ${gitBranch}` : ''}`;
+
       results.push({
-        sessionKey: `claude-code:live-${proc.pid}`,
+        sessionKey: realSessionId ? `claude-code:${realSessionId}` : `claude-code:live-${proc.pid}`,
         runtimeId: 'claude-code',
-        displayName: dirName,
+        displayName,
         cwd: proc.cwd,
-        branch: undefined,
+        branch: gitBranch,
         status: 'running',
         ownership: 'discovered',
         sessionCapabilities: {
-          canSendInput: false,
+          canSendInput: true,
           canInterrupt: true,
-          canReviewDiffs: false,
+          canReviewDiffs: Boolean(realSessionId),
         },
         lastActivityAt: new Date(),
-        initialTask: `Live Claude Code session (PID ${proc.pid})`,
+        initialTask: firstUserMessage ?? `Live Claude Code session (PID ${proc.pid})`,
         model: 'claude',
+        contextUsedPercent,
       });
     }
 
@@ -588,7 +655,41 @@ export const claudeCodeRuntime: AgentRuntime = {
   },
 
   async resume(sessionKey: string, message: string): Promise<RuntimeActionResult> {
-    const sessionId = sessionKey.replace('claude-code:', '');
+    let sessionId = sessionKey.replace('claude-code:', '');
+
+    // If sessionId is a synthetic live-PID key, try to resolve to a real session ID
+    // by finding the most recent JSONL in the project dir that matches the PID's CWD
+    if (sessionId.startsWith('live-')) {
+      const pid = Number(sessionId.replace('live-', ''));
+      if (pid > 0) {
+        try {
+          const { stdout: cwdOut } = await execFileAsync(
+            'lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'],
+            { timeout: 2000 },
+          );
+          const cwdLine = cwdOut.split('\n').find((l) => l.startsWith('n/'));
+          const cwd = cwdLine?.slice(1);
+          if (cwd) {
+            const encodedDir = `-${cwd.replace(/^\/+/, '').replace(/\//g, '-')}`;
+            const projectDirPath = path.join(CLAUDE_PROJECTS_DIR, encodedDir);
+            const dirEntries = await readdir(projectDirPath).catch(() => [] as string[]);
+            const jsonlFiles = dirEntries.filter((e) => e.endsWith('.jsonl'));
+            if (jsonlFiles.length > 0) {
+              const withStats = await Promise.all(
+                jsonlFiles.map(async (f) => {
+                  const fp = path.join(projectDirPath, f);
+                  const s = await stat(fp).catch(() => null);
+                  return { file: f, mtime: s?.mtimeMs ?? 0 };
+                }),
+              );
+              withStats.sort((a, b) => b.mtime - a.mtime);
+              sessionId = withStats[0].file.replace('.jsonl', '');
+            }
+          }
+        } catch { /* fallback to original sessionId */ }
+      }
+    }
+
     const cliArgs = [
       '-p', '--print',
       '--resume', sessionId,
