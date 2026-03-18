@@ -17,9 +17,11 @@ async function getCachedCcSessions(): Promise<RuntimeSession[]> {
   return sessions;
 }
 
-export async function getRuntimeInventorySnapshot(): Promise<FleetSnapshot> {
+export async function getRuntimeInventorySnapshot(
+  options: { fleetMode?: 'smart' | 'all' } = {},
+): Promise<FleetSnapshot> {
   const [ocSnapshot, ccSessions] = await Promise.all([
-    getOpenClawFleetSnapshot(),
+    getOpenClawFleetSnapshot({ fleetMode: options.fleetMode ?? 'smart' }),
     getCachedCcSessions(),
   ]);
 
