@@ -269,12 +269,14 @@ const TabBar = memo(function TabBar({
   onSelectTab,
   onCloseTab,
   onNewTab,
+  onRegisterRepo,
 }: {
   tabs: TerminalTab[];
   activeTabId: string;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onNewTab: (agentId: string, repo?: RegisteredRepo) => void;
+  onRegisterRepo?: (localPath: string) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerStep, setPickerStep] = useState<'agent' | 'repo'>('agent');
@@ -669,6 +671,8 @@ const TabBar = memo(function TabBar({
                   if (folderPath && selectedAgent) {
                     const folderName = folderPath.split('/').filter(Boolean).pop() ?? 'folder';
                     onNewTab(selectedAgent.id, { name: folderName, localPath: folderPath });
+                    // Auto-register so it shows under Repos next time
+                    onRegisterRepo?.(folderPath);
                     setPickerOpen(false);
                     setPickerStep('agent');
                     setSelectedAgent(null);
@@ -768,6 +772,15 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
       onSessionCreated: handleSessionCreated,
     }), [handleSessionCreated]);
 
+    // Auto-register a folder so it shows in the picker next time
+    const handleRegisterRepo = useCallback((localPath: string) => {
+      fetch('/api/panel/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', localPath }),
+      }).catch(() => { /* silently fail — non-critical */ });
+    }, []);
+
     const handleNewTab = useCallback((agentId: string, repo?: RegisteredRepo) => {
       const agent = CLI_AGENTS.find(a => a.id === agentId);
       if (!agent) return;
@@ -845,6 +858,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           onSelectTab={setActiveTabId}
           onCloseTab={handleCloseTab}
           onNewTab={handleNewTab}
+          onRegisterRepo={handleRegisterRepo}
         />
 
         {/* Terminal panels — all mounted, only active is visible */}
