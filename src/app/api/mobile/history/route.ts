@@ -3,6 +3,7 @@ import { getOwnedCodexRuntimeTail } from '@/lib/codex/owned';
 import { getCodexRuntimeTail } from '@/lib/codex/sessions';
 import type { MobileHistoryResponse, MobileTranscriptEntry } from '@/lib/mobile/types';
 import { getSessionTranscript } from '@/lib/openclaw/chat';
+import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
 
 export const runtime = 'nodejs';

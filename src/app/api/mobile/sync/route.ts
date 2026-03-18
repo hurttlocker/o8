@@ -4,6 +4,7 @@ import { getCodexRuntimeTail } from '@/lib/codex/sessions';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
 import { getMobileInboxSnapshot } from '@/lib/mobile/openclaw';
 import { getSessionTranscript } from '@/lib/openclaw/chat';
+import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
 import { getReviewFileDetail } from '@/lib/review/workspace';
 
