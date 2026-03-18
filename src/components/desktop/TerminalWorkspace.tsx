@@ -12,6 +12,8 @@ export interface TerminalTab {
   tmuxSession: string | null; // null = pending creation
   cliAgent?: string; // which CLI agent was launched (or 'shell')
   repo?: RegisteredRepo; // optional repo context
+  createdAt: number; // timestamp for elapsed time
+  lastActivity: number; // timestamp of last terminal output
 }
 
 export interface TerminalTabHandle {
@@ -342,6 +344,60 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
 
 /* ── Tab Bar ── */
 
+/** Format elapsed time: 0s → 59s, 1m → 59m, 1h → 99h */
+function formatElapsed(ms: number): string {
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  return `${hrs}h`;
+}
+
+/** Live activity dot + elapsed time for a tab */
+function ActivityIndicator({ tab }: { tab: TerminalTab }) {
+  const [now, setNow] = useState(Date.now());
+
+  // Tick every second for elapsed time
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const elapsed = now - tab.createdAt;
+  const timeSinceActivity = now - tab.lastActivity;
+  const isActive = timeSinceActivity < 3000; // active if output in last 3s
+
+  return (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+      marginLeft: 2,
+    }}>
+      {/* Activity dot */}
+      <span style={{
+        width: 6,
+        height: 6,
+        borderRadius: '50%',
+        background: isActive ? '#22c55e' : '#cbd5e1',
+        transition: 'background 300ms',
+        animation: isActive ? 'pulse-dot 1.5s ease-in-out infinite' : 'none',
+        flexShrink: 0,
+      }} />
+      {/* Elapsed time */}
+      <span style={{
+        fontSize: 10,
+        color: '#94a3b8',
+        fontWeight: 400,
+        fontVariantNumeric: 'tabular-nums',
+      }}>
+        {formatElapsed(elapsed)}
+      </span>
+    </span>
+  );
+}
+
 const TabBar = memo(function TabBar({
   tabs,
   activeTabId,
@@ -437,6 +493,7 @@ const TabBar = memo(function TabBar({
                 <AgentDot color={agent?.color ?? '#64748b'} />
               )}
               <span>{tab.label}</span>
+              <ActivityIndicator tab={tab} />
               {tabs.length > 1 && (
                 <span
                   onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}
@@ -852,6 +909,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
             tabCountRef.current += 1;
             const tabId = `tab-${tabCountRef.current}`;
 
+            const now = Date.now();
             if (st.tmuxSession && alive.has(st.tmuxSession)) {
               // Tmux session survived — reattach directly
               restoredTabs.push({
@@ -860,6 +918,8 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
                 tmuxSession: st.tmuxSession,
                 cliAgent: st.cliAgent,
                 repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : undefined,
+                createdAt: now,
+                lastActivity: now,
               });
               // Attach to the existing session
               sendTerminalAttach(st.tmuxSession, 120, 30);
@@ -871,6 +931,8 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
                 tmuxSession: null, // will be assigned when session created
                 cliAgent: 'shell', // don't auto-restart agents (could be destructive)
                 repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : undefined,
+                createdAt: now,
+                lastActivity: now,
               });
               needsNewSession = true;
             }
@@ -922,11 +984,14 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
         }
         // No pending tab — this is the initial auto-created session
         tabCountRef.current += 1;
+        const now = Date.now();
         const newTab: TerminalTab = {
           id: `tab-${tabCountRef.current}`,
           label: 'Shell',
           tmuxSession: sessionName,
           cliAgent: 'shell',
+          createdAt: now,
+          lastActivity: now,
         };
         return [...prev, newTab];
       });
@@ -937,6 +1002,10 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
     useImperativeHandle(ref, () => ({
       writeToTerminal: (sessionName: string, data: string) => {
         panelRefs.current.get(sessionName)?.writeData(data);
+        // Track activity for the live dot
+        setTabs(prev => prev.map(t =>
+          t.tmuxSession === sessionName ? { ...t, lastActivity: Date.now() } : t
+        ));
       },
       writeRaw: (sessionName: string, data: string) => {
         panelRefs.current.get(sessionName)?.writeRaw(data);
@@ -969,12 +1038,15 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
       tabCountRef.current += 1;
       const tabId = `tab-${tabCountRef.current}`;
       const label = repo ? `${agent.label} · ${repo.name}` : agent.label;
+      const now = Date.now();
       const newTab: TerminalTab = {
         id: tabId,
         label,
         tmuxSession: null,
         cliAgent: agentId,
         repo,
+        createdAt: now,
+        lastActivity: now,
       };
 
       // Queue CLI command + optional cd to repo
