@@ -883,6 +883,7 @@ const ActivityFeed = memo(function ActivityFeed({
   onSelectPR,
   activeRepo: externalRepo,
   activeAgentKey,
+  refreshKey,
 }: {
   events: EventEntry[];
   commits: { hash: string; message: string; age: string }[];
@@ -890,6 +891,7 @@ const ActivityFeed = memo(function ActivityFeed({
   onSelectPR?: (prNumber: number, repo?: string) => void;
   activeRepo?: string | null;
   activeAgentKey?: string | null;
+  refreshKey?: number;
 }) {
   const [extras, setExtras] = useState<{ issues: ActivityItem[]; prs: ActivityItem[]; ciRuns: ActivityItem[]; repoCommits: ActivityItem[] }>({ issues: [], prs: [], ciRuns: [], repoCommits: [] });
   const [filter, setFilter] = useState<FeedFilter>('all');
@@ -1007,7 +1009,7 @@ const ActivityFeed = memo(function ActivityFeed({
     fetchExtras();
     const id = setInterval(fetchExtras, 60_000);
     return () => clearInterval(id);
-  }, [repo, isAllRepos, allRepos]);
+  }, [repo, isAllRepos, allRepos, refreshKey]);
 
   // Build unified timeline — commits now come from per-repo fetch, not parent prop
   const items = useMemo<ActivityItem[]>(() => {
@@ -2352,6 +2354,7 @@ export const AgentPanel = memo(function AgentPanel({
   const [activityOpen, setActivityOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(true);
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
+  const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
@@ -2384,7 +2387,7 @@ export const AgentPanel = memo(function AgentPanel({
   // WS listener — triggers immediate re-fetch on agent status changes
   const wsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
     onInboxUpdate: () => { fetchNowRef.current(); },
-    onReviewUpdate: () => { fetchNowRef.current(); },
+    onReviewUpdate: () => { fetchNowRef.current(); setActivityRefreshKey(k => k + 1); },
   }), []);
 
   const { isConnected: wsConnected } = useDesktopWebSocket(undefined, wsCallbacks);
@@ -2636,6 +2639,7 @@ export const AgentPanel = memo(function AgentPanel({
               onSelectPR={onSelectPR}
               activeRepo={activeRepo}
               activeAgentKey={expandedGroup ? agents.find(a => a.workspace === expandedGroup)?.sessionKey ?? null : null}
+              refreshKey={activityRefreshKey}
             />
           </div>
         )}
