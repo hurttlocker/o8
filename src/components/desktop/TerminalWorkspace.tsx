@@ -16,6 +16,18 @@ export interface TerminalTab {
   lastActivity: number; // timestamp of last terminal output
 }
 
+/** Detected localhost dev server from terminal output */
+interface LocalhostPreview {
+  id: string;
+  tabId: string;
+  url: string;
+  port: number;
+  detectedAt: number;
+}
+
+/** Regex to detect localhost URLs in terminal output */
+const LOCALHOST_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{3,5})\b/g;
+
 export interface TerminalTabHandle {
   writeToTerminal: (sessionName: string, data: string) => void;
   writeRaw: (sessionName: string, data: string) => void;
@@ -343,6 +355,149 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
 });
 
 /* ── Tab Bar ── */
+
+/* ── Localhost Preview Pane ── */
+
+function PreviewToolbar({ preview, onRefresh, onClose }: {
+  preview: LocalhostPreview;
+  onRefresh: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      height: 32,
+      paddingLeft: 12,
+      paddingRight: 8,
+      background: '#f1f5f9',
+      borderBottom: '1px solid #e2e8f0',
+      gap: 8,
+      flexShrink: 0,
+    }}>
+      {/* Green dot — live */}
+      <span style={{
+        width: 8,
+        height: 8,
+        borderRadius: '50%',
+        background: '#22c55e',
+        flexShrink: 0,
+      }} />
+      {/* URL */}
+      <span style={{
+        fontSize: 11,
+        color: '#64748b',
+        fontFamily: 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
+        flex: 1,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}>
+        {preview.url}
+      </span>
+      {/* Refresh */}
+      <button
+        type="button"
+        onClick={onRefresh}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 24,
+          height: 24,
+          border: 'none',
+          background: 'transparent',
+          color: '#64748b',
+          cursor: 'pointer',
+          borderRadius: 4,
+          fontSize: 14,
+        }}
+        title="Refresh"
+      >
+        ↻
+      </button>
+      {/* Close */}
+      <button
+        type="button"
+        onClick={onClose}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 24,
+          height: 24,
+          border: 'none',
+          background: 'transparent',
+          color: '#64748b',
+          cursor: 'pointer',
+          borderRadius: 4,
+          fontSize: 14,
+        }}
+        title="Close preview"
+      >
+        ✕
+      </button>
+    </div>
+  );
+}
+
+function PreviewPane({ previews, onRefresh, onClose }: {
+  previews: LocalhostPreview[];
+  onRefresh: (id: string) => void;
+  onClose: (id: string) => void;
+}) {
+  const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
+
+  if (previews.length === 0) return null;
+
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'row',
+      flex: 1,
+      minHeight: 0,
+      gap: 1,
+      background: '#e2e8f0',
+    }}>
+      {previews.map((p) => (
+        <div key={p.id} style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+          background: '#ffffff',
+        }}>
+          <PreviewToolbar
+            preview={p}
+            onRefresh={() => {
+              const iframe = iframeRefs.current.get(p.id);
+              if (iframe) {
+                // Force reload by resetting src
+                const src = iframe.src;
+                iframe.src = '';
+                setTimeout(() => { iframe.src = src; }, 50);
+              }
+              onRefresh(p.id);
+            }}
+            onClose={() => onClose(p.id)}
+          />
+          <iframe
+            ref={(el) => { if (el) iframeRefs.current.set(p.id, el); }}
+            src={p.url.replace('0.0.0.0', 'localhost')}
+            title={`Preview ${p.url}`}
+            style={{
+              flex: 1,
+              border: 'none',
+              width: '100%',
+              background: '#ffffff',
+            }}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** Format elapsed time: 0s → 59s, 1m → 59m, 1h → 99h */
 function formatElapsed(ms: number): string {
@@ -854,12 +1009,14 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
   ) {
     const [tabs, setTabs] = useState<TerminalTab[]>([]);
     const [activeTabId, setActiveTabId] = useState<string>('');
+    const [previews, setPreviews] = useState<LocalhostPreview[]>([]);
     const panelRefs = useRef<Map<string, XtermPanelHandle>>(new Map());
     const tabCountRef = useRef(0);
     const pendingCliCommands = useRef<Map<string, string>>(new Map()); // tabId → command to run after session created
     const initialCreatedRef = useRef(false);
     const restoredRef = useRef(false);
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const detectedPortsRef = useRef<Set<number>>(new Set()); // avoid duplicate detections
 
     // Persist tab state (debounced — saves 500ms after last change)
     const persistTabs = useCallback((currentTabs: TerminalTab[], currentActiveId: string) => {
@@ -1003,9 +1160,37 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
       writeToTerminal: (sessionName: string, data: string) => {
         panelRefs.current.get(sessionName)?.writeData(data);
         // Track activity for the live dot
+        const now = Date.now();
         setTabs(prev => prev.map(t =>
-          t.tmuxSession === sessionName ? { ...t, lastActivity: Date.now() } : t
+          t.tmuxSession === sessionName ? { ...t, lastActivity: now } : t
         ));
+
+        // Scan for localhost URLs in terminal output
+        try {
+          const decoded = atob(data);
+          const matches = decoded.matchAll(LOCALHOST_RE);
+          for (const match of matches) {
+            const port = parseInt(match[1], 10);
+            if (detectedPortsRef.current.has(port)) continue;
+            detectedPortsRef.current.add(port);
+
+            // Find which tab this session belongs to
+            const tab = tabs.find(t => t.tmuxSession === sessionName);
+            const url = match[0].replace('0.0.0.0', 'localhost');
+
+            setPreviews(prev => {
+              // Don't add duplicate ports
+              if (prev.some(p => p.port === port)) return prev;
+              return [...prev, {
+                id: `preview-${port}`,
+                tabId: tab?.id ?? '',
+                url,
+                port,
+                detectedAt: now,
+              }];
+            });
+          }
+        } catch { /* ignore decode errors */ }
       },
       writeRaw: (sessionName: string, data: string) => {
         panelRefs.current.get(sessionName)?.writeRaw(data);
@@ -1078,6 +1263,13 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           const newIdx = Math.min(idx, remaining.length - 1);
           setActiveTabId(remaining[newIdx].id);
         }
+        // Remove any previews associated with this tab
+        setPreviews(prev => {
+          const toRemove = prev.filter(p => p.tabId === tabId);
+          toRemove.forEach(p => detectedPortsRef.current.delete(p.port));
+          return prev.filter(p => p.tabId !== tabId);
+        });
+
         return remaining;
       });
     }, [activeTabId, sendTerminalDetach]);
@@ -1121,8 +1313,33 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           onRegisterRepo={handleRegisterRepo}
         />
 
+        {/* Localhost preview pane — slides in when dev servers detected */}
+        {previews.length > 0 && (
+          <div style={{
+            flex: 1,
+            minHeight: 120,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            borderBottom: '2px solid #e2e8f0',
+            animation: 'slide-in-preview 300ms ease-out',
+          }}>
+            <PreviewPane
+              previews={previews}
+              onRefresh={() => {}}
+              onClose={(id) => {
+                setPreviews(prev => {
+                  const removed = prev.find(p => p.id === id);
+                  if (removed) detectedPortsRef.current.delete(removed.port);
+                  return prev.filter(p => p.id !== id);
+                });
+              }}
+            />
+          </div>
+        )}
+
         {/* Terminal panels — all mounted, only active is visible */}
-        <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        <div style={{ flex: previews.length > 0 ? 1 : 1, position: 'relative', overflow: 'hidden' }}>
           {tabs.map((tab) => (
             tab.tmuxSession ? (
               <XtermPanel
