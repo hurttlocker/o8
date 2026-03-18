@@ -490,8 +490,9 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   const sessionName = `cortex-dash-${shortId}`;
 
   try {
+    const home = process.env.HOME ?? '/tmp';
     execSync(
-      `tmux new-session -d -s ${sessionName} -x ${cols} -y ${rows} \\; set-option status off`,
+      `tmux new-session -d -s ${sessionName} -x ${cols} -y ${rows} -c "${home}" \\; set-option status off \\; send-keys clear Enter`,
       { encoding: 'utf-8', timeout: 5000 },
     );
     console.log(`[ws-server] Created tmux session: ${sessionName}`);
