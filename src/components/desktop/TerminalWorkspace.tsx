@@ -101,7 +101,9 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
     writeRaw: (data: string) => {
       if (!termRef.current) return;
       try {
-        termRef.current.write(data);
+        // Encode to bytes — ImageAddon needs raw bytes to detect IIP sequences
+        const encoder = new TextEncoder();
+        termRef.current.write(encoder.encode(data));
       } catch { /* ignore */ }
     },
     setError: (err: string) => setError(err),

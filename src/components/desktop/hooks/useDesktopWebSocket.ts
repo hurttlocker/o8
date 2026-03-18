@@ -191,7 +191,12 @@ export function useDesktopWebSocket(
           } else if (eventType === 'error' && data) {
             cbRef.current.onTerminalError?.(data.sessionName as string, (data.error as string) ?? 'Unknown error');
           } else if (eventType === 'image' && data) {
-            cbRef.current.onTerminalImage?.(data.sessionName as string, data.iip as string);
+            // Build IIP escape sequence from raw components (avoids JSON escape mangling)
+            const filenameB64 = data.filenameB64 as string;
+            const fileSize = data.fileSize as number;
+            const imageB64 = data.imageB64 as string;
+            const iip = `\x1b]1337;File=name=${filenameB64};size=${fileSize};inline=1:${imageB64}\x07`;
+            cbRef.current.onTerminalImage?.(data.sessionName as string, iip);
           }
           break;
 
