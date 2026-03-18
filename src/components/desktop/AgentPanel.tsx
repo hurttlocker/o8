@@ -873,7 +873,7 @@ const REPO_DISPLAY: Record<string, string> = {
   'LavonTMCQ/mybeautifulwife': 'Eyes Web',
 };
 
-const KNOWN_REPOS = Object.keys(REPO_DISPLAY);
+const FALLBACK_REPOS = Object.keys(REPO_DISPLAY);
 
 const ActivityFeed = memo(function ActivityFeed({
   events,
@@ -892,6 +892,30 @@ const ActivityFeed = memo(function ActivityFeed({
   const [filter, setFilter] = useState<FeedFilter>('all');
   const [repoOverride, setRepoOverride] = useState<string | null>(null);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
+  const [registeredRepos, setRegisteredRepos] = useState<string[]>([]);
+
+  // Fetch registered repos on mount
+  useEffect(() => {
+    fetch('/api/panel/repos')
+      .then(r => r.json())
+      .then(data => {
+        const ghRepos = (data.repos ?? [])
+          .map((r: { remoteUrl?: string }) => {
+            const url = (r.remoteUrl ?? '').replace(/\.git$/, '');
+            const parts = url.split('/');
+            return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : null;
+          })
+          .filter(Boolean) as string[];
+        setRegisteredRepos(ghRepos);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Merge registered repos with known repos (deduped)
+  const allRepos = useMemo(() => {
+    const set = new Set([...registeredRepos, ...FALLBACK_REPOS]);
+    return Array.from(set);
+  }, [registeredRepos]);
 
   // Resolve active repo: override > agent-derived > external > default
   const repo = useMemo(() => {
@@ -1118,17 +1142,22 @@ const ActivityFeed = memo(function ActivityFeed({
 
         {/* Repo picker dropdown */}
         {repoPickerOpen ? (
-          <div style={{
-            margin: '2px 10px 6px',
-            borderRadius: 10,
-            border: '1px solid var(--t-divider-subtle)',
-            background: 'rgba(255, 255, 255, 0.95)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
-            overflow: 'hidden',
-          }}>
-            {KNOWN_REPOS.map((r) => {
+          <div
+            style={{
+              margin: '2px 10px 6px',
+              borderRadius: 10,
+              border: '1px solid var(--t-divider-subtle)',
+              background: 'rgba(255, 255, 255, 0.95)',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+              maxHeight: 200,
+              overflowY: 'auto',
+              scrollbarWidth: 'none',
+            } as React.CSSProperties}
+            className="hide-scrollbar"
+          >
+            {allRepos.map((r) => {
               const selected = r === repo;
               return (
                 <button
