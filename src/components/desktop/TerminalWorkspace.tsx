@@ -122,12 +122,13 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
 
     async function init() {
       try {
-        const [{ Terminal }, { FitAddon }, { WebLinksAddon }, { SearchAddon }, { Unicode11Addon }] = await Promise.all([
+        const [{ Terminal }, { FitAddon }, { WebLinksAddon }, { SearchAddon }, { Unicode11Addon }, { ImageAddon }] = await Promise.all([
           import('@xterm/xterm'),
           import('@xterm/addon-fit'),
           import('@xterm/addon-web-links'),
           import('@xterm/addon-search'),
           import('@xterm/addon-unicode11'),
+          import('@xterm/addon-image'),
         ]);
         if (disposed) return;
 
@@ -179,10 +180,20 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
         const webLinksAddon = new WebLinksAddon();
         const searchAddon = new SearchAddon();
         const unicode11Addon = new Unicode11Addon();
+        const imageAddon = new ImageAddon({
+          enableSizeReports: true,
+          pixelLimit: 16777216, // 4096x4096 max
+          sixelSupport: true,
+          sixelScrolling: true,
+          sixelPaletteLimit: 4096,
+          iipSupport: true, // iTerm2 Inline Image Protocol
+          iipSizeLimit: 20000000, // 20MB max image size
+        });
         term.loadAddon(fitAddon);
         term.loadAddon(webLinksAddon);
         term.loadAddon(searchAddon);
         term.loadAddon(unicode11Addon);
+        term.loadAddon(imageAddon);
         term.unicode.activeVersion = '11';
 
         if (!containerRef.current || disposed) { term.dispose(); return; }
