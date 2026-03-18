@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { MobileActionRequest, MobileActionResponse } from '@/lib/mobile/types';
 import { launchCodexFromMobile, performRuntimeAction } from '@/lib/runtime/actions';
 import { steerOpenClawSession } from '@/lib/openclaw/chat';
+import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
 
 export const runtime = 'nodejs';
