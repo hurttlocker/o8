@@ -492,7 +492,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   try {
     const home = process.env.HOME ?? '/tmp';
     execSync(
-      `tmux new-session -d -s ${sessionName} -x ${cols} -y ${rows} -c "${home}" \\; set-option status off \\; set-environment LANG en_US.UTF-8 \\; set-environment LC_ALL en_US.UTF-8 \\; send-keys clear Enter`,
+      `tmux new-session -d -s ${sessionName} -x ${cols} -y ${rows} -c "${home}" \\; set-option status off \\; set-option default-terminal "xterm-256color" \\; set-environment TERM xterm-256color \\; set-environment LANG en_US.UTF-8 \\; set-environment LC_ALL en_US.UTF-8`,
       { encoding: 'utf-8', timeout: 5000 },
     );
     console.log(`[ws-server] Created tmux session: ${sessionName}`);

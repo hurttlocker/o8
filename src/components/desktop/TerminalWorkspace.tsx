@@ -91,7 +91,9 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
     writeData: (data: string) => {
       if (!termRef.current) return;
       try {
-        termRef.current.write(atob(data));
+        // Decode base64 → Uint8Array → proper UTF-8 (atob mangles multi-byte chars)
+        const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+        termRef.current.write(bytes);
       } catch { /* ignore */ }
     },
     setError: (err: string) => setError(err),
