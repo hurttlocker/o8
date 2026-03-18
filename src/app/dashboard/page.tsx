@@ -75,8 +75,8 @@ function DashboardInner() {
       terminalRef.current?.setTermExited(true);
       termWorkspaceRef.current?.setTermExited(sessionName);
     },
-    onTerminalImage: (sessionName: string, iip: string) => {
-      termWorkspaceRef.current?.writeRaw(sessionName, iip);
+    onTerminalImage: (sessionName: string, imageB64: string, filename: string) => {
+      termWorkspaceRef.current?.showImage(sessionName, imageB64, filename);
     },
   }), []);
 

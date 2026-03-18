@@ -28,7 +28,7 @@ export interface DesktopWsCallbacks {
   onTerminalAttached?: (sessionName: string) => void;
   onTerminalExited?: (sessionName: string, exitCode: number) => void;
   onTerminalError?: (sessionName: string, error: string) => void;
-  onTerminalImage?: (sessionName: string, iip: string) => void;
+  onTerminalImage?: (sessionName: string, imageB64: string, filename: string) => void;
 }
 
 interface UseDesktopWebSocketResult {
@@ -191,14 +191,10 @@ export function useDesktopWebSocket(
           } else if (eventType === 'error' && data) {
             cbRef.current.onTerminalError?.(data.sessionName as string, (data.error as string) ?? 'Unknown error');
           } else if (eventType === 'image' && data) {
-            // Build IIP escape sequence from raw components (avoids JSON escape mangling)
-            const filenameB64 = data.filenameB64 as string;
-            const fileSize = data.fileSize as number;
+            // Render image as HTML overlay (IIP/Sixel don't work reliably through tmux)
             const imageB64 = data.imageB64 as string;
-            // width=auto;height=auto tells the addon to size based on pixel dimensions
-            // preserveAspectRatio=1 keeps proportions correct
-            const iip = `\x1b]1337;File=name=${filenameB64};size=${fileSize};width=auto;height=auto;inline=1;preserveAspectRatio=1:${imageB64}\x07`;
-            cbRef.current.onTerminalImage?.(data.sessionName as string, iip);
+            const filename = data.filename as string ?? 'image.png';
+            cbRef.current.onTerminalImage?.(data.sessionName as string, imageB64, filename);
           }
           break;
 
