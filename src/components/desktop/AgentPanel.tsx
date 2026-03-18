@@ -869,11 +869,12 @@ const REPO_DISPLAY: Record<string, string> = {
   'hurttlocker/cortex-ide': 'Cortex IDE',
   'hurttlocker/cortex': 'Cortex',
   'hurttlocker/sleeping-beauties': 'Copy Trade',
-  'LavonTMCQ/spear-production': 'Spear',
-  'LavonTMCQ/mybeautifulwife': 'Eyes Web',
 };
 
 const FALLBACK_REPOS = Object.keys(REPO_DISPLAY);
+
+// Special "all repos" key
+const ALL_REPOS_KEY = '__github__';
 
 const ActivityFeed = memo(function ActivityFeed({
   events,
@@ -888,7 +889,7 @@ const ActivityFeed = memo(function ActivityFeed({
   activeRepo?: string | null;
   activeAgentKey?: string | null;
 }) {
-  const [extras, setExtras] = useState<{ issues: ActivityItem[]; prs: ActivityItem[]; ciRuns: ActivityItem[] }>({ issues: [], prs: [], ciRuns: [] });
+  const [extras, setExtras] = useState<{ issues: ActivityItem[]; prs: ActivityItem[]; ciRuns: ActivityItem[]; repoCommits: ActivityItem[] }>({ issues: [], prs: [], ciRuns: [], repoCommits: [] });
   const [filter, setFilter] = useState<FeedFilter>('all');
   const [repoOverride, setRepoOverride] = useState<string | null>(null);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
@@ -925,73 +926,95 @@ const ActivityFeed = memo(function ActivityFeed({
     return 'hurttlocker/cortex-ide';
   }, [repoOverride, activeAgentKey, externalRepo]);
 
-  const repoLabel = REPO_DISPLAY[repo] ?? repo.split('/').pop() ?? repo;
+  const isAllRepos = repo === ALL_REPOS_KEY;
+  const repoLabel = isAllRepos ? 'GitHub' : (REPO_DISPLAY[repo] ?? repo.split('/').pop() ?? repo);
 
   // Clear override when agent changes
   useEffect(() => { setRepoOverride(null); }, [activeAgentKey]);
 
-  // Fetch issues, PRs, CI for selected repo
+  // Fetch issues, PRs, CI, and commits for selected repo(s)
   useEffect(() => {
+    async function fetchForRepo(r: string) {
+      const [issuesRes, prsRes, ciRes, commitsRes] = await Promise.all([
+        fetch(`/api/panel/issues?repo=${encodeURIComponent(r)}`).catch(() => null),
+        fetch(`/api/panel/prs?repo=${encodeURIComponent(r)}`).catch(() => null),
+        fetch(`/api/panel/ci?repo=${encodeURIComponent(r)}`).catch(() => null),
+        fetch(`/api/panel/commits?repo=${encodeURIComponent(r)}`).catch(() => null),
+      ]);
+
+      const repoSlug = r.split('/').pop() ?? r;
+      const issueItems: ActivityItem[] = [];
+      if (issuesRes?.ok) {
+        const data = await issuesRes.json();
+        for (const i of (data.issues ?? []).slice(0, 8)) {
+          const ts = i.createdAt ? new Date(i.createdAt).getTime() : 0;
+          issueItems.push({ kind: 'issue', number: i.number, title: i.title, state: (i.state ?? '').toLowerCase(), labels: i.labels ?? [], age: i.createdAt ? relativeAge(i.createdAt) : '', ts });
+        }
+      }
+
+      const prItems: ActivityItem[] = [];
+      if (prsRes?.ok) {
+        const data = await prsRes.json();
+        for (const p of (data.prs ?? []).slice(0, 8)) {
+          const ts = p.createdAt ? new Date(p.createdAt).getTime() : 0;
+          prItems.push({ kind: 'pr', number: p.number, title: p.title, state: (p.state ?? '').toLowerCase(), author: p.author?.login ?? '', branch: p.headRefName ?? '', additions: p.additions ?? 0, deletions: p.deletions ?? 0, age: p.createdAt ? relativeAge(p.createdAt) : '', ts });
+        }
+      }
+
+      const ciItems: ActivityItem[] = [];
+      if (ciRes?.ok) {
+        const data = await ciRes.json();
+        for (const c of (data.runs ?? []).slice(0, 6)) {
+          const ts = c.createdAt ? new Date(c.createdAt).getTime() : 0;
+          ciItems.push({ kind: 'ci', id: c.databaseId, title: c.displayTitle ?? '', status: c.status ?? '', conclusion: c.conclusion ?? '', branch: c.headBranch ?? '', workflow: c.workflowName ?? '', age: c.createdAt ? relativeAge(c.createdAt) : '', ts });
+        }
+      }
+
+      const commitItems: ActivityItem[] = [];
+      if (commitsRes?.ok) {
+        const data = await commitsRes.json();
+        for (const c of (data.commits ?? []).slice(0, 10)) {
+          const ts = c.date ? new Date(c.date).getTime() : 0;
+          commitItems.push({ kind: 'commit', hash: c.hash ?? '', message: `${isAllRepos ? `[${repoSlug}] ` : ''}${c.message ?? ''}`, age: c.date ? relativeAge(c.date) : '', ts });
+        }
+      }
+
+      return { issues: issueItems, prs: prItems, ciRuns: ciItems, commits: commitItems };
+    }
+
     async function fetchExtras() {
       try {
-        const [issuesRes, prsRes, ciRes] = await Promise.all([
-          fetch(`/api/panel/issues?repo=${encodeURIComponent(repo)}`).catch(() => null),
-          fetch(`/api/panel/prs?repo=${encodeURIComponent(repo)}`).catch(() => null),
-          fetch(`/api/panel/ci?repo=${encodeURIComponent(repo)}`).catch(() => null),
-        ]);
-
-        const issueItems: ActivityItem[] = [];
-        if (issuesRes?.ok) {
-          const data = await issuesRes.json();
-          for (const i of (data.issues ?? []).slice(0, 8)) {
-            const ts = i.createdAt ? new Date(i.createdAt).getTime() : 0;
-            issueItems.push({ kind: 'issue', number: i.number, title: i.title, state: (i.state ?? '').toLowerCase(), labels: i.labels ?? [], age: i.createdAt ? relativeAge(i.createdAt) : '', ts });
+        if (isAllRepos) {
+          // Fetch from all registered repos in parallel
+          const repos = allRepos.length > 0 ? allRepos : FALLBACK_REPOS;
+          const results = await Promise.all(repos.map(r => fetchForRepo(r).catch(() => ({ issues: [], prs: [], ciRuns: [], commits: [] }))));
+          const merged = { issues: [] as ActivityItem[], prs: [] as ActivityItem[], ciRuns: [] as ActivityItem[], repoCommits: [] as ActivityItem[] };
+          for (const r of results) {
+            merged.issues.push(...r.issues);
+            merged.prs.push(...r.prs);
+            merged.ciRuns.push(...r.ciRuns);
+            merged.repoCommits.push(...r.commits);
           }
+          setExtras(merged);
+        } else {
+          const result = await fetchForRepo(repo);
+          setExtras({ issues: result.issues, prs: result.prs, ciRuns: result.ciRuns, repoCommits: result.commits });
         }
-
-        const prItems: ActivityItem[] = [];
-        if (prsRes?.ok) {
-          const data = await prsRes.json();
-          for (const p of (data.prs ?? []).slice(0, 8)) {
-            const ts = p.createdAt ? new Date(p.createdAt).getTime() : 0;
-            prItems.push({ kind: 'pr', number: p.number, title: p.title, state: (p.state ?? '').toLowerCase(), author: p.author?.login ?? '', branch: p.headRefName ?? '', additions: p.additions ?? 0, deletions: p.deletions ?? 0, age: p.createdAt ? relativeAge(p.createdAt) : '', ts });
-          }
-        }
-
-        const ciItems: ActivityItem[] = [];
-        if (ciRes?.ok) {
-          const data = await ciRes.json();
-          for (const r of (data.runs ?? []).slice(0, 6)) {
-            const ts = r.createdAt ? new Date(r.createdAt).getTime() : 0;
-            ciItems.push({ kind: 'ci', id: r.databaseId, title: r.displayTitle ?? '', status: r.status ?? '', conclusion: r.conclusion ?? '', branch: r.headBranch ?? '', workflow: r.workflowName ?? '', age: r.createdAt ? relativeAge(r.createdAt) : '', ts });
-          }
-        }
-
-        setExtras({ issues: issueItems, prs: prItems, ciRuns: ciItems });
       } catch { /* silent */ }
     }
     fetchExtras();
     const id = setInterval(fetchExtras, 60_000);
     return () => clearInterval(id);
-  }, [repo]);
+  }, [repo, isAllRepos, allRepos]);
 
-  // Build unified timeline
+  // Build unified timeline — commits now come from per-repo fetch, not parent prop
   const items = useMemo<ActivityItem[]>(() => {
     const all: ActivityItem[] = [];
 
-    for (const c of commits) {
-      // Parse relative age into approximate timestamp for sorting
-      const ageMatch = c.age.match(/(\d+)\s*(second|minute|hour|day|week|month)/);
-      let ts = Date.now();
-      if (ageMatch) {
-        const n = parseInt(ageMatch[1], 10);
-        const unit = ageMatch[2];
-        const multipliers: Record<string, number> = { second: 1000, minute: 60000, hour: 3600000, day: 86400000, week: 604800000, month: 2592000000 };
-        ts -= n * (multipliers[unit] ?? 60000);
-      }
-      all.push({ kind: 'commit', hash: c.hash, message: c.message, age: c.age, ts });
-    }
+    // Repo-specific commits from API
+    all.push(...extras.repoCommits);
 
+    // Agent events (always included — they're cross-repo)
     for (const e of events) {
       const ts = e.timestamp ? new Date(e.timestamp).getTime() || Date.now() : Date.now();
       all.push({ kind: 'event', data: e, ts });
@@ -1002,7 +1025,7 @@ const ActivityFeed = memo(function ActivityFeed({
     // Sort newest first
     all.sort((a, b) => b.ts - a.ts);
     return all.slice(0, 40);
-  }, [commits, events, extras]);
+  }, [events, extras]);
 
   // Counts per type for filter badges
   const counts = useMemo(() => {
@@ -1157,8 +1180,47 @@ const ActivityFeed = memo(function ActivityFeed({
             } as React.CSSProperties}
             className="hide-scrollbar"
           >
+            {/* GitHub (all repos) option */}
+            {(() => {
+              const selected = isAllRepos;
+              return (
+                <button
+                  type="button"
+                  onClick={() => { setRepoOverride(ALL_REPOS_KEY); setRepoPickerOpen(false); }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    width: '100%',
+                    padding: '7px 12px',
+                    border: 'none',
+                    borderBottom: '1px solid var(--t-divider-subtle)',
+                    background: selected ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
+                    color: selected ? '#2563eb' : 'var(--t-text)',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    textAlign: 'left',
+                  }}
+                >
+                  <Globe size={12} strokeWidth={2} style={{ color: selected ? '#2563eb' : 'var(--t-text-muted)' }} />
+                  GitHub
+                  <span style={{
+                    marginLeft: 'auto',
+                    fontSize: 9,
+                    color: 'var(--t-text-faint)',
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                  }}>
+                    all repos
+                  </span>
+                  {selected ? <CheckCircle2 size={12} strokeWidth={2} style={{ color: '#2563eb' }} /> : null}
+                </button>
+              );
+            })()}
+            {/* Individual repos */}
             {allRepos.map((r) => {
-              const selected = r === repo;
+              const selected = r === repo && !isAllRepos;
               return (
                 <button
                   key={r}
