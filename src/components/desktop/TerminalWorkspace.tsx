@@ -489,7 +489,7 @@ function PreviewPane({ previews, onRefresh, onClose }: {
           />
           <iframe
             ref={(el) => { if (el) iframeRefs.current.set(p.id, el); }}
-            src={p.url.replace('0.0.0.0', 'localhost')}
+            src={`/api/panel/proxy?url=${encodeURIComponent(p.url.replace('0.0.0.0', 'localhost'))}`}
             title={`Preview ${p.url}`}
             style={{
               flex: 1,
