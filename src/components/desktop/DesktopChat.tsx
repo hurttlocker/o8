@@ -43,6 +43,7 @@ import { CodeBlock } from './CodeBlock';
 import { DiffModal } from './DiffModal';
 import { MessageActions } from './MessageActions';
 import { ttsEngine } from '@/lib/tts/engine';
+import { autocompleteSlashCommand, buildSlashTerminalInput, getSlashCommandSuggestions, isSlashCommandText } from '@/lib/slash-commands';
 
 // ── Types ──
 
@@ -115,11 +116,27 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName,
   }
 
   if (isUser) {
+    const isSlashCommand = isSlashCommandText(entry.text);
     return (
       <div className={`remodex-user-turn-wrap${isNew ? ' remodex-turn-new' : ''}`}>
         {hasText ? (
-          <div className="remodex-user-bubble">
-            <div className="remodex-rich-text">
+          <div
+            className="remodex-user-bubble"
+            style={isSlashCommand ? {
+              background: 'rgba(15, 23, 42, 0.92)',
+              color: '#f8fafc',
+              border: '1px solid rgba(148, 163, 184, 0.18)',
+            } : undefined}
+          >
+            {isSlashCommand ? (
+              <div style={{ marginBottom: 6, fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#93c5fd' }}>
+                Slash Command
+              </div>
+            ) : null}
+            <div
+              className="remodex-rich-text"
+              style={isSlashCommand ? { fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: '0.88rem' } : undefined}
+            >
               {entry.text.split('\n').map((line, i) => (
                 <p key={i} className="remodex-rich-paragraph">{line}</p>
               ))}
@@ -664,7 +681,13 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
     },
   }), [selectedKey]);
 
-  const { isConnected: wsConnected, connectionState } = useDesktopWebSocket(selectedKey || undefined, wsCallbacks);
+  const {
+    isConnected: wsConnected,
+    connectionState,
+    sendTerminalAttach,
+    sendTerminalInput,
+    sendTerminalDetach,
+  } = useDesktopWebSocket(selectedKey || undefined, wsCallbacks);
 
   // Report WS status to parent
   useEffect(() => { onWsStatusChange?.(connectionState); }, [connectionState, onWsStatusChange]);
@@ -672,6 +695,19 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
   const isClaudeCode = selectedSession?.runtime === 'claude-code';
   const isCodexLocal = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'discovered';
   const isLocalAgent = isClaudeCode || isCodexLocal;
+  const supportsSlashTerminalRelay = Boolean(
+    selectedSession?.tmuxSession && (selectedSession?.runtime === 'codex' || selectedSession?.runtime === 'claude-code'),
+  );
+  const slashSuggestions = getSlashCommandSuggestions(draft);
+  const showSlashSuggestions = isSlashCommandText(draft) && slashSuggestions.length > 0;
+
+  useEffect(() => {
+    if (!supportsSlashTerminalRelay || !selectedSession?.tmuxSession) return;
+    sendTerminalAttach(selectedSession.tmuxSession, 120, 32);
+    return () => {
+      sendTerminalDetach(selectedSession.tmuxSession!);
+    };
+  }, [selectedSession?.tmuxSession, sendTerminalAttach, sendTerminalDetach, supportsSlashTerminalRelay]);
 
   const projectGroups = useMemo(
     () => snapshot ? buildProjectGroups(snapshot, selectedSession) : [],
@@ -1122,6 +1158,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
     if ((!draft.trim() && pendingFiles.length === 0) || !selectedKey || sending) return;
     const text = draft.trim();
     const files = [...pendingFiles];
+    const relaySlashToTerminal = Boolean(text && files.length === 0 && isSlashCommandText(text) && supportsSlashTerminalRelay && selectedSession?.tmuxSession);
     setDraft('');
     setPendingFiles([]);
     setSending(true);
@@ -1141,6 +1178,13 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
     scrollToBottom(true);
 
     try {
+      if (relaySlashToTerminal && selectedSession?.tmuxSession) {
+        sendTerminalAttach(selectedSession.tmuxSession, 120, 32);
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        sendTerminalInput(selectedSession.tmuxSession, buildSlashTerminalInput(text));
+        return;
+      }
+
       // Route to local agent CLIs based on runtime
       if (isClaudeCode) {
         await sendToClaudeCode(text);
@@ -1172,7 +1216,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
       files.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview); });
       setSending(false);
     }
-  }, [draft, pendingFiles, selectedKey, sending, isClaudeCode, isCodexLocal, sendToClaudeCode, sendToCodex, fetchTranscript, scrollToBottom, playSendSound]);
+  }, [draft, pendingFiles, selectedKey, sending, isClaudeCode, isCodexLocal, selectedSession?.tmuxSession, sendTerminalAttach, sendTerminalInput, supportsSlashTerminalRelay, selectedSession, sendToClaudeCode, sendToCodex, fetchTranscript, scrollToBottom, playSendSound]);
 
   // ── Stop / Abort run ──
   const stopRun = useCallback(async () => {
@@ -1199,7 +1243,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
     if (transcript.length === 0) { setAgentRunning(false); return; }
     const last = transcript[transcript.length - 1];
     // If last message is user (or local optimistic) → agent is generating
-    if (last.role === 'user' || last.id.startsWith('local-')) {
+    if ((last.role === 'user' || last.id.startsWith('local-')) && !isSlashCommandText(last.text)) {
       setAgentRunning(true);
       // No auto-scroll — user controls position
     } else {
@@ -1328,6 +1372,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
+        minHeight: 0, // critical for flex overflow scrolling
         background: 'var(--t-bg)',
         borderLeft: '1px solid var(--t-divider)',
         position: 'relative',
@@ -2002,6 +2047,14 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
             value={draft}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => {
+              if (e.key === 'Tab' && showSlashSuggestions) {
+                e.preventDefault();
+                const nextValue = autocompleteSlashCommand(draft);
+                if (nextValue) {
+                  setDraft(`${nextValue} `);
+                }
+                return;
+              }
               if (e.key === 'Enter' && !e.shiftKey && draft.trim()) {
                 e.preventDefault();
                 void send();
@@ -2016,6 +2069,50 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
               transition: 'none',
             }}
           />
+          {showSlashSuggestions ? (
+            <div style={{
+              marginTop: 8,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+              padding: 10,
+              borderRadius: 14,
+              border: '1px solid rgba(37, 99, 235, 0.12)',
+              background: 'rgba(255,255,255,0.86)',
+            }}>
+              {slashSuggestions.slice(0, 6).map((item) => (
+                <button
+                  key={item.command}
+                  type="button"
+                  onClick={() => {
+                    setDraft(`${item.command} `);
+                    composeRef.current?.focus();
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                    width: '100%',
+                    minHeight: 36,
+                    padding: '8px 10px',
+                    borderRadius: 10,
+                    border: 'none',
+                    background: 'rgba(37, 99, 235, 0.04)',
+                    color: 'var(--t-text)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                  }}
+                >
+                  <span style={{ fontSize: 12, fontWeight: 700, fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                    {item.command}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{item.description}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
 
           {/* Action row */}
           <div className="remodex-compose-row">

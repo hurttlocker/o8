@@ -1178,7 +1178,9 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
 
         // Scan for localhost URLs (skip during first 5s to ignore replayed history)
         if (urlDetectionEnabledRef.current) try {
-          const raw = atob(data);
+          // Decode base64 → bytes → UTF-8 string for reliable regex matching
+          const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
+          const raw = new TextDecoder().decode(bytes);
           const clean = raw.replace(ANSI_RE, '');
           const matches = clean.matchAll(LOCALHOST_RE);
           for (const match of matches) {
