@@ -677,9 +677,7 @@ function handleTerminalImage(_client: ClientState, msg: Record<string, unknown>)
     const b64 = data.toString('base64');
     const filename = require('path').basename(resolved);
     const filenameB64 = Buffer.from(filename).toString('base64');
-    const iip = `\x1b]1337;File=name=${filenameB64};size=${data.length};inline=1:${b64}\x07\n`;
-
-    // Broadcast to ALL clients attached to this terminal session (not the sender)
+    // Send raw components — client builds the IIP escape sequence
     const attachment = terminalAttachments.get(sessionName);
     if (!attachment) {
       console.log(`[ws-server] terminal-image: no attachment for ${sessionName}`);
@@ -689,7 +687,12 @@ function handleTerminalImage(_client: ClientState, msg: Record<string, unknown>)
     const imageMsg = JSON.stringify({
       channel: 'terminal',
       event: 'image',
-      data: { sessionName, iip },
+      data: {
+        sessionName,
+        filenameB64,
+        fileSize: data.length,
+        imageB64: b64,
+      },
     });
 
     for (const cid of attachment.clientIds) {
