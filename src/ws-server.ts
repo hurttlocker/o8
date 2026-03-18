@@ -315,6 +315,9 @@ function handleClientMessage(client: ClientState, raw: string) {
     case 'terminal-detach':
       handleTerminalDetach(client, msg);
       break;
+    case 'terminal-image':
+      handleTerminalImage(client, msg);
+      break;
   }
 }
 
@@ -661,6 +664,35 @@ function handleTerminalResize(client: ClientState, msg: Record<string, unknown>)
     attachment.cols = cols;
     attachment.rows = rows;
   } catch { /* resize may fail if PTY exited */ }
+}
+
+function handleTerminalImage(client: ClientState, msg: Record<string, unknown>) {
+  const sessionName = msg.sessionName as string;
+  const filePath = msg.filePath as string;
+  if (!sessionName || !filePath) {
+    sendTerminal(client, 'error', { sessionName: sessionName ?? '', error: 'sessionName and filePath required' });
+    return;
+  }
+
+  try {
+    // Resolve path
+    const resolved = filePath.replace(/^~/, process.env.HOME ?? '/tmp');
+    const data = readFileSync(resolved);
+    const b64 = data.toString('base64');
+    const filename = require('path').basename(resolved);
+    const filenameB64 = Buffer.from(filename).toString('base64');
+
+    // Send the IIP sequence directly to the client (bypasses tmux entirely)
+    sendTerminal(client, 'image', {
+      sessionName,
+      iip: `\x1b]1337;File=name=${filenameB64};size=${data.length};inline=1:${b64}\x07\n`,
+    });
+  } catch (err) {
+    sendTerminal(client, 'error', {
+      sessionName,
+      error: `Image load failed: ${err instanceof Error ? err.message : 'unknown'}`,
+    });
+  }
 }
 
 function handleTerminalDetach(client: ClientState, msg: Record<string, unknown>) {
