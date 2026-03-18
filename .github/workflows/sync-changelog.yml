@@ -1,0 +1,62 @@
+name: Sync Public Changelog
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout private repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        run: |
+          cat > /tmp/CHANGELOG.md << 'HEADER'
+          # Changelog
+
+          Development activity for Cortex IDE. Commit messages from the private repository.
+
+          ---
+          HEADER
+
+          current_date=""
+          git log --format="%as|%h|%s" --no-merges | while IFS='|' read -r date hash msg; do
+            if [ "$date" != "$current_date" ]; then
+              echo ""
+              echo "## $date"
+              echo ""
+              current_date="$date"
+            fi
+            echo "- \`$hash\` $msg"
+          done >> /tmp/CHANGELOG.md
+
+      - name: Generate stats
+        run: |
+          echo "# Development Stats" > /tmp/STATS.md
+          echo "" >> /tmp/STATS.md
+          echo "Last updated: $(date -u +%Y-%m-%d)" >> /tmp/STATS.md
+          echo "" >> /tmp/STATS.md
+          echo "| Metric | Value |" >> /tmp/STATS.md
+          echo "|---|---|" >> /tmp/STATS.md
+          echo "| Total commits | $(git rev-list --count HEAD) |" >> /tmp/STATS.md
+          echo "| Days active | $(git log --format="%as" | sort -u | wc -l | tr -d ' ') |" >> /tmp/STATS.md
+          echo "| This week | $(git log --since='7 days ago' --oneline --no-merges | wc -l | tr -d ' ') commits |" >> /tmp/STATS.md
+          echo "| Today | $(git log --since='1 day ago' --oneline --no-merges | wc -l | tr -d ' ') commits |" >> /tmp/STATS.md
+
+      - name: Push to public repo
+        env:
+          TOKEN: ${{ secrets.PUBLIC_CHANGELOG_TOKEN }}
+        run: |
+          git clone https://x-access-token:${TOKEN}@github.com/hurttlocker/cortex-ide-public.git /tmp/public
+          cp /tmp/CHANGELOG.md /tmp/public/CHANGELOG.md
+          cp /tmp/STATS.md /tmp/public/STATS.md
+          cd /tmp/public
+          git config user.name "hurttlocker"
+          git config user.email "noreply@hurttlocker.dev"
+          git add -A
+          git diff --cached --quiet || git commit -m "sync: Update changelog $(date -u +%Y-%m-%d)"
+          git push
