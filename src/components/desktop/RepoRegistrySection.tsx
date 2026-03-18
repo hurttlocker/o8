@@ -10,6 +10,7 @@ import {
   ExternalLink,
   FolderOpen,
   GitBranch,
+  MoreHorizontal,
   Plus,
   PlayCircle,
   Settings2,
@@ -383,6 +384,8 @@ function RepoCard({
   onRemove: (repo: RepoRegistryEntry) => void;
   onSaveSetup: (repoId: string, setup: RepoSetupConfig) => Promise<void>;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draftSetup, setDraftSetup] = useState<RepoSetupConfig>(repo.setup);
   const [saving, setSaving] = useState(false);
@@ -415,198 +418,220 @@ function RepoCard({
   }, []);
 
   return (
-    <div
-      style={{
-        background: 'rgba(255, 255, 255, 0.7)',
-        border: '1px solid var(--t-panel-border)',
-        borderRadius: 14,
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-        boxShadow: 'var(--t-panel-shadow)',
-        overflow: 'hidden',
-      }}
-    >
-      <div style={{ padding: '14px 14px 12px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+    <div style={{ borderBottom: '1px solid var(--t-divider-subtle)' }}>
+      {/* Compact header row — Conductor style */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '8px 4px',
+          cursor: 'pointer',
+        }}
+        onClick={() => setExpanded((v) => !v)}
+      >
+        <span style={{ color: 'var(--t-text-muted)', flexShrink: 0, display: 'flex' }}>
+          {expanded ? <ChevronDown size={14} strokeWidth={2} /> : <ChevronRight size={14} strokeWidth={2} />}
+        </span>
+        <span
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: 'var(--t-text)',
+            letterSpacing: '-0.01em',
+            flex: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {repo.name}
+        </span>
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 3,
+            padding: '1px 6px',
+            borderRadius: 999,
+            background: 'var(--t-divider-subtle)',
+            color: 'var(--t-text-secondary)',
+            fontSize: 10,
+            fontWeight: 600,
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+            flexShrink: 0,
+          }}
+        >
+          <GitBranch size={10} strokeWidth={2} />
+          {repo.defaultBranch}
+        </span>
+        {/* Overflow menu trigger */}
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 24,
+            height: 24,
+            borderRadius: 6,
+            border: 'none',
+            background: menuOpen ? 'var(--t-divider-subtle)' : 'transparent',
+            color: 'var(--t-text-muted)',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          <MoreHorizontal size={14} strokeWidth={2} />
+        </button>
+      </div>
+
+      {/* Overflow menu dropdown */}
+      {menuOpen ? (
+        <div
+          style={{
+            position: 'relative',
+          }}
+        >
           <div
             style={{
-              width: 32,
-              height: 32,
+              position: 'absolute',
+              right: 4,
+              top: -4,
+              zIndex: 50,
+              minWidth: 160,
+              padding: '4px 0',
               borderRadius: 10,
-              background: 'rgba(37, 99, 235, 0.08)',
-              border: '1px solid rgba(37, 99, 235, 0.16)',
-              color: '#2563eb',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
+              border: '1px solid var(--t-panel-border)',
+              background: 'rgba(255, 255, 255, 0.95)',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
             }}
           >
-            <FolderOpen size={15} strokeWidth={2} />
+            {[
+              { label: 'Launch Agent', icon: <PlayCircle size={12} strokeWidth={2} />, action: () => { onLaunchAgent(repo); setMenuOpen(false); } },
+              { label: 'New Workspace', icon: <Plus size={12} strokeWidth={2.5} />, action: () => { onCreateWorkspace(repo); setMenuOpen(false); } },
+              { label: 'Settings', icon: <Settings2 size={12} strokeWidth={2} />, action: () => { setSettingsOpen((v) => !v); setMenuOpen(false); } },
+              ...(githubUrl ? [{ label: 'Open on GitHub', icon: <ExternalLink size={12} strokeWidth={2} />, action: () => { onOpenGitHub(repo); setMenuOpen(false); } }] : []),
+              { label: 'Remove', icon: <Trash2 size={12} strokeWidth={2} />, action: () => { onRemove(repo); setMenuOpen(false); }, danger: true },
+            ].map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={item.action}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                  padding: '7px 12px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: (item as { danger?: boolean }).danger ? '#ef4444' : 'var(--t-text)',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  textAlign: 'left',
+                }}
+              >
+                <span style={{ color: (item as { danger?: boolean }).danger ? '#ef4444' : 'var(--t-text-muted)', display: 'flex' }}>{item.icon}</span>
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Expanded content */}
+      {expanded ? (
+        <div style={{ padding: '0 4px 8px 28px' }}>
+          {/* Quick actions row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+            <button
+              type="button"
+              onClick={() => onCreateWorkspace(repo)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: 0,
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--t-text-muted)',
+                fontSize: 11,
+                fontWeight: 500,
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              <Plus size={11} strokeWidth={2.5} />
+              New workspace
+            </button>
+            <button
+              type="button"
+              onClick={() => onLaunchAgent(repo)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: 0,
+                border: 'none',
+                background: 'transparent',
+                color: '#2563eb',
+                fontSize: 11,
+                fontWeight: 500,
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              <PlayCircle size={11} strokeWidth={2} />
+              Launch agent
+            </button>
           </div>
 
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span
-                style={{
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: 'var(--t-text)',
-                  letterSpacing: '-0.01em',
-                }}
-              >
-                {repo.name}
-              </span>
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '2px 8px',
-                  borderRadius: 999,
-                  background: 'var(--t-divider-subtle)',
-                  color: 'var(--t-text-secondary)',
-                  fontSize: 10,
-                  fontWeight: 600,
-                  fontFamily: '"SF Mono", ui-monospace, monospace',
-                }}
-              >
-                <GitBranch size={11} strokeWidth={2} />
-                {repo.defaultBranch}
-              </span>
-            </div>
-
+          {/* Workspace notice */}
+          {workspaceNotice ? (
             <div
               style={{
-                marginTop: 5,
-                fontSize: 11,
-                color: 'var(--t-text-muted)',
-                fontFamily: '"SF Mono", ui-monospace, monospace',
-                lineHeight: 1.45,
-                wordBreak: 'break-all',
-              }}
-              title={repo.localPath}
-            >
-              {shortenPath(repo.localPath)}
-            </div>
-
-            <div
-              style={{
-                marginTop: 8,
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                flexWrap: 'wrap',
-                fontSize: 11,
-                color: 'var(--t-text-muted)',
+                padding: '5px 0',
+                fontSize: 12,
+                color: 'var(--t-text)',
               }}
             >
-              <span>Last opened {formatRelativeTime(repo.lastOpenedAt)}</span>
-              <span style={{ color: 'var(--t-text-faint)' }}>·</span>
-              <span
-                style={{
-                  fontFamily: '"SF Mono", ui-monospace, monospace',
-                  color: 'var(--t-text-faint)',
-                }}
-              >
-                {repo.remoteUrl ? repo.remoteUrl.replace(/^https?:\/\//, '') : 'No remote configured'}
+              <GitBranch size={12} strokeWidth={2} style={{ color: '#15803d', flexShrink: 0 }} />
+              <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontWeight: 500 }}>
+                {workspaceNotice.branch}
               </span>
+              <span style={{ fontSize: 10, color: '#15803d', fontWeight: 600 }}>Ready</span>
             </div>
-          </div>
-        </div>
+          ) : null}
 
-        {workspaceNotice ? (
+          {/* Repo metadata — compact */}
           <div
             style={{
-              marginTop: 12,
-              padding: 10,
-              borderRadius: 12,
-              border: '1px solid rgba(34, 197, 94, 0.18)',
-              background: 'rgba(34, 197, 94, 0.08)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
+              fontSize: 10,
+              color: 'var(--t-text-faint)',
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+              lineHeight: 1.6,
+              marginTop: 2,
             }}
           >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                fontSize: 11,
-                fontWeight: 700,
-                color: '#15803d',
-              }}
-            >
-              <CheckCircle2 size={13} strokeWidth={2} />
-              Workspace ready
-            </div>
-            <div
-              style={{
-                fontSize: 10,
-                color: '#166534',
-                fontFamily: '"SF Mono", ui-monospace, monospace',
-                lineHeight: 1.45,
-                wordBreak: 'break-all',
-              }}
-            >
-              {workspaceNotice.branch}
-            </div>
-            <div
-              style={{
-                fontSize: 10,
-                color: '#166534',
-                fontFamily: '"SF Mono", ui-monospace, monospace',
-                lineHeight: 1.45,
-                wordBreak: 'break-all',
-              }}
-            >
-              {shortenPath(workspaceNotice.path)}
-            </div>
+            <div>{shortenPath(repo.localPath)}</div>
+            {repo.remoteUrl ? (
+              <div>{repo.remoteUrl.replace(/^https?:\/\//, '')}</div>
+            ) : null}
           </div>
-        ) : null}
-
-        <div
-          style={{
-            marginTop: 12,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            flexWrap: 'wrap',
-          }}
-        >
-          <RepoActionButton
-            label="Launch Agent"
-            icon={<PlayCircle size={12} strokeWidth={2} />}
-            onClick={() => onLaunchAgent(repo)}
-            active
-          />
-          <RepoActionButton
-            label="New Workspace"
-            icon={<Plus size={12} strokeWidth={2.5} />}
-            onClick={() => onCreateWorkspace(repo)}
-          />
-          <RepoActionButton
-            label="Settings"
-            icon={<Settings2 size={12} strokeWidth={2} />}
-            onClick={() => setSettingsOpen((current) => !current)}
-            active={settingsOpen}
-          />
-          <RepoActionButton
-            label="Open on GitHub"
-            icon={<ExternalLink size={12} strokeWidth={2} />}
-            onClick={() => onOpenGitHub(repo)}
-            disabled={!githubUrl}
-          />
-          <RepoActionButton
-            label="Remove"
-            icon={<Trash2 size={12} strokeWidth={2} />}
-            onClick={() => onRemove(repo)}
-            danger
-          />
         </div>
-      </div>
+      ) : null}
 
+      {/* Settings panel (inline, below card when open) */}
       {settingsOpen ? (
         <div
           style={{
@@ -1223,34 +1248,7 @@ export function RepoRegistrySection({
             gap: 8,
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-            <button
-              type="button"
-              onClick={() => {
-                setAddOpen(true);
-                setValidationError(null);
-                setValidationResult(null);
-              }}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                minHeight: 32,
-                padding: '8px 10px',
-                borderRadius: 10,
-                border: '1px solid rgba(239, 68, 68, 0.18)',
-                background: 'rgba(239, 68, 68, 0.08)',
-                color: '#b91c1c',
-                fontSize: 11,
-                fontWeight: 700,
-                cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
-              }}
-            >
-              <Plus size={12} strokeWidth={2.5} />
-              Add Repository
-            </button>
-          </div>
+          {/* Compact repo list — no top button, Add is at bottom */}
 
           {loading ? (
             <div style={{ fontSize: 13, color: 'var(--t-text-muted)', padding: '8px 2px' }}>Loading repositories…</div>
@@ -1323,6 +1321,34 @@ export function RepoRegistrySection({
                 onSaveSetup={handleSaveSetup}
               />
             ))
+          ) : null}
+
+          {/* Compact footer — Add repository */}
+          {!loading ? (
+            <button
+              type="button"
+              onClick={() => {
+                setAddOpen(true);
+                setValidationError(null);
+                setValidationResult(null);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 4px',
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--t-text-muted)',
+                fontSize: 11,
+                fontWeight: 500,
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              <FolderOpen size={12} strokeWidth={2} />
+              Add repository
+            </button>
           ) : null}
         </div>
       ) : null}
