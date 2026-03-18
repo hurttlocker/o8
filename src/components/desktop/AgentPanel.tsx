@@ -1826,7 +1826,7 @@ export const AgentPanel = memo(function AgentPanel({
       try {
         // Fetch inventory, workspace enrichments, and registered repos in parallel
         const [invRes, wsRes, repoRes] = await Promise.all([
-          fetch('/api/runtime/inventory').catch(() => null),
+          fetch(`/api/runtime/inventory?fleetMode=${typeof window !== 'undefined' ? localStorage.getItem('cortex-ide-fleet-mode') ?? 'smart' : 'smart'}`).catch(() => null),
           fetch('/api/panel/workspaces').catch(() => null),
           fetch('/api/panel/repos').catch(() => null),
         ]);
