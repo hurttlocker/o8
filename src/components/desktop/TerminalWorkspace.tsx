@@ -1198,15 +1198,19 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
             // Ensure http:// prefix
             if (!url.startsWith('http')) url = `http://${url}`;
 
+            const newPreview: LocalhostPreview = {
+              id: `preview-${port}`,
+              tabId: tab?.id ?? '',
+              url,
+              port,
+              detectedAt: now,
+            };
+            console.log(`[terminal] Adding preview:`, newPreview);
             setPreviews(prev => {
               if (prev.some(p => p.port === port)) return prev;
-              return [...prev, {
-                id: `preview-${port}`,
-                tabId: tab?.id ?? '',
-                url,
-                port,
-                detectedAt: now,
-              }];
+              const updated = [...prev, newPreview];
+              console.log(`[terminal] Previews now:`, updated.length);
+              return updated;
             });
           }
         } catch { /* ignore decode errors */ }
