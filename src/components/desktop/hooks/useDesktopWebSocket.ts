@@ -195,7 +195,9 @@ export function useDesktopWebSocket(
             const filenameB64 = data.filenameB64 as string;
             const fileSize = data.fileSize as number;
             const imageB64 = data.imageB64 as string;
-            const iip = `\x1b]1337;File=name=${filenameB64};size=${fileSize};inline=1:${imageB64}\x07`;
+            // width=auto;height=auto tells the addon to size based on pixel dimensions
+            // preserveAspectRatio=1 keeps proportions correct
+            const iip = `\x1b]1337;File=name=${filenameB64};size=${fileSize};width=auto;height=auto;inline=1;preserveAspectRatio=1:${imageB64}\x07`;
             cbRef.current.onTerminalImage?.(data.sessionName as string, iip);
           }
           break;
