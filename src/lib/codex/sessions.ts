@@ -151,7 +151,7 @@ async function codexStateExists() {
   }
 }
 
-async function queryCodexThreads(limit = 6) {
+export async function queryCodexThreads(limit = 6) {
   if (!(await codexStateExists())) {
     return [] as CodexThreadRow[];
   }

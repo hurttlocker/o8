@@ -20,6 +20,7 @@ import type {
   PendingOwnedTurn,
 } from './types';
 import { buildOwnedCorrectionDraft, fileToDataUrl } from './utils';
+import { buildSlashTerminalInput, isSlashCommandText } from '@/lib/slash-commands';
 
 const mobileClockFormatter = new Intl.DateTimeFormat('en-US', {
   hour: 'numeric',
@@ -171,6 +172,7 @@ interface SteerSubmitArgs {
   refreshInbox: () => Promise<MobileInboxSnapshot>;
   loadHistory: (sessionKey: string, force?: boolean) => Promise<unknown>;
   playSendClick: () => void;
+  relaySlashCommand: (sessionKey: string, commandText: string) => Promise<boolean>;
 }
 
 export async function submitSteerTurn({
@@ -193,13 +195,15 @@ export async function submitSteerTurn({
   refreshInbox,
   loadHistory,
   playSendClick,
+  relaySlashCommand,
 }: SteerSubmitArgs) {
   if (actionStateBySession[sessionKey] === 'steering') return;
 
   const targetSession = snapshot.sessions.find((session) => session.sessionKey === sessionKey);
   const isDiscoveredCodex = targetSession?.runtime === 'codex' && targetSession?.runtimeSurface?.ownership === 'discovered';
   const isOwnedCodex = targetSession?.runtime === 'codex' && targetSession?.runtimeSurface?.ownership === 'owned';
-  const isChat = targetSession?.runtime === 'openclaw' || isDiscoveredCodex || isOwnedCodex;
+  const isClaudeCode = targetSession?.runtime === 'claude-code';
+  const isChat = targetSession?.runtime === 'openclaw' || isDiscoveredCodex || isOwnedCodex || isClaudeCode;
   if (!isChat) {
     setActionNoteBySession((current) => ({ ...current, [sessionKey]: 'Cannot send to this session type.' }));
     return;
@@ -210,6 +214,28 @@ export async function submitSteerTurn({
   if (!message && attachments.length === 0) {
     setActionNoteBySession((current) => ({ ...current, [sessionKey]: 'Type a message or attach an image first.' }));
     return;
+  }
+
+  if (message && attachments.length === 0 && isSlashCommandText(message)) {
+    const relayed = await relaySlashCommand(sessionKey, buildSlashTerminalInput(message));
+    if (relayed) {
+      playSendClick();
+      const optimisticEntry: MobileTranscriptEntry = {
+        id: `optimistic-${Date.now()}`,
+        role: 'user',
+        text: message,
+        timestampLabel: new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }),
+      };
+      setHistoryBySession((current) => ({
+        ...current,
+        [sessionKey]: [...(current[sessionKey] ?? []), optimisticEntry],
+      }));
+      setDraftBySession((current) => ({ ...current, [sessionKey]: '' }));
+      setPreEnhanceDraft(null);
+      setWaitingForResponse(false);
+      setSurfaceNote('Slash command sent to terminal.');
+      return;
+    }
   }
 
   playSendClick();
@@ -242,6 +268,14 @@ export async function submitSteerTurn({
 
   try {
     if (isDiscoveredCodex) {
+      // For discovered (running) Codex sessions, send directly via exec resume.
+      // The backend uses `codex exec resume <thread-id> <prompt>` to inject
+      // the message into the existing conversation.
+      if (targetSession?.status === 'running') {
+        await runAction({ action: 'resume' as MobileActionRequest['action'], sessionKey, message });
+        setSurfaceNote('Sent to Codex…');
+      } else {
+      // Only launch a new session if the discovered session is NOT running
       const cwd = targetSession?.runtimeSurface?.cwd ?? targetSession?.workspace ?? '';
       const existingOwned = snapshot.sessions.find((session) =>
         session.runtime === 'codex'
@@ -270,9 +304,10 @@ export async function submitSteerTurn({
           setSurfaceNote('Codex session launched.');
         }
       }
-    } else if (isOwnedCodex) {
+      } // close outer else (non-running discovered codex)
+    } else if (isOwnedCodex || isClaudeCode) {
       await runAction({ action: 'resume' as MobileActionRequest['action'], sessionKey, message });
-      setSurfaceNote('Sent to Codex…');
+      setSurfaceNote(isClaudeCode ? 'Sent to Claude Code…' : 'Sent to Codex…');
     } else {
       await runAction({
         action: 'steer',
@@ -334,6 +369,7 @@ interface OwnedResumeArgs {
   setSurfaceNote: Dispatch<SetStateAction<string | null>>;
   runAction: (payload: MobileActionRequest) => Promise<MobileActionResponse | undefined>;
   playSendClick: () => void;
+  relaySlashCommand: (sessionKey: string, commandText: string) => Promise<boolean>;
 }
 
 export async function submitOwnedResumeTurn({
@@ -346,6 +382,7 @@ export async function submitOwnedResumeTurn({
   setSurfaceNote,
   runAction,
   playSendClick,
+  relaySlashCommand,
 }: OwnedResumeArgs) {
   if (actionStateBySession[sessionKey] === 'steering') return;
 
@@ -353,6 +390,16 @@ export async function submitOwnedResumeTurn({
   if (!message) {
     setActionNoteBySession((current) => ({ ...current, [sessionKey]: 'Write an instruction or load the correction draft first.' }));
     return;
+  }
+
+  if (isSlashCommandText(message)) {
+    const relayed = await relaySlashCommand(sessionKey, buildSlashTerminalInput(message));
+    if (relayed) {
+      playSendClick();
+      setDraftBySession((current) => ({ ...current, [sessionKey]: '' }));
+      setSurfaceNote('Slash command sent to terminal.');
+      return;
+    }
   }
 
   playSendClick();
