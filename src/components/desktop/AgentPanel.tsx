@@ -857,18 +857,63 @@ const FILTER_TABS: { key: FeedFilter; label: string; icon: React.ReactNode }[] =
   { key: 'ci', label: 'CI', icon: <CheckCircle2 size={11} strokeWidth={2} /> },
 ];
 
-const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommit }: { events: EventEntry[]; commits: { hash: string; message: string; age: string }[]; onSelectCommit?: (hash: string) => void }) {
+// Agent → GitHub repo mapping (same as workspaces API)
+const AGENT_REPO_MAP: Record<string, string> = {
+  'agent:main:main': 'hurttlocker/cortex-ide',
+  'agent:ace:main': 'hurttlocker/cortex',
+  'agent:hawk:main': 'hurttlocker/cortex',
+};
+
+// Display names for repos
+const REPO_DISPLAY: Record<string, string> = {
+  'hurttlocker/cortex-ide': 'Cortex IDE',
+  'hurttlocker/cortex': 'Cortex',
+  'hurttlocker/sleeping-beauties': 'Copy Trade',
+  'LavonTMCQ/spear-production': 'Spear',
+  'LavonTMCQ/mybeautifulwife': 'Eyes Web',
+};
+
+const KNOWN_REPOS = Object.keys(REPO_DISPLAY);
+
+const ActivityFeed = memo(function ActivityFeed({
+  events,
+  commits,
+  onSelectCommit,
+  activeRepo: externalRepo,
+  activeAgentKey,
+}: {
+  events: EventEntry[];
+  commits: { hash: string; message: string; age: string }[];
+  onSelectCommit?: (hash: string) => void;
+  activeRepo?: string | null;
+  activeAgentKey?: string | null;
+}) {
   const [extras, setExtras] = useState<{ issues: ActivityItem[]; prs: ActivityItem[]; ciRuns: ActivityItem[] }>({ issues: [], prs: [], ciRuns: [] });
   const [filter, setFilter] = useState<FeedFilter>('all');
+  const [repoOverride, setRepoOverride] = useState<string | null>(null);
+  const [repoPickerOpen, setRepoPickerOpen] = useState(false);
 
-  // Fetch issues, PRs, CI in parallel on mount
+  // Resolve active repo: override > agent-derived > external > default
+  const repo = useMemo(() => {
+    if (repoOverride) return repoOverride;
+    if (activeAgentKey && AGENT_REPO_MAP[activeAgentKey]) return AGENT_REPO_MAP[activeAgentKey];
+    if (externalRepo) return externalRepo;
+    return 'hurttlocker/cortex-ide';
+  }, [repoOverride, activeAgentKey, externalRepo]);
+
+  const repoLabel = REPO_DISPLAY[repo] ?? repo.split('/').pop() ?? repo;
+
+  // Clear override when agent changes
+  useEffect(() => { setRepoOverride(null); }, [activeAgentKey]);
+
+  // Fetch issues, PRs, CI for selected repo
   useEffect(() => {
     async function fetchExtras() {
       try {
         const [issuesRes, prsRes, ciRes] = await Promise.all([
-          fetch('/api/panel/issues?repo=hurttlocker/cortex-ide').catch(() => null),
-          fetch('/api/panel/prs?repo=hurttlocker/cortex-ide').catch(() => null),
-          fetch('/api/panel/ci?repo=hurttlocker/cortex-ide').catch(() => null),
+          fetch(`/api/panel/issues?repo=${encodeURIComponent(repo)}`).catch(() => null),
+          fetch(`/api/panel/prs?repo=${encodeURIComponent(repo)}`).catch(() => null),
+          fetch(`/api/panel/ci?repo=${encodeURIComponent(repo)}`).catch(() => null),
         ]);
 
         const issueItems: ActivityItem[] = [];
@@ -904,7 +949,7 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
     fetchExtras();
     const id = setInterval(fetchExtras, 60_000);
     return () => clearInterval(id);
-  }, []);
+  }, [repo]);
 
   // Build unified timeline
   const items = useMemo<ActivityItem[]>(() => {
@@ -981,55 +1026,194 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {/* Filter tabs — iOS segmented control style */}
+      {/* Repo selector + filter tabs — Apple toolbar style */}
       <div style={{
-        display: 'flex',
-        gap: 1,
-        padding: '8px 10px 6px',
         position: 'sticky',
         top: 0,
         zIndex: 3,
         background: 'var(--t-panel)',
+        borderBottom: '1px solid var(--t-divider-subtle)',
       }}>
-        {FILTER_TABS.map((tab) => {
-          const active = filter === tab.key;
-          const count = counts[tab.key];
-          return (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setFilter(tab.key)}
-              style={{
+        {/* Repo selector row */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '8px 10px 4px',
+        }}>
+          <button
+            type="button"
+            onClick={() => setRepoPickerOpen(v => !v)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '3px 8px 3px 6px',
+              borderRadius: 8,
+              border: '1px solid var(--t-divider-subtle)',
+              background: 'rgba(255, 255, 255, 0.6)',
+              backdropFilter: 'blur(12px)',
+              WebkitBackdropFilter: 'blur(12px)',
+              cursor: 'pointer',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontSize: 11,
+              fontWeight: 600,
+              color: 'var(--t-text)',
+              letterSpacing: '-0.01em',
+            }}
+          >
+            <Folder size={11} strokeWidth={2} style={{ color: '#2563eb' }} />
+            {repoLabel}
+            <ChevronDown size={10} strokeWidth={2} style={{
+              color: 'var(--t-text-muted)',
+              transform: repoPickerOpen ? 'rotate(180deg)' : 'none',
+              transition: 'transform 200ms cubic-bezier(0.32, 0.72, 0, 1)',
+            }} />
+          </button>
+
+          {/* Merge banner — only if there's an open PR on this repo */}
+          {extras.prs.some(p => p.kind === 'pr' && (p.state === 'open')) ? (() => {
+            const openPr = extras.prs.find(p => p.kind === 'pr' && p.state === 'open') as (ActivityItem & { kind: 'pr' }) | undefined;
+            if (!openPr) return null;
+            return (
+              <div style={{
+                marginLeft: 'auto',
                 display: 'flex',
                 alignItems: 'center',
-                gap: 4,
-                padding: '4px 8px',
-                borderRadius: 8,
-                border: 'none',
-                background: active ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
-                color: active ? '#2563eb' : 'var(--t-text-muted)',
-                fontSize: 10,
-                fontWeight: active ? 700 : 500,
-                cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
-                transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
-              }}
-            >
-              {tab.icon}
-              {tab.label}
-              {count > 0 && tab.key !== 'all' ? (
+                gap: 6,
+              }}>
                 <span style={{
-                  fontSize: 9,
-                  fontWeight: 700,
-                  color: active ? '#2563eb' : 'var(--t-text-faint)',
+                  fontSize: 10,
+                  color: 'var(--t-text-muted)',
                   fontFamily: '"SF Mono", ui-monospace, monospace',
                 }}>
-                  {count}
+                  PR #{openPr.number}
                 </span>
-              ) : null}
-            </button>
-          );
-        })}
+                <button
+                  type="button"
+                  onClick={() => window.open(`https://github.com/${repo}/pull/${openPr.number}`, '_blank')}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '3px 10px',
+                    borderRadius: 8,
+                    border: 'none',
+                    background: '#22c55e',
+                    color: '#fff',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    letterSpacing: '-0.01em',
+                  }}
+                >
+                  <GitPullRequest size={10} strokeWidth={2.5} />
+                  Review
+                </button>
+              </div>
+            );
+          })() : null}
+        </div>
+
+        {/* Repo picker dropdown */}
+        {repoPickerOpen ? (
+          <div style={{
+            margin: '2px 10px 6px',
+            borderRadius: 10,
+            border: '1px solid var(--t-divider-subtle)',
+            background: 'rgba(255, 255, 255, 0.95)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+            overflow: 'hidden',
+          }}>
+            {KNOWN_REPOS.map((r) => {
+              const selected = r === repo;
+              return (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => { setRepoOverride(r); setRepoPickerOpen(false); }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    width: '100%',
+                    padding: '7px 12px',
+                    border: 'none',
+                    background: selected ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
+                    color: selected ? '#2563eb' : 'var(--t-text)',
+                    fontSize: 12,
+                    fontWeight: selected ? 600 : 400,
+                    cursor: 'pointer',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    textAlign: 'left',
+                  }}
+                >
+                  <Folder size={12} strokeWidth={2} style={{ color: selected ? '#2563eb' : 'var(--t-text-muted)' }} />
+                  {REPO_DISPLAY[r] ?? r.split('/').pop()}
+                  <span style={{
+                    marginLeft: 'auto',
+                    fontSize: 9,
+                    color: 'var(--t-text-faint)',
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                  }}>
+                    {r.split('/').pop()}
+                  </span>
+                  {selected ? <CheckCircle2 size={12} strokeWidth={2} style={{ color: '#2563eb' }} /> : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {/* Filter tabs */}
+        <div style={{
+          display: 'flex',
+          gap: 1,
+          padding: '2px 10px 6px',
+        }}>
+          {FILTER_TABS.map((tab) => {
+            const active = filter === tab.key;
+            const count = counts[tab.key];
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => setFilter(tab.key)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '4px 8px',
+                  borderRadius: 8,
+                  border: 'none',
+                  background: active ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                  color: active ? '#2563eb' : 'var(--t-text-muted)',
+                  fontSize: 10,
+                  fontWeight: active ? 700 : 500,
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
+                }}
+              >
+                {tab.icon}
+                {tab.label}
+                {count > 0 && tab.key !== 'all' ? (
+                  <span style={{
+                    fontSize: 9,
+                    fontWeight: 700,
+                    color: active ? '#2563eb' : 'var(--t-text-faint)',
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                  }}>
+                    {count}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* No results for filter */}
@@ -1050,7 +1234,7 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
             textTransform: 'uppercase',
             letterSpacing: '0.06em',
             position: 'sticky',
-            top: 34,
+            top: 68,
             background: 'var(--t-panel)',
             zIndex: 2,
           }}>
@@ -1063,7 +1247,6 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
             const handleClick = () => {
               if (item.kind === 'commit') { onSelectCommit?.(item.hash); return; }
               // Open issues/PRs/CI in browser
-              const repo = 'hurttlocker/cortex-ide';
               let url = '';
               if (item.kind === 'issue') url = `https://github.com/${repo}/issues/${item.number}`;
               else if (item.kind === 'pr') url = `https://github.com/${repo}/pull/${item.number}`;
@@ -2347,7 +2530,7 @@ export const AgentPanel = memo(function AgentPanel({
         </button>
         {activityOpen && (
           <div style={{
-            maxHeight: 400,
+            maxHeight: 480,
             overflowY: 'auto',
             borderRadius: 10,
             border: '1px solid var(--t-divider-subtle)',
@@ -2357,7 +2540,13 @@ export const AgentPanel = memo(function AgentPanel({
           } as React.CSSProperties}
           className="hide-scrollbar"
           >
-            <ActivityFeed events={events} commits={commits} onSelectCommit={onSelectCommit} />
+            <ActivityFeed
+              events={events}
+              commits={commits}
+              onSelectCommit={onSelectCommit}
+              activeRepo={activeRepo}
+              activeAgentKey={expandedGroup ? agents.find(a => a.workspace === expandedGroup)?.sessionKey ?? null : null}
+            />
           </div>
         )}
       </div>
