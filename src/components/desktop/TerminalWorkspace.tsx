@@ -1302,23 +1302,23 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
 
     // Drag resize state
     const [previewHeight, setPreviewHeight] = useState(0.55); // 55% default for preview
-    const isDraggingRef = useRef(false);
+    const [isDragging, setIsDragging] = useState(false);
     const containerDivRef = useRef<HTMLDivElement>(null);
 
     const handleDragStart = useCallback((e: React.MouseEvent) => {
       e.preventDefault();
-      isDraggingRef.current = true;
+      e.stopPropagation();
+      setIsDragging(true);
 
       const onMove = (ev: MouseEvent) => {
-        if (!isDraggingRef.current || !containerDivRef.current) return;
+        if (!containerDivRef.current) return;
         const rect = containerDivRef.current.getBoundingClientRect();
         const ratio = (ev.clientY - rect.top) / rect.height;
-        // Clamp between 20% and 80%
         setPreviewHeight(Math.min(0.8, Math.max(0.2, ratio)));
       };
 
       const onUp = () => {
-        isDraggingRef.current = false;
+        setIsDragging(false);
         document.removeEventListener('mousemove', onMove);
         document.removeEventListener('mouseup', onUp);
         document.body.style.cursor = '';
@@ -1351,6 +1351,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
             overflow: 'hidden',
             flexShrink: 0,
             animation: 'slide-in-preview 300ms ease-out',
+            pointerEvents: isDragging ? 'none' : 'auto', // prevent iframe stealing mouse during drag
           }}>
             <PreviewPane
               previews={previews}
@@ -1371,23 +1372,22 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           <div
             onMouseDown={handleDragStart}
             style={{
-              height: 6,
+              height: 8,
               cursor: 'row-resize',
-              background: '#e2e8f0',
+              background: isDragging ? '#93c5fd' : '#e2e8f0',
               flexShrink: 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              transition: 'background 150ms',
+              zIndex: 20,
+              position: 'relative',
             }}
-            onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = '#93c5fd'; }}
-            onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = '#e2e8f0'; }}
           >
             <div style={{
               width: 32,
               height: 3,
               borderRadius: 2,
-              background: '#94a3b8',
+              background: isDragging ? '#3b82f6' : '#94a3b8',
             }} />
           </div>
         )}
