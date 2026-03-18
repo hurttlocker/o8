@@ -318,6 +318,9 @@ function handleClientMessage(client: ClientState, raw: string) {
     case 'terminal-image':
       handleTerminalImage(client, msg);
       break;
+    case 'agent-kill':
+      handleAgentKill(client, msg);
+      break;
   }
 }
 
@@ -626,6 +629,9 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       }
 
       terminalAttachments.delete(sessionName);
+
+      // ── Broadcast agent lifecycle event to ALL clients ──
+      broadcastLifecycle(sessionName, exitCode === 0 ? 'completed' : 'failed', exitCode);
     });
 
     sendTerminal(client, 'attached', { sessionName });
@@ -739,6 +745,78 @@ function removeClientFromTerminal(clientId: string, sessionName: string) {
       }, 10_000);
     }
   }
+}
+
+// ── Agent Lifecycle ──
+
+type LifecycleState = 'active' | 'completed' | 'failed' | 'killed' | 'stalled';
+
+// Track lifecycle state per session name
+const agentLifecycleState = new Map<string, {
+  state: LifecycleState;
+  exitCode?: number;
+  killedBy?: string;
+  ts: number;
+}>();
+
+function broadcastLifecycle(sessionName: string, state: LifecycleState, exitCode?: number) {
+  const entry = { state, exitCode, ts: Date.now() };
+  agentLifecycleState.set(sessionName, entry);
+
+  const msg = JSON.stringify({
+    channel: 'agent-lifecycle',
+    event: state,
+    data: { sessionName, state, exitCode, ts: entry.ts },
+  });
+
+  // Broadcast to ALL connected clients (not just terminal subscribers)
+  for (const [, c] of clients) {
+    sendRaw(c, msg);
+  }
+  console.log(`[ws-server] Agent lifecycle: ${sessionName} → ${state}${exitCode !== undefined ? ` (exit ${exitCode})` : ''}`);
+}
+
+function handleAgentKill(_client: ClientState, msg: Record<string, unknown>) {
+  const sessionName = msg.sessionName as string;
+  const signal = (msg.signal as string) ?? 'SIGTERM';
+  if (!sessionName) return;
+
+  console.log(`[ws-server] Kill request for ${sessionName} (signal: ${signal})`);
+
+  // 1. Try killing via PTY attachment (Codex / Claude Code terminals)
+  const attachment = terminalAttachments.get(sessionName);
+  if (attachment) {
+    try {
+      if (signal === 'SIGINT') {
+        // Send Ctrl+C to the PTY (interrupt, not kill)
+        attachment.ptyProcess.write('\x03');
+        console.log(`[ws-server] Sent Ctrl+C to ${sessionName}`);
+        return;
+      }
+
+      attachment.ptyProcess.kill();
+      console.log(`[ws-server] Killed PTY for ${sessionName}`);
+    } catch (err) {
+      console.error(`[ws-server] Failed to kill PTY for ${sessionName}:`, err);
+    }
+    // Lifecycle broadcast happens via onExit handler
+    return;
+  }
+
+  // 2. Try killing tmux session directly (if PTY already detached but tmux lives)
+  try {
+    execSync(`tmux has-session -t ${sessionName} 2>/dev/null`, { timeout: 2000 });
+    execSync(`tmux kill-session -t ${sessionName}`, { timeout: 3000 });
+    console.log(`[ws-server] Killed tmux session: ${sessionName}`);
+    broadcastLifecycle(sessionName, 'killed');
+    return;
+  } catch { /* no tmux session */ }
+
+  // 3. Try OpenClaw session interrupt (for OpenClaw agents)
+  // OpenClaw agents don't have PTYs — they run through the gateway
+  // For now, broadcast the kill state; the frontend can steer via the API
+  console.log(`[ws-server] No PTY/tmux found for ${sessionName} — broadcasting killed state`);
+  broadcastLifecycle(sessionName, 'killed');
 }
 
 // ── Server startup ──
