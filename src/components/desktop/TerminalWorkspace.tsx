@@ -145,6 +145,7 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
           cursorBlink: true,
           cursorStyle: 'block',
           allowTransparency: true,
+          allowProposedApi: true,
           scrollback: 10000,
           theme: {
             background: '#ffffff',
