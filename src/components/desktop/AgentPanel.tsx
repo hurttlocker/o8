@@ -25,6 +25,7 @@ import {
   Folder,
   FolderOpen,
   GitCommit,
+  GitPullRequest,
   Globe,
   MessageSquare,
   Monitor,
@@ -34,7 +35,9 @@ import {
   Tag,
   Terminal,
   X,
+  XCircle,
   Zap,
+  CheckCircle2,
 } from 'lucide-react';
 import { MarkdownBody } from './MarkdownBody';
 import { RepoRegistrySection } from './RepoRegistrySection';
@@ -801,19 +804,144 @@ const AgentCard = memo(function AgentCard({
 
 // ── Activity Feed (rich events) ──
 
+// ── Unified Activity Feed (Apple-grade) ──
+
+type ActivityItem =
+  | { kind: 'commit'; hash: string; message: string; age: string; ts: number }
+  | { kind: 'event'; data: EventEntry; ts: number }
+  | { kind: 'issue'; number: number; title: string; state: string; labels: { name: string; color: string }[]; age: string; ts: number }
+  | { kind: 'pr'; number: number; title: string; state: string; author: string; branch: string; additions: number; deletions: number; age: string; ts: number }
+  | { kind: 'ci'; id: number; title: string; status: string; conclusion: string; branch: string; workflow: string; age: string; ts: number };
+
+function relativeAge(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+const FEED_ICON: Record<string, { icon: React.ReactNode; bg: string; color: string }> = {
+  commit: { icon: <GitCommit size={11} strokeWidth={2} />, bg: 'rgba(34,197,94,0.08)', color: '#22c55e' },
+  issue: { icon: <AlertCircle size={11} strokeWidth={2} />, bg: 'rgba(139,92,246,0.08)', color: '#8b5cf6' },
+  pr: { icon: <GitPullRequest size={11} strokeWidth={2} />, bg: 'rgba(37,99,235,0.08)', color: '#2563eb' },
+  ci_success: { icon: <CheckCircle2 size={11} strokeWidth={2} />, bg: 'rgba(34,197,94,0.08)', color: '#22c55e' },
+  ci_failure: { icon: <XCircle size={11} strokeWidth={2} />, bg: 'rgba(239,68,68,0.08)', color: '#ef4444' },
+  ci_pending: { icon: <Clock size={11} strokeWidth={2} />, bg: 'rgba(245,158,11,0.08)', color: '#f59e0b' },
+  event: { icon: <Zap size={11} strokeWidth={2} />, bg: 'rgba(100,116,139,0.08)', color: '#64748b' },
+};
+
+function feedIcon(item: ActivityItem) {
+  if (item.kind === 'ci') {
+    if (item.conclusion === 'success') return FEED_ICON.ci_success;
+    if (item.conclusion === 'failure') return FEED_ICON.ci_failure;
+    return FEED_ICON.ci_pending;
+  }
+  if (item.kind === 'event') {
+    const sColor = severityColor[item.data.severity] ?? '#64748b';
+    return { icon: <Zap size={11} strokeWidth={2} />, bg: `${sColor}10`, color: sColor };
+  }
+  return FEED_ICON[item.kind] ?? FEED_ICON.event;
+}
+
 const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommit }: { events: EventEntry[]; commits: { hash: string; message: string; age: string }[]; onSelectCommit?: (hash: string) => void }) {
-  // Merge events + commits into a unified feed
-  const items: { type: 'event' | 'commit'; data: EventEntry | { hash: string; message: string; age: string } }[] = [];
+  const [extras, setExtras] = useState<{ issues: ActivityItem[]; prs: ActivityItem[]; ciRuns: ActivityItem[] }>({ issues: [], prs: [], ciRuns: [] });
 
-  // Add all agent events
-  for (const e of events) {
-    items.push({ type: 'event', data: e });
-  }
+  // Fetch issues, PRs, CI in parallel on mount
+  useEffect(() => {
+    async function fetchExtras() {
+      try {
+        const [issuesRes, prsRes, ciRes] = await Promise.all([
+          fetch('/api/panel/issues?repo=hurttlocker/cortex-ide').catch(() => null),
+          fetch('/api/panel/prs?repo=hurttlocker/cortex-ide').catch(() => null),
+          fetch('/api/panel/ci?repo=hurttlocker/cortex-ide').catch(() => null),
+        ]);
 
-  // Add commits
-  for (const c of commits) {
-    items.push({ type: 'commit', data: c });
-  }
+        const issueItems: ActivityItem[] = [];
+        if (issuesRes?.ok) {
+          const data = await issuesRes.json();
+          for (const i of (data.issues ?? []).slice(0, 8)) {
+            const ts = i.createdAt ? new Date(i.createdAt).getTime() : 0;
+            issueItems.push({ kind: 'issue', number: i.number, title: i.title, state: (i.state ?? '').toLowerCase(), labels: i.labels ?? [], age: i.createdAt ? relativeAge(i.createdAt) : '', ts });
+          }
+        }
+
+        const prItems: ActivityItem[] = [];
+        if (prsRes?.ok) {
+          const data = await prsRes.json();
+          for (const p of (data.prs ?? []).slice(0, 8)) {
+            const ts = p.createdAt ? new Date(p.createdAt).getTime() : 0;
+            prItems.push({ kind: 'pr', number: p.number, title: p.title, state: (p.state ?? '').toLowerCase(), author: p.author?.login ?? '', branch: p.headRefName ?? '', additions: p.additions ?? 0, deletions: p.deletions ?? 0, age: p.createdAt ? relativeAge(p.createdAt) : '', ts });
+          }
+        }
+
+        const ciItems: ActivityItem[] = [];
+        if (ciRes?.ok) {
+          const data = await ciRes.json();
+          for (const r of (data.runs ?? []).slice(0, 6)) {
+            const ts = r.createdAt ? new Date(r.createdAt).getTime() : 0;
+            ciItems.push({ kind: 'ci', id: r.databaseId, title: r.displayTitle ?? '', status: r.status ?? '', conclusion: r.conclusion ?? '', branch: r.headBranch ?? '', workflow: r.workflowName ?? '', age: r.createdAt ? relativeAge(r.createdAt) : '', ts });
+          }
+        }
+
+        setExtras({ issues: issueItems, prs: prItems, ciRuns: ciItems });
+      } catch { /* silent */ }
+    }
+    fetchExtras();
+    const id = setInterval(fetchExtras, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Build unified timeline
+  const items = useMemo<ActivityItem[]>(() => {
+    const all: ActivityItem[] = [];
+
+    for (const c of commits) {
+      // Parse relative age into approximate timestamp for sorting
+      const ageMatch = c.age.match(/(\d+)\s*(second|minute|hour|day|week|month)/);
+      let ts = Date.now();
+      if (ageMatch) {
+        const n = parseInt(ageMatch[1], 10);
+        const unit = ageMatch[2];
+        const multipliers: Record<string, number> = { second: 1000, minute: 60000, hour: 3600000, day: 86400000, week: 604800000, month: 2592000000 };
+        ts -= n * (multipliers[unit] ?? 60000);
+      }
+      all.push({ kind: 'commit', hash: c.hash, message: c.message, age: c.age, ts });
+    }
+
+    for (const e of events) {
+      const ts = e.timestamp ? new Date(e.timestamp).getTime() || Date.now() : Date.now();
+      all.push({ kind: 'event', data: e, ts });
+    }
+
+    all.push(...extras.issues, ...extras.prs, ...extras.ciRuns);
+
+    // Sort newest first
+    all.sort((a, b) => b.ts - a.ts);
+    return all.slice(0, 30);
+  }, [commits, events, extras]);
+
+  // Group by date
+  const grouped = useMemo(() => {
+    const groups: { label: string; items: ActivityItem[] }[] = [];
+    let currentLabel = '';
+    const today = new Date().toDateString();
+    const yesterday = new Date(Date.now() - 86400000).toDateString();
+
+    for (const item of items) {
+      const d = new Date(item.ts).toDateString();
+      const label = d === today ? 'Today' : d === yesterday ? 'Yesterday' : new Date(item.ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      if (label !== currentLabel) {
+        groups.push({ label, items: [] });
+        currentLabel = label;
+      }
+      groups[groups.length - 1].items.push(item);
+    }
+    return groups;
+  }, [items]);
 
   if (!items.length) {
     return <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>No recent activity</div>;
@@ -821,106 +949,175 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {items.map((item, i) => {
-        if (item.type === 'commit') {
-          const c = item.data as { hash: string; message: string; age: string };
-          return (
-            <div
-              key={`c-${c.hash}`}
-              onClick={() => onSelectCommit?.(c.hash)}
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: 10,
-                paddingTop: 10,
-                paddingRight: 14,
-                paddingBottom: 10,
-                paddingLeft: 14,
-                borderBottom: '1px solid var(--t-divider-subtle)',
-                cursor: onSelectCommit ? 'pointer' : 'default',
-                transition: 'background 100ms ease',
-              }}
-              onMouseEnter={(e) => { if (onSelectCommit) (e.currentTarget as HTMLDivElement).style.background = 'rgba(37,99,235,0.04)'; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
-            >
-              <div style={{
-                width: 22,
-                height: 22,
-                borderRadius: '50%',
-                background: 'rgba(34,197,94,0.08)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                marginTop: 1,
-              }}>
-                <GitCommit size={12} strokeWidth={2} style={{ color: '#22c55e' }} />
-              </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{
-                  fontSize: 13,
-                  color: 'var(--t-text-strong)',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  lineHeight: 1.4,
-                }}>
-                  {c.message}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 2, display: 'flex', gap: 6 }}>
-                  <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', color: 'var(--t-text-secondary)' }}>{c.hash}</span>
-                  <span>·</span>
-                  <span>{c.age}</span>
-                </div>
-              </div>
-            </div>
-          );
-        }
-
-        const e = item.data as EventEntry;
-        const sColor = severityColor[e.severity] ?? '#64748b';
-        return (
-          <div key={e.id} style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 10,
-            paddingTop: 10,
-            paddingRight: 14,
-            paddingBottom: 10,
-            paddingLeft: 14,
-            borderBottom: '1px solid var(--t-divider-subtle)',
+      {grouped.map((group) => (
+        <div key={group.label}>
+          {/* Date header */}
+          <div style={{
+            padding: '8px 14px 4px',
+            fontSize: 10,
+            fontWeight: 700,
+            color: 'var(--t-text-faint)',
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+            position: 'sticky',
+            top: 0,
+            background: 'var(--t-panel)',
+            zIndex: 2,
           }}>
-            <div style={{
-              width: 22,
-              height: 22,
-              borderRadius: '50%',
-              background: `${sColor}10`,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              marginTop: 1,
-            }}>
-              <Zap size={11} strokeWidth={2} style={{ color: sColor }} />
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{
-                fontSize: 13,
-                color: 'var(--t-text-strong)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                lineHeight: 1.4,
-              }}>
-                {e.title}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 2 }}>
-                {e.timestamp}
-              </div>
-            </div>
+            {group.label}
           </div>
-        );
-      })}
+          {group.items.map((item, idx) => {
+            const fi = feedIcon(item);
+            const key = item.kind === 'commit' ? `c-${item.hash}` : item.kind === 'event' ? `e-${item.data.id}` : item.kind === 'issue' ? `i-${item.number}` : item.kind === 'pr' ? `pr-${item.number}` : `ci-${item.id}`;
+            const clickable = item.kind === 'commit' && !!onSelectCommit;
+
+            return (
+              <div
+                key={key}
+                onClick={item.kind === 'commit' ? () => onSelectCommit?.(item.hash) : undefined}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 8,
+                  padding: '7px 14px',
+                  cursor: clickable ? 'pointer' : 'default',
+                  transition: 'background 100ms ease',
+                }}
+                onMouseEnter={clickable ? (e) => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(37,99,235,0.04)'; } : undefined}
+                onMouseLeave={clickable ? (e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; } : undefined}
+              >
+                {/* Icon dot */}
+                <div style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: '50%',
+                  background: fi.bg,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  marginTop: 1,
+                  color: fi.color,
+                }}>
+                  {fi.icon}
+                </div>
+
+                {/* Content */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {/* Title line */}
+                  <div style={{
+                    fontSize: 12,
+                    color: 'var(--t-text)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    lineHeight: 1.4,
+                    fontWeight: 500,
+                  }}>
+                    {item.kind === 'commit' ? item.message : item.kind === 'event' ? item.data.title : item.kind === 'issue' ? `#${item.number} ${item.title}` : item.kind === 'pr' ? `#${item.number} ${item.title}` : item.title}
+                  </div>
+
+                  {/* Metadata line */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    marginTop: 1,
+                    fontSize: 10,
+                    color: 'var(--t-text-muted)',
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    lineHeight: 1.4,
+                  }}>
+                    {item.kind === 'commit' ? (
+                      <>
+                        <span style={{ color: 'var(--t-text-secondary)' }}>{item.hash}</span>
+                        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+                        <span>{item.age}</span>
+                      </>
+                    ) : item.kind === 'pr' ? (
+                      <>
+                        <span style={{ color: '#22c55e' }}>+{item.additions}</span>
+                        <span style={{ color: '#ef4444' }}>-{item.deletions}</span>
+                        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+                        <span>{item.branch}</span>
+                        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+                        <span>{item.age}</span>
+                      </>
+                    ) : item.kind === 'ci' ? (
+                      <>
+                        <span>{item.workflow}</span>
+                        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+                        <span>{item.branch}</span>
+                        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+                        <span style={{
+                          color: item.conclusion === 'success' ? '#22c55e' : item.conclusion === 'failure' ? '#ef4444' : '#f59e0b',
+                          fontWeight: 600,
+                        }}>
+                          {item.conclusion || item.status}
+                        </span>
+                      </>
+                    ) : item.kind === 'issue' ? (
+                      <>
+                        {item.labels.slice(0, 2).map((l) => (
+                          <span key={l.name} style={{
+                            padding: '0 4px',
+                            borderRadius: 4,
+                            background: `#${l.color}18`,
+                            color: `#${l.color}`,
+                            fontSize: 9,
+                            fontWeight: 600,
+                            fontFamily: '-apple-system, system-ui, sans-serif',
+                          }}>
+                            {l.name}
+                          </span>
+                        ))}
+                        <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+                        <span>{item.age}</span>
+                      </>
+                    ) : (
+                      <span>{item.data.timestamp}</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right side badges */}
+                {item.kind === 'pr' && item.state ? (
+                  <span style={{
+                    padding: '1px 6px',
+                    borderRadius: 999,
+                    fontSize: 9,
+                    fontWeight: 700,
+                    flexShrink: 0,
+                    marginTop: 2,
+                    background: item.state === 'merged' ? 'rgba(139,92,246,0.1)' : item.state === 'open' ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+                    color: item.state === 'merged' ? '#8b5cf6' : item.state === 'open' ? '#22c55e' : '#ef4444',
+                    textTransform: 'uppercase',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                  }}>
+                    {item.state}
+                  </span>
+                ) : null}
+                {item.kind === 'issue' && item.state ? (
+                  <span style={{
+                    padding: '1px 6px',
+                    borderRadius: 999,
+                    fontSize: 9,
+                    fontWeight: 700,
+                    flexShrink: 0,
+                    marginTop: 2,
+                    background: item.state === 'open' ? 'rgba(34,197,94,0.1)' : 'rgba(139,92,246,0.1)',
+                    color: item.state === 'open' ? '#22c55e' : '#8b5cf6',
+                    textTransform: 'uppercase',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                  }}>
+                    {item.state}
+                  </span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 });
@@ -2050,7 +2247,7 @@ export const AgentPanel = memo(function AgentPanel({
         </button>
         {activityOpen && (
           <div style={{
-            maxHeight: 240,
+            maxHeight: 400,
             overflowY: 'auto',
             borderRadius: 10,
             border: '1px solid var(--t-divider-subtle)',
