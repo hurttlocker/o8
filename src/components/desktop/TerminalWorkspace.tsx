@@ -16,6 +16,7 @@ export interface TerminalTab {
 export interface TerminalTabHandle {
   writeToTerminal: (sessionName: string, data: string) => void;
   writeRaw: (sessionName: string, data: string) => void;
+  showImage: (sessionName: string, imageB64: string, filename: string) => void;
   setTermError: (sessionName: string, error: string) => void;
   setTermExited: (sessionName: string) => void;
   onSessionCreated: (sessionName: string) => void;
@@ -70,9 +71,16 @@ interface XtermPanelProps {
   visible: boolean;
 }
 
+interface InlineImage {
+  id: string;
+  dataUrl: string;
+  filename: string;
+}
+
 interface XtermPanelHandle {
   writeData: (data: string) => void;
-  writeRaw: (data: string) => void; // Write raw string directly (for IIP sequences)
+  writeRaw: (data: string) => void;
+  showImage: (imageB64: string, filename: string) => void;
   setError: (error: string) => void;
   setExited: () => void;
 }
@@ -88,6 +96,8 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
   const fitAddonRef = useRef<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [exited, setExited] = useState(false);
+  const [inlineImages, setInlineImages] = useState<InlineImage[]>([]);
+  const imageCountRef = useRef(0);
 
   useImperativeHandle(ref, () => ({
     writeData: (data: string) => {
@@ -98,10 +108,21 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
         termRef.current.write(bytes);
       } catch { /* ignore decode errors */ }
     },
+    showImage: (imageB64: string, filename: string) => {
+      // Detect mime type from filename
+      const ext = filename.split('.').pop()?.toLowerCase() ?? 'png';
+      const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'gif' ? 'image/gif' : ext === 'svg' ? 'image/svg+xml' : 'image/png';
+      const dataUrl = `data:${mime};base64,${imageB64}`;
+      imageCountRef.current += 1;
+      setInlineImages(prev => [...prev, { id: `img-${imageCountRef.current}`, dataUrl, filename }]);
+      // Write a newline placeholder in xterm so the prompt moves down
+      if (termRef.current) {
+        termRef.current.write('\r\n\r\n');
+      }
+    },
     writeRaw: (data: string) => {
       if (!termRef.current) return;
       try {
-        // Encode to bytes — ImageAddon needs raw bytes to detect IIP sequences
         const encoder = new TextEncoder();
         termRef.current.write(encoder.encode(data));
       } catch { /* ignore */ }
@@ -269,18 +290,52 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
   }
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        flex: 1,
-        width: '100%',
-        display: visible ? 'block' : 'none',
-        background: '#ffffff',
-        borderRadius: 0,
-        paddingTop: 2,
-        paddingLeft: 2,
-      }}
-    />
+    <div style={{
+      flex: 1,
+      width: '100%',
+      display: visible ? 'flex' : 'none',
+      flexDirection: 'column',
+      background: '#ffffff',
+      borderRadius: 0,
+      overflow: 'hidden',
+    }}>
+      {/* Inline images — rendered above terminal */}
+      {inlineImages.map((img) => (
+        <div key={img.id} style={{
+          paddingTop: 8,
+          paddingBottom: 8,
+          paddingLeft: 12,
+          paddingRight: 12,
+          borderBottom: '1px solid #f1f5f9',
+          flexShrink: 0,
+        }}>
+          <img
+            src={img.dataUrl}
+            alt={img.filename}
+            style={{
+              maxWidth: '100%',
+              maxHeight: 400,
+              borderRadius: 8,
+              objectFit: 'contain',
+            }}
+          />
+          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, fontFamily: 'ui-monospace, monospace' }}>
+            {img.filename}
+          </div>
+        </div>
+      ))}
+      {/* Terminal */}
+      <div
+        ref={containerRef}
+        style={{
+          flex: 1,
+          width: '100%',
+          background: '#ffffff',
+          paddingTop: 2,
+          paddingLeft: 2,
+        }}
+      />
+    </div>
   );
 });
 
@@ -787,6 +842,9 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
       },
       writeRaw: (sessionName: string, data: string) => {
         panelRefs.current.get(sessionName)?.writeRaw(data);
+      },
+      showImage: (sessionName: string, imageB64: string, filename: string) => {
+        panelRefs.current.get(sessionName)?.showImage(imageB64, filename);
       },
       setTermError: (sessionName: string, error: string) => {
         panelRefs.current.get(sessionName)?.setError(error);

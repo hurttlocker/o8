@@ -689,8 +689,7 @@ function handleTerminalImage(_client: ClientState, msg: Record<string, unknown>)
       event: 'image',
       data: {
         sessionName,
-        filenameB64,
-        fileSize: data.length,
+        filename,
         imageB64: b64,
       },
     });
