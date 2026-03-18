@@ -484,9 +484,10 @@ const AgentCard = memo(function AgentCard({
 
       {/* Expanded: status-grouped agent cards */}
       {expanded && (() => {
-        type AgentStatus = 'in_progress' | 'in_review' | 'completed' | 'failed' | 'idle';
+        type AgentStatus = 'in_progress' | 'in_review' | 'stalled' | 'completed' | 'failed' | 'idle';
         const classify = (a: AgentDetail): AgentStatus => {
           // Lifecycle state takes priority (from WS events)
+          if (a.lifecycleState === 'stalled') return 'stalled';
           if (a.lifecycleState === 'completed') return 'completed';
           if (a.lifecycleState === 'failed' || a.lifecycleState === 'killed') return 'failed';
           // Use workspace status if available (PR-aware)
@@ -497,6 +498,7 @@ const AgentCard = memo(function AgentCard({
         };
         const statusGroups: { key: AgentStatus; label: string; color: string; agents: AgentDetail[] }[] = [
           { key: 'in_progress', label: 'In Progress', color: '#2563eb', agents: [] },
+          { key: 'stalled', label: 'Stalled', color: '#f97316', agents: [] },
           { key: 'in_review', label: 'In Review', color: '#f59e0b', agents: [] },
           { key: 'failed', label: 'Failed', color: '#ef4444', agents: [] },
           { key: 'completed', label: 'Completed', color: '#22c55e', agents: [] },
@@ -515,10 +517,11 @@ const AgentCard = memo(function AgentCard({
           const lcTs = lc?.ts;
 
           const isRunning = (agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy')
-            && lcState !== 'completed' && lcState !== 'failed' && lcState !== 'killed';
+            && lcState !== 'completed' && lcState !== 'failed' && lcState !== 'killed' && lcState !== 'stalled';
           const isFailed = lcState === 'failed' || lcState === 'killed';
           const isCompleted = lcState === 'completed';
-          const agentDot = isFailed ? '#ef4444' : isCompleted ? '#22c55e' : isRunning ? '#22c55e' : '#9ca3af';
+          const isStalled = lcState === 'stalled';
+          const agentDot = isFailed ? '#ef4444' : isStalled ? '#f97316' : isCompleted ? '#22c55e' : isRunning ? '#22c55e' : '#9ca3af';
           const agentCtx = agent.context?.usedPercent ?? 0;
           const agentName = agent.name.replace(/\s*\(.*\)/, '').split(' ')[0];
           // For OpenClaw agents: use session name to differentiate (Mister, Niot, Hawk, etc.)
@@ -675,7 +678,7 @@ const AgentCard = memo(function AgentCard({
               </div>
 
               {/* Lifecycle status line + actions */}
-              {(isRunning || isFailed || isCompleted) && (
+              {(isRunning || isFailed || isCompleted || isStalled) && (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   marginTop: 8, paddingTop: 8,
@@ -683,16 +686,18 @@ const AgentCard = memo(function AgentCard({
                 }}>
                   <span style={{
                     fontSize: 10, fontWeight: 600, flex: 1,
-                    color: isFailed ? '#ef4444' : isCompleted ? '#22c55e' : 'var(--t-text-secondary)',
+                    color: isFailed ? '#ef4444' : isStalled ? '#f97316' : isCompleted ? '#22c55e' : 'var(--t-text-secondary)',
                   }}>
                     {isFailed
                       ? `${lcState === 'killed' ? 'Killed' : 'Failed'}${lcExitCode !== undefined ? ` (exit ${lcExitCode})` : ''}`
+                      : isStalled
+                        ? `Stalled — no output for ${lcTs ? `${Math.round((Date.now() - lcTs) / 60000)}m` : '5m+'}`
                       : isCompleted
                         ? `Completed${lcTs ? ` · ${Math.round((Date.now() - lcTs) / 60000)}m ago` : ''}`
                         : 'Running'
                     }
                   </span>
-                  {isRunning && onAgentKill && agent.tmuxSession && (
+                  {(isRunning || isStalled) && onAgentKill && agent.tmuxSession && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -711,7 +716,7 @@ const AgentCard = memo(function AgentCard({
                       INTERRUPT
                     </button>
                   )}
-                  {isRunning && onAgentKill && agent.tmuxSession && (
+                  {(isRunning || isStalled) && onAgentKill && agent.tmuxSession && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
