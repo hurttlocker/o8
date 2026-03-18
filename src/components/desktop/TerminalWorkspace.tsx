@@ -650,20 +650,19 @@ const TabBar = memo(function TabBar({
                 onClick={async () => {
                   let folderPath: string | null = null;
 
-                  // Try Tauri dialog first (native Finder/Explorer)
+                  // Try Tauri native dialog first (gives real filesystem path)
                   try {
                     const { open } = await import('@tauri-apps/plugin-dialog');
                     const result = await open({ directory: true, title: 'Select project folder' });
                     if (typeof result === 'string') folderPath = result;
                   } catch {
-                    // Not in Tauri — try browser File System Access API
+                    // Not in Tauri (browser dev mode) — use server-side folder picker
                     try {
-                      if ('showDirectoryPicker' in window) {
-                        const handle = await (window as any).showDirectoryPicker();
-                        folderPath = handle.name; // Browser only gives name, not full path
-                      }
+                      const res = await fetch('/api/panel/browse-folder', { method: 'POST' });
+                      const data = await res.json();
+                      if (data.path) folderPath = data.path;
                     } catch {
-                      // User cancelled or API not available — fall back to prompt
+                      // Last resort
                       folderPath = window.prompt('Enter folder path:');
                     }
                   }
