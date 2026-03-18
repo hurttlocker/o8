@@ -40,6 +40,7 @@ type OpenClawAgentMeta = {
 
 type OpenClawAgentConfigEntry = {
   id?: string;
+  name?: string;
   model?: string | { primary?: string };
   heartbeat?: { model?: string };
 };
@@ -71,7 +72,14 @@ function extractPrimaryModel(model?: string | { primary?: string }) {
   return model?.primary;
 }
 
-function readOpenClawAgentConfigModels(): Record<string, OpenClawAgentConfigModels> {
+type OpenClawAgentConfig = {
+  id: string;
+  name?: string;
+  primaryModel?: string;
+  heartbeatModel?: string;
+};
+
+function readOpenClawAgentConfigs(): OpenClawAgentConfig[] {
   try {
     const configPath = join(
       process.env.HOME ?? '/Users/marquisehurtt',
@@ -79,22 +87,26 @@ function readOpenClawAgentConfigModels(): Record<string, OpenClawAgentConfigMode
       'openclaw.json',
     );
     const raw = readFileSync(configPath, 'utf-8');
-    const parsed = JSON.parse(raw) as { agents?: { list?: OpenClawAgentConfigEntry[] } };
+    const parsed = JSON.parse(raw) as { agents?: { list?: (OpenClawAgentConfigEntry & { name?: string })[] } };
 
-    return Object.fromEntries(
-      (parsed.agents?.list ?? [])
-        .filter((agent): agent is OpenClawAgentConfigEntry & { id: string } => Boolean(agent.id))
-        .map((agent) => [
-          agent.id,
-          {
-            primaryModel: extractPrimaryModel(agent.model),
-            heartbeatModel: agent.heartbeat?.model,
-          },
-        ]),
-    );
+    return (parsed.agents?.list ?? [])
+      .filter((agent): agent is OpenClawAgentConfigEntry & { id: string } => Boolean(agent.id))
+      .map((agent) => ({
+        id: agent.id,
+        name: agent.name,
+        primaryModel: extractPrimaryModel(agent.model),
+        heartbeatModel: agent.heartbeat?.model,
+      }));
   } catch {
-    return {};
+    return [];
   }
+}
+
+function readOpenClawAgentConfigModels(): Record<string, OpenClawAgentConfigModels> {
+  const configs = readOpenClawAgentConfigs();
+  return Object.fromEntries(
+    configs.map((c) => [c.id, { primaryModel: c.primaryModel, heartbeatModel: c.heartbeatModel }]),
+  );
 }
 
 function relativeAge(ageMs?: number) {
@@ -425,15 +437,84 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
       };
     });
 
+    // ── Collapse sessions per agent + pin configured agents ──
+    // Each agentId gets ONE card. Prefer :main session, then most recent.
+    // Cron/subagent sessions just update the primary card's "last active" time.
+    const agentConfigs = readOpenClawAgentConfigs();
+    const agentBestSession = new Map<string, AgentSummary>();
+
+    for (const agent of agents) {
+      // Derive the base agentId (main, ace, hawk)
+      const baseAgentId = agent.squadId.replace('squad-', '');
+      const existing = agentBestSession.get(baseAgentId);
+
+      if (!existing) {
+        agentBestSession.set(baseAgentId, agent);
+        continue;
+      }
+
+      // Prefer the :main session (direct session, not cron/group/discord)
+      const isMainSession = agent.sessionKey === `agent:${baseAgentId}:main`;
+      const existingIsMain = existing.sessionKey === `agent:${baseAgentId}:main`;
+
+      if (isMainSession && !existingIsMain) {
+        // New agent is the main session — keep it, carry forward latest activity
+        const existingAge = existing.lastEventAt;
+        agentBestSession.set(baseAgentId, agent);
+        // If cron ran more recently, note that
+        if (existing.surfaceLabel?.includes('Cron') || existing.surfaceLabel?.includes('automation')) {
+          const merged = agentBestSession.get(baseAgentId)!;
+          merged.currentTask = `${merged.currentTask}`;
+        }
+      } else if (!isMainSession && existingIsMain) {
+        // Existing is main session — keep it, but update last active if cron is newer
+        // (no swap needed)
+      } else {
+        // Both are non-main or both are main — keep the one with more recent activity
+        // (first one in the list is typically the most recent from gateway)
+      }
+    }
+
+    // Pin configured agents that have no active session
+    for (const config of agentConfigs) {
+      if (!agentBestSession.has(config.id)) {
+        const meta = agentMeta[config.id];
+        const workspace = shortenPath(meta?.workspaceDir);
+        agentBestSession.set(config.id, {
+          id: `agent:${config.id}:main`,
+          name: config.name ?? config.id,
+          squadId: `squad-${config.id}`,
+          runtime: 'openclaw',
+          model: config.primaryModel ?? 'unknown',
+          primaryModel: config.primaryModel,
+          heartbeatModel: config.heartbeatModel,
+          status: 'idle' as AgentStatus,
+          currentTask: '',
+          workspace: workspace ?? '~/clawd',
+          branch: '',
+          sessionKey: `agent:${config.id}:main`,
+          approvalStatus: 'none',
+          lastEventAt: 'offline',
+          context: { usedPercent: 0, trend: 'stable' as const },
+          alerts: 0,
+          surfaceLabel: 'Idle',
+          isCurrentSession: false,
+        });
+      }
+    }
+
+    // Replace the agents array with deduplicated + pinned agents
+    const deduplicatedAgents: AgentSummary[] = [...agentBestSession.values()];
+
     const openClawSquads: SquadSummary[] = (parsed.agents?.agents ?? [])
       .map((agent) => {
-        const members = agents.filter((item) => item.squadId === `squad-${agent.id}`).map((item) => item.id);
+        const members = deduplicatedAgents.filter((item) => item.squadId === `squad-${agent.id}`).map((item) => item.id);
         if (!members.length) return null;
 
-        const blockers = agents.filter(
+        const blockers = deduplicatedAgents.filter(
           (item) => item.squadId === `squad-${agent.id}` && item.status === 'blocked',
         ).length;
-        const alerts = agents
+        const alerts = deduplicatedAgents
           .filter((item) => item.squadId === `squad-${agent.id}`)
           .reduce((sum, item) => sum + item.alerts, 0);
 
@@ -450,7 +531,7 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
       })
       .filter((item): item is SquadSummary => Boolean(item));
 
-    const openClawEvents = agents.slice(0, 6).map((agent) => ({
+    const openClawEvents = deduplicatedAgents.slice(0, 6).map((agent) => ({
       id: `evt-${agent.id}`,
       agentId: agent.id,
       squadId: agent.squadId,
@@ -509,7 +590,7 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
     const liveClaudeCodeAgents = claudeCodeSessions.agents.filter((agent) => agent.status === 'running');
     const liveClaudeCodeSquads = liveClaudeCodeAgents.length > 0 ? claudeCodeSessions.squads : [];
 
-    const allAgents = [...agents, ...liveOwnedAgents, ...filteredDiscoveredAgents, ...liveClaudeCodeAgents];
+    const allAgents = [...deduplicatedAgents, ...liveOwnedAgents, ...filteredDiscoveredAgents, ...liveClaudeCodeAgents];
     // Only include squads that have live agents
     const liveOwnedSquads = liveOwnedAgents.length > 0 ? ownedCodex.squads : [];
     const allSquads = [...openClawSquads, ...liveOwnedSquads, ...filteredDiscoveredSquads, ...liveClaudeCodeSquads];
