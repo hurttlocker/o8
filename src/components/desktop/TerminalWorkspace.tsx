@@ -25,8 +25,11 @@ interface LocalhostPreview {
   detectedAt: number;
 }
 
-/** Regex to detect localhost URLs in terminal output */
-const LOCALHOST_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{3,5})\b/g;
+/** Strip ANSI escape sequences from terminal output for URL detection */
+const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[^[]/g;
+
+/** Detect localhost URLs in terminal output */
+const LOCALHOST_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{3,5})\b[^\s)"]*/g;
 
 export interface TerminalTabHandle {
   writeToTerminal: (sessionName: string, data: string) => void;
@@ -1165,10 +1168,11 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           t.tmuxSession === sessionName ? { ...t, lastActivity: now } : t
         ));
 
-        // Scan for localhost URLs in terminal output
+        // Scan for localhost URLs in terminal output (strip ANSI first)
         try {
-          const decoded = atob(data);
-          const matches = decoded.matchAll(LOCALHOST_RE);
+          const raw = atob(data);
+          const clean = raw.replace(ANSI_RE, '');
+          const matches = clean.matchAll(LOCALHOST_RE);
           for (const match of matches) {
             const port = parseInt(match[1], 10);
             if (detectedPortsRef.current.has(port)) continue;
@@ -1176,10 +1180,11 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
 
             // Find which tab this session belongs to
             const tab = tabs.find(t => t.tmuxSession === sessionName);
-            const url = match[0].replace('0.0.0.0', 'localhost');
+            let url = match[0].replace('0.0.0.0', 'localhost');
+            // Ensure http:// prefix
+            if (!url.startsWith('http')) url = `http://${url}`;
 
             setPreviews(prev => {
-              // Don't add duplicate ports
               if (prev.some(p => p.port === port)) return prev;
               return [...prev, {
                 id: `preview-${port}`,
