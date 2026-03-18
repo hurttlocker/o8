@@ -277,9 +277,10 @@ const TabBar = memo(function TabBar({
   onNewTab: (agentId: string, repo?: RegisteredRepo) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerStep, setPickerStep] = useState<'agent' | 'repo'>('agent');
+  const [pickerStep, setPickerStep] = useState<'agent' | 'repo' | 'browse'>('agent');
   const [selectedAgent, setSelectedAgent] = useState<typeof CLI_AGENTS[0] | null>(null);
   const [repos, setRepos] = useState<RegisteredRepo[]>([]);
+  const [browsePath, setBrowsePath] = useState('');
   const pickerRef = useRef<HTMLDivElement>(null);
 
   // Close picker on outside click
@@ -290,6 +291,7 @@ const TabBar = memo(function TabBar({
         setPickerOpen(false);
         setPickerStep('agent');
         setSelectedAgent(null);
+        setBrowsePath('');
       }
     };
     document.addEventListener('mousedown', handler);
@@ -583,6 +585,21 @@ const TabBar = memo(function TabBar({
               </button>
 
               {/* Registered repos */}
+              {repos.length > 0 && (
+                <div style={{
+                  paddingTop: 6,
+                  paddingRight: 10,
+                  paddingBottom: 4,
+                  paddingLeft: 10,
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: '#94a3b8',
+                  letterSpacing: '0.05em',
+                  textTransform: 'uppercase',
+                }}>
+                  Repos
+                </div>
+              )}
               {repos.map((repo) => (
                 <button
                   type="button"
@@ -623,6 +640,118 @@ const TabBar = memo(function TabBar({
                   </div>
                 </button>
               ))}
+
+              {/* Divider */}
+              <div style={{ height: 1, background: '#f1f5f9', marginTop: 4, marginBottom: 4 }} />
+
+              {/* Open folder */}
+              <button
+                type="button"
+                onClick={() => {
+                  setPickerStep('browse');
+                  setBrowsePath('');
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  width: '100%',
+                  paddingTop: 8,
+                  paddingRight: 12,
+                  paddingBottom: 8,
+                  paddingLeft: 12,
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#1e293b',
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  transition: 'background 100ms',
+                }}
+                onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
+              >
+                <span style={{ fontSize: 14, color: '#94a3b8', width: 20, textAlign: 'center' }}>📂</span>
+                <div style={{ fontWeight: 500 }}>Open folder...</div>
+              </button>
+            </>)}
+
+            {/* Step 3: Browse — enter a folder path */}
+            {pickerStep === 'browse' && selectedAgent && (<>
+              <button
+                type="button"
+                onClick={() => { setPickerStep('repo'); setBrowsePath(''); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  width: '100%',
+                  paddingTop: 6,
+                  paddingRight: 10,
+                  paddingBottom: 6,
+                  paddingLeft: 10,
+                  border: 'none',
+                  borderBottom: '1px solid #f1f5f9',
+                  background: 'transparent',
+                  color: '#94a3b8',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}
+              >
+                ← Back
+              </button>
+              <div style={{
+                paddingTop: 8,
+                paddingRight: 10,
+                paddingBottom: 4,
+                paddingLeft: 10,
+                fontSize: 10,
+                fontWeight: 600,
+                color: '#94a3b8',
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase',
+              }}>
+                Folder Path
+              </div>
+              <div style={{ paddingTop: 4, paddingRight: 10, paddingBottom: 10, paddingLeft: 10 }}>
+                <input
+                  type="text"
+                  autoFocus
+                  placeholder="/path/to/project"
+                  value={browsePath}
+                  onChange={(e) => setBrowsePath(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && browsePath.trim()) {
+                      const folderName = browsePath.trim().split('/').filter(Boolean).pop() ?? 'folder';
+                      onNewTab(selectedAgent.id, { name: folderName, localPath: browsePath.trim() });
+                      setPickerOpen(false);
+                      setPickerStep('agent');
+                      setSelectedAgent(null);
+                      setBrowsePath('');
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    paddingTop: 8,
+                    paddingRight: 10,
+                    paddingBottom: 8,
+                    paddingLeft: 10,
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 6,
+                    fontSize: 13,
+                    fontFamily: 'ui-monospace, monospace',
+                    color: '#1e293b',
+                    background: '#f8fafc',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>
+                  Type a path and press Enter
+                </div>
+              </div>
             </>)}
           </div>
         )}
