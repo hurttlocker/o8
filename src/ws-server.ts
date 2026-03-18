@@ -110,6 +110,8 @@ interface TerminalAttachment {
   rows: number;
   batchBuffer: string;
   batchTimer: ReturnType<typeof setTimeout> | null;
+  lastOutputAt: number; // timestamp of last PTY output (for stall detection)
+  createdAt: number;    // timestamp of terminal creation
 }
 
 const terminalAttachments = new Map<string, TerminalAttachment>();
@@ -553,6 +555,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       env: { ...process.env, TERM: 'xterm-256color' } as Record<string, string>,
     });
 
+    const now = Date.now();
     attachment = {
       id: randomUUID(),
       sessionName,
@@ -562,6 +565,8 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       rows,
       batchBuffer: '',
       batchTimer: null,
+      lastOutputAt: now,
+      createdAt: now,
     };
 
     terminalAttachments.set(sessionName, attachment);
@@ -572,6 +577,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       const att = terminalAttachments.get(sessionName);
       if (!att) return;
 
+      att.lastOutputAt = Date.now();
       att.batchBuffer += data;
 
       if (!att.batchTimer) {
@@ -758,6 +764,51 @@ const agentLifecycleState = new Map<string, {
   killedBy?: string;
   ts: number;
 }>();
+
+// ── Stall Detection ──
+// Only monitor launched agent terminals (cortex-codex-*, cortex-claude-*)
+// NOT dashboard terminals (cortex-dash-*) or OpenClaw cron agents
+const STALL_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes with no output
+const STALL_CHECK_INTERVAL_MS = 30 * 1000; // check every 30s
+const STALL_GRACE_MS = 60 * 1000; // ignore first 60s after creation (agent startup)
+
+function isMonitoredAgent(sessionName: string): boolean {
+  // Only monitor IDE-launched agent terminals
+  // cortex-codex-* and cortex-claude-* are launched agents
+  // cortex-dash-* are user dashboard terminals — not monitored
+  // OpenClaw agents (agent:main:*, agent:ace:*, etc.) are cron/heartbeat — not monitored
+  return sessionName.startsWith('cortex-codex-') || sessionName.startsWith('cortex-claude-');
+}
+
+function checkForStalledAgents() {
+  const now = Date.now();
+  for (const [sessionName, att] of terminalAttachments) {
+    if (!isMonitoredAgent(sessionName)) continue;
+
+    // Skip if within grace period (agent startup takes time)
+    if (now - att.createdAt < STALL_GRACE_MS) continue;
+
+    // Skip if already in a terminal lifecycle state
+    const existing = agentLifecycleState.get(sessionName);
+    if (existing && (existing.state === 'completed' || existing.state === 'failed' || existing.state === 'killed')) continue;
+
+    const silentMs = now - att.lastOutputAt;
+    if (silentMs >= STALL_THRESHOLD_MS) {
+      // Only broadcast if not already stalled (avoid spam)
+      if (!existing || existing.state !== 'stalled') {
+        console.log(`[ws-server] Stall detected: ${sessionName} — no output for ${Math.round(silentMs / 60000)}m`);
+        broadcastLifecycle(sessionName, 'stalled');
+      }
+    } else if (existing?.state === 'stalled') {
+      // Agent resumed producing output — clear stall
+      console.log(`[ws-server] Stall cleared: ${sessionName} — output resumed`);
+      broadcastLifecycle(sessionName, 'active');
+    }
+  }
+}
+
+// Start stall detection interval (cleaned up on shutdown)
+const stallCheckTimer = setInterval(checkForStalledAgents, STALL_CHECK_INTERVAL_MS);
 
 function broadcastLifecycle(sessionName: string, state: LifecycleState, exitCode?: number) {
   const entry = { state, exitCode, ts: Date.now() };
@@ -1164,6 +1215,9 @@ httpServer.listen(WS_PORT, '0.0.0.0', () => {
 
 function shutdown(signal: string) {
   console.log(`[ws-server] ${signal} received — shutting down gracefully`);
+
+  // Stop stall detection
+  clearInterval(stallCheckTimer);
 
   // Close gateway connection
   if (gatewayWs) {
