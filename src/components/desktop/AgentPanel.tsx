@@ -77,6 +77,10 @@ interface AgentDetail {
   workspaceStatus?: 'in_progress' | 'in_review' | 'done' | 'idle' | 'cancelled';
   tmuxSession?: string;
   worktree?: WorktreeInfo;
+  // Agent lifecycle (from WS)
+  lifecycleState?: 'active' | 'completed' | 'failed' | 'killed' | 'stalled';
+  exitCode?: number;
+  lifecycleTs?: number;
 }
 
 interface EventEntry {
@@ -334,12 +338,16 @@ const AgentCard = memo(function AgentCard({
   onToggle,
   onSelectSession,
   onSelectPR,
+  onAgentKill,
+  lifecycleEvents,
 }: {
   group: WorkspaceGroup;
   expanded: boolean;
   onToggle: () => void;
   onSelectSession?: (sessionKey: string) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
+  onAgentKill?: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
+  lifecycleEvents?: Map<string, { state: string; exitCode?: number; ts: number }>;
 }) {
   const model = group.primaryModel;
   const ctx = group.bestContextPct > 0 ? { usedPercent: group.bestContextPct } : null;
@@ -476,18 +484,22 @@ const AgentCard = memo(function AgentCard({
 
       {/* Expanded: status-grouped agent cards */}
       {expanded && (() => {
-        type AgentStatus = 'in_progress' | 'in_review' | 'done' | 'idle';
+        type AgentStatus = 'in_progress' | 'in_review' | 'completed' | 'failed' | 'idle';
         const classify = (a: AgentDetail): AgentStatus => {
+          // Lifecycle state takes priority (from WS events)
+          if (a.lifecycleState === 'completed') return 'completed';
+          if (a.lifecycleState === 'failed' || a.lifecycleState === 'killed') return 'failed';
           // Use workspace status if available (PR-aware)
           if (a.workspaceStatus === 'in_review') return 'in_review';
-          if (a.workspaceStatus === 'done') return 'done';
+          if (a.workspaceStatus === 'done') return 'completed';
           if (a.status === 'running' || a.status === 'watching' || a.status === 'healthy') return 'in_progress';
           return 'idle';
         };
         const statusGroups: { key: AgentStatus; label: string; color: string; agents: AgentDetail[] }[] = [
           { key: 'in_progress', label: 'In Progress', color: '#2563eb', agents: [] },
           { key: 'in_review', label: 'In Review', color: '#f59e0b', agents: [] },
-          { key: 'done', label: 'Done', color: '#22c55e', agents: [] },
+          { key: 'failed', label: 'Failed', color: '#ef4444', agents: [] },
+          { key: 'completed', label: 'Completed', color: '#22c55e', agents: [] },
           { key: 'idle', label: 'Idle', color: '#9ca3af', agents: [] },
         ];
         for (const agent of group.agents) {
@@ -496,8 +508,17 @@ const AgentCard = memo(function AgentCard({
         }
 
         const renderCard = (agent: AgentDetail) => {
-          const isRunning = agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy';
-          const agentDot = isRunning ? '#22c55e' : '#9ca3af';
+          // Merge lifecycle events from WS into agent
+          const lc = lifecycleEvents?.get(agent.tmuxSession ?? '') ?? lifecycleEvents?.get(agent.sessionKey ?? '');
+          const lcState = lc?.state as AgentDetail['lifecycleState'] | undefined;
+          const lcExitCode = lc?.exitCode;
+          const lcTs = lc?.ts;
+
+          const isRunning = (agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy')
+            && lcState !== 'completed' && lcState !== 'failed' && lcState !== 'killed';
+          const isFailed = lcState === 'failed' || lcState === 'killed';
+          const isCompleted = lcState === 'completed';
+          const agentDot = isFailed ? '#ef4444' : isCompleted ? '#22c55e' : isRunning ? '#22c55e' : '#9ca3af';
           const agentCtx = agent.context?.usedPercent ?? 0;
           const agentName = agent.name.replace(/\s*\(.*\)/, '').split(' ')[0];
           // For OpenClaw agents: use session name to differentiate (Mister, Niot, Hawk, etc.)
@@ -652,6 +673,86 @@ const AgentCard = memo(function AgentCard({
                   )}
                 </div>
               </div>
+
+              {/* Lifecycle status line + actions */}
+              {(isRunning || isFailed || isCompleted) && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  marginTop: 8, paddingTop: 8,
+                  borderTop: '1px solid var(--t-divider-subtle)',
+                }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, flex: 1,
+                    color: isFailed ? '#ef4444' : isCompleted ? '#22c55e' : 'var(--t-text-secondary)',
+                  }}>
+                    {isFailed
+                      ? `${lcState === 'killed' ? 'Killed' : 'Failed'}${lcExitCode !== undefined ? ` (exit ${lcExitCode})` : ''}`
+                      : isCompleted
+                        ? `Completed${lcTs ? ` · ${Math.round((Date.now() - lcTs) / 60000)}m ago` : ''}`
+                        : 'Running'
+                    }
+                  </span>
+                  {isRunning && onAgentKill && agent.tmuxSession && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAgentKill(agent.tmuxSession!, 'SIGINT');
+                      }}
+                      style={{
+                        fontSize: 9, fontWeight: 700, padding: '3px 8px',
+                        borderRadius: 6, border: '1px solid rgba(245, 158, 11, 0.3)',
+                        background: 'rgba(245, 158, 11, 0.08)', color: '#f59e0b',
+                        cursor: 'pointer', letterSpacing: '0.02em',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(245, 158, 11, 0.15)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(245, 158, 11, 0.08)'; }}
+                      title="Send interrupt (Ctrl+C)"
+                    >
+                      INTERRUPT
+                    </button>
+                  )}
+                  {isRunning && onAgentKill && agent.tmuxSession && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm('Kill this agent? This will terminate it immediately.')) {
+                          onAgentKill(agent.tmuxSession!);
+                        }
+                      }}
+                      style={{
+                        fontSize: 9, fontWeight: 700, padding: '3px 8px',
+                        borderRadius: 6, border: '1px solid rgba(239, 68, 68, 0.3)',
+                        background: 'rgba(239, 68, 68, 0.08)', color: '#ef4444',
+                        cursor: 'pointer', letterSpacing: '0.02em',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)'; }}
+                      title="Kill agent (SIGTERM)"
+                    >
+                      STOP
+                    </button>
+                  )}
+                  {isFailed && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // TODO: Wire retry — relaunch same agent config
+                      }}
+                      style={{
+                        fontSize: 9, fontWeight: 700, padding: '3px 8px',
+                        borderRadius: 6, border: '1px solid rgba(37, 99, 235, 0.3)',
+                        background: 'rgba(37, 99, 235, 0.08)', color: '#2563eb',
+                        cursor: 'pointer', letterSpacing: '0.02em',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(37, 99, 235, 0.15)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(37, 99, 235, 0.08)'; }}
+                      title="Retry with same configuration"
+                    >
+                      RETRY
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           );
         };
@@ -1648,6 +1749,8 @@ export const AgentPanel = memo(function AgentPanel({
   onOpenDeploy,
   onOpenMemory,
   onAgentsUpdate,
+  onAgentKill,
+  lifecycleEvents,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
@@ -1661,6 +1764,8 @@ export const AgentPanel = memo(function AgentPanel({
   onOpenDeploy?: (project?: string) => void;
   onOpenMemory?: () => void;
   onAgentsUpdate?: (agents: AgentDetail[]) => void;
+  onAgentKill?: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
+  lifecycleEvents?: Map<string, { state: string; exitCode?: number; ts: number }>;
 } = {}) {
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [events, setEvents] = useState<EventEntry[]>([]);
@@ -2026,6 +2131,8 @@ export const AgentPanel = memo(function AgentPanel({
               onToggle={() => setExpandedGroup(expandedGroup === group.workspace ? null : group.workspace)}
               onSelectSession={onSelectSession}
               onSelectPR={onSelectPR}
+              onAgentKill={onAgentKill}
+              lifecycleEvents={lifecycleEvents}
             />
           ))
         )}

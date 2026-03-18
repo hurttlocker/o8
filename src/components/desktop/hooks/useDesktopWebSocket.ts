@@ -29,6 +29,8 @@ export interface DesktopWsCallbacks {
   onTerminalExited?: (sessionName: string, exitCode: number) => void;
   onTerminalError?: (sessionName: string, error: string) => void;
   onTerminalImage?: (sessionName: string, imageB64: string, filename: string) => void;
+  // Agent lifecycle channel
+  onAgentLifecycle?: (sessionName: string, state: string, exitCode?: number) => void;
 }
 
 interface UseDesktopWebSocketResult {
@@ -40,6 +42,7 @@ interface UseDesktopWebSocketResult {
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalDetach: (sessionName: string) => void;
+  sendAgentKill: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
 }
 
 const MAX_BACKOFF = 30_000;
@@ -198,6 +201,16 @@ export function useDesktopWebSocket(
           }
           break;
 
+        case 'agent-lifecycle':
+          if (data) {
+            cbRef.current.onAgentLifecycle?.(
+              data.sessionName as string,
+              data.state as string,
+              data.exitCode as number | undefined,
+            );
+          }
+          break;
+
         case 'pong':
           break;
       }
@@ -260,5 +273,11 @@ export function useDesktopWebSocket(
     sendTerminalInput,
     sendTerminalResize,
     sendTerminalDetach,
+    sendAgentKill: useCallback((sessionName: string, signal: 'SIGTERM' | 'SIGINT' = 'SIGTERM') => {
+      const ws = wsRef.current;
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'agent-kill', sessionName, signal }));
+      }
+    }, []),
   };
 }
