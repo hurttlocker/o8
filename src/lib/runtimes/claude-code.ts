@@ -690,24 +690,54 @@ export const claudeCodeRuntime: AgentRuntime = {
       }
     }
 
-    const cliArgs = [
-      '-p', '--print',
-      '--resume', sessionId,
-      '--permission-mode', 'bypassPermissions',
-      '--output-format', 'stream-json',
-      '--verbose',
-      message,
-    ];
+    // Resolve the CWD for this session so we can use --continue (which is more
+    // reliable than --resume <id> — the latter requires the session to be in
+    // Claude's internal conversation store, which has different retention)
+    let sessionCwd: string | undefined;
+    try {
+      const projectDirs = await readdir(CLAUDE_PROJECTS_DIR);
+      for (const dir of projectDirs) {
+        const candidate = path.join(CLAUDE_PROJECTS_DIR, dir, `${sessionId}.jsonl`);
+        try {
+          await access(candidate);
+          // Decode the project dir name back to a path
+          sessionCwd = decodeProjectPath(dir);
+          break;
+        } catch { /* not in this project */ }
+      }
+    } catch { /* projects dir missing */ }
+
+    // Use --continue with the correct CWD (picks up most recent conversation
+    // in that directory). Falls back to --resume <id> if CWD unknown.
+    const cliArgs = sessionCwd
+      ? [
+          '-p', '--print',
+          '--continue',
+          '--permission-mode', 'bypassPermissions',
+          '--output-format', 'stream-json',
+          '--verbose',
+          message,
+        ]
+      : [
+          '-p', '--print',
+          '--resume', sessionId,
+          '--permission-mode', 'bypassPermissions',
+          '--output-format', 'stream-json',
+          '--verbose',
+          message,
+        ];
+
+    const spawnCwd = sessionCwd ?? process.env.HOME ?? '/tmp';
 
     try {
       // Try tmux-wrapped resume
       if (await isTmuxAvailable()) {
         const tmuxName = tmuxSessionName('cc', sessionId);
-        const result = await createTmuxSession(tmuxName, 'claude', cliArgs, process.env.HOME ?? '/tmp');
+        const result = await createTmuxSession(tmuxName, 'claude', cliArgs, spawnCwd);
         if (result.ok) {
           return {
             ok: true,
-            note: 'Message sent to Claude Code session (tmux).',
+            note: `Message sent to Claude Code session${sessionCwd ? ` in ${shortenPath(sessionCwd)}` : ''}.`,
             sessionKey,
           };
         }
@@ -717,6 +747,7 @@ export const claudeCodeRuntime: AgentRuntime = {
       const child = spawn('claude', cliArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: true,
+        cwd: spawnCwd,
         env: { ...process.env },
       });
 
