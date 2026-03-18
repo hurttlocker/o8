@@ -880,12 +880,14 @@ const ActivityFeed = memo(function ActivityFeed({
   events,
   commits,
   onSelectCommit,
+  onSelectPR,
   activeRepo: externalRepo,
   activeAgentKey,
 }: {
   events: EventEntry[];
   commits: { hash: string; message: string; age: string }[];
   onSelectCommit?: (hash: string) => void;
+  onSelectPR?: (prNumber: number, repo?: string) => void;
   activeRepo?: string | null;
   activeAgentKey?: string | null;
 }) {
@@ -1138,7 +1140,7 @@ const ActivityFeed = memo(function ActivityFeed({
                 </span>
                 <button
                   type="button"
-                  onClick={() => window.open(`https://github.com/${repo}/pull/${openPr.number}`, '_blank')}
+                  onClick={() => onSelectPR?.(openPr.number, repo)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -1337,10 +1339,11 @@ const ActivityFeed = memo(function ActivityFeed({
             const clickable = (item.kind === 'commit' && !!onSelectCommit) || item.kind === 'issue' || item.kind === 'pr' || item.kind === 'ci';
             const handleClick = () => {
               if (item.kind === 'commit') { onSelectCommit?.(item.hash); return; }
-              // Open issues/PRs/CI in browser
+              // PRs open in contextual canvas
+              if (item.kind === 'pr') { onSelectPR?.(item.number, repo); return; }
+              // Issues/CI open in browser
               let url = '';
               if (item.kind === 'issue') url = `https://github.com/${repo}/issues/${item.number}`;
-              else if (item.kind === 'pr') url = `https://github.com/${repo}/pull/${item.number}`;
               else if (item.kind === 'ci') url = `https://github.com/${repo}/actions/runs/${item.id}`;
               if (url) window.open(url, '_blank');
             };
@@ -2256,13 +2259,8 @@ const FileTree = memo(function FileTree({ tree, changedFiles, onSelectFile }: {
 // ── Tab Bar ──
 
 const tabs: { id: Tab; icon: typeof Zap; label: string }[] = [
-
-  { id: 'issues', icon: Tag, label: 'Issues' },
-  { id: 'prs', icon: GitCommit, label: 'PRs' },
   { id: 'files', icon: Folder, label: 'Files' },
-  { id: 'ci', icon: PlayCircle, label: 'CI' },
   { id: 'deploy', icon: Globe, label: 'Deploy' },
-
 ];
 
 // ── Memory Tab — auto-opens canvas on mount ──
@@ -2350,7 +2348,7 @@ export const AgentPanel = memo(function AgentPanel({
   const [prs, setPrs] = useState<GHPullRequest[]>([]);
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<Tab>('issues');
+  const [activeTab, setActiveTab] = useState<Tab>('files');
   const [activityOpen, setActivityOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(true);
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
@@ -2635,6 +2633,7 @@ export const AgentPanel = memo(function AgentPanel({
               events={events}
               commits={commits}
               onSelectCommit={onSelectCommit}
+              onSelectPR={onSelectPR}
               activeRepo={activeRepo}
               activeAgentKey={expandedGroup ? agents.find(a => a.workspace === expandedGroup)?.sessionKey ?? null : null}
             />
@@ -2858,52 +2857,7 @@ export const AgentPanel = memo(function AgentPanel({
         borderTop: expandedGroup ? 'none' : '1px solid var(--t-divider-subtle)',
         marginTop: expandedGroup ? 0 : 4,
       }}>
-        {activeTab === 'issues' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'flex-end',
-              paddingTop: 6,
-              paddingRight: 10,
-              paddingBottom: 4,
-              paddingLeft: 10,
-              flexShrink: 0,
-            }}>
-              <button
-                type="button"
-                onClick={() => onCreateIssue?.(activeRepo ?? undefined)}
-                title="Create new issue"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  paddingTop: 4,
-                  paddingRight: 8,
-                  paddingBottom: 4,
-                  paddingLeft: 8,
-                  borderRadius: 6,
-                  border: '1px solid var(--t-btn-secondary-border)',
-                  background: 'var(--t-panel-hover)',
-                  fontSize: 11,
-                  fontWeight: 500,
-                  color: 'var(--t-text-secondary)',
-                  cursor: 'pointer',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                }}
-              >
-                <Plus size={12} strokeWidth={2.5} />
-                New
-              </button>
-            </div>
-            <div style={{ flex: 1, overflowY: 'auto' }}>
-              <IssuesList issues={issues} onSelect={(num) => onSelectIssue ? onSelectIssue(num, activeRepo ?? undefined) : setSelectedIssue(num)} />
-            </div>
-          </div>
-        ) : null}
-        {activeTab === 'prs' ? <PRList prs={prs} onSelect={(num) => onSelectPR?.(num, activeRepo ?? undefined)} /> : null}
         {activeTab === 'files' ? <FileTree tree={fileTree} changedFiles={changedFiles} onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)} /> : null}
-        {activeTab === 'ci' ? <CIList repo={activeRepo} onOpenCI={onOpenCI} /> : null}
         {activeTab === 'deploy' ? <DeployList onOpenDeploy={onOpenDeploy} /> : null}
 
       </div>
