@@ -113,9 +113,11 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
 
     async function init() {
       try {
-        const [{ Terminal }, { FitAddon }] = await Promise.all([
+        const [{ Terminal }, { FitAddon }, { WebLinksAddon }, { SearchAddon }] = await Promise.all([
           import('@xterm/xterm'),
           import('@xterm/addon-fit'),
+          import('@xterm/addon-web-links'),
+          import('@xterm/addon-search'),
         ]);
         if (disposed) return;
 
@@ -130,15 +132,16 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
 
         const term = new Terminal({
           fontFamily: 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
-          fontSize: 13,
+          fontSize: 12,
           lineHeight: 1.35,
           cursorBlink: true,
+          cursorStyle: 'block',
           allowTransparency: true,
           scrollback: 10000,
           theme: {
             background: '#ffffff',
             foreground: '#1e293b',
-            cursor: '#3b82f6',
+            cursor: '#dc2626',
             cursorAccent: '#ffffff',
             selectionBackground: 'rgba(59, 130, 246, 0.18)',
             selectionForeground: '#0f172a',
@@ -162,7 +165,11 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
         });
 
         const fitAddon = new FitAddon();
+        const webLinksAddon = new WebLinksAddon();
+        const searchAddon = new SearchAddon();
         term.loadAddon(fitAddon);
+        term.loadAddon(webLinksAddon);
+        term.loadAddon(searchAddon);
 
         if (!containerRef.current || disposed) { term.dispose(); return; }
 
@@ -235,6 +242,8 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
         display: visible ? 'block' : 'none',
         background: '#ffffff',
         borderRadius: 0,
+        paddingTop: 2,
+        paddingLeft: 2,
       }}
     />
   );
@@ -279,10 +288,12 @@ const TabBar = memo(function TabBar({
       background: '#f8fafc',
       borderBottom: '1px solid #e2e8f0',
       flexShrink: 0,
-      overflow: 'hidden',
+      overflow: 'visible',
+      zIndex: 10,
+      position: 'relative',
     }}>
       {/* Tabs */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'auto', gap: 0 }}>
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', gap: 0 }}>
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           const agent = CLI_AGENTS.find(a => a.id === tab.cliAgent);
@@ -389,7 +400,7 @@ const TabBar = memo(function TabBar({
             position: 'absolute',
             top: '100%',
             right: 0,
-            zIndex: 100,
+            zIndex: 9000,
             marginTop: 4,
             minWidth: 200,
             background: '#ffffff',
