@@ -1020,6 +1020,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
     const restoredRef = useRef(false);
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const detectedPortsRef = useRef<Set<number>>(new Set()); // avoid duplicate detections
+    const urlDetectionEnabledRef = useRef(false); // suppress during initial replay
 
     // Persist tab state (debounced — saves 500ms after last change)
     const persistTabs = useCallback((currentTabs: TerminalTab[], currentActiveId: string) => {
@@ -1053,6 +1054,10 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
     useEffect(() => {
       if (!termWsConnected || restoredRef.current) return;
       restoredRef.current = true;
+
+      // Suppress URL detection for 5s to skip replay of old terminal output
+      urlDetectionEnabledRef.current = false;
+      setTimeout(() => { urlDetectionEnabledRef.current = true; }, 5000);
 
       (async () => {
         const saved = await loadTabState();
@@ -1168,8 +1173,8 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           t.tmuxSession === sessionName ? { ...t, lastActivity: now } : t
         ));
 
-        // Scan for localhost URLs in terminal output (strip ANSI first)
-        try {
+        // Scan for localhost URLs (skip during first 5s to ignore replayed history)
+        if (urlDetectionEnabledRef.current) try {
           const raw = atob(data);
           const clean = raw.replace(ANSI_RE, '');
           const matches = clean.matchAll(LOCALHOST_RE);
