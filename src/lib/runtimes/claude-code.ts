@@ -695,6 +695,7 @@ export const claudeCodeRuntime: AgentRuntime = {
       '--resume', sessionId,
       '--permission-mode', 'bypassPermissions',
       '--output-format', 'stream-json',
+      '--verbose',
       message,
     ];
 
