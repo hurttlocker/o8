@@ -120,11 +120,12 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
 
     async function init() {
       try {
-        const [{ Terminal }, { FitAddon }, { WebLinksAddon }, { SearchAddon }] = await Promise.all([
+        const [{ Terminal }, { FitAddon }, { WebLinksAddon }, { SearchAddon }, { Unicode11Addon }] = await Promise.all([
           import('@xterm/xterm'),
           import('@xterm/addon-fit'),
           import('@xterm/addon-web-links'),
           import('@xterm/addon-search'),
+          import('@xterm/addon-unicode11'),
         ]);
         if (disposed) return;
 
@@ -174,9 +175,12 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
         const fitAddon = new FitAddon();
         const webLinksAddon = new WebLinksAddon();
         const searchAddon = new SearchAddon();
+        const unicode11Addon = new Unicode11Addon();
         term.loadAddon(fitAddon);
         term.loadAddon(webLinksAddon);
         term.loadAddon(searchAddon);
+        term.loadAddon(unicode11Addon);
+        term.unicode.activeVersion = '11';
 
         if (!containerRef.current || disposed) { term.dispose(); return; }
 
@@ -450,13 +454,13 @@ const TabBar = memo(function TabBar({
                   type="button"
                   key={agent.id}
                   onClick={() => {
-                    if (agent.id === 'shell' || repos.length === 0) {
-                      // Shell or no repos — launch directly
+                    if (agent.id === 'shell') {
+                      // Shell — launch directly in home dir
                       onNewTab(agent.id);
                       setPickerOpen(false);
                       setPickerStep('agent');
                     } else {
-                      // CLI agent — show repo picker
+                      // CLI agent — always show repo picker (even with 0 repos)
                       setSelectedAgent(agent);
                       setPickerStep('repo');
                     }
