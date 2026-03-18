@@ -15,6 +15,7 @@ export interface TerminalTab {
 
 export interface TerminalTabHandle {
   writeToTerminal: (sessionName: string, data: string) => void;
+  writeRaw: (sessionName: string, data: string) => void;
   setTermError: (sessionName: string, error: string) => void;
   setTermExited: (sessionName: string) => void;
   onSessionCreated: (sessionName: string) => void;
@@ -71,6 +72,7 @@ interface XtermPanelProps {
 
 interface XtermPanelHandle {
   writeData: (data: string) => void;
+  writeRaw: (data: string) => void; // Write raw string directly (for IIP sequences)
   setError: (error: string) => void;
   setExited: () => void;
 }
@@ -94,6 +96,12 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
         // Decode base64 → Uint8Array → proper UTF-8 (atob mangles multi-byte chars)
         const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
         termRef.current.write(bytes);
+      } catch { /* ignore decode errors */ }
+    },
+    writeRaw: (data: string) => {
+      if (!termRef.current) return;
+      try {
+        termRef.current.write(data);
       } catch { /* ignore */ }
     },
     setError: (err: string) => setError(err),
@@ -774,6 +782,9 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
     useImperativeHandle(ref, () => ({
       writeToTerminal: (sessionName: string, data: string) => {
         panelRefs.current.get(sessionName)?.writeData(data);
+      },
+      writeRaw: (sessionName: string, data: string) => {
+        panelRefs.current.get(sessionName)?.writeRaw(data);
       },
       setTermError: (sessionName: string, error: string) => {
         panelRefs.current.get(sessionName)?.setError(error);

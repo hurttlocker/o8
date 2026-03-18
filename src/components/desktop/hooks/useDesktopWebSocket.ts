@@ -28,6 +28,7 @@ export interface DesktopWsCallbacks {
   onTerminalAttached?: (sessionName: string) => void;
   onTerminalExited?: (sessionName: string, exitCode: number) => void;
   onTerminalError?: (sessionName: string, error: string) => void;
+  onTerminalImage?: (sessionName: string, iip: string) => void;
 }
 
 interface UseDesktopWebSocketResult {
@@ -189,6 +190,8 @@ export function useDesktopWebSocket(
             cbRef.current.onTerminalExited?.(data.sessionName as string, (data.exitCode as number) ?? 0);
           } else if (eventType === 'error' && data) {
             cbRef.current.onTerminalError?.(data.sessionName as string, (data.error as string) ?? 'Unknown error');
+          } else if (eventType === 'image' && data) {
+            cbRef.current.onTerminalImage?.(data.sessionName as string, data.iip as string);
           }
           break;
 
