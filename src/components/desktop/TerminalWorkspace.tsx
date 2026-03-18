@@ -10,6 +10,7 @@ export interface TerminalTab {
   label: string;
   tmuxSession: string | null; // null = pending creation
   cliAgent?: string; // which CLI agent was launched (or 'shell')
+  repo?: RegisteredRepo; // optional repo context
 }
 
 export interface TerminalTabHandle {
@@ -36,6 +37,12 @@ const CLI_AGENTS = [
   { id: 'opencode', label: 'OpenCode', color: '#f97316', command: 'opencode' },
   { id: 'aider', label: 'Aider', color: '#eab308', command: 'aider' },
 ];
+
+interface RegisteredRepo {
+  name: string;
+  localPath: string;
+  remoteUrl?: string;
+}
 
 /** Small colored dot for tab/picker items */
 function AgentDot({ color, size = 8 }: { color: string; size?: number }) {
@@ -262,9 +269,12 @@ const TabBar = memo(function TabBar({
   activeTabId: string;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
-  onNewTab: (agentId: string) => void;
+  onNewTab: (agentId: string, repo?: RegisteredRepo) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerStep, setPickerStep] = useState<'agent' | 'repo'>('agent');
+  const [selectedAgent, setSelectedAgent] = useState<typeof CLI_AGENTS[0] | null>(null);
+  const [repos, setRepos] = useState<RegisteredRepo[]>([]);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   // Close picker on outside click
@@ -273,10 +283,21 @@ const TabBar = memo(function TabBar({
     const handler = (e: MouseEvent) => {
       if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
         setPickerOpen(false);
+        setPickerStep('agent');
+        setSelectedAgent(null);
       }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
+  }, [pickerOpen]);
+
+  // Fetch repos when picker opens
+  useEffect(() => {
+    if (!pickerOpen) return;
+    fetch('/api/panel/repos')
+      .then(r => r.json())
+      .then(data => setRepos(data.repos ?? []))
+      .catch(() => setRepos([]));
   }, [pickerOpen]);
 
   return (
@@ -402,33 +423,131 @@ const TabBar = memo(function TabBar({
             right: 0,
             zIndex: 9000,
             marginTop: 4,
-            minWidth: 200,
+            minWidth: 220,
             background: '#ffffff',
             border: '1px solid #e2e8f0',
             borderRadius: 10,
             overflow: 'hidden',
             boxShadow: '0 12px 40px rgba(0, 0, 0, 0.12)',
           }}>
-            <div style={{
-              paddingTop: 8,
-              paddingRight: 10,
-              paddingBottom: 4,
-              paddingLeft: 10,
-              fontSize: 10,
-              fontWeight: 600,
-              color: '#94a3b8',
-              letterSpacing: '0.05em',
-              textTransform: 'uppercase',
-            }}>
-              New Terminal
-            </div>
-            {CLI_AGENTS.map((agent) => (
+            {/* Step 1: Pick a CLI agent */}
+            {pickerStep === 'agent' && (<>
+              <div style={{
+                paddingTop: 8,
+                paddingRight: 10,
+                paddingBottom: 4,
+                paddingLeft: 10,
+                fontSize: 10,
+                fontWeight: 600,
+                color: '#94a3b8',
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase',
+              }}>
+                New Terminal
+              </div>
+              {CLI_AGENTS.map((agent) => (
+                <button
+                  type="button"
+                  key={agent.id}
+                  onClick={() => {
+                    if (agent.id === 'shell' || repos.length === 0) {
+                      // Shell or no repos — launch directly
+                      onNewTab(agent.id);
+                      setPickerOpen(false);
+                      setPickerStep('agent');
+                    } else {
+                      // CLI agent — show repo picker
+                      setSelectedAgent(agent);
+                      setPickerStep('repo');
+                    }
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    width: '100%',
+                    paddingTop: 8,
+                    paddingRight: 12,
+                    paddingBottom: 8,
+                    paddingLeft: 12,
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#1e293b',
+                    fontSize: 13,
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'background 100ms',
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                  onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
+                >
+                  <span style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {agent.id === 'shell' ? (
+                      <TerminalIcon size={14} style={{ color: '#94a3b8' }} />
+                    ) : (
+                      <AgentDot color={agent.color} size={10} />
+                    )}
+                  </span>
+                  <div>
+                    <div style={{ fontWeight: 500 }}>{agent.label}</div>
+                    {agent.command && (
+                      <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'ui-monospace, monospace' }}>
+                        $ {agent.command}
+                      </div>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </>)}
+
+            {/* Step 2: Pick a repo (or launch without repo) */}
+            {pickerStep === 'repo' && selectedAgent && (<>
               <button
                 type="button"
-                key={agent.id}
+                onClick={() => { setPickerStep('agent'); setSelectedAgent(null); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  width: '100%',
+                  paddingTop: 6,
+                  paddingRight: 10,
+                  paddingBottom: 6,
+                  paddingLeft: 10,
+                  border: 'none',
+                  borderBottom: '1px solid #f1f5f9',
+                  background: 'transparent',
+                  color: '#94a3b8',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}
+              >
+                ← {selectedAgent.label}
+              </button>
+              <div style={{
+                paddingTop: 6,
+                paddingRight: 10,
+                paddingBottom: 4,
+                paddingLeft: 10,
+                fontSize: 10,
+                fontWeight: 600,
+                color: '#94a3b8',
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase',
+              }}>
+                Select Repo
+              </div>
+
+              {/* No repo — launch in home dir */}
+              <button
+                type="button"
                 onClick={() => {
-                  onNewTab(agent.id);
+                  onNewTab(selectedAgent.id);
                   setPickerOpen(false);
+                  setPickerStep('agent');
+                  setSelectedAgent(null);
                 }}
                 style={{
                   display: 'flex',
@@ -441,33 +560,65 @@ const TabBar = memo(function TabBar({
                   paddingLeft: 12,
                   border: 'none',
                   background: 'transparent',
-                  color: '#1e293b',
+                  color: '#64748b',
                   fontSize: 13,
-                  fontFamily: '-apple-system, system-ui, sans-serif',
                   cursor: 'pointer',
                   textAlign: 'left',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
                   transition: 'background 100ms',
                 }}
                 onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
                 onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
               >
-                <span style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {agent.id === 'shell' ? (
-                    <TerminalIcon size={14} style={{ color: '#94a3b8' }} />
-                  ) : (
-                    <AgentDot color={agent.color} size={10} />
-                  )}
-                </span>
+                <TerminalIcon size={14} style={{ color: '#94a3b8' }} />
                 <div>
-                  <div style={{ fontWeight: 500 }}>{agent.label}</div>
-                  {agent.command && (
-                    <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'ui-monospace, monospace' }}>
-                      $ {agent.command}
-                    </div>
-                  )}
+                  <div style={{ fontWeight: 500 }}>No repo (home dir)</div>
+                  <div style={{ fontSize: 11, color: '#94a3b8' }}>~/</div>
                 </div>
               </button>
-            ))}
+
+              {/* Registered repos */}
+              {repos.map((repo) => (
+                <button
+                  type="button"
+                  key={repo.localPath}
+                  onClick={() => {
+                    onNewTab(selectedAgent.id, repo);
+                    setPickerOpen(false);
+                    setPickerStep('agent');
+                    setSelectedAgent(null);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    width: '100%',
+                    paddingTop: 8,
+                    paddingRight: 12,
+                    paddingBottom: 8,
+                    paddingLeft: 12,
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#1e293b',
+                    fontSize: 13,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    transition: 'background 100ms',
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                  onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
+                >
+                  <AgentDot color={selectedAgent.color} size={8} />
+                  <div>
+                    <div style={{ fontWeight: 500 }}>{repo.name}</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'ui-monospace, monospace' }}>
+                      {repo.localPath.replace(/^\/Users\/[^/]+\//, '~/')}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </>)}
           </div>
         )}
       </div>
@@ -537,22 +688,27 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
       onSessionCreated: handleSessionCreated,
     }), [handleSessionCreated]);
 
-    const handleNewTab = useCallback((agentId: string) => {
+    const handleNewTab = useCallback((agentId: string, repo?: RegisteredRepo) => {
       const agent = CLI_AGENTS.find(a => a.id === agentId);
       if (!agent) return;
 
       tabCountRef.current += 1;
       const tabId = `tab-${tabCountRef.current}`;
+      const label = repo ? `${agent.label} · ${repo.name}` : agent.label;
       const newTab: TerminalTab = {
         id: tabId,
-        label: agent.label,
-        tmuxSession: null, // will be set when WS responds with session name
+        label,
+        tmuxSession: null,
         cliAgent: agentId,
+        repo,
       };
 
-      // If agent has a CLI command, queue it for execution after session creation
-      if (agent.command) {
-        pendingCliCommands.current.set(tabId, agent.command);
+      // Queue CLI command + optional cd to repo
+      if (agent.command || repo) {
+        const parts: string[] = [];
+        if (repo) parts.push(`cd ${repo.localPath}`);
+        if (agent.command) parts.push(agent.command);
+        pendingCliCommands.current.set(tabId, parts.join(' && '));
       }
 
       setTabs(prev => [...prev, newTab]);
