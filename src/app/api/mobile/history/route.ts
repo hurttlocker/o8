@@ -3,6 +3,7 @@ import { getOwnedCodexRuntimeTail } from '@/lib/codex/owned';
 import { getCodexRuntimeTail } from '@/lib/codex/sessions';
 import type { MobileHistoryResponse, MobileTranscriptEntry } from '@/lib/mobile/types';
 import { getSessionTranscript } from '@/lib/openclaw/chat';
+import { getRuntime } from '@/lib/runtimes/registry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -129,6 +130,26 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(payload, {
         headers: { 'Cache-Control': 'no-store, max-age=0' },
       });
+    }
+
+    // Claude Code sessions — read JSONL from ~/.claude/projects/
+    if (sessionKey.startsWith('claude-code:')) {
+      const ccRuntime = getRuntime('claude-code');
+      if (ccRuntime?.readTranscript) {
+        const entries = await ccRuntime.readTranscript(sessionKey, undefined, limit);
+        const transcript: MobileTranscriptEntry[] = entries.map(entry => ({
+          id: entry.id,
+          role: entry.role === 'user' ? 'user' : entry.role === 'assistant' ? 'assistant' : 'system',
+          text: entry.text,
+          timestampLabel: entry.timestamp
+            ? entry.timestamp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+            : '',
+        }));
+        return NextResponse.json(
+          { sessionKey, transcript } satisfies MobileHistoryResponse,
+          { headers: { 'Cache-Control': 'no-store, max-age=0' } },
+        );
+      }
     }
 
     // OpenClaw sessions — use gateway chat.history
