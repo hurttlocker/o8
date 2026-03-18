@@ -5,8 +5,10 @@ import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
-const IGNORE = new Set(['.git', 'node_modules', '.next', '.turbo', 'target', 'dist', '.DS_Store']);
+const IGNORE = new Set(['node_modules', '.next', '.turbo', 'target', 'dist', '.DS_Store', '.pnpm-store', '.cache']);
 const MAX_DEPTH = 3;
+// Dotfiles/dirs to show (everything else starting with . is hidden)
+const SHOW_DOT = new Set(['.github', '.vscode', '.claude', '.env', '.env.local', '.env.example', '.env.development', '.gitignore', '.gitattributes', '.eslintrc', '.eslintrc.js', '.eslintrc.json', '.prettierrc', '.prettierrc.js']);
 
 interface FileNode {
   name: string;
@@ -24,7 +26,7 @@ async function buildTree(dir: string, relPath: string, depth: number): Promise<F
 
     // Sort: dirs first, then files, alphabetical
     const sorted = entries
-      .filter(e => !IGNORE.has(e.name) && !e.name.startsWith('.'))
+      .filter(e => !IGNORE.has(e.name) && (!e.name.startsWith('.') || SHOW_DOT.has(e.name)))
       .sort((a, b) => {
         if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
         return a.name.localeCompare(b.name);
