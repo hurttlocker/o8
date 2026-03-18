@@ -2139,6 +2139,93 @@ function DeployList({ onOpenDeploy }: { onOpenDeploy?: (project?: string) => voi
 
 // ── File Tree (light theme) ──
 
+// ── File icon color mapping (VS Code / Cursor style) ──
+const FILE_ICON_COLORS: Record<string, string> = {
+  // TypeScript / JavaScript
+  '.ts': '#3178c6', '.tsx': '#3178c6', '.d.ts': '#3178c6',
+  '.js': '#f7df1e', '.jsx': '#f7df1e', '.mjs': '#f7df1e', '.cjs': '#f7df1e',
+  // Styles
+  '.css': '#1572b6', '.scss': '#cd6799', '.less': '#1d365d', '.sass': '#cd6799',
+  // Data / Config
+  '.json': '#cbcb41', '.yaml': '#cb171e', '.yml': '#cb171e', '.toml': '#9c4121',
+  '.xml': '#e37933', '.csv': '#237346',
+  // Web
+  '.html': '#e34f26', '.htm': '#e34f26', '.svg': '#ffb13b',
+  // Docs
+  '.md': '#519aba', '.mdx': '#519aba', '.txt': '#89929b',
+  // Go
+  '.go': '#00add8', '.mod': '#00add8', '.sum': '#00add8',
+  // Rust
+  '.rs': '#ce412b',
+  // Python
+  '.py': '#3572a5', '.pyi': '#3572a5',
+  // Shell
+  '.sh': '#4eaa25', '.bash': '#4eaa25', '.zsh': '#4eaa25', '.fish': '#4eaa25',
+  // Images
+  '.png': '#a074c4', '.jpg': '#a074c4', '.jpeg': '#a074c4', '.gif': '#a074c4',
+  '.ico': '#a074c4', '.webp': '#a074c4',
+  // Lock/Config
+  '.lock': '#89929b', '.env': '#ecd53f', '.gitignore': '#f05032',
+  // Other
+  '.wasm': '#654ff0', '.sql': '#e38c00', '.graphql': '#e535ab', '.prisma': '#2d3748',
+};
+
+// Special filename → color
+const FILE_NAME_COLORS: Record<string, string> = {
+  'package.json': '#3c873a', 'package-lock.json': '#3c873a',
+  'tsconfig.json': '#3178c6', 'next.config.js': '#000000', 'next.config.ts': '#000000', 'next.config.mjs': '#000000',
+  'tailwind.config.js': '#38bdf8', 'tailwind.config.ts': '#38bdf8',
+  'postcss.config.js': '#dd3a0a', 'postcss.config.mjs': '#dd3a0a',
+  '.eslintrc': '#4b32c3', '.eslintrc.js': '#4b32c3', '.eslintrc.json': '#4b32c3', 'eslint.config.js': '#4b32c3', 'eslint.config.mjs': '#4b32c3',
+  '.prettierrc': '#56b3b4', 'prettier.config.js': '#56b3b4',
+  'Dockerfile': '#2496ed', 'docker-compose.yml': '#2496ed', 'docker-compose.yaml': '#2496ed',
+  'Makefile': '#6d8086', 'CMakeLists.txt': '#6d8086',
+  'README.md': '#519aba', 'LICENSE': '#d4aa00', 'CHANGELOG.md': '#519aba',
+  'Cargo.toml': '#ce412b', 'Cargo.lock': '#ce412b',
+  'go.mod': '#00add8', 'go.sum': '#00add8',
+  '.env': '#ecd53f', '.env.local': '#ecd53f', '.env.example': '#ecd53f', '.env.development': '#ecd53f',
+  '.gitignore': '#f05032', '.gitattributes': '#f05032',
+  'jest.config.js': '#c21325', 'jest.config.ts': '#c21325', 'vitest.config.ts': '#729b1b',
+  'CLAUDE.md': '#d97706', 'AGENTS.md': '#d97706',
+};
+
+// Folder name → color
+const FOLDER_COLORS: Record<string, string> = {
+  'src': '#42a5f5', 'app': '#ef5350', 'pages': '#ef5350',
+  'components': '#ab47bc', 'lib': '#26a69a', 'utils': '#26a69a',
+  'hooks': '#7e57c2', 'context': '#e57373',
+  'styles': '#ec407a', 'css': '#ec407a',
+  'public': '#66bb6a', 'static': '#66bb6a', 'assets': '#ffa726',
+  'api': '#42a5f5', 'server': '#42a5f5', 'routes': '#42a5f5',
+  'types': '#3178c6', 'interfaces': '#3178c6',
+  'config': '#78909c', 'configs': '#78909c', '.vscode': '#007acc',
+  'test': '#c21325', 'tests': '#c21325', '__tests__': '#c21325', 'spec': '#c21325',
+  'scripts': '#78909c', 'bin': '#78909c', 'cmd': '#78909c',
+  'docs': '#42a5f5', 'doc': '#42a5f5',
+  'node_modules': '#66bb6a', '.next': '#000000', '.turbo': '#0096ff',
+  '.git': '#f05032', '.github': '#6e5494',
+  'dist': '#78909c', 'build': '#78909c', 'out': '#78909c', 'target': '#78909c',
+  'internal': '#26a69a', 'pkg': '#26a69a',
+  'migrations': '#e38c00', 'prisma': '#2d3748',
+  'ios': '#a2aaad', 'android': '#3ddc84',
+  'src-tauri': '#ffc131',
+};
+
+function getFileIconColor(name: string): string {
+  // Check exact filename first
+  const lower = name.toLowerCase();
+  if (FILE_NAME_COLORS[lower]) return FILE_NAME_COLORS[lower];
+  if (FILE_NAME_COLORS[name]) return FILE_NAME_COLORS[name];
+  // Then extension (handle .d.ts specially)
+  if (name.endsWith('.d.ts')) return FILE_ICON_COLORS['.d.ts']!;
+  const ext = '.' + name.split('.').pop()?.toLowerCase();
+  return FILE_ICON_COLORS[ext] ?? '#89929b';
+}
+
+function getFolderColor(name: string): string {
+  return FOLDER_COLORS[name.toLowerCase()] ?? '#42a5f5';
+}
+
 function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
   node: FileNode;
   depth?: number;
@@ -2153,6 +2240,7 @@ function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
   const hasChangedChild = node.type === 'dir' && hasChangedDescendant(node, changedFiles);
 
   if (node.type === 'file') {
+    const iconColor = isChanged ? '#3b82f6' : getFileIconColor(node.name);
     return (
       <div
         onClick={() => onSelectFile?.(node.path)}
@@ -2172,7 +2260,7 @@ function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
           transition: 'color 100ms',
         }}
       >
-        <FileText size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: isChanged ? '#3b82f6' : 'var(--t-text-muted)' }} />
+        <FileText size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: iconColor }} />
         {node.name}
         {isChanged ? (
           <span style={{
@@ -2188,6 +2276,7 @@ function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
     );
   }
 
+  const folderColor = getFolderColor(node.name);
   return (
     <div>
       <div
@@ -2208,8 +2297,8 @@ function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
         }}
       >
         {open
-          ? <FolderOpen size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: hasChangedChild ? '#3b82f6' : '#3b82f6' }} />
-          : <Folder size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: hasChangedChild ? '#3b82f6' : '#3b82f6' }} />
+          ? <FolderOpen size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: hasChangedChild ? '#3b82f6' : folderColor }} />
+          : <Folder size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: hasChangedChild ? '#3b82f6' : folderColor }} />
         }
         {node.name}
         {open
@@ -2538,11 +2627,29 @@ export const AgentPanel = memo(function AgentPanel({
     return () => clearInterval(id);
   }, [activeRepo]);
 
-  // Fetch file tree (re-fetch when activeWorkspace changes)
+  // Resolve repo → local path for file tree
+  const [repoLocalPath, setRepoLocalPath] = useState<string | null>(null);
+  useEffect(() => {
+    if (!activeRepo) { setRepoLocalPath(null); return; }
+    fetch('/api/panel/repos')
+      .then(r => r.json())
+      .then(data => {
+        const match = (data.repos ?? []).find((r: { remoteUrl?: string }) => {
+          const url = (r.remoteUrl ?? '').replace(/\.git$/, '');
+          return url.endsWith(activeRepo!);
+        });
+        setRepoLocalPath(match?.localPath ?? null);
+      })
+      .catch(() => setRepoLocalPath(null));
+  }, [activeRepo]);
+
+  // Fetch file tree (re-fetch when repo or workspace changes)
   useEffect(() => {
     async function fetchFiles() {
       try {
-        const wsParam = activeWorkspace ? `?workspace=${encodeURIComponent(activeWorkspace)}` : '';
+        // Priority: workspace > repo local path > default
+        const wsPath = activeWorkspace ?? repoLocalPath;
+        const wsParam = wsPath ? `?workspace=${encodeURIComponent(wsPath)}` : '';
         const res = await fetch(`/api/panel/files${wsParam}`);
         if (!res.ok) return;
         const data = await res.json();
@@ -2559,7 +2666,7 @@ export const AgentPanel = memo(function AgentPanel({
     void fetchFiles();
     const id = setInterval(fetchFiles, 60_000);
     return () => clearInterval(id);
-  }, [activeWorkspace]);
+  }, [activeWorkspace, repoLocalPath]);
 
   return (
     <div style={{
