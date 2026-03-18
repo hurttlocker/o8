@@ -1182,11 +1182,14 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           const bytes = Uint8Array.from(atob(data), c => c.charCodeAt(0));
           const raw = new TextDecoder().decode(bytes);
           const clean = raw.replace(ANSI_RE, '');
+          // Reset regex lastIndex (global regex retains state)
+          LOCALHOST_RE.lastIndex = 0;
           const matches = clean.matchAll(LOCALHOST_RE);
           for (const match of matches) {
             const port = parseInt(match[1], 10);
-            if (IGNORED_PORTS.has(port)) continue; // skip IDE's own ports
-            if (detectedPortsRef.current.has(port)) continue;
+            console.log(`[terminal] Detected localhost:${port} → ${match[0]}`);
+            if (IGNORED_PORTS.has(port)) { console.log(`[terminal] Skipping port ${port} (IDE port)`); continue; }
+            if (detectedPortsRef.current.has(port)) { console.log(`[terminal] Skipping port ${port} (already detected)`); continue; }
             detectedPortsRef.current.add(port);
 
             // Find which tab this session belongs to

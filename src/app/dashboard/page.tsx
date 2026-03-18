@@ -392,6 +392,7 @@ function DashboardInner() {
         flex: 1,
         display: 'flex',
         overflow: 'hidden',
+        minHeight: 0, // critical: allow flex children to shrink for scroll
       }}>
       {/* ── Nav Rail + Left Panel ── */}
       {sidebarVisible && <NavRail
