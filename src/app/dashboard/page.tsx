@@ -613,6 +613,9 @@ function DashboardInner() {
         width: rightWidth,
         flexShrink: 0,
         height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
         borderLeft: '1px solid var(--t-divider)',
       }}>
         <DesktopChat
