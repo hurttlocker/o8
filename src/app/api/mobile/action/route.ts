@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { MobileActionRequest, MobileActionResponse } from '@/lib/mobile/types';
 import { launchCodexFromMobile, performRuntimeAction } from '@/lib/runtime/actions';
 import { steerOpenClawSession } from '@/lib/openclaw/chat';
+import { getRuntime } from '@/lib/runtimes/registry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -72,45 +73,70 @@ export async function POST(request: NextRequest) {
     }
 
     if (action === 'resume') {
-      if (!isOwnedCodex) {
+      const message = (payload as unknown as Record<string, unknown>)?.message as string | undefined;
+
+      // Route 1: IDE-owned Codex — use existing performRuntimeAction path
+      if (isOwnedCodex) {
+        const result = await performRuntimeAction({
+          action: 'send_input',
+          surfaceId: sessionKey,
+          message,
+          runId: payload?.runId,
+        });
+
         const response: MobileActionResponse = {
-          ok: false,
+          ok: result.ok,
           action,
           sessionKey,
-          status: 'unavailable',
-          note: 'Resume is only wired truthfully for IDE-owned Codex sessions between runs on mobile right now.',
+          status: result.status,
+          note: result.note,
+          runId: result.runId,
+          aborted: result.aborted,
         };
+
         return NextResponse.json(response, {
-          status: 501,
-          headers: {
-            'Cache-Control': 'no-store, max-age=0',
-          },
+          status: result.status === 'unavailable' ? 501 : 200,
+          headers: { 'Cache-Control': 'no-store, max-age=0' },
         });
       }
 
-      const result = await performRuntimeAction({
-        action: 'send_input',
-        surfaceId: sessionKey,
-        message: payload?.message,
-        runId: payload?.runId,
-      });
+      // Route 2: Claude Code sessions — use claude-code runtime adapter
+      if (sessionKey.startsWith('claude-code:')) {
+        const ccRuntime = getRuntime('claude-code');
+        if (!ccRuntime?.resume) {
+          return NextResponse.json(
+            { ok: false, action, sessionKey, status: 'unavailable', note: 'Claude Code runtime not available.' },
+            { status: 501, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+          );
+        }
+        const result = await ccRuntime.resume(sessionKey, message ?? '');
+        return NextResponse.json(
+          { ok: result.ok, action, sessionKey, status: result.ok ? 'sent' : 'error', note: result.note },
+          { status: result.ok ? 200 : 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+        );
+      }
 
-      const response: MobileActionResponse = {
-        ok: result.ok,
-        action,
-        sessionKey,
-        status: result.status,
-        note: result.note,
-        runId: result.runId,
-        aborted: result.aborted,
-      };
+      // Route 3: Discovered Codex sessions — use codex runtime adapter
+      if (sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-discovered:')) {
+        const codexRuntime = getRuntime('codex');
+        if (!codexRuntime?.resume) {
+          return NextResponse.json(
+            { ok: false, action, sessionKey, status: 'unavailable', note: 'Codex runtime not available.' },
+            { status: 501, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+          );
+        }
+        const result = await codexRuntime.resume(sessionKey, message ?? '');
+        return NextResponse.json(
+          { ok: result.ok, action, sessionKey, status: result.ok ? 'sent' : 'error', note: result.note },
+          { status: result.ok ? 200 : 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+        );
+      }
 
-      return NextResponse.json(response, {
-        status: result.status === 'unavailable' ? 501 : 200,
-        headers: {
-          'Cache-Control': 'no-store, max-age=0',
-        },
-      });
+      // Route 4: Unknown session type
+      return NextResponse.json(
+        { ok: false, action, sessionKey, status: 'unavailable', note: `Don't know how to resume session: ${sessionKey.split(':')[0]}` },
+        { status: 501, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+      );
     }
 
     if (action === 'watch' || action === 'resolve') {
