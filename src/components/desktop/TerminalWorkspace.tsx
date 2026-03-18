@@ -828,16 +828,23 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
       });
     }, [activeTabId, sendTerminalDetach]);
 
-    // When a tab gets its tmux session, check if there's a CLI command to run
+    // When a tab gets its tmux session, run pending CLI command via tmux send-keys (server-side)
     useEffect(() => {
       for (const tab of tabs) {
         if (tab.tmuxSession && pendingCliCommands.current.has(tab.id)) {
           const command = pendingCliCommands.current.get(tab.id)!;
           pendingCliCommands.current.delete(tab.id);
-          // Delay to let xterm + tmux fully initialize before sending CLI command
-          setTimeout(() => {
-            sendTerminalInput(tab.tmuxSession!, command + '\n');
-          }, 1200);
+          // Use server-side API to run command via tmux send-keys (doesn't race with terminal rendering)
+          fetch('/api/panel/terminal-exec', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionName: tab.tmuxSession, command }),
+          }).catch(() => {
+            // Fallback: send through WS input after longer delay
+            setTimeout(() => {
+              sendTerminalInput(tab.tmuxSession!, command + '\n');
+            }, 2000);
+          });
         }
       }
     }, [tabs, sendTerminalInput]);
