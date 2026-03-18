@@ -360,7 +360,9 @@ async function discoverClaudeCodeSessions(): Promise<{
   }
 }
 
-export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
+export async function getOpenClawFleetSnapshot(
+  options: { fleetMode?: 'smart' | 'all' } = {},
+): Promise<FleetSnapshot> {
   try {
     // Use gateway REST API (<50ms) with CLI fallback (30-40s)
     const { getGatewayStatus } = await import('@/lib/openclaw/gateway-client');
@@ -437,74 +439,105 @@ export async function getOpenClawFleetSnapshot(): Promise<FleetSnapshot> {
       };
     });
 
-    // ── Collapse sessions per agent + pin configured agents ──
-    // Each agentId gets ONE card. Prefer :main session, then most recent.
-    // Cron/subagent sessions just update the primary card's "last active" time.
+    // ── Smart session collapsing + pin configured agents ──
+    // When fleetMode is 'all', skip collapsing — show every session as-is.
+    const useSmartCollapse = options.fleetMode !== 'all';
+    //
+    // Main agent(s): Show ALL non-cron surfaces (direct, Discord, Telegram group).
+    //   These are different conversations the user switches between.
+    //   Cron sessions collapse into ONE "latest cron" card.
+    //
+    // Sub-agents: Collapse ALL sessions into ONE card per agent.
+    //   Prefer the :main session; crons just update activity.
+    //
     const agentConfigs = readOpenClawAgentConfigs();
-    const agentBestSession = new Map<string, AgentSummary>();
+
+    // Determine which agentId is the "main" agent (id === 'main' by convention)
+    const mainAgentId = agentConfigs.find(c => c.id === 'main')?.id ?? 'main';
+
+    // Separate agents into: main agent surfaces vs sub-agent sessions
+    const mainAgentCards: AgentSummary[] = [];
+    const mainAgentLatestCron: AgentSummary | null = null;
+    const subAgentBest = new Map<string, AgentSummary>();
+
+    let latestMainCron: AgentSummary | null = null;
 
     for (const agent of agents) {
-      // Derive the base agentId (main, ace, hawk)
       const baseAgentId = agent.squadId.replace('squad-', '');
-      const existing = agentBestSession.get(baseAgentId);
+      const isCron = agent.sessionKey?.includes(':cron:');
 
-      if (!existing) {
-        agentBestSession.set(baseAgentId, agent);
-        continue;
-      }
-
-      // Prefer the :main session (direct session, not cron/group/discord)
-      const isMainSession = agent.sessionKey === `agent:${baseAgentId}:main`;
-      const existingIsMain = existing.sessionKey === `agent:${baseAgentId}:main`;
-
-      if (isMainSession && !existingIsMain) {
-        // New agent is the main session — keep it, carry forward latest activity
-        const existingAge = existing.lastEventAt;
-        agentBestSession.set(baseAgentId, agent);
-        // If cron ran more recently, note that
-        if (existing.surfaceLabel?.includes('Cron') || existing.surfaceLabel?.includes('automation')) {
-          const merged = agentBestSession.get(baseAgentId)!;
-          merged.currentTask = `${merged.currentTask}`;
+      if (baseAgentId === mainAgentId) {
+        // Main agent: keep all non-cron surfaces, collapse crons
+        if (isCron) {
+          // Keep only the most recent cron
+          if (!latestMainCron) {
+            latestMainCron = agent;
+          }
+          // First one in the list is most recent (gateway sorts by updatedAt desc)
+        } else {
+          mainAgentCards.push(agent);
         }
-      } else if (!isMainSession && existingIsMain) {
-        // Existing is main session — keep it, but update last active if cron is newer
-        // (no swap needed)
       } else {
-        // Both are non-main or both are main — keep the one with more recent activity
-        // (first one in the list is typically the most recent from gateway)
+        // Sub-agent: collapse to one card per agentId
+        if (!subAgentBest.has(baseAgentId)) {
+          subAgentBest.set(baseAgentId, agent);
+        } else {
+          // Prefer :main session over cron
+          const existing = subAgentBest.get(baseAgentId)!;
+          const isMainSession = agent.sessionKey === `agent:${baseAgentId}:main`;
+          const existingIsMain = existing.sessionKey === `agent:${baseAgentId}:main`;
+          if (isMainSession && !existingIsMain) {
+            subAgentBest.set(baseAgentId, agent);
+          }
+        }
       }
     }
 
-    // Pin configured agents that have no active session
+    // Pin configured agents that have no active session at all
+    const seenAgentIds = new Set<string>();
+    for (const card of mainAgentCards) seenAgentIds.add(mainAgentId);
+    for (const [id] of subAgentBest) seenAgentIds.add(id);
+
     for (const config of agentConfigs) {
-      if (!agentBestSession.has(config.id)) {
-        const meta = agentMeta[config.id];
-        const workspace = shortenPath(meta?.workspaceDir);
-        agentBestSession.set(config.id, {
-          id: `agent:${config.id}:main`,
-          name: config.name ?? config.id,
-          squadId: `squad-${config.id}`,
-          runtime: 'openclaw',
-          model: config.primaryModel ?? 'unknown',
-          primaryModel: config.primaryModel,
-          heartbeatModel: config.heartbeatModel,
-          status: 'idle' as AgentStatus,
-          currentTask: '',
-          workspace: workspace ?? '~/clawd',
-          branch: '',
-          sessionKey: `agent:${config.id}:main`,
-          approvalStatus: 'none',
-          lastEventAt: 'offline',
-          context: { usedPercent: 0, trend: 'stable' as const },
-          alerts: 0,
-          surfaceLabel: 'Idle',
-          isCurrentSession: false,
-        });
+      if (seenAgentIds.has(config.id)) continue;
+      const meta = agentMeta[config.id];
+      const workspace = shortenPath(meta?.workspaceDir);
+      const pinnedAgent: AgentSummary = {
+        id: `agent:${config.id}:main`,
+        name: config.name ?? config.id,
+        squadId: `squad-${config.id}`,
+        runtime: 'openclaw',
+        model: config.primaryModel ?? 'unknown',
+        primaryModel: config.primaryModel,
+        heartbeatModel: config.heartbeatModel,
+        status: 'idle' as AgentStatus,
+        currentTask: '',
+        workspace: workspace ?? '~/clawd',
+        branch: '',
+        sessionKey: `agent:${config.id}:main`,
+        approvalStatus: 'none',
+        lastEventAt: 'offline',
+        context: { usedPercent: 0, trend: 'stable' as const },
+        alerts: 0,
+        surfaceLabel: 'Idle',
+        isCurrentSession: false,
+      };
+
+      if (config.id === mainAgentId) {
+        mainAgentCards.push(pinnedAgent);
+      } else {
+        subAgentBest.set(config.id, pinnedAgent);
       }
     }
 
-    // Replace the agents array with deduplicated + pinned agents
-    const deduplicatedAgents: AgentSummary[] = [...agentBestSession.values()];
+    // Assemble: all main agent surfaces + one card per sub-agent (or all sessions if 'all' mode)
+    const deduplicatedAgents: AgentSummary[] = useSmartCollapse
+      ? [
+          ...mainAgentCards,
+          ...(latestMainCron ? [latestMainCron] : []),
+          ...subAgentBest.values(),
+        ]
+      : agents; // 'all' mode — show every session as-is
 
     const openClawSquads: SquadSummary[] = (parsed.agents?.agents ?? [])
       .map((agent) => {
