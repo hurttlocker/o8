@@ -110,6 +110,7 @@ async function resolveHistory(
       }
       if (entry.kind === 'message') {
         const role = runtimeTailRole(entry.label);
+        // Filter system noise
         if (role === 'system' || role === 'user') {
           const lt = entry.text.toLowerCase();
           if (lt.includes('<permissions') || lt.includes('collaboration_mode') || lt.includes('# agents.md') || lt.includes('sandbox_mode')) continue;
@@ -117,20 +118,20 @@ async function resolveHistory(
         raw.push({ id: entry.id, role, text: entry.text, timestampLabel: entry.timestampLabel });
         continue;
       }
-      if (entry.kind === 'tool') {
-        raw.push({ id: entry.id, role: 'system', text: `🔧 ${entry.label || 'Tool'}`, timestampLabel: entry.timestampLabel });
-        continue;
-      }
-      if (entry.kind === 'tool-output') {
-        raw.push({ id: entry.id, role: 'system', text: entry.text, timestampLabel: entry.timestampLabel });
+      // Collapse tool calls — skip individual tool entries and tool output.
+      // Users see the assistant's summary of what it did, not every raw function call.
+      if (entry.kind === 'tool' || entry.kind === 'tool-output') {
         continue;
       }
     }
-    // Deduplicate consecutive assistant messages with identical text
+    // Deduplicate: remove entries with identical text (not just consecutive)
+    const seen = new Set<string>();
     const deduped: MobileTranscriptEntry[] = [];
     for (const entry of raw) {
-      const prev = deduped[deduped.length - 1];
-      if (prev && prev.role === 'assistant' && entry.role === 'assistant' && prev.text === entry.text) continue;
+      // Normalize for dedup: trim and take first 200 chars
+      const key = `${entry.role}:${entry.text.trim().slice(0, 200)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       deduped.push(entry);
     }
     return { sessionKey, entries: applyDelta(deduped, req.sinceId) };

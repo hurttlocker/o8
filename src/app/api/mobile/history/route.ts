@@ -92,15 +92,12 @@ export async function GET(request: NextRequest) {
       const tail = await getCodexRuntimeTail(sessionKey);
       const transcript: MobileTranscriptEntry[] = [];
       for (const entry of tail.entries ?? []) {
-        // Skip noisy system/instruction entries — only show user, assistant, and tool activity
         if (entry.kind === 'event' && entry.label === 'Agent update') {
-          // Agent updates are assistant messages
           transcript.push({ id: entry.id, role: 'assistant', text: entry.text, timestampLabel: entry.timestampLabel });
           continue;
         }
         if (entry.kind === 'message') {
           const role = runtimeTailRole(entry.label);
-          // Filter out system instructions (permissions, collaboration mode, AGENTS.md)
           if (role === 'system' || role === 'user') {
             const lowerText = entry.text.toLowerCase();
             if (lowerText.includes('<permissions') || lowerText.includes('collaboration_mode') || lowerText.includes('# agents.md') || lowerText.includes('sandbox_mode')) continue;
@@ -108,23 +105,18 @@ export async function GET(request: NextRequest) {
           transcript.push({ id: entry.id, role, text: entry.text, timestampLabel: entry.timestampLabel });
           continue;
         }
-        if (entry.kind === 'tool') {
-          // Format tool calls as system entries with clean names
-          const toolName = entry.label || 'Tool';
-          transcript.push({ id: entry.id, role: 'system', text: `🔧 ${toolName}`, timestampLabel: entry.timestampLabel });
-          continue;
-        }
-        if (entry.kind === 'tool-output') {
-          // Show compact tool output
-          transcript.push({ id: entry.id, role: 'system', text: entry.text, timestampLabel: entry.timestampLabel });
+        // Tool calls and output: skip — the assistant summary covers what happened
+        if (entry.kind === 'tool' || entry.kind === 'tool-output') {
           continue;
         }
       }
-      // Deduplicate consecutive assistant messages with identical text
+      // Deduplicate: remove entries with identical text (not just consecutive)
+      const seen = new Set<string>();
       const deduped: MobileTranscriptEntry[] = [];
       for (const entry of transcript) {
-        const prev = deduped[deduped.length - 1];
-        if (prev && prev.role === 'assistant' && entry.role === 'assistant' && prev.text === entry.text) continue;
+        const key = `${entry.role}:${entry.text.trim().slice(0, 200)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
         deduped.push(entry);
       }
       const payload: MobileHistoryResponse = { sessionKey, transcript: deduped };

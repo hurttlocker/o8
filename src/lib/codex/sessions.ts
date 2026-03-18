@@ -595,7 +595,7 @@ function summarizeTailFromJsonl(raw: string) {
     const timestampLabel = parseTimestampLabel(typeof parsed.timestamp === 'string' ? parsed.timestamp : undefined);
 
     if (type === 'event_msg' && payload.type === 'agent_message') {
-      const text = compactText(String(payload.message ?? ''), 240);
+      const text = String(payload.message ?? '').trim();
       if (!text) continue;
       entries.push({
         id: `${entries.length}-event`,
@@ -610,7 +610,7 @@ function summarizeTailFromJsonl(raw: string) {
     if (type === 'response_item' && payload.type === 'message') {
       const role = String(payload.role ?? 'message');
       const phase = compactText(String(payload.phase ?? ''), 32);
-      const text = compactText(extractTextParts((payload.content ?? []) as Array<Record<string, unknown>>), 280);
+      const text = extractTextParts((payload.content ?? []) as Array<Record<string, unknown>>).trim();
       if (!text) continue;
       entries.push({
         id: `${entries.length}-message`,
@@ -628,14 +628,14 @@ function summarizeTailFromJsonl(raw: string) {
         id: `${entries.length}-tool`,
         kind: 'tool',
         label: name || 'Tool call',
-        text: compactText(String(payload.arguments ?? ''), 220) || 'Tool invoked.',
+        text: compactText(String(payload.arguments ?? ''), 500) || 'Tool invoked.',
         timestampLabel,
       });
       continue;
     }
 
     if (type === 'response_item' && payload.type === 'function_call_output') {
-      const text = compactText(String(payload.output ?? ''), 240);
+      const text = compactText(String(payload.output ?? ''), 500);
       if (!text) continue;
       entries.push({
         id: `${entries.length}-tool-output`,
@@ -647,7 +647,7 @@ function summarizeTailFromJsonl(raw: string) {
     }
   }
 
-  return entries.slice(-24);
+  return entries.slice(-50);
 }
 
 async function findCodexThreadBySurfaceId(surfaceId: string) {
