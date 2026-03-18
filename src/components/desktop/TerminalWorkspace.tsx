@@ -31,6 +31,9 @@ const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[^[]/g;
 /** Detect localhost URLs in terminal output */
 const LOCALHOST_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{3,5})\b[^\s)"]*/g;
 
+/** Ports to ignore — the IDE itself runs on these */
+const IGNORED_PORTS = new Set([3000, 3002]); // 3000 = Next.js dev, 3002 = WS server
+
 export interface TerminalTabHandle {
   writeToTerminal: (sessionName: string, data: string) => void;
   writeRaw: (sessionName: string, data: string) => void;
@@ -1180,6 +1183,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           const matches = clean.matchAll(LOCALHOST_RE);
           for (const match of matches) {
             const port = parseInt(match[1], 10);
+            if (IGNORED_PORTS.has(port)) continue; // skip IDE's own ports
             if (detectedPortsRef.current.has(port)) continue;
             detectedPortsRef.current.add(port);
 
