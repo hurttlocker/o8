@@ -56,6 +56,7 @@ function DashboardInner() {
   const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
   const [thoughtsOpen, setThoughtsOpen] = useState(false);
   const [wsStatus, setWsStatus] = useState<WsConnectionState>('disconnected');
+  const [lifecycleEvents, setLifecycleEvents] = useState<Map<string, { state: string; exitCode?: number; ts: number }>>(new Map());
 
   // Terminal WS hook — routes events to TerminalWorkspace (multi-tab)
   const terminalWsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
@@ -78,6 +79,13 @@ function DashboardInner() {
     onTerminalImage: (sessionName: string, imageB64: string, filename: string) => {
       termWorkspaceRef.current?.showImage(sessionName, imageB64, filename);
     },
+    onAgentLifecycle: (sessionName: string, state: string, exitCode?: number) => {
+      setLifecycleEvents(prev => {
+        const next = new Map(prev);
+        next.set(sessionName, { state, exitCode, ts: Date.now() });
+        return next;
+      });
+    },
   }), []);
 
   const {
@@ -87,6 +95,7 @@ function DashboardInner() {
     sendTerminalInput,
     sendTerminalResize,
     sendTerminalDetach,
+    sendAgentKill,
   } = useDesktopWebSocket(undefined, terminalWsCallbacks);
 
   // Terminal auto-creation now handled by TerminalWorkspace component
@@ -433,6 +442,8 @@ function DashboardInner() {
           onOpenDeploy={handleOpenDeploy}
           onOpenMemory={handleOpenMemory}
           onAgentsUpdate={handleAgentsUpdate}
+          onAgentKill={sendAgentKill}
+          lifecycleEvents={lifecycleEvents}
         />
       </div>}
 
