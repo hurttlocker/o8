@@ -36,9 +36,9 @@ interface TerminalWorkspaceProps {
 
 const CLI_AGENTS = [
   { id: 'shell', label: 'Terminal', color: '#64748b', command: null },
-  { id: 'claude', label: 'Claude Code', color: '#a855f7', command: 'claude' },
-  { id: 'codex', label: 'Codex', color: '#22c55e', command: 'codex' },
-  { id: 'gemini', label: 'Gemini CLI', color: '#3b82f6', command: 'gemini' },
+  { id: 'claude', label: 'Claude Code', color: '#e07a3a', command: 'claude' },
+  { id: 'codex', label: 'Codex', color: '#6b7280', command: 'codex' },
+  { id: 'gemini', label: 'Gemini CLI', color: '#4285f4', command: 'gemini' },
   { id: 'opencode', label: 'OpenCode', color: '#f97316', command: 'opencode' },
   { id: 'aider', label: 'Aider', color: '#eab308', command: 'aider' },
 ];
