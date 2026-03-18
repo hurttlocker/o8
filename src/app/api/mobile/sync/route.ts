@@ -4,6 +4,7 @@ import { getCodexRuntimeTail } from '@/lib/codex/sessions';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
 import { getMobileInboxSnapshot } from '@/lib/mobile/openclaw';
 import { getSessionTranscript } from '@/lib/openclaw/chat';
+import { getRuntime } from '@/lib/runtimes/registry';
 import { getReviewFileDetail } from '@/lib/review/workspace';
 
 export const runtime = 'nodejs';
@@ -132,6 +133,23 @@ async function resolveHistory(
       deduped.push(entry);
     }
     return { sessionKey, entries: applyDelta(deduped, req.sinceId) };
+  }
+
+  // Claude Code sessions — read from JSONL via runtime adapter
+  if (sessionKey.startsWith('claude-code:')) {
+    const ccRuntime = getRuntime('claude-code');
+    if (ccRuntime?.readTranscript) {
+      const entries = await ccRuntime.readTranscript(sessionKey, undefined, limit);
+      const transcript: MobileTranscriptEntry[] = entries.map(entry => ({
+        id: entry.id,
+        role: entry.role === 'user' ? 'user' : entry.role === 'assistant' ? 'assistant' : 'system',
+        text: entry.text,
+        timestampLabel: entry.timestamp
+          ? entry.timestamp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+          : '',
+      }));
+      return { sessionKey, entries: applyDelta(transcript, req.sinceId) };
+    }
   }
 
   // OpenClaw sessions
