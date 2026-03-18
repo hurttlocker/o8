@@ -2,6 +2,7 @@
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Plus, X, Terminal as TerminalIcon, ChevronDown } from 'lucide-react';
+import { saveTabState, loadTabState, checkAliveSessions, type PersistedTab, type PersistedTabState } from '@/lib/terminal/tab-state';
 
 /* ── Types ── */
 
@@ -800,17 +801,105 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
     const tabCountRef = useRef(0);
     const pendingCliCommands = useRef<Map<string, string>>(new Map()); // tabId → command to run after session created
     const initialCreatedRef = useRef(false);
+    const restoredRef = useRef(false);
+    const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    // Create initial shell tab on WS connect
+    // Persist tab state (debounced — saves 500ms after last change)
+    const persistTabs = useCallback((currentTabs: TerminalTab[], currentActiveId: string) => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        const persisted: PersistedTabState = {
+          version: 1,
+          activeTabId: currentActiveId,
+          tabs: currentTabs.map(t => ({
+            id: t.id,
+            label: t.label,
+            cliAgent: t.cliAgent ?? 'shell',
+            repoName: t.repo?.name,
+            repoPath: t.repo?.localPath,
+            tmuxSession: t.tmuxSession ?? undefined,
+          })),
+          savedAt: new Date().toISOString(),
+        };
+        saveTabState(persisted);
+      }, 500);
+    }, []);
+
+    // Save whenever tabs or active tab changes
     useEffect(() => {
-      if (termWsConnected && !initialCreatedRef.current) {
-        initialCreatedRef.current = true;
-        sendTerminalCreate(120, 30);
+      if (tabs.length > 0) {
+        persistTabs(tabs, activeTabId);
       }
+    }, [tabs, activeTabId, persistTabs]);
+
+    // Restore tabs on WS connect (or create default shell tab)
+    useEffect(() => {
+      if (!termWsConnected || restoredRef.current) return;
+      restoredRef.current = true;
+
+      (async () => {
+        const saved = await loadTabState();
+
+        if (saved && saved.tabs.length > 0) {
+          // Check which tmux sessions are still alive
+          const tmuxNames = saved.tabs.map(t => t.tmuxSession).filter(Boolean) as string[];
+          const alive = await checkAliveSessions(tmuxNames);
+
+          const restoredTabs: TerminalTab[] = [];
+          let needsNewSession = false;
+
+          for (const st of saved.tabs) {
+            tabCountRef.current += 1;
+            const tabId = `tab-${tabCountRef.current}`;
+
+            if (st.tmuxSession && alive.has(st.tmuxSession)) {
+              // Tmux session survived — reattach directly
+              restoredTabs.push({
+                id: tabId,
+                label: st.label,
+                tmuxSession: st.tmuxSession,
+                cliAgent: st.cliAgent,
+                repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : undefined,
+              });
+              // Attach to the existing session
+              sendTerminalAttach(st.tmuxSession, 120, 30);
+            } else {
+              // Tmux session died — create a new shell in the same directory
+              restoredTabs.push({
+                id: tabId,
+                label: st.label,
+                tmuxSession: null, // will be assigned when session created
+                cliAgent: 'shell', // don't auto-restart agents (could be destructive)
+                repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : undefined,
+              });
+              needsNewSession = true;
+            }
+          }
+
+          setTabs(restoredTabs);
+          // Set active tab — try to match saved, otherwise first tab
+          const activeMatch = restoredTabs.find(t => t.id === saved.activeTabId);
+          setActiveTabId(activeMatch?.id ?? restoredTabs[0]?.id ?? '');
+
+          // Create new sessions for tabs that need them
+          const deadTabs = restoredTabs.filter(t => t.tmuxSession === null);
+          for (const tab of deadTabs) {
+            sendTerminalCreate(120, 30);
+          }
+        } else {
+          // No saved state — create default shell tab
+          sendTerminalCreate(120, 30);
+        }
+      })();
+    }, [termWsConnected, sendTerminalCreate, sendTerminalAttach]);
+
+    // Reset restored flag when WS disconnects
+    useEffect(() => {
       if (!termWsConnected) {
+        restoredRef.current = false;
         initialCreatedRef.current = false;
       }
-    }, [termWsConnected, sendTerminalCreate]);
+    }, [termWsConnected]);
 
     // Called when WS server confirms a new tmux session was created
     const handleSessionCreated = useCallback((sessionName: string) => {
@@ -819,7 +908,16 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
         const pendingIdx = prev.findIndex(t => t.tmuxSession === null);
         if (pendingIdx >= 0) {
           const updated = [...prev];
-          updated[pendingIdx] = { ...updated[pendingIdx], tmuxSession: sessionName };
+          const tab = updated[pendingIdx];
+          updated[pendingIdx] = { ...tab, tmuxSession: sessionName };
+          // If this is a restored tab with a repo, cd into it
+          if (tab.repo?.localPath) {
+            fetch('/api/panel/terminal-exec', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionName, command: `cd ${tab.repo.localPath}` }),
+            }).catch(() => {});
+          }
           return updated;
         }
         // No pending tab — this is the initial auto-created session
