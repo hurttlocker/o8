@@ -666,32 +666,39 @@ function handleTerminalResize(client: ClientState, msg: Record<string, unknown>)
   } catch { /* resize may fail if PTY exited */ }
 }
 
-function handleTerminalImage(client: ClientState, msg: Record<string, unknown>) {
+function handleTerminalImage(_client: ClientState, msg: Record<string, unknown>) {
   const sessionName = msg.sessionName as string;
   const filePath = msg.filePath as string;
-  if (!sessionName || !filePath) {
-    sendTerminal(client, 'error', { sessionName: sessionName ?? '', error: 'sessionName and filePath required' });
-    return;
-  }
+  if (!sessionName || !filePath) return;
 
   try {
-    // Resolve path
     const resolved = filePath.replace(/^~/, process.env.HOME ?? '/tmp');
     const data = readFileSync(resolved);
     const b64 = data.toString('base64');
     const filename = require('path').basename(resolved);
     const filenameB64 = Buffer.from(filename).toString('base64');
+    const iip = `\x1b]1337;File=name=${filenameB64};size=${data.length};inline=1:${b64}\x07\n`;
 
-    // Send the IIP sequence directly to the client (bypasses tmux entirely)
-    sendTerminal(client, 'image', {
-      sessionName,
-      iip: `\x1b]1337;File=name=${filenameB64};size=${data.length};inline=1:${b64}\x07\n`,
+    // Broadcast to ALL clients attached to this terminal session (not the sender)
+    const attachment = terminalAttachments.get(sessionName);
+    if (!attachment) {
+      console.log(`[ws-server] terminal-image: no attachment for ${sessionName}`);
+      return;
+    }
+
+    const imageMsg = JSON.stringify({
+      channel: 'terminal',
+      event: 'image',
+      data: { sessionName, iip },
     });
+
+    for (const cid of attachment.clientIds) {
+      const c = clients.get(cid);
+      if (c) sendRaw(c, imageMsg);
+    }
+    console.log(`[ws-server] Sent image to ${attachment.clientIds.size} client(s) on ${sessionName}`);
   } catch (err) {
-    sendTerminal(client, 'error', {
-      sessionName,
-      error: `Image load failed: ${err instanceof Error ? err.message : 'unknown'}`,
-    });
+    console.log(`[ws-server] terminal-image error: ${err instanceof Error ? err.message : 'unknown'}`);
   }
 }
 
