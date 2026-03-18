@@ -14,6 +14,19 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'Content-Security-Policy',
+            value: "frame-src http://localhost:* http://127.0.0.1:* 'self'; frame-ancestors 'self'",
+          },
+        ],
+      },
+    ];
+  },
   async rewrites() {
     return [
       {
