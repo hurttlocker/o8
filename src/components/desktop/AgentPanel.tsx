@@ -847,8 +847,19 @@ function feedIcon(item: ActivityItem) {
   return FEED_ICON[item.kind] ?? FEED_ICON.event;
 }
 
+type FeedFilter = 'all' | 'commit' | 'issue' | 'pr' | 'ci';
+
+const FILTER_TABS: { key: FeedFilter; label: string; icon: React.ReactNode }[] = [
+  { key: 'all', label: 'All', icon: <Zap size={11} strokeWidth={2} /> },
+  { key: 'commit', label: 'Commits', icon: <GitCommit size={11} strokeWidth={2} /> },
+  { key: 'issue', label: 'Issues', icon: <AlertCircle size={11} strokeWidth={2} /> },
+  { key: 'pr', label: 'PRs', icon: <GitPullRequest size={11} strokeWidth={2} /> },
+  { key: 'ci', label: 'CI', icon: <CheckCircle2 size={11} strokeWidth={2} /> },
+];
+
 const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommit }: { events: EventEntry[]; commits: { hash: string; message: string; age: string }[]; onSelectCommit?: (hash: string) => void }) {
   const [extras, setExtras] = useState<{ issues: ActivityItem[]; prs: ActivityItem[]; ciRuns: ActivityItem[] }>({ issues: [], prs: [], ciRuns: [] });
+  const [filter, setFilter] = useState<FeedFilter>('all');
 
   // Fetch issues, PRs, CI in parallel on mount
   useEffect(() => {
@@ -921,8 +932,24 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
 
     // Sort newest first
     all.sort((a, b) => b.ts - a.ts);
-    return all.slice(0, 30);
+    return all.slice(0, 40);
   }, [commits, events, extras]);
+
+  // Counts per type for filter badges
+  const counts = useMemo(() => {
+    const c: Record<FeedFilter, number> = { all: items.length, commit: 0, issue: 0, pr: 0, ci: 0 };
+    for (const item of items) {
+      if (item.kind === 'event') continue; // events show in 'all' only
+      if (item.kind in c) c[item.kind as FeedFilter]++;
+    }
+    return c;
+  }, [items]);
+
+  // Apply filter
+  const filtered = useMemo(() => {
+    if (filter === 'all') return items;
+    return items.filter(i => i.kind === filter);
+  }, [items, filter]);
 
   // Group by date
   const grouped = useMemo(() => {
@@ -931,7 +958,7 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
     const today = new Date().toDateString();
     const yesterday = new Date(Date.now() - 86400000).toDateString();
 
-    for (const item of items) {
+    for (const item of filtered) {
       const d = new Date(item.ts).toDateString();
       const label = d === today ? 'Today' : d === yesterday ? 'Yesterday' : new Date(item.ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
       if (label !== currentLabel) {
@@ -941,26 +968,89 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
       groups[groups.length - 1].items.push(item);
     }
     return groups;
-  }, [items]);
+  }, [filtered]);
 
   if (!items.length) {
-    return <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>No recent activity</div>;
+    return (
+      <div style={{ padding: '24px 14px', textAlign: 'center' }}>
+        <div style={{ fontSize: 12, color: 'var(--t-text-muted)', fontWeight: 500 }}>No recent activity</div>
+        <div style={{ fontSize: 11, color: 'var(--t-text-faint)', marginTop: 4 }}>Commits, issues, PRs, and CI runs will appear here</div>
+      </div>
+    );
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {/* Filter tabs — iOS segmented control style */}
+      <div style={{
+        display: 'flex',
+        gap: 1,
+        padding: '8px 10px 6px',
+        position: 'sticky',
+        top: 0,
+        zIndex: 3,
+        background: 'var(--t-panel)',
+      }}>
+        {FILTER_TABS.map((tab) => {
+          const active = filter === tab.key;
+          const count = counts[tab.key];
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setFilter(tab.key)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '4px 8px',
+                borderRadius: 8,
+                border: 'none',
+                background: active ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                color: active ? '#2563eb' : 'var(--t-text-muted)',
+                fontSize: 10,
+                fontWeight: active ? 700 : 500,
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
+              }}
+            >
+              {tab.icon}
+              {tab.label}
+              {count > 0 && tab.key !== 'all' ? (
+                <span style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  color: active ? '#2563eb' : 'var(--t-text-faint)',
+                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                }}>
+                  {count}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* No results for filter */}
+      {filtered.length === 0 ? (
+        <div style={{ padding: '16px 14px', fontSize: 11, color: 'var(--t-text-muted)', textAlign: 'center' }}>
+          No {filter === 'all' ? '' : filter} activity
+        </div>
+      ) : null}
+
       {grouped.map((group) => (
         <div key={group.label}>
           {/* Date header */}
           <div style={{
-            padding: '8px 14px 4px',
+            padding: '6px 14px 3px',
             fontSize: 10,
             fontWeight: 700,
             color: 'var(--t-text-faint)',
             textTransform: 'uppercase',
             letterSpacing: '0.06em',
             position: 'sticky',
-            top: 0,
+            top: 34,
             background: 'var(--t-panel)',
             zIndex: 2,
           }}>
@@ -969,12 +1059,22 @@ const ActivityFeed = memo(function ActivityFeed({ events, commits, onSelectCommi
           {group.items.map((item, idx) => {
             const fi = feedIcon(item);
             const key = item.kind === 'commit' ? `c-${item.hash}` : item.kind === 'event' ? `e-${item.data.id}` : item.kind === 'issue' ? `i-${item.number}` : item.kind === 'pr' ? `pr-${item.number}` : `ci-${item.id}`;
-            const clickable = item.kind === 'commit' && !!onSelectCommit;
+            const clickable = (item.kind === 'commit' && !!onSelectCommit) || item.kind === 'issue' || item.kind === 'pr' || item.kind === 'ci';
+            const handleClick = () => {
+              if (item.kind === 'commit') { onSelectCommit?.(item.hash); return; }
+              // Open issues/PRs/CI in browser
+              const repo = 'hurttlocker/cortex-ide';
+              let url = '';
+              if (item.kind === 'issue') url = `https://github.com/${repo}/issues/${item.number}`;
+              else if (item.kind === 'pr') url = `https://github.com/${repo}/pull/${item.number}`;
+              else if (item.kind === 'ci') url = `https://github.com/${repo}/actions/runs/${item.id}`;
+              if (url) window.open(url, '_blank');
+            };
 
             return (
               <div
                 key={key}
-                onClick={item.kind === 'commit' ? () => onSelectCommit?.(item.hash) : undefined}
+                onClick={clickable ? handleClick : undefined}
                 style={{
                   display: 'flex',
                   alignItems: 'flex-start',
