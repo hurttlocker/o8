@@ -8,7 +8,7 @@
  * Glass frosted background matching the Cortex IDE design system.
  */
 
-import { useState, createContext, useContext, useCallback } from 'react';
+import { useState, useEffect, createContext, useContext, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Box,
@@ -21,6 +21,7 @@ import {
   Search,
   Zap,
   Lightbulb,
+  Cable,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -256,6 +257,142 @@ function UtilButton({
   );
 }
 
+// ── Port Types ──
+
+interface PortGroup {
+  repo: string;
+  repoPath: string;
+  ports: number[];
+}
+
+// ── Ports Footer ──
+
+function PortsFooter({ expanded }: { expanded: boolean }) {
+  const [groups, setGroups] = useState<PortGroup[]>([]);
+  const [total, setTotal] = useState(0);
+
+  useEffect(() => {
+    function fetchPorts() {
+      fetch('/api/panel/ports')
+        .then(r => r.json())
+        .then(data => {
+          setGroups(data.groups ?? []);
+          setTotal(data.total ?? 0);
+        })
+        .catch(() => {});
+    }
+    fetchPorts();
+    const id = setInterval(fetchPorts, 10_000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (total === 0) return null;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      {/* Separator */}
+      <div style={{
+        height: 1,
+        background: 'var(--t-divider)',
+        margin: '4px 12px',
+      }} />
+
+      {/* Header */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '4px 12px',
+        overflow: 'hidden',
+        whiteSpace: 'nowrap',
+      }}>
+        <Cable size={14} strokeWidth={1.8} style={{ color: '#22c55e', flexShrink: 0 }} />
+        <motion.span
+          initial={false}
+          animate={{ opacity: expanded ? 1 : 0, display: expanded ? 'inline-block' : 'none' }}
+          transition={{ duration: 0.12 }}
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: 'var(--t-text-secondary)',
+            letterSpacing: '-0.01em',
+          }}
+        >
+          Ports
+        </motion.span>
+        <motion.span
+          initial={false}
+          animate={{ opacity: expanded ? 1 : 0, display: expanded ? 'inline-block' : 'none' }}
+          transition={{ duration: 0.12 }}
+          style={{
+            fontSize: 10,
+            fontWeight: 700,
+            color: '#22c55e',
+            marginLeft: 'auto',
+          }}
+        >
+          {total}
+        </motion.span>
+      </div>
+
+      {/* Port groups */}
+      {groups.map((group) => (
+        <div key={group.repo} style={{ padding: '0 12px', overflow: 'hidden' }}>
+          {/* Repo label (only when expanded) */}
+          <motion.div
+            initial={false}
+            animate={{ opacity: expanded ? 1 : 0, height: expanded ? 'auto' : 0 }}
+            transition={{ duration: 0.12 }}
+            style={{
+              fontSize: 9,
+              fontWeight: 600,
+              color: 'var(--t-text-faint)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+              marginBottom: 2,
+              overflow: 'hidden',
+            }}
+          >
+            {group.repo}
+          </motion.div>
+
+          {/* Port pills */}
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 3,
+          }}>
+            {group.ports.map((port) => (
+              <button
+                key={port}
+                type="button"
+                onClick={() => window.open(`http://localhost:${port}`, '_blank')}
+                title={`Open localhost:${port}`}
+                style={{
+                  padding: '2px 6px',
+                  borderRadius: 4,
+                  border: '1px solid rgba(34,197,94,0.15)',
+                  background: 'rgba(34,197,94,0.06)',
+                  color: '#16a34a',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                  cursor: 'pointer',
+                  transition: 'background 120ms ease',
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(34,197,94,0.12)'; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(34,197,94,0.06)'; }}
+              >
+                {port}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Main Component ──
 
 export function NavRail({
@@ -326,8 +463,11 @@ export function NavRail({
         ))}
       </div>
 
-      {/* Bottom — Thoughts + Alerts + Settings */}
+      {/* Bottom — Ports + Thoughts + Alerts + Settings */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {/* Ports footer — pinned above utils */}
+        <PortsFooter expanded={expanded} />
+
         <UtilButton
           icon={Lightbulb}
           label="Thoughts"
