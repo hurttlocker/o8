@@ -242,7 +242,7 @@ export function TitleBar({
         backdropFilter: 'blur(20px) saturate(1.6)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
         borderBottom: '1px solid var(--t-divider)',
-        zIndex: 100,
+        zIndex: 9000,
         position: 'relative',
         ['WebkitAppRegion' as string]: 'drag',
       }}
@@ -343,7 +343,7 @@ export function TitleBar({
             {/* Repo picker dropdown */}
             {repoPickerOpen ? (
               <>
-                <div onClick={() => setRepoPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 199 }} />
+                <div onClick={() => setRepoPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 9998 }} />
                 <div style={{
                   position: 'absolute',
                   top: '100%',
@@ -351,13 +351,13 @@ export function TitleBar({
                   marginTop: 6,
                   minWidth: 200,
                   borderRadius: 10,
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  background: 'rgba(255,255,255,0.85)',
-                  backdropFilter: 'blur(24px) saturate(1.8)',
-                  WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
-                  boxShadow: '0 8px 32px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.08)',
+                  border: '1px solid rgba(255,255,255,0.25)',
+                  background: 'rgba(255,255,255,0.18)',
+                  backdropFilter: 'blur(80px) saturate(2.2)',
+                  WebkitBackdropFilter: 'blur(80px) saturate(2.2)',
+                  boxShadow: '0 12px 48px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.1)',
                   overflow: 'hidden',
-                  zIndex: 200,
+                  zIndex: 9999,
                 }}>
                   {repoList.map((repo) => (
                     <button
