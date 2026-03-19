@@ -2335,6 +2335,20 @@ function hasChangedDescendant(node: FileNode, changedFiles: Set<string>): boolea
   return node.children?.some(c => hasChangedDescendant(c, changedFiles)) ?? false;
 }
 
+function filterTreeToChanged(nodes: FileNode[], changed: Set<string>): FileNode[] {
+  return nodes
+    .map((node) => {
+      if (node.type === 'file') {
+        return changed.has(node.path) ? node : null;
+      }
+      // Directory — recurse and keep if any children match
+      const filteredChildren = filterTreeToChanged(node.children ?? [], changed);
+      if (filteredChildren.length === 0) return null;
+      return { ...node, children: filteredChildren };
+    })
+    .filter((n): n is FileNode => n !== null);
+}
+
 const FileTree = memo(function FileTree({ tree, changedFiles, onSelectFile }: {
   tree: FileNode[];
   changedFiles: Set<string>;
@@ -2445,6 +2459,7 @@ export const AgentPanel = memo(function AgentPanel({
   const [prs, setPrs] = useState<GHPullRequest[]>([]);
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
+  const [fileFilter, setFileFilter] = useState<'all' | 'changes'>('all');
   const [activeTab, setActiveTab] = useState<Tab>('files');
   const [activityOpen, setActivityOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(true);
@@ -2974,7 +2989,50 @@ export const AgentPanel = memo(function AgentPanel({
         borderTop: expandedGroup ? 'none' : '1px solid var(--t-divider-subtle)',
         marginTop: expandedGroup ? 0 : 4,
       }}>
-        {activeTab === 'files' ? <FileTree tree={fileTree} changedFiles={changedFiles} onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)} /> : null}
+        {activeTab === 'files' ? (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+            {/* Filter dropdown */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 10px',
+              borderBottom: '1px solid var(--t-divider-subtle)',
+              flexShrink: 0,
+            }}>
+              <select
+                value={fileFilter}
+                onChange={(e) => setFileFilter(e.target.value as 'all' | 'changes')}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: 'var(--t-text-secondary)',
+                  background: 'rgba(255,255,255,0.55)',
+                  border: '1px solid var(--t-btn-secondary-border)',
+                  borderRadius: 6,
+                  padding: '3px 8px',
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  outline: 'none',
+                }}
+              >
+                <option value="all">All Files</option>
+                <option value="changes">Changes{changedFiles.size > 0 ? ` (${changedFiles.size})` : ''}</option>
+              </select>
+              {fileFilter === 'changes' && changedFiles.size === 0 ? (
+                <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>No changes</span>
+              ) : null}
+            </div>
+            {/* Tree */}
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              <FileTree
+                tree={fileFilter === 'changes' ? filterTreeToChanged(fileTree, changedFiles) : fileTree}
+                changedFiles={changedFiles}
+                onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)}
+              />
+            </div>
+          </div>
+        ) : null}
         {activeTab === 'deploy' ? <DeployList onOpenDeploy={onOpenDeploy} /> : null}
 
       </div>
