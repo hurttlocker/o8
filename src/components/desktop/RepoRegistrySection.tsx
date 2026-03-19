@@ -367,6 +367,17 @@ function SetupModeButton({
   );
 }
 
+interface BranchInfo {
+  name: string;
+  current: boolean;
+  lastCommitAge: string;
+  lastCommitMessage: string;
+  isWorktree: boolean;
+  worktreePath?: string;
+  ahead: number;
+  behind: number;
+}
+
 function RepoCard({
   repo,
   workspaceNotice,
@@ -375,6 +386,7 @@ function RepoCard({
   onOpenGitHub,
   onRemove,
   onSaveSetup,
+  onSelectBranch,
 }: {
   repo: RepoRegistryEntry;
   workspaceNotice: WorkspaceCreateResult | null;
@@ -383,6 +395,7 @@ function RepoCard({
   onOpenGitHub: (repo: RepoRegistryEntry) => void;
   onRemove: (repo: RepoRegistryEntry) => void;
   onSaveSetup: (repoId: string, setup: RepoSetupConfig) => Promise<void>;
+  onSelectBranch?: (branch: string, repoPath: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -390,10 +403,23 @@ function RepoCard({
   const [draftSetup, setDraftSetup] = useState<RepoSetupConfig>(repo.setup);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [branches, setBranches] = useState<BranchInfo[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
 
   useEffect(() => {
     setDraftSetup(repo.setup);
   }, [repo.setup]);
+
+  // Fetch branches when expanded
+  useEffect(() => {
+    if (!expanded) return;
+    setBranchesLoading(true);
+    fetch(`/api/panel/branches?path=${encodeURIComponent(repo.localPath)}`)
+      .then(r => r.json())
+      .then(data => setBranches(data.branches ?? []))
+      .catch(() => setBranches([]))
+      .finally(() => setBranchesLoading(false));
+  }, [expanded, repo.localPath]);
 
   const githubUrl = useMemo(() => githubUrlFromRemote(repo.remoteUrl), [repo.remoteUrl]);
   const hasUnsavedChanges = JSON.stringify(draftSetup) !== JSON.stringify(repo.setup);
@@ -613,6 +639,104 @@ function RepoCard({
             </div>
           ) : null}
 
+          {/* Branch list — Apple-grade progressive disclosure */}
+          <div style={{ marginTop: 6 }}>
+            {branchesLoading ? (
+              <div style={{ fontSize: 11, color: 'var(--t-text-faint)', padding: '4px 0' }}>Loading branches…</div>
+            ) : branches.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                {branches.map((branch) => (
+                  <div
+                    key={branch.name}
+                    onClick={() => onSelectBranch?.(branch.name, repo.localPath)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '5px 6px',
+                      borderRadius: 8,
+                      cursor: 'pointer',
+                      transition: 'background 120ms ease',
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(37,99,235,0.04)'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+                  >
+                    {/* Branch icon — colored by type */}
+                    <GitBranch
+                      size={12}
+                      strokeWidth={2}
+                      style={{
+                        flexShrink: 0,
+                        color: branch.current ? '#22c55e' : branch.isWorktree ? '#f59e0b' : 'var(--t-text-muted)',
+                      }}
+                    />
+                    {/* Branch name */}
+                    <span style={{
+                      fontSize: 12,
+                      fontWeight: branch.current ? 600 : 400,
+                      color: branch.current ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                      fontFamily: '"SF Mono", ui-monospace, monospace',
+                      flex: 1,
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {branch.name}
+                    </span>
+                    {/* Current indicator */}
+                    {branch.current ? (
+                      <span style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        color: '#22c55e',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                        flexShrink: 0,
+                      }}>
+                        current
+                      </span>
+                    ) : null}
+                    {/* Worktree badge */}
+                    {branch.isWorktree && !branch.current ? (
+                      <span style={{
+                        fontSize: 9,
+                        fontWeight: 600,
+                        color: '#f59e0b',
+                        padding: '1px 5px',
+                        borderRadius: 4,
+                        background: 'rgba(245, 158, 11, 0.08)',
+                        flexShrink: 0,
+                      }}>
+                        worktree
+                      </span>
+                    ) : null}
+                    {/* Ahead/behind */}
+                    {branch.ahead > 0 || branch.behind > 0 ? (
+                      <span style={{
+                        fontSize: 9,
+                        fontWeight: 600,
+                        color: 'var(--t-text-faint)',
+                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                        flexShrink: 0,
+                      }}>
+                        {branch.ahead > 0 ? `↑${branch.ahead}` : ''}{branch.behind > 0 ? `↓${branch.behind}` : ''}
+                      </span>
+                    ) : null}
+                    {/* Commit age */}
+                    <span style={{
+                      fontSize: 10,
+                      color: 'var(--t-text-faint)',
+                      flexShrink: 0,
+                    }}>
+                      {branch.lastCommitAge}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
           {/* Repo metadata — compact */}
           <div
             style={{
@@ -620,7 +744,7 @@ function RepoCard({
               color: 'var(--t-text-faint)',
               fontFamily: '"SF Mono", ui-monospace, monospace',
               lineHeight: 1.6,
-              marginTop: 2,
+              marginTop: 4,
             }}
           >
             <div>{shortenPath(repo.localPath)}</div>
@@ -1319,6 +1443,10 @@ export function RepoRegistrySection({
                 onOpenGitHub={handleOpenGitHub}
                 onRemove={setRemoveTarget}
                 onSaveSetup={handleSaveSetup}
+                onSelectBranch={(branch, repoPath) => {
+                  // Future: switch conversation context to agent on this branch
+                  // For now: could trigger file tree refresh for this branch
+                }}
               />
             ))
           ) : null}
