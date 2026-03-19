@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { demoApprovals } from '@/lib/json-render/demo-specs';
 import type { ApprovalRequest } from '@/lib/json-render/demo-specs';
 import type { ReviewChangedFile, RuntimeReviewPacket } from '@/lib/fleet/types';
@@ -28,7 +28,7 @@ export function useMobileState(init: MobileStateInit) {
   // ── Core state ──
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot>(initialSnapshot);
   const [selectedId, setSelectedId] = useState(() => pickCurrentSession(initialSnapshot)?.id ?? '');
-  const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs'>('squad');
+  const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs' | 'fleet'>('squad');
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [surfaceNote, setSurfaceNote] = useState<string | null>(null);
 
@@ -39,8 +39,9 @@ export function useMobileState(init: MobileStateInit) {
   // Stable ref for historyBySession — used by polling to read latest state
   // without putting historyBySession in the polling effect's dependency array
   // (which would cause a restart loop: poll → update history → restart effect → immediate poll).
+  // Synced in an effect to avoid render-time ref mutation (#195).
   const historyBySessionRef = useRef(historyBySession);
-  historyBySessionRef.current = historyBySession;
+  useEffect(() => { historyBySessionRef.current = historyBySession; }, [historyBySession]);
 
   const [historyGroupsBySession, setHistoryGroupsBySession] = useState<Record<string, MobileRuntimeTailGroup[]>>({});
   const [historyLoading, setHistoryLoading] = useState<Record<string, boolean>>({});
@@ -121,7 +122,7 @@ export function useMobileState(init: MobileStateInit) {
   );
   const selectedSessionKey = selectedSession?.sessionKey;
   const isOpenClawSession = selectedSession?.runtime === 'openclaw';
-  const isChatSession = isOpenClawSession || selectedSession?.runtime === 'codex';
+  const isChatSession = isOpenClawSession || selectedSession?.runtime === 'codex' || selectedSession?.runtime === 'claude-code';
   const isOwnedCodexSession = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'owned';
   const selectedReviewPacket = selectedSessionKey && isOwnedCodexSession ? reviewPacketBySession[selectedSessionKey] ?? null : null;
   const selectedReviewPacketError = selectedSessionKey && isOwnedCodexSession ? reviewPacketErrorBySession[selectedSessionKey] ?? null : null;
