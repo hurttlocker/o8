@@ -406,7 +406,7 @@ function MobileRemoteShellInner({
             selectedReviewPacketError={selectedReviewPacketError}
           />
           ) : null}
-          {hasTerminalSession ? (
+          {hasTerminalSession && activeView !== 'fleet' && activeView !== 'costs' ? (
             <div
               style={{
                 display: 'flex',
@@ -450,7 +450,8 @@ function MobileRemoteShellInner({
               </button>
             </div>
           ) : null}
-          {terminalActive ? (
+          {activeView !== 'fleet' && activeView !== 'costs' ? (
+          terminalActive ? (
             <MobileTerminal tmuxSession={selectedSession!.tmuxSession!} />
           ) : (
             <>
@@ -496,11 +497,12 @@ function MobileRemoteShellInner({
                 </div>
               ) : null}
             </>
-          )}
+          )
+          ) : null}
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
         <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
-          {!terminalActive ? (
+          {!terminalActive && activeView !== 'fleet' && activeView !== 'costs' ? (
             <div className="remodex-compose-shell">
               <ComposeBar
                 session={selectedSession}
@@ -532,6 +534,7 @@ function MobileRemoteShellInner({
               />
             </div>
           ) : null}
+          {activeView !== 'fleet' && activeView !== 'costs' ? (
           <RuntimeBar
             snapshot={snapshot}
             selectedSession={selectedSession}
@@ -539,6 +542,7 @@ function MobileRemoteShellInner({
             isOwnedCodexSession={isOwnedCodexSession}
             compactLine={compactLine}
           />
+          ) : null}
         </div>
       </div>
       <ControlsSheet
