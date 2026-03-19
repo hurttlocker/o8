@@ -137,10 +137,10 @@ export const TopBar = memo(function TopBar({
               display: 'flex', alignItems: 'center', gap: 8,
               padding: '4px 12px',
               borderRadius: 20,
-              background: 'rgba(255,255,255,0.75)',
+              background: 'rgba(0,122,255,0.08)',
               backdropFilter: 'blur(20px) saturate(1.6)',
               WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-              border: '1px solid rgba(0,0,0,0.06)',
+              border: '1px solid rgba(0,122,255,0.15)',
               maxWidth: '100%',
             }}>
               <span style={{
@@ -151,7 +151,7 @@ export const TopBar = memo(function TopBar({
               }} />
               <span style={{
                 fontSize: 14, fontWeight: 600,
-                color: '#0a0a0a',
+                color: '#007aff',
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 fontFamily: '-apple-system, system-ui, sans-serif',
               }}>
