@@ -38,6 +38,9 @@ function ApprovalCard({ item, onApprove, onDeny }: {
       border: '1px solid rgba(255,149,0,0.12)',
       backdropFilter: 'blur(20px) saturate(1.6)',
       WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
+      width: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden',
     }}>
       {/* Header */}
       <div style={{
@@ -137,6 +140,9 @@ function AlertCard({ item }: { item: MobileInboxItem }) {
       borderRadius: 14,
       background: isError ? 'rgba(255,59,48,0.04)' : 'rgba(0,122,255,0.03)',
       border: `1px solid ${isError ? 'rgba(255,59,48,0.12)' : 'rgba(0,122,255,0.08)'}`,
+      width: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden',
     }}>
       <div style={{
         display: 'flex', alignItems: 'center', gap: 8,
@@ -199,6 +205,8 @@ function AgentEventCard({ agent, onSelect }: { agent: AgentSummary; onSelect: ()
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
         textAlign: 'left',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
       }}
     >
       <span style={{
@@ -278,6 +286,10 @@ export const ActivityFeed = memo(function ActivityFeed({
     <div style={{
       padding: '0 14px 24px',
       display: 'flex', flexDirection: 'column', gap: 14,
+      width: '100%',
+      maxWidth: '100%',
+      boxSizing: 'border-box',
+      overflow: 'hidden',
     }}>
       {/* Header */}
       <div style={{
@@ -325,7 +337,10 @@ export const ActivityFeed = memo(function ActivityFeed({
         borderRadius: 10,
         background: 'rgba(0,122,255,0.04)',
         border: '1px solid rgba(0,122,255,0.08)',
-        gap: 2,
+        gap: 1,
+        overflowX: 'auto',
+        WebkitOverflowScrolling: 'touch',
+        scrollbarWidth: 'none',
       }}>
         {FILTERS.map((f) => {
           const active = filter === f.id;
@@ -335,18 +350,20 @@ export const ActivityFeed = memo(function ActivityFeed({
               type="button"
               onClick={() => setFilter(f.id)}
               style={{
-                flex: 1, padding: '7px 2px',
+                flex: '1 0 auto', padding: '7px 6px',
                 borderRadius: 8, border: 'none',
                 background: active ? '#fff' : 'transparent',
                 boxShadow: active ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
                 cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
                 transition: 'all 200ms ease',
+                minWidth: 0,
+                whiteSpace: 'nowrap',
               }}
             >
               <span style={{
-                fontSize: 11, fontWeight: 600,
+                fontSize: 10, fontWeight: 600,
                 color: active ? '#0a0a0a' : '#8e8e93',
                 fontFamily: '-apple-system, system-ui, sans-serif',
               }}>
@@ -354,11 +371,11 @@ export const ActivityFeed = memo(function ActivityFeed({
               </span>
               {f.count > 0 && (
                 <span style={{
-                  minWidth: 16, height: 16, borderRadius: 8,
-                  padding: '0 4px',
+                  minWidth: 14, height: 14, borderRadius: 7,
+                  padding: '0 3px',
                   background: active && f.id === 'approvals' ? '#ff9500' : active ? '#007aff' : 'rgba(0,0,0,0.06)',
                   color: active ? '#fff' : '#8e8e93',
-                  fontSize: 10, fontWeight: 700,
+                  fontSize: 9, fontWeight: 700,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                 }}>
                   {f.count}
@@ -391,7 +408,7 @@ export const ActivityFeed = memo(function ActivityFeed({
               </span>
             </div>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', overflow: 'hidden' }}>
             {approvals.map((item) => (
               <ApprovalCard
                 key={item.id}
@@ -418,7 +435,7 @@ export const ActivityFeed = memo(function ActivityFeed({
               Alerts
             </span>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', overflow: 'hidden' }}>
             {alerts.map((item) => (
               <AlertCard key={item.id} item={item} />
             ))}
@@ -443,7 +460,7 @@ export const ActivityFeed = memo(function ActivityFeed({
               </span>
             </div>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', overflow: 'hidden' }}>
             {reviewItems.map((item) => (
               <button
                 key={item.id}
@@ -466,6 +483,8 @@ export const ActivityFeed = memo(function ActivityFeed({
                   cursor: 'pointer',
                   WebkitTapHighlightColor: 'transparent',
                   textAlign: 'left',
+                  boxSizing: 'border-box',
+                  overflow: 'hidden',
                 }}
               >
                 <span style={{
@@ -516,7 +535,7 @@ export const ActivityFeed = memo(function ActivityFeed({
               Agent Activity
             </span>
           )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, width: '100%', overflow: 'hidden' }}>
             {agentEvents.map((agent) => (
               <AgentEventCard
                 key={agent.id}
