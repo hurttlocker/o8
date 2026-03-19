@@ -409,6 +409,14 @@ function RepoCard({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
+  const [branchMenuOpen, setBranchMenuOpen] = useState<string | null>(null);
+  const [branchDeleting, setBranchDeleting] = useState<string | null>(null);
+  const [branchDeleteConfirm, setBranchDeleteConfirm] = useState<string | null>(null);
+  const [createBranchOpen, setCreateBranchOpen] = useState(false);
+  const [newBranchName, setNewBranchName] = useState('');
+  const [newBranchWorktree, setNewBranchWorktree] = useState(false);
+  const [newBranchCreating, setNewBranchCreating] = useState(false);
+  const [newBranchError, setNewBranchError] = useState<string | null>(null);
 
   useEffect(() => {
     setDraftSetup(repo.setup);
@@ -424,6 +432,68 @@ function RepoCard({
       .catch(() => setBranches([]))
       .finally(() => setBranchesLoading(false));
   }, [expanded, repo.localPath]);
+
+  // Refresh branches
+  const refreshBranches = useCallback(() => {
+    fetch(`/api/panel/branches?path=${encodeURIComponent(repo.localPath)}`)
+      .then(r => r.json())
+      .then(data => setBranches(data.branches ?? []))
+      .catch(() => {});
+  }, [repo.localPath]);
+
+  // Delete branch handler
+  const handleDeleteBranch = useCallback(async (branchName: string, force?: boolean) => {
+    setBranchDeleting(branchName);
+    try {
+      const res = await fetch('/api/panel/branches', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: repo.localPath, branch: branchName, force }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.canForce) {
+          setBranchDeleteConfirm(branchName);
+        }
+        return;
+      }
+      setBranchDeleteConfirm(null);
+      setBranchMenuOpen(null);
+      refreshBranches();
+    } catch { /* silent */ }
+    finally { setBranchDeleting(null); }
+  }, [repo.localPath, refreshBranches]);
+
+  // Create branch handler
+  const handleCreateBranch = useCallback(async () => {
+    const name = newBranchName.trim();
+    if (!name) return;
+    setNewBranchCreating(true);
+    setNewBranchError(null);
+    try {
+      const res = await fetch('/api/panel/branches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: repo.localPath,
+          branch: name,
+          baseBranch: repo.defaultBranch,
+          worktree: newBranchWorktree,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setNewBranchError(data.error ?? 'Failed to create branch');
+        return;
+      }
+      setNewBranchName('');
+      setCreateBranchOpen(false);
+      setNewBranchWorktree(false);
+      refreshBranches();
+    } catch (err) {
+      setNewBranchError(err instanceof Error ? err.message : 'Failed');
+    } finally { setNewBranchCreating(false); }
+  }, [newBranchName, newBranchWorktree, repo.localPath, repo.defaultBranch, refreshBranches]);
 
   const githubUrl = useMemo(() => githubUrlFromRemote(repo.remoteUrl), [repo.remoteUrl]);
   const hasUnsavedChanges = JSON.stringify(draftSetup) !== JSON.stringify(repo.setup);
@@ -650,8 +720,8 @@ function RepoCard({
             ) : branches.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 {branches.map((branch) => (
+                  <div key={branch.name}>
                   <div
-                    key={branch.name}
                     onClick={() => onSelectBranch?.(branch.name, repo.localPath)}
                     style={{
                       display: 'flex',
@@ -760,11 +830,228 @@ function RepoCard({
                     }}>
                       {branch.lastCommitAge}
                     </span>
+                    {/* Overflow menu — not on current/protected */}
+                    {!branch.current ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setBranchMenuOpen(branchMenuOpen === branch.name ? null : branch.name);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          width: 20,
+                          height: 20,
+                          borderRadius: 4,
+                          border: 'none',
+                          background: branchMenuOpen === branch.name ? 'rgba(0,0,0,0.04)' : 'transparent',
+                          color: 'var(--t-text-muted)',
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                          opacity: 0.5,
+                          transition: 'opacity 120ms',
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '1'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.5'; }}
+                      >
+                        <MoreHorizontal size={12} strokeWidth={2} />
+                      </button>
+                    ) : null}
+                  </div>
+                  {/* Branch overflow menu */}
+                  {branchMenuOpen === branch.name ? (
+                    <div style={{
+                      marginLeft: 30 + 6,
+                      marginBottom: 4,
+                      padding: '3px 0',
+                      borderRadius: 8,
+                      border: '1px solid var(--t-panel-border)',
+                      background: 'rgba(255,255,255,0.95)',
+                      backdropFilter: 'blur(16px)',
+                      width: 'fit-content',
+                      minWidth: 120,
+                    }}>
+                      {[
+                        { label: 'Open PR', action: () => { setBranchMenuOpen(null); window.open(`${githubUrlFromRemote(repo.remoteUrl)}/compare/${branch.name}?expand=1`, '_blank'); } },
+                        { label: 'Delete', action: () => handleDeleteBranch(branch.name), danger: true },
+                      ].map((item) => (
+                        <button
+                          key={item.label}
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); item.action(); }}
+                          disabled={branchDeleting === branch.name}
+                          style={{
+                            display: 'block',
+                            width: '100%',
+                            padding: '5px 10px',
+                            border: 'none',
+                            background: 'transparent',
+                            color: item.danger ? '#dc2626' : 'var(--t-text)',
+                            fontSize: 11,
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            fontFamily: '-apple-system, system-ui, sans-serif',
+                            opacity: branchDeleting === branch.name ? 0.5 : 1,
+                          }}
+                        >
+                          {branchDeleting === branch.name && item.danger ? 'Deleting…' : item.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
+                  {/* Force delete confirmation */}
+                  {branchDeleteConfirm === branch.name ? (
+                    <div style={{
+                      marginLeft: 30 + 6,
+                      marginBottom: 4,
+                      padding: '6px 8px',
+                      borderRadius: 8,
+                      border: '1px solid rgba(239,68,68,0.15)',
+                      background: 'rgba(254,242,242,0.9)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}>
+                      <AlertCircle size={11} strokeWidth={2} style={{ color: '#dc2626', flexShrink: 0 }} />
+                      <span style={{ fontSize: 10, color: '#991b1b', flex: 1 }}>Not fully merged.</span>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleDeleteBranch(branch.name, true); }}
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: '#dc2626',
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '2px 6px',
+                        }}
+                      >
+                        Force delete
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); setBranchDeleteConfirm(null); }}
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 500,
+                          color: 'var(--t-text-muted)',
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '2px 6px',
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : null}
                   </div>
                 ))}
               </div>
             ) : null}
           </div>
+
+          {/* Create branch inline */}
+          {createBranchOpen ? (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+              padding: '6px 6px',
+              marginTop: 2,
+              borderRadius: 8,
+              background: 'rgba(37,99,235,0.03)',
+              border: '1px solid rgba(37,99,235,0.08)',
+            }}>
+              <input
+                value={newBranchName}
+                onChange={(e) => setNewBranchName(e.currentTarget.value)}
+                placeholder="feat/my-feature"
+                autoFocus
+                onKeyDown={(e) => { if (e.key === 'Enter') handleCreateBranch(); if (e.key === 'Escape') { setCreateBranchOpen(false); setNewBranchName(''); } }}
+                style={{
+                  width: '100%',
+                  padding: '6px 8px',
+                  borderRadius: 6,
+                  border: '1px solid var(--t-btn-secondary-border)',
+                  background: 'rgba(255,255,255,0.7)',
+                  fontSize: 12,
+                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                  outline: 'none',
+                  color: 'var(--t-text)',
+                }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 10, color: 'var(--t-text-secondary)' }}>
+                  <input
+                    type="checkbox"
+                    checked={newBranchWorktree}
+                    onChange={(e) => setNewBranchWorktree(e.currentTarget.checked)}
+                    style={{ accentColor: '#ef4444' }}
+                  />
+                  Create worktree
+                </label>
+                <div style={{ flex: 1 }} />
+                <button
+                  type="button"
+                  onClick={() => { setCreateBranchOpen(false); setNewBranchName(''); setNewBranchError(null); }}
+                  style={{ fontSize: 10, color: 'var(--t-text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCreateBranch}
+                  disabled={newBranchCreating || !newBranchName.trim()}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: '#fff',
+                    background: '#2563eb',
+                    border: 'none',
+                    borderRadius: 5,
+                    padding: '3px 8px',
+                    cursor: newBranchCreating || !newBranchName.trim() ? 'not-allowed' : 'pointer',
+                    opacity: newBranchCreating || !newBranchName.trim() ? 0.5 : 1,
+                  }}
+                >
+                  {newBranchCreating ? 'Creating…' : 'Create'}
+                </button>
+              </div>
+              {newBranchError ? (
+                <div style={{ fontSize: 10, color: '#dc2626' }}>{newBranchError}</div>
+              ) : null}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setCreateBranchOpen(true); }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: '4px 6px',
+                marginTop: 2,
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--t-text-muted)',
+                fontSize: 11,
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                borderRadius: 6,
+                transition: 'color 120ms',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#2563eb'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--t-text-muted)'; }}
+            >
+              <Plus size={11} strokeWidth={2} />
+              New branch
+            </button>
+          )}
 
           {/* Stale branch summary */}
           {(() => {
@@ -789,9 +1076,11 @@ function RepoCard({
                 </span>
                 <button
                   type="button"
-                  onClick={(e) => {
+                  onClick={async (e) => {
                     e.stopPropagation();
-                    // Future: batch cleanup modal
+                    for (const sb of staleBranches) {
+                      await handleDeleteBranch(sb.name, true);
+                    }
                   }}
                   style={{
                     fontSize: 10,
