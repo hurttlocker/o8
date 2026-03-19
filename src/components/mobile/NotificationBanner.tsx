@@ -35,29 +35,73 @@ function BannerCard({ notification, onDismiss, onTap }: {
 }) {
   const icon = ICON_PATHS[notification.type] || ICON_PATHS.info;
   const startX = useRef(0);
+  const startY = useRef(0);
   const deltaX = useRef(0);
+  const deltaY = useRef(0);
+  const axis = useRef<'none' | 'x' | 'y'>('none');
   const cardRef = useRef<HTMLDivElement>(null);
 
   return (
     <div
       ref={cardRef}
       onClick={onTap}
-      onTouchStart={(e) => { startX.current = e.touches[0].clientX; }}
+      onTouchStart={(e) => {
+        startX.current = e.touches[0].clientX;
+        startY.current = e.touches[0].clientY;
+        deltaX.current = 0;
+        deltaY.current = 0;
+        axis.current = 'none';
+        // Prevent scroll underneath
+        e.stopPropagation();
+      }}
       onTouchMove={(e) => {
         deltaX.current = e.touches[0].clientX - startX.current;
-        if (cardRef.current) {
+        deltaY.current = e.touches[0].clientY - startY.current;
+        // Lock axis on first significant movement
+        if (axis.current === 'none' && (Math.abs(deltaX.current) > 5 || Math.abs(deltaY.current) > 5)) {
+          axis.current = Math.abs(deltaY.current) > Math.abs(deltaX.current) ? 'y' : 'x';
+        }
+        if (!cardRef.current) return;
+        if (axis.current === 'y' && deltaY.current < 0) {
+          // Swipe up — translate up with resistance
+          e.preventDefault();
+          cardRef.current.style.transform = `translateY(${deltaY.current}px)`;
+          cardRef.current.style.opacity = `${Math.max(0, 1 - Math.abs(deltaY.current) / 120)}`;
+        } else if (axis.current === 'x') {
+          // Swipe left/right
+          e.preventDefault();
           cardRef.current.style.transform = `translateX(${deltaX.current}px)`;
           cardRef.current.style.opacity = `${Math.max(0, 1 - Math.abs(deltaX.current) / 150)}`;
         }
       }}
       onTouchEnd={() => {
-        if (Math.abs(deltaX.current) > 60) {
-          onDismiss();
+        const dismissed =
+          (axis.current === 'y' && deltaY.current < -40) ||
+          (axis.current === 'x' && Math.abs(deltaX.current) > 60);
+        if (dismissed) {
+          // Animate out before removing
+          if (cardRef.current) {
+            cardRef.current.style.transition = 'transform 200ms ease, opacity 200ms ease';
+            if (axis.current === 'y') {
+              cardRef.current.style.transform = 'translateY(-80px)';
+            } else {
+              cardRef.current.style.transform = `translateX(${deltaX.current > 0 ? 200 : -200}px)`;
+            }
+            cardRef.current.style.opacity = '0';
+          }
+          setTimeout(onDismiss, 180);
         } else if (cardRef.current) {
-          cardRef.current.style.transform = 'translateX(0)';
+          cardRef.current.style.transition = 'transform 250ms cubic-bezier(0.32, 0.72, 0, 1), opacity 250ms ease';
+          cardRef.current.style.transform = 'translate(0, 0)';
           cardRef.current.style.opacity = '1';
+          // Clear transition after spring-back
+          setTimeout(() => {
+            if (cardRef.current) cardRef.current.style.transition = '';
+          }, 260);
         }
         deltaX.current = 0;
+        deltaY.current = 0;
+        axis.current = 'none';
       }}
       style={{
         display: 'flex',
@@ -221,13 +265,13 @@ export function useNotifications(snapshot: { items: Array<{ id: string; kind: st
     if (newNotifs.length > 0) {
       setNotifications(prev => [...newNotifs, ...prev].slice(0, 20));
 
-      // Auto-dismiss after 4 seconds
+      // Auto-dismiss after 2.5 seconds
       const ids = newNotifs.map(n => n.id);
       setTimeout(() => {
         setNotifications(prev =>
           prev.map(n => ids.includes(n.id) ? { ...n, dismissed: true } : n)
         );
-      }, 4000);
+      }, 2500);
     }
   }, [snapshot.items, snapshot.sessions]);
 
