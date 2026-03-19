@@ -580,26 +580,37 @@ const AgentCard = memo(function AgentCard({
 
               {/* Main content */}
               <div style={{ flex: 1, minWidth: 0 }}>
-                {/* Line 1: task description (truncated) */}
+                {/* Line 1: Agent name (bold) + status */}
                 <div style={{
-                  fontSize: 12, fontWeight: 500,
-                  color: 'var(--t-text)',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  display: 'flex', alignItems: 'center', gap: 6,
                   lineHeight: '16px',
                 }}>
-                  {taskDesc || fullName}
+                  <span style={{
+                    fontSize: 12, fontWeight: 700,
+                    color: 'var(--t-text)',
+                    letterSpacing: '-0.01em',
+                  }}>
+                    {fullName}
+                  </span>
+                  {statusLabel && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 600,
+                      color: isRunning ? '#22c55e' : isStalled ? '#f97316' : isFailed ? '#ef4444' : '#22c55e',
+                    }}>
+                      {statusLabel}
+                    </span>
+                  )}
                 </div>
 
-                {/* Line 2: branch · PR # · status */}
+                {/* Line 2: branch · PR # · model */}
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 4,
-                  marginTop: 2,
-                  fontSize: 11, color: 'var(--t-text-muted)',
+                  marginTop: 1,
+                  fontSize: 10, color: 'var(--t-text-muted)',
                 }}>
                   {branch && !branch.startsWith('surface/') && (
                     <span style={{
                       fontFamily: '"SF Mono", ui-monospace, monospace',
-                      fontSize: 10,
                       maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }}>
                       {branch}
@@ -613,21 +624,18 @@ const AgentCard = memo(function AgentCard({
                         style={{
                           fontWeight: 600,
                           color: pr.state === 'merged' ? '#8b5cf6' : pr.state === 'open' ? '#22c55e' : '#9ca3af',
-                          cursor: 'pointer', fontSize: 10,
+                          cursor: 'pointer',
                         }}
                       >
                         PR #{pr.number}
                       </span>
                     </>
                   )}
-                  {statusLabel && (
+                  {formatModelLabel(agent.model || '') && (
                     <>
                       {(branch || pr) && <span style={{ color: 'var(--t-text-faint)' }}>·</span>}
-                      <span style={{
-                        fontWeight: 600, fontSize: 10,
-                        color: isRunning ? '#22c55e' : isStalled ? '#f97316' : isFailed ? '#ef4444' : '#22c55e',
-                      }}>
-                        {statusLabel}
+                      <span style={{ fontWeight: 500 }}>
+                        {formatModelLabel(agent.model || '')}
                       </span>
                     </>
                   )}
@@ -2747,11 +2755,22 @@ export const AgentPanel = memo(function AgentPanel({
                     flexShrink: 0,
                   }} />
                   <span style={{
-                    fontSize: 11, fontWeight: 600, color: 'var(--t-text)',
-                    flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    fontSize: 11, fontWeight: 700, color: 'var(--t-text)',
+                    flexShrink: 0,
                   }}>
-                    {taskDesc || displayName}
+                    {displayName}
                   </span>
+                  {agent.branch && !agent.branch.startsWith('surface/') && (
+                    <span style={{
+                      fontSize: 10, color: 'var(--t-text-muted)',
+                      fontFamily: '"SF Mono", ui-monospace, monospace',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      flex: 1,
+                    }}>
+                      {agent.branch}
+                    </span>
+                  )}
+                  {!agent.branch && <span style={{ flex: 1 }} />}
                   <span style={{ fontSize: 10, fontWeight: 600, color: '#22c55e', flexShrink: 0 }}>
                     Working…
                   </span>
