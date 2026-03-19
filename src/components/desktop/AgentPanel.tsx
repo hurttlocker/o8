@@ -517,8 +517,6 @@ const AgentCard = memo(function AgentCard({
           // Merge lifecycle events from WS into agent
           const lc = lifecycleEvents?.get(agent.tmuxSession ?? '') ?? lifecycleEvents?.get(agent.sessionKey ?? '');
           const lcState = lc?.state as AgentDetail['lifecycleState'] | undefined;
-          const lcExitCode = lc?.exitCode;
-          const lcTs = lc?.ts;
 
           const isRunning = (agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy')
             && lcState !== 'completed' && lcState !== 'failed' && lcState !== 'killed' && lcState !== 'stalled';
@@ -526,10 +524,8 @@ const AgentCard = memo(function AgentCard({
           const isCompleted = lcState === 'completed';
           const isStalled = lcState === 'stalled';
           const agentDot = isFailed ? '#ef4444' : isStalled ? '#f97316' : isCompleted ? '#22c55e' : isRunning ? '#22c55e' : '#9ca3af';
-          const agentCtx = agent.context?.usedPercent ?? 0;
-          const agentName = agent.name.replace(/\s*\(.*\)/, '').split(' ')[0];
-          // For OpenClaw agents: use session name to differentiate (Mister, Niot, Hawk, etc.)
-          // For repo agents: show runtime/editor name (Codex, Claude Code)
+
+          // Agent display info
           const isOpenClawGroup = group.repo === 'openclaw';
           const nameLower = (agent.name || '').toLowerCase();
           const modelLower = (agent.model || '').toLowerCase();
@@ -540,11 +536,13 @@ const AgentCard = memo(function AgentCard({
             : isCodex ? 'Codex'
             : isClaudeCode ? 'Claude Code'
             : (agent.surfaceLabel || agent.name);
-          const branch = agent.branch || agent.currentTask || null;
-          const progress = agentCtx > 0 ? agentCtx / 100 : 0;
-          const modelAttribution = renderModelAttribution(agent);
+
+          // Task description — latest commit, current task, or branch
+          const taskDesc = agent.currentTask || null;
+          const branch = agent.branch || null;
           const pr = agent.pr;
           const diff = pr ? { add: pr.additions, del: pr.deletions } : agent.localDiff ? { add: agent.localDiff.additions, del: agent.localDiff.deletions } : null;
+          const statusLabel = isRunning ? 'Working…' : isStalled ? 'Stalled' : isFailed ? 'Failed' : isCompleted ? 'Done' : null;
 
           return (
             <div
@@ -554,219 +552,107 @@ const AgentCard = memo(function AgentCard({
                 if (agent.sessionKey && onSelectSession) onSelectSession(agent.sessionKey);
               }}
               style={{
-                padding: '12px', borderRadius: 12,
-                background: agent.status === 'running'
-                  ? 'linear-gradient(135deg, var(--t-panel) 0%, rgba(147, 197, 253, 0.03) 100%)'
-                  : 'var(--t-panel)',
-                border: agent.status === 'running'
-                  ? '1px solid rgba(52, 211, 153, 0.2)'
-                  : '1px solid var(--t-panel-border)',
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                padding: '8px 10px',
+                borderRadius: 8,
+                background: isRunning ? 'rgba(34,197,94,0.04)' : 'transparent',
+                border: isRunning ? '1px solid rgba(34,197,94,0.12)' : '1px solid transparent',
                 cursor: agent.sessionKey ? 'pointer' : 'default',
-                transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
-                animation: agent.status === 'running' ? 'agentCardPulse 3s ease-in-out infinite' : 'none',
+                transition: 'all 150ms ease',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.border = '1px solid rgba(37,99,235,0.12)';
-                e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.06)';
+                e.currentTarget.style.background = isRunning ? 'rgba(34,197,94,0.08)' : 'rgba(0,0,0,0.02)';
               }}
               onMouseLeave={(e) => {
-                if (agent.status === 'running') {
-                  e.currentTarget.style.border = '';
-                  e.currentTarget.style.boxShadow = '';
-                } else {
-                  e.currentTarget.style.border = '1px solid var(--t-panel-border)';
-                  e.currentTarget.style.boxShadow = 'none';
-                }
+                e.currentTarget.style.background = isRunning ? 'rgba(34,197,94,0.04)' : 'transparent';
               }}
             >
-              {/* Identity row */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {/* Status dot with glow */}
+              <span style={{
+                width: 7, height: 7, borderRadius: '50%',
+                background: agentDot,
+                boxShadow: isRunning ? `0 0 8px ${agentDot}` : 'none',
+                flexShrink: 0,
+                marginTop: 5,
+              }} />
+
+              {/* Main content */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {/* Line 1: task description (truncated) */}
                 <div style={{
-                  width: 32, height: 32, borderRadius: 10,
-                  background: `${agentDot}0a`,
-                  border: `1.5px solid ${agentDot}30`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 13, fontWeight: 700, color: agentDot, flexShrink: 0,
-                  letterSpacing: '-0.02em',
+                  fontSize: 12, fontWeight: 500,
+                  color: 'var(--t-text)',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  lineHeight: '16px',
                 }}>
-                  {agentName[0]}
+                  {taskDesc || fullName}
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
-                      {fullName}
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2, flexWrap: 'wrap' }}>
-                    {modelAttribution}
-                    {branch && !branch.startsWith('surface/') && (
-                      <>
-                        <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
-                        <span style={{
-                          display: 'inline-flex', alignItems: 'center', gap: 3,
-                          fontSize: 10, color: 'var(--t-text-secondary)',
-                          fontFamily: 'SF Mono, Menlo, monospace',
-                          maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                          padding: '1px 5px', borderRadius: 4,
-                          background: 'rgba(37,99,235,0.04)',
-                          border: '1px solid rgba(37,99,235,0.08)',
-                        }}>
-                          <GitBranch size={9} strokeWidth={2} style={{ flexShrink: 0 }} />
-                          {branch}
-                        </span>
-                      </>
-                    )}
-                    {pr && (
-                      <>
-                        <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
-                        <span
-                          onClick={(e) => { e.stopPropagation(); onSelectPR?.(pr.number, group.repo); }}
-                          style={{
-                            fontSize: 10, fontWeight: 600,
-                            color: pr.state === 'merged' ? '#8b5cf6' : pr.state === 'open' ? '#22c55e' : '#9ca3af',
-                            cursor: 'pointer',
-                          }}
-                          title={`View PR #${pr.number}`}
-                        >
-                          #{pr.number}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                  {agent.worktree ? (
-                    <div style={{ marginTop: 4 }}>
-                      <WorktreeBadge worktree={agent.worktree} />
-                    </div>
-                  ) : null}
-                </div>
-                {/* Right side: diff stats + context ring */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 'auto' }}>
-                  {diff && (
-                    <span
-                      onClick={pr ? (e) => { e.stopPropagation(); onSelectPR?.(pr.number, group.repo); } : undefined}
-                      style={{
-                        fontSize: 10, fontWeight: 700,
-                        fontFamily: 'SF Mono, Menlo, monospace',
-                        display: 'flex', gap: 4, flexShrink: 0,
-                        cursor: pr ? 'pointer' : 'default',
-                        padding: pr ? '2px 6px' : 0,
-                        borderRadius: pr ? 6 : 0,
-                        background: pr ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
-                        transition: 'background 120ms ease',
-                      }}
-                      onMouseEnter={pr ? (e) => { e.currentTarget.style.background = 'rgba(37, 99, 235, 0.12)'; } : undefined}
-                      onMouseLeave={pr ? (e) => { e.currentTarget.style.background = 'rgba(37, 99, 235, 0.06)'; } : undefined}
-                      title={pr ? `View PR #${pr.number} diff` : undefined}
-                    >
-                      <span style={{ color: '#22c55e' }}>+{diff.add.toLocaleString()}</span>
-                      <span style={{ color: '#ef4444' }}>-{diff.del.toLocaleString()}</span>
+
+                {/* Line 2: branch · PR # · status */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  marginTop: 2,
+                  fontSize: 11, color: 'var(--t-text-muted)',
+                }}>
+                  {branch && !branch.startsWith('surface/') && (
+                    <span style={{
+                      fontFamily: '"SF Mono", ui-monospace, monospace',
+                      fontSize: 10,
+                      maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {branch}
                     </span>
                   )}
-                  {progress > 0 && (
-                    <div style={{ position: 'relative', width: 32, height: 32, flexShrink: 0 }}>
-                      <svg width={32} height={32} style={{ display: 'block', transform: 'rotate(-90deg)' }}>
-                        <circle cx={16} cy={16} r={13} fill="none" stroke="var(--t-divider-subtle)" strokeWidth={2} />
-                        <circle cx={16} cy={16} r={13} fill="none" stroke={ctxColor(agentCtx)} strokeWidth={2}
-                          strokeDasharray={2 * Math.PI * 13}
-                          strokeDashoffset={2 * Math.PI * 13 * (1 - progress)}
-                          strokeLinecap="round"
-                          style={{ transition: 'stroke-dashoffset 600ms cubic-bezier(0.32, 0.72, 0, 1)' }}
-                        />
-                      </svg>
-                      <span style={{
-                        position: 'absolute', inset: 0,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 8, fontWeight: 800, color: ctxColor(agentCtx),
-                        fontFamily: 'SF Mono, Menlo, monospace',
-                      }}>
-                        {agentCtx}
+                  {pr && (
+                    <>
+                      {branch && <span style={{ color: 'var(--t-text-faint)' }}>·</span>}
+                      <span
+                        onClick={(e) => { e.stopPropagation(); onSelectPR?.(pr.number, group.repo); }}
+                        style={{
+                          fontWeight: 600,
+                          color: pr.state === 'merged' ? '#8b5cf6' : pr.state === 'open' ? '#22c55e' : '#9ca3af',
+                          cursor: 'pointer', fontSize: 10,
+                        }}
+                      >
+                        PR #{pr.number}
                       </span>
-                    </div>
+                    </>
+                  )}
+                  {statusLabel && (
+                    <>
+                      {(branch || pr) && <span style={{ color: 'var(--t-text-faint)' }}>·</span>}
+                      <span style={{
+                        fontWeight: 600, fontSize: 10,
+                        color: isRunning ? '#22c55e' : isStalled ? '#f97316' : isFailed ? '#ef4444' : '#22c55e',
+                      }}>
+                        {statusLabel}
+                      </span>
+                    </>
                   )}
                 </div>
               </div>
 
-              {/* Lifecycle status line + actions */}
-              {(isRunning || isFailed || isCompleted || isStalled) && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  marginTop: 8, paddingTop: 8,
-                  borderTop: '1px solid var(--t-divider-subtle)',
-                }}>
-                  <span style={{
-                    fontSize: 10, fontWeight: 600, flex: 1,
-                    color: isFailed ? '#ef4444' : isStalled ? '#f97316' : isCompleted ? '#22c55e' : 'var(--t-text-secondary)',
-                  }}>
-                    {isFailed
-                      ? `${lcState === 'killed' ? 'Killed' : 'Failed'}${lcExitCode !== undefined ? ` (exit ${lcExitCode})` : ''}`
-                      : isStalled
-                        ? `Stalled — no output for ${lcTs ? `${Math.round((Date.now() - lcTs) / 60000)}m` : '5m+'}`
-                      : isCompleted
-                        ? `Completed${lcTs ? ` · ${Math.round((Date.now() - lcTs) / 60000)}m ago` : ''}`
-                        : 'Running'
-                    }
-                  </span>
-                  {(isRunning || isStalled) && onAgentKill && agent.tmuxSession && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onAgentKill(agent.tmuxSession!, 'SIGINT');
-                      }}
-                      style={{
-                        fontSize: 9, fontWeight: 700, padding: '3px 8px',
-                        borderRadius: 6, border: '1px solid rgba(245, 158, 11, 0.3)',
-                        background: 'rgba(245, 158, 11, 0.08)', color: '#f59e0b',
-                        cursor: 'pointer', letterSpacing: '0.02em',
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(245, 158, 11, 0.15)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(245, 158, 11, 0.08)'; }}
-                      title="Send interrupt (Ctrl+C)"
-                    >
-                      INTERRUPT
-                    </button>
-                  )}
-                  {(isRunning || isStalled) && onAgentKill && agent.tmuxSession && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm('Kill this agent? This will terminate it immediately.')) {
-                          onAgentKill(agent.tmuxSession!);
-                        }
-                      }}
-                      style={{
-                        fontSize: 9, fontWeight: 700, padding: '3px 8px',
-                        borderRadius: 6, border: '1px solid rgba(239, 68, 68, 0.3)',
-                        background: 'rgba(239, 68, 68, 0.08)', color: '#ef4444',
-                        cursor: 'pointer', letterSpacing: '0.02em',
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)'; }}
-                      title="Kill agent (SIGTERM)"
-                    >
-                      STOP
-                    </button>
-                  )}
-                  {isFailed && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        // TODO: Wire retry — relaunch same agent config
-                      }}
-                      style={{
-                        fontSize: 9, fontWeight: 700, padding: '3px 8px',
-                        borderRadius: 6, border: '1px solid rgba(37, 99, 235, 0.3)',
-                        background: 'rgba(37, 99, 235, 0.08)', color: '#2563eb',
-                        cursor: 'pointer', letterSpacing: '0.02em',
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(37, 99, 235, 0.15)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(37, 99, 235, 0.08)'; }}
-                      title="Retry with same configuration"
-                    >
-                      RETRY
-                    </button>
-                  )}
-                </div>
-              )}
+              {/* Right: diff stats */}
+              {diff && (diff.add > 0 || diff.del > 0) ? (
+                <span
+                  onClick={pr ? (e) => { e.stopPropagation(); onSelectPR?.(pr.number, group.repo); } : undefined}
+                  style={{
+                    fontSize: 10, fontWeight: 700,
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    display: 'flex', gap: 3, flexShrink: 0,
+                    cursor: pr ? 'pointer' : 'default',
+                    padding: '2px 6px',
+                    borderRadius: 5,
+                    background: 'rgba(0,0,0,0.03)',
+                    marginTop: 1,
+                  }}
+                >
+                  <span style={{ color: '#22c55e' }}>+{diff.add.toLocaleString()}</span>
+                  <span style={{ color: '#ef4444' }}>-{diff.del.toLocaleString()}</span>
+                </span>
+              ) : null}
             </div>
           );
         };
@@ -2822,6 +2708,70 @@ export const AgentPanel = memo(function AgentPanel({
           </span>
         </button>
       </div>
+      {/* Running agents ALWAYS visible — even when collapsed */}
+      {!agentsOpen && (() => {
+        const runningAgents = agents.filter(a =>
+          a.status === 'running' || a.status === 'watching' || a.status === 'healthy'
+        );
+        if (runningAgents.length === 0) return null;
+        return (
+          <div style={{
+            paddingLeft: 14, paddingRight: 14, paddingBottom: 8,
+            display: 'flex', flexDirection: 'column', gap: 2,
+          }}>
+            {runningAgents.map(agent => {
+              const nameLower = (agent.name || '').toLowerCase();
+              const modelLower = (agent.model || '').toLowerCase();
+              const isCodex = nameLower.includes('codex') || modelLower.includes('codex');
+              const isClaudeCode = nameLower.includes('claude code') || nameLower.includes('claude-code');
+              const displayName = isCodex ? 'Codex' : isClaudeCode ? 'Claude Code' : (agent.surfaceLabel || agent.name).replace(/\s*\(.*\)/, '').split(' ')[0];
+              const taskDesc = agent.currentTask || null;
+              const pr = agent.pr;
+              const diff = pr ? { add: pr.additions, del: pr.deletions } : agent.localDiff ? { add: agent.localDiff.additions, del: agent.localDiff.deletions } : null;
+              return (
+                <div
+                  key={agent.id}
+                  onClick={() => { if (agent.sessionKey && onSelectSession) onSelectSession(agent.sessionKey); }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '6px 8px', borderRadius: 6,
+                    background: 'rgba(34,197,94,0.04)',
+                    border: '1px solid rgba(34,197,94,0.1)',
+                    cursor: agent.sessionKey ? 'pointer' : 'default',
+                  }}
+                >
+                  <span style={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: '#22c55e',
+                    boxShadow: '0 0 8px #22c55e',
+                    flexShrink: 0,
+                  }} />
+                  <span style={{
+                    fontSize: 11, fontWeight: 600, color: 'var(--t-text)',
+                    flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {taskDesc || displayName}
+                  </span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: '#22c55e', flexShrink: 0 }}>
+                    Working…
+                  </span>
+                  {diff && (diff.add > 0 || diff.del > 0) ? (
+                    <span style={{
+                      fontSize: 9, fontWeight: 700,
+                      fontFamily: '"SF Mono", ui-monospace, monospace',
+                      display: 'flex', gap: 3, flexShrink: 0,
+                    }}>
+                      <span style={{ color: '#22c55e' }}>+{diff.add.toLocaleString()}</span>
+                      <span style={{ color: '#ef4444' }}>-{diff.del.toLocaleString()}</span>
+                    </span>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       {agentsOpen && (
       <div style={{
         flexShrink: 0,
