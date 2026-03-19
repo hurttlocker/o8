@@ -386,7 +386,6 @@ function RepoCard({
   repo,
   workspaceNotice,
   onLaunchAgent,
-  onCreateWorkspace,
   onOpenGitHub,
   onRemove,
   onSaveSetup,
@@ -395,7 +394,6 @@ function RepoCard({
   repo: RepoRegistryEntry;
   workspaceNotice: WorkspaceCreateResult | null;
   onLaunchAgent: (repo: RepoRegistryEntry) => void;
-  onCreateWorkspace: (repo: RepoRegistryEntry) => void;
   onOpenGitHub: (repo: RepoRegistryEntry) => void;
   onRemove: (repo: RepoRegistryEntry) => void;
   onSaveSetup: (repoId: string, setup: RepoSetupConfig) => Promise<void>;
@@ -613,7 +611,6 @@ function RepoCard({
           >
             {[
               { label: 'Launch Agent', icon: <PlayCircle size={12} strokeWidth={2} />, action: () => { onLaunchAgent(repo); setMenuOpen(false); } },
-              { label: 'New Workspace', icon: <Plus size={12} strokeWidth={2.5} />, action: () => { onCreateWorkspace(repo); setMenuOpen(false); } },
               { label: 'Settings', icon: <Settings2 size={12} strokeWidth={2} />, action: () => { setSettingsOpen((v) => !v); setMenuOpen(false); } },
               ...(githubUrl ? [{ label: 'Open on GitHub', icon: <ExternalLink size={12} strokeWidth={2} />, action: () => { onOpenGitHub(repo); setMenuOpen(false); } }] : []),
               { label: 'Remove', icon: <Trash2 size={12} strokeWidth={2} />, action: () => { onRemove(repo); setMenuOpen(false); }, danger: true },
@@ -649,28 +646,8 @@ function RepoCard({
       {/* Expanded content */}
       {expanded ? (
         <div style={{ padding: '0 4px 8px 28px' }}>
-          {/* Quick actions row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
-            <button
-              type="button"
-              onClick={() => onCreateWorkspace(repo)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: 0,
-                border: 'none',
-                background: 'transparent',
-                color: 'var(--t-text-muted)',
-                fontSize: 11,
-                fontWeight: 500,
-                cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
-              }}
-            >
-              <Plus size={11} strokeWidth={2.5} />
-              New workspace
-            </button>
+          {/* Primary action */}
+          <div style={{ marginBottom: 6 }}>
             <button
               type="button"
               onClick={() => onLaunchAgent(repo)}
@@ -1806,7 +1783,6 @@ export function RepoRegistrySection({
                 repo={repo}
                 workspaceNotice={workspaceNotice[repo.id] ?? null}
                 onLaunchAgent={openLaunchModal}
-                onCreateWorkspace={openWorkspaceModal}
                 onOpenGitHub={handleOpenGitHub}
                 onRemove={setRemoveTarget}
                 onSaveSetup={handleSaveSetup}
