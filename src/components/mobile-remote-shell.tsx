@@ -24,6 +24,7 @@ import { TopBar } from './mobile/TopBar';
 import { ShimmerCard } from './mobile/ShimmerCard';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { AlertTray } from '@/components/shared/AlertTray';
+import { SpeedDial, type MobileScreen } from './mobile/SpeedDial';
 
 // Lazy-loaded panels — only loaded when opened (#45)
 const shimmerFallback = { loading: () => <ShimmerCard /> };
@@ -33,6 +34,7 @@ const CostsDashboard = dynamic(() => import('./mobile/CostsDashboard').then((m) 
 const DiffOverlay = dynamic(() => import('./mobile/DiffOverlay').then((m) => ({ default: m.DiffOverlay })), { ssr: false, ...shimmerFallback });
 const TokenUsageSummary = dynamic(() => import('./mobile/TokenUsageSummary').then((m) => ({ default: m.TokenUsageSummary })), { ssr: false, ...shimmerFallback });
 const MobileTerminal = dynamic(() => import('./mobile/MobileTerminal').then((m) => ({ default: m.MobileTerminal })), { ssr: false, ...shimmerFallback });
+const WorktreeActions = dynamic(() => import('./mobile/WorktreeActions').then((m) => ({ default: m.WorktreeActions })), { ssr: false, ...shimmerFallback });
 
 // Cortex memory surfaces (#78-#85) — typed via explicit generic param
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -99,13 +101,13 @@ function MobileRemoteShellInner({
   const state = useMobileState({ initialSnapshot, initialTranscript, initialReviewFile, initialOwnedReviewPacket });
 
   // ── Streaming + WebSocket ──
-  const { wsConnected, wsConnectionState } = useMobileStreaming(state);
+  const { wsConnected, wsConnectionState, sendTerminalAttach, sendTerminalInput } = useMobileStreaming(state);
 
   // ── Data fetching + polling ──
   const { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, linkedOwnedKey } = useMobilePolling(state, wsConnected);
 
   // ── Action handlers ──
-  const actions = useMobileActions(state, { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles });
+  const actions = useMobileActions(state, { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, sendTerminalAttach, sendTerminalInput });
 
   // ── Alert engine: feed agent data on each snapshot update ──
   const { updateAgents, alerts: activeAlerts, markRead: alertMarkRead, markAllRead: alertMarkAllRead, dismiss: alertDismiss, dismissAll: alertDismissAll } = useAlerts();
@@ -258,6 +260,28 @@ function MobileRemoteShellInner({
       ? 'terminal'
       : 'chat';
   const terminalActive = hasTerminalSession && detailTab === 'terminal';
+  const linkedWorktree = selectedReviewPacket?.worktree;
+  const showWorktreeActions = Boolean(
+    isOwnedCodexSession
+    && linkedWorktree
+    && linkedWorktree.dirtyFiles.length > 0
+    && selectedSession?.runtimeSurface?.lifecycle?.availability === 'ready-for-resume',
+  );
+  const worktreeRepoRoot = selectedReviewPacket?.repoPath
+    ? selectedReviewPacket.repoPath.replace(/^~(?=\/|$)/, '/Users/marquisehurtt')
+    : null;
+  const mobileWorktree = linkedWorktree ? {
+    id: linkedWorktree.id,
+    path: linkedWorktree.path,
+    branch: linkedWorktree.branch,
+    baseBranch: linkedWorktree.baseBranch,
+    agentType: 'codex' as const,
+    status: linkedWorktree.status as import('@/lib/worktree/types').WorktreeStatus,
+    createdAt: 0,
+    lastActivityAt: 0,
+    dirtyFiles: linkedWorktree.dirtyFiles,
+    claudeManaged: false,
+  } : null;
 
   // Track compose bar height via ResizeObserver for dynamic pill positioning
   const bottomDockRef = useRef<HTMLDivElement>(null);
@@ -415,6 +439,21 @@ function MobileRemoteShellInner({
                 onApprove={(a) => actions.handleApprovalDecision(a, 'approved')}
                 onReject={(a) => actions.handleApprovalDecision(a, 'rejected')}
               />
+              {showWorktreeActions && mobileWorktree && worktreeRepoRoot ? (
+                <div style={{ padding: '0 14px', marginTop: 12 }}>
+                  <WorktreeActions
+                    worktree={mobileWorktree}
+                    repoRoot={worktreeRepoRoot}
+                    onResult={(result) => {
+                      setSurfaceNote(result.note);
+                      void refreshInbox();
+                      if (selectedSessionKey) {
+                        void loadOwnedReviewPacket(selectedSessionKey, true);
+                      }
+                    }}
+                  />
+                </div>
+              ) : null}
             </>
           )}
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
@@ -556,6 +595,35 @@ function MobileRemoteShellInner({
         sessionAge={selectedSession?.lastEventAt ? formatSessionAge(selectedSession.lastEventAt) : undefined}
         onCopyKey={actions.handleCopySelectedSessionKey}
         onExpandMedia={(media) => { setSessionInfoOpen(false); setExpandedMedia(media); }}
+      />
+      {/* Speed Dial Navigation */}
+      <SpeedDial
+        activeScreen={activeView === 'costs' ? 'costs' : 'chat'}
+        onNavigate={(screen: MobileScreen) => {
+          switch (screen) {
+            case 'chat':
+              setActiveView('squad');
+              break;
+            case 'fleet':
+              setActiveView('squad');
+              state.setSquadPickerOpen(true);
+              break;
+            case 'memory':
+              setCortexRecallOpen(true);
+              break;
+            case 'approvals':
+              setControlsOpen(true);
+              actions.handleToggleApprovals();
+              break;
+            case 'costs':
+              setActiveView('costs');
+              break;
+            case 'settings':
+              setControlsOpen(true);
+              break;
+          }
+        }}
+        approvalCount={pendingApprovals.length}
       />
     </div>
   );
