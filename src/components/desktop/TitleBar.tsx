@@ -186,6 +186,16 @@ export function TitleBar({
 }: TitleBarProps) {
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
+  const [openMenuOpen, setOpenMenuOpen] = useState(false);
+  const [availableEditors, setAvailableEditors] = useState<{ id: string; name: string; available: boolean }[]>([]);
+
+  // Fetch available editors on mount
+  useEffect(() => {
+    fetch('/api/panel/open-in')
+      .then(r => r.json())
+      .then(data => setAvailableEditors(data.editors ?? []))
+      .catch(() => {});
+  }, []);
   const headerRef = useRef<HTMLElement>(null);
 
   // Window drag — Tauri v2 startDragging API
@@ -455,6 +465,167 @@ export function TitleBar({
           )}
         </div>
       </div>
+
+      {/* ── Open In button ── */}
+      {globalRepo ? (
+        <div style={{ position: 'relative', flexShrink: 0, ['WebkitAppRegion' as string]: 'no-drag' }} data-no-drag="">
+          <button
+            type="button"
+            onClick={() => setOpenMenuOpen(v => !v)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '5px 10px',
+              borderRadius: 8,
+              border: '1px solid var(--t-search-border)',
+              background: 'var(--t-search-bg)',
+              cursor: 'pointer',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+              fontSize: 12,
+              fontWeight: 500,
+              color: 'var(--t-text-muted)',
+              transition: 'background 150ms ease, border-color 150ms ease',
+              whiteSpace: 'nowrap',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--t-hover)';
+              e.currentTarget.style.borderColor = 'var(--t-input-border)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'var(--t-search-bg)';
+              e.currentTarget.style.borderColor = 'var(--t-search-border)';
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+            Open
+            <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4 }}>
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+
+          {openMenuOpen ? (
+            <>
+              <div onClick={() => setOpenMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 9998 }} />
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                right: 0,
+                marginTop: 6,
+                minWidth: 180,
+                borderRadius: 10,
+                border: '1px solid rgba(255,255,255,0.25)',
+                background: 'rgba(255,255,255,0.12)',
+                backdropFilter: 'blur(120px) saturate(2.8)',
+                WebkitBackdropFilter: 'blur(120px) saturate(2.8)',
+                boxShadow: '0 12px 48px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.1)',
+                overflow: 'hidden',
+                zIndex: 9999,
+              }}>
+                {/* System actions */}
+                {[
+                  { id: 'finder', name: 'Finder', icon: '📁' },
+                  { id: 'terminal', name: 'Terminal', icon: '▶' },
+                ].map(item => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      fetch('/api/panel/open-in', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ editor: item.id, repo: globalRepo }),
+                      });
+                      setOpenMenuOpen(false);
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                      padding: '8px 12px', border: 'none', background: 'transparent',
+                      color: 'var(--t-text)', fontSize: 12, fontWeight: 400,
+                      cursor: 'pointer', fontFamily: '-apple-system, system-ui, sans-serif', textAlign: 'left',
+                    }}
+                    onMouseEnter={(e) => { (e.currentTarget).style.background = 'rgba(255,255,255,0.1)'; }}
+                    onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
+                  >
+                    <span style={{ width: 16, textAlign: 'center', fontSize: 13 }}>{item.icon}</span>
+                    {item.name}
+                  </button>
+                ))}
+
+                {/* Divider */}
+                <div style={{ height: 1, background: 'rgba(255,255,255,0.12)', margin: '4px 0' }} />
+
+                {/* IDEs */}
+                {availableEditors
+                  .filter(e => e.id !== 'finder' && e.id !== 'terminal' && e.available)
+                  .map(editor => (
+                    <button
+                      key={editor.id}
+                      type="button"
+                      onClick={() => {
+                        fetch('/api/panel/open-in', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ editor: editor.id, repo: globalRepo }),
+                        });
+                        setOpenMenuOpen(false);
+                      }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                        padding: '8px 12px', border: 'none', background: 'transparent',
+                        color: 'var(--t-text)', fontSize: 12, fontWeight: 400,
+                        cursor: 'pointer', fontFamily: '-apple-system, system-ui, sans-serif', textAlign: 'left',
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget).style.background = 'rgba(255,255,255,0.1)'; }}
+                      onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
+                    >
+                      <span style={{ width: 16, textAlign: 'center' }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
+                          <polyline points="16 18 22 12 16 6" />
+                          <polyline points="8 6 2 12 8 18" />
+                        </svg>
+                      </span>
+                      {editor.name}
+                    </button>
+                  ))}
+
+                {/* Divider */}
+                <div style={{ height: 1, background: 'rgba(255,255,255,0.12)', margin: '4px 0' }} />
+
+                {/* Copy path */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(globalRepo ?? '');
+                    setOpenMenuOpen(false);
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                    padding: '8px 12px', border: 'none', background: 'transparent',
+                    color: 'var(--t-text)', fontSize: 12, fontWeight: 400,
+                    cursor: 'pointer', fontFamily: '-apple-system, system-ui, sans-serif', textAlign: 'left',
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget).style.background = 'rgba(255,255,255,0.1)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
+                >
+                  <span style={{ width: 16, textAlign: 'center' }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
+                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                    </svg>
+                  </span>
+                  Copy path
+                  <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t-text-faint)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>⌘⇧C</span>
+                </button>
+              </div>
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* ── Right controls ── */}
       <div style={{
