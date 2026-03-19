@@ -130,7 +130,23 @@ export const SpeedDialButton = memo(function SpeedDialButton({
         )}
       </button>
 
-      {/* Floating pills — no backdrop, no panel box */}
+      {/* Frosted overlay behind menu */}
+      {open && (
+        <div
+          onClick={() => setOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,122,255,0.03)',
+            backdropFilter: 'blur(12px) saturate(1.4)',
+            WebkitBackdropFilter: 'blur(12px) saturate(1.4)',
+            zIndex: 9998,
+            animation: 'menuFrostIn 200ms ease',
+          }}
+        />
+      )}
+
+      {/* Floating pills */}
       {open && (
         <div style={{
           position: 'absolute',
@@ -224,6 +240,10 @@ export const SpeedDialButton = memo(function SpeedDialButton({
         @keyframes speedDialPop {
           from { opacity: 0; transform: translateY(-6px) scale(0.92); }
           to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes menuFrostIn {
+          from { opacity: 0; backdrop-filter: blur(0px); -webkit-backdrop-filter: blur(0px); }
+          to { opacity: 1; backdrop-filter: blur(12px) saturate(1.4); -webkit-backdrop-filter: blur(12px) saturate(1.4); }
         }
       `}</style>
     </div>
