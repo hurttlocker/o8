@@ -1,8 +1,9 @@
 'use client';
 
-import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Plus, X, Terminal as TerminalIcon, ChevronDown, Crosshair } from 'lucide-react';
-import { saveTabState, loadTabState, checkAliveSessions, type PersistedTab, type PersistedTabState } from '@/lib/terminal/tab-state';
+import { ChatBubble } from './ChatBubble';
+import { saveTabState, loadTabState, checkAliveSessions, type PersistedTabState } from '@/lib/terminal/tab-state';
 import {
   PREVIEW_HOST_MESSAGE_SOURCE,
   PREVIEW_MESSAGE_SOURCE,
@@ -495,7 +496,7 @@ function PreviewToolbar({ preview, selectionEnabled, onToggleSelection, onRefres
 
 /* ── Workspace Chat Pane ── */
 
-function WorkspaceChatPane({ tab, onUpdateMessages }: {
+const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessages }: {
   tab: TerminalTab;
   onUpdateMessages: (tabId: string, messages: ChatMessage[]) => void;
 }) {
@@ -503,7 +504,10 @@ function WorkspaceChatPane({ tab, onUpdateMessages }: {
   const [sending, setSending] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const messages = tab.chatMessages ?? [];
+  const messages = useMemo(() => tab.chatMessages ?? [], [tab.chatMessages]);
+  const tabId = tab.id;
+  const chatRuntime = tab.chatRuntime;
+  const chatSessionKey = tab.chatSessionKey;
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -525,22 +529,22 @@ function WorkspaceChatPane({ tab, onUpdateMessages }: {
       timestamp: Date.now(),
     };
     const updated = [...messages, userMsg];
-    onUpdateMessages(tab.id, updated);
+      onUpdateMessages(tabId, updated);
 
     try {
       let endpoint = '';
       let body: Record<string, unknown> = {};
 
-      if (tab.chatRuntime === 'claude-code') {
+      if (chatRuntime === 'claude-code') {
         endpoint = '/api/claude-code/send';
-        body = { message: text, sessionId: tab.chatSessionKey };
-      } else if (tab.chatRuntime === 'codex') {
+        body = { message: text, sessionId: chatSessionKey };
+      } else if (chatRuntime === 'codex') {
         endpoint = '/api/codex/send';
-        body = { message: text, threadId: tab.chatSessionKey };
+        body = { message: text, threadId: chatSessionKey };
       } else {
         // OpenClaw — use gateway send
         endpoint = '/api/panel/chat/send';
-        body = { sessionKey: tab.chatSessionKey || 'agent:main:main', message: text };
+        body = { sessionKey: chatSessionKey || 'agent:main:main', message: text };
       }
 
       setStreaming(true);
@@ -554,7 +558,7 @@ function WorkspaceChatPane({ tab, onUpdateMessages }: {
         timestamp: Date.now(),
       };
       let withAssistant = [...updated, assistantMsg];
-      onUpdateMessages(tab.id, withAssistant);
+      onUpdateMessages(tabId, withAssistant);
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -564,10 +568,10 @@ function WorkspaceChatPane({ tab, onUpdateMessages }: {
 
       if (!res.ok) {
         const errText = await res.text();
-        withAssistant = withAssistant.map(m =>
+        withAssistant = withAssistant.map((m) =>
           m.id === assistantId ? { ...m, content: `Error ${res.status}: ${errText}` } : m
         );
-        onUpdateMessages(tab.id, withAssistant);
+        onUpdateMessages(tabId, withAssistant);
         return;
       }
 
@@ -598,32 +602,32 @@ function WorkspaceChatPane({ tab, onUpdateMessages }: {
 
               if (event.type === 'delta' && event.text) {
                 accumulated += event.text;
-                withAssistant = withAssistant.map(m =>
+                withAssistant = withAssistant.map((m) =>
                   m.id === assistantId ? { ...m, content: accumulated } : m
                 );
-                onUpdateMessages(tab.id, withAssistant);
+                onUpdateMessages(tabId, withAssistant);
               }
 
               if (event.type === 'tool' && event.name) {
                 accumulated += `\n🔧 *${event.name}*\n`;
-                withAssistant = withAssistant.map(m =>
+                withAssistant = withAssistant.map((m) =>
                   m.id === assistantId ? { ...m, content: accumulated } : m
                 );
-                onUpdateMessages(tab.id, withAssistant);
+                onUpdateMessages(tabId, withAssistant);
               }
 
               // Capture session ID for conversation continuity
-              if (event.sessionId && tab.chatRuntime === 'claude-code') {
+              if (event.sessionId && chatRuntime === 'claude-code') {
                 tab.chatSessionKey = event.sessionId;
               }
 
               if (event.type === 'done' || event.type === 'close') {
                 if (event.text && !accumulated) {
                   accumulated = event.text;
-                  withAssistant = withAssistant.map(m =>
+                  withAssistant = withAssistant.map((m) =>
                     m.id === assistantId ? { ...m, content: accumulated } : m
                   );
-                  onUpdateMessages(tab.id, withAssistant);
+                  onUpdateMessages(tabId, withAssistant);
                 }
               }
             } catch { /* skip malformed lines */ }
@@ -632,18 +636,18 @@ function WorkspaceChatPane({ tab, onUpdateMessages }: {
 
         // If nothing accumulated, show fallback
         if (!accumulated) {
-          withAssistant = withAssistant.map(m =>
+          withAssistant = withAssistant.map((m) =>
             m.id === assistantId ? { ...m, content: 'No response received' } : m
           );
-          onUpdateMessages(tab.id, withAssistant);
+          onUpdateMessages(tabId, withAssistant);
         }
       } else {
         // Non-streaming fallback
         const data = await res.json();
-        withAssistant = withAssistant.map(m =>
+        withAssistant = withAssistant.map((m) =>
           m.id === assistantId ? { ...m, content: data.response ?? data.message ?? data.text ?? 'No response' } : m
         );
-        onUpdateMessages(tab.id, withAssistant);
+        onUpdateMessages(tabId, withAssistant);
       }
     } catch (err) {
       const errorMsg: ChatMessage = {
@@ -652,12 +656,12 @@ function WorkspaceChatPane({ tab, onUpdateMessages }: {
         content: `Error: ${err instanceof Error ? err.message : 'Failed to send'}`,
         timestamp: Date.now(),
       };
-      onUpdateMessages(tab.id, [...updated, errorMsg]);
+      onUpdateMessages(tabId, [...updated, errorMsg]);
     } finally {
       setSending(false);
       setStreaming(false);
     }
-  }, [input, sending, messages, tab.id, tab.chatRuntime, tab.chatSessionKey, onUpdateMessages]);
+  }, [input, sending, messages, tabId, chatRuntime, chatSessionKey, onUpdateMessages, tab]);
 
   const runtimeLabels = { 'codex': 'Codex', 'claude-code': 'Claude Code', 'openclaw': 'OpenClaw' };
   const runtimeColors = { 'codex': '#10b981', 'claude-code': '#8b5cf6', 'openclaw': '#ef4444' };
@@ -723,36 +727,12 @@ function WorkspaceChatPane({ tab, onUpdateMessages }: {
             </span>
           </div>
         ) : (
-          messages.map((msg) => (
-            <div key={msg.id} style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-              alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
-              maxWidth: '85%',
-              alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-            }}>
-              <div style={{
-                padding: '10px 14px',
-                borderRadius: msg.role === 'user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
-                background: msg.role === 'user' ? '#0f172a' : '#f1f5f9',
-                color: msg.role === 'user' ? '#ffffff' : '#0f172a',
-                fontSize: 13,
-                lineHeight: 1.5,
-                fontFamily: '-apple-system, system-ui, sans-serif',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}>
-                {msg.content}
-              </div>
-              <span style={{
-                fontSize: 9,
-                color: '#cbd5e1',
-                paddingLeft: 4, paddingRight: 4,
-              }}>
-                {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            </div>
+          messages.map((msg: ChatMessage) => (
+            <ChatBubble
+              key={msg.id}
+              message={msg}
+              runtimeColor={runtimeColors[tab.chatRuntime ?? 'openclaw']}
+            />
           ))
         )}
         {streaming ? (
@@ -773,60 +753,114 @@ function WorkspaceChatPane({ tab, onUpdateMessages }: {
 
       {/* Compose bar */}
       <div style={{
-        padding: '12px 16px',
+        padding: '10px 16px',
         borderTop: '1px solid #e2e8f0',
-        display: 'flex',
-        gap: 8,
         flexShrink: 0,
       }}>
-        <input
-          value={input}
-          onChange={(e) => setInput(e.currentTarget.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-          placeholder={`Message ${runtimeLabels[tab.chatRuntime ?? 'openclaw']}…`}
-          disabled={sending}
-          style={{
+        {/* Input row */}
+        <div style={{
+          display: 'flex', gap: 8, alignItems: 'flex-end',
+        }}>
+          <div style={{
             flex: 1,
-            padding: '10px 14px',
             borderRadius: 12,
             border: '1px solid #e2e8f0',
             background: '#f8fafc',
-            fontSize: 13,
-            fontFamily: '-apple-system, system-ui, sans-serif',
-            outline: 'none',
-            color: '#0f172a',
-          }}
-        />
-        <button
-          type="button"
-          onClick={handleSend}
-          disabled={sending || !input.trim()}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 40,
-            height: 40,
-            borderRadius: 12,
-            border: 'none',
-            background: input.trim() ? '#0f172a' : '#e2e8f0',
-            color: input.trim() ? '#ffffff' : '#94a3b8',
-            cursor: input.trim() ? 'pointer' : 'default',
-            transition: 'all 150ms ease',
+            overflow: 'hidden',
+            transition: 'border-color 150ms ease',
+          }}>
+            <textarea
+              value={input}
+              onChange={(e) => {
+                setInput(e.currentTarget.value);
+                // Auto-resize
+                e.currentTarget.style.height = 'auto';
+                e.currentTarget.style.height = Math.min(e.currentTarget.scrollHeight, 120) + 'px';
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder={`Message ${runtimeLabels[tab.chatRuntime ?? 'openclaw']}… (/ for commands)`}
+              disabled={sending}
+              rows={1}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                border: 'none',
+                background: 'transparent',
+                fontSize: 13,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                outline: 'none',
+                color: '#0f172a',
+                resize: 'none',
+                lineHeight: 1.5,
+                maxHeight: 120,
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={sending || !input.trim()}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 36,
+              height: 36,
+              borderRadius: 10,
+              border: 'none',
+              background: input.trim() ? runtimeColors[tab.chatRuntime ?? 'openclaw'] : '#e2e8f0',
+              color: input.trim() ? '#ffffff' : '#94a3b8',
+              cursor: input.trim() ? 'pointer' : 'default',
+              transition: 'all 150ms ease',
+              flexShrink: 0,
+              marginBottom: 2,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="22" y1="2" x2="11" y2="13" />
+              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+            </svg>
+          </button>
+        </div>
+        {/* Bottom row: model indicator + char count */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          paddingTop: 4, paddingLeft: 4,
+          fontSize: 10, color: '#94a3b8',
+        }}>
+          <span style={{
+            width: 5, height: 5, borderRadius: '50%',
+            background: runtimeColors[tab.chatRuntime ?? 'openclaw'],
             flexShrink: 0,
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="22" y1="2" x2="11" y2="13" />
-            <polygon points="22 2 15 22 11 13 2 9 22 2" />
-          </svg>
-        </button>
+          }} />
+          <span style={{ fontWeight: 600 }}>
+            {runtimeLabels[tab.chatRuntime ?? 'openclaw']}
+          </span>
+          {tab.repo ? (
+            <>
+              <span>·</span>
+              <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                {tab.repo.name}
+              </span>
+            </>
+          ) : null}
+          {input.length > 0 && (
+            <span style={{ marginLeft: 'auto', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+              {input.length}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );
-}
+});
 
-function PreviewPane({ previews, onElementSelect, onRefresh, onClose }: {
+const PreviewPane = memo(function PreviewPane({ previews, onElementSelect, onRefresh, onClose }: {
   previews: LocalhostPreview[];
   onElementSelect?: (selection: PreviewSelectionPayload) => void;
   onRefresh: (id: string) => void;
@@ -938,7 +972,7 @@ function PreviewPane({ previews, onElementSelect, onRefresh, onClose }: {
       ))}
     </div>
   );
-}
+});
 
 /** Format elapsed time: 0s → 59s, 1m → 59m, 1h → 99h */
 function formatElapsed(ms: number): string {
@@ -1581,8 +1615,6 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           const alive = await checkAliveSessions(tmuxNames);
 
           const restoredTabs: TerminalTab[] = [];
-          let needsNewSession = false;
-
           for (const st of saved.tabs) {
             tabCountRef.current += 1;
             const tabId = `tab-${tabCountRef.current}`;
@@ -1614,7 +1646,6 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
                 createdAt: now,
                 lastActivity: now,
               });
-              needsNewSession = true;
             }
           }
 
@@ -1625,7 +1656,8 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
 
           // Create new sessions for tabs that need them
           const deadTabs = restoredTabs.filter(t => t.tmuxSession === null);
-          for (const tab of deadTabs) {
+          for (const deadTab of deadTabs) {
+            void deadTab;
             sendTerminalCreate(120, 30);
           }
         } else {
