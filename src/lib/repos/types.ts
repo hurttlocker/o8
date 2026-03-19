@@ -7,6 +7,8 @@ export interface RepoSetupConfig {
   installOnCreateWorkspace: boolean;
   buildCommand: string | null;
   runBuildOnCreateWorkspace: boolean;
+  devCommand: string | null;
+  defaultPort: number | null;
 }
 
 export interface RepoRegistryEntry {

@@ -105,6 +105,8 @@ async function resolveDefaultBranch(repoRoot: string) {
 type PackageJsonShape = {
   packageManager?: string;
   scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
 };
 
 async function detectPackageManager(repoRoot: string, packageJson?: PackageJsonShape) {
@@ -154,6 +156,43 @@ async function detectSetupConfig(repoRoot: string): Promise<RepoSetupConfig> {
     else buildCommand = 'npm run build';
   }
 
+  // Auto-detect dev command
+  let devCommand: string | null = null;
+  let defaultPort: number | null = null;
+  const hasDevScript = Boolean(packageJson?.scripts?.dev);
+  const hasStartScript = Boolean(packageJson?.scripts?.start);
+  if (hasDevScript) {
+    if (packageManager === 'pnpm') devCommand = 'pnpm dev';
+    else if (packageManager === 'yarn') devCommand = 'yarn dev';
+    else if (packageManager === 'bun') devCommand = 'bun dev';
+    else devCommand = 'npm run dev';
+  } else if (hasStartScript) {
+    if (packageManager === 'pnpm') devCommand = 'pnpm start';
+    else if (packageManager === 'yarn') devCommand = 'yarn start';
+    else if (packageManager === 'bun') devCommand = 'bun start';
+    else devCommand = 'npm start';
+  }
+  // Try to detect port from scripts
+  const devScript = packageJson?.scripts?.dev ?? packageJson?.scripts?.start ?? '';
+  const portMatch = devScript.match(/(?:--port|PORT=|-p)\s*(\d+)/);
+  if (portMatch) defaultPort = parseInt(portMatch[1], 10);
+  // Common framework defaults
+  if (!defaultPort && hasDevScript) {
+    const deps = { ...packageJson?.dependencies, ...packageJson?.devDependencies };
+    if (deps?.next) defaultPort = 3000;
+    else if (deps?.vite) defaultPort = 5173;
+    else if (deps?.['@angular/core']) defaultPort = 4200;
+    else if (deps?.['react-scripts']) defaultPort = 3000;
+    else if (deps?.nuxt) defaultPort = 3000;
+    else if (deps?.svelte || deps?.['@sveltejs/kit']) defaultPort = 5173;
+  }
+
+  // Check for Go projects
+  const hasGoMod = await pathExists(path.join(repoRoot, 'go.mod'));
+  if (!devCommand && hasGoMod) {
+    devCommand = 'go run .';
+  }
+
   return {
     envMode: 'copy',
     envFiles: ['.env', '.env.local'],
@@ -161,6 +200,8 @@ async function detectSetupConfig(repoRoot: string): Promise<RepoSetupConfig> {
     installOnCreateWorkspace: Boolean(installCommand),
     buildCommand,
     runBuildOnCreateWorkspace: false,
+    devCommand,
+    defaultPort,
   };
 }
 
