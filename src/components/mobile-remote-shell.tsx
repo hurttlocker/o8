@@ -37,6 +37,7 @@ const MobileTerminal = dynamic(() => import('./mobile/MobileTerminal').then((m) 
 const WorktreeActions = dynamic(() => import('./mobile/WorktreeActions').then((m) => ({ default: m.WorktreeActions })), { ssr: false, ...shimmerFallback });
 const FleetView = dynamic(() => import('./mobile/FleetView').then((m) => ({ default: m.FleetView })), { ssr: false, ...shimmerFallback });
 const LaunchSheet = dynamic(() => import('./mobile/LaunchSheet').then((m) => ({ default: m.LaunchSheet })), { ssr: false });
+const ActivityFeed = dynamic(() => import('./mobile/ActivityFeed').then((m) => ({ default: m.ActivityFeed })), { ssr: false, ...shimmerFallback });
 
 // Cortex memory surfaces (#78-#85) — typed via explicit generic param
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -327,7 +328,7 @@ function MobileRemoteShellInner({
           wsConnectionState={wsConnectionState}
           compactLine={compactLine}
           squadPickerOpen={state.squadPickerOpen}
-          activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : 'chat'}
+          activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : activeView === 'activity' ? 'approvals' : 'chat'}
           onNavigate={(screen: MobileScreen) => {
             switch (screen) {
               case 'chat':
@@ -340,8 +341,7 @@ function MobileRemoteShellInner({
                 setCortexRecallOpen(true);
                 break;
               case 'approvals':
-                setControlsOpen(true);
-                actions.handleToggleApprovals();
+                setActiveView('activity');
                 break;
               case 'costs':
                 setActiveView('costs');
@@ -369,6 +369,26 @@ function MobileRemoteShellInner({
               onLaunch={() => setLaunchOpen(true)}
             />
           ) : null}
+          {activeView === 'activity' ? (
+            <ActivityFeed
+              snapshot={snapshot}
+              onBack={() => setActiveView('squad')}
+              onAgentSelect={(sessionKey) => {
+                actions.handleSessionFocus(sessionKey);
+                setActiveView('squad');
+              }}
+              onApprove={(item) => {
+                if (item.sessionKey) {
+                  actions.runAction({ action: 'approve', sessionKey: item.sessionKey });
+                }
+              }}
+              onDeny={(item) => {
+                if (item.sessionKey) {
+                  actions.runAction({ action: 'deny', sessionKey: item.sessionKey });
+                }
+              }}
+            />
+          ) : null}
           {activeView === 'costs' ? (
             <CostsDashboard
               snapshot={snapshot}
@@ -394,7 +414,7 @@ function MobileRemoteShellInner({
               agentDisplayName={agentDisplayName}
             />
           ) : null}
-          {activeView !== 'fleet' && activeView !== 'costs' ? (
+          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' ? (
           <SurfaceStatus
             snapshot={snapshot}
             selectedSession={selectedSession}
@@ -406,7 +426,7 @@ function MobileRemoteShellInner({
             selectedReviewPacketError={selectedReviewPacketError}
           />
           ) : null}
-          {hasTerminalSession && activeView !== 'fleet' && activeView !== 'costs' ? (
+          {hasTerminalSession && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' ? (
             <div
               style={{
                 display: 'flex',
@@ -450,7 +470,7 @@ function MobileRemoteShellInner({
               </button>
             </div>
           ) : null}
-          {activeView !== 'fleet' && activeView !== 'costs' ? (
+          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' ? (
           terminalActive ? (
             <MobileTerminal tmuxSession={selectedSession!.tmuxSession!} />
           ) : (
@@ -502,7 +522,7 @@ function MobileRemoteShellInner({
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
         <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
-          {!terminalActive && activeView !== 'fleet' && activeView !== 'costs' ? (
+          {!terminalActive && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' ? (
             <div className="remodex-compose-shell">
               <ComposeBar
                 session={selectedSession}
@@ -534,7 +554,7 @@ function MobileRemoteShellInner({
               />
             </div>
           ) : null}
-          {activeView !== 'fleet' && activeView !== 'costs' ? (
+          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' ? (
           <RuntimeBar
             snapshot={snapshot}
             selectedSession={selectedSession}
@@ -647,9 +667,16 @@ function MobileRemoteShellInner({
       <LaunchSheet
         open={launchOpen}
         onClose={() => setLaunchOpen(false)}
-        onLaunched={() => {
+        onLaunched={(surfaceId) => {
           setLaunchOpen(false);
           refreshInbox();
+          if (surfaceId) {
+            // Navigate to chat with the newly launched agent
+            setTimeout(() => {
+              actions.handleSessionFocus(surfaceId);
+              setActiveView('squad');
+            }, 500);
+          }
         }}
       />
     </div>
