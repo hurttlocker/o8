@@ -45,13 +45,13 @@ function BannerCard({ notification, onDismiss, onTap }: {
       onTouchStart={(e) => { startX.current = e.touches[0].clientX; }}
       onTouchMove={(e) => {
         deltaX.current = e.touches[0].clientX - startX.current;
-        if (cardRef.current && deltaX.current > 0) {
+        if (cardRef.current) {
           cardRef.current.style.transform = `translateX(${deltaX.current}px)`;
-          cardRef.current.style.opacity = `${Math.max(0, 1 - deltaX.current / 200)}`;
+          cardRef.current.style.opacity = `${Math.max(0, 1 - Math.abs(deltaX.current) / 150)}`;
         }
       }}
       onTouchEnd={() => {
-        if (deltaX.current > 100) {
+        if (Math.abs(deltaX.current) > 60) {
           onDismiss();
         } else if (cardRef.current) {
           cardRef.current.style.transform = 'translateX(0)';
@@ -65,11 +65,11 @@ function BannerCard({ notification, onDismiss, onTap }: {
         gap: 10,
         padding: '12px 14px',
         borderRadius: 16,
-        background: 'rgba(255,255,255,0.88)',
+        background: 'rgba(0,122,255,0.08)',
         backdropFilter: 'blur(40px) saturate(1.8)',
         WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-        border: '1px solid rgba(255,255,255,0.4)',
-        boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)',
+        border: '1px solid rgba(0,122,255,0.15)',
+        boxShadow: '0 8px 32px rgba(0,122,255,0.12), 0 2px 8px rgba(0,0,0,0.06)',
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
         transition: 'transform 200ms ease, opacity 200ms ease',
@@ -112,7 +112,7 @@ function BannerCard({ notification, onDismiss, onTap }: {
         onClick={(e) => { e.stopPropagation(); onDismiss(); }}
         style={{
           width: 20, height: 20, borderRadius: '50%',
-          background: 'rgba(0,0,0,0.06)',
+          background: 'rgba(0,122,255,0.1)',
           border: 'none', cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           flexShrink: 0, marginTop: 2,
@@ -120,7 +120,7 @@ function BannerCard({ notification, onDismiss, onTap }: {
         }}
       >
         <svg width="8" height="8" viewBox="0 0 24 24" fill="none"
-          stroke="#8e8e93" strokeWidth="3" strokeLinecap="round">
+          stroke="#007aff" strokeWidth="3" strokeLinecap="round">
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
@@ -221,13 +221,13 @@ export function useNotifications(snapshot: { items: Array<{ id: string; kind: st
     if (newNotifs.length > 0) {
       setNotifications(prev => [...newNotifs, ...prev].slice(0, 20));
 
-      // Auto-dismiss after 8 seconds
+      // Auto-dismiss after 4 seconds
       const ids = newNotifs.map(n => n.id);
       setTimeout(() => {
         setNotifications(prev =>
           prev.map(n => ids.includes(n.id) ? { ...n, dismissed: true } : n)
         );
-      }, 8000);
+      }, 4000);
     }
   }, [snapshot.items, snapshot.sessions]);
 
