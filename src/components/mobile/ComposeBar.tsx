@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { memo } from 'react';
+import React, { memo } from 'react';
 import {
   ArrowUp,
   Brain,
@@ -17,6 +17,7 @@ import {
 import type { CSSProperties } from 'react';
 import type { ComposeBarProps } from './types';
 import { ownedLifecycleLabel, ownedReviewDispositionLabel } from './utils';
+import { autocompleteSlashCommand, getSlashCommandSuggestions, isSlashCommandText } from '@/lib/slash-commands';
 
 export const ComposeBar = memo(function ComposeBar({
   session,
@@ -43,7 +44,25 @@ export const ComposeBar = memo(function ComposeBar({
   handlers,
   onOpenRecall,
   onModelPillTap,
+  streamingText = '',
+  agentRunning = false,
 }: ComposeBarProps) {
+  const [xrayOpen, setXrayOpen] = React.useState(false);
+  const xrayRef = React.useRef<HTMLDivElement>(null);
+
+  const isThinking = agentRunning && !streamingText;
+  const isStreaming = agentRunning && !!streamingText;
+  const xrayWordCount = streamingText ? streamingText.split(/\s+/).filter(Boolean).length : 0;
+
+  // Auto-scroll x-ray panel
+  React.useEffect(() => {
+    if (xrayOpen && xrayRef.current) {
+      xrayRef.current.scrollTop = xrayRef.current.scrollHeight;
+    }
+  }, [xrayOpen, streamingText]);
+  const slashSuggestions = getSlashCommandSuggestions(draft);
+  const showSlashSuggestions = isSlashCommandText(draft) && slashSuggestions.length > 0;
+
   const sendButtonStyle = (disabled: boolean): CSSProperties => ({
     marginLeft: 'auto',
     display: 'inline-flex',
@@ -105,8 +124,68 @@ export const ComposeBar = memo(function ComposeBar({
           <div className="remodex-compose-surface">
             <div className="remodex-compose-status-bar">
               <button type="button" className="remodex-compose-chip remodex-compose-pill" onClick={onModelPillTap} style={{ cursor: "pointer", border: "none", background: "inherit", font: "inherit", color: "inherit", padding: "inherit" }}>{session?.model ?? 'live'}</button>
-              <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{session?.status ?? 'idle'}</span>
+              {/* Thinking X-ray pill */}
+              <button
+                type="button"
+                onClick={() => { if (isThinking || isStreaming) setXrayOpen(v => !v); }}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '3px 8px', borderRadius: 8,
+                  border: (isThinking || isStreaming) ? '1px solid rgba(147,197,253,0.3)' : '1px solid transparent',
+                  background: (isThinking || isStreaming) ? 'rgba(147,197,253,0.08)' : 'transparent',
+                  cursor: (isThinking || isStreaming) ? 'pointer' : 'default',
+                  fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
+                  color: (isThinking || isStreaming) ? '#3b82f6' : 'var(--t-text-muted, #8e8e93)',
+                  transition: 'all 200ms ease',
+                }}
+              >
+                <Brain size={12} style={{ animation: isThinking ? 'pulse 1.5s ease-in-out infinite' : 'none', opacity: (isThinking || isStreaming) ? 1 : 0.5 }} />
+                {isThinking ? 'Thinking…' : isStreaming ? `${xrayWordCount} words` : (session?.status ?? 'idle')}
+              </button>
             </div>
+
+            {/* X-ray expanded panel */}
+            {xrayOpen && (isThinking || isStreaming) && (
+              <div style={{
+                borderRadius: 10,
+                background: 'rgba(15, 23, 42, 0.92)',
+                border: '1px solid rgba(59,130,246,0.2)',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
+                maxHeight: 160,
+                display: 'flex', flexDirection: 'column',
+                overflow: 'hidden',
+                marginBottom: 6,
+              }}>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '6px 10px',
+                  borderBottom: '1px solid rgba(255,255,255,0.06)',
+                  flexShrink: 0,
+                }}>
+                  <Brain size={10} color="#60a5fa" style={{ animation: isThinking ? 'pulse 1.5s ease-in-out infinite' : 'none' }} />
+                  <span style={{ fontSize: 9, fontWeight: 700, color: '#60a5fa', letterSpacing: '0.03em', textTransform: 'uppercase' }}>Chain of Thought</span>
+                  {isStreaming && <span style={{ fontSize: 9, color: '#94a3b8', marginLeft: 'auto', fontFamily: '"SF Mono", ui-monospace, monospace' }}>{xrayWordCount}w</span>}
+                  <button type="button" onClick={() => setXrayOpen(false)} style={{
+                    marginLeft: isStreaming ? 4 : 'auto',
+                    width: 16, height: 16, borderRadius: 4,
+                    border: 'none', background: 'rgba(255,255,255,0.06)',
+                    color: '#64748b', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9,
+                  }}>✕</button>
+                </div>
+                <div ref={xrayRef} style={{
+                  flex: 1, overflowY: 'auto', padding: '8px 10px',
+                  fontSize: 11, lineHeight: 1.5, color: '#cbd5e1',
+                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                }}>
+                  {isThinking && !streamingText ? (
+                    <span style={{ color: '#64748b' }}>Reasoning in progress…</span>
+                  ) : streamingText || ''}
+                </div>
+              </div>
+            )}
+
             <textarea
               ref={composeRef}
               className="remodex-compose-input"
@@ -114,6 +193,15 @@ export const ComposeBar = memo(function ComposeBar({
               value={draft}
               onChange={(event) => handlers.onDraftChange(event.target.value)}
               onKeyDown={(event) => {
+                // Up arrow: recall last message (placeholder for mobile)
+                if (event.key === 'Tab' && showSlashSuggestions) {
+                  event.preventDefault();
+                  const nextValue = autocompleteSlashCommand(draft);
+                  if (nextValue) {
+                    handlers.onDraftChange(`${nextValue} `);
+                  }
+                  return;
+                }
                 if (event.key === 'Enter' && !event.shiftKey && sessionKey && draft.trim()) {
                   event.preventDefault();
                   void handlers.onSend();
@@ -123,6 +211,51 @@ export const ComposeBar = memo(function ComposeBar({
               onBlur={() => handlers.onFocusChange(false)}
               placeholder={attachments.length ? 'Add context for the image…' : `Message ${session ? agentDisplayName(session) : 'Mister'}…`}
             />
+            {showSlashSuggestions ? (
+              <div
+                style={{
+                  marginTop: 8,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  padding: 10,
+                  borderRadius: 14,
+                  border: '1px solid rgba(37, 99, 235, 0.12)',
+                  background: 'rgba(255, 255, 255, 0.82)',
+                }}
+              >
+                {slashSuggestions.slice(0, 6).map((item) => (
+                  <button
+                    key={item.command}
+                    type="button"
+                    onClick={() => {
+                      handlers.onDraftChange(`${item.command} `);
+                      composeRef.current?.focus();
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      width: '100%',
+                      minHeight: 38,
+                      padding: '8px 10px',
+                      borderRadius: 10,
+                      border: 'none',
+                      background: 'rgba(37, 99, 235, 0.04)',
+                      color: '#0f172a',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <span style={{ fontSize: '0.82rem', fontWeight: 700, fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                      {item.command}
+                    </span>
+                    <span style={{ fontSize: '0.76rem', color: '#64748b' }}>{item.description}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <div className="remodex-compose-row">
               <button
                 type="button"
@@ -219,6 +352,14 @@ export const ComposeBar = memo(function ComposeBar({
               value={draft}
               onChange={(event) => handlers.onDraftChange(event.target.value)}
               onKeyDown={(event) => {
+                if (event.key === 'Tab' && showSlashSuggestions) {
+                  event.preventDefault();
+                  const nextValue = autocompleteSlashCommand(draft);
+                  if (nextValue) {
+                    handlers.onDraftChange(`${nextValue} `);
+                  }
+                  return;
+                }
                 if (event.key === 'Enter' && !event.shiftKey && sessionKey && draft.trim()) {
                   event.preventDefault();
                   void handlers.onOwnedResume();
@@ -228,6 +369,51 @@ export const ComposeBar = memo(function ComposeBar({
               onBlur={() => handlers.onFocusChange(false)}
               placeholder="Next instruction for Codex…"
             />
+            {showSlashSuggestions ? (
+              <div
+                style={{
+                  marginTop: 8,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  padding: 10,
+                  borderRadius: 14,
+                  border: '1px solid rgba(37, 99, 235, 0.12)',
+                  background: 'rgba(255, 255, 255, 0.82)',
+                }}
+              >
+                {slashSuggestions.slice(0, 6).map((item) => (
+                  <button
+                    key={item.command}
+                    type="button"
+                    onClick={() => {
+                      handlers.onDraftChange(`${item.command} `);
+                      composeRef.current?.focus();
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      width: '100%',
+                      minHeight: 38,
+                      padding: '8px 10px',
+                      borderRadius: 10,
+                      border: 'none',
+                      background: 'rgba(37, 99, 235, 0.04)',
+                      color: '#0f172a',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <span style={{ fontSize: '0.82rem', fontWeight: 700, fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                      {item.command}
+                    </span>
+                    <span style={{ fontSize: '0.76rem', color: '#64748b' }}>{item.description}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <div className="remodex-owned-quick-actions">
               <button
                 type="button"
@@ -260,7 +446,7 @@ export const ComposeBar = memo(function ComposeBar({
                 <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
               </button>
               <button type="button" className="remodex-compose-chip remodex-compose-pill" onClick={onModelPillTap} style={{ cursor: 'pointer', border: 'none', background: 'inherit', font: 'inherit', color: 'inherit', padding: 'inherit' }}>{session?.model ?? 'live'}</button>
-              <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{ownedLifecycleLabel(ownedAvailability)}</span>
+              <button type="button" onClick={() => { if (isThinking || isStreaming) setXrayOpen(v => !v); }} className="remodex-compose-chip remodex-compose-pill" style={{ cursor: (isThinking || isStreaming) ? "pointer" : "default", border: (isThinking || isStreaming) ? "1px solid rgba(147,197,253,0.3)" : "none", background: "inherit", font: "inherit", color: (isThinking || isStreaming) ? "#3b82f6" : "inherit", padding: "inherit" }}>{isThinking ? "Thinking…" : isStreaming ? `${xrayWordCount}w` : ownedLifecycleLabel(ownedAvailability)}</button>
               <span className="remodex-compose-chip remodex-compose-pill">{ownedReviewDispositionLabel(ownedReviewDisposition)}</span>
               <button
                 type="button"
@@ -351,7 +537,7 @@ export const ComposeBar = memo(function ComposeBar({
                 <RefreshCw size={16} strokeWidth={2.2} className={surfaceRefreshing ? 'spin' : undefined} />
               </button>
               <button type="button" className="remodex-compose-chip remodex-compose-pill" onClick={onModelPillTap} style={{ cursor: 'pointer', border: 'none', background: 'inherit', font: 'inherit', color: 'inherit', padding: 'inherit' }}>{session?.model ?? 'live'}</button>
-              <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">{ownedLifecycleLabel(ownedAvailability)}</span>
+              <button type="button" onClick={() => { if (isThinking || isStreaming) setXrayOpen(v => !v); }} className="remodex-compose-chip remodex-compose-pill" style={{ cursor: (isThinking || isStreaming) ? "pointer" : "default", border: (isThinking || isStreaming) ? "1px solid rgba(147,197,253,0.3)" : "none", background: "inherit", font: "inherit", color: (isThinking || isStreaming) ? "#3b82f6" : "inherit", padding: "inherit" }}>{isThinking ? "Thinking…" : isStreaming ? `${xrayWordCount}w` : ownedLifecycleLabel(ownedAvailability)}</button>
               <span className="remodex-compose-chip remodex-compose-pill">{ownedReviewDispositionLabel(ownedReviewDisposition)}</span>
             </div>
           </div>
