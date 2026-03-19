@@ -43,10 +43,6 @@ const MENU_ITEMS: { screen: MobileScreen; label: string; iconPath: string }[] = 
   },
 ];
 
-/**
- * SpeedDialButton — the hamburger trigger that lives in the TopBar.
- * Renders a menu button + dropdown when open.
- */
 export const SpeedDialButton = memo(function SpeedDialButton({
   activeScreen,
   onNavigate,
@@ -55,7 +51,6 @@ export const SpeedDialButton = memo(function SpeedDialButton({
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  // Close on outside tap
   useEffect(() => {
     if (!open) return;
     const handler = (e: TouchEvent | MouseEvent) => {
@@ -72,8 +67,8 @@ export const SpeedDialButton = memo(function SpeedDialButton({
   }, [open]);
 
   return (
-    <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
-      {/* Hamburger button — matches existing TopBar circle button */}
+    <div ref={menuRef} style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+      {/* Blue glass hamburger button */}
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
@@ -81,16 +76,16 @@ export const SpeedDialButton = memo(function SpeedDialButton({
         style={{
           width: 36, height: 36,
           borderRadius: 12,
-          background: open ? '#1a1a1a' : '#ef4444',
-          border: 'none',
-          color: '#ffffff',
+          background: open ? 'rgba(0,122,255,0.15)' : 'rgba(0,122,255,0.08)',
+          backdropFilter: 'blur(20px) saturate(1.6)',
+          WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
+          border: '1px solid rgba(0,122,255,0.15)',
+          color: '#007aff',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           cursor: 'pointer',
-          boxShadow: open
-            ? '0 2px 8px rgba(0,0,0,0.2)'
-            : '0 4px 12px rgba(239,68,68,0.25)',
+          boxShadow: '0 2px 12px rgba(0,122,255,0.12)',
           transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
           WebkitTapHighlightColor: 'transparent',
           position: 'relative',
@@ -105,49 +100,33 @@ export const SpeedDialButton = memo(function SpeedDialButton({
           alignItems: 'center',
         }}>
           <span style={{
-            display: 'block',
-            width: open ? 16 : 16,
-            height: 2,
-            borderRadius: 1,
-            background: '#fff',
+            display: 'block', width: 16, height: 1.5, borderRadius: 1,
+            background: '#007aff',
             transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
-            transform: open ? 'translateY(5px) rotate(45deg)' : 'none',
+            transform: open ? 'translateY(5.25px) rotate(45deg)' : 'none',
           }} />
           <span style={{
-            display: 'block',
-            width: 12,
-            height: 2,
-            borderRadius: 1,
-            background: '#fff',
+            display: 'block', width: 12, height: 1.5, borderRadius: 1,
+            background: '#007aff',
             transition: 'all 200ms ease',
             opacity: open ? 0 : 1,
-            transform: open ? 'scale(0)' : 'scale(1)',
           }} />
           <span style={{
-            display: 'block',
-            width: open ? 16 : 16,
-            height: 2,
-            borderRadius: 1,
-            background: '#fff',
+            display: 'block', width: 16, height: 1.5, borderRadius: 1,
+            background: '#007aff',
             transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
-            transform: open ? 'translateY(-5px) rotate(-45deg)' : 'none',
+            transform: open ? 'translateY(-5.25px) rotate(-45deg)' : 'none',
           }} />
         </div>
 
-        {/* Approval badge on button */}
+        {/* Approval badge */}
         {!open && approvalCount > 0 && (
           <span style={{
-            position: 'absolute',
-            top: -4, right: -4,
-            width: 16, height: 16,
-            borderRadius: '50%',
-            background: '#ff3b30',
-            color: '#fff',
-            fontSize: 9,
-            fontWeight: 700,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
+            position: 'absolute', top: -4, right: -4,
+            width: 16, height: 16, borderRadius: '50%',
+            background: '#ff3b30', color: '#fff',
+            fontSize: 9, fontWeight: 700,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
             border: '2px solid #fff',
           }}>
             {approvalCount}
@@ -155,34 +134,35 @@ export const SpeedDialButton = memo(function SpeedDialButton({
         )}
       </button>
 
-      {/* Dropdown menu */}
+      {/* Dropdown — drops DOWN from button */}
       {open && (
         <>
           {/* Backdrop */}
-          <div style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,0,0,0.3)',
-            zIndex: 9998,
-            animation: 'speedDialFade 200ms ease',
-          }} />
+          <div
+            onClick={() => setOpen(false)}
+            style={{
+              position: 'fixed', inset: 0,
+              background: 'rgba(0,0,0,0.15)',
+              zIndex: 9998,
+            }}
+          />
 
-          {/* Menu panel */}
+          {/* Blue glass dropdown panel */}
           <div style={{
             position: 'absolute',
             top: '100%',
-            right: 0,
+            left: 0,
             marginTop: 8,
-            width: 200,
-            borderRadius: 16,
-            background: 'rgba(28, 28, 30, 0.95)',
+            minWidth: 180,
+            borderRadius: 14,
+            background: 'rgba(0,122,255,0.08)',
             backdropFilter: 'blur(40px) saturate(1.8)',
             WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
+            border: '1px solid rgba(0,122,255,0.15)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)',
             padding: '6px 0',
             zIndex: 9999,
-            animation: 'speedDialSlide 250ms cubic-bezier(0.32, 0.72, 0, 1)',
+            animation: 'speedDialDrop 200ms cubic-bezier(0.32, 0.72, 0, 1)',
           }}>
             {MENU_ITEMS.map((item) => {
               const isActive = item.screen === activeScreen;
@@ -197,59 +177,43 @@ export const SpeedDialButton = memo(function SpeedDialButton({
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 12,
+                    gap: 10,
                     width: '100%',
-                    padding: '12px 16px',
+                    padding: '11px 14px',
                     border: 'none',
-                    background: isActive ? 'rgba(239, 68, 68, 0.12)' : 'transparent',
+                    background: isActive ? 'rgba(0,122,255,0.1)' : 'transparent',
                     cursor: 'pointer',
                     WebkitTapHighlightColor: 'transparent',
-                    transition: 'background 150ms ease',
                   }}
                 >
-                  {/* Icon */}
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-                    stroke={isActive ? '#ef4444' : 'rgba(255,255,255,0.7)'}
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                    stroke={isActive ? '#007aff' : 'rgba(0,122,255,0.6)'}
                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d={item.iconPath} />
                   </svg>
-
-                  {/* Label */}
                   <span style={{
-                    fontSize: 15,
-                    fontWeight: isActive ? 700 : 500,
+                    fontSize: 14, fontWeight: isActive ? 700 : 500,
                     fontFamily: '-apple-system, system-ui, sans-serif',
-                    color: isActive ? '#ef4444' : '#ffffff',
+                    color: isActive ? '#007aff' : 'rgba(0,60,180,0.8)',
                     letterSpacing: '-0.01em',
-                    flex: 1,
-                    textAlign: 'left',
+                    flex: 1, textAlign: 'left',
                   }}>
                     {item.label}
                   </span>
-
-                  {/* Approval badge */}
                   {item.screen === 'approvals' && approvalCount > 0 && (
                     <span style={{
-                      width: 20, height: 20,
-                      borderRadius: '50%',
-                      background: '#ff3b30',
-                      color: '#fff',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
+                      width: 18, height: 18, borderRadius: '50%',
+                      background: '#ff3b30', color: '#fff',
+                      fontSize: 10, fontWeight: 700,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}>
                       {approvalCount}
                     </span>
                   )}
-
-                  {/* Active indicator */}
                   {isActive && (
                     <span style={{
-                      width: 6, height: 6,
-                      borderRadius: '50%',
-                      background: '#ef4444',
+                      width: 5, height: 5, borderRadius: '50%',
+                      background: '#007aff',
                     }} />
                   )}
                 </button>
@@ -259,21 +223,10 @@ export const SpeedDialButton = memo(function SpeedDialButton({
         </>
       )}
 
-      {/* Keyframes */}
       <style>{`
-        @keyframes speedDialFade {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
-        @keyframes speedDialSlide {
-          from {
-            opacity: 0;
-            transform: translateY(-8px) scale(0.95);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0) scale(1);
-          }
+        @keyframes speedDialDrop {
+          from { opacity: 0; transform: translateY(-6px) scale(0.96); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
         }
       `}</style>
     </div>
