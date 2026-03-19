@@ -100,14 +100,8 @@ export const TopBar = memo(function TopBar({
       data-visible={headerVisible ? 'true' : 'false'}
       data-picker-open={squadPickerOpen ? 'true' : 'false'}
     >
-      {/* Connection status dot */}
-      <div style={{
-        flexShrink: 0,
-        width: 8, height: 8,
-        borderRadius: '50%',
-        background: connectionDotColor,
-        marginLeft: 4,
-      }} />
+      {/* First grid column spacer — connection dot is in the title area */}
+      <div />
 
       {/* Tappable title area — opens squad picker */}
       <div ref={pickerRef} style={{ minWidth: 0, flex: 1, position: 'relative' }}>
