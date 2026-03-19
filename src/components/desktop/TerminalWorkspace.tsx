@@ -666,6 +666,41 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [slashFilter, setSlashFilter] = useState('');
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
+  const [slashSelected, setSlashSelected] = useState(0);
+  const composeRef = useRef<HTMLDivElement>(null);
+
+  // Slash commands
+  const SLASH_COMMANDS = useMemo(() => [
+    { cmd: '/help', desc: 'Show available commands' },
+    { cmd: '/compact', desc: 'Compact conversation history' },
+    { cmd: '/clear', desc: 'Clear terminal output' },
+    { cmd: '/cost', desc: 'Show token usage' },
+    { cmd: '/status', desc: 'Show agent status' },
+    { cmd: '/review', desc: 'Review current changes' },
+    { cmd: '/diff', desc: 'Show working diff' },
+    { cmd: '/test', desc: 'Run tests' },
+    { cmd: '/plan', desc: 'Create implementation plan' },
+  ], []);
+
+  const filteredSlash = useMemo(() => {
+    if (!slashFilter) return SLASH_COMMANDS;
+    return SLASH_COMMANDS.filter(c => c.cmd.includes(slashFilter.toLowerCase()));
+  }, [slashFilter, SLASH_COMMANDS]);
+
+  // Close attach menu on outside click
+  useEffect(() => {
+    if (!showAttachMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (composeRef.current && !composeRef.current.contains(e.target as Node)) {
+        setShowAttachMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showAttachMenu]);
 
   // ⌘F to open search
   useEffect(() => {
@@ -837,11 +872,117 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
       </div>
 
       {/* Compose bar */}
-      <div style={{
+      <div ref={composeRef} style={{
         padding: '10px 16px',
         borderTop: '1px solid #e2e8f0',
         flexShrink: 0,
+        position: 'relative',
       }}>
+        {/* Slash command popover */}
+        {showSlashMenu && filteredSlash.length > 0 && (
+          <div style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: 16, right: 16,
+            marginBottom: 4,
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.75)',
+            backdropFilter: 'blur(40px) saturate(1.8)',
+            WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
+            border: '1px solid rgba(255,255,255,0.3)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)',
+            overflow: 'hidden',
+            zIndex: 100,
+          }}>
+            {filteredSlash.map((cmd, i) => (
+              <button
+                key={cmd.cmd}
+                type="button"
+                onClick={() => {
+                  setInput(cmd.cmd + ' ');
+                  setShowSlashMenu(false);
+                  setSlashFilter('');
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  width: '100%',
+                  padding: '8px 14px',
+                  border: 'none',
+                  background: i === slashSelected ? 'rgba(37,99,235,0.08)' : 'transparent',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  transition: 'background 80ms ease',
+                }}
+                onMouseEnter={() => setSlashSelected(i)}
+              >
+                <span style={{
+                  fontSize: 13, fontWeight: 600, color: '#0f172a',
+                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                  minWidth: 80,
+                }}>
+                  {cmd.cmd}
+                </span>
+                <span style={{ fontSize: 12, color: '#64748b' }}>
+                  {cmd.desc}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Attach popover (glass) */}
+        {showAttachMenu && (
+          <div style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: 16,
+            marginBottom: 4,
+            borderRadius: 10,
+            background: 'rgba(255,255,255,0.75)',
+            backdropFilter: 'blur(40px) saturate(1.8)',
+            WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
+            border: '1px solid rgba(255,255,255,0.3)',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)',
+            overflow: 'hidden',
+            zIndex: 100,
+            minWidth: 180,
+          }}>
+            {[
+              { icon: 'M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48', label: 'Attach file' },
+              { icon: 'M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z M12 13m-4 0a4 4 0 1 0 8 0a4 4 0 1 0-8 0', label: 'Attach image' },
+              { icon: 'M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2 M9 2h6v4H9z', label: 'Paste from clipboard' },
+              { icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8', label: 'Add context file' },
+            ].map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                onClick={() => setShowAttachMenu(false)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  width: '100%',
+                  padding: '8px 14px',
+                  border: 'none',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  transition: 'background 80ms ease',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.04)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d={item.icon} />
+                </svg>
+                <span style={{ fontSize: 13, fontWeight: 500, color: '#0f172a' }}>
+                  {item.label}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Input row */}
         <div style={{
           display: 'flex', gap: 8, alignItems: 'flex-end',
@@ -857,12 +998,51 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
             <textarea
               value={input}
               onChange={(e) => {
-                setInput(e.currentTarget.value);
+                const val = e.currentTarget.value;
+                setInput(val);
                 // Auto-resize
                 e.currentTarget.style.height = 'auto';
                 e.currentTarget.style.height = Math.min(e.currentTarget.scrollHeight, 120) + 'px';
+                // Slash command detection
+                if (val === '/') {
+                  setShowSlashMenu(true);
+                  setSlashFilter('');
+                  setSlashSelected(0);
+                } else if (val.startsWith('/') && !val.includes(' ')) {
+                  setShowSlashMenu(true);
+                  setSlashFilter(val);
+                  setSlashSelected(0);
+                } else {
+                  setShowSlashMenu(false);
+                }
               }}
               onKeyDown={(e) => {
+                if (showSlashMenu) {
+                  if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    setSlashSelected(s => Math.min(s + 1, filteredSlash.length - 1));
+                    return;
+                  }
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    setSlashSelected(s => Math.max(s - 1, 0));
+                    return;
+                  }
+                  if (e.key === 'Enter' || e.key === 'Tab') {
+                    e.preventDefault();
+                    if (filteredSlash[slashSelected]) {
+                      setInput(filteredSlash[slashSelected].cmd + ' ');
+                      setShowSlashMenu(false);
+                      setSlashFilter('');
+                    }
+                    return;
+                  }
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    setShowSlashMenu(false);
+                    return;
+                  }
+                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   handleSend();
@@ -912,73 +1092,71 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
             </svg>
           </button>
         </div>
-        {/* Bottom row: model + thinking + media + send indicators */}
+        {/* Bottom row: model + thinking + attach + search */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: 8,
           paddingTop: 6, paddingLeft: 2,
           fontSize: 11, color: '#64748b',
         }}>
           {/* Model indicator */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 4,
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 3,
+            fontWeight: 600, fontSize: 11,
           }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
-            <span style={{ fontWeight: 600, fontSize: 11 }}>
-              {runtimeModels[tab.chatRuntime ?? 'openclaw']}
-            </span>
-          </div>
-
+            {runtimeModels[tab.chatRuntime ?? 'openclaw']}
+          </span>
+          <span style={{ color: '#e2e8f0' }}>·</span>
           {/* Thinking level */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 3,
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 3,
+            fontWeight: 600, fontSize: 11, color: '#f59e0b',
           }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
               <path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z" />
               <path d="M9 21h6" />
-              <path d="M10 21v1a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-1" />
             </svg>
-            <span style={{
-              fontWeight: 600, fontSize: 11,
-              color: '#f59e0b',
-            }}>
-              {runtimeThinking[tab.chatRuntime ?? 'openclaw']}
-            </span>
-          </div>
+            {runtimeThinking[tab.chatRuntime ?? 'openclaw']}
+          </span>
 
           <span style={{ flex: 1 }} />
 
-          {/* Add media button */}
+          {/* Attach button (opens glass popover) */}
           <button
             type="button"
-            title="Attach media"
+            onClick={() => setShowAttachMenu(v => !v)}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              width: 26, height: 26, borderRadius: 6,
-              border: 'none', background: 'transparent',
+              width: 24, height: 24, borderRadius: 6,
+              border: 'none',
+              background: showAttachMenu ? 'rgba(0,0,0,0.06)' : 'transparent',
               cursor: 'pointer', color: '#94a3b8',
-              transition: 'color 150ms ease',
+              transition: 'all 120ms ease',
             }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = '#64748b'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; }}
+            onMouseEnter={(e) => { if (!showAttachMenu) e.currentTarget.style.background = 'rgba(0,0,0,0.04)'; }}
+            onMouseLeave={(e) => { if (!showAttachMenu) e.currentTarget.style.background = 'transparent'; }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
             </svg>
           </button>
 
-          {/* ⌘F search shortcut hint */}
-          <kbd style={{
-            fontSize: 9, fontWeight: 500,
-            padding: '1px 4px', borderRadius: 3,
-            border: '1px solid #e2e8f0',
-            background: '#f1f5f9',
-            color: '#94a3b8',
-            fontFamily: '-apple-system, system-ui, sans-serif',
-          }}>
+          {/* ⌘F search */}
+          <kbd
+            onClick={() => { setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 50); }}
+            style={{
+              fontSize: 9, fontWeight: 500,
+              padding: '1px 4px', borderRadius: 3,
+              border: '1px solid #e2e8f0',
+              background: '#f1f5f9',
+              color: '#94a3b8',
+              cursor: 'pointer',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
             ⌘F
           </kbd>
         </div>
