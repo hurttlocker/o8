@@ -2460,6 +2460,7 @@ export const AgentPanel = memo(function AgentPanel({
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
   const [fileFilter, setFileFilter] = useState<'all' | 'changes'>('all');
+  const [fileDropdownOpen, setFileDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('files');
   const [activityOpen, setActivityOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(true);
@@ -2870,35 +2871,121 @@ export const AgentPanel = memo(function AgentPanel({
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
+          const isFiles = tab.id === 'files';
           return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                flex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 5,
-                paddingTop: 8,
-                paddingRight: 0,
-                paddingBottom: 8,
-                paddingLeft: 0,
-                border: 'none',
-                borderBottom: isActive ? '2px solid #ef4444' : '2px solid transparent',
-                background: 'transparent',
-                color: isActive ? 'var(--t-text)' : 'var(--t-text-muted)',
-                fontSize: 12,
-                fontWeight: isActive ? 600 : 400,
-                cursor: 'pointer',
-                transition: 'all 150ms ease',
-                fontFamily: '-apple-system, system-ui, sans-serif',
-              }}
-            >
-              <Icon size={14} strokeWidth={isActive ? 2 : 1.5} />
-              {tab.label}
-            </button>
+            <div key={tab.id} style={{ flex: 1, position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (isFiles && isActive) {
+                    // Already on Files — toggle dropdown
+                    setFileDropdownOpen(v => !v);
+                  } else {
+                    setActiveTab(tab.id);
+                    if (!isFiles) setFileDropdownOpen(false);
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 5,
+                  paddingTop: 8,
+                  paddingRight: 0,
+                  paddingBottom: 8,
+                  paddingLeft: 0,
+                  border: 'none',
+                  borderBottom: isActive ? '2px solid #ef4444' : '2px solid transparent',
+                  background: 'transparent',
+                  color: isActive ? 'var(--t-text)' : 'var(--t-text-muted)',
+                  fontSize: 12,
+                  fontWeight: isActive ? 600 : 400,
+                  cursor: 'pointer',
+                  transition: 'all 150ms ease',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}
+              >
+                <Icon size={14} strokeWidth={isActive ? 2 : 1.5} />
+                {isFiles ? (fileFilter === 'changes' ? 'Changes' : tab.label) : tab.label}
+                {isFiles && isActive ? (
+                  <ChevronDown size={10} strokeWidth={2} style={{
+                    transition: 'transform 150ms ease',
+                    transform: fileDropdownOpen ? 'rotate(180deg)' : 'none',
+                    opacity: 0.5,
+                  }} />
+                ) : null}
+              </button>
+              {/* Files filter dropdown */}
+              {isFiles && fileDropdownOpen ? (
+                <>
+                  {/* Backdrop */}
+                  <div
+                    onClick={() => setFileDropdownOpen(false)}
+                    style={{ position: 'fixed', inset: 0, zIndex: 99 }}
+                  />
+                  {/* Glass popover */}
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    marginTop: 4,
+                    minWidth: 150,
+                    borderRadius: 10,
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    background: 'rgba(255,255,255,0.78)',
+                    backdropFilter: 'blur(24px) saturate(1.8)',
+                    WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.06)',
+                    overflow: 'hidden',
+                    zIndex: 100,
+                  }}>
+                    {[
+                      { id: 'all' as const, label: 'All Files' },
+                      { id: 'changes' as const, label: `Changes${changedFiles.size > 0 ? ` (${changedFiles.size})` : ''}` },
+                    ].map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          setFileFilter(opt.id);
+                          setFileDropdownOpen(false);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          width: '100%',
+                          padding: '8px 12px',
+                          border: 'none',
+                          background: fileFilter === opt.id ? 'rgba(239,68,68,0.06)' : 'transparent',
+                          color: fileFilter === opt.id ? '#dc2626' : 'var(--t-text)',
+                          fontSize: 12,
+                          fontWeight: fileFilter === opt.id ? 600 : 400,
+                          cursor: 'pointer',
+                          fontFamily: '-apple-system, system-ui, sans-serif',
+                          textAlign: 'left',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (fileFilter !== opt.id) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.03)';
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = fileFilter === opt.id ? 'rgba(239,68,68,0.06)' : 'transparent';
+                        }}
+                      >
+                        <span style={{
+                          width: 14,
+                          textAlign: 'center',
+                          fontSize: 12,
+                          color: fileFilter === opt.id ? '#dc2626' : 'transparent',
+                        }}>✓</span>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </div>
           );
         })}
       </div>
@@ -2990,48 +3077,11 @@ export const AgentPanel = memo(function AgentPanel({
         marginTop: expandedGroup ? 0 : 4,
       }}>
         {activeTab === 'files' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-            {/* Filter dropdown */}
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 10px',
-              borderBottom: '1px solid var(--t-divider-subtle)',
-              flexShrink: 0,
-            }}>
-              <select
-                value={fileFilter}
-                onChange={(e) => setFileFilter(e.target.value as 'all' | 'changes')}
-                style={{
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: 'var(--t-text-secondary)',
-                  background: 'rgba(255,255,255,0.55)',
-                  border: '1px solid var(--t-btn-secondary-border)',
-                  borderRadius: 6,
-                  padding: '3px 8px',
-                  cursor: 'pointer',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                  outline: 'none',
-                }}
-              >
-                <option value="all">All Files</option>
-                <option value="changes">Changes{changedFiles.size > 0 ? ` (${changedFiles.size})` : ''}</option>
-              </select>
-              {fileFilter === 'changes' && changedFiles.size === 0 ? (
-                <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>No changes</span>
-              ) : null}
-            </div>
-            {/* Tree */}
-            <div style={{ flex: 1, overflowY: 'auto' }}>
-              <FileTree
-                tree={fileFilter === 'changes' ? filterTreeToChanged(fileTree, changedFiles) : fileTree}
-                changedFiles={changedFiles}
-                onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)}
-              />
-            </div>
-          </div>
+          <FileTree
+            tree={fileFilter === 'changes' ? filterTreeToChanged(fileTree, changedFiles) : fileTree}
+            changedFiles={changedFiles}
+            onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)}
+          />
         ) : null}
         {activeTab === 'deploy' ? <DeployList onOpenDeploy={onOpenDeploy} /> : null}
 
