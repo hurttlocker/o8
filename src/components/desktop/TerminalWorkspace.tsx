@@ -728,7 +728,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
   const runtimeLabels = { 'codex': 'Codex', 'claude-code': 'Claude Code', 'openclaw': 'OpenClaw' };
   const runtimeColors = { 'codex': '#10b981', 'claude-code': '#8b5cf6', 'openclaw': '#ef4444' };
   const runtimeModels = { 'codex': 'GPT-5.4', 'claude-code': 'Opus 4.6', 'openclaw': 'Opus 4.6' };
-  const runtimeThinking = { 'codex': 'High', 'claude-code': 'xhigh', 'openclaw': 'xhigh' };
+  const runtimeThinking = { 'codex': 'High', 'claude-code': 'high', 'openclaw': 'high' };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff' }}>
@@ -878,13 +878,13 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
         flexShrink: 0,
         position: 'relative',
       }}>
-        {/* Slash command popover */}
+        {/* Slash command popover — drops DOWN into message area */}
         {showSlashMenu && filteredSlash.length > 0 && (
           <div style={{
             position: 'absolute',
-            bottom: '100%',
+            top: '100%',
             left: 16, right: 16,
-            marginBottom: 4,
+            marginTop: 4,
             borderRadius: 10,
             background: 'rgba(255,255,255,0.75)',
             backdropFilter: 'blur(40px) saturate(1.8)',
@@ -931,13 +931,13 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
           </div>
         )}
 
-        {/* Attach popover (glass) */}
+        {/* Attach popover (glass) — drops DOWN */}
         {showAttachMenu && (
           <div style={{
             position: 'absolute',
-            bottom: '100%',
+            top: '100%',
             left: 16,
-            marginBottom: 4,
+            marginTop: 4,
             borderRadius: 10,
             background: 'rgba(255,255,255,0.75)',
             backdropFilter: 'blur(40px) saturate(1.8)',
@@ -1129,19 +1129,24 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
             type="button"
             onClick={() => setShowAttachMenu(v => !v)}
             style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              width: 24, height: 24, borderRadius: 6,
-              border: 'none',
-              background: showAttachMenu ? 'rgba(0,0,0,0.06)' : 'transparent',
-              cursor: 'pointer', color: '#94a3b8',
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '2px 8px',
+              borderRadius: 5,
+              border: '1px solid #e2e8f0',
+              background: showAttachMenu ? 'rgba(0,0,0,0.06)' : '#f1f5f9',
+              cursor: 'pointer', color: '#64748b',
+              fontSize: 10, fontWeight: 600,
+              fontFamily: '-apple-system, system-ui, sans-serif',
               transition: 'all 120ms ease',
             }}
-            onMouseEnter={(e) => { if (!showAttachMenu) e.currentTarget.style.background = 'rgba(0,0,0,0.04)'; }}
-            onMouseLeave={(e) => { if (!showAttachMenu) e.currentTarget.style.background = 'transparent'; }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.06)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = showAttachMenu ? 'rgba(0,0,0,0.06)' : '#f1f5f9'; }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
+            Attach
           </button>
 
           {/* ⌘F search */}
