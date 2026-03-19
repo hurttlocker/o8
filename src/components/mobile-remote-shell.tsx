@@ -39,6 +39,7 @@ const FleetView = dynamic(() => import('./mobile/FleetView').then((m) => ({ defa
 const LaunchSheet = dynamic(() => import('./mobile/LaunchSheet').then((m) => ({ default: m.LaunchSheet })), { ssr: false });
 const ActivityFeed = dynamic(() => import('./mobile/ActivityFeed').then((m) => ({ default: m.ActivityFeed })), { ssr: false, ...shimmerFallback });
 const PRReviewSheet = dynamic(() => import('./mobile/PRReviewSheet').then((m) => ({ default: m.PRReviewSheet })), { ssr: false });
+const SettingsView = dynamic(() => import('./mobile/SettingsView').then((m) => ({ default: m.SettingsView })), { ssr: false, ...shimmerFallback });
 
 // Cortex memory surfaces (#78-#85) — typed via explicit generic param
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -334,7 +335,7 @@ function MobileRemoteShellInner({
           wsConnectionState={wsConnectionState}
           compactLine={compactLine}
           squadPickerOpen={state.squadPickerOpen}
-          activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : activeView === 'activity' ? 'approvals' : 'chat'}
+          activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : activeView === 'activity' ? 'approvals' : activeView === 'settings' ? 'settings' : 'chat'}
           onNavigate={(screen: MobileScreen) => {
             switch (screen) {
               case 'chat':
@@ -353,7 +354,7 @@ function MobileRemoteShellInner({
                 setActiveView('costs');
                 break;
               case 'settings':
-                setControlsOpen(true);
+                setActiveView('settings');
                 break;
             }
           }}
@@ -375,6 +376,9 @@ function MobileRemoteShellInner({
               onLaunch={() => setLaunchOpen(true)}
             />
           ) : null}
+          {activeView === 'settings' ? (
+            <SettingsView onBack={() => setActiveView('squad')} />
+          ) : null}
           {activeView === 'activity' ? (
             <ActivityFeed
               snapshot={snapshot}
@@ -392,6 +396,11 @@ function MobileRemoteShellInner({
                 if (item.sessionKey) {
                   actions.runAction({ action: 'deny', sessionKey: item.sessionKey });
                 }
+              }}
+              onReviewPR={(repoPath, prNumber) => {
+                setPrReviewRepo(repoPath);
+                setPrReviewNumber(prNumber);
+                setPrReviewOpen(true);
               }}
             />
           ) : null}
@@ -420,7 +429,7 @@ function MobileRemoteShellInner({
               agentDisplayName={agentDisplayName}
             />
           ) : null}
-          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' ? (
+          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' ? (
           <SurfaceStatus
             snapshot={snapshot}
             selectedSession={selectedSession}
@@ -432,7 +441,7 @@ function MobileRemoteShellInner({
             selectedReviewPacketError={selectedReviewPacketError}
           />
           ) : null}
-          {hasTerminalSession && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' ? (
+          {hasTerminalSession && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' ? (
             <div
               style={{
                 display: 'flex',
@@ -476,7 +485,7 @@ function MobileRemoteShellInner({
               </button>
             </div>
           ) : null}
-          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' ? (
+          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' ? (
           terminalActive ? (
             <MobileTerminal tmuxSession={selectedSession!.tmuxSession!} />
           ) : (
@@ -528,7 +537,7 @@ function MobileRemoteShellInner({
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
         <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
-          {!terminalActive && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' ? (
+          {!terminalActive && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' ? (
             <div className="remodex-compose-shell">
               <ComposeBar
                 session={selectedSession}
@@ -560,7 +569,7 @@ function MobileRemoteShellInner({
               />
             </div>
           ) : null}
-          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' ? (
+          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' ? (
           <RuntimeBar
             snapshot={snapshot}
             selectedSession={selectedSession}

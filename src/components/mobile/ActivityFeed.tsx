@@ -10,9 +10,10 @@ interface ActivityFeedProps {
   onAgentSelect: (sessionKey: string) => void;
   onApprove: (item: MobileInboxItem) => void;
   onDeny: (item: MobileInboxItem) => void;
+  onReviewPR?: (repoPath: string, prNumber: number) => void;
 }
 
-type ActivityFilter = 'all' | 'approvals' | 'alerts' | 'agents';
+type ActivityFilter = 'all' | 'approvals' | 'alerts' | 'agents' | 'reviews';
 
 function formatRelativeTime(isoDate: string): string {
   const diff = Date.now() - new Date(isoDate).getTime();
@@ -242,6 +243,7 @@ export const ActivityFeed = memo(function ActivityFeed({
   onAgentSelect,
   onApprove,
   onDeny,
+  onReviewPR,
 }: ActivityFeedProps) {
   const [filter, setFilter] = useState<ActivityFilter>('all');
 
@@ -259,10 +261,15 @@ export const ActivityFeed = memo(function ActivityFeed({
     ),
     [snapshot.sessions]
   );
+  const reviewItems = useMemo(() =>
+    snapshot.items.filter(i => i.kind === 'review'),
+    [snapshot.items]
+  );
 
   const FILTERS: { id: ActivityFilter; label: string; count: number }[] = [
-    { id: 'all', label: 'All', count: approvals.length + alerts.length + agentEvents.length },
+    { id: 'all', label: 'All', count: approvals.length + alerts.length + agentEvents.length + reviewItems.length },
     { id: 'approvals', label: 'Approvals', count: approvals.length },
+    { id: 'reviews', label: 'Reviews', count: reviewItems.length },
     { id: 'alerts', label: 'Alerts', count: alerts.length },
     { id: 'agents', label: 'Agents', count: agentEvents.length },
   ];
@@ -414,6 +421,82 @@ export const ActivityFeed = memo(function ActivityFeed({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {alerts.map((item) => (
               <AlertCard key={item.id} item={item} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Reviews section */}
+      {(filter === 'all' || filter === 'reviews') && reviewItems.length > 0 && (
+        <section>
+          {filter === 'all' && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              marginBottom: 8,
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#af52de' }} />
+              <span style={{
+                fontSize: 12, fontWeight: 700, color: '#af52de',
+                textTransform: 'uppercase', letterSpacing: '0.05em',
+              }}>
+                Pull Requests
+              </span>
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {reviewItems.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  // Extract PR number from title (e.g. "PR #123: title")
+                  const match = item.title.match(/#(\d+)/);
+                  if (match && onReviewPR && item.sessionKey) {
+                    onReviewPR(item.sessionKey, parseInt(match[1]));
+                  } else {
+                    onAgentSelect(item.sessionKey || '');
+                  }
+                }}
+                style={{
+                  width: '100%', padding: '12px 16px',
+                  borderRadius: 14,
+                  background: 'rgba(175,82,222,0.03)',
+                  border: '1px solid rgba(175,82,222,0.1)',
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  cursor: 'pointer',
+                  WebkitTapHighlightColor: 'transparent',
+                  textAlign: 'left',
+                }}
+              >
+                <span style={{
+                  width: 28, height: 28, borderRadius: 8,
+                  background: 'rgba(175,82,222,0.08)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="#af52de" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="18" cy="18" r="3" />
+                    <circle cx="6" cy="6" r="3" />
+                    <path d="M13 6h3a2 2 0 0 1 2 2v7" />
+                    <path d="M6 9v12" />
+                  </svg>
+                </span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: '#0a0a0a' }}>
+                    {item.title}
+                  </p>
+                  <p style={{
+                    margin: '2px 0 0', fontSize: 11, color: '#8e8e93',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {item.detail}
+                  </p>
+                </div>
+                <span style={{ fontSize: 10, color: '#c7c7cc', flexShrink: 0 }}>
+                  {item.timestampLabel || ''}
+                </span>
+              </button>
             ))}
           </div>
         </section>
