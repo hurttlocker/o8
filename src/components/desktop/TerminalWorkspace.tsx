@@ -1,19 +1,36 @@
 'use client';
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Plus, X, Terminal as TerminalIcon, ChevronDown } from 'lucide-react';
+import { Plus, X, Terminal as TerminalIcon, ChevronDown, Crosshair } from 'lucide-react';
 import { saveTabState, loadTabState, checkAliveSessions, type PersistedTab, type PersistedTabState } from '@/lib/terminal/tab-state';
+import {
+  PREVIEW_HOST_MESSAGE_SOURCE,
+  PREVIEW_MESSAGE_SOURCE,
+  type PreviewSelectionPayload,
+} from '@/lib/panel/preview';
 
 /* ── Types ── */
 
 export interface TerminalTab {
   id: string;
   label: string;
-  tmuxSession: string | null; // null = pending creation
+  kind: 'terminal' | 'chat';
+  tmuxSession: string | null; // null = pending creation (terminal only)
   cliAgent?: string; // which CLI agent was launched (or 'shell')
   repo?: RegisteredRepo; // optional repo context
   createdAt: number; // timestamp for elapsed time
   lastActivity: number; // timestamp of last terminal output
+  // Chat-specific fields
+  chatRuntime?: 'codex' | 'claude-code' | 'openclaw';
+  chatSessionKey?: string; // OpenClaw session key or CLI session ID
+  chatMessages?: ChatMessage[];
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
 }
 
 /** Detected localhost dev server from terminal output */
@@ -50,6 +67,7 @@ interface TerminalWorkspaceProps {
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalDetach: (sessionName: string) => void;
   termWsConnected: boolean;
+  onPreviewSelection?: (selection: PreviewSelectionPayload) => void;
 }
 
 const CLI_AGENTS = [
@@ -364,8 +382,10 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
 
 /* ── Localhost Preview Pane ── */
 
-function PreviewToolbar({ preview, onRefresh, onClose }: {
+function PreviewToolbar({ preview, selectionEnabled, onToggleSelection, onRefresh, onClose }: {
   preview: LocalhostPreview;
+  selectionEnabled: boolean;
+  onToggleSelection: () => void;
   onRefresh: () => void;
   onClose: () => void;
 }) {
@@ -401,6 +421,32 @@ function PreviewToolbar({ preview, onRefresh, onClose }: {
       }}>
         {preview.url}
       </span>
+      <button
+        type="button"
+        onClick={onToggleSelection}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          height: 24,
+          paddingTop: 0,
+          paddingRight: 9,
+          paddingBottom: 0,
+          paddingLeft: 9,
+          borderRadius: 999,
+          border: selectionEnabled ? '1px solid rgba(37,99,235,0.28)' : '1px solid rgba(148,163,184,0.18)',
+          background: selectionEnabled ? 'rgba(37,99,235,0.08)' : 'rgba(255,255,255,0.82)',
+          color: selectionEnabled ? '#1d4ed8' : '#475569',
+          cursor: 'pointer',
+          fontSize: 11,
+          fontWeight: 600,
+          flexShrink: 0,
+        }}
+        title={selectionEnabled ? 'Element selection is active' : 'Select an element in the preview'}
+      >
+        <Crosshair size={12} />
+        Select
+      </button>
       {/* Refresh */}
       <button
         type="button"
@@ -447,12 +493,304 @@ function PreviewToolbar({ preview, onRefresh, onClose }: {
   );
 }
 
-function PreviewPane({ previews, onRefresh, onClose }: {
+/* ── Workspace Chat Pane ── */
+
+function WorkspaceChatPane({ tab, onUpdateMessages }: {
+  tab: TerminalTab;
+  onUpdateMessages: (tabId: string, messages: ChatMessage[]) => void;
+}) {
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const [streaming, setStreaming] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const messages = tab.chatMessages ?? [];
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages.length, streaming]);
+
+  const handleSend = useCallback(async () => {
+    const text = input.trim();
+    if (!text || sending) return;
+    setInput('');
+    setSending(true);
+
+    const userMsg: ChatMessage = {
+      id: `msg-${Date.now()}-user`,
+      role: 'user',
+      content: text,
+      timestamp: Date.now(),
+    };
+    const updated = [...messages, userMsg];
+    onUpdateMessages(tab.id, updated);
+
+    try {
+      // Send to appropriate runtime
+      let endpoint = '/api/mobile/send';
+      let body: Record<string, unknown> = {};
+
+      if (tab.chatRuntime === 'openclaw') {
+        body = {
+          sessionKey: tab.chatSessionKey || 'agent:main:main',
+          message: text,
+        };
+      } else if (tab.chatRuntime === 'claude-code') {
+        endpoint = '/api/runtime/send';
+        body = { runtime: 'claude-code', message: text, sessionKey: tab.chatSessionKey };
+      } else {
+        endpoint = '/api/runtime/send';
+        body = { runtime: 'codex', message: text, sessionKey: tab.chatSessionKey };
+      }
+
+      setStreaming(true);
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+
+      const assistantMsg: ChatMessage = {
+        id: `msg-${Date.now()}-assistant`,
+        role: 'assistant',
+        content: data.response ?? data.message ?? data.text ?? 'No response',
+        timestamp: Date.now(),
+      };
+      onUpdateMessages(tab.id, [...updated, assistantMsg]);
+    } catch (err) {
+      const errorMsg: ChatMessage = {
+        id: `msg-${Date.now()}-error`,
+        role: 'assistant',
+        content: `Error: ${err instanceof Error ? err.message : 'Failed to send'}`,
+        timestamp: Date.now(),
+      };
+      onUpdateMessages(tab.id, [...updated, errorMsg]);
+    } finally {
+      setSending(false);
+      setStreaming(false);
+    }
+  }, [input, sending, messages, tab.id, tab.chatRuntime, tab.chatSessionKey, onUpdateMessages]);
+
+  const runtimeLabels = { 'codex': 'Codex', 'claude-code': 'Claude Code', 'openclaw': 'OpenClaw' };
+  const runtimeColors = { 'codex': '#10b981', 'claude-code': '#8b5cf6', 'openclaw': '#ef4444' };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff' }}>
+      {/* Header bar */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '8px 16px',
+        borderBottom: '1px solid #e2e8f0',
+        flexShrink: 0,
+      }}>
+        <span style={{
+          width: 8, height: 8, borderRadius: '50%',
+          background: runtimeColors[tab.chatRuntime ?? 'openclaw'],
+          flexShrink: 0,
+        }} />
+        <span style={{
+          fontSize: 13, fontWeight: 600,
+          color: '#0f172a',
+          fontFamily: '-apple-system, system-ui, sans-serif',
+        }}>
+          {runtimeLabels[tab.chatRuntime ?? 'openclaw']}
+        </span>
+        {tab.repo ? (
+          <span style={{
+            fontSize: 11, color: '#94a3b8',
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+          }}>
+            {tab.repo.name}
+          </span>
+        ) : null}
+      </div>
+
+      {/* Messages area */}
+      <div ref={scrollRef} style={{
+        flex: 1,
+        overflowY: 'auto',
+        padding: '16px 24px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16,
+      }}>
+        {messages.length === 0 ? (
+          <div style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            color: '#94a3b8',
+          }}>
+            <TerminalIcon size={32} strokeWidth={1} />
+            <span style={{ fontSize: 14, fontWeight: 500 }}>
+              Start a conversation with {runtimeLabels[tab.chatRuntime ?? 'openclaw']}
+            </span>
+            <span style={{ fontSize: 12 }}>
+              Messages are scoped to this workspace tab
+            </span>
+          </div>
+        ) : (
+          messages.map((msg) => (
+            <div key={msg.id} style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start',
+              maxWidth: '85%',
+              alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+            }}>
+              <div style={{
+                padding: '10px 14px',
+                borderRadius: msg.role === 'user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+                background: msg.role === 'user' ? '#0f172a' : '#f1f5f9',
+                color: msg.role === 'user' ? '#ffffff' : '#0f172a',
+                fontSize: 13,
+                lineHeight: 1.5,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}>
+                {msg.content}
+              </div>
+              <span style={{
+                fontSize: 9,
+                color: '#cbd5e1',
+                paddingLeft: 4, paddingRight: 4,
+              }}>
+                {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </span>
+            </div>
+          ))
+        )}
+        {streaming ? (
+          <div style={{
+            display: 'flex',
+            gap: 4,
+            padding: '10px 14px',
+            borderRadius: '14px 14px 14px 4px',
+            background: '#f1f5f9',
+            width: 'fit-content',
+          }}>
+            <span style={{ animation: 'pulse 1.5s ease-in-out infinite', width: 6, height: 6, borderRadius: '50%', background: '#94a3b8' }} />
+            <span style={{ animation: 'pulse 1.5s ease-in-out 0.2s infinite', width: 6, height: 6, borderRadius: '50%', background: '#94a3b8' }} />
+            <span style={{ animation: 'pulse 1.5s ease-in-out 0.4s infinite', width: 6, height: 6, borderRadius: '50%', background: '#94a3b8' }} />
+          </div>
+        ) : null}
+      </div>
+
+      {/* Compose bar */}
+      <div style={{
+        padding: '12px 16px',
+        borderTop: '1px solid #e2e8f0',
+        display: 'flex',
+        gap: 8,
+        flexShrink: 0,
+      }}>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.currentTarget.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+          placeholder={`Message ${runtimeLabels[tab.chatRuntime ?? 'openclaw']}…`}
+          disabled={sending}
+          style={{
+            flex: 1,
+            padding: '10px 14px',
+            borderRadius: 12,
+            border: '1px solid #e2e8f0',
+            background: '#f8fafc',
+            fontSize: 13,
+            fontFamily: '-apple-system, system-ui, sans-serif',
+            outline: 'none',
+            color: '#0f172a',
+          }}
+        />
+        <button
+          type="button"
+          onClick={handleSend}
+          disabled={sending || !input.trim()}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 40,
+            height: 40,
+            borderRadius: 12,
+            border: 'none',
+            background: input.trim() ? '#0f172a' : '#e2e8f0',
+            color: input.trim() ? '#ffffff' : '#94a3b8',
+            cursor: input.trim() ? 'pointer' : 'default',
+            transition: 'all 150ms ease',
+            flexShrink: 0,
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13" />
+            <polygon points="22 2 15 22 11 13 2 9 22 2" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PreviewPane({ previews, onElementSelect, onRefresh, onClose }: {
   previews: LocalhostPreview[];
+  onElementSelect?: (selection: PreviewSelectionPayload) => void;
   onRefresh: (id: string) => void;
   onClose: (id: string) => void;
 }) {
   const iframeRefs = useRef<Map<string, HTMLIFrameElement>>(new Map());
+  const [selectionModes, setSelectionModes] = useState<Record<string, boolean>>({});
+
+  const syncSelectionMode = useCallback((previewId: string, enabled: boolean) => {
+    const iframe = iframeRefs.current.get(previewId);
+    iframe?.contentWindow?.postMessage({
+      source: PREVIEW_HOST_MESSAGE_SOURCE,
+      type: 'selection-mode',
+      enabled,
+    }, window.location.origin);
+  }, []);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as {
+        source?: string;
+        type?: string;
+        enabled?: boolean;
+        selection?: PreviewSelectionPayload;
+      };
+      if (!data || data.source !== PREVIEW_MESSAGE_SOURCE) return;
+
+      const preview = previews.find((item) => iframeRefs.current.get(item.id)?.contentWindow === event.source);
+      if (!preview) return;
+
+      if (data.type === 'ready') {
+        syncSelectionMode(preview.id, Boolean(selectionModes[preview.id]));
+        return;
+      }
+
+      if (data.type === 'selection-mode') {
+        setSelectionModes((prev) => ({ ...prev, [preview.id]: Boolean(data.enabled) }));
+        return;
+      }
+
+      if (data.type === 'selection' && data.selection) {
+        onElementSelect?.(data.selection);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [onElementSelect, previews, selectionModes, syncSelectionMode]);
 
   if (previews.length === 0) return null;
 
@@ -475,6 +813,14 @@ function PreviewPane({ previews, onRefresh, onClose }: {
         }}>
           <PreviewToolbar
             preview={p}
+            selectionEnabled={Boolean(selectionModes[p.id])}
+            onToggleSelection={() => {
+              setSelectionModes((prev) => {
+                const enabled = !prev[p.id];
+                syncSelectionMode(p.id, enabled);
+                return { ...prev, [p.id]: enabled };
+              });
+            }}
             onRefresh={() => {
               const iframe = iframeRefs.current.get(p.id);
               if (iframe) {
@@ -488,9 +834,13 @@ function PreviewPane({ previews, onRefresh, onClose }: {
             onClose={() => onClose(p.id)}
           />
           <iframe
-            ref={(el) => { if (el) iframeRefs.current.set(p.id, el); }}
+            ref={(el) => {
+              if (el) iframeRefs.current.set(p.id, el);
+              else iframeRefs.current.delete(p.id);
+            }}
             src={`/api/panel/proxy?url=${encodeURIComponent(p.url.replace('0.0.0.0', 'localhost'))}`}
             title={`Preview ${p.url}`}
+            onLoad={() => syncSelectionMode(p.id, Boolean(selectionModes[p.id]))}
             style={{
               flex: 1,
               border: 'none',
@@ -565,6 +915,7 @@ const TabBar = memo(function TabBar({
   onSelectTab,
   onCloseTab,
   onNewTab,
+  onNewChatTab,
   onRegisterRepo,
 }: {
   tabs: TerminalTab[];
@@ -572,6 +923,7 @@ const TabBar = memo(function TabBar({
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onNewTab: (agentId: string, repo?: RegisteredRepo) => void;
+  onNewChatTab: (runtime: 'codex' | 'claude-code' | 'openclaw', repo?: RegisteredRepo) => void;
   onRegisterRepo?: (localPath: string) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -648,7 +1000,13 @@ const TabBar = memo(function TabBar({
                 borderBottom: isActive ? '2px solid #93c5fd' : '2px solid transparent',
               }}
             >
-              {tab.cliAgent === 'shell' ? (
+              {tab.kind === 'chat' ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={
+                  tab.chatRuntime === 'codex' ? '#10b981' : tab.chatRuntime === 'claude-code' ? '#8b5cf6' : '#ef4444'
+                } strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+              ) : tab.cliAgent === 'shell' ? (
                 <TerminalIcon size={12} style={{ color: '#94a3b8' }} />
               ) : (
                 <AgentDot color={agent?.color ?? '#64748b'} />
@@ -800,6 +1158,65 @@ const TabBar = memo(function TabBar({
                         $ {agent.command}
                       </div>
                     )}
+                  </div>
+                </button>
+              ))}
+              {/* Chat section divider */}
+              <div style={{
+                paddingTop: 8,
+                paddingRight: 10,
+                paddingBottom: 4,
+                paddingLeft: 10,
+                fontSize: 10,
+                fontWeight: 600,
+                color: '#94a3b8',
+                letterSpacing: '0.05em',
+                textTransform: 'uppercase',
+                borderTop: '1px solid #f1f5f9',
+                marginTop: 4,
+              }}>
+                New Chat
+              </div>
+              {([
+                { id: 'codex' as const, label: 'Codex', color: '#10b981' },
+                { id: 'claude-code' as const, label: 'Claude Code', color: '#8b5cf6' },
+                { id: 'openclaw' as const, label: 'OpenClaw', color: '#ef4444' },
+              ]).map((rt) => (
+                <button
+                  type="button"
+                  key={`chat-${rt.id}`}
+                  onClick={() => {
+                    onNewChatTab(rt.id);
+                    setPickerOpen(false);
+                    setPickerStep('agent');
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    width: '100%',
+                    paddingTop: 8,
+                    paddingRight: 12,
+                    paddingBottom: 8,
+                    paddingLeft: 12,
+                    border: 'none',
+                    background: 'transparent',
+                    color: '#1e293b',
+                    fontSize: 13,
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'background 100ms',
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                  onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
+                >
+                  <span style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <AgentDot color={rt.color} size={10} />
+                  </span>
+                  <div>
+                    <div style={{ fontWeight: 500 }}>{rt.label}</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>Chat interface</div>
                   </div>
                 </button>
               ))}
@@ -1010,7 +1427,15 @@ const TabBar = memo(function TabBar({
 
 export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspaceProps>(
   function TerminalWorkspace(
-    { sendTerminalCreate, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, termWsConnected },
+    {
+      sendTerminalCreate,
+      sendTerminalAttach,
+      sendTerminalInput,
+      sendTerminalResize,
+      sendTerminalDetach,
+      termWsConnected,
+      onPreviewSelection,
+    },
     ref,
   ) {
     const [tabs, setTabs] = useState<TerminalTab[]>([]);
@@ -1083,6 +1508,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
               restoredTabs.push({
                 id: tabId,
                 label: st.label,
+                kind: 'terminal',
                 tmuxSession: st.tmuxSession,
                 cliAgent: st.cliAgent,
                 repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : undefined,
@@ -1096,6 +1522,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
               restoredTabs.push({
                 id: tabId,
                 label: st.label,
+                kind: 'terminal',
                 tmuxSession: null, // will be assigned when session created
                 cliAgent: 'shell', // don't auto-restart agents (could be destructive)
                 repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : undefined,
@@ -1156,6 +1583,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
         const newTab: TerminalTab = {
           id: `tab-${tabCountRef.current}`,
           label: 'Shell',
+          kind: 'terminal',
           tmuxSession: sessionName,
           cliAgent: 'shell',
           createdAt: now,
@@ -1250,6 +1678,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
       const newTab: TerminalTab = {
         id: tabId,
         label,
+        kind: 'terminal',
         tmuxSession: null,
         cliAgent: agentId,
         repo,
@@ -1269,6 +1698,27 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
       setActiveTabId(tabId);
       sendTerminalCreate(120, 30);
     }, [sendTerminalCreate]);
+
+    const handleNewChatTab = useCallback((runtime: 'codex' | 'claude-code' | 'openclaw', repo?: RegisteredRepo) => {
+      tabCountRef.current += 1;
+      const tabId = `chat-${tabCountRef.current}`;
+      const runtimeLabels = { 'codex': 'Codex', 'claude-code': 'Claude Code', 'openclaw': 'OpenClaw' };
+      const label = repo ? `${runtimeLabels[runtime]} · ${repo.name}` : runtimeLabels[runtime];
+      const now = Date.now();
+      const newTab: TerminalTab = {
+        id: tabId,
+        label,
+        kind: 'chat',
+        tmuxSession: null,
+        chatRuntime: runtime,
+        repo,
+        createdAt: now,
+        lastActivity: now,
+        chatMessages: [],
+      };
+      setTabs(prev => [...prev, newTab]);
+      setActiveTabId(tabId);
+    }, []);
 
     const handleCloseTab = useCallback((tabId: string) => {
       setTabs(prev => {
@@ -1373,6 +1823,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           }}>
             <PreviewPane
               previews={previews}
+              onElementSelect={onPreviewSelection}
               onRefresh={() => {}}
               onClose={(id) => {
                 setPreviews(prev => {
@@ -1417,13 +1868,29 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           onSelectTab={setActiveTabId}
           onCloseTab={handleCloseTab}
           onNewTab={handleNewTab}
+          onNewChatTab={handleNewChatTab}
           onRegisterRepo={handleRegisterRepo}
         />
 
         {/* Terminal panels — all mounted, only active is visible */}
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
           {tabs.map((tab) => (
-            tab.tmuxSession ? (
+            tab.kind === 'chat' ? (
+              <div key={tab.id} style={{
+                flex: 1,
+                display: tab.id === activeTabId ? 'flex' : 'none',
+                flexDirection: 'column',
+              }}>
+                <WorkspaceChatPane
+                  tab={tab}
+                  onUpdateMessages={(tabId, msgs) => {
+                    setTabs(prev => prev.map(t =>
+                      t.id === tabId ? { ...t, chatMessages: msgs, lastActivity: Date.now() } : t
+                    ));
+                  }}
+                />
+              </div>
+            ) : tab.tmuxSession ? (
               <XtermPanel
                 key={tab.tmuxSession}
                 ref={(handle) => {
