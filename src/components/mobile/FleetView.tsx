@@ -238,7 +238,7 @@ export const FleetView = memo(function FleetView({
             color: '#0a0a0a',
             letterSpacing: '-0.03em',
           }}>
-            Fleet
+            Agents
           </h2>
           <p style={{
             margin: '2px 0 0',
