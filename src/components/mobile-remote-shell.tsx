@@ -576,6 +576,8 @@ function MobileRemoteShellInner({
             selectedReviewPacket={selectedReviewPacket}
             isOwnedCodexSession={isOwnedCodexSession}
             compactLine={compactLine}
+            reviewFiles={reviewFiles}
+            onOpenDiff={actions.openDiffViewer}
           />
           ) : null}
         </div>

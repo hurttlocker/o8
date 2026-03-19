@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { TopBarProps } from './types';
 import { buildProjectGroups } from './utils';
 import { useAlerts } from '@/lib/alerts/context';
@@ -99,6 +99,9 @@ export const TopBar = memo(function TopBar({
       data-context-visible="false"
       data-visible={headerVisible ? 'true' : 'false'}
       data-picker-open={squadPickerOpen ? 'true' : 'false'}
+      style={{
+        transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
+      }}
     >
       {/* Hamburger menu — first grid column */}
       <SpeedDialButton
@@ -128,37 +131,76 @@ export const TopBar = memo(function TopBar({
           aria-label="Switch session"
           aria-expanded={squadPickerOpen}
         >
-          <div className="remodex-title-shell" style={{ minWidth: 0, flex: 1 }}>
-            <div className="remodex-title-stack">
-              <span className="remodex-title-kicker">
-                <span
-                  style={{
-                    display: 'inline-block',
-                    width: '6px',
-                    height: '6px',
-                    borderRadius: '50%',
-                    backgroundColor: connectionDotColor,
-                    marginRight: '5px',
-                    verticalAlign: 'middle',
-                  }}
-                  title={`WebSocket: ${wsConnectionState ?? 'unknown'}`}
-                />
-                {headerLabel}
+          {isHeaderCompact ? (
+            /* ── Collapsed pill — agent name + status dot ── */
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '4px 12px',
+              borderRadius: 20,
+              background: 'rgba(255,255,255,0.75)',
+              backdropFilter: 'blur(20px) saturate(1.6)',
+              WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
+              border: '1px solid rgba(0,0,0,0.06)',
+              maxWidth: '100%',
+            }}>
+              <span style={{
+                width: 7, height: 7, borderRadius: '50%',
+                background: connectionDotColor,
+                flexShrink: 0,
+                boxShadow: connectionDotColor === '#34c759' ? '0 0 6px rgba(52,199,89,0.4)' : 'none',
+              }} />
+              <span style={{
+                fontSize: 14, fontWeight: 600,
+                color: '#0a0a0a',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}>
+                {activeTitle}
               </span>
-              <h1>{activeTitle}</h1>
-              <p>{activeSubtitle}</p>
+              <ChevronDown size={12} strokeWidth={2.5}
+                style={{
+                  flexShrink: 0, color: '#8e8e93',
+                  transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
+                  transform: squadPickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                }}
+              />
             </div>
-          </div>
-          <ChevronDown
-            size={14}
-            strokeWidth={2.2}
-            style={{
-              flexShrink: 0,
-              color: '#8e8e93',
-              transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
-              transform: squadPickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-            }}
-          />
+          ) : (
+            /* ── Expanded header — full details ── */
+            <>
+              <div className="remodex-title-shell" style={{ minWidth: 0, flex: 1 }}>
+                <div className="remodex-title-stack">
+                  <span className="remodex-title-kicker">
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        width: '6px',
+                        height: '6px',
+                        borderRadius: '50%',
+                        backgroundColor: connectionDotColor,
+                        marginRight: '5px',
+                        verticalAlign: 'middle',
+                      }}
+                      title={`WebSocket: ${wsConnectionState ?? 'unknown'}`}
+                    />
+                    {headerLabel}
+                  </span>
+                  <h1>{activeTitle}</h1>
+                  <p>{activeSubtitle}</p>
+                </div>
+              </div>
+              <ChevronDown
+                size={14}
+                strokeWidth={2.2}
+                style={{
+                  flexShrink: 0,
+                  color: '#8e8e93',
+                  transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
+                  transform: squadPickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                }}
+              />
+            </>
+          )}
         </button>
 
         {/* Squad picker dropdown — grouped by project */}
@@ -368,25 +410,6 @@ export const TopBar = memo(function TopBar({
           })}
         </div>
       </div>
-
-      <button
-        type="button"
-        className="remodex-diff-pill"
-        onClick={onOpenDiff}
-        disabled={!reviewFiles.length}
-        style={{ flexShrink: 0 }}
-        aria-label={`Open diff sheet with +${focusedAdditions ?? 0}, -${focusedDeletions ?? 0}, ${reviewFiles.length} ${diffFileLabel}`}
-      >
-        <span className="remodex-diff-pill-stats" aria-hidden="true">
-          <span className="remodex-diff-pill-chip remodex-diff-pill-chip-add">+{focusedAdditions ?? 0}</span>
-          <span className="remodex-diff-pill-chip remodex-diff-pill-chip-remove">-{focusedDeletions ?? 0}</span>
-        </span>
-        <span className="remodex-diff-pill-meta">
-          <span className="remodex-diff-pill-count">{reviewFiles.length}</span>
-          <span className="remodex-diff-pill-caption">{diffFileLabel}</span>
-        </span>
-        <SlidersHorizontal size={15} strokeWidth={2} />
-      </button>
 
     </header>
   );
