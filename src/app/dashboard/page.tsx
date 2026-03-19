@@ -24,6 +24,10 @@ import { IntentCanvas } from '@/components/desktop/IntentCanvas';
 import { SettingsPage } from '@/components/desktop/SettingsPage';
 import { AnalyticsPage } from '@/components/desktop/AnalyticsPage';
 import { ThoughtsCard } from '@/components/desktop/ThoughtsCard';
+import {
+  formatPreviewSelectionContext,
+  type PreviewSelectionPayload,
+} from '@/lib/panel/preview';
 
 export default function DashboardPage() {
   return (
@@ -57,6 +61,7 @@ function DashboardInner() {
   const [thoughtsOpen, setThoughtsOpen] = useState(false);
   const [wsStatus, setWsStatus] = useState<WsConnectionState>('disconnected');
   const [lifecycleEvents, setLifecycleEvents] = useState<Map<string, { state: string; exitCode?: number; ts: number }>>(new Map());
+  const [draftInjection, setDraftInjection] = useState<{ id: string; text: string } | null>(null);
 
   // Terminal WS hook — routes events to TerminalWorkspace (multi-tab)
   const terminalWsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
@@ -213,6 +218,14 @@ function DashboardInner() {
 
   const handleOpenMemory = useCallback(() => {
     setShowMemoryView(true);
+  }, []);
+
+  const handlePreviewSelection = useCallback((selection: PreviewSelectionPayload) => {
+    setChatVisible(true);
+    setDraftInjection({
+      id: `preview-${Date.now()}`,
+      text: formatPreviewSelectionContext(selection),
+    });
   }, []);
 
   // ── Feed agent data to alert engine + search ──
@@ -416,6 +429,15 @@ function DashboardInner() {
         onSearchClick={() => setSearchOpen(true)}
         thoughtsOpen={thoughtsOpen}
         onThoughtsToggle={() => setThoughtsOpen(v => !v)}
+        onPortPreview={(port, url, repo) => {
+          openCanvasTab({
+            id: `preview-${port}`,
+            kind: 'preview',
+            label: `Preview :${port}`,
+            resourceId: url,
+            meta: { port: String(port), ...(repo ? { repo } : {}) },
+          });
+        }}
       />}
 
       {/* ── Left: Agent Panel ── */}
@@ -542,6 +564,7 @@ function DashboardInner() {
             sendTerminalResize={sendTerminalResize}
             sendTerminalDetach={sendTerminalDetach}
             termWsConnected={termWsConnected}
+            onPreviewSelection={handlePreviewSelection}
           />
         )}
 
@@ -632,6 +655,7 @@ function DashboardInner() {
       }}>
         <DesktopChat
           externalSessionKey={activeSessionKey}
+          draftInjection={draftInjection}
           onOpenDiff={() => {
             openCanvasTab({
               id: 'diff:workspace',

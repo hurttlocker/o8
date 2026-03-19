@@ -43,6 +43,7 @@ interface NavRailProps {
   onSearchClick?: () => void;
   thoughtsOpen?: boolean;
   onThoughtsToggle?: () => void;
+  onPortPreview?: (port: number, url: string, repo?: string) => void;
 }
 
 interface NavItem {
@@ -267,7 +268,7 @@ interface PortGroup {
 
 // ── Ports Footer ──
 
-function PortsFooter({ expanded }: { expanded: boolean }) {
+function PortsFooter({ expanded, onPortPreview }: { expanded: boolean; onPortPreview?: (port: number, url: string, repo?: string) => void }) {
   const [groups, setGroups] = useState<PortGroup[]>([]);
   const [total, setTotal] = useState(0);
 
@@ -366,8 +367,15 @@ function PortsFooter({ expanded }: { expanded: boolean }) {
               <button
                 key={port}
                 type="button"
-                onClick={() => window.open(`http://localhost:${port}`, '_blank')}
-                title={`Open localhost:${port}`}
+                onClick={() => {
+                  const url = `http://localhost:${port}`;
+                  if (onPortPreview) {
+                    onPortPreview(port, url, group.repo);
+                  } else {
+                    window.open(url, '_blank');
+                  }
+                }}
+                title={`Preview localhost:${port}`}
                 style={{
                   padding: '2px 6px',
                   borderRadius: 4,
@@ -403,6 +411,7 @@ export function NavRail({
   onSearchClick,
   thoughtsOpen,
   onThoughtsToggle,
+  onPortPreview,
 }: NavRailProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -466,7 +475,7 @@ export function NavRail({
       {/* Bottom — Ports + Thoughts + Alerts + Settings */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         {/* Ports footer — pinned above utils */}
-        <PortsFooter expanded={expanded} />
+        <PortsFooter expanded={expanded} onPortPreview={onPortPreview} />
 
         <UtilButton
           icon={Lightbulb}
