@@ -109,3 +109,127 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+
+// ── DELETE: Remove branch (+ worktree if applicable) ──
+export async function DELETE(req: NextRequest) {
+  try {
+    const body = await req.json() as { path: string; branch: string; force?: boolean };
+    const { path: repoPath, branch, force } = body;
+
+    if (!repoPath || !branch) {
+      return NextResponse.json({ error: 'path and branch required' }, { status: 400 });
+    }
+
+    // Prevent deleting main/master
+    const protectedBranches = ['main', 'master', 'develop'];
+    if (protectedBranches.includes(branch)) {
+      return NextResponse.json({ error: `Cannot delete protected branch '${branch}'` }, { status: 400 });
+    }
+
+    // Check if it's a worktree — remove worktree first
+    let worktreeRemoved = false;
+    try {
+      const wtRaw = execSync(
+        `git -C "${repoPath}" worktree list --porcelain`,
+        { encoding: 'utf-8', timeout: 5000 },
+      ).trim();
+      let currentPath = '';
+      for (const line of wtRaw.split('\n')) {
+        if (line.startsWith('worktree ')) currentPath = line.slice(9);
+        if (line.startsWith('branch refs/heads/') && line.slice(18) === branch && currentPath !== repoPath) {
+          // Remove the worktree
+          execSync(`git -C "${repoPath}" worktree remove "${currentPath}" ${force ? '--force' : ''}`, {
+            encoding: 'utf-8',
+            timeout: 10000,
+          });
+          worktreeRemoved = true;
+          break;
+        }
+      }
+    } catch { /* no worktree to remove */ }
+
+    // Delete the branch
+    const flag = force ? '-D' : '-d';
+    execSync(`git -C "${repoPath}" branch ${flag} "${branch}"`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+
+    // Try to delete remote branch too
+    let remoteDeleted = false;
+    try {
+      execSync(`git -C "${repoPath}" push origin --delete "${branch}" 2>/dev/null`, {
+        encoding: 'utf-8',
+        timeout: 10000,
+      });
+      remoteDeleted = true;
+    } catch { /* no remote branch or no permission */ }
+
+    return NextResponse.json({
+      deleted: branch,
+      worktreeRemoved,
+      remoteDeleted,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to delete branch';
+    // If branch not fully merged, suggest force
+    if (msg.includes('not fully merged')) {
+      return NextResponse.json({
+        error: `Branch '${(await req.clone().json() as { branch: string }).branch}' is not fully merged. Use force delete?`,
+        canForce: true,
+      }, { status: 409 });
+    }
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
+}
+
+// ── POST: Create new branch (+ optional worktree) ──
+export async function POST(req: NextRequest) {
+  try {
+    const body = await req.json() as { path: string; branch: string; baseBranch?: string; worktree?: boolean };
+    const { path: repoPath, branch, baseBranch, worktree } = body;
+
+    if (!repoPath || !branch) {
+      return NextResponse.json({ error: 'path and branch required' }, { status: 400 });
+    }
+
+    // Validate branch name
+    const safeNameRe = /^[a-zA-Z0-9._\-/]+$/;
+    if (!safeNameRe.test(branch)) {
+      return NextResponse.json({ error: 'Invalid branch name' }, { status: 400 });
+    }
+
+    const base = baseBranch || 'main';
+
+    if (worktree) {
+      // Create worktree with new branch
+      const worktreePath = `${repoPath}/../.worktrees/${branch.replace(/\//g, '-')}`;
+      execSync(
+        `git -C "${repoPath}" worktree add "${worktreePath}" -b "${branch}" "${base}"`,
+        { encoding: 'utf-8', timeout: 10000 },
+      );
+      return NextResponse.json({
+        created: branch,
+        baseBranch: base,
+        isWorktree: true,
+        worktreePath,
+      });
+    } else {
+      // Just create branch
+      execSync(
+        `git -C "${repoPath}" branch "${branch}" "${base}"`,
+        { encoding: 'utf-8', timeout: 5000 },
+      );
+      return NextResponse.json({
+        created: branch,
+        baseBranch: base,
+        isWorktree: false,
+      });
+    }
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to create branch' },
+      { status: 500 },
+    );
+  }
+}
