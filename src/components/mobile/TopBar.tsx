@@ -1,9 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Menu, SlidersHorizontal } from 'lucide-react';
+import { ChevronDown, ChevronRight, SlidersHorizontal } from 'lucide-react';
 import type { TopBarProps } from './types';
 import { buildProjectGroups } from './utils';
 import { useAlerts } from '@/lib/alerts/context';
-import { AlertBell } from '@/components/shared/AlertBell';
+import { SpeedDialButton } from './SpeedDial';
 
 export const TopBar = memo(function TopBar({
   snapshot,
@@ -18,13 +18,15 @@ export const TopBar = memo(function TopBar({
   wsConnectionState,
   compactLine,
   squadPickerOpen,
+  activeScreen,
+  onNavigate,
   onOpenControls,
   onOpenDiff,
   onOpenAlerts,
   onToggleSquadPicker,
   onSessionFocus,
 }: TopBarProps) {
-  const { unreadCount, urgentCount, hasUnread } = useAlerts();
+  const { hasUnread } = useAlerts();
   const pickerRef = useRef<HTMLDivElement>(null);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
 
@@ -98,29 +100,14 @@ export const TopBar = memo(function TopBar({
       data-visible={headerVisible ? 'true' : 'false'}
       data-picker-open={squadPickerOpen ? 'true' : 'false'}
     >
-      <div style={{ position: 'relative', flexShrink: 0 }}>
-        {hasUnread ? (
-          <AlertBell
-            unreadCount={unreadCount}
-            urgentCount={urgentCount}
-            onClick={onOpenAlerts}
-            size="mobile"
-          />
-        ) : (
-          <button
-            type="button"
-            className="remodex-circle-button"
-            aria-label="Conversation controls"
-            onClick={onOpenControls}
-            style={{ background: '#ef4444', color: '#ffffff', border: 'none', boxShadow: '0 4px 12px rgba(239,68,68,0.25)' }}
-          >
-            <Menu size={18} strokeWidth={2.1} />
-          </button>
-        )}
-        {!hasUnread && pendingApprovalsCount > 0 ? (
-          <span className="remodex-approval-badge">{pendingApprovalsCount}</span>
-        ) : null}
-      </div>
+      {/* Connection status dot */}
+      <div style={{
+        flexShrink: 0,
+        width: 8, height: 8,
+        borderRadius: '50%',
+        background: connectionDotColor,
+        marginLeft: 4,
+      }} />
 
       {/* Tappable title area — opens squad picker */}
       <div ref={pickerRef} style={{ minWidth: 0, flex: 1, position: 'relative' }}>
@@ -402,6 +389,13 @@ export const TopBar = memo(function TopBar({
         </span>
         <SlidersHorizontal size={15} strokeWidth={2} />
       </button>
+
+      {/* Speed Dial — top-right navigation */}
+      <SpeedDialButton
+        activeScreen={activeScreen}
+        onNavigate={onNavigate}
+        approvalCount={pendingApprovalsCount}
+      />
     </header>
   );
 });

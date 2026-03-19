@@ -147,6 +147,8 @@ export interface ComposeBarProps {
   handlers: ComposeBarHandlers;
   onOpenRecall?: () => void;
   onModelPillTap?: () => void;
+  streamingText?: string;
+  agentRunning?: boolean;
 }
 
 export interface ControlsSheetProps {
@@ -202,6 +204,8 @@ export interface TopBarProps {
   wsConnectionState?: 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
   compactLine: CompactLine;
   squadPickerOpen: boolean;
+  activeScreen: import('./SpeedDial').MobileScreen;
+  onNavigate: (screen: import('./SpeedDial').MobileScreen) => void;
   onOpenControls: () => void;
   onOpenDiff: () => void;
   onOpenAlerts: () => void;

@@ -8,7 +8,6 @@ interface SpeedDialProps {
   activeScreen: MobileScreen;
   onNavigate: (screen: MobileScreen) => void;
   approvalCount?: number;
-  alertCount?: number;
 }
 
 const MENU_ITEMS: { screen: MobileScreen; label: string; iconPath: string }[] = [
@@ -44,7 +43,11 @@ const MENU_ITEMS: { screen: MobileScreen; label: string; iconPath: string }[] = 
   },
 ];
 
-export const SpeedDial = memo(function SpeedDial({
+/**
+ * SpeedDialButton — the hamburger trigger that lives in the TopBar.
+ * Renders a menu button + dropdown when open.
+ */
+export const SpeedDialButton = memo(function SpeedDialButton({
   activeScreen,
   onNavigate,
   approvalCount = 0,
@@ -69,116 +72,15 @@ export const SpeedDial = memo(function SpeedDial({
   }, [open]);
 
   return (
-    <div ref={menuRef} style={{
-      position: 'fixed',
-      bottom: 28,
-      right: 20,
-      zIndex: 9999,
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'flex-end',
-      gap: 0,
-    }}>
-      {/* Menu items — stacked above FAB */}
-      {open && (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-end',
-          gap: 8,
-          marginBottom: 12,
-        }}>
-          {MENU_ITEMS.map((item, index) => {
-            const isActive = item.screen === activeScreen;
-            return (
-              <button
-                key={item.screen}
-                type="button"
-                onClick={() => {
-                  onNavigate(item.screen);
-                  setOpen(false);
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 10,
-                  padding: 0,
-                  border: 'none',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  animation: `speedDialIn 200ms ease ${index * 40}ms both`,
-                  WebkitTapHighlightColor: 'transparent',
-                }}
-              >
-                {/* Label pill */}
-                <span style={{
-                  padding: '8px 16px',
-                  borderRadius: 20,
-                  background: isActive ? '#1a1a1a' : 'rgba(0,0,0,0.85)',
-                  backdropFilter: 'blur(20px)',
-                  WebkitBackdropFilter: 'blur(20px)',
-                  color: '#ffffff',
-                  fontSize: 14,
-                  fontWeight: 600,
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                  letterSpacing: '-0.01em',
-                  boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
-                  position: 'relative',
-                }}>
-                  {item.label}
-                  {/* Approval badge */}
-                  {item.screen === 'approvals' && approvalCount > 0 && (
-                    <span style={{
-                      position: 'absolute',
-                      top: -4,
-                      right: -4,
-                      width: 18, height: 18,
-                      borderRadius: '50%',
-                      background: '#ef4444',
-                      color: '#fff',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}>
-                      {approvalCount}
-                    </span>
-                  )}
-                </span>
-
-                {/* Icon circle */}
-                <span style={{
-                  width: 44, height: 44,
-                  borderRadius: 14,
-                  background: isActive ? '#1a1a1a' : 'rgba(0,0,0,0.85)',
-                  backdropFilter: 'blur(20px)',
-                  WebkitBackdropFilter: 'blur(20px)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: '0 4px 16px rgba(0,0,0,0.2)',
-                  border: isActive ? '2px solid #ef4444' : '2px solid transparent',
-                }}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-                    stroke={isActive ? '#ef4444' : '#ffffff'}
-                    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d={item.iconPath} />
-                  </svg>
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* FAB trigger */}
+    <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
+      {/* Hamburger button — matches existing TopBar circle button */}
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
+        aria-label="Navigation menu"
         style={{
-          width: 52, height: 52,
-          borderRadius: 16,
+          width: 36, height: 36,
+          borderRadius: 12,
           background: open ? '#1a1a1a' : '#ef4444',
           border: 'none',
           color: '#ffffff',
@@ -187,26 +89,186 @@ export const SpeedDial = memo(function SpeedDial({
           justifyContent: 'center',
           cursor: 'pointer',
           boxShadow: open
-            ? '0 4px 16px rgba(0,0,0,0.3)'
-            : '0 4px 20px rgba(239,68,68,0.4)',
+            ? '0 2px 8px rgba(0,0,0,0.2)'
+            : '0 4px 12px rgba(239,68,68,0.25)',
           transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
-          transform: open ? 'rotate(45deg)' : 'rotate(0deg)',
           WebkitTapHighlightColor: 'transparent',
+          position: 'relative',
         }}
       >
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <line x1="12" y1="5" x2="12" y2="19" />
-          <line x1="5" y1="12" x2="19" y2="12" />
-        </svg>
+        {/* Animated hamburger → × */}
+        <div style={{
+          width: 16, height: 12,
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}>
+          <span style={{
+            display: 'block',
+            width: open ? 16 : 16,
+            height: 2,
+            borderRadius: 1,
+            background: '#fff',
+            transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
+            transform: open ? 'translateY(5px) rotate(45deg)' : 'none',
+          }} />
+          <span style={{
+            display: 'block',
+            width: 12,
+            height: 2,
+            borderRadius: 1,
+            background: '#fff',
+            transition: 'all 200ms ease',
+            opacity: open ? 0 : 1,
+            transform: open ? 'scale(0)' : 'scale(1)',
+          }} />
+          <span style={{
+            display: 'block',
+            width: open ? 16 : 16,
+            height: 2,
+            borderRadius: 1,
+            background: '#fff',
+            transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
+            transform: open ? 'translateY(-5px) rotate(-45deg)' : 'none',
+          }} />
+        </div>
+
+        {/* Approval badge on button */}
+        {!open && approvalCount > 0 && (
+          <span style={{
+            position: 'absolute',
+            top: -4, right: -4,
+            width: 16, height: 16,
+            borderRadius: '50%',
+            background: '#ff3b30',
+            color: '#fff',
+            fontSize: 9,
+            fontWeight: 700,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            border: '2px solid #fff',
+          }}>
+            {approvalCount}
+          </span>
+        )}
       </button>
 
-      {/* Animation keyframes */}
+      {/* Dropdown menu */}
+      {open && (
+        <>
+          {/* Backdrop */}
+          <div style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.3)',
+            zIndex: 9998,
+            animation: 'speedDialFade 200ms ease',
+          }} />
+
+          {/* Menu panel */}
+          <div style={{
+            position: 'absolute',
+            top: '100%',
+            right: 0,
+            marginTop: 8,
+            width: 200,
+            borderRadius: 16,
+            background: 'rgba(28, 28, 30, 0.95)',
+            backdropFilter: 'blur(40px) saturate(1.8)',
+            WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
+            border: '1px solid rgba(255,255,255,0.08)',
+            boxShadow: '0 12px 40px rgba(0,0,0,0.35)',
+            padding: '6px 0',
+            zIndex: 9999,
+            animation: 'speedDialSlide 250ms cubic-bezier(0.32, 0.72, 0, 1)',
+          }}>
+            {MENU_ITEMS.map((item) => {
+              const isActive = item.screen === activeScreen;
+              return (
+                <button
+                  key={item.screen}
+                  type="button"
+                  onClick={() => {
+                    onNavigate(item.screen);
+                    setOpen(false);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    width: '100%',
+                    padding: '12px 16px',
+                    border: 'none',
+                    background: isActive ? 'rgba(239, 68, 68, 0.12)' : 'transparent',
+                    cursor: 'pointer',
+                    WebkitTapHighlightColor: 'transparent',
+                    transition: 'background 150ms ease',
+                  }}
+                >
+                  {/* Icon */}
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                    stroke={isActive ? '#ef4444' : 'rgba(255,255,255,0.7)'}
+                    strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d={item.iconPath} />
+                  </svg>
+
+                  {/* Label */}
+                  <span style={{
+                    fontSize: 15,
+                    fontWeight: isActive ? 700 : 500,
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    color: isActive ? '#ef4444' : '#ffffff',
+                    letterSpacing: '-0.01em',
+                    flex: 1,
+                    textAlign: 'left',
+                  }}>
+                    {item.label}
+                  </span>
+
+                  {/* Approval badge */}
+                  {item.screen === 'approvals' && approvalCount > 0 && (
+                    <span style={{
+                      width: 20, height: 20,
+                      borderRadius: '50%',
+                      background: '#ff3b30',
+                      color: '#fff',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}>
+                      {approvalCount}
+                    </span>
+                  )}
+
+                  {/* Active indicator */}
+                  {isActive && (
+                    <span style={{
+                      width: 6, height: 6,
+                      borderRadius: '50%',
+                      background: '#ef4444',
+                    }} />
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* Keyframes */}
       <style>{`
-        @keyframes speedDialIn {
+        @keyframes speedDialFade {
+          from { opacity: 0; }
+          to { opacity: 1; }
+        }
+        @keyframes speedDialSlide {
           from {
             opacity: 0;
-            transform: translateY(10px) scale(0.9);
+            transform: translateY(-8px) scale(0.95);
           }
           to {
             opacity: 1;

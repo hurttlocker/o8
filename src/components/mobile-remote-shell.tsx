@@ -24,7 +24,7 @@ import { TopBar } from './mobile/TopBar';
 import { ShimmerCard } from './mobile/ShimmerCard';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { AlertTray } from '@/components/shared/AlertTray';
-import { SpeedDial, type MobileScreen } from './mobile/SpeedDial';
+import { type MobileScreen } from './mobile/SpeedDial';
 
 // Lazy-loaded panels — only loaded when opened (#45)
 const shimmerFallback = { loading: () => <ShimmerCard /> };
@@ -323,6 +323,31 @@ function MobileRemoteShellInner({
           wsConnectionState={wsConnectionState}
           compactLine={compactLine}
           squadPickerOpen={state.squadPickerOpen}
+          activeScreen={activeView === 'costs' ? 'costs' : 'chat'}
+          onNavigate={(screen: MobileScreen) => {
+            switch (screen) {
+              case 'chat':
+                setActiveView('squad');
+                break;
+              case 'fleet':
+                setActiveView('squad');
+                state.setSquadPickerOpen(true);
+                break;
+              case 'memory':
+                setCortexRecallOpen(true);
+                break;
+              case 'approvals':
+                setControlsOpen(true);
+                actions.handleToggleApprovals();
+                break;
+              case 'costs':
+                setActiveView('costs');
+                break;
+              case 'settings':
+                setControlsOpen(true);
+                break;
+            }
+          }}
           onOpenControls={() => setControlsOpen(true)}
           onOpenDiff={actions.openDiffViewer}
           onOpenAlerts={() => state.setAlertsOpen(true)}
@@ -486,6 +511,8 @@ function MobileRemoteShellInner({
                 handlers={actions.composeBarHandlers}
                 onOpenRecall={() => setCortexRecallOpen(true)}
                 onModelPillTap={() => setSessionInfoOpen(true)}
+                streamingText={streamingText}
+                agentRunning={waitingForResponse}
               />
             </div>
           ) : null}
@@ -596,35 +623,7 @@ function MobileRemoteShellInner({
         onCopyKey={actions.handleCopySelectedSessionKey}
         onExpandMedia={(media) => { setSessionInfoOpen(false); setExpandedMedia(media); }}
       />
-      {/* Speed Dial Navigation */}
-      <SpeedDial
-        activeScreen={activeView === 'costs' ? 'costs' : 'chat'}
-        onNavigate={(screen: MobileScreen) => {
-          switch (screen) {
-            case 'chat':
-              setActiveView('squad');
-              break;
-            case 'fleet':
-              setActiveView('squad');
-              state.setSquadPickerOpen(true);
-              break;
-            case 'memory':
-              setCortexRecallOpen(true);
-              break;
-            case 'approvals':
-              setControlsOpen(true);
-              actions.handleToggleApprovals();
-              break;
-            case 'costs':
-              setActiveView('costs');
-              break;
-            case 'settings':
-              setControlsOpen(true);
-              break;
-          }
-        }}
-        approvalCount={pendingApprovals.length}
-      />
+      {/* SpeedDial now lives in TopBar — no more FAB */}
     </div>
   );
 }
