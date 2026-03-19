@@ -2469,6 +2469,10 @@ export const AgentPanel = memo(function AgentPanel({
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
+  const [globalRepo, setGlobalRepo] = useState<string | null>(null);
+  const [globalRepoBranch, setGlobalRepoBranch] = useState<string>('main');
+  const [globalRepoDiff, setGlobalRepoDiff] = useState<{ additions: number; deletions: number } | null>(null);
+  const [repoPickerOpen, setRepoPickerOpen] = useState(false);
 
   // Build workspace groups from agents
   const workspaceGroups = buildWorkspaceGroups(agents);
@@ -2493,6 +2497,75 @@ export const AgentPanel = memo(function AgentPanel({
   }, [expandedGroup, onExpandWorkspace]);
 
   // Ref for triggering immediate fetch from WS events
+  // Fetch repos for the global picker
+  const [globalRepoList, setGlobalRepoList] = useState<string[]>([]);
+  useEffect(() => {
+    fetch('/api/panel/repos')
+      .then(r => r.json())
+      .then(data => {
+        const repos = (data.repos ?? []).map((r: { remoteUrl?: string }) => {
+          const url = (r.remoteUrl ?? '').replace(/\.git$/, '');
+          const parts = url.split('/');
+          return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : null;
+        }).filter(Boolean) as string[];
+        setGlobalRepoList(repos.length > 0 ? repos : Object.keys(REPO_DISPLAY));
+      })
+      .catch(() => setGlobalRepoList(Object.keys(REPO_DISPLAY)));
+  }, []);
+
+  const repoListForPicker = globalRepoList;
+
+  useEffect(() => {
+    if (!globalRepo && repoListForPicker.length > 0) {
+      // Try to restore from sessionStorage
+      const saved = typeof window !== 'undefined' ? sessionStorage.getItem('cortex-global-repo') : null;
+      if (saved && repoListForPicker.includes(saved)) {
+        setGlobalRepo(saved);
+      } else {
+        setGlobalRepo(repoListForPicker[0]);
+      }
+    }
+  }, [globalRepo, repoListForPicker]);
+
+  // Fetch branch + diff stats for global repo
+  useEffect(() => {
+    if (!globalRepo) return;
+    // Save to sessionStorage
+    if (typeof window !== 'undefined') sessionStorage.setItem('cortex-global-repo', globalRepo);
+    // Also set activeRepo so Activity/Issues/Files are scoped
+    setActiveRepo(globalRepo);
+
+    // Fetch branch info
+    fetch(`/api/panel/repos`)
+      .then(r => r.json())
+      .then(data => {
+        const repo = (data.repos ?? []).find((r: { name: string }) => {
+          const url = (r as { remoteUrl?: string }).remoteUrl ?? '';
+          return url.includes(globalRepo.replace('/', '/'));
+        });
+        if (repo?.localPath) {
+          // Get branch
+          fetch(`/api/panel/branches?path=${encodeURIComponent(repo.localPath)}`)
+            .then(r => r.json())
+            .then(bData => {
+              const current = (bData.branches ?? []).find((b: { current: boolean }) => b.current);
+              if (current) setGlobalRepoBranch(current.name);
+            })
+            .catch(() => {});
+          // Get diff stats
+          fetch(`/api/panel/diff-stats?repo=${encodeURIComponent(globalRepo)}`)
+            .then(r => r.json())
+            .then(dData => {
+              if (dData.additions !== undefined) {
+                setGlobalRepoDiff({ additions: dData.additions, deletions: dData.deletions });
+              }
+            })
+            .catch(() => setGlobalRepoDiff(null));
+        }
+      })
+      .catch(() => {});
+  }, [globalRepo]);
+
   const fetchNowRef = useRef<() => void>(() => {});
 
   // WS listener — triggers immediate re-fetch on agent status changes
@@ -2857,6 +2930,125 @@ export const AgentPanel = memo(function AgentPanel({
         onLaunchComplete={() => { fetchNowRef.current(); }}
         onSelectSession={onSelectSession}
       />
+
+      {/* ── Global Repo Context ── */}
+      {globalRepo ? (
+        <div style={{ position: 'relative', paddingLeft: 14, paddingRight: 14, paddingTop: 8, paddingBottom: 4, flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={() => setRepoPickerOpen(v => !v)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              width: '100%',
+              padding: '6px 10px',
+              borderRadius: 8,
+              border: '1px solid var(--t-divider-subtle, #e2e8f0)',
+              background: 'rgba(255,255,255,0.6)',
+              backdropFilter: 'blur(12px)',
+              cursor: 'pointer',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+              transition: 'border-color 150ms ease',
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" fill="currentColor" opacity="0.5" />
+            </svg>
+            <span style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'var(--t-text-strong, #0f172a)',
+            }}>
+              {REPO_DISPLAY[globalRepo] ?? globalRepo.split('/').pop()}
+            </span>
+            <span style={{
+              fontSize: 11,
+              color: 'var(--t-text-muted, #64748b)',
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+            }}>
+              {globalRepoBranch}
+            </span>
+            {globalRepoDiff && (globalRepoDiff.additions > 0 || globalRepoDiff.deletions > 0) ? (
+              <span style={{
+                fontSize: 10,
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                marginLeft: 'auto',
+              }}>
+                <span style={{ color: '#22c55e' }}>+{globalRepoDiff.additions}</span>
+                {' '}
+                <span style={{ color: '#ef4444' }}>-{globalRepoDiff.deletions}</span>
+              </span>
+            ) : null}
+            <ChevronDown size={10} strokeWidth={2} style={{
+              color: 'var(--t-text-faint)',
+              marginLeft: globalRepoDiff ? 0 : 'auto',
+              transition: 'transform 150ms ease',
+              transform: repoPickerOpen ? 'rotate(180deg)' : 'none',
+            }} />
+          </button>
+
+          {/* Repo picker dropdown */}
+          {repoPickerOpen ? (
+            <>
+              <div onClick={() => setRepoPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 99 }} />
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                left: 14,
+                right: 14,
+                marginTop: 4,
+                borderRadius: 10,
+                border: '1px solid rgba(255,255,255,0.18)',
+                background: 'rgba(255,255,255,0.82)',
+                backdropFilter: 'blur(24px) saturate(1.8)',
+                WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+                overflow: 'hidden',
+                zIndex: 100,
+              }}>
+                {repoListForPicker.map((repo) => (
+                  <button
+                    key={repo}
+                    type="button"
+                    onClick={() => {
+                      setGlobalRepo(repo);
+                      setRepoPickerOpen(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      width: '100%',
+                      padding: '8px 12px',
+                      border: 'none',
+                      background: globalRepo === repo ? 'rgba(239,68,68,0.06)' : 'transparent',
+                      color: globalRepo === repo ? '#dc2626' : 'var(--t-text)',
+                      fontSize: 12,
+                      fontWeight: globalRepo === repo ? 600 : 400,
+                      cursor: 'pointer',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      textAlign: 'left',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (globalRepo !== repo) (e.currentTarget).style.background = 'rgba(0,0,0,0.03)';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget).style.background = globalRepo === repo ? 'rgba(239,68,68,0.06)' : 'transparent';
+                    }}
+                  >
+                    <span style={{ width: 14, textAlign: 'center', fontSize: 12, color: globalRepo === repo ? '#dc2626' : 'transparent' }}>✓</span>
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" fill="currentColor" opacity="0.5" />
+                    </svg>
+                    {REPO_DISPLAY[repo] ?? repo.split('/').pop()}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       {/* ── Tab Bar ── */}
       <div style={{
