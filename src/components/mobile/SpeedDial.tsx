@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, memo } from 'react';
+import { createPortal } from 'react-dom';
 
 export type MobileScreen = 'chat' | 'fleet' | 'memory' | 'approvals' | 'costs' | 'settings';
 
@@ -130,8 +131,8 @@ export const SpeedDialButton = memo(function SpeedDialButton({
         )}
       </button>
 
-      {/* Frosted overlay + floating pills — FIXED to escape stacking context */}
-      {open && (
+      {/* Portal: frosted overlay + floating pills at document.body level */}
+      {open && typeof document !== 'undefined' && createPortal(
         <div style={{
           position: 'fixed',
           inset: 0,
@@ -236,7 +237,8 @@ export const SpeedDialButton = memo(function SpeedDialButton({
             );
           })}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
 
       <style>{`
