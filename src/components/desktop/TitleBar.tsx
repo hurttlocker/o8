@@ -466,6 +466,41 @@ export function TitleBar({
         </div>
       </div>
 
+      {/* ── Live indicator ── */}
+      <div
+        title={wsStatus === 'connected' ? 'Live — WebSocket connected' : wsStatus === 'reconnecting' ? 'Reconnecting…' : wsStatus === 'connecting' ? 'Connecting…' : 'Disconnected'}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 5,
+          padding: '5px 10px',
+          borderRadius: 8,
+          border: '1px solid var(--t-search-border)',
+          background: 'var(--t-search-bg)',
+          fontSize: 11,
+          fontWeight: 500,
+          color: 'var(--t-text-muted)',
+          fontFamily: '-apple-system, system-ui, sans-serif',
+          flexShrink: 0,
+          ['WebkitAppRegion' as string]: 'no-drag',
+        }}
+        data-no-drag=""
+      >
+        <span style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: wsStatus === 'connected' ? '#34c759'
+            : wsStatus === 'reconnecting' || wsStatus === 'connecting' ? '#ff9f0a'
+            : '#ff3b30',
+          transition: 'background 300ms ease',
+          flexShrink: 0,
+        }} />
+        <span style={{ fontSize: 11 }}>
+          {wsStatus === 'connected' ? 'Live' : wsStatus === 'reconnecting' ? 'Reconnecting' : wsStatus === 'connecting' ? 'Connecting' : 'Offline'}
+        </span>
+      </div>
+
       {/* ── Open In button ── */}
       {globalRepo ? (
         <div style={{ position: 'relative', flexShrink: 0, ['WebkitAppRegion' as string]: 'no-drag' }} data-no-drag="">
@@ -635,22 +670,7 @@ export function TitleBar({
         flexShrink: 0,
         paddingRight: 4,
       }}>
-        {/* WS connection indicator */}
-        <div
-          title={wsStatus === 'connected' ? 'WebSocket connected' : wsStatus === 'reconnecting' ? 'Reconnecting…' : wsStatus === 'connecting' ? 'Connecting…' : 'Disconnected — polling fallback'}
-          style={{
-            width: 7,
-            height: 7,
-            borderRadius: '50%',
-            background: wsStatus === 'connected' ? '#34c759'
-              : wsStatus === 'reconnecting' || wsStatus === 'connecting' ? '#ff9f0a'
-              : '#ff3b30',
-            flexShrink: 0,
-            marginRight: 6,
-            transition: 'background 300ms ease',
-            ['WebkitAppRegion' as string]: 'no-drag',
-          }}
-        />
+        {/* WS indicator moved to left of Open button */}
 
         {/* Bottom panel toggle */}
         <TitleBarButton
