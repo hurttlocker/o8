@@ -35,6 +35,7 @@ const DiffOverlay = dynamic(() => import('./mobile/DiffOverlay').then((m) => ({ 
 const TokenUsageSummary = dynamic(() => import('./mobile/TokenUsageSummary').then((m) => ({ default: m.TokenUsageSummary })), { ssr: false, ...shimmerFallback });
 const MobileTerminal = dynamic(() => import('./mobile/MobileTerminal').then((m) => ({ default: m.MobileTerminal })), { ssr: false, ...shimmerFallback });
 const WorktreeActions = dynamic(() => import('./mobile/WorktreeActions').then((m) => ({ default: m.WorktreeActions })), { ssr: false, ...shimmerFallback });
+const FleetView = dynamic(() => import('./mobile/FleetView').then((m) => ({ default: m.FleetView })), { ssr: false, ...shimmerFallback });
 
 // Cortex memory surfaces (#78-#85) — typed via explicit generic param
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -323,15 +324,14 @@ function MobileRemoteShellInner({
           wsConnectionState={wsConnectionState}
           compactLine={compactLine}
           squadPickerOpen={state.squadPickerOpen}
-          activeScreen={activeView === 'costs' ? 'costs' : 'chat'}
+          activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : 'chat'}
           onNavigate={(screen: MobileScreen) => {
             switch (screen) {
               case 'chat':
                 setActiveView('squad');
                 break;
               case 'fleet':
-                setActiveView('squad');
-                state.setSquadPickerOpen(true);
+                setActiveView('fleet');
                 break;
               case 'memory':
                 setCortexRecallOpen(true);
@@ -355,6 +355,16 @@ function MobileRemoteShellInner({
           onSessionFocus={actions.handleSessionFocus}
         />
         <div className="remodex-scroll-view">
+          {activeView === 'fleet' ? (
+            <FleetView
+              snapshot={snapshot}
+              onAgentSelect={(sessionKey) => {
+                actions.handleSessionFocus(sessionKey);
+                setActiveView('squad');
+              }}
+              onBack={() => setActiveView('squad')}
+            />
+          ) : null}
           {activeView === 'costs' ? (
             <CostsDashboard
               snapshot={snapshot}
@@ -366,10 +376,10 @@ function MobileRemoteShellInner({
               compactLine={compactLine}
             />
           ) : null}
-          {activeView !== 'costs' ? (
+          {activeView !== 'costs' && activeView !== 'fleet' ? (
             <TokenUsageSummary snapshot={snapshot} onViewCosts={() => setActiveView('costs')} />
           ) : null}
-          {activeView !== 'costs' ? (
+          {activeView !== 'costs' && activeView !== 'fleet' ? (
             <SquadRail
               snapshot={snapshot}
               expandedProject={expandedProject}
@@ -380,6 +390,7 @@ function MobileRemoteShellInner({
               agentDisplayName={agentDisplayName}
             />
           ) : null}
+          {activeView !== 'fleet' && activeView !== 'costs' ? (
           <SurfaceStatus
             snapshot={snapshot}
             selectedSession={selectedSession}
@@ -390,6 +401,7 @@ function MobileRemoteShellInner({
             transcriptError={transcriptError}
             selectedReviewPacketError={selectedReviewPacketError}
           />
+          ) : null}
           {hasTerminalSession ? (
             <div
               style={{
