@@ -1857,7 +1857,14 @@ interface PRDetail {
   labels: { name: string; color: string }[];
   reviews: { author: { login: string }; state: string; body: string }[];
   files: { path: string; additions: number; deletions: number }[];
-  statusCheckRollup: { name: string; status: string; conclusion: string }[];
+  statusCheckRollup: {
+    name: string;
+    status: string;
+    conclusion: string;
+    detailsUrl?: string;
+    startedAt?: string;
+    completedAt?: string;
+  }[];
   reviewComments: { id: number; body: string; user: string; path: string; line: number | null; created_at: string }[];
   issueComments: { id: number; body: string; user: string; created_at: string }[];
   diffStat: string;
@@ -1874,7 +1881,7 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
   const [pr, setPr] = useState<PRDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<'overview' | 'files' | 'comments' | 'reviews'>('overview');
+  const [activeSection, setActiveSection] = useState<'overview' | 'files' | 'checks' | 'comments' | 'reviews'>('overview');
   const [reviewComments, setReviewComments] = useState<{
     id: number; author: string; body: string; path: string;
     line: number | null; createdAt: string; diffHunk: string; inReplyTo: number | null;
@@ -1980,9 +1987,10 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
   const ciChecks = pr.statusCheckRollup ?? [];
   const passedChecks = ciChecks.filter(c => c.conclusion === 'SUCCESS' || c.conclusion === 'success').length;
 
-  const sections: { id: 'overview' | 'files' | 'comments' | 'reviews'; label: string; count?: number }[] = [
+  const sections: { id: 'overview' | 'files' | 'checks' | 'comments' | 'reviews'; label: string; count?: number }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'files', label: 'Files', count: pr.changedFiles },
+    { id: 'checks', label: 'Checks', count: ciChecks.length },
     { id: 'comments', label: 'Comments', count: allComments.length },
     { id: 'reviews', label: 'Reviews' },
   ];
@@ -2373,6 +2381,86 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                 {pr.diffStat}
               </pre>
             ) : null}
+          </div>
+        ) : null}
+
+        {activeSection === 'checks' ? (
+          <div>
+            {ciChecks.length === 0 ? (
+              <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>No checks configured</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {ciChecks.map((check, i) => {
+                  const passed = check.conclusion === 'SUCCESS' || check.conclusion === 'success';
+                  const pending = check.status === 'IN_PROGRESS' || check.status === 'QUEUED' || check.status === 'PENDING';
+                  const failed = !passed && !pending;
+                  // Calculate duration
+                  let duration = '';
+                  if (check.startedAt && check.completedAt) {
+                    const ms = new Date(check.completedAt).getTime() - new Date(check.startedAt).getTime();
+                    if (ms < 60_000) duration = `${Math.round(ms / 1000)}s`;
+                    else duration = `${Math.round(ms / 60_000)}m`;
+                  }
+                  return (
+                    <div key={i} style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '8px 12px',
+                      borderRadius: 8,
+                      transition: 'background 120ms ease',
+                      cursor: check.detailsUrl ? 'pointer' : 'default',
+                    }}
+                    onClick={() => check.detailsUrl && window.open(check.detailsUrl, '_blank')}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(0,0,0,0.02)'; }}
+                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+                    >
+                      {/* Status icon */}
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 20, height: 20,
+                        borderRadius: '50%',
+                        background: passed ? 'rgba(34,197,94,0.08)' : pending ? 'rgba(245,158,11,0.08)' : 'rgba(239,68,68,0.08)',
+                        color: passed ? '#22c55e' : pending ? '#f59e0b' : '#ef4444',
+                        fontSize: 12, fontWeight: 700,
+                        flexShrink: 0,
+                      }}>
+                        {passed ? '✓' : pending ? '○' : '✗'}
+                      </span>
+                      {/* Check name */}
+                      <span style={{
+                        flex: 1,
+                        fontSize: 13,
+                        fontWeight: 500,
+                        color: 'var(--t-text-strong)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {check.name}
+                      </span>
+                      {/* Duration */}
+                      {duration ? (
+                        <span style={{
+                          fontSize: 11,
+                          color: 'var(--t-text-muted)',
+                          fontFamily: '"SF Mono", ui-monospace, monospace',
+                          flexShrink: 0,
+                        }}>
+                          {duration}
+                        </span>
+                      ) : null}
+                      {/* External link */}
+                      {check.detailsUrl ? (
+                        <ExternalLink size={12} strokeWidth={1.5} color="var(--t-text-faint)" style={{ flexShrink: 0 }} />
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ) : null}
 
