@@ -3,7 +3,7 @@ import { execSync } from 'child_process';
 
 export const dynamic = 'force-dynamic';
 
-const EDITORS: Record<string, { command: string; check?: string }> = {
+const EDITORS: Record<string, { command: string }> = {
   'finder':       { command: 'open "{path}"' },
   'terminal':     { command: 'open -a Terminal "{path}"' },
   'vscode':       { command: 'code "{path}"' },
@@ -13,6 +13,8 @@ const EDITORS: Record<string, { command: string; check?: string }> = {
   'xcode':        { command: 'open -a Xcode "{path}"' },
   'jetbrains':    { command: 'idea "{path}"' },
   'windsurf':     { command: 'windsurf "{path}"' },
+  'claude-code':  { command: 'claude "{path}"' },
+  'opencode':     { command: 'opencode "{path}"' },
 };
 
 // GET — return available editors (checks which CLIs exist)
@@ -30,6 +32,8 @@ export async function GET() {
     { id: 'sublime', name: 'Sublime Text', bin: 'subl' },
     { id: 'xcode', name: 'Xcode', bin: 'xcodebuild' },
     { id: 'jetbrains', name: 'JetBrains', bin: 'idea' },
+    { id: 'claude-code', name: 'Claude Code', bin: 'claude' },
+    { id: 'opencode', name: 'OpenCode', bin: 'opencode' },
   ];
 
   for (const editor of editors) {
