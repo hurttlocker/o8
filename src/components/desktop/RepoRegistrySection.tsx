@@ -401,6 +401,7 @@ function RepoCard({
   onSaveSetup,
   onSelectBranch,
   agentsByBranch,
+  activePorts,
 }: {
   repo: RepoRegistryEntry;
   workspaceNotice: WorkspaceCreateResult | null;
@@ -410,6 +411,7 @@ function RepoCard({
   onSaveSetup: (repoId: string, setup: RepoSetupConfig) => Promise<void>;
   onSelectBranch?: (branch: string, repoPath: string) => void;
   agentsByBranch?: Map<string, BranchAgent[]>;
+  activePorts?: number[];
 }) {
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -617,6 +619,31 @@ function RepoCard({
         >
           {repo.name}
         </span>
+        {/* Running port indicator */}
+        {activePorts && activePorts.length > 0 ? (
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            padding: '1px 6px',
+            borderRadius: 999,
+            background: 'rgba(34,197,94,0.06)',
+            border: '1px solid rgba(34,197,94,0.12)',
+            flexShrink: 0,
+          }}>
+            <span style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: '#22c55e',
+              animation: 'agentCardPulse 2s ease-in-out infinite',
+            }} />
+            <span style={{
+              fontSize: 10, fontWeight: 600, color: '#16a34a',
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+            }}>
+              {activePorts.length === 1 ? `:${activePorts[0]}` : `${activePorts.length} ports`}
+            </span>
+          </span>
+        ) : null}
         <span
           style={{
             display: 'inline-flex',
@@ -1624,6 +1651,27 @@ export function RepoRegistrySection({
     return () => clearInterval(id);
   }, []);
 
+  // ── Port data for running indicators (#170) ──
+  const [portsByRepo, setPortsByRepo] = useState<Map<string, number[]>>(new Map());
+
+  useEffect(() => {
+    function fetchPorts() {
+      fetch('/api/panel/ports')
+        .then(r => r.json())
+        .then((data: { groups?: { repo: string; ports: number[] }[] }) => {
+          const map = new Map<string, number[]>();
+          for (const g of data.groups ?? []) {
+            map.set(g.repo, g.ports);
+          }
+          setPortsByRepo(map);
+        })
+        .catch(() => {});
+    }
+    fetchPorts();
+    const id = setInterval(fetchPorts, 10_000);
+    return () => clearInterval(id);
+  }, []);
+
   const resetAddModal = useCallback(() => {
     setAddOpen(false);
     setRepoPathInput('');
@@ -2036,6 +2084,7 @@ export function RepoRegistrySection({
                   // For now: could trigger file tree refresh for this branch
                 }}
                 agentsByBranch={agentBranchMap.get(repo.name)}
+                activePorts={portsByRepo.get(repo.name)}
               />
             ))
           ) : null}
