@@ -11,9 +11,11 @@ import {
   FolderOpen,
   GitBranch,
   MoreHorizontal,
+  Play,
   Plus,
   PlayCircle,
   Settings2,
+  Square,
   Trash2,
   X,
 } from 'lucide-react';
@@ -113,6 +115,8 @@ function normalizeSetupDraft(setup: RepoSetupConfig): RepoSetupConfig {
     envFiles,
     installCommand: setup.installCommand?.trim() || null,
     buildCommand: setup.buildCommand?.trim() || null,
+    devCommand: setup.devCommand?.trim() || null,
+    defaultPort: setup.defaultPort ?? null,
   };
 }
 
@@ -423,6 +427,9 @@ function RepoCard({
   const [newBranchWorktree, setNewBranchWorktree] = useState(false);
   const [newBranchCreating, setNewBranchCreating] = useState(false);
   const [newBranchError, setNewBranchError] = useState<string | null>(null);
+  const [devServerRunning, setDevServerRunning] = useState(false);
+  const [devServerStarting, setDevServerStarting] = useState(false);
+  const [devServerPort, setDevServerPort] = useState<number | null>(null);
 
   useEffect(() => {
     setDraftSetup(repo.setup);
@@ -438,6 +445,62 @@ function RepoCard({
       .catch(() => setBranches([]))
       .finally(() => setBranchesLoading(false));
   }, [expanded, repo.localPath]);
+
+  // Check dev server status on expand
+  useEffect(() => {
+    if (!expanded) return;
+    fetch('/api/panel/dev-server')
+      .then(r => r.json())
+      .then((data: { servers?: { id: string; cwd: string; port: number | null; alive: boolean }[] }) => {
+        const resolved = repo.localPath.replace(/^~/, process.env.HOME || '');
+        const srv = data.servers?.find(s => s.cwd === resolved || s.id === `dev-${repo.localPath}`);
+        if (srv?.alive) {
+          setDevServerRunning(true);
+          setDevServerPort(srv.port);
+        } else {
+          setDevServerRunning(false);
+          setDevServerPort(null);
+        }
+      })
+      .catch(() => {});
+  }, [expanded, repo.localPath]);
+
+  // Start dev server
+  const handleStartDevServer = useCallback(async () => {
+    const cmd = repo.setup.devCommand;
+    if (!cmd) return;
+    setDevServerStarting(true);
+    try {
+      const res = await fetch('/api/panel/dev-server', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repoPath: repo.localPath,
+          command: cmd,
+          port: repo.setup.defaultPort,
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setDevServerRunning(true);
+        setDevServerPort(data.port);
+      }
+    } catch { /* silent */ }
+    finally { setDevServerStarting(false); }
+  }, [repo.localPath, repo.setup.devCommand, repo.setup.defaultPort]);
+
+  // Stop dev server
+  const handleStopDevServer = useCallback(async () => {
+    try {
+      await fetch('/api/panel/dev-server', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoPath: repo.localPath }),
+      });
+      setDevServerRunning(false);
+      setDevServerPort(null);
+    } catch { /* silent */ }
+  }, [repo.localPath]);
 
   // Refresh branches
   const refreshBranches = useCallback(() => {
@@ -654,8 +717,8 @@ function RepoCard({
       {/* Expanded content */}
       {expanded ? (
         <div style={{ padding: '0 4px 8px 28px' }}>
-          {/* Primary action */}
-          <div style={{ marginBottom: 6 }}>
+          {/* Primary actions row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
             <button
               type="button"
               onClick={() => onLaunchAgent(repo)}
@@ -676,6 +739,56 @@ function RepoCard({
               <PlayCircle size={11} strokeWidth={2} />
               Launch agent
             </button>
+            {/* Dev server Run/Stop */}
+            {repo.setup.devCommand ? (
+              devServerRunning ? (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleStopDevServer(); }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '2px 8px',
+                    borderRadius: 6,
+                    border: '1px solid rgba(239,68,68,0.15)',
+                    background: 'rgba(239,68,68,0.05)',
+                    color: '#dc2626',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                  }}
+                >
+                  <Square size={8} strokeWidth={2.5} fill="#dc2626" />
+                  Stop{devServerPort ? ` :${devServerPort}` : ''}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleStartDevServer(); }}
+                  disabled={devServerStarting}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '2px 8px',
+                    borderRadius: 6,
+                    border: '1px solid rgba(34,197,94,0.15)',
+                    background: 'rgba(34,197,94,0.05)',
+                    color: '#16a34a',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    cursor: devServerStarting ? 'wait' : 'pointer',
+                    opacity: devServerStarting ? 0.6 : 1,
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                  }}
+                >
+                  <Play size={8} strokeWidth={2.5} fill="#16a34a" />
+                  {devServerStarting ? 'Starting…' : 'Run dev'}
+                </button>
+              )
+            ) : null}
           </div>
 
           {/* Workspace notice */}
@@ -1280,6 +1393,62 @@ function RepoCard({
               </div>
             </div>
           </label>
+
+          {/* Dev command */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+              Dev command
+            </div>
+            <input
+              value={draftSetup.devCommand ?? ''}
+              onChange={(e) => setDraftSetup(current => ({ ...current, devCommand: e.currentTarget.value || null }))}
+              placeholder="npm run dev"
+              style={{
+                width: '100%',
+                padding: '6px 8px',
+                borderRadius: 6,
+                border: '1px solid var(--t-btn-secondary-border)',
+                background: 'rgba(255,255,255,0.55)',
+                fontSize: 11,
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                outline: 'none',
+                color: 'var(--t-text)',
+              }}
+            />
+            <div style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
+              Starts the development server from the repo card.
+            </div>
+          </div>
+
+          {/* Default port */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+              Default port
+            </div>
+            <input
+              value={draftSetup.defaultPort ?? ''}
+              onChange={(e) => {
+                const val = e.currentTarget.value.trim();
+                setDraftSetup(current => ({ ...current, defaultPort: val ? parseInt(val, 10) || null : null }));
+              }}
+              placeholder="Auto-detect"
+              type="number"
+              style={{
+                width: 100,
+                padding: '6px 8px',
+                borderRadius: 6,
+                border: '1px solid var(--t-btn-secondary-border)',
+                background: 'rgba(255,255,255,0.55)',
+                fontSize: 11,
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                outline: 'none',
+                color: 'var(--t-text)',
+              }}
+            />
+            <div style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
+              Port for the preview pane. Leave blank to auto-detect from output.
+            </div>
+          </div>
 
           {saveError ? (
             <div
