@@ -1740,7 +1740,7 @@ button.workflow-file-item.workflow-file-item-active {
   z-index: 8;
   width: min(calc(100dvw - 16px), 422px);
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) auto;
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
   gap: calc(0.66rem - (var(--remodex-header-progress) * 0.1rem));
   align-items: stretch;
   min-width: 0;
