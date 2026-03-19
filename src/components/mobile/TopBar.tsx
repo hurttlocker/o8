@@ -100,8 +100,12 @@ export const TopBar = memo(function TopBar({
       data-visible={headerVisible ? 'true' : 'false'}
       data-picker-open={squadPickerOpen ? 'true' : 'false'}
     >
-      {/* First grid column spacer — connection dot is in the title area */}
-      <div />
+      {/* Hamburger menu — first grid column */}
+      <SpeedDialButton
+        activeScreen={activeScreen}
+        onNavigate={onNavigate}
+        approvalCount={pendingApprovalsCount}
+      />
 
       {/* Tappable title area — opens squad picker */}
       <div ref={pickerRef} style={{ minWidth: 0, flex: 1, position: 'relative' }}>
@@ -384,12 +388,6 @@ export const TopBar = memo(function TopBar({
         <SlidersHorizontal size={15} strokeWidth={2} />
       </button>
 
-      {/* Speed Dial — top-right navigation */}
-      <SpeedDialButton
-        activeScreen={activeScreen}
-        onNavigate={onNavigate}
-        approvalCount={pendingApprovalsCount}
-      />
     </header>
   );
 });
