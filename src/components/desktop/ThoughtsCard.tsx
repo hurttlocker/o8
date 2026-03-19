@@ -663,6 +663,11 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+        @keyframes compactionProgress {
+          0% { width: 10%; }
+          50% { width: 70%; }
+          100% { width: 95%; }
+        }
       `}</style>
 
       <div
@@ -1246,34 +1251,118 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                   )}
 
                   {/* Messages */}
-                  {chatMessages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      style={{
-                        alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                        maxWidth: '85%',
-                        padding: '8px 12px',
-                        borderRadius: msg.role === 'user' ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
-                        background: msg.role === 'user'
-                          ? 'rgba(37, 99, 235, 0.12)'
-                          : 'var(--t-panel-translucent)',
-                        border: msg.role === 'user'
-                          ? '1px solid rgba(37, 99, 235, 0.15)'
-                          : '1px solid var(--t-divider)',
-                        fontSize: 12,
-                        color: 'var(--t-text)',
-                        lineHeight: 1.5,
-                        letterSpacing: '-0.01em',
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
-                      }}
-                    >
-                      {msg.content}
+                  {chatMessages.map((msg) => {
+                    const isUser = msg.role === 'user';
+                    const isCompacting = !isUser && msg.content.toLowerCase().includes('compaction');
+                    return (
+                      <div
+                        key={msg.id}
+                        style={{
+                          alignSelf: isUser ? 'flex-end' : 'flex-start',
+                          maxWidth: '85%',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 3,
+                        }}
+                      >
+                        <div style={{
+                          padding: '8px 12px',
+                          borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+                          background: isUser
+                            ? 'rgba(37, 99, 235, 0.12)'
+                            : 'var(--t-panel-translucent)',
+                          border: isUser
+                            ? '1px solid rgba(37, 99, 235, 0.15)'
+                            : '1px solid var(--t-divider)',
+                          fontSize: 12,
+                          color: 'var(--t-text)',
+                          lineHeight: 1.5,
+                          letterSpacing: '-0.01em',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                        }}>
+                          {msg.content}
+                        </div>
+                        <span style={{
+                          fontSize: 9, color: 'var(--t-text-faint)',
+                          paddingLeft: 4, paddingRight: 4,
+                          alignSelf: isUser ? 'flex-end' : 'flex-start',
+                        }}>
+                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        {/* Compaction indicator */}
+                        {isCompacting && (
+                          <div style={{
+                            display: 'flex', alignItems: 'center', gap: 6,
+                            padding: '6px 10px',
+                            borderRadius: 8,
+                            background: 'rgba(245, 158, 11, 0.06)',
+                            border: '1px solid rgba(245, 158, 11, 0.12)',
+                            alignSelf: 'flex-start',
+                          }}>
+                            <div style={{
+                              width: 14, height: 14, borderRadius: '50%',
+                              border: '2px solid rgba(245, 158, 11, 0.3)',
+                              borderTopColor: '#f59e0b',
+                              animation: 'spin 1s linear infinite',
+                            }} />
+                            <span style={{
+                              fontSize: 10, fontWeight: 600, color: '#f59e0b',
+                            }}>
+                              Compacting context…
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Compaction banner — when agent is actively compacting */}
+                  {waitingForReply && chatMessages.length > 0 &&
+                    chatMessages[chatMessages.length - 1]?.content?.toLowerCase().includes('compact') && (
+                    <div style={{
+                      padding: '10px 12px',
+                      borderRadius: 10,
+                      background: 'rgba(245, 158, 11, 0.06)',
+                      border: '1px solid rgba(245, 158, 11, 0.15)',
+                      display: 'flex', flexDirection: 'column', gap: 6,
+                    }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        fontSize: 11, fontWeight: 700, color: '#f59e0b',
+                      }}>
+                        <div style={{
+                          width: 14, height: 14, borderRadius: '50%',
+                          border: '2px solid rgba(245, 158, 11, 0.3)',
+                          borderTopColor: '#f59e0b',
+                          animation: 'spin 1s linear infinite',
+                        }} />
+                        Compaction in progress
+                      </div>
+                      <div style={{
+                        fontSize: 10, color: 'var(--t-text-secondary)', lineHeight: 1.4,
+                      }}>
+                        Context is being compressed. Messages sent now will be queued and delivered after compaction completes.
+                      </div>
+                      {/* Progress bar */}
+                      <div style={{
+                        height: 3, borderRadius: 2,
+                        background: 'rgba(245, 158, 11, 0.15)',
+                        overflow: 'hidden',
+                      }}>
+                        <div style={{
+                          height: '100%', borderRadius: 2,
+                          background: '#f59e0b',
+                          width: '60%',
+                          animation: 'compactionProgress 2s ease-in-out infinite',
+                        }} />
+                      </div>
                     </div>
-                  ))}
+                  )}
 
                   {/* Typing indicator */}
-                  {waitingForReply && (
+                  {waitingForReply && !(chatMessages.length > 0 &&
+                    chatMessages[chatMessages.length - 1]?.content?.toLowerCase().includes('compact')) && (
                     <div style={{
                       alignSelf: 'flex-start',
                       padding: '8px 14px',
@@ -1400,9 +1489,16 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                       value={input}
                       onChange={(e) => setInput(e.target.value)}
                       onKeyDown={(e) => {
+                        // Up arrow: recall last user message
+                        if (e.key === 'ArrowUp' && !input.trim()) {
+                          e.preventDefault();
+                          const lastUserMsg = [...chatMessages].reverse().find(m => m.role === 'user');
+                          if (lastUserMsg) setInput(lastUserMsg.content);
+                          return;
+                        }
                         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleTaskSend(); }
                       }}
-                      placeholder={waitingForReply ? `${targetAgent.name} is thinking...` : `Message ${targetAgent.name}...`}
+                      placeholder={waitingForReply ? `${targetAgent.name} is thinking...` : `Message ${targetAgent.name}… (↑ for recent)`}
                       disabled={waitingForReply}
                       rows={1}
                       style={{
@@ -1425,6 +1521,22 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
                       onSubmit={handleTaskSend}
                       small
                     />
+                  </div>
+                  {/* Footer: model + context */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    paddingTop: 4, paddingLeft: 2,
+                    fontSize: 9, color: 'var(--t-text-faint)',
+                  }}>
+                    <span style={{
+                      width: 5, height: 5, borderRadius: '50%',
+                      background: targetAgent.color,
+                    }} />
+                    <span style={{ fontWeight: 600 }}>{targetAgent.name}</span>
+                    <span>·</span>
+                    <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                      claude-opus-4-6
+                    </span>
                   </div>
                 </div>
               </>
