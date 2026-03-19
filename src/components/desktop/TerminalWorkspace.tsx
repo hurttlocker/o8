@@ -528,38 +528,123 @@ function WorkspaceChatPane({ tab, onUpdateMessages }: {
     onUpdateMessages(tab.id, updated);
 
     try {
-      // Send to appropriate runtime
-      let endpoint = '/api/mobile/send';
+      let endpoint = '';
       let body: Record<string, unknown> = {};
 
-      if (tab.chatRuntime === 'openclaw') {
-        body = {
-          sessionKey: tab.chatSessionKey || 'agent:main:main',
-          message: text,
-        };
-      } else if (tab.chatRuntime === 'claude-code') {
-        endpoint = '/api/runtime/send';
-        body = { runtime: 'claude-code', message: text, sessionKey: tab.chatSessionKey };
+      if (tab.chatRuntime === 'claude-code') {
+        endpoint = '/api/claude-code/send';
+        body = { message: text, sessionId: tab.chatSessionKey };
+      } else if (tab.chatRuntime === 'codex') {
+        endpoint = '/api/codex/send';
+        body = { message: text, threadId: tab.chatSessionKey };
       } else {
-        endpoint = '/api/runtime/send';
-        body = { runtime: 'codex', message: text, sessionKey: tab.chatSessionKey };
+        // OpenClaw — use gateway send
+        endpoint = '/api/panel/chat/send';
+        body = { sessionKey: tab.chatSessionKey || 'agent:main:main', message: text };
       }
 
       setStreaming(true);
+
+      // Create placeholder assistant message for streaming
+      const assistantId = `msg-${Date.now()}-assistant`;
+      const assistantMsg: ChatMessage = {
+        id: assistantId,
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now(),
+      };
+      let withAssistant = [...updated, assistantMsg];
+      onUpdateMessages(tab.id, withAssistant);
+
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = await res.json();
 
-      const assistantMsg: ChatMessage = {
-        id: `msg-${Date.now()}-assistant`,
-        role: 'assistant',
-        content: data.response ?? data.message ?? data.text ?? 'No response',
-        timestamp: Date.now(),
-      };
-      onUpdateMessages(tab.id, [...updated, assistantMsg]);
+      if (!res.ok) {
+        const errText = await res.text();
+        withAssistant = withAssistant.map(m =>
+          m.id === assistantId ? { ...m, content: `Error ${res.status}: ${errText}` } : m
+        );
+        onUpdateMessages(tab.id, withAssistant);
+        return;
+      }
+
+      if (res.body) {
+        // Stream SSE response
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let accumulated = '';
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const event = JSON.parse(line.slice(6)) as {
+                type: string;
+                text?: string;
+                name?: string;
+                sessionId?: string;
+              };
+
+              if (event.type === 'delta' && event.text) {
+                accumulated += event.text;
+                withAssistant = withAssistant.map(m =>
+                  m.id === assistantId ? { ...m, content: accumulated } : m
+                );
+                onUpdateMessages(tab.id, withAssistant);
+              }
+
+              if (event.type === 'tool' && event.name) {
+                accumulated += `\n🔧 *${event.name}*\n`;
+                withAssistant = withAssistant.map(m =>
+                  m.id === assistantId ? { ...m, content: accumulated } : m
+                );
+                onUpdateMessages(tab.id, withAssistant);
+              }
+
+              // Capture session ID for conversation continuity
+              if (event.sessionId && tab.chatRuntime === 'claude-code') {
+                tab.chatSessionKey = event.sessionId;
+              }
+
+              if (event.type === 'done' || event.type === 'close') {
+                if (event.text && !accumulated) {
+                  accumulated = event.text;
+                  withAssistant = withAssistant.map(m =>
+                    m.id === assistantId ? { ...m, content: accumulated } : m
+                  );
+                  onUpdateMessages(tab.id, withAssistant);
+                }
+              }
+            } catch { /* skip malformed lines */ }
+          }
+        }
+
+        // If nothing accumulated, show fallback
+        if (!accumulated) {
+          withAssistant = withAssistant.map(m =>
+            m.id === assistantId ? { ...m, content: 'No response received' } : m
+          );
+          onUpdateMessages(tab.id, withAssistant);
+        }
+      } else {
+        // Non-streaming fallback
+        const data = await res.json();
+        withAssistant = withAssistant.map(m =>
+          m.id === assistantId ? { ...m, content: data.response ?? data.message ?? data.text ?? 'No response' } : m
+        );
+        onUpdateMessages(tab.id, withAssistant);
+      }
     } catch (err) {
       const errorMsg: ChatMessage = {
         id: `msg-${Date.now()}-error`,
@@ -867,7 +952,7 @@ function formatElapsed(ms: number): string {
 
 /** Live activity dot + elapsed time for a tab */
 function ActivityIndicator({ tab }: { tab: TerminalTab }) {
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => tab.createdAt);
 
   // Tick every second for elapsed time
   useEffect(() => {
