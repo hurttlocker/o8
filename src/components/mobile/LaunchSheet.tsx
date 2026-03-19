@@ -11,7 +11,7 @@ interface RepoEntry {
 interface LaunchSheetProps {
   open: boolean;
   onClose: () => void;
-  onLaunched: () => void;
+  onLaunched: (surfaceId?: string) => void;
 }
 
 const RUNTIMES = [
@@ -123,12 +123,12 @@ export const LaunchSheet = memo(function LaunchSheet({
         return;
       }
 
-      // Success — reset and close
+      // Success — reset and navigate to new agent
       setTask('');
       setBranchMode('main');
       setNewBranch('');
       setLaunching(false);
-      onLaunched();
+      onLaunched(result.surfaceId);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Launch failed');
