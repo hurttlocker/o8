@@ -367,6 +367,12 @@ function SetupModeButton({
   );
 }
 
+interface BranchAgent {
+  name: string;
+  sessionKey: string;
+  color: string;
+}
+
 interface BranchInfo {
   name: string;
   current: boolean;
@@ -390,6 +396,7 @@ function RepoCard({
   onRemove,
   onSaveSetup,
   onSelectBranch,
+  agentsByBranch,
 }: {
   repo: RepoRegistryEntry;
   workspaceNotice: WorkspaceCreateResult | null;
@@ -398,6 +405,7 @@ function RepoCard({
   onRemove: (repo: RepoRegistryEntry) => void;
   onSaveSetup: (repoId: string, setup: RepoSetupConfig) => Promise<void>;
   onSelectBranch?: (branch: string, repoPath: string) => void;
+  agentsByBranch?: Map<string, BranchAgent[]>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -748,6 +756,33 @@ function RepoCard({
                         current
                       </span>
                     ) : null}
+                    {/* Agent indicators */}
+                    {agentsByBranch?.get(branch.name)?.map((agent) => (
+                      <span
+                        key={agent.sessionKey}
+                        title={agent.name}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 3,
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                          background: `${agent.color}08`,
+                          border: `1px solid ${agent.color}18`,
+                          fontSize: 9,
+                          fontWeight: 600,
+                          color: agent.color,
+                          flexShrink: 0,
+                        }}
+                      >
+                        <span style={{
+                          width: 5, height: 5, borderRadius: '50%',
+                          background: agent.color,
+                          flexShrink: 0,
+                        }} />
+                        {agent.name}
+                      </span>
+                    ))}
                     {/* Worktree badge */}
                     {branch.isWorktree && !branch.current ? (
                       <span style={{
@@ -1379,6 +1414,47 @@ export function RepoRegistrySection({
     void loadRepos();
   }, [loadRepos]);
 
+  // ── Agent ↔ Branch association (#168) ──
+  const [agentBranchMap, setAgentBranchMap] = useState<Map<string, Map<string, BranchAgent[]>>>(new Map());
+
+  useEffect(() => {
+    function fetchAgentBranches() {
+      fetch('/api/panel/workspaces')
+        .then(r => r.json())
+        .then((data: { workspaces?: { repo: string; branch: string; agentName: string; sessionKey: string; agentStatus: string }[] }) => {
+          const map = new Map<string, Map<string, BranchAgent[]>>();
+          const AGENT_COLORS: Record<string, string> = {
+            'Mister': '#111827',
+            'Niot': '#2563eb',
+            'Hawk': '#f59e0b',
+          };
+          for (const ws of data.workspaces ?? []) {
+            if (!ws.branch || ws.branch.startsWith('surface/')) continue;
+            const repoKey = ws.repo;
+            if (!map.has(repoKey)) map.set(repoKey, new Map());
+            const branchMap = map.get(repoKey)!;
+            if (!branchMap.has(ws.branch)) branchMap.set(ws.branch, []);
+            // Derive agent display name
+            const agentName = ws.agentName.split(' ')[0] || ws.agentName;
+            const isCodex = agentName.toLowerCase().includes('codex');
+            const isClaude = agentName.toLowerCase().includes('claude');
+            const displayName = isCodex ? 'Codex' : isClaude ? 'Claude Code' : agentName;
+            const color = AGENT_COLORS[displayName] ?? (isCodex ? '#10b981' : isClaude ? '#8b5cf6' : '#6b7280');
+            // Deduplicate by session key
+            const existing = branchMap.get(ws.branch)!;
+            if (!existing.some(a => a.sessionKey === ws.sessionKey)) {
+              existing.push({ name: displayName, sessionKey: ws.sessionKey, color });
+            }
+          }
+          setAgentBranchMap(map);
+        })
+        .catch(() => {});
+    }
+    fetchAgentBranches();
+    const id = setInterval(fetchAgentBranches, 30_000);
+    return () => clearInterval(id);
+  }, []);
+
   const resetAddModal = useCallback(() => {
     setAddOpen(false);
     setRepoPathInput('');
@@ -1790,6 +1866,7 @@ export function RepoRegistrySection({
                   // Future: switch conversation context to agent on this branch
                   // For now: could trigger file tree refresh for this branch
                 }}
+                agentsByBranch={agentBranchMap.get(repo.name)}
               />
             ))
           ) : null}

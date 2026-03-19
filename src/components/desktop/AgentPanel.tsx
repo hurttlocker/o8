@@ -24,6 +24,7 @@ import {
   FileText,
   Folder,
   FolderOpen,
+  GitBranch,
   GitCommit,
   GitPullRequest,
   Globe,
@@ -598,14 +599,19 @@ const AgentCard = memo(function AgentCard({
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2, flexWrap: 'wrap' }}>
                     {modelAttribution}
-                    {branch && (
+                    {branch && !branch.startsWith('surface/') && (
                       <>
                         <span style={{ fontSize: 9, color: 'var(--t-text-faint)' }}>·</span>
                         <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 3,
                           fontSize: 10, color: 'var(--t-text-secondary)',
                           fontFamily: 'SF Mono, Menlo, monospace',
                           maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          padding: '1px 5px', borderRadius: 4,
+                          background: 'rgba(37,99,235,0.04)',
+                          border: '1px solid rgba(37,99,235,0.08)',
                         }}>
+                          <GitBranch size={9} strokeWidth={2} style={{ flexShrink: 0 }} />
                           {branch}
                         </span>
                       </>

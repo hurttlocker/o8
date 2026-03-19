@@ -77,6 +77,29 @@ function resolveWorkspacePath(workspace: string): string {
   return workspace.replace(/^~/, process.env.HOME || '/Users/marquisehurtt');
 }
 
+// Resolve current git branch for a path
+const branchCache = new Map<string, { branch: string; ts: number }>();
+const BRANCH_CACHE_TTL = 10_000;
+
+function resolveGitBranch(repoPath: string): string {
+  const now = Date.now();
+  const cached = branchCache.get(repoPath);
+  if (cached && now - cached.ts < BRANCH_CACHE_TTL) return cached.branch;
+
+  try {
+    const { execSync } = require('child_process');
+    const resolved = resolveWorkspacePath(repoPath);
+    const branch = execSync(`git -C "${resolved}" branch --show-current 2>/dev/null`, {
+      encoding: 'utf-8',
+      timeout: 3000,
+    }).trim() || 'main';
+    branchCache.set(repoPath, { branch, ts: now });
+    return branch;
+  } catch {
+    return 'main';
+  }
+}
+
 // Cache to avoid re-running git on every poll (30s TTL)
 const diffCache = new Map<string, { data: { additions: number; deletions: number; changedFiles: number } | null; ts: number }>();
 const DIFF_CACHE_TTL = 30_000;
@@ -199,8 +222,14 @@ export async function GET() {
       }
       if (!repoName) continue;
 
-      // Try to match PR by branch
-      const branchName = s.branch.replace('surface/', '');
+      // Resolve real git branch for OpenClaw agents with known repos
+      let branchName = s.branch.replace(/^surface\//, '');
+      const activeRepo = getAgentActiveRepo(s.sessionKey);
+      // If agent has a known active repo, always resolve the real git branch
+      // (OpenClaw surface branches like "current-q-chat", "discord-channel" aren't git branches)
+      if (activeRepo) {
+        branchName = resolveGitBranch(activeRepo.path);
+      }
       const pr = prsByBranch.get(`${repoName}:${branchName}`) || null;
       const ghRepo = ghOwnerRepo(repoName);
 
@@ -222,7 +251,6 @@ export async function GET() {
       // For agents without a PR, get local diff stats
       // OpenClaw agents: use their active repo, not clawd workspace
       let diffWorkspace = s.workspace;
-      const activeRepo = getAgentActiveRepo(s.sessionKey);
       if (activeRepo) {
         diffWorkspace = activeRepo.path;
         if (!repoName || repoName === 'clawd') repoName = activeRepo.repo;
