@@ -130,35 +130,37 @@ export const SpeedDialButton = memo(function SpeedDialButton({
         )}
       </button>
 
-      {/* Frosted overlay behind menu */}
-      {open && (
-        <div
-          onClick={() => setOpen(false)}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(0,122,255,0.03)',
-            backdropFilter: 'blur(12px) saturate(1.4)',
-            WebkitBackdropFilter: 'blur(12px) saturate(1.4)',
-            zIndex: 9998,
-            animation: 'menuFrostIn 200ms ease',
-          }}
-        />
-      )}
-
-      {/* Floating pills */}
+      {/* Frosted overlay + floating pills — FIXED to escape stacking context */}
       {open && (
         <div style={{
-          position: 'absolute',
-          top: '100%',
-          left: 0,
-          marginTop: 10,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'flex-start',
-          gap: 6,
-          zIndex: 9999,
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9998,
         }}>
+          {/* Frost backdrop */}
+          <div
+            onClick={() => setOpen(false)}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'rgba(0,122,255,0.03)',
+              backdropFilter: 'blur(12px) saturate(1.4)',
+              WebkitBackdropFilter: 'blur(12px) saturate(1.4)',
+              animation: 'menuFrostIn 200ms ease',
+            }}
+          />
+
+          {/* Floating pills — positioned from top-left */}
+          <div style={{
+            position: 'absolute',
+            top: 'calc(env(safe-area-inset-top, 0px) + 52px)',
+            left: 14,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
+            gap: 6,
+            zIndex: 9999,
+          }}>
           {MENU_ITEMS.map((item, index) => {
             const isActive = item.screen === activeScreen;
             return (
@@ -233,6 +235,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
               </button>
             );
           })}
+          </div>
         </div>
       )}
 
