@@ -504,6 +504,44 @@ function RepoCard({
     } catch { /* silent */ }
   }, [repo.localPath]);
 
+  // ── Branch checkout (#172) ──
+  const [checkoutTarget, setCheckoutTarget] = useState<string | null>(null);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [checkoutDirty, setCheckoutDirty] = useState<{ files: string[]; fileCount: number } | null>(null);
+
+  const handleCheckout = useCallback(async (branch: string, opts?: { stash?: boolean; force?: boolean }) => {
+    if (branch === branches.find(b => b.current)?.name) return; // Already on this branch
+    setCheckoutBusy(true);
+    setCheckoutDirty(null);
+    try {
+      const res = await fetch('/api/panel/branches/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repoPath: repo.localPath,
+          branch,
+          stash: opts?.stash,
+          force: opts?.force,
+        }),
+      });
+      const data = await res.json();
+      if (res.status === 409 && data.dirty) {
+        setCheckoutTarget(branch);
+        setCheckoutDirty({ files: data.files, fileCount: data.fileCount });
+        return;
+      }
+      if (res.ok) {
+        // Refresh branches to show new current
+        fetch(`/api/panel/branches?path=${encodeURIComponent(repo.localPath)}`)
+          .then(r => r.json())
+          .then(d => setBranches(d.branches ?? []))
+          .catch(() => {});
+        setCheckoutTarget(null);
+      }
+    } catch { /* silent */ }
+    finally { setCheckoutBusy(false); }
+  }, [branches, repo.localPath]);
+
   // Refresh branches
   const refreshBranches = useCallback(() => {
     fetch(`/api/panel/branches?path=${encodeURIComponent(repo.localPath)}`)
@@ -847,14 +885,18 @@ function RepoCard({
                 {branches.map((branch) => (
                   <div key={branch.name}>
                   <div
-                    onClick={() => onSelectBranch?.(branch.name, repo.localPath)}
+                    onClick={() => {
+                      if (!branch.current && !checkoutBusy) {
+                        handleCheckout(branch.name);
+                      }
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
                       padding: '5px 6px',
                       borderRadius: 8,
-                      cursor: 'pointer',
+                      cursor: branch.current ? 'default' : checkoutBusy ? 'wait' : 'pointer',
                       transition: 'background 120ms ease',
                     }}
                     onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(37,99,235,0.04)'; }}
@@ -1204,6 +1246,91 @@ function RepoCard({
               New branch
             </button>
           )}
+
+          {/* Dirty check dialog — appears when checkout blocked by uncommitted changes */}
+          {checkoutDirty && checkoutTarget ? (
+            <div style={{
+              margin: '6px 0',
+              padding: 10,
+              borderRadius: 10,
+              background: 'rgba(245,158,11,0.04)',
+              border: '1px solid rgba(245,158,11,0.12)',
+            }}>
+              <div style={{
+                fontSize: 11, fontWeight: 600, color: '#b45309',
+                marginBottom: 6,
+              }}>
+                {checkoutDirty.fileCount} uncommitted change{checkoutDirty.fileCount === 1 ? '' : 's'}
+              </div>
+              <div style={{
+                fontSize: 10, color: 'var(--t-text-secondary)',
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                marginBottom: 8,
+                maxHeight: 60,
+                overflow: 'auto',
+                lineHeight: 1.5,
+              }}>
+                {checkoutDirty.files.map((f, i) => (
+                  <div key={i}>{f}</div>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => handleCheckout(checkoutTarget, { stash: true })}
+                  disabled={checkoutBusy}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    border: '1px solid rgba(37,99,235,0.15)',
+                    background: 'rgba(37,99,235,0.06)',
+                    color: '#2563eb',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                  }}
+                >
+                  Stash & switch
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCheckout(checkoutTarget, { force: true })}
+                  disabled={checkoutBusy}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    border: '1px solid rgba(239,68,68,0.15)',
+                    background: 'rgba(239,68,68,0.04)',
+                    color: '#dc2626',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                  }}
+                >
+                  Force
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setCheckoutTarget(null); setCheckoutDirty(null); }}
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    border: '1px solid var(--t-btn-secondary-border)',
+                    background: 'transparent',
+                    color: 'var(--t-text-secondary)',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {/* Stale branch summary */}
           {(() => {
