@@ -36,6 +36,7 @@ const TokenUsageSummary = dynamic(() => import('./mobile/TokenUsageSummary').the
 const MobileTerminal = dynamic(() => import('./mobile/MobileTerminal').then((m) => ({ default: m.MobileTerminal })), { ssr: false, ...shimmerFallback });
 const WorktreeActions = dynamic(() => import('./mobile/WorktreeActions').then((m) => ({ default: m.WorktreeActions })), { ssr: false, ...shimmerFallback });
 const FleetView = dynamic(() => import('./mobile/FleetView').then((m) => ({ default: m.FleetView })), { ssr: false, ...shimmerFallback });
+const LaunchSheet = dynamic(() => import('./mobile/LaunchSheet').then((m) => ({ default: m.LaunchSheet })), { ssr: false });
 
 // Cortex memory surfaces (#78-#85) — typed via explicit generic param
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -160,6 +161,8 @@ function MobileRemoteShellInner({
     cortexGraphOpen, setCortexGraphOpen,
     // cortexContextEnabled/Block removed — recall moved to ComposeBar
   } = state;
+
+  const [launchOpen, setLaunchOpen] = useState(false);
 
   // Lock body scroll when diff overlay is open
   useEffect(() => {
@@ -363,6 +366,7 @@ function MobileRemoteShellInner({
                 setActiveView('squad');
               }}
               onBack={() => setActiveView('squad')}
+              onLaunch={() => setLaunchOpen(true)}
             />
           ) : null}
           {activeView === 'costs' ? (
@@ -636,6 +640,14 @@ function MobileRemoteShellInner({
         onExpandMedia={(media) => { setSessionInfoOpen(false); setExpandedMedia(media); }}
       />
       {/* SpeedDial now lives in TopBar — no more FAB */}
+      <LaunchSheet
+        open={launchOpen}
+        onClose={() => setLaunchOpen(false)}
+        onLaunched={() => {
+          setLaunchOpen(false);
+          refreshInbox();
+        }}
+      />
     </div>
   );
 }

@@ -8,6 +8,7 @@ interface FleetViewProps {
   snapshot: MobileInboxSnapshot;
   onAgentSelect: (sessionKey: string) => void;
   onBack: () => void;
+  onLaunch: () => void;
 }
 
 function formatRelativeTime(isoDate: string): string {
@@ -197,6 +198,7 @@ export const FleetView = memo(function FleetView({
   snapshot,
   onAgentSelect,
   onBack,
+  onLaunch,
 }: FleetViewProps) {
   const { running, idle, done } = useMemo(() => {
     const r: AgentSummary[] = [];
@@ -247,25 +249,52 @@ export const FleetView = memo(function FleetView({
             {totalAgents} agent{totalAgents !== 1 ? 's' : ''} · {totalRunning} running
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onBack}
-          style={{
-            padding: '6px 14px',
-            borderRadius: 10,
-            background: 'rgba(0,122,255,0.08)',
-            backdropFilter: 'blur(20px)',
-            WebkitBackdropFilter: 'blur(20px)',
-            border: '1px solid rgba(0,122,255,0.12)',
-            color: '#007aff',
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: 'pointer',
-            WebkitTapHighlightColor: 'transparent',
-          }}
-        >
-          Done
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            type="button"
+            onClick={onLaunch}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 10,
+              background: '#007aff',
+              border: 'none',
+              color: '#fff',
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Launch
+          </button>
+          <button
+            type="button"
+            onClick={onBack}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 10,
+              background: 'rgba(0,122,255,0.08)',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              border: '1px solid rgba(0,122,255,0.12)',
+              color: '#007aff',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            Done
+          </button>
+        </div>
       </div>
 
       {/* Summary cards row */}
