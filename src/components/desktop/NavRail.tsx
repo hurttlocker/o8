@@ -337,66 +337,63 @@ function PortsFooter({ expanded, onPortPreview }: { expanded: boolean; onPortPre
       </div>
 
       {/* Port groups */}
-      {groups.map((group) => (
-        <div key={group.repo} style={{ padding: '0 12px', overflow: 'hidden' }}>
-          {/* Repo label (only when expanded) */}
-          <motion.div
-            initial={false}
-            animate={{ opacity: expanded ? 1 : 0, height: expanded ? 'auto' : 0 }}
-            transition={{ duration: 0.12 }}
+      {expanded ? (
+        /* Expanded: full port pills grouped by repo */
+        groups.map((group) => (
+          <div key={group.repo} style={{ padding: '0 12px', overflow: 'hidden' }}>
+            <div style={{
+              fontSize: 9, fontWeight: 600, color: 'var(--t-text-faint)',
+              textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 2,
+            }}>
+              {group.repo}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+              {group.ports.map((port) => (
+                <button
+                  key={port}
+                  type="button"
+                  onClick={() => {
+                    const url = `http://localhost:${port}`;
+                    onPortPreview ? onPortPreview(port, url, group.repo) : window.open(url, '_blank');
+                  }}
+                  title={`Preview localhost:${port}`}
+                  style={{
+                    padding: '2px 6px', borderRadius: 4,
+                    border: '1px solid rgba(34,197,94,0.15)',
+                    background: 'rgba(34,197,94,0.06)',
+                    color: '#16a34a', fontSize: 10, fontWeight: 600,
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    cursor: 'pointer', transition: 'background 120ms ease',
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(34,197,94,0.12)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(34,197,94,0.06)'; }}
+                >
+                  {port}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))
+      ) : (
+        /* Collapsed: single green count badge */
+        <div style={{
+          display: 'flex', justifyContent: 'center', padding: '2px 0',
+        }}>
+          <div
+            title={groups.flatMap(g => g.ports.map(p => `${g.repo}: ${p}`)).join('\n')}
             style={{
-              fontSize: 9,
-              fontWeight: 600,
-              color: 'var(--t-text-faint)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-              marginBottom: 2,
-              overflow: 'hidden',
+              width: 22, height: 22, borderRadius: 6,
+              background: 'rgba(34,197,94,0.1)',
+              border: '1px solid rgba(34,197,94,0.2)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 700, color: '#16a34a',
+              fontFamily: '"SF Mono", ui-monospace, monospace',
             }}
           >
-            {group.repo}
-          </motion.div>
-
-          {/* Port pills */}
-          <div style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 3,
-          }}>
-            {group.ports.map((port) => (
-              <button
-                key={port}
-                type="button"
-                onClick={() => {
-                  const url = `http://localhost:${port}`;
-                  if (onPortPreview) {
-                    onPortPreview(port, url, group.repo);
-                  } else {
-                    window.open(url, '_blank');
-                  }
-                }}
-                title={`Preview localhost:${port}`}
-                style={{
-                  padding: '2px 6px',
-                  borderRadius: 4,
-                  border: '1px solid rgba(34,197,94,0.15)',
-                  background: 'rgba(34,197,94,0.06)',
-                  color: '#16a34a',
-                  fontSize: 10,
-                  fontWeight: 600,
-                  fontFamily: '"SF Mono", ui-monospace, monospace',
-                  cursor: 'pointer',
-                  transition: 'background 120ms ease',
-                }}
-                onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(34,197,94,0.12)'; }}
-                onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(34,197,94,0.06)'; }}
-              >
-                {port}
-              </button>
-            ))}
+            {total}
           </div>
         </div>
-      ))}
+      )}
     </div>
   );
 }
