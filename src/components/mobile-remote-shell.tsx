@@ -38,6 +38,7 @@ const WorktreeActions = dynamic(() => import('./mobile/WorktreeActions').then((m
 const FleetView = dynamic(() => import('./mobile/FleetView').then((m) => ({ default: m.FleetView })), { ssr: false, ...shimmerFallback });
 const LaunchSheet = dynamic(() => import('./mobile/LaunchSheet').then((m) => ({ default: m.LaunchSheet })), { ssr: false });
 const ActivityFeed = dynamic(() => import('./mobile/ActivityFeed').then((m) => ({ default: m.ActivityFeed })), { ssr: false, ...shimmerFallback });
+const PRReviewSheet = dynamic(() => import('./mobile/PRReviewSheet').then((m) => ({ default: m.PRReviewSheet })), { ssr: false });
 
 // Cortex memory surfaces (#78-#85) — typed via explicit generic param
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,6 +59,7 @@ import { useMobilePolling } from './mobile/hooks/useMobilePolling';
 import { useMobileScroll } from './mobile/hooks/useMobileScroll';
 import { useMobileStreaming } from './mobile/hooks/useMobileStreaming';
 import { useMobileActions } from './mobile/hooks/useMobileActions';
+import { NotificationBanner, useNotifications } from './mobile/NotificationBanner';
 
 export function MobileRemoteShell(props: MobileRemoteShellProps) {
   return (
@@ -164,6 +166,10 @@ function MobileRemoteShellInner({
   } = state;
 
   const [launchOpen, setLaunchOpen] = useState(false);
+  const [prReviewOpen, setPrReviewOpen] = useState(false);
+  const [prReviewNumber, setPrReviewNumber] = useState<number | null>(null);
+  const [prReviewRepo, setPrReviewRepo] = useState('');
+  const { notifications, dismiss: dismissNotification, unreadCount } = useNotifications(snapshot);
 
   // Lock body scroll when diff overlay is open
   useEffect(() => {
@@ -663,7 +669,31 @@ function MobileRemoteShellInner({
         onCopyKey={actions.handleCopySelectedSessionKey}
         onExpandMedia={(media) => { setSessionInfoOpen(false); setExpandedMedia(media); }}
       />
+      {/* Notification banners — iOS-style toast from top */}
+      <NotificationBanner
+        notifications={notifications}
+        onDismiss={dismissNotification}
+        onTap={(n) => {
+          dismissNotification(n.id);
+          if (n.sessionKey) {
+            actions.handleSessionFocus(n.sessionKey);
+            setActiveView('squad');
+          } else {
+            setActiveView('activity');
+          }
+        }}
+      />
       {/* SpeedDial now lives in TopBar — no more FAB */}
+      <PRReviewSheet
+        open={prReviewOpen}
+        repoPath={prReviewRepo}
+        prNumber={prReviewNumber}
+        onClose={() => setPrReviewOpen(false)}
+        onViewDiff={() => {
+          setPrReviewOpen(false);
+          actions.openDiffViewer();
+        }}
+      />
       <LaunchSheet
         open={launchOpen}
         onClose={() => setLaunchOpen(false)}
