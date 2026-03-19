@@ -80,6 +80,11 @@ function IconSettings({ size = 18 }: { size?: number }) {
 interface TitleBarProps {
   onSettingsClick?: () => void;
   renderSearch?: (onClose: () => void) => React.ReactNode;
+  globalRepo?: string | null;
+  globalRepoBranch?: string;
+  repoList?: string[];
+  repoDisplayNames?: Record<string, string>;
+  onRepoChange?: (repo: string) => void;
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
   bottomPanelVisible?: boolean;
@@ -166,6 +171,11 @@ function TitleBarSep() {
 export function TitleBar({
   onSettingsClick,
   renderSearch,
+  globalRepo,
+  globalRepoBranch = 'main',
+  repoList = [],
+  repoDisplayNames = {},
+  onRepoChange,
   sidebarVisible = true,
   onToggleSidebar,
   bottomPanelVisible = true,
@@ -175,6 +185,7 @@ export function TitleBar({
   wsStatus = 'disconnected',
 }: TitleBarProps) {
   const [searchExpanded, setSearchExpanded] = useState(false);
+  const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const headerRef = useRef<HTMLElement>(null);
 
   // Window drag — Tauri v2 startDragging API
@@ -271,12 +282,118 @@ export function TitleBar({
         />
       </div>
 
-      {/* ── Center — Search ── */}
+      {/* ── Center — Repo Picker + Search ── */}
       <div style={{
         flex: 1,
         display: 'flex',
+        alignItems: 'center',
         justifyContent: 'center',
+        gap: 6,
       }}>
+        {/* Repo picker pill */}
+        {globalRepo ? (
+          <div style={{ position: 'relative', flexShrink: 0, ['WebkitAppRegion' as string]: 'no-drag' }} data-no-drag="">
+            <button
+              type="button"
+              onClick={() => setRepoPickerOpen(v => !v)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '5px 10px',
+                borderRadius: 8,
+                border: '1px solid var(--t-search-border)',
+                background: 'var(--t-search-bg)',
+                backdropFilter: 'blur(12px)',
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                transition: 'background 150ms ease, border-color 150ms ease',
+                whiteSpace: 'nowrap',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'var(--t-hover)';
+                e.currentTarget.style.borderColor = 'var(--t-input-border)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'var(--t-search-bg)';
+                e.currentTarget.style.borderColor = 'var(--t-search-border)';
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" fill="currentColor" opacity="0.4" />
+              </svg>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text)' }}>
+                {repoDisplayNames[globalRepo] ?? globalRepo.split('/').pop()}
+              </span>
+              <span style={{
+                fontSize: 10,
+                color: 'var(--t-text-muted)',
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                padding: '1px 5px',
+                borderRadius: 4,
+                background: 'var(--t-kbd-bg, rgba(0,0,0,0.04))',
+              }}>
+                {globalRepoBranch}
+              </span>
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4 }}>
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+
+            {/* Repo picker dropdown */}
+            {repoPickerOpen ? (
+              <>
+                <div onClick={() => setRepoPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 199 }} />
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  marginTop: 6,
+                  minWidth: 200,
+                  borderRadius: 10,
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  background: 'rgba(255,255,255,0.85)',
+                  backdropFilter: 'blur(24px) saturate(1.8)',
+                  WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
+                  boxShadow: '0 8px 32px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.08)',
+                  overflow: 'hidden',
+                  zIndex: 200,
+                }}>
+                  {repoList.map((repo) => (
+                    <button
+                      key={repo}
+                      type="button"
+                      onClick={() => { onRepoChange?.(repo); setRepoPickerOpen(false); }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        width: '100%',
+                        padding: '8px 12px',
+                        border: 'none',
+                        background: globalRepo === repo ? 'rgba(239,68,68,0.06)' : 'transparent',
+                        color: globalRepo === repo ? '#dc2626' : 'var(--t-text)',
+                        fontSize: 12,
+                        fontWeight: globalRepo === repo ? 600 : 400,
+                        cursor: 'pointer',
+                        fontFamily: '-apple-system, system-ui, sans-serif',
+                        textAlign: 'left',
+                      }}
+                      onMouseEnter={(e) => { if (globalRepo !== repo) (e.currentTarget).style.background = 'rgba(0,0,0,0.03)'; }}
+                      onMouseLeave={(e) => { (e.currentTarget).style.background = globalRepo === repo ? 'rgba(239,68,68,0.06)' : 'transparent'; }}
+                    >
+                      <span style={{ width: 14, textAlign: 'center', fontSize: 12, color: globalRepo === repo ? '#dc2626' : 'transparent' }}>✓</span>
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" fill="currentColor" opacity="0.4" />
+                      </svg>
+                      {repoDisplayNames[repo] ?? repo.split('/').pop()}
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
+          </div>
+        ) : null}
         <div style={{
           width: '100%',
           maxWidth: searchExpanded ? 640 : 280,

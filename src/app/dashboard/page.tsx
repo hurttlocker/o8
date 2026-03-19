@@ -60,6 +60,64 @@ function DashboardInner() {
   const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
   const [thoughtsOpen, setThoughtsOpen] = useState(false);
   const [wsStatus, setWsStatus] = useState<WsConnectionState>('disconnected');
+
+  // Global repo state (shared between TitleBar and AgentPanel)
+  const [globalRepo, setGlobalRepo] = useState<string | null>(null);
+  const [globalRepoBranch, setGlobalRepoBranch] = useState<string>('main');
+  const [globalRepoList, setGlobalRepoList] = useState<string[]>([]);
+  const REPO_DISPLAY: Record<string, string> = {
+    'hurttlocker/cortex-ide': 'Cortex IDE',
+    'hurttlocker/cortex': 'Cortex',
+    'hurttlocker/sleeping-beauties': 'Copy Trade',
+  };
+
+  // Fetch repos for picker on mount
+  useEffect(() => {
+    fetch('/api/panel/repos')
+      .then(r => r.json())
+      .then(data => {
+        const repos = (data.repos ?? []).map((r: { remoteUrl?: string }) => {
+          const url = (r.remoteUrl ?? '').replace(/\.git$/, '');
+          const parts = url.split('/');
+          return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : null;
+        }).filter(Boolean) as string[];
+        const list = repos.length > 0 ? repos : Object.keys(REPO_DISPLAY);
+        setGlobalRepoList(list);
+        // Auto-select first or restore from sessionStorage
+        const saved = typeof window !== 'undefined' ? sessionStorage.getItem('cortex-global-repo') : null;
+        if (saved && list.includes(saved)) setGlobalRepo(saved);
+        else if (list.length > 0) setGlobalRepo(list[0]);
+      })
+      .catch(() => {
+        const list = Object.keys(REPO_DISPLAY);
+        setGlobalRepoList(list);
+        if (list.length > 0) setGlobalRepo(list[0]);
+      });
+  }, []);
+
+  // Fetch branch when globalRepo changes
+  useEffect(() => {
+    if (!globalRepo) return;
+    if (typeof window !== 'undefined') sessionStorage.setItem('cortex-global-repo', globalRepo);
+    fetch('/api/panel/repos')
+      .then(r => r.json())
+      .then(data => {
+        const repo = (data.repos ?? []).find((r: { remoteUrl?: string }) => {
+          const url = (r.remoteUrl ?? '').replace(/\.git$/, '');
+          return url.includes(globalRepo);
+        });
+        if (repo?.localPath) {
+          fetch(`/api/panel/branches?path=${encodeURIComponent(repo.localPath)}`)
+            .then(r => r.json())
+            .then(bData => {
+              const current = (bData.branches ?? []).find((b: { current: boolean }) => b.current);
+              if (current) setGlobalRepoBranch(current.name);
+            })
+            .catch(() => {});
+        }
+      })
+      .catch(() => {});
+  }, [globalRepo]);
   const [lifecycleEvents, setLifecycleEvents] = useState<Map<string, { state: string; exitCode?: number; ts: number }>>(new Map());
   const [draftInjection, setDraftInjection] = useState<{ id: string; text: string } | null>(null);
 
@@ -362,6 +420,11 @@ function DashboardInner() {
     }}>
       {/* ── Title Bar ── */}
       <TitleBar
+        globalRepo={globalRepo}
+        globalRepoBranch={globalRepoBranch}
+        repoList={globalRepoList}
+        repoDisplayNames={REPO_DISPLAY}
+        onRepoChange={setGlobalRepo}
         sidebarVisible={sidebarVisible}
         onToggleSidebar={() => setSidebarVisible(v => !v)}
         bottomPanelVisible={bottomPanelVisible}
