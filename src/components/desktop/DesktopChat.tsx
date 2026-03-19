@@ -16,21 +16,19 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import Image from 'next/image';
-import { useDesktopWebSocket } from './hooks/useDesktopWebSocket';
+import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
 import {
   ArrowUp,
   Brain,
   ChevronDown,
   ChevronRight,
-  GitBranch,
   Loader2,
   Plus,
   RefreshCw,
   SlidersHorizontal,
   Sparkles,
   Square,
-  X,
 } from 'lucide-react';
 import type {
   MobileInboxSnapshot,
@@ -86,16 +84,16 @@ function isImageMedia(item: MobileTranscriptMedia): boolean {
 interface BubbleProps {
   entry: MobileTranscriptEntry;
   previousEntry: MobileTranscriptEntry | null;
-  isLatest: boolean;
   agentName: string;
   isNew?: boolean;
   onOpenMermaid?: (code: string) => void;
 }
 
-const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName, isNew, onOpenMermaid }: BubbleProps) {
+const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, onOpenMermaid }: BubbleProps) {
   const isUser = entry.role === 'user';
   const hasText = Boolean(entry.text.trim());
   const hasMedia = Boolean(entry.media?.length);
+  const isSlashCommand = isSlashCommandText(entry.text);
   const speakerChanged = !previousEntry || previousEntry.role !== entry.role;
   const showTimestamp = (() => {
     if (!previousEntry?.timestampLabel || !entry.timestampLabel) return speakerChanged;
@@ -104,6 +102,43 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName,
     if (Number.isNaN(prev) || Number.isNaN(curr)) return speakerChanged;
     return Math.abs(curr - prev) >= 15 * 60 * 1000;
   })();
+
+  const mdBlocks = useMemo(
+    () => hasText ? renderMarkdownBlocks(entry.text, onOpenMermaid) : [],
+    [entry.text, hasText, onOpenMermaid],
+  );
+
+  const [activeBlock, setActiveBlock] = useState<number | null>(null);
+  const playingRef = useRef(false);
+
+  useEffect(() => {
+    if (entry.role !== 'assistant') return;
+    return ttsEngine.subscribe((state) => {
+      const isOurs = state.activeMessageId === entry.id;
+
+      if (isOurs && (state.state === 'playing' || state.state === 'loading')) {
+        playingRef.current = true;
+        setActiveBlock((prev) => prev ?? 0);
+      }
+
+      if (playingRef.current && (state.state === 'idle' || state.state === 'error' || (!isOurs && state.activeMessageId !== null))) {
+        playingRef.current = false;
+        setActiveBlock(null);
+      }
+    });
+  }, [entry.id, entry.role]);
+
+  const handleBlockClick = useCallback((blockIndex: number) => {
+    const textFromHere = mdBlocks
+      .slice(blockIndex)
+      .map(b => b.rawText)
+      .join('\n\n');
+
+    if (!textFromHere.trim()) return;
+
+    setActiveBlock(blockIndex);
+    void ttsEngine.play(textFromHere, entry.id);
+  }, [mdBlocks, entry.id]);
 
   if (entry.role === 'system' && entry.text.toLowerCase().includes('compaction')) {
     return (
@@ -116,7 +151,6 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName,
   }
 
   if (isUser) {
-    const isSlashCommand = isSlashCommandText(entry.text);
     return (
       <div className={`remodex-user-turn-wrap${isNew ? ' remodex-turn-new' : ''}`}>
         {hasText ? (
@@ -166,47 +200,6 @@ const Bubble = memo(function Bubble({ entry, previousEntry, isLatest, agentName,
       </div>
     );
   }
-
-  // Parse markdown into blocks for point-to-play
-  const mdBlocks = useMemo(
-    () => hasText ? renderMarkdownBlocks(entry.text, onOpenMermaid) : [],
-    [entry.text, hasText, onOpenMermaid],
-  );
-
-  const [activeBlock, setActiveBlock] = useState<number | null>(null);
-  const playingRef = useRef(false);
-
-  // Subscribe to TTS state — show/clear blue highlight
-  useEffect(() => {
-    if (entry.role !== 'assistant') return;
-    return ttsEngine.subscribe((state) => {
-      const isOurs = state.activeMessageId === entry.id;
-
-      if (isOurs && (state.state === 'playing' || state.state === 'loading')) {
-        playingRef.current = true;
-        // If Play button was clicked (not point-to-play), highlight from top
-        setActiveBlock((prev) => prev ?? 0);
-      }
-
-      // Clear when playback ends or switches away
-      if (playingRef.current && (state.state === 'idle' || state.state === 'error' || (!isOurs && state.activeMessageId !== null))) {
-        playingRef.current = false;
-        setActiveBlock(null);
-      }
-    });
-  }, [entry.id, entry.role]);
-
-  const handleBlockClick = useCallback((blockIndex: number) => {
-    const textFromHere = mdBlocks
-      .slice(blockIndex)
-      .map(b => b.rawText)
-      .join('\n\n');
-
-    if (!textFromHere.trim()) return;
-
-    setActiveBlock(blockIndex);
-    void ttsEngine.play(textFromHere, entry.id);
-  }, [mdBlocks, entry.id]);
 
   return (
     <article className={`remodex-message-card remodex-message-card-assistant${isNew ? ' remodex-turn-new' : ''}`}>
@@ -571,9 +564,926 @@ function renderInline(text: string): React.ReactNode {
   });
 }
 
+const DesktopChatHeader = memo(function DesktopChatHeader({
+  pickerRef,
+  pickerOpen,
+  setPickerOpen,
+  projectGroups,
+  selectedSession,
+  activeTitle,
+  headerLabel,
+  activeSubtitle,
+  connectionDotColor,
+  handleSessionFocus,
+  expandedGroup,
+  setExpandedGroup,
+  diffStats,
+  onOpenDiff,
+  setDiffOpen,
+}: {
+  pickerRef: React.RefObject<HTMLDivElement | null>;
+  pickerOpen: boolean;
+  setPickerOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  projectGroups: ProjectGroup[];
+  selectedSession: SessionSummary | undefined;
+  activeTitle: string;
+  headerLabel: string;
+  activeSubtitle: string;
+  connectionDotColor: string;
+  handleSessionFocus: (sessionId: string) => void;
+  expandedGroup: string | null;
+  setExpandedGroup: React.Dispatch<React.SetStateAction<string | null>>;
+  diffStats: { additions: number; deletions: number; files: number };
+  onOpenDiff?: () => void;
+  setDiffOpen: React.Dispatch<React.SetStateAction<boolean>>;
+}) {
+  return (
+    <header
+      style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        padding: '14px 16px',
+        borderBottom: '1px solid var(--t-divider)',
+        background: 'var(--t-panel-translucent)',
+        backdropFilter: 'blur(20px) saturate(1.4)',
+        WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
+        flexShrink: 0,
+        zIndex: 10,
+      }}
+    >
+      <div ref={pickerRef} style={{ minWidth: 0, flex: 1, position: 'relative' }}>
+        <button
+          type="button"
+          onClick={() => setPickerOpen((p) => !p)}
+          className="desktop-session-pill"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            width: '100%',
+            padding: '8px 12px',
+            margin: 0,
+            border: '1px solid var(--t-divider)',
+            borderRadius: 12,
+            background: pickerOpen ? 'var(--t-divider-subtle)' : 'var(--t-hover)',
+            cursor: 'pointer',
+            textAlign: 'left',
+            WebkitTapHighlightColor: 'transparent',
+            transition: 'background 180ms ease, border-color 180ms ease',
+          }}
+          onMouseEnter={(e) => { if (!pickerOpen) e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
+          onMouseLeave={(e) => { if (!pickerOpen) e.currentTarget.style.background = 'var(--t-hover)'; }}
+          aria-label="Switch session"
+          aria-expanded={pickerOpen}
+        >
+          <span
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: '50%',
+              backgroundColor: connectionDotColor,
+              flexShrink: 0,
+              boxShadow: connectionDotColor === '#34c759' ? '0 0 8px rgba(52, 199, 89, 0.5)' : 'none',
+            }}
+          />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: 'var(--t-text)',
+              letterSpacing: '-0.01em',
+              lineHeight: 1.3,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}>
+              {activeTitle}
+            </div>
+            <div style={{
+              fontSize: 11.5,
+              color: 'var(--t-text-muted)',
+              lineHeight: 1.3,
+              marginTop: 1,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}>
+              {headerLabel} · {activeSubtitle}
+            </div>
+          </div>
+          <ChevronDown
+            size={15}
+            strokeWidth={2}
+            style={{
+              flexShrink: 0,
+              color: 'var(--t-text-faint)',
+              transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
+              transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+            }}
+          />
+        </button>
+
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 8px)',
+            left: '-12px',
+            right: '-12px',
+            zIndex: 100,
+            borderRadius: '14px',
+            background: 'var(--t-panel)',
+            backdropFilter: 'blur(40px) saturate(1.8)',
+            WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
+            boxShadow: '0 20px 60px rgba(15, 23, 42, 0.18), 0 1px 3px rgba(15, 23, 42, 0.08)',
+            padding: '8px',
+            maxHeight: '60vh',
+            overflowY: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            opacity: pickerOpen ? 1 : 0,
+            transform: pickerOpen ? 'translateY(0) scale(1)' : 'translateY(-8px) scale(0.97)',
+            pointerEvents: pickerOpen ? 'auto' : 'none',
+            transition: 'opacity 220ms cubic-bezier(0.32, 0.72, 0, 1), transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+          }}
+        >
+          {projectGroups.map((group, gi) => {
+            const isExpanded = expandedGroup === group.workspace;
+            const isSingle = group.sessions.length === 1;
+            const containsSelected = group.sessions.some((s) => s.id === selectedSession?.id);
+            const dotColor = group.hasRunning
+              ? '#34c759'
+              : group.bestContextPct >= 75
+                ? '#ff9f0a'
+                : '#8e8e93';
+
+            return (
+              <div key={group.workspace}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isSingle) {
+                      handleSessionFocus(group.sessions[0].id);
+                      setPickerOpen(false);
+                    } else {
+                      setExpandedGroup(isExpanded ? null : group.workspace);
+                    }
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '10px',
+                    width: '100%',
+                    padding: '10px 12px',
+                    border: 'none',
+                    borderRadius: '10px',
+                    background: containsSelected && !isExpanded
+                      ? 'rgba(37, 99, 235, 0.08)'
+                      : 'transparent',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'background 120ms ease',
+                    minHeight: '44px',
+                  }}
+                >
+                  <span style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    backgroundColor: dotColor,
+                    flexShrink: 0,
+                    boxShadow: group.hasRunning ? `0 0 6px ${dotColor}` : 'none',
+                  }} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{
+                      fontSize: '14px',
+                      fontWeight: containsSelected ? 600 : 500,
+                      color: containsSelected ? '#2563eb' : 'var(--t-text)',
+                      lineHeight: 1.3,
+                    }}>
+                      {group.projectName}
+                    </div>
+                    <div style={{
+                      fontSize: '12px',
+                      color: 'var(--t-text-muted)',
+                      lineHeight: 1.3,
+                      marginTop: '1px',
+                    }}>
+                      {group.summary}
+                      {group.mostRecentTime ? ` · ${group.mostRecentTime}` : ''}
+                    </div>
+                  </div>
+                  {containsSelected && isSingle ? (
+                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#2563eb', flexShrink: 0 }}>✓</span>
+                  ) : !isSingle ? (
+                    <ChevronRight
+                      size={14}
+                      strokeWidth={2.2}
+                      style={{
+                        flexShrink: 0,
+                        color: 'var(--t-text-muted)',
+                        transition: 'transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+                        transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                      }}
+                    />
+                  ) : null}
+                </button>
+
+                {isExpanded && !isSingle ? (
+                  <div style={{
+                    marginLeft: '18px',
+                    borderLeft: '2px solid rgba(37, 99, 235, 0.12)',
+                    paddingLeft: '8px',
+                    marginTop: '2px',
+                    marginBottom: '4px',
+                  }}>
+                    {group.sessions.map((session) => {
+                      const isActive = session.id === selectedSession?.id;
+                      const isRunning = session.status === 'running' || session.status === 'reviewing';
+                      const sessionPercent = Math.round(session.context?.usedPercent ?? 0);
+                      const sDotColor = isRunning ? '#34c759' : sessionPercent >= 75 ? '#ff9f0a' : '#8e8e93';
+                      const rawName = session.name ?? session.sessionKey ?? session.id;
+                      const runtimeTag = session.runtime === 'claude-code' ? ' · Claude Code'
+                        : session.runtime === 'codex' ? ' · Codex'
+                        : '';
+                      const name = rawName + runtimeTag;
+                      const subtitle = session.currentTask
+                        ?? session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '')
+                        ?? session.sessionKey
+                        ?? '';
+
+                      return (
+                        <button
+                          key={session.id}
+                          type="button"
+                          onClick={() => {
+                            handleSessionFocus(session.id);
+                            setPickerOpen(false);
+                          }}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '10px',
+                            width: '100%',
+                            padding: '8px 10px',
+                            border: 'none',
+                            borderRadius: '10px',
+                            background: isActive ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                            transition: 'background 120ms ease',
+                            minHeight: '44px',
+                          }}
+                        >
+                          <span style={{
+                            width: '6px',
+                            height: '6px',
+                            borderRadius: '50%',
+                            backgroundColor: sDotColor,
+                            flexShrink: 0,
+                            boxShadow: isRunning ? `0 0 5px ${sDotColor}` : 'none',
+                          }} />
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{
+                              fontSize: '13px',
+                              fontWeight: isActive ? 600 : 400,
+                              color: isActive ? '#2563eb' : 'var(--t-text)',
+                              lineHeight: 1.3,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}>
+                              {name}
+                            </div>
+                            {subtitle ? (
+                              <div style={{
+                                fontSize: '11px',
+                                color: 'var(--t-text-muted)',
+                                lineHeight: 1.3,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                marginTop: '1px',
+                              }}>
+                                {subtitle}
+                              </div>
+                            ) : null}
+                          </div>
+                          {isActive ? (
+                            <span style={{ fontSize: '11px', fontWeight: 600, color: '#2563eb', flexShrink: 0 }}>✓</span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                {gi < projectGroups.length - 1 ? (
+                  <div style={{
+                    height: '1px',
+                    background: 'var(--t-divider)',
+                    margin: '4px 12px',
+                  }} />
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onOpenDiff ? onOpenDiff() : setDiffOpen(true)}
+        style={{
+          flexShrink: 0,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          paddingTop: 6,
+          paddingRight: 12,
+          paddingBottom: 6,
+          paddingLeft: 12,
+          borderRadius: 999,
+          border: diffStats.files > 0 ? '1px solid rgba(37, 99, 235, 0.12)' : '1px solid var(--t-divider)',
+          background: diffStats.files > 0 ? 'rgba(37, 99, 235, 0.04)' : 'var(--t-hover)',
+          color: 'var(--t-text-muted)',
+          fontSize: 12,
+          fontWeight: 500,
+          cursor: 'pointer',
+          transition: 'all 150ms ease',
+        }}
+        aria-label="Open diff sheet"
+      >
+        <span style={{ color: '#22c55e', fontWeight: 600 }}>+{diffStats.additions}</span>
+        <span style={{ color: '#ef4444', fontWeight: 600 }}>-{diffStats.deletions}</span>
+        <span style={{ color: 'var(--t-text-muted)' }}>{diffStats.files} file{diffStats.files !== 1 ? 's' : ''}</span>
+        <SlidersHorizontal size={13} strokeWidth={2} />
+      </button>
+    </header>
+  );
+});
+
+const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
+  loading,
+  transcript,
+  currentAgentName,
+  onOpenMermaid,
+  streamingText,
+  agentRunning,
+  scrollRef,
+  handleScroll,
+  showScrollPill,
+  scrollToBottom,
+  getIsNewEntry,
+}: {
+  loading: boolean;
+  transcript: MobileTranscriptEntry[];
+  currentAgentName: string;
+  onOpenMermaid?: (code: string) => void;
+  streamingText: string;
+  agentRunning: boolean;
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  handleScroll: () => void;
+  showScrollPill: boolean;
+  scrollToBottom: (force?: boolean) => void;
+  getIsNewEntry: (entryId: string) => boolean;
+}) {
+  return (
+    <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="remodex-message-stack"
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '12px 14px',
+        }}
+      >
+        {loading ? (
+          <div className="remodex-skeleton-stack">
+            <div className="remodex-skeleton-bubble remodex-skeleton-assistant" />
+            <div className="remodex-skeleton-bubble remodex-skeleton-user" />
+            <div className="remodex-skeleton-bubble remodex-skeleton-assistant remodex-skeleton-wide" />
+            <div className="remodex-skeleton-bubble remodex-skeleton-user remodex-skeleton-short" />
+          </div>
+        ) : transcript.length === 0 ? (
+          <div className="remodex-loading-card">
+            No transcript visible yet — waiting for activity.
+          </div>
+        ) : (
+          transcript.map((entry, i) => {
+            const isNew = getIsNewEntry(entry.id);
+            return (
+              <Bubble
+                key={entry.id}
+                entry={entry}
+                previousEntry={i > 0 ? transcript[i - 1] : null}
+                agentName={currentAgentName}
+                isNew={isNew}
+                onOpenMermaid={onOpenMermaid}
+              />
+            );
+          })
+        )}
+
+        {streamingText && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 8,
+            paddingTop: 8,
+            paddingRight: 16,
+            paddingBottom: 4,
+            paddingLeft: 16,
+          }}>
+            <div style={{
+              maxWidth: '85%',
+              paddingTop: 10,
+              paddingRight: 16,
+              paddingBottom: 10,
+              paddingLeft: 16,
+              borderRadius: 18,
+              background: 'var(--t-panel-translucent)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              border: '1px solid var(--t-divider-subtle)',
+              fontSize: 14,
+              lineHeight: 1.5,
+              color: 'var(--t-text)',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}>
+              {streamingText}
+              <span style={{
+                display: 'inline-block',
+                width: 6, height: 14,
+                background: 'var(--t-text)',
+                opacity: 0.4,
+                marginLeft: 2,
+                animation: 'blink 1s step-end infinite',
+                verticalAlign: 'text-bottom',
+              }} />
+            </div>
+          </div>
+        )}
+
+        {agentRunning && !streamingText && (
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            paddingTop: 8,
+            paddingRight: 16,
+            paddingBottom: 12,
+            paddingLeft: 16,
+          }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              paddingTop: 10,
+              paddingRight: 16,
+              paddingBottom: 10,
+              paddingLeft: 16,
+              borderRadius: 18,
+              background: 'var(--t-panel-translucent)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              border: '1px solid var(--t-divider-subtle)',
+            }}>
+              <span className="remodex-typing-dot" style={{ animationDelay: '0ms' }} />
+              <span className="remodex-typing-dot" style={{ animationDelay: '150ms' }} />
+              <span className="remodex-typing-dot" style={{ animationDelay: '300ms' }} />
+              <span style={{
+                fontSize: 11,
+                color: 'var(--t-text-muted)',
+                marginLeft: 6,
+                fontWeight: 500,
+              }}>
+                {currentAgentName || 'Agent'} is thinking…
+              </span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {showScrollPill && (
+        <div style={{
+          position: 'absolute',
+          bottom: 8,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 10,
+        }}>
+          <button
+            onClick={() => scrollToBottom(true)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '4px 10px',
+              borderRadius: 10,
+              border: '1px solid rgba(0,0,0,0.08)',
+              background: 'rgba(255,255,255,0.85)',
+              backdropFilter: 'blur(20px) saturate(1.6)',
+              WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
+              color: 'var(--t-text-secondary)',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              letterSpacing: '-0.01em',
+              boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+              transition: 'all 150ms ease',
+            }}
+          >
+            <ChevronDown size={11} />
+            ↓
+          </button>
+        </div>
+      )}
+    </div>
+  );
+});
+
+const DesktopComposePane = memo(function DesktopComposePane({
+  pendingFiles,
+  removePendingFile,
+  selectedSession,
+  composeRef,
+  draft,
+  setDraft,
+  showSlashSuggestions,
+  slashSuggestions,
+  composeHeight,
+  currentAgentName,
+  send,
+  fileInputRef,
+  selectedKey,
+  fetchTranscript,
+  enhancing,
+  enhance,
+  agentRunning,
+  sending,
+  stopping,
+  stopRun,
+  chatSendDisabled,
+}: {
+  pendingFiles: { name: string; mimeType: string; content: string; preview?: string }[];
+  removePendingFile: (idx: number) => void;
+  selectedSession: SessionSummary | undefined;
+  composeRef: React.RefObject<HTMLTextAreaElement | null>;
+  draft: string;
+  setDraft: React.Dispatch<React.SetStateAction<string>>;
+  showSlashSuggestions: boolean;
+  slashSuggestions: ReturnType<typeof getSlashCommandSuggestions>;
+  composeHeight: number;
+  currentAgentName: string;
+  send: () => Promise<void>;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+  selectedKey: string;
+  fetchTranscript: (key: string) => Promise<void>;
+  enhancing: boolean;
+  enhance: () => Promise<void>;
+  agentRunning: boolean;
+  sending: boolean;
+  stopping: boolean;
+  stopRun: () => Promise<void>;
+  chatSendDisabled: boolean;
+}) {
+  return (
+    <div style={{
+      padding: '10px 14px 14px',
+      flexShrink: 0,
+    }}>
+      {pendingFiles.length > 0 && (
+        <div style={{
+          display: 'flex',
+          gap: 8,
+          paddingTop: 8,
+          paddingBottom: 8,
+          overflowX: 'auto',
+        }}>
+          {pendingFiles.map((f, idx) => (
+            <div key={idx} style={{
+              position: 'relative',
+              flexShrink: 0,
+              borderRadius: 10,
+              overflow: 'hidden',
+              border: '1px solid var(--t-divider)',
+              background: 'var(--t-panel-translucent)',
+            }}>
+              {f.preview ? (
+                <img src={f.preview} alt={f.name} style={{
+                  width: 64,
+                  height: 64,
+                  objectFit: 'cover',
+                  display: 'block',
+                }} />
+              ) : (
+                <div style={{
+                  width: 64,
+                  height: 64,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 10,
+                  color: 'var(--t-text-secondary)',
+                  textAlign: 'center',
+                  padding: 4,
+                  wordBreak: 'break-all',
+                }}>
+                  {f.name.slice(0, 12)}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => removePendingFile(idx)}
+                style={{
+                  position: 'absolute',
+                  top: 2,
+                  right: 2,
+                  width: 18,
+                  height: 18,
+                  borderRadius: '50%',
+                  border: 'none',
+                  background: 'rgba(0,0,0,0.5)',
+                  color: '#fff',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  paddingTop: 0,
+                  paddingRight: 0,
+                  paddingBottom: 0,
+                  paddingLeft: 0,
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="remodex-compose-surface">
+        <div className="remodex-compose-status-bar">
+          <span className="remodex-compose-chip remodex-compose-pill">
+            {selectedSession?.model ?? 'live'}
+          </span>
+          <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">
+            {selectedSession?.status ?? 'idle'}
+          </span>
+        </div>
+
+        <textarea
+          ref={composeRef}
+          className="remodex-compose-input"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === 'Tab' && showSlashSuggestions) {
+              e.preventDefault();
+              const nextValue = autocompleteSlashCommand(draft);
+              if (nextValue) {
+                setDraft(`${nextValue} `);
+              }
+              return;
+            }
+            if (e.key === 'Enter' && !e.shiftKey && draft.trim()) {
+              e.preventDefault();
+              void send();
+            }
+          }}
+          placeholder={`Message ${currentAgentName}…`}
+          style={{
+            height: composeHeight,
+            minHeight: 60,
+            maxHeight: 400,
+            resize: 'none',
+            transition: 'none',
+          }}
+        />
+        {showSlashSuggestions ? (
+          <div style={{
+            marginTop: 8,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+            padding: 10,
+            borderRadius: 14,
+            border: '1px solid rgba(37, 99, 235, 0.12)',
+            background: 'rgba(255,255,255,0.86)',
+          }}>
+            {slashSuggestions.slice(0, 6).map((item) => (
+              <button
+                key={item.command}
+                type="button"
+                onClick={() => {
+                  setDraft(`${item.command} `);
+                  composeRef.current?.focus();
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  width: '100%',
+                  minHeight: 36,
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  border: 'none',
+                  background: 'rgba(37, 99, 235, 0.04)',
+                  color: 'var(--t-text)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}
+              >
+                <span style={{ fontSize: 12, fontWeight: 700, fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                  {item.command}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{item.description}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="remodex-compose-row">
+          <button
+            type="button"
+            className="remodex-compose-chip remodex-compose-chip-icon"
+            aria-label="Attach"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Plus size={16} strokeWidth={2.2} />
+          </button>
+          <button
+            type="button"
+            className="remodex-compose-chip remodex-compose-chip-icon"
+            aria-label="Refresh"
+            onClick={() => void fetchTranscript(selectedKey)}
+          >
+            <RefreshCw size={16} strokeWidth={2.2} />
+          </button>
+          <button
+            type="button"
+            className="remodex-compose-chip remodex-compose-chip-icon"
+            aria-label="Memory recall"
+            style={{ color: '#2563eb' }}
+          >
+            <Brain size={17} strokeWidth={2} />
+          </button>
+          {draft.trim().length >= 3 ? (
+            <button
+              type="button"
+              className="remodex-compose-chip remodex-compose-chip-icon"
+              aria-label="Enhance prompt"
+              disabled={enhancing}
+              onClick={() => void enhance()}
+              style={{ color: enhancing ? '#d1d5db' : '#ff9f0a' }}
+            >
+              <Sparkles size={18} strokeWidth={2} className={enhancing ? 'spin' : undefined} />
+            </button>
+          ) : null}
+          {agentRunning && !draft.trim() ? (
+            <button
+              type="button"
+              disabled={stopping}
+              onClick={() => void stopRun()}
+              aria-label="Stop agent run"
+              style={{
+                marginLeft: 'auto',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.32rem',
+                minWidth: 42,
+                minHeight: 42,
+                padding: '0 0.82rem',
+                borderRadius: 999,
+                border: '2px solid #ef4444',
+                background: stopping ? '#fef2f2' : 'rgba(239, 68, 68, 0.06)',
+                color: '#ef4444',
+                fontSize: '0.84rem',
+                fontWeight: 700,
+                cursor: stopping ? 'default' : 'pointer',
+                transition: 'all 150ms ease',
+              }}
+            >
+              {stopping ? (
+                <Loader2 size={17} className="spin" />
+              ) : (
+                <>
+                  <Square size={14} strokeWidth={2.5} fill="#ef4444" />
+                  <span>Stop</span>
+                </>
+              )}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={chatSendDisabled}
+              onClick={() => void send()}
+              aria-label={`Send message to ${currentAgentName}`}
+              style={{
+                marginLeft: 'auto',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.32rem',
+                minWidth: 42,
+                minHeight: 42,
+                padding: '0 0.82rem',
+                borderRadius: 999,
+                border: 'none',
+                background: chatSendDisabled ? 'var(--t-text-faint)' : '#ef4444',
+                color: chatSendDisabled ? 'var(--t-text-muted)' : '#ffffff',
+                fontSize: '0.84rem',
+                fontWeight: 700,
+                boxShadow: chatSendDisabled ? 'none' : '0 4px 14px rgba(239, 68, 68, 0.4)',
+                cursor: chatSendDisabled ? 'default' : 'pointer',
+              }}
+            >
+              {sending ? (
+                <Loader2 size={17} className="spin" />
+              ) : (
+                <>
+                  <ArrowUp size={17} strokeWidth={2.2} />
+                  <span>Send</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 8,
+        padding: '6px 12px',
+        marginTop: 6,
+        background: 'var(--t-chrome)',
+        backdropFilter: 'blur(20px) saturate(1.4)',
+        WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
+        borderRadius: 999,
+        border: '1px solid var(--t-divider-subtle)',
+      }}>
+        {(() => {
+          const pct = Math.round((selectedSession as unknown as Record<string, unknown>)?.context
+            ? ((selectedSession as unknown as Record<string, unknown>).context as { usedPercent?: number })?.usedPercent ?? 0
+            : 0);
+          const tone = pct >= 70 ? '#ef4444' : pct >= 50 ? '#f59e0b' : '#34c759';
+          return (
+            <>
+              <span style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: tone,
+                flexShrink: 0,
+              }} />
+              <span style={{
+                fontSize: 12,
+                color: 'var(--t-text-secondary)',
+                fontWeight: 500,
+              }}>
+                {pct}% context
+              </span>
+            </>
+          );
+        })()}
+        <span style={{ color: 'var(--t-divider)' }}>·</span>
+        <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', fontWeight: 500 }}>
+          {selectedSession?.branch ?? 'branch unknown'}
+        </span>
+        <span style={{ color: 'var(--t-divider)' }}>·</span>
+        <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', fontWeight: 500 }}>
+          {selectedSession?.status ?? 'idle'}
+        </span>
+      </div>
+    </div>
+  );
+});
+
 // ── Main Component ──
 
-export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onWsStatusChange }: { externalSessionKey?: string; onOpenDiff?: () => void; onOpenMermaid?: (code: string) => void; onWsStatusChange?: (status: 'connected' | 'connecting' | 'reconnecting' | 'disconnected') => void } = {}) {
+export function DesktopChat({
+  externalSessionKey,
+  draftInjection,
+  onOpenDiff,
+  onOpenMermaid,
+  onWsStatusChange,
+}: {
+  externalSessionKey?: string;
+  draftInjection?: { id: string; text: string } | null;
+  onOpenDiff?: () => void;
+  onOpenMermaid?: (code: string) => void;
+  onWsStatusChange?: (status: 'connected' | 'connecting' | 'reconnecting' | 'disconnected') => void;
+} = {}) {
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [selectedKey, setSelectedKey] = useState<string>('');
@@ -687,18 +1597,17 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
     sendTerminalAttach,
     sendTerminalInput,
     sendTerminalDetach,
-  } = useDesktopWebSocket(selectedKey || undefined, wsCallbacks);
+  } = useSharedDesktopWs(selectedKey || undefined, wsCallbacks);
 
   // Report WS status to parent
   useEffect(() => { onWsStatusChange?.(connectionState); }, [connectionState, onWsStatusChange]);
 
   const isClaudeCode = selectedSession?.runtime === 'claude-code';
   const isCodexLocal = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'discovered';
-  const isLocalAgent = isClaudeCode || isCodexLocal;
   const supportsSlashTerminalRelay = Boolean(
     selectedSession?.tmuxSession && (selectedSession?.runtime === 'codex' || selectedSession?.runtime === 'claude-code'),
   );
-  const slashSuggestions = getSlashCommandSuggestions(draft);
+  const slashSuggestions = useMemo(() => getSlashCommandSuggestions(draft), [draft]);
   const showSlashSuggestions = isSlashCommandText(draft) && slashSuggestions.length > 0;
 
   useEffect(() => {
@@ -819,7 +1728,6 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
           // Only add entries that appear AFTER the last timestamp we know about
           // (prevents old messages from appearing at bottom)
           if (newFromServer.length > 0 && realPrev.length > 0) {
-            const lastIdx = serverEntries.findIndex(e => e.id === newFromServer[0]?.id);
             const lastKnownIdx = Math.max(...realPrev.map(e => serverEntries.findIndex(se => se.id === e.id)).filter(i => i >= 0));
             if (lastKnownIdx >= 0) {
               newFromServer = newFromServer.filter(e => {
@@ -1216,7 +2124,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
       files.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview); });
       setSending(false);
     }
-  }, [draft, pendingFiles, selectedKey, sending, isClaudeCode, isCodexLocal, selectedSession?.tmuxSession, sendTerminalAttach, sendTerminalInput, supportsSlashTerminalRelay, selectedSession, sendToClaudeCode, sendToCodex, fetchTranscript, scrollToBottom, playSendSound]);
+  }, [draft, pendingFiles, selectedKey, sending, isClaudeCode, isCodexLocal, sendTerminalAttach, sendTerminalInput, supportsSlashTerminalRelay, selectedSession, sendToClaudeCode, sendToCodex, scrollToBottom, playSendSound]);
 
   // ── Stop / Abort run ──
   const stopRun = useCallback(async () => {
@@ -1249,7 +2157,7 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
     } else {
       setAgentRunning(false);
     }
-  }, [transcript, scrollToBottom]);
+  }, [transcript]);
 
   // ── Diff stats (WS-driven + safety-net) ──
   // WS pushes diff-stats on git changes; this poll is the safety-net
@@ -1278,7 +2186,15 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
     if (externalSessionKey && externalSessionKey !== selectedKey) {
       setSelectedKey(externalSessionKey);
     }
-  }, [externalSessionKey]);
+  }, [externalSessionKey, selectedKey]);
+
+  useEffect(() => {
+    if (!draftInjection?.id) return;
+    setDraft((prev) => prev.trim()
+      ? `${prev.trimEnd()}\n\n${draftInjection.text}\n\n`
+      : `${draftInjection.text}\n\n`);
+    requestAnimationFrame(() => composeRef.current?.focus());
+  }, [draftInjection?.id, draftInjection?.text]);
 
   // ── Enhance draft ──
   const enhance = useCallback(async () => {
@@ -1360,6 +2276,14 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
   // Only scroll on initial session load (handled by fetchTranscript).
   // useEffect(() => { scrollToBottom(); }, [transcript.length, scrollToBottom]);
 
+  const getIsNewEntry = useCallback((entryId: string) => {
+    const isNew = !seenIdsRef.current.has(entryId);
+    if (isNew) {
+      queueMicrotask(() => seenIdsRef.current.add(entryId));
+    }
+    return isNew;
+  }, []);
+
   const chatSendDisabled = !selectedKey || sending || !draft.trim();
 
   return (
@@ -1425,464 +2349,37 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
         }}
       />
 
-      {/* ── Header ── */}
-      <header
-        style={{
-          position: 'relative',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          padding: '14px 16px',
-          borderBottom: '1px solid var(--t-divider)',
-          background: 'var(--t-panel-translucent)',
-          backdropFilter: 'blur(20px) saturate(1.4)',
-          WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
-          flexShrink: 0,
-          zIndex: 10,
-        }}
-      >
-        {/* Session selector — Apple-style pill button */}
-        <div ref={pickerRef} style={{ minWidth: 0, flex: 1, position: 'relative' }}>
-          <button
-            type="button"
-            onClick={() => setPickerOpen(p => !p)}
-            className="desktop-session-pill"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 10,
-              width: '100%',
-              padding: '8px 12px',
-              margin: 0,
-              border: '1px solid var(--t-divider)',
-              borderRadius: 12,
-              background: pickerOpen ? 'var(--t-divider-subtle)' : 'var(--t-hover)',
-              cursor: 'pointer',
-              textAlign: 'left',
-              WebkitTapHighlightColor: 'transparent',
-              transition: 'background 180ms ease, border-color 180ms ease',
-            }}
-            onMouseEnter={(e) => { if (!pickerOpen) e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
-            onMouseLeave={(e) => { if (!pickerOpen) e.currentTarget.style.background = 'var(--t-hover)'; }}
-            aria-label="Switch session"
-            aria-expanded={pickerOpen}
-          >
-            {/* Status dot */}
-            <span
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: '50%',
-                backgroundColor: connectionDotColor,
-                flexShrink: 0,
-                boxShadow: connectionDotColor === '#34c759' ? '0 0 8px rgba(52, 199, 89, 0.5)' : 'none',
-              }}
-            />
+      <DesktopChatHeader
+        pickerRef={pickerRef}
+        pickerOpen={pickerOpen}
+        setPickerOpen={setPickerOpen}
+        projectGroups={projectGroups}
+        selectedSession={selectedSession}
+        activeTitle={activeTitle}
+        headerLabel={headerLabel}
+        activeSubtitle={activeSubtitle}
+        connectionDotColor={connectionDotColor}
+        handleSessionFocus={handleSessionFocus}
+        expandedGroup={expandedGroup}
+        setExpandedGroup={setExpandedGroup}
+        diffStats={diffStats}
+        onOpenDiff={onOpenDiff}
+        setDiffOpen={setDiffOpen}
+      />
 
-            {/* Title block */}
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{
-                fontSize: 14,
-                fontWeight: 600,
-                color: 'var(--t-text)',
-                letterSpacing: '-0.01em',
-                lineHeight: 1.3,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}>
-                {activeTitle}
-              </div>
-              <div style={{
-                fontSize: 11.5,
-                color: 'var(--t-text-muted)',
-                lineHeight: 1.3,
-                marginTop: 1,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}>
-                {headerLabel} · {activeSubtitle}
-              </div>
-            </div>
-
-            {/* Chevron */}
-            <ChevronDown
-              size={15}
-              strokeWidth={2}
-              style={{
-                flexShrink: 0,
-                color: 'var(--t-text-faint)',
-                transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
-                transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-              }}
-            />
-          </button>
-
-          {/* Squad picker dropdown — grouped by project (matches mobile exactly) */}
-          <div
-            style={{
-              position: 'absolute',
-              top: 'calc(100% + 8px)',
-              left: '-12px',
-              right: '-12px',
-              zIndex: 100,
-              borderRadius: '14px',
-              background: 'var(--t-panel)',
-              backdropFilter: 'blur(40px) saturate(1.8)',
-              WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-              boxShadow: '0 20px 60px rgba(15, 23, 42, 0.18), 0 1px 3px rgba(15, 23, 42, 0.08)',
-              padding: '8px',
-              maxHeight: '60vh',
-              overflowY: 'auto',
-              WebkitOverflowScrolling: 'touch',
-              opacity: pickerOpen ? 1 : 0,
-              transform: pickerOpen ? 'translateY(0) scale(1)' : 'translateY(-8px) scale(0.97)',
-              pointerEvents: pickerOpen ? 'auto' : 'none',
-              transition: 'opacity 220ms cubic-bezier(0.32, 0.72, 0, 1), transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
-            }}
-          >
-            {projectGroups.map((group, gi) => {
-              const isExpanded = expandedGroup === group.workspace;
-              const isSingle = group.sessions.length === 1;
-              const containsSelected = group.sessions.some((s) => s.id === selectedSession?.id);
-              const dotColor = group.hasRunning
-                ? '#34c759'
-                : group.bestContextPct >= 75
-                  ? '#ff9f0a'
-                  : '#8e8e93';
-
-              return (
-                <div key={group.workspace}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (isSingle) {
-                        handleSessionFocus(group.sessions[0].id);
-                        setPickerOpen(false);
-                      } else {
-                        setExpandedGroup(isExpanded ? null : group.workspace);
-                      }
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '10px',
-                      width: '100%',
-                      padding: '10px 12px',
-                      border: 'none',
-                      borderRadius: '10px',
-                      background: containsSelected && !isExpanded
-                        ? 'rgba(37, 99, 235, 0.08)'
-                        : 'transparent',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      transition: 'background 120ms ease',
-                      minHeight: '44px',
-                    }}
-                  >
-                    <span style={{
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '50%',
-                      backgroundColor: dotColor,
-                      flexShrink: 0,
-                      boxShadow: group.hasRunning ? `0 0 6px ${dotColor}` : 'none',
-                    }} />
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{
-                        fontSize: '14px',
-                        fontWeight: containsSelected ? 600 : 500,
-                        color: containsSelected ? '#2563eb' : 'var(--t-text)',
-                        lineHeight: 1.3,
-                      }}>
-                        {group.projectName}
-                      </div>
-                      <div style={{
-                        fontSize: '12px',
-                        color: 'var(--t-text-muted)',
-                        lineHeight: 1.3,
-                        marginTop: '1px',
-                      }}>
-                        {group.summary}
-                        {group.mostRecentTime ? ` · ${group.mostRecentTime}` : ''}
-                      </div>
-                    </div>
-                    {containsSelected && isSingle ? (
-                      <span style={{ fontSize: '11px', fontWeight: 600, color: '#2563eb', flexShrink: 0 }}>✓</span>
-                    ) : !isSingle ? (
-                      <ChevronRight
-                        size={14}
-                        strokeWidth={2.2}
-                        style={{
-                          flexShrink: 0,
-                          color: 'var(--t-text-muted)',
-                          transition: 'transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
-                          transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
-                        }}
-                      />
-                    ) : null}
-                  </button>
-
-                  {/* Expanded session list */}
-                  {isExpanded && !isSingle ? (
-                    <div style={{
-                      marginLeft: '18px',
-                      borderLeft: '2px solid rgba(37, 99, 235, 0.12)',
-                      paddingLeft: '8px',
-                      marginTop: '2px',
-                      marginBottom: '4px',
-                    }}>
-                      {group.sessions.map((session) => {
-                        const isActive = session.id === selectedSession?.id;
-                        const isRunning = session.status === 'running' || session.status === 'reviewing';
-                        const sessionPercent = Math.round(session.context?.usedPercent ?? 0);
-                        const sDotColor = isRunning ? '#34c759' : sessionPercent >= 75 ? '#ff9f0a' : '#8e8e93';
-                        const rawName = session.name ?? session.sessionKey ?? session.id;
-                        const runtimeTag = session.runtime === 'claude-code' ? ' · Claude Code'
-                          : session.runtime === 'codex' ? ' · Codex'
-                          : '';
-                        const name = rawName + runtimeTag;
-                        const subtitle = session.currentTask
-                          ?? session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '')
-                          ?? session.sessionKey
-                          ?? '';
-
-                        return (
-                          <button
-                            key={session.id}
-                            type="button"
-                            onClick={() => {
-                              handleSessionFocus(session.id);
-                              setPickerOpen(false);
-                            }}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '10px',
-                              width: '100%',
-                              padding: '8px 10px',
-                              border: 'none',
-                              borderRadius: '10px',
-                              background: isActive ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
-                              cursor: 'pointer',
-                              textAlign: 'left',
-                              transition: 'background 120ms ease',
-                              minHeight: '44px',
-                            }}
-                          >
-                            <span style={{
-                              width: '6px',
-                              height: '6px',
-                              borderRadius: '50%',
-                              backgroundColor: sDotColor,
-                              flexShrink: 0,
-                              boxShadow: isRunning ? `0 0 5px ${sDotColor}` : 'none',
-                            }} />
-                            <div style={{ minWidth: 0, flex: 1 }}>
-                              <div style={{
-                                fontSize: '13px',
-                                fontWeight: isActive ? 600 : 400,
-                                color: isActive ? '#2563eb' : 'var(--t-text)',
-                                lineHeight: 1.3,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}>
-                                {name}
-                              </div>
-                              {subtitle ? (
-                                <div style={{
-                                  fontSize: '11px',
-                                  color: 'var(--t-text-muted)',
-                                  lineHeight: 1.3,
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                  marginTop: '1px',
-                                }}>
-                                  {subtitle}
-                                </div>
-                              ) : null}
-                            </div>
-                            {isActive ? (
-                              <span style={{ fontSize: '11px', fontWeight: 600, color: '#2563eb', flexShrink: 0 }}>✓</span>
-                            ) : null}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-
-                  {gi < projectGroups.length - 1 ? (
-                    <div style={{
-                      height: '1px',
-                      background: 'var(--t-divider)',
-                      margin: '4px 12px',
-                    }} />
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Diff pill (right side) */}
-        <button
-          type="button"
-          onClick={() => onOpenDiff ? onOpenDiff() : setDiffOpen(true)}
-          style={{
-            flexShrink: 0,
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            paddingTop: 6,
-            paddingRight: 12,
-            paddingBottom: 6,
-            paddingLeft: 12,
-            borderRadius: 999,
-            border: diffStats.files > 0 ? '1px solid rgba(37, 99, 235, 0.12)' : '1px solid var(--t-divider)',
-            background: diffStats.files > 0 ? 'rgba(37, 99, 235, 0.04)' : 'var(--t-hover)',
-            color: 'var(--t-text-muted)',
-            fontSize: 12,
-            fontWeight: 500,
-            cursor: 'pointer',
-            transition: 'all 150ms ease',
-          }}
-          aria-label="Open diff sheet"
-        >
-          <span style={{ color: '#22c55e', fontWeight: 600 }}>+{diffStats.additions}</span>
-          <span style={{ color: '#ef4444', fontWeight: 600 }}>-{diffStats.deletions}</span>
-          <span style={{ color: 'var(--t-text-muted)' }}>{diffStats.files} file{diffStats.files !== 1 ? 's' : ''}</span>
-          <SlidersHorizontal size={13} strokeWidth={2} />
-        </button>
-      </header>
-
-      {/* ── Messages ── */}
-      <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        className="remodex-message-stack"
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '12px 14px',
-        }}
-      >
-        {loading ? (
-          <div className="remodex-skeleton-stack">
-            <div className="remodex-skeleton-bubble remodex-skeleton-assistant" />
-            <div className="remodex-skeleton-bubble remodex-skeleton-user" />
-            <div className="remodex-skeleton-bubble remodex-skeleton-assistant remodex-skeleton-wide" />
-            <div className="remodex-skeleton-bubble remodex-skeleton-user remodex-skeleton-short" />
-          </div>
-        ) : transcript.length === 0 ? (
-          <div className="remodex-loading-card">
-            No transcript visible yet — waiting for activity.
-          </div>
-        ) : (
-          transcript.map((entry, i) => {
-            const isNew = !seenIdsRef.current.has(entry.id);
-            if (!isNew) { /* already seen */ } else {
-              // Mark as seen after first render via microtask
-              queueMicrotask(() => seenIdsRef.current.add(entry.id));
-            }
-            return (
-              <Bubble
-                key={entry.id}
-                entry={entry}
-                previousEntry={i > 0 ? transcript[i - 1] : null}
-                isLatest={i === transcript.length - 1 && entry.role === 'assistant'}
-                agentName={currentAgentName}
-                isNew={isNew}
-                onOpenMermaid={onOpenMermaid}
-              />
-            );
-          })
-        )}
-
-        {/* ── Streaming Text (real-time from WS) ── */}
-        {streamingText && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            gap: 8,
-            paddingTop: 8,
-            paddingRight: 16,
-            paddingBottom: 4,
-            paddingLeft: 16,
-          }}>
-            <div style={{
-              maxWidth: '85%',
-              paddingTop: 10,
-              paddingRight: 16,
-              paddingBottom: 10,
-              paddingLeft: 16,
-              borderRadius: 18,
-              background: 'var(--t-panel-translucent)',
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
-              border: '1px solid var(--t-divider-subtle)',
-              fontSize: 14,
-              lineHeight: 1.5,
-              color: 'var(--t-text)',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}>
-              {streamingText}
-              <span style={{
-                display: 'inline-block',
-                width: 6, height: 14,
-                background: 'var(--t-text)',
-                opacity: 0.4,
-                marginLeft: 2,
-                animation: 'blink 1s step-end infinite',
-                verticalAlign: 'text-bottom',
-              }} />
-            </div>
-          </div>
-        )}
-
-        {/* ── Typing Indicator ── */}
-        {agentRunning && !streamingText && (
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            paddingTop: 8,
-            paddingRight: 16,
-            paddingBottom: 12,
-            paddingLeft: 16,
-          }}>
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              paddingTop: 10,
-              paddingRight: 16,
-              paddingBottom: 10,
-              paddingLeft: 16,
-              borderRadius: 18,
-              background: 'var(--t-panel-translucent)',
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
-              border: '1px solid var(--t-divider-subtle)',
-            }}>
-              <span className="remodex-typing-dot" style={{ animationDelay: '0ms' }} />
-              <span className="remodex-typing-dot" style={{ animationDelay: '150ms' }} />
-              <span className="remodex-typing-dot" style={{ animationDelay: '300ms' }} />
-              <span style={{
-                fontSize: 11,
-                color: 'var(--t-text-muted)',
-                marginLeft: 6,
-                fontWeight: 500,
-              }}>
-                {currentAgentName || 'Agent'} is thinking…
-              </span>
-            </div>
-          </div>
-        )}
-      </div>
+      <DesktopTranscriptPane
+        loading={loading}
+        transcript={transcript}
+        currentAgentName={currentAgentName}
+        onOpenMermaid={onOpenMermaid}
+        streamingText={streamingText}
+        agentRunning={agentRunning}
+        scrollRef={scrollRef}
+        handleScroll={handleScroll}
+        showScrollPill={showScrollPill}
+        scrollToBottom={scrollToBottom}
+        getIsNewEntry={getIsNewEntry}
+      />
 
       {/* ── Resize Handle ── */}
       <div
@@ -1919,367 +2416,29 @@ export function DesktopChat({ externalSessionKey, onOpenDiff, onOpenMermaid, onW
         }} />
       </div>
 
-      {/* ── New Messages Pill ── */}
-      {showScrollPill && (
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          padding: '6px 0',
-          flexShrink: 0,
-        }}>
-          <button
-            onClick={() => scrollToBottom(true)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '5px 14px',
-              borderRadius: 14,
-              border: 'none',
-              background: 'rgba(0,122,255,0.9)',
-              color: '#fff',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: 'pointer',
-              letterSpacing: '-0.01em',
-              boxShadow: '0 2px 8px rgba(0,122,255,0.3)',
-              transition: 'all 150ms ease',
-            }}
-          >
-            <ChevronDown size={13} />
-            New messages
-          </button>
-        </div>
-      )}
-
-      {/* ── Compose Bar (matches mobile exactly) ── */}
-      <div style={{
-        padding: '10px 14px 14px',
-        flexShrink: 0,
-      }}>
-        {/* Pending file previews */}
-        {pendingFiles.length > 0 && (
-          <div style={{
-            display: 'flex',
-            gap: 8,
-            paddingTop: 8,
-            paddingBottom: 8,
-            overflowX: 'auto',
-          }}>
-            {pendingFiles.map((f, idx) => (
-              <div key={idx} style={{
-                position: 'relative',
-                flexShrink: 0,
-                borderRadius: 10,
-                overflow: 'hidden',
-                border: '1px solid var(--t-divider)',
-                background: 'var(--t-panel-translucent)',
-              }}>
-                {f.preview ? (
-                  <img src={f.preview} alt={f.name} style={{
-                    width: 64,
-                    height: 64,
-                    objectFit: 'cover',
-                    display: 'block',
-                  }} />
-                ) : (
-                  <div style={{
-                    width: 64,
-                    height: 64,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 10,
-                    color: 'var(--t-text-secondary)',
-                    textAlign: 'center',
-                    padding: 4,
-                    wordBreak: 'break-all',
-                  }}>
-                    {f.name.slice(0, 12)}
-                  </div>
-                )}
-                <button
-                  type="button"
-                  onClick={() => removePendingFile(idx)}
-                  style={{
-                    position: 'absolute',
-                    top: 2,
-                    right: 2,
-                    width: 18,
-                    height: 18,
-                    borderRadius: '50%',
-                    border: 'none',
-                    background: 'rgba(0,0,0,0.5)',
-                    color: '#fff',
-                    fontSize: 11,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    paddingTop: 0,
-                    paddingRight: 0,
-                    paddingBottom: 0,
-                    paddingLeft: 0,
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <div className="remodex-compose-surface">
-          {/* Status pills row */}
-          <div className="remodex-compose-status-bar">
-            <span className="remodex-compose-chip remodex-compose-pill">
-              {selectedSession?.model ?? 'live'}
-            </span>
-            <span className="remodex-compose-chip remodex-compose-pill remodex-compose-pill-status">
-              {selectedSession?.status ?? 'idle'}
-            </span>
-          </div>
-
-          {/* Textarea */}
-          <textarea
-            ref={composeRef}
-            className="remodex-compose-input"
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Tab' && showSlashSuggestions) {
-                e.preventDefault();
-                const nextValue = autocompleteSlashCommand(draft);
-                if (nextValue) {
-                  setDraft(`${nextValue} `);
-                }
-                return;
-              }
-              if (e.key === 'Enter' && !e.shiftKey && draft.trim()) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-            placeholder={`Message ${currentAgentName}…`}
-            style={{
-              height: composeHeight,
-              minHeight: 60,
-              maxHeight: 400,
-              resize: 'none',
-              transition: 'none',
-            }}
-          />
-          {showSlashSuggestions ? (
-            <div style={{
-              marginTop: 8,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              padding: 10,
-              borderRadius: 14,
-              border: '1px solid rgba(37, 99, 235, 0.12)',
-              background: 'rgba(255,255,255,0.86)',
-            }}>
-              {slashSuggestions.slice(0, 6).map((item) => (
-                <button
-                  key={item.command}
-                  type="button"
-                  onClick={() => {
-                    setDraft(`${item.command} `);
-                    composeRef.current?.focus();
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 12,
-                    width: '100%',
-                    minHeight: 36,
-                    padding: '8px 10px',
-                    borderRadius: 10,
-                    border: 'none',
-                    background: 'rgba(37, 99, 235, 0.04)',
-                    color: 'var(--t-text)',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    fontFamily: '-apple-system, system-ui, sans-serif',
-                  }}
-                >
-                  <span style={{ fontSize: 12, fontWeight: 700, fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-                    {item.command}
-                  </span>
-                  <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{item.description}</span>
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          {/* Action row */}
-          <div className="remodex-compose-row">
-            <button
-              type="button"
-              className="remodex-compose-chip remodex-compose-chip-icon"
-              aria-label="Attach"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Plus size={16} strokeWidth={2.2} />
-            </button>
-            <button
-              type="button"
-              className="remodex-compose-chip remodex-compose-chip-icon"
-              aria-label="Refresh"
-              onClick={() => void fetchTranscript(selectedKey)}
-            >
-              <RefreshCw size={16} strokeWidth={2.2} />
-            </button>
-            <button
-              type="button"
-              className="remodex-compose-chip remodex-compose-chip-icon"
-              aria-label="Memory recall"
-              style={{ color: '#2563eb' }}
-            >
-              <Brain size={17} strokeWidth={2} />
-            </button>
-            {draft.trim().length >= 3 ? (
-              <button
-                type="button"
-                className="remodex-compose-chip remodex-compose-chip-icon"
-                aria-label="Enhance prompt"
-                disabled={enhancing}
-                onClick={() => void enhance()}
-                style={{ color: enhancing ? '#d1d5db' : '#ff9f0a' }}
-              >
-                <Sparkles size={18} strokeWidth={2} className={enhancing ? 'spin' : undefined} />
-              </button>
-            ) : null}
-            {agentRunning && !draft.trim() ? (
-              <button
-                type="button"
-                disabled={stopping}
-                onClick={() => void stopRun()}
-                aria-label="Stop agent run"
-                style={{
-                  marginLeft: 'auto',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.32rem',
-                  minWidth: 42,
-                  minHeight: 42,
-                  padding: '0 0.82rem',
-                  borderRadius: 999,
-                  border: '2px solid #ef4444',
-                  background: stopping ? '#fef2f2' : 'rgba(239, 68, 68, 0.06)',
-                  color: '#ef4444',
-                  fontSize: '0.84rem',
-                  fontWeight: 700,
-                  cursor: stopping ? 'default' : 'pointer',
-                  transition: 'all 150ms ease',
-                }}
-              >
-                {stopping ? (
-                  <Loader2 size={17} className="spin" />
-                ) : (
-                  <>
-                    <Square size={14} strokeWidth={2.5} fill="#ef4444" />
-                    <span>Stop</span>
-                  </>
-                )}
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={chatSendDisabled}
-                onClick={() => void send()}
-                aria-label={`Send message to ${currentAgentName}`}
-                style={{
-                  marginLeft: 'auto',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.32rem',
-                  minWidth: 42,
-                  minHeight: 42,
-                  padding: '0 0.82rem',
-                  borderRadius: 999,
-                  border: 'none',
-                  background: chatSendDisabled ? 'var(--t-text-faint)' : '#ef4444',
-                  color: chatSendDisabled ? 'var(--t-text-muted)' : '#ffffff',
-                  fontSize: '0.84rem',
-                  fontWeight: 700,
-                  boxShadow: chatSendDisabled ? 'none' : '0 4px 14px rgba(239, 68, 68, 0.4)',
-                  cursor: chatSendDisabled ? 'default' : 'pointer',
-                }}
-              >
-                {sending ? (
-                  <Loader2 size={17} className="spin" />
-                ) : (
-                  <>
-                    <ArrowUp size={17} strokeWidth={2.2} />
-                    <span>Send</span>
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Runtime bar — context %, branch, status (matches mobile RuntimeBar) */}
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          gap: 8,
-          padding: '6px 12px',
-          marginTop: 6,
-          background: 'var(--t-chrome)',
-          backdropFilter: 'blur(20px) saturate(1.4)',
-          WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
-          borderRadius: 999,
-          border: '1px solid var(--t-divider-subtle)',
-        }}>
-          {/* Context pressure */}
-          {(() => {
-            const pct = Math.round((selectedSession as unknown as Record<string, unknown>)?.context
-              ? ((selectedSession as unknown as Record<string, unknown>).context as { usedPercent?: number })?.usedPercent ?? 0
-              : 0);
-            const tone = pct >= 70 ? '#ef4444' : pct >= 50 ? '#f59e0b' : '#34c759';
-            return (
-              <>
-                <span style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  background: tone,
-                  flexShrink: 0,
-                }} />
-                <span style={{
-                  fontSize: 12,
-                  fontWeight: 600,
-                  color: 'var(--t-text-secondary)',
-                }}>
-                  {pct}% used
-                </span>
-              </>
-            );
-          })()}
-
-          <span style={{ color: 'var(--t-text-faint)', fontSize: 12 }}>·</span>
-
-          {/* Branch */}
-          <GitBranch size={12} strokeWidth={1.6} style={{ color: 'var(--t-text-muted)', flexShrink: 0 }} />
-          <span style={{
-            fontSize: 12,
-            fontWeight: 500,
-            color: 'var(--t-text-muted)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>
-            {compactLine(selectedSession?.branch ?? 'main', 'main', 18)}
-          </span>
-        </div>
-      </div>
+      <DesktopComposePane
+        pendingFiles={pendingFiles}
+        removePendingFile={removePendingFile}
+        selectedSession={selectedSession}
+        composeRef={composeRef}
+        draft={draft}
+        setDraft={setDraft}
+        showSlashSuggestions={showSlashSuggestions}
+        slashSuggestions={slashSuggestions}
+        composeHeight={composeHeight}
+        currentAgentName={currentAgentName}
+        send={send}
+        fileInputRef={fileInputRef}
+        selectedKey={selectedKey}
+        fetchTranscript={fetchTranscript}
+        enhancing={enhancing}
+        enhance={enhance}
+        agentRunning={agentRunning}
+        sending={sending}
+        stopping={stopping}
+        stopRun={stopRun}
+        chatSendDisabled={chatSendDisabled}
+      />
       {diffOpen ? <DiffModal onClose={() => setDiffOpen(false)} /> : null}
     </div>
   );
