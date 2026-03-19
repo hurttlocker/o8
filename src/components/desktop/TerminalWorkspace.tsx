@@ -663,8 +663,37 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
     }
   }, [input, sending, messages, tabId, chatRuntime, chatSessionKey, onUpdateMessages, tab]);
 
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // ⌘F to open search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+        e.preventDefault();
+        setSearchOpen(v => !v);
+        setTimeout(() => searchRef.current?.focus(), 50);
+      }
+      if (e.key === 'Escape' && searchOpen) {
+        setSearchOpen(false);
+        setSearchQuery('');
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [searchOpen]);
+
+  const filteredMessages = useMemo(() => {
+    if (!searchQuery.trim()) return messages;
+    const q = searchQuery.toLowerCase();
+    return messages.filter(m => m.content.toLowerCase().includes(q));
+  }, [messages, searchQuery]);
+
   const runtimeLabels = { 'codex': 'Codex', 'claude-code': 'Claude Code', 'openclaw': 'OpenClaw' };
   const runtimeColors = { 'codex': '#10b981', 'claude-code': '#8b5cf6', 'openclaw': '#ef4444' };
+  const runtimeModels = { 'codex': 'GPT-5.4', 'claude-code': 'Opus 4.6', 'openclaw': 'Opus 4.6' };
+  const runtimeThinking = { 'codex': 'High', 'claude-code': 'xhigh', 'openclaw': 'xhigh' };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff' }}>
@@ -699,6 +728,50 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
         ) : null}
       </div>
 
+      {/* Search bar (⌘F) */}
+      {searchOpen && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '6px 16px',
+          borderBottom: '1px solid #e2e8f0',
+          background: '#f8fafc',
+          flexShrink: 0,
+        }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            ref={searchRef}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.currentTarget.value)}
+            placeholder="Search messages…"
+            style={{
+              flex: 1, border: 'none', background: 'transparent',
+              fontSize: 13, outline: 'none', color: '#0f172a',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          />
+          {searchQuery && (
+            <span style={{ fontSize: 11, color: '#64748b', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+              {filteredMessages.length} result{filteredMessages.length !== 1 ? 's' : ''}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => { setSearchOpen(false); setSearchQuery(''); }}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 20, height: 20, borderRadius: 4,
+              border: 'none', background: 'rgba(0,0,0,0.05)',
+              cursor: 'pointer', color: '#64748b', fontSize: 11,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Messages area */}
       <div ref={scrollRef} style={{
         flex: 1,
@@ -708,7 +781,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
         flexDirection: 'column',
         gap: 16,
       }}>
-        {messages.length === 0 ? (
+        {(searchQuery ? filteredMessages : messages).length === 0 ? (
           <div style={{
             flex: 1,
             display: 'flex',
@@ -718,16 +791,28 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
             gap: 8,
             color: '#94a3b8',
           }}>
-            <TerminalIcon size={32} strokeWidth={1} />
-            <span style={{ fontSize: 14, fontWeight: 500 }}>
-              Start a conversation with {runtimeLabels[tab.chatRuntime ?? 'openclaw']}
-            </span>
-            <span style={{ fontSize: 12 }}>
-              Messages are scoped to this workspace tab
-            </span>
+            {searchQuery ? (
+              <>
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <span style={{ fontSize: 14, fontWeight: 500 }}>No results for &quot;{searchQuery}&quot;</span>
+              </>
+            ) : (
+              <>
+                <TerminalIcon size={32} strokeWidth={1} />
+                <span style={{ fontSize: 14, fontWeight: 500 }}>
+                  Start a conversation with {runtimeLabels[tab.chatRuntime ?? 'openclaw']}
+                </span>
+                <span style={{ fontSize: 12 }}>
+                  Messages are scoped to this workspace tab
+                </span>
+              </>
+            )}
           </div>
         ) : (
-          messages.map((msg: ChatMessage) => (
+          (searchQuery ? filteredMessages : messages).map((msg: ChatMessage) => (
             <ChatBubble
               key={msg.id}
               message={msg}
@@ -827,33 +912,75 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
             </svg>
           </button>
         </div>
-        {/* Bottom row: model indicator + char count */}
+        {/* Bottom row: model + thinking + media + send indicators */}
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 6,
-          paddingTop: 4, paddingLeft: 4,
-          fontSize: 10, color: '#94a3b8',
+          display: 'flex', alignItems: 'center', gap: 8,
+          paddingTop: 6, paddingLeft: 2,
+          fontSize: 11, color: '#64748b',
         }}>
-          <span style={{
-            width: 5, height: 5, borderRadius: '50%',
-            background: runtimeColors[tab.chatRuntime ?? 'openclaw'],
-            flexShrink: 0,
-          }} />
-          <span style={{ fontWeight: 600 }}>
-            {runtimeLabels[tab.chatRuntime ?? 'openclaw']}
-          </span>
-          {tab.repo ? (
-            <>
-              <span>·</span>
-              <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-                {tab.repo.name}
-              </span>
-            </>
-          ) : null}
-          {input.length > 0 && (
-            <span style={{ marginLeft: 'auto', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-              {input.length}
+          {/* Model indicator */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 4,
+          }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+            <span style={{ fontWeight: 600, fontSize: 11 }}>
+              {runtimeModels[tab.chatRuntime ?? 'openclaw']}
             </span>
-          )}
+          </div>
+
+          {/* Thinking level */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 3,
+          }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
+              <path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z" />
+              <path d="M9 21h6" />
+              <path d="M10 21v1a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-1" />
+            </svg>
+            <span style={{
+              fontWeight: 600, fontSize: 11,
+              color: '#f59e0b',
+            }}>
+              {runtimeThinking[tab.chatRuntime ?? 'openclaw']}
+            </span>
+          </div>
+
+          <span style={{ flex: 1 }} />
+
+          {/* Add media button */}
+          <button
+            type="button"
+            title="Attach media"
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              width: 26, height: 26, borderRadius: 6,
+              border: 'none', background: 'transparent',
+              cursor: 'pointer', color: '#94a3b8',
+              transition: 'color 150ms ease',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = '#64748b'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = '#94a3b8'; }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+
+          {/* ⌘F search shortcut hint */}
+          <kbd style={{
+            fontSize: 9, fontWeight: 500,
+            padding: '1px 4px', borderRadius: 3,
+            border: '1px solid #e2e8f0',
+            background: '#f1f5f9',
+            color: '#94a3b8',
+            fontFamily: '-apple-system, system-ui, sans-serif',
+          }}>
+            ⌘F
+          </kbd>
         </div>
       </div>
     </div>
@@ -1560,6 +1687,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
     const [tabs, setTabs] = useState<TerminalTab[]>([]);
     const [activeTabId, setActiveTabId] = useState<string>('');
     const [previews, setPreviews] = useState<LocalhostPreview[]>([]);
+    const tabsRef = useRef<TerminalTab[]>([]);
     const panelRefs = useRef<Map<string, XtermPanelHandle>>(new Map());
     const tabCountRef = useRef(0);
     const pendingCliCommands = useRef<Map<string, string>>(new Map()); // tabId → command to run after session created
@@ -1592,6 +1720,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
 
     // Save whenever tabs or active tab changes
     useEffect(() => {
+      tabsRef.current = tabs;
       if (tabs.length > 0) {
         persistTabs(tabs, activeTabId);
       }
@@ -1738,7 +1867,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
             detectedPortsRef.current.add(port);
 
             // Find which tab this session belongs to
-            const tab = tabs.find(t => t.tmuxSession === sessionName);
+            const tab = tabsRef.current.find(t => t.tmuxSession === sessionName);
             let url = match[0].replace('0.0.0.0', 'localhost');
             // Ensure http:// prefix
             if (!url.startsWith('http')) url = `http://${url}`;
