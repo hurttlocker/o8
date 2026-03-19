@@ -132,38 +132,42 @@ export const TopBar = memo(function TopBar({
           aria-expanded={squadPickerOpen}
         >
           {isHeaderCompact ? (
-            /* ── Collapsed pill — agent name + status dot ── */
+            /* ── Collapsed pill — centered, agent name + status dot ── */
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 8,
-              padding: '4px 12px',
-              borderRadius: 20,
-              background: 'rgba(0,122,255,0.08)',
-              backdropFilter: 'blur(20px) saturate(1.6)',
-              WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-              border: '1px solid rgba(0,122,255,0.15)',
-              maxWidth: '100%',
+              display: 'flex', justifyContent: 'center', width: '100%',
             }}>
-              <span style={{
-                width: 7, height: 7, borderRadius: '50%',
-                background: connectionDotColor,
-                flexShrink: 0,
-                boxShadow: connectionDotColor === '#34c759' ? '0 0 6px rgba(52,199,89,0.4)' : 'none',
-              }} />
-              <span style={{
-                fontSize: 14, fontWeight: 600,
-                color: '#007aff',
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                fontFamily: '-apple-system, system-ui, sans-serif',
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '5px 16px',
+                borderRadius: 20,
+                background: 'rgba(0,122,255,0.08)',
+                backdropFilter: 'blur(20px) saturate(1.6)',
+                WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
+                border: '1px solid rgba(0,122,255,0.15)',
+                maxWidth: '75%',
               }}>
-                {activeTitle}
-              </span>
-              <ChevronDown size={12} strokeWidth={2.5}
-                style={{
-                  flexShrink: 0, color: '#8e8e93',
-                  transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
-                  transform: squadPickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                }}
-              />
+                <span style={{
+                  width: 7, height: 7, borderRadius: '50%',
+                  background: connectionDotColor,
+                  flexShrink: 0,
+                  boxShadow: connectionDotColor === '#34c759' ? '0 0 6px rgba(52,199,89,0.4)' : 'none',
+                }} />
+                <span style={{
+                  fontSize: 14, fontWeight: 600,
+                  color: '#007aff',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}>
+                  {activeTitle}
+                </span>
+                <ChevronDown size={12} strokeWidth={2.5}
+                  style={{
+                    flexShrink: 0, color: '#007aff',
+                    transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
+                    transform: squadPickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                  }}
+                />
+              </div>
             </div>
           ) : (
             /* ── Expanded header — full details ── */
