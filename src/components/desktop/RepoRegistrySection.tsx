@@ -372,10 +372,14 @@ interface BranchInfo {
   current: boolean;
   lastCommitAge: string;
   lastCommitMessage: string;
+  lastCommitUnix: number;
   isWorktree: boolean;
   worktreePath?: string;
   ahead: number;
   behind: number;
+  isStale: boolean;
+  staleDays?: number;
+  diskSize?: string;
 }
 
 function RepoCard({
@@ -711,6 +715,31 @@ function RepoCard({
                         worktree
                       </span>
                     ) : null}
+                    {/* Stale badge */}
+                    {branch.isStale ? (
+                      <span style={{
+                        fontSize: 9,
+                        fontWeight: 600,
+                        color: '#d97706',
+                        padding: '1px 5px',
+                        borderRadius: 4,
+                        background: 'rgba(217, 119, 6, 0.06)',
+                        flexShrink: 0,
+                      }}>
+                        {branch.staleDays}d idle
+                      </span>
+                    ) : null}
+                    {/* Disk size for worktrees */}
+                    {branch.diskSize ? (
+                      <span style={{
+                        fontSize: 9,
+                        color: 'var(--t-text-faint)',
+                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                        flexShrink: 0,
+                      }}>
+                        {branch.diskSize}
+                      </span>
+                    ) : null}
                     {/* Ahead/behind */}
                     {branch.ahead > 0 || branch.behind > 0 ? (
                       <span style={{
@@ -726,7 +755,7 @@ function RepoCard({
                     {/* Commit age */}
                     <span style={{
                       fontSize: 10,
-                      color: 'var(--t-text-faint)',
+                      color: branch.isStale ? '#d97706' : 'var(--t-text-faint)',
                       flexShrink: 0,
                     }}>
                       {branch.lastCommitAge}
@@ -736,6 +765,51 @@ function RepoCard({
               </div>
             ) : null}
           </div>
+
+          {/* Stale branch summary */}
+          {(() => {
+            const staleBranches = branches.filter(b => b.isStale);
+            if (staleBranches.length === 0) return null;
+            const totalDisk = staleBranches.filter(b => b.diskSize).map(b => b.diskSize!).join(' + ');
+            return (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 8px',
+                marginTop: 4,
+                borderRadius: 8,
+                background: 'rgba(217, 119, 6, 0.04)',
+                border: '1px solid rgba(217, 119, 6, 0.1)',
+              }}>
+                <AlertCircle size={11} strokeWidth={2} style={{ color: '#d97706', flexShrink: 0 }} />
+                <span style={{ fontSize: 10, color: '#92400e', flex: 1 }}>
+                  {staleBranches.length} stale branch{staleBranches.length > 1 ? 'es' : ''}
+                  {totalDisk ? ` · ${totalDisk}` : ''}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Future: batch cleanup modal
+                  }}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    color: '#d97706',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                  }}
+                >
+                  Clean up
+                </button>
+              </div>
+            );
+          })()}
 
           {/* Repo metadata — compact */}
           <div
@@ -1016,6 +1090,7 @@ export function RepoRegistrySection({
   const [launchLoading, setLaunchLoading] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [launchResult, setLaunchResult] = useState<LaunchAgentResult | null>(null);
+  const [launchIsolation, setLaunchIsolation] = useState<'main' | 'branch'>('main');
 
   const [removeTarget, setRemoveTarget] = useState<RepoRegistryEntry | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
@@ -1134,6 +1209,7 @@ export function RepoRegistrySection({
     setLaunchPrompt(`Work on ${repo.name}. Start by reading CLAUDE.md and the relevant issue context, then implement the requested change.`);
     setLaunchBaseBranch(repo.defaultBranch);
     setLaunchUseSetup(repo.setup.installOnCreateWorkspace);
+    setLaunchIsolation('main');
     setLaunchError(null);
     setLaunchResult(null);
   }, []);
@@ -1176,8 +1252,9 @@ export function RepoRegistrySection({
           repoPath: launchRepo.localPath,
           prompt,
           taskName,
-          baseBranch: launchBaseBranch.trim() || undefined,
-          skipSetup: !launchUseSetup,
+          baseBranch: launchIsolation === 'branch' ? (launchBaseBranch.trim() || undefined) : undefined,
+          skipSetup: launchIsolation === 'main' ? true : !launchUseSetup,
+          isolation: launchIsolation,
         }),
       });
 
@@ -1204,6 +1281,7 @@ export function RepoRegistrySection({
     }
   }, [
     launchBaseBranch,
+    launchIsolation,
     launchPrompt,
     launchRepo,
     launchRuntime,
@@ -1856,7 +1934,7 @@ export function RepoRegistrySection({
         open={launchRepo !== null}
         onClose={closeLaunchModal}
         title={launchRepo ? `Launch Agent · ${launchRepo.name}` : 'Launch Agent'}
-        subtitle="This runs through the runtime launch route, prepares a worktree when isolation is needed, and links the resulting owned surface back to the repo."
+        subtitle="Choose a runtime and task. The agent will start working immediately."
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
@@ -1948,63 +2026,120 @@ export function RepoRegistrySection({
           </div>
         ) : (
           <>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* ── Isolation Mode — iOS Segmented Control ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
-                Base branch
+                Isolation
               </div>
-              <input
-                value={launchBaseBranch}
-                onChange={(event) => setLaunchBaseBranch(event.currentTarget.value)}
-                placeholder="main"
-                style={{
-                  width: '100%',
-                  minHeight: 40,
-                  padding: '10px 12px',
-                  borderRadius: 12,
-                  border: '1px solid var(--t-btn-secondary-border)',
-                  background: 'rgba(255, 255, 255, 0.55)',
-                  color: 'var(--t-text)',
-                  fontSize: 13,
-                  fontFamily: '"SF Mono", ui-monospace, monospace',
-                  outline: 'none',
-                }}
-              />
+              <div style={{
+                display: 'flex',
+                padding: 2,
+                borderRadius: 10,
+                background: 'rgba(0, 0, 0, 0.04)',
+                gap: 0,
+              }}>
+                {(['main', 'branch'] as const).map((mode) => {
+                  const active = launchIsolation === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setLaunchIsolation(mode)}
+                      style={{
+                        flex: 1,
+                        padding: '7px 0',
+                        borderRadius: 8,
+                        border: 'none',
+                        background: active ? '#fff' : 'transparent',
+                        boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)' : 'none',
+                        color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
+                        fontSize: 12,
+                        fontWeight: active ? 600 : 500,
+                        cursor: 'pointer',
+                        transition: 'all 180ms cubic-bezier(0.32, 0.72, 0, 1)',
+                        fontFamily: '-apple-system, system-ui, sans-serif',
+                        letterSpacing: '-0.01em',
+                      }}
+                    >
+                      {mode === 'main' ? 'On current branch' : 'New branch'}
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{
+                fontSize: 10,
+                color: 'var(--t-text-faint)',
+                lineHeight: 1.4,
+                marginTop: 2,
+              }}>
+                {launchIsolation === 'main'
+                  ? 'Agent works directly on the current branch. Fast, no setup overhead.'
+                  : 'Agent gets an isolated worktree with its own branch. No conflicts with other work.'}
+              </div>
             </div>
 
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: 10,
-                cursor: 'pointer',
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={launchUseSetup}
-                onChange={(event) => setLaunchUseSetup(event.currentTarget.checked)}
-                style={{
-                  marginTop: 2,
-                  accentColor: '#ef4444',
-                }}
-              />
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
-                  Run dependency setup if a worktree is created
+            {/* ── Branch config (only shown for worktree isolation) ── */}
+            {launchIsolation === 'branch' ? (
+              <>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+                    Base branch
+                  </div>
+                  <input
+                    value={launchBaseBranch}
+                    onChange={(event) => setLaunchBaseBranch(event.currentTarget.value)}
+                    placeholder="main"
+                    style={{
+                      width: '100%',
+                      minHeight: 40,
+                      padding: '10px 12px',
+                      borderRadius: 12,
+                      border: '1px solid var(--t-btn-secondary-border)',
+                      background: 'rgba(255, 255, 255, 0.55)',
+                      color: 'var(--t-text)',
+                      fontSize: 13,
+                      fontFamily: '"SF Mono", ui-monospace, monospace',
+                      outline: 'none',
+                    }}
+                  />
                 </div>
-                <div
+
+                <label
                   style={{
-                    marginTop: 4,
-                    fontSize: 11,
-                    color: 'var(--t-text-muted)',
-                    lineHeight: 1.45,
-                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 10,
+                    cursor: 'pointer',
                   }}
                 >
-                  {launchRepo?.setup.installCommand ?? 'No install command detected'}
-                </div>
-              </div>
-            </label>
+                  <input
+                    type="checkbox"
+                    checked={launchUseSetup}
+                    onChange={(event) => setLaunchUseSetup(event.currentTarget.checked)}
+                    style={{
+                      marginTop: 2,
+                      accentColor: '#ef4444',
+                    }}
+                  />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+                      Run dependency setup in new worktree
+                    </div>
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontSize: 11,
+                        color: 'var(--t-text-muted)',
+                        lineHeight: 1.45,
+                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                      }}
+                    >
+                      {launchRepo?.setup.installCommand ?? 'No install command detected'}
+                    </div>
+                  </div>
+                </label>
+              </>
+            ) : null}
           </>
         )}
 
