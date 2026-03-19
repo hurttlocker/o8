@@ -413,7 +413,28 @@ function RepoCard({
   agentsByBranch?: Map<string, BranchAgent[]>;
   activePorts?: number[];
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      const stored = sessionStorage.getItem('cortex-repo-expanded');
+      if (stored) {
+        const set = JSON.parse(stored) as string[];
+        return set.includes(repo.id);
+      }
+    } catch { /* ignore */ }
+    return false;
+  });
+
+  // Persist expanded state
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem('cortex-repo-expanded');
+      const set = new Set<string>(stored ? JSON.parse(stored) : []);
+      if (expanded) set.add(repo.id);
+      else set.delete(repo.id);
+      sessionStorage.setItem('cortex-repo-expanded', JSON.stringify([...set]));
+    } catch { /* ignore */ }
+  }, [expanded, repo.id]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draftSetup, setDraftSetup] = useState<RepoSetupConfig>(repo.setup);
@@ -432,6 +453,8 @@ function RepoCard({
   const [devServerRunning, setDevServerRunning] = useState(false);
   const [devServerStarting, setDevServerStarting] = useState(false);
   const [devServerPort, setDevServerPort] = useState<number | null>(null);
+  const [devLogsOpen, setDevLogsOpen] = useState(false);
+  const [devLogs, setDevLogs] = useState('');
 
   useEffect(() => {
     setDraftSetup(repo.setup);
@@ -503,6 +526,23 @@ function RepoCard({
       setDevServerPort(null);
     } catch { /* silent */ }
   }, [repo.localPath]);
+
+  // Poll dev server logs when open
+  useEffect(() => {
+    if (!devLogsOpen || !devServerRunning) return;
+    function fetchLogs() {
+      fetch('/api/panel/dev-server')
+        .then(r => r.json())
+        .then((data: { servers?: { id: string; lastOutput: string }[] }) => {
+          const srv = data.servers?.find(s => s.id === `dev-${repo.localPath}`);
+          if (srv) setDevLogs(srv.lastOutput);
+        })
+        .catch(() => {});
+    }
+    fetchLogs();
+    const id = setInterval(fetchLogs, 3000);
+    return () => clearInterval(id);
+  }, [devLogsOpen, devServerRunning, repo.localPath]);
 
   // ── Branch checkout (#172) ──
   const [checkoutTarget, setCheckoutTarget] = useState<string | null>(null);
@@ -806,7 +846,7 @@ function RepoCard({
             </button>
             {/* Dev server Run/Stop */}
             {repo.setup.devCommand ? (
-              devServerRunning ? (
+              devServerRunning ? (<>
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); handleStopDevServer(); }}
@@ -828,7 +868,27 @@ function RepoCard({
                   <Square size={8} strokeWidth={2.5} fill="#dc2626" />
                   Stop{devServerPort ? ` :${devServerPort}` : ''}
                 </button>
-              ) : (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setDevLogsOpen(v => !v); }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3,
+                    padding: '2px 6px',
+                    borderRadius: 6,
+                    border: `1px solid ${devLogsOpen ? 'rgba(37,99,235,0.15)' : 'var(--t-btn-secondary-border)'}`,
+                    background: devLogsOpen ? 'rgba(37,99,235,0.04)' : 'transparent',
+                    color: devLogsOpen ? '#2563eb' : 'var(--t-text-muted)',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                  }}
+                >
+                  Logs
+                </button>
+              </>) : (
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); handleStartDevServer(); }}
@@ -855,6 +915,87 @@ function RepoCard({
               )
             ) : null}
           </div>
+
+          {/* Multi-agent conflict warning */}
+          {(() => {
+            if (!agentsByBranch) return null;
+            const conflicts: { branch: string; agents: BranchAgent[] }[] = [];
+            agentsByBranch.forEach((agents, branch) => {
+              if (agents.length > 1) conflicts.push({ branch, agents });
+            });
+            if (conflicts.length === 0) return null;
+            return (
+              <div style={{
+                margin: '4px 0',
+                padding: '6px 8px',
+                borderRadius: 8,
+                background: 'rgba(239,68,68,0.03)',
+                border: '1px solid rgba(239,68,68,0.10)',
+              }}>
+                {conflicts.map((c) => (
+                  <div key={c.branch} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    fontSize: 10,
+                    color: '#b91c1c',
+                    fontWeight: 600,
+                  }}>
+                    <AlertCircle size={11} strokeWidth={2} />
+                    <span>
+                      {c.agents.map(a => a.name).join(' + ')} both on <span style={{
+                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                        background: 'rgba(239,68,68,0.06)',
+                        padding: '0 3px',
+                        borderRadius: 3,
+                      }}>{c.branch}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* Dev server logs */}
+          {devLogsOpen && devServerRunning ? (
+            <div style={{
+              margin: '4px 0',
+              borderRadius: 8,
+              border: '1px solid var(--t-panel-border)',
+              background: '#0f172a',
+              overflow: 'hidden',
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '4px 8px',
+                background: 'rgba(255,255,255,0.03)',
+                borderBottom: '1px solid rgba(255,255,255,0.06)',
+              }}>
+                <span style={{ fontSize: 9, fontWeight: 600, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Dev Server Output
+                </span>
+                <span style={{ fontSize: 9, color: '#475569' }}>
+                  {repo.setup.devCommand}
+                </span>
+              </div>
+              <pre style={{
+                margin: 0,
+                padding: 8,
+                fontSize: 10,
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                color: '#e2e8f0',
+                lineHeight: 1.5,
+                maxHeight: 140,
+                overflow: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+              }}>
+                {devLogs || 'Waiting for output…'}
+              </pre>
+            </div>
+          ) : null}
 
           {/* Workspace notice */}
           {workspaceNotice ? (
@@ -1024,6 +1165,36 @@ function RepoCard({
                     }}>
                       {branch.lastCommitAge}
                     </span>
+                    {/* Open PR button — on feature branches with commits ahead */}
+                    {!branch.current && branch.name !== repo.defaultBranch && branch.ahead > 0 ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const ghUrl = githubUrlFromRemote(repo.remoteUrl);
+                          if (ghUrl) {
+                            window.open(`${ghUrl}/compare/${branch.name}?expand=1`, '_blank');
+                          }
+                        }}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 3,
+                          padding: '1px 6px',
+                          borderRadius: 4,
+                          border: '1px solid rgba(37,99,235,0.12)',
+                          background: 'rgba(37,99,235,0.04)',
+                          color: '#2563eb',
+                          fontSize: 9,
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          flexShrink: 0,
+                        }}
+                        title={`Open PR for ${branch.name}`}
+                      >
+                        PR
+                      </button>
+                    ) : null}
                     {/* Overflow menu — not on current/protected */}
                     {!branch.current ? (
                       <button
