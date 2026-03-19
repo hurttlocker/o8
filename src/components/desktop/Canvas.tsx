@@ -24,6 +24,7 @@ import {
   Clock,
   Clipboard,
   ExternalLink,
+  RefreshCw,
   FileEdit,
   FileMinus,
   FilePlus,
@@ -48,7 +49,7 @@ import { GraphExplorer3D } from './GraphExplorer3D';
 
 // ── Tab Types ──
 
-export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'git-log' | 'image' | 'deploy' | 'memory' | 'welcome' | 'timeline' | 'mermaid';
+export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'git-log' | 'image' | 'deploy' | 'memory' | 'welcome' | 'timeline' | 'mermaid' | 'preview';
 
 export interface CanvasTab {
   id: string;
@@ -213,6 +214,7 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
     case 'welcome': return <BookOpen size={size} />;
     case 'timeline': return <Clock size={size} />;
     case 'mermaid': return <Hexagon size={size} />;
+    case 'preview': return <Globe size={size} />;
   }
 }
 
@@ -252,6 +254,8 @@ const TabContent = memo(function TabContent({ tab, onSelectCommit }: { tab: Canv
       return <TimelineExpanded />;
     case 'mermaid':
       return <MermaidViewer code={tab.resourceId} />;
+    case 'preview':
+      return <PortPreview url={tab.resourceId} port={parseInt(tab.meta?.port ?? '0', 10)} repo={tab.meta?.repo} />;
     default:
       return <CanvasEmpty />;
   }
@@ -893,6 +897,108 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
     </div>
   );
 });
+
+// ── Port Preview (reuses /api/panel/proxy) ──
+
+function PortPreview({ url, port, repo }: { url: string; port: number; repo?: string }) {
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const normalizedUrl = url.replace('0.0.0.0', 'localhost');
+  const proxiedSrc = `/api/panel/proxy?url=${encodeURIComponent(normalizedUrl)}`;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#fff' }}>
+      {/* Toolbar — matches TerminalWorkspace PreviewToolbar pattern */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        height: 32,
+        paddingLeft: 12,
+        paddingRight: 8,
+        background: '#f1f5f9',
+        borderBottom: '1px solid #e2e8f0',
+        gap: 8,
+        flexShrink: 0,
+      }}>
+        {/* Green dot — live */}
+        <span style={{
+          width: 8, height: 8, borderRadius: '50%',
+          background: '#22c55e', flexShrink: 0,
+        }} />
+        {/* URL */}
+        <span style={{
+          fontSize: 11,
+          color: '#64748b',
+          fontFamily: 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
+          flex: 1,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {normalizedUrl}
+        </span>
+        {repo ? (
+          <span style={{
+            fontSize: 9, fontWeight: 600,
+            color: '#94a3b8',
+            padding: '1px 5px', borderRadius: 4,
+            background: 'rgba(148,163,184,0.1)',
+          }}>
+            {repo}
+          </span>
+        ) : null}
+        {/* Refresh */}
+        <button
+          type="button"
+          onClick={() => {
+            const iframe = iframeRef.current;
+            if (iframe) {
+              const src = iframe.src;
+              iframe.src = '';
+              setTimeout(() => { iframe.src = src; }, 50);
+            }
+            setRefreshKey(k => k + 1);
+          }}
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 24, height: 24, borderRadius: 6,
+            border: '1px solid rgba(148,163,184,0.18)',
+            background: 'rgba(255,255,255,0.82)',
+            color: '#475569', cursor: 'pointer', flexShrink: 0,
+          }}
+          title="Refresh preview"
+        >
+          <RefreshCw size={12} strokeWidth={2} />
+        </button>
+        {/* Open in browser */}
+        <button
+          type="button"
+          onClick={() => window.open(normalizedUrl, '_blank')}
+          style={{
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 24, height: 24, borderRadius: 6,
+            border: '1px solid rgba(148,163,184,0.18)',
+            background: 'rgba(255,255,255,0.82)',
+            color: '#475569', cursor: 'pointer', flexShrink: 0,
+          }}
+          title="Open in browser"
+        >
+          <ExternalLink size={12} strokeWidth={2} />
+        </button>
+      </div>
+      {/* Iframe — proxied through /api/panel/proxy */}
+      <iframe
+        key={refreshKey}
+        ref={iframeRef}
+        src={proxiedSrc}
+        title={`Preview localhost:${port}`}
+        style={{
+          flex: 1, border: 'none', width: '100%', background: '#ffffff',
+        }}
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+      />
+    </div>
+  );
+}
 
 // ── Empty State ──
 
