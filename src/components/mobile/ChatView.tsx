@@ -13,6 +13,7 @@ import {
   mediaHref,
   roleLabel,
 } from './utils';
+import { isSlashCommandText } from '@/lib/slash-commands';
 
 // ── Memoized message bubble — only re-renders when its own data changes ──
 
@@ -59,9 +60,37 @@ const MessageBubble = memo(function MessageBubble({
   })();
 
   if (isUser) {
+    const isSlashCommand = isSlashCommandText(entry.text);
     return (
       <div className={`remodex-user-turn-wrap${fadeClass}`}>
-        {hasText ? <div className="remodex-user-bubble">{renderMessageBody(entry.text, `${entry.id}-user`)}</div> : null}
+        {hasText ? (
+          <div
+            className="remodex-user-bubble"
+            style={isSlashCommand ? {
+              background: 'rgba(15, 23, 42, 0.92)',
+              color: '#f8fafc',
+              border: '1px solid rgba(148, 163, 184, 0.18)',
+              boxShadow: '0 8px 24px rgba(15, 23, 42, 0.14)',
+            } : undefined}
+          >
+            {isSlashCommand ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span style={{
+                  fontSize: '0.68rem',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  color: '#93c5fd',
+                }}>
+                  Slash Command
+                </span>
+              </div>
+            ) : null}
+            <div style={isSlashCommand ? { fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: '0.88rem' } : undefined}>
+              {renderMessageBody(entry.text, `${entry.id}-user`)}
+            </div>
+          </div>
+        ) : null}
         {hasMedia ? <MediaGrid media={entry.media ?? []} align="right" setExpandedMedia={setExpandedMedia} onScrollToLatestMessage={onScrollToLatestMessage} /> : null}
         {showTimestamp ? <span className="remodex-turn-time">{entry.timestampLabel ?? 'now'}</span> : null}
       </div>
@@ -192,22 +221,36 @@ export function ChatView({
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const prevEntryCountRef = useRef(transcriptEntries.length);
 
-  const getIsNew = useCallback((entryId: string) => {
-    return hydrated
-      && seenMessageIdsRef.current != null
-      && seenMessageIdsRef.current.size > 0
-      && !seenMessageIdsRef.current.has(entryId);
-  }, [hydrated, seenMessageIdsRef]);
+  // Track which messages are "new" (not yet seen) via state, avoiding
+  // render-time ref access (#195). The effect computes the new set and
+  // updates the seen ref in one pass. The setState here is intentional —
+  // this is derived state that depends on a mutable ref and cannot be
+  // computed in useMemo without accessing the ref during render.
+  const [newMessageIds, setNewMessageIds] = useState<Set<string>>(new Set());
 
-  const markSeen = useCallback((entryId: string) => {
-    seenMessageIdsRef.current?.add(entryId);
-  }, [seenMessageIdsRef]);
+  /* eslint-disable react-hooks/set-state-in-effect -- derived from mutable ref, cannot use useMemo (#195) */
+  useEffect(() => {
+    if (!hydrated || !seenMessageIdsRef.current || seenMessageIdsRef.current.size === 0) {
+      setNewMessageIds(prev => prev.size === 0 ? prev : new Set());
+      return;
+    }
+    const ids = new Set<string>();
+    for (const entry of transcriptEntries) {
+      if (!seenMessageIdsRef.current.has(entry.id)) {
+        ids.add(entry.id);
+        seenMessageIdsRef.current.add(entry.id);
+      }
+    }
+    setNewMessageIds(prev => ids.size === 0 && prev.size === 0 ? prev : ids);
+  }, [hydrated, transcriptEntries, seenMessageIdsRef]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Stable estimateSize — must NOT depend on transcriptEntries to avoid
   // virtualizer recalculating all sizes on every poll update, which causes
   // scroll position to jump randomly on mobile.
+  // Synced via effect to avoid render-time ref mutation (#195).
   const transcriptRef = useRef(transcriptEntries);
-  transcriptRef.current = transcriptEntries;
+  useEffect(() => { transcriptRef.current = transcriptEntries; }, [transcriptEntries]);
 
   const estimateSize = useCallback((index: number) => {
     const entry = transcriptRef.current[index];
@@ -219,11 +262,17 @@ export function ChatView({
     return Math.max(64, 64 + Math.ceil(textLen / 50) * 22 + (hasMedia ? 200 : 0));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Track scrollMargin via state to avoid render-time ref access (#195).
+  const [scrollMargin, setScrollMargin] = useState(0);
+  useEffect(() => {
+    if (listRef.current) setScrollMargin(listRef.current.offsetTop);
+  }, [transcriptEntries.length]); // re-measure when list size changes
+
   const virtualizer = useWindowVirtualizer({
     count: transcriptEntries.length,
     estimateSize,
     overscan: 8,
-    scrollMargin: listRef.current?.offsetTop ?? 0,
+    scrollMargin,
   });
 
   // No auto-scroll — user controls position via "new messages" button.
@@ -287,8 +336,7 @@ export function ChatView({
               const entry = transcriptEntries[virtualRow.index];
               const previousEntry = virtualRow.index > 0 ? transcriptEntries[virtualRow.index - 1] : null;
               const isLatest = virtualRow.index === lastAssistantIndex;
-              const isNew = getIsNew(entry.id);
-              if (isNew) markSeen(entry.id);
+              const isNew = newMessageIds.has(entry.id);
 
               return (
                 <div
@@ -375,20 +423,23 @@ export function ChatView({
             zIndex: 20,
             display: 'flex',
             alignItems: 'center',
-            gap: '6px',
-            padding: '8px 16px',
-            borderRadius: '20px',
-            backgroundColor: '#007aff',
-            color: '#ffffff',
-            fontSize: '13px',
+            justifyContent: 'center',
+            width: 32,
+            height: 32,
+            borderRadius: 10,
+            border: '1px solid rgba(0,122,255,0.15)',
+            background: 'rgba(0,122,255,0.08)',
+            backdropFilter: 'blur(20px) saturate(1.6)',
+            WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
+            color: '#007aff',
+            fontSize: 14,
             fontWeight: 600,
-            border: 'none',
-            boxShadow: '0 4px 16px rgba(0,122,255,0.35)',
+            boxShadow: '0 2px 12px rgba(0,122,255,0.15)',
             cursor: 'pointer',
             animation: 'pill-bounce-in 0.3s ease-out',
           }}
         >
-          <span style={{ fontSize: '14px' }}>↓</span> New messages
+          ↓
           <style>{`@keyframes pill-bounce-in { from { opacity: 0; transform: translateX(-50%) translateY(10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }`}</style>
         </button>
       ) : null}
