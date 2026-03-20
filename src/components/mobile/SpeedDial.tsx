@@ -165,6 +165,12 @@ export const SpeedDialButton = memo(function SpeedDialButton({
               <button
                 key={item.screen}
                 type="button"
+                onTouchEnd={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onNavigate(item.screen);
+                  setOpen(false);
+                }}
                 onClick={() => {
                   onNavigate(item.screen);
                   setOpen(false);
@@ -173,29 +179,31 @@ export const SpeedDialButton = memo(function SpeedDialButton({
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
-                  padding: 0,
+                  padding: '4px',
                   border: 'none',
                   background: 'transparent',
                   cursor: 'pointer',
                   WebkitTapHighlightColor: 'transparent',
-                  animation: `speedDialPop 200ms cubic-bezier(0.32, 0.72, 0, 1) ${index * 30}ms both`,
+                  pointerEvents: 'auto',
+                  touchAction: 'manipulation',
+                  position: 'relative',
+                  minHeight: 44,
                 }}
               >
                 {/* Label pill */}
                 <span style={{
                   padding: '8px 14px',
                   borderRadius: 18,
-                  background: isActive ? 'rgba(0,122,255,0.12)' : 'rgba(0,122,255,0.06)',
-                  backdropFilter: 'blur(30px) saturate(1.8)',
-                  WebkitBackdropFilter: 'blur(30px) saturate(1.8)',
+                  background: isActive ? 'rgba(0,122,255,0.15)' : 'rgba(0,122,255,0.08)',
                   border: isActive ? '1px solid rgba(0,122,255,0.25)' : '1px solid rgba(0,122,255,0.1)',
                   color: isActive ? '#007aff' : 'rgba(0,80,200,0.7)',
                   fontSize: 13,
                   fontWeight: 600,
                   fontFamily: '-apple-system, system-ui, sans-serif',
                   letterSpacing: '-0.01em',
-                  boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
+                  boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
                   position: 'relative',
+                  pointerEvents: 'none',
                 }}>
                   {item.label}
                   {item.screen === 'approvals' && approvalCount > 0 && (
@@ -215,14 +223,13 @@ export const SpeedDialButton = memo(function SpeedDialButton({
                 <span style={{
                   width: 36, height: 36,
                   borderRadius: 12,
-                  background: isActive ? 'rgba(0,122,255,0.12)' : 'rgba(0,122,255,0.06)',
-                  backdropFilter: 'blur(30px) saturate(1.8)',
-                  WebkitBackdropFilter: 'blur(30px) saturate(1.8)',
+                  background: isActive ? 'rgba(0,122,255,0.15)' : 'rgba(0,122,255,0.08)',
                   border: isActive ? '1px solid rgba(0,122,255,0.25)' : '1px solid rgba(0,122,255,0.1)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
+                  boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+                  pointerEvents: 'none',
                 }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
                     stroke={isActive ? '#007aff' : 'rgba(0,80,200,0.5)'}
