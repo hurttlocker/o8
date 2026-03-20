@@ -163,18 +163,26 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
       .catch(() => {});
   }, []);
 
-  // Fetch recent on mount
-  useEffect(() => {
+  const loadRecent = useCallback(() => {
     setLoading(true);
-    fetch('/api/mobile/cortex/recall', {
+    return fetch('/api/mobile/cortex/recall', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: 'recent important decisions', limit: 10 }),
     })
       .then(r => r.json())
+      .then(r => r.json())
       .then(d => { setResults(d.cards ?? []); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
+
+  // Fetch recent on mount
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void loadRecent();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadRecent]);
 
   const doSearch = useCallback((q: string) => {
     if (!q.trim()) return;
@@ -213,15 +221,34 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         marginBottom: 16,
       }}>
-        <h1 style={{
-          fontSize: 28, fontWeight: 800,
-          letterSpacing: '-0.03em',
-          color: '#0a0a0a',
-          fontFamily: '-apple-system, system-ui, sans-serif',
-          margin: 0,
-        }}>
-          Memory
-        </h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            type="button"
+            onClick={onBack}
+            style={{
+              padding: '6px 14px',
+              borderRadius: 10,
+              background: 'rgba(0,122,255,0.08)',
+              border: '1px solid rgba(0,122,255,0.12)',
+              color: '#007aff',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+          >
+            Done
+          </button>
+          <h1 style={{
+            fontSize: 28, fontWeight: 800,
+            letterSpacing: '-0.03em',
+            color: '#0a0a0a',
+            fontFamily: '-apple-system, system-ui, sans-serif',
+            margin: 0,
+          }}>
+            Memory
+          </h1>
+        </div>
         {stats ? (
           <div style={{
             display: 'flex', gap: 12,
@@ -337,8 +364,8 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
               {activeTab === 'search' && query ? 'No results found' : 'Loading recent memories...'}
             </div>
           ) : null}
-          {results.map((fact) => (
-            <FactRow key={fact.memory_id} fact={fact} onInject={onInjectText} />
+          {results.map((fact, i) => (
+            <FactRow key={`${fact.memory_id}-${i}`} fact={fact} onInject={onInjectText} />
           ))}
         </div>
       ) : (
