@@ -161,53 +161,64 @@ function MediaGrid({
 }) {
   const images = media.filter(isImageMedia);
   const files = media.filter(m => !isImageMedia(m));
+  const imgCount = images.length;
 
-  // Telegram-style grid layout
-  const gridStyle = (): React.CSSProperties => {
-    const count = images.length;
-    if (count === 1) return { display: 'grid', gridTemplateColumns: '1fr', gap: 2 };
-    if (count === 2) return { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 };
-    if (count === 3) return { display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: 'auto auto', gap: 2 };
-    return { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }; // 4+ = 2×N
-  };
+  // Telegram-style grid: columns based on image count
+  const gridCols = imgCount === 1 ? '1fr' : '1fr 1fr';
 
   return (
-    <div className={`remodex-media-grid ${align === 'right' ? 'remodex-media-grid-right' : ''}`}>
-      {images.length > 0 ? (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 8,
+      width: '100%',
+      ...(align === 'right' ? { alignItems: 'flex-end' } : {}),
+    }}>
+      {imgCount > 0 ? (
         <div style={{
-          ...gridStyle(),
-          borderRadius: 12,
+          display: 'grid',
+          gridTemplateColumns: gridCols,
+          gap: 2,
+          borderRadius: 14,
           overflow: 'hidden',
-          maxWidth: images.length === 1 ? '85%' : '100%',
+          width: imgCount === 1 ? '75%' : '100%',
+          ...(align === 'right' ? { marginLeft: 'auto' } : {}),
         }}>
-          {images.map((item, i) => (
-            <button
-              key={item.path}
-              type="button"
-              className="remodex-media-card remodex-media-card-image"
-              onClick={() => setExpandedMedia(item)}
-              style={{
-                // First image in a 3-grid spans full width
-                ...(images.length === 3 && i === 0 ? { gridColumn: '1 / -1' } : {}),
-                margin: 0, padding: 0, border: 'none', background: 'none',
-                cursor: 'pointer', display: 'block',
-                WebkitTapHighlightColor: 'transparent',
-              }}
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={mediaHref(item.path)}
-                alt={item.name}
-                loading="lazy"
+          {images.map((item, i) => {
+            // 3 images: first one spans full width
+            const span = imgCount === 3 && i === 0;
+            // Single image: auto height; multiple: fixed 150px
+            const h = imgCount === 1 ? 'auto' : 150;
+            const maxH = imgCount === 1 ? 300 : undefined;
+            return (
+              <button
+                key={item.path}
+                type="button"
+                onClick={() => setExpandedMedia(item)}
                 style={{
-                  width: '100%',
-                  height: images.length === 1 ? 'auto' : 160,
-                  objectFit: 'cover',
-                  display: 'block',
+                  gridColumn: span ? '1 / -1' : undefined,
+                  margin: 0, padding: 0, border: 'none',
+                  background: '#e5e5ea',
+                  cursor: 'pointer', display: 'block',
+                  WebkitTapHighlightColor: 'transparent',
+                  overflow: 'hidden',
+                  lineHeight: 0,
                 }}
-              />
-            </button>
-          ))}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={mediaHref(item.path)}
+                  alt={item.name}
+                  loading="lazy"
+                  style={{
+                    width: '100%',
+                    height: h,
+                    maxHeight: maxH,
+                    objectFit: imgCount === 1 ? 'contain' : 'cover',
+                    display: 'block',
+                  }}
+                />
+              </button>
+            );
+          })}
         </div>
       ) : null}
 
