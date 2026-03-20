@@ -127,6 +127,29 @@ function MobileRemoteShellInner({
     }
   }, [state.snapshot, updateAgents]);
 
+  useEffect(() => {
+    if (state.snapshot.mode === 'live' && state.snapshot.sessions.length > 0) return;
+    let active = true;
+
+    async function refreshSoon() {
+      try {
+        await refreshInbox();
+      } catch {
+        // Shell-first bootstrap should stay honest and retry later.
+      }
+    }
+
+    void refreshSoon();
+    const timer = window.setTimeout(() => {
+      if (active) void refreshSoon();
+    }, 2500);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [refreshInbox, state.snapshot.mode, state.snapshot.sessions.length]);
+
   // ── Derived transcript data ──
   const {
     snapshot, selectedSession, selectedSessionKey,
@@ -333,12 +356,12 @@ function MobileRemoteShellInner({
     <ThemeProvider>
     <div className="mobile-wrap remodex-mobile-page" style={shellStyle} suppressHydrationWarning>
       <div className="remodex-phone-shell">
-        {/* Frosted status bar — theme-aware gradient */}
-        <div style={{
+        {/* Frosted status bar — solid at clock, gentle fade */}
+        <div className="remodex-frost-bar" style={{
           position: 'fixed',
           top: 0, left: 0, right: 0,
           height: 'calc(env(safe-area-inset-top, 0px) + 56px)',
-          background: 'linear-gradient(180deg, var(--frost-strong) 0%, var(--frost-bg) 25%, color-mix(in srgb, var(--frost-bg) 60%, transparent) 45%, color-mix(in srgb, var(--frost-bg) 20%, transparent) 70%, transparent 100%)',
+          background: 'linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(255,255,255,0.97) 25%, rgba(255,255,255,0.8) 45%, rgba(255,255,255,0.4) 70%, rgba(255,255,255,0.1) 85%, rgba(255,255,255,0) 100%)',
           zIndex: 7,
           pointerEvents: 'none',
         }} />
