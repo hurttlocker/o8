@@ -668,9 +668,80 @@ export function renderLLMMarkdown(text: string, opts?: {
     i++;
   }
 
-  // Unclosed code block
+  // Unclosed code block — streaming mode (show live with cursor)
   if (inCodeBlock && codeContent) {
-    nodes.push(<CodeBlock key="code-end" code={codeContent} lang={codeLang} onApplyToFile={opts?.onApplyToFile} onOpenInCanvas={opts?.onOpenInCanvas} onRunInTerminal={opts?.onRunInTerminal} />);
+    nodes.push(
+      <div key="code-streaming" style={{
+        marginTop: 8,
+        marginBottom: 8,
+        borderRadius: 10,
+        overflow: 'hidden',
+        border: '1px solid #e2e8f0',
+        background: '#f8fafc',
+      }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingTop: 4,
+          paddingBottom: 4,
+          paddingLeft: 12,
+          paddingRight: 8,
+          background: '#f1f5f9',
+          borderBottom: '1px solid #e2e8f0',
+        }}>
+          <span style={{
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#64748b',
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+          }}>
+            {codeLang || 'code'}
+          </span>
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            fontSize: 10,
+            color: '#3b82f6',
+            fontWeight: 500,
+          }}>
+            <span style={{
+              width: 6,
+              height: 6,
+              borderRadius: '50%',
+              background: '#3b82f6',
+              animation: 'llmDot 1s ease-in-out infinite',
+            }} />
+            streaming
+          </span>
+        </div>
+        <pre style={{
+          margin: 0,
+          paddingTop: 12,
+          paddingBottom: 12,
+          paddingLeft: 16,
+          paddingRight: 16,
+          fontSize: 13,
+          lineHeight: 1.6,
+          fontFamily: '"SF Mono", ui-monospace, "Cascadia Code", monospace',
+          overflowX: 'auto',
+          color: '#334155',
+          tabSize: 2,
+        }}>
+          {codeContent}
+          <span style={{
+            display: 'inline-block',
+            width: 2,
+            height: 16,
+            background: '#3b82f6',
+            marginLeft: 1,
+            verticalAlign: 'text-bottom',
+            animation: 'llmDot 1s ease-in-out infinite',
+          }} />
+        </pre>
+      </div>
+    );
   }
 
   return nodes;
