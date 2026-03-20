@@ -3242,11 +3242,18 @@ button.workflow-file-item.workflow-file-item-active {
   z-index: 6;
   width: min(calc(100dvw - 16px), 422px);
   display: grid;
-  gap: calc(0.34rem - (var(--remodex-dock-fade-progress) * 0.1rem) - (var(--remodex-dock-motion-progress) * 0.08rem));
+  gap: 0.34rem;
   padding: 0.08rem 0.25rem 0;
-  opacity: calc(1 - var(--remodex-dock-motion-progress));
-  transform: translate(-50%, calc(var(--remodex-dock-motion-progress) * 18px));
-  transition: gap 180ms ease, opacity 180ms ease, transform 180ms ease;
+  opacity: 1;
+  transform: translate(-50%, 0);
+  transition: opacity 180ms ease, transform 180ms ease;
+  will-change: opacity, transform;
+}
+/* When scrolling, hide dock with GPU-composited properties only */
+.remodex-bottom-dock[data-scrolling="true"] {
+  opacity: 0;
+  transform: translate(-50%, 18px);
+  pointer-events: none;
 }
 
 .remodex-compose-shell {
@@ -3255,48 +3262,26 @@ button.workflow-file-item.workflow-file-item-active {
   gap: 0.42rem;
   padding: calc(0.48rem + (var(--remodex-compose-active) * 0.18rem));
   border-radius: calc(20px + (var(--remodex-compose-active) * 6px));
-  border: 1px solid rgba(191, 219, 254, calc(0.24 + (var(--remodex-compose-active) * 0.18) - (var(--remodex-dock-motion-progress) * 0.08)));
+  border: 1px solid rgba(191, 219, 254, calc(0.24 + (var(--remodex-compose-active) * 0.18)));
   background:
     linear-gradient(
       180deg,
-      rgba(
-        219,
-        234,
-        254,
-        calc(0.6 - (var(--remodex-dock-fade-progress) * 0.22) - (var(--remodex-dock-motion-progress) * 0.44) + (var(--remodex-compose-active) * 0.12))
-      ),
-      rgba(
-        239,
-        246,
-        255,
-        calc(0.48 - (var(--remodex-dock-fade-progress) * 0.2) - (var(--remodex-dock-motion-progress) * 0.42) + (var(--remodex-compose-active) * 0.14))
-      )
+      rgba(219, 234, 254, calc(0.6 + (var(--remodex-compose-active) * 0.12))),
+      rgba(239, 246, 255, calc(0.48 + (var(--remodex-compose-active) * 0.14)))
     );
-  backdrop-filter: blur(calc(14px + (var(--remodex-compose-active) * 10px) - (var(--remodex-dock-motion-progress) * 12px))) saturate(calc(1.04 + (var(--remodex-compose-active) * 0.16) - (var(--remodex-dock-motion-progress) * 0.12)));
+  backdrop-filter: blur(calc(14px + (var(--remodex-compose-active) * 10px))) saturate(calc(1.04 + (var(--remodex-compose-active) * 0.16)));
   box-shadow:
-    0 12px 26px rgba(
-      96,
-      165,
-      250,
-      calc(0.08 - (var(--remodex-dock-fade-progress) * 0.05) - (var(--remodex-dock-motion-progress) * 0.08) + (var(--remodex-compose-active) * 0.1))
-    ),
-    0 10px 20px rgba(
-      15,
-      23,
-      42,
-      calc(0.04 - (var(--remodex-dock-fade-progress) * 0.02) - (var(--remodex-dock-motion-progress) * 0.03) + (var(--remodex-compose-active) * 0.03))
-    );
-  opacity: calc(0.9 - (var(--remodex-dock-fade-progress) * 0.22) - (var(--remodex-dock-motion-progress) * 0.62) + (var(--remodex-compose-active) * 0.08));
-  transform: translateY(calc((var(--remodex-dock-fade-progress) * 3px) + (var(--remodex-dock-motion-progress) * 12px))) scale(calc(1 - (var(--remodex-dock-motion-progress) * 0.03)));
+    0 12px 26px rgba(96, 165, 250, calc(0.08 + (var(--remodex-compose-active) * 0.1))),
+    0 10px 20px rgba(15, 23, 42, calc(0.04 + (var(--remodex-compose-active) * 0.03)));
+  opacity: calc(0.9 + (var(--remodex-compose-active) * 0.08));
+  /* No per-frame transforms — dock parent handles scroll visibility */
   transition:
-    gap 220ms ease,
     padding 220ms ease,
     border-radius 220ms ease,
     border-color 220ms ease,
     background 220ms ease,
     box-shadow 220ms ease,
     opacity 220ms ease,
-    transform 220ms ease,
     backdrop-filter 220ms ease;
 }
 
@@ -3308,18 +3293,8 @@ button.workflow-file-item.workflow-file-item-active {
   background:
     linear-gradient(
       180deg,
-      rgba(
-        255,
-        255,
-        255,
-        calc(0.18 - (var(--remodex-dock-fade-progress) * 0.08) - (var(--remodex-dock-motion-progress) * 0.16) + (var(--remodex-compose-active) * 0.22))
-      ),
-      rgba(
-        255,
-        255,
-        255,
-        calc(0.04 - (var(--remodex-dock-fade-progress) * 0.02) - (var(--remodex-dock-motion-progress) * 0.05) + (var(--remodex-compose-active) * 0.06))
-      )
+      rgba(255, 255, 255, calc(0.18 + (var(--remodex-compose-active) * 0.22))),
+      rgba(255, 255, 255, calc(0.04 + (var(--remodex-compose-active) * 0.06)))
     );
   pointer-events: none;
   transition: border-radius 220ms ease, background 220ms ease;
@@ -3337,24 +3312,9 @@ button.workflow-file-item.workflow-file-item-active {
     calc(0.72rem + (var(--remodex-compose-active) * 0.14rem))
     calc(0.6rem + (var(--remodex-compose-active) * 0.14rem));
   border-radius: calc(18px + (var(--remodex-compose-active) * 4px));
-  background: rgba(
-    255,
-    255,
-    255,
-    calc(0.44 - (var(--remodex-dock-fade-progress) * 0.12) - (var(--remodex-dock-motion-progress) * 0.2) + (var(--remodex-compose-active) * 0.2))
-  );
-  border: 1px solid rgba(
-    255,
-    255,
-    255,
-    calc(0.28 - (var(--remodex-dock-fade-progress) * 0.08) - (var(--remodex-dock-motion-progress) * 0.12) + (var(--remodex-compose-active) * 0.16))
-  );
-  box-shadow: inset 0 1px 0 rgba(
-    255,
-    255,
-    255,
-    calc(0.3 - (var(--remodex-dock-fade-progress) * 0.08) - (var(--remodex-dock-motion-progress) * 0.12) + (var(--remodex-compose-active) * 0.2))
-  );
+  background: rgba(255, 255, 255, calc(0.44 + (var(--remodex-compose-active) * 0.2)));
+  border: 1px solid rgba(255, 255, 255, calc(0.28 + (var(--remodex-compose-active) * 0.16)));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, calc(0.3 + (var(--remodex-compose-active) * 0.2)));
   transition:
     gap 220ms ease,
     padding 220ms ease,

@@ -1,13 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execFile } from 'node:child_process';
-import os from 'node:os';
-import path from 'node:path';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
-const CORTEX_BINARY = process.env.CORTEX_BINARY || path.join(os.homedir(), 'bin', 'cortex');
+import { getCortexClient } from '@/lib/cortex/client';
 
 export async function POST(request: Request) {
   try {
@@ -18,24 +12,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'subject or factId is required' }, { status: 400 });
     }
 
-    // Use real Cortex graph traversal (cortex#338: --subject mode)
-    const args = ['graph'];
-    if (subject) {
-      args.push('--subject', subject);
-    } else {
-      args.push(String(factId));
+    const client = getCortexClient();
+    const graph = await client.graph({ subject, factId, depth });
+
+    if (!graph) {
+      return NextResponse.json({ center: subject ?? `fact #${factId}`, nodes: [], edges: [], meta: {} });
     }
-    args.push('--depth', String(depth), '--export', 'json');
 
-    const { stdout } = await execFileAsync(CORTEX_BINARY, args, {
-      timeout: 10_000,
-      maxBuffer: 4 * 1024 * 1024,
-      env: { ...process.env, NO_COLOR: '1' },
-    });
-
-    const graph = JSON.parse(stdout.trim());
-
-    // Cortex graph JSON format: { nodes: [...], edges: [...], meta: {...} }
     // Transform to IDE format
     const nodes = (graph.nodes ?? []).map((n: Record<string, unknown>) => ({
       id: n.id,
@@ -62,7 +45,6 @@ export async function POST(request: Request) {
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Graph query failed';
-    // If graph returns empty (no nodes for subject), return empty instead of 500
     if (message.includes('{}') || message.includes('No graph found')) {
       return NextResponse.json({ center: 'unknown', nodes: [], edges: [], meta: {} });
     }

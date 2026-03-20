@@ -91,7 +91,7 @@ export const TopBar = memo(function TopBar({
       data-visible={headerVisible ? 'true' : 'false'}
       data-picker-open={squadPickerOpen ? 'true' : 'false'}
       style={{
-        transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
+        transition: 'opacity 250ms ease, transform 250ms cubic-bezier(0.32, 0.72, 0, 1)',
       }}
     >
       {/* Hamburger menu — first grid column */}
@@ -132,7 +132,7 @@ export const TopBar = memo(function TopBar({
               ? 'scale(1)'
               : 'scale(0.85)',
             opacity: isHeaderCompact ? 1 : 0,
-            transition: 'all 350ms cubic-bezier(0.32, 0.72, 0, 1)',
+            transition: 'opacity 350ms ease, transform 350ms cubic-bezier(0.32, 0.72, 0, 1)',
             pointerEvents: isHeaderCompact ? 'auto' : 'none',
             zIndex: 1,
           }}>
@@ -141,7 +141,6 @@ export const TopBar = memo(function TopBar({
               padding: '5px 16px',
               borderRadius: 20,
               background: 'rgba(0,122,255,0.08)',
-              backdropFilter: 'blur(20px) saturate(1.6)',
               WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
               border: '1px solid rgba(0,122,255,0.15)',
               maxWidth: '75%',
@@ -178,7 +177,7 @@ export const TopBar = memo(function TopBar({
           <div style={{
             opacity: isHeaderCompact ? 0 : 1,
             transform: isHeaderCompact ? 'scale(1.05)' : 'scale(1)',
-            transition: 'all 350ms cubic-bezier(0.32, 0.72, 0, 1)',
+            transition: 'opacity 350ms ease, transform 350ms cubic-bezier(0.32, 0.72, 0, 1)',
             pointerEvents: isHeaderCompact ? 'none' : 'auto',
             display: 'flex', alignItems: 'center', width: '100%',
           }}>

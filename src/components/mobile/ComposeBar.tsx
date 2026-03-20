@@ -135,7 +135,7 @@ export const ComposeBar = memo(function ComposeBar({
                   cursor: (isThinking || isStreaming) ? 'pointer' : 'default',
                   fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
                   color: (isThinking || isStreaming) ? '#3b82f6' : 'var(--t-text-muted, #8e8e93)',
-                  transition: 'all 200ms ease',
+                  transition: 'color 200ms ease, background 200ms ease, border-color 200ms ease',
                 }}
               >
                 <Brain size={12} style={{ animation: isThinking ? 'pulse 1.5s ease-in-out infinite' : 'none', opacity: (isThinking || isStreaming) ? 1 : 0.5 }} />
@@ -192,10 +192,12 @@ export const ComposeBar = memo(function ComposeBar({
               value={draft}
               onChange={(event) => {
                 handlers.onDraftChange(event.target.value);
-                // Auto-grow: expand with each line, max ~6 lines
+                // Auto-grow without jitter: measure off-screen then apply once
                 const el = event.target;
-                el.style.height = 'auto';
-                el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+                // Set to 0 instead of 'auto' — avoids visible collapse frame
+                el.style.height = '0';
+                const next = Math.min(el.scrollHeight, 160);
+                el.style.height = `${next}px`;
               }}
               onKeyDown={(event) => {
                 // Up arrow: recall last message (placeholder for mobile)

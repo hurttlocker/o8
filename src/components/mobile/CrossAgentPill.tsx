@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * CrossAgentPill — Tiny floating indicator on chat page.
- * Shows "2 agents running" without leaving chat.
- * Taps to navigate to Agents view.
+ * CrossAgentPill — Whisper-thin indicator above compose bar.
+ * "2 running" / "3 idle" — tap to jump to Agents view.
+ * No layout-triggering animations. Pure opacity + transform (GPU-only).
  */
 
 import { memo } from 'react';
@@ -36,14 +36,14 @@ export const CrossAgentPill = memo(function CrossAgentPill({
         WebkitTapHighlightColor: 'transparent',
         touchAction: 'manipulation',
         opacity: 0.55,
-        transition: 'opacity 300ms ease',
-        animation: 'pillFadeIn 400ms cubic-bezier(0.32, 0.72, 0, 1)',
+        /* No transition on opacity — avoids jitter when parent re-renders */
       }}
     >
-      {/* Tiny dot */}
+      {/* Tiny dot — pulse is opacity-only (no layout) */}
       <span style={{
         width: 4, height: 4, borderRadius: '50%',
         background: runningCount > 0 ? '#34c759' : '#8e8e93',
+        willChange: runningCount > 0 ? 'opacity' : undefined,
         animation: runningCount > 0 ? 'crossPulse 2s ease-in-out infinite' : 'none',
       }} />
 
@@ -60,10 +60,6 @@ export const CrossAgentPill = memo(function CrossAgentPill({
         @keyframes crossPulse {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.4; }
-        }
-        @keyframes pillFadeIn {
-          from { opacity: 0; transform: scale(0.9); }
-          to { opacity: 1; transform: scale(1); }
         }
       `}</style>
     </button>

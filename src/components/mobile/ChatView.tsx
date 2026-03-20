@@ -526,6 +526,8 @@ export function ChatView({
               : 'No transcript turns visible yet — latest activity may have been tool-heavy or compacted.'}
           </div>
         )}
+        {/* Bottom breathing room — keeps last message above compose bar + action buttons */}
+        <div style={{ height: Math.max(composeHeight, 120) + 24 }} aria-hidden="true" />
       </div>
 
       {(() => {
