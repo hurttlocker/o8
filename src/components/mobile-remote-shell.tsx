@@ -39,6 +39,7 @@ const FleetView = dynamic(() => import('./mobile/FleetView').then((m) => ({ defa
 import { PullToRefresh } from './mobile/PullToRefresh';
 import { PageTransition } from './mobile/PageTransition';
 import { useSwipeBack } from './mobile/useSwipeBack';
+import { ThemeProvider, useTheme } from './mobile/ThemeContext';
 const LaunchSheet = dynamic(() => import('./mobile/LaunchSheet').then((m) => ({ default: m.LaunchSheet })), { ssr: false });
 const ActivityFeed = dynamic(() => import('./mobile/ActivityFeed').then((m) => ({ default: m.ActivityFeed })), { ssr: false, ...shimmerFallback });
 const PRReviewSheet = dynamic(() => import('./mobile/PRReviewSheet').then((m) => ({ default: m.PRReviewSheet })), { ssr: false });
@@ -329,14 +330,15 @@ function MobileRemoteShellInner({
 
   // ── Render ──
   return (
+    <ThemeProvider>
     <div className="mobile-wrap remodex-mobile-page" style={shellStyle} suppressHydrationWarning>
       <div className="remodex-phone-shell">
-        {/* Frosted status bar — solid at clock, gentle fade */}
+        {/* Frosted status bar — theme-aware gradient */}
         <div style={{
           position: 'fixed',
           top: 0, left: 0, right: 0,
           height: 'calc(env(safe-area-inset-top, 0px) + 56px)',
-          background: 'linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(255,255,255,0.97) 25%, rgba(255,255,255,0.8) 45%, rgba(255,255,255,0.4) 70%, rgba(255,255,255,0.1) 85%, rgba(255,255,255,0) 100%)',
+          background: 'linear-gradient(180deg, var(--frost-strong) 0%, var(--frost-bg) 25%, color-mix(in srgb, var(--frost-bg) 60%, transparent) 45%, color-mix(in srgb, var(--frost-bg) 20%, transparent) 70%, transparent 100%)',
           zIndex: 7,
           pointerEvents: 'none',
         }} />
@@ -749,5 +751,6 @@ function MobileRemoteShellInner({
         }}
       />
     </div>
+    </ThemeProvider>
   );
 }
