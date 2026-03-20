@@ -11,6 +11,10 @@ interface PortEntry {
   repo: string | null;
 }
 
+// ── Response cache (ports don't change fast enough to scan every request) ──
+let portsCache: { data: unknown; ts: number } | null = null;
+const PORTS_CACHE_TTL_MS = 10_000; // 10s cache — ports don't change every second
+
 interface PortGroup {
   repo: string;
   repoPath: string;
@@ -26,6 +30,11 @@ const IGNORE_PROCESSES = new Set([
 ]);
 
 export async function GET() {
+  // Return cached response if fresh
+  if (portsCache && (Date.now() - portsCache.ts) < PORTS_CACHE_TTL_MS) {
+    return NextResponse.json(portsCache.data);
+  }
+
   try {
     // Get all listening TCP ports
     const raw = execSync(
@@ -54,26 +63,8 @@ export async function GET() {
         if (IGNORE_PROCESSES.has(currentProcess)) continue;
         if (port < 1024 && currentProcess !== 'node') continue;
 
-        // Resolve CWD for this PID
-        let cwd = '';
-        if (pidCwdCache.has(currentPid)) {
-          cwd = pidCwdCache.get(currentPid)!;
-        } else {
-          try {
-            cwd = execSync(
-              `lsof -p ${currentPid} -Fn 2>/dev/null | grep '^n/' | grep 'cwd$' | head -1 | sed 's/^n//'`,
-              { encoding: 'utf-8', timeout: 2000 },
-            ).trim();
-            // Fallback: try /proc on Linux or pwdx
-            if (!cwd) {
-              cwd = execSync(
-                `lsof -p ${currentPid} -a -d cwd -Fn 2>/dev/null | grep '^n' | head -1 | sed 's/^n//'`,
-                { encoding: 'utf-8', timeout: 2000 },
-              ).trim();
-            }
-          } catch { /* can't resolve CWD */ }
-          pidCwdCache.set(currentPid, cwd);
-        }
+        // CWD resolution deferred to batch below
+        const cwd = '';
 
         // Deduplicate (same port can appear for IPv4 and IPv6)
         if (!entries.some(e => e.port === port)) {
@@ -85,6 +76,27 @@ export async function GET() {
             repo: null,
           });
         }
+      }
+    }
+
+    // Batch-resolve CWDs for all unique PIDs in one lsof call
+    const uniquePids = [...new Set(entries.map(e => e.pid))];
+    if (uniquePids.length > 0) {
+      try {
+        const pidList = uniquePids.join(',');
+        const cwdRaw = execSync(
+          `lsof -p ${pidList} -a -d cwd -Fn 2>/dev/null`,
+          { encoding: 'utf-8', timeout: 3000 },
+        ).trim();
+        let pid = 0;
+        for (const line of cwdRaw.split('\n')) {
+          if (line.startsWith('p')) pid = parseInt(line.slice(1), 10);
+          else if (line.startsWith('n') && pid) pidCwdCache.set(pid, line.slice(1));
+        }
+      } catch { /* batch CWD resolution failed — entries keep empty cwd */ }
+
+      for (const entry of entries) {
+        entry.cwd = pidCwdCache.get(entry.pid) ?? '';
       }
     }
 
@@ -139,11 +151,13 @@ export async function GET() {
     // Sort ports within groups
     for (const g of groups) g.ports.sort((a, b) => a - b);
 
-    return NextResponse.json({
+    const result = {
       ports: filtered.sort((a, b) => a.port - b.port),
       groups,
       total: filtered.length,
-    });
+    };
+    portsCache = { data: result, ts: Date.now() };
+    return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json({
       ports: [],

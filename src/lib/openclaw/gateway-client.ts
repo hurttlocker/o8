@@ -25,7 +25,9 @@ interface GatewayConfig {
 }
 
 let cachedConfig: GatewayConfig | null = null;
-const REST_STATUS_TIMEOUT_MS = 1_500;
+let configLoadedAt = 0;
+const CONFIG_MAX_AGE_MS = 30_000; // Re-read config every 30s (catches token changes, restarts)
+const REST_STATUS_TIMEOUT_MS = 3_000; // Bumped from 1.5s — cold connections need headroom
 const REST_RPC_TIMEOUT_MS = 10_000;
 const CLI_STATUS_TIMEOUT_MS = 20_000;
 const CLI_COLD_START_WAIT_MS = 2_500;
@@ -42,17 +44,27 @@ let cliConsecutiveFailures = 0;
 let cliCircuitOpenUntil = 0;
 
 function loadConfig(): GatewayConfig {
-  if (cachedConfig) return cachedConfig;
+  const now = Date.now();
+  // Re-read config periodically — catches token changes and gateway restarts
+  if (cachedConfig && (now - configLoadedAt) < CONFIG_MAX_AGE_MS) {
+    return cachedConfig;
+  }
   try {
-    const home = process.env.HOME || '/Users/marquisehurtt';
+    const home = process.env.HOME || homedir();
     const raw = readFileSync(join(home, '.openclaw', 'openclaw.json'), 'utf-8');
     const config = JSON.parse(raw);
+    const token = config?.gateway?.auth?.token ?? '';
     cachedConfig = {
       port: config?.gateway?.port ?? 18789,
-      token: config?.gateway?.auth?.token ?? '',
+      token,
     };
+    configLoadedAt = now;
+    if (!token) {
+      console.warn('[gateway-client] No auth token found in openclaw.json — REST API calls will 401');
+    }
   } catch {
     cachedConfig = { port: 18789, token: '' };
+    configLoadedAt = now;
   }
   return cachedConfig;
 }
@@ -60,26 +72,42 @@ function loadConfig(): GatewayConfig {
 // ── REST API (primary — fast path) ──
 
 async function fetchRestApi<T>(endpoint: string, params?: Record<string, string>): Promise<T | null> {
-  const config = loadConfig();
-  const url = new URL(`http://127.0.0.1:${config.port}/api/v1/${endpoint}`);
-  if (params) {
-    for (const [k, v] of Object.entries(params)) {
-      url.searchParams.set(k, v);
+  const attempt = async (config: GatewayConfig): Promise<Response | null> => {
+    const url = new URL(`http://127.0.0.1:${config.port}/api/v1/${endpoint}`);
+    if (params) {
+      for (const [k, v] of Object.entries(params)) {
+        url.searchParams.set(k, v);
+      }
+    }
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), REST_STATUS_TIMEOUT_MS);
+      const res = await fetch(url.toString(), {
+        headers: config.token ? { Authorization: `Bearer ${config.token}` } : {},
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      return res;
+    } catch {
+      return null;
+    }
+  };
+
+  let config = loadConfig();
+  let res = await attempt(config);
+
+  // On 401, force re-read config (token may have rotated) and retry once
+  if (res?.status === 401) {
+    cachedConfig = null;
+    configLoadedAt = 0;
+    config = loadConfig();
+    if (config.token) {
+      res = await attempt(config);
     }
   }
 
+  if (!res?.ok) return null;
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), REST_STATUS_TIMEOUT_MS);
-
-    const res = await fetch(url.toString(), {
-      headers: config.token ? { Authorization: `Bearer ${config.token}` } : {},
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-
-    if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
     return null;

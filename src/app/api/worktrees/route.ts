@@ -16,12 +16,23 @@ import { getWorktreeManager, getActiveWorktreeSummary } from '@/lib/worktree/lau
 const API_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
 
 function isTrustedPanelRequest(req: NextRequest) {
+  // Same-origin check (covers most browser requests)
   const origin = req.headers.get('origin');
-  if (origin && origin === req.nextUrl.origin) {
-    return true;
+  if (origin) {
+    try {
+      const url = new URL(origin);
+      if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true;
+    } catch { /* ignore */ }
+    if (origin === req.nextUrl.origin) return true;
   }
 
-  return req.headers.get('sec-fetch-site') === 'same-origin';
+  const fetchSite = req.headers.get('sec-fetch-site');
+  if (fetchSite === 'same-origin' || fetchSite === 'none') return true;
+
+  // Tauri webview and direct fetches may not send origin/sec-fetch headers
+  if (!origin && !fetchSite) return true;
+
+  return false;
 }
 
 function checkAuth(req: NextRequest): NextResponse | null {
