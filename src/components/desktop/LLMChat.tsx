@@ -306,9 +306,14 @@ export default function LLMChat({ tabId }: { tabId: string }) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamContent, setStreamContent] = useState('');
   const [modelResolved, setModelResolved] = useState(false);
+  const [fileSuggestions, setFileSuggestions] = useState<{ path: string; name: string }[]>([]);
+  const [showFilePicker, setShowFilePicker] = useState(false);
+  const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
+  const [filePickerIndex, setFilePickerIndex] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const fileSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto-select model based on configured API keys
   useEffect(() => {
@@ -343,20 +348,91 @@ export default function LLMChat({ tabId }: { tabId: string }) {
     inputRef.current?.focus();
   }, [tabId]);
 
-  // Auto-resize textarea
+  // Auto-resize textarea + @file detection
   const handleInputChange = useCallback((value: string) => {
     setInput(value);
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
       inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 200) + 'px';
     }
+
+    // Detect @file pattern
+    const cursorPos = inputRef.current?.selectionStart ?? value.length;
+    const textBeforeCursor = value.slice(0, cursorPos);
+    const atMatch = textBeforeCursor.match(/@([\w./\-]*)$/);
+
+    if (atMatch && atMatch[1].length >= 1) {
+      const query = atMatch[1];
+      if (fileSearchTimeout.current) clearTimeout(fileSearchTimeout.current);
+      fileSearchTimeout.current = setTimeout(async () => {
+        try {
+          const res = await fetch(`/api/v2/context/files?q=${encodeURIComponent(query)}`);
+          if (res.ok) {
+            const data = await res.json();
+            setFileSuggestions(data.files ?? []);
+            setShowFilePicker(data.files?.length > 0);
+            setFilePickerIndex(0);
+          }
+        } catch { /* ignore */ }
+      }, 150);
+    } else {
+      setShowFilePicker(false);
+      setFileSuggestions([]);
+    }
   }, []);
+
+  // Select a file from the autocomplete
+  const handleFileSelect = useCallback((filePath: string) => {
+    // Replace the @query with the full path
+    const cursorPos = inputRef.current?.selectionStart ?? input.length;
+    const textBeforeCursor = input.slice(0, cursorPos);
+    const atMatch = textBeforeCursor.match(/@[\w./\-]*$/);
+    if (atMatch) {
+      const before = textBeforeCursor.slice(0, atMatch.index);
+      const after = input.slice(cursorPos);
+      setInput(before + '@' + filePath + ' ' + after);
+    }
+    if (!attachedFiles.includes(filePath)) {
+      setAttachedFiles(prev => [...prev, filePath]);
+    }
+    setShowFilePicker(false);
+    setFileSuggestions([]);
+    inputRef.current?.focus();
+  }, [input, attachedFiles]);
 
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text || isStreaming) return;
 
-    // Add user message
+    // Extract @file references from the message
+    const fileRefs = text.match(/@([\w./\-]+)/g)?.map(r => r.slice(1)) ?? [];
+    // Combine with explicitly attached files
+    const allFiles = [...new Set([...attachedFiles, ...fileRefs])];
+
+    // Fetch file contents if any files referenced
+    let fileContext = '';
+    if (allFiles.length > 0) {
+      try {
+        const res = await fetch('/api/v2/context/files', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paths: allFiles }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const parts = (data.files ?? [])
+            .filter((f: { content: string; error?: string }) => f.content && !f.error)
+            .map((f: { path: string; content: string; truncated: boolean }) =>
+              `### File: ${f.path}${f.truncated ? ' (truncated)' : ''}\n\`\`\`\n${f.content}\n\`\`\``
+            );
+          if (parts.length > 0) {
+            fileContext = '\n\n## Attached Files\n' + parts.join('\n\n');
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Build the user message (display version without file contents)
     const userMsg: LLMMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
@@ -365,7 +441,11 @@ export default function LLMChat({ tabId }: { tabId: string }) {
     };
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
+    setAttachedFiles([]);
     if (inputRef.current) inputRef.current.style.height = 'auto';
+
+    // Build the actual message sent to the model (includes file contents)
+    const messageForModel = fileContext ? text + fileContext : text;
 
     // Start streaming
     setIsStreaming(true);
@@ -380,10 +460,10 @@ export default function LLMChat({ tabId }: { tabId: string }) {
         body: JSON.stringify({
           model: model.id,
           provider: model.provider,
-          messages: [...messages, userMsg].map((m) => ({
-            role: m.role,
-            content: m.content,
-          })),
+          messages: [
+            ...messages.map((m) => ({ role: m.role, content: m.content })),
+            { role: 'user', content: messageForModel },
+          ],
         }),
         signal: controller.signal,
       });
@@ -478,11 +558,34 @@ export default function LLMChat({ tabId }: { tabId: string }) {
   }, []);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // File picker navigation
+    if (showFilePicker && fileSuggestions.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setFilePickerIndex(prev => Math.min(prev + 1, fileSuggestions.length - 1));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setFilePickerIndex(prev => Math.max(prev - 1, 0));
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        handleFileSelect(fileSuggestions[filePickerIndex].path);
+        return;
+      }
+      if (e.key === 'Escape') {
+        setShowFilePicker(false);
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-  }, [handleSend]);
+  }, [handleSend, showFilePicker, fileSuggestions, filePickerIndex, handleFileSelect]);
 
   const isEmpty = messages.length === 0 && !isStreaming;
 
@@ -652,7 +755,109 @@ export default function LLMChat({ tabId }: { tabId: string }) {
         paddingLeft: 24,
         paddingRight: 24,
         borderTop: '1px solid #f1f5f9',
+        position: 'relative',
       }}>
+        {/* Attached files pills */}
+        {attachedFiles.length > 0 && (
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 6,
+            maxWidth: 720,
+            marginLeft: 'auto',
+            marginRight: 'auto',
+            marginBottom: 8,
+          }}>
+            {attachedFiles.map(f => (
+              <span key={f} style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                paddingTop: 3,
+                paddingBottom: 3,
+                paddingLeft: 8,
+                paddingRight: 6,
+                background: '#eff6ff',
+                color: '#3b82f6',
+                fontSize: 11,
+                fontFamily: 'ui-monospace, monospace',
+                borderRadius: 6,
+                border: '1px solid #bfdbfe',
+              }}>
+                {f.split('/').pop()}
+                <button
+                  type="button"
+                  onClick={() => setAttachedFiles(prev => prev.filter(p => p !== f))}
+                  style={{ border: 'none', background: 'none', color: '#93c5fd', cursor: 'pointer', padding: 0, lineHeight: 1 }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* @file autocomplete dropdown */}
+        {showFilePicker && fileSuggestions.length > 0 && (
+          <div style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: 24,
+            right: 24,
+            maxWidth: 720,
+            marginLeft: 'auto',
+            marginRight: 'auto',
+            marginBottom: 4,
+            background: 'white',
+            border: '1px solid #e2e8f0',
+            borderRadius: 10,
+            boxShadow: '0 8px 30px rgba(0, 0, 0, 0.1)',
+            overflow: 'hidden',
+            maxHeight: 200,
+            overflowY: 'auto',
+            zIndex: 100,
+          }}>
+            <div style={{
+              paddingTop: 6,
+              paddingBottom: 4,
+              paddingLeft: 10,
+              paddingRight: 10,
+              fontSize: 10,
+              fontWeight: 600,
+              color: '#94a3b8',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+            }}>
+              Files
+            </div>
+            {fileSuggestions.map((f, i) => (
+              <button
+                key={f.path}
+                type="button"
+                onClick={() => handleFileSelect(f.path)}
+                style={{
+                  display: 'block',
+                  width: '100%',
+                  paddingTop: 6,
+                  paddingBottom: 6,
+                  paddingLeft: 12,
+                  paddingRight: 12,
+                  border: 'none',
+                  background: i === filePickerIndex ? '#f1f5f9' : 'transparent',
+                  color: '#1e293b',
+                  fontSize: 12,
+                  fontFamily: 'ui-monospace, monospace',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  transition: 'background 60ms',
+                }}
+                onMouseEnter={() => setFilePickerIndex(i)}
+              >
+                {f.path}
+              </button>
+            ))}
+          </div>
+        )}
         <div style={{
           display: 'flex',
           alignItems: 'flex-end',
@@ -683,7 +888,7 @@ export default function LLMChat({ tabId }: { tabId: string }) {
             value={input}
             onChange={(e) => handleInputChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={`Message ${model.label}...`}
+            placeholder={`Message ${model.label}... (type @ to attach files)`}
             rows={1}
             style={{
               flex: 1,
@@ -757,7 +962,7 @@ export default function LLMChat({ tabId }: { tabId: string }) {
           fontSize: 11,
           color: '#cbd5e1',
         }}>
-          {model.label} · Shift+Enter for new line
+          {model.label} · @file to attach · Shift+Enter for new line
         </div>
       </div>
     </div>
