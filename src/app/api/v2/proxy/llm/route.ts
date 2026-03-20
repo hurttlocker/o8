@@ -21,6 +21,13 @@ import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
 // ── Pricing (per 1M tokens) ──
 
 const PRICING: Record<string, { input: number; output: number }> = {
+  // Google
+  'gemini-3.1-pro-preview': { input: 1.25, output: 10 },
+  'gemini-3-pro-preview':   { input: 1.25, output: 10 },
+  'gemini-3-flash-preview': { input: 0.15, output: 0.60 },
+  'gemini-2.5-pro':         { input: 1.25, output: 10 },
+  'gemini-2.5-flash':       { input: 0.15, output: 0.60 },
+  'gemini-2.5-flash-lite':  { input: 0.04, output: 0.15 },
   // Anthropic
   'claude-opus-4-6':   { input: 15,   output: 75 },
   'claude-sonnet-4-5': { input: 3,    output: 15 },
@@ -29,9 +36,6 @@ const PRICING: Record<string, { input: number; output: number }> = {
   'gpt-5.4':           { input: 2.50, output: 10 },
   'gpt-4o':            { input: 2.50, output: 10 },
   'o3':                { input: 10,   output: 40 },
-  // Google
-  'gemini-2.5-pro':    { input: 1.25, output: 10 },
-  'gemini-2.5-flash':  { input: 0.15, output: 0.60 },
 };
 
 function computeCost(model: string, inputTokens: number, outputTokens: number): number {
