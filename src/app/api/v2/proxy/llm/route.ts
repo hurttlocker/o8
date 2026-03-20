@@ -304,6 +304,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   }
 
   const config = PROVIDERS[provider];
+  console.log(`[llm-proxy] ${provider}/${model} — ${messages.length} messages`);
 
   // Build the upstream request
   let url = config.url;
@@ -378,6 +379,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
             costUsd,
           })}\n\n`));
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          console.log(`[llm-proxy] ${provider}/${model} — ${totalInputTokens} in / ${totalOutputTokens} out — $${costUsd.toFixed(4)}`);
 
           // Log usage for authenticated users
           if (auth?.user && totalOutputTokens > 0) {
