@@ -24,6 +24,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { renderLLMMarkdown } from './LLMMarkdown';
+import { saveChatHistory, loadChatHistory } from '@/lib/llm/chat-history';
 
 // ── Types ──
 
@@ -345,26 +346,52 @@ export default function LLMChat({ tabId }: { tabId: string }) {
   const abortRef = useRef<AbortController | null>(null);
   const fileSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Auto-select model based on configured API keys
+  // Load persisted messages + auto-select model
   useEffect(() => {
     if (modelResolved) return;
     (async () => {
+      // Load saved chat history
+      const saved = await loadChatHistory(tabId);
+      if (saved?.messages?.length) {
+        setMessages(saved.messages);
+        // Restore model if saved
+        if (saved.model) {
+          const savedModel = MODELS.find(m => m.id === saved.model);
+          if (savedModel) {
+            setModel(savedModel);
+            setModelResolved(true);
+            return;
+          }
+        }
+      }
+      // Auto-select model based on configured API keys
       try {
         const res = await fetch('/api/v2/keys');
-        if (!res.ok) return;
-        const data = await res.json();
-        const configured = new Set(
-          (data.providers ?? [])
-            .filter((p: { configured: boolean }) => p.configured)
-            .map((p: { id: string }) => p.id)
-        );
-        // Pick first model whose provider has a key
-        const match = MODELS.find(m => configured.has(m.provider));
-        if (match) setModel(match);
+        if (res.ok) {
+          const data = await res.json();
+          const configured = new Set(
+            (data.providers ?? [])
+              .filter((p: { configured: boolean }) => p.configured)
+              .map((p: { id: string }) => p.id)
+          );
+          const match = MODELS.find(m => configured.has(m.provider));
+          if (match) setModel(match);
+        }
       } catch { /* ignore */ }
       setModelResolved(true);
     })();
-  }, [modelResolved]);
+  }, [modelResolved, tabId]);
+
+  // Auto-save chat history (debounced)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!modelResolved || messages.length === 0) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveChatHistory(tabId, messages, model.id);
+    }, 1000);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [messages, model.id, tabId, modelResolved]);
 
   // Auto-scroll on new messages
   useEffect(() => {
