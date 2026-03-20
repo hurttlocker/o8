@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @next/next/no-img-element -- terminal image previews intentionally use raw panel-served URLs */
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Plus, X, Terminal as TerminalIcon, ChevronDown, Crosshair } from 'lucide-react';

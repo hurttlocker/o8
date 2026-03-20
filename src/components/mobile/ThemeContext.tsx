@@ -86,23 +86,42 @@ export function useTheme() {
 
 const STORAGE_KEY = 'cortex-theme';
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<Theme>('light');
-  const [systemDark, setSystemDark] = useState(false);
+function isTheme(value: string | null): value is Theme {
+  return value === 'light' || value === 'dark' || value === 'system';
+}
 
-  // Load saved theme after mount
+function readStoredTheme(): Theme {
+  if (typeof window === 'undefined') return 'light';
+  try {
+    const saved = window.sessionStorage.getItem(STORAGE_KEY);
+    return isTheme(saved) ? saved : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
+function readSystemDarkPreference() {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setThemeState] = useState<Theme>(readStoredTheme);
+  const [systemDark, setSystemDark] = useState(readSystemDarkPreference);
+
   useEffect(() => {
-    const saved = sessionStorage.getItem(STORAGE_KEY) as Theme | null;
-    if (saved && (saved === 'light' || saved === 'dark' || saved === 'system')) {
-      setThemeState(saved);
+    if (typeof window.matchMedia !== 'function') return undefined;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
+
+    if (typeof mq.addEventListener === 'function') {
+      mq.addEventListener('change', handler);
+      return () => mq.removeEventListener('change', handler);
     }
 
-    // Listen to system preference
-    const mq = window.matchMedia('(prefers-color-scheme: dark)');
-    setSystemDark(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
-    mq.addEventListener('change', handler);
-    return () => mq.removeEventListener('change', handler);
+    mq.addListener(handler);
+    return () => mq.removeListener(handler);
   }, []);
 
   const isDark = theme === 'dark' || (theme === 'system' && systemDark);
@@ -128,7 +147,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const setTheme = useCallback((t: Theme) => {
     setThemeState(t);
-    sessionStorage.setItem(STORAGE_KEY, t);
+    try {
+      sessionStorage.setItem(STORAGE_KEY, t);
+    } catch {
+      // Ignore storage failures on constrained browsers.
+    }
   }, []);
 
   const toggle = useCallback(() => {

@@ -87,7 +87,6 @@ function resolveGitBranch(repoPath: string): string {
   if (cached && now - cached.ts < BRANCH_CACHE_TTL) return cached.branch;
 
   try {
-    const { execSync } = require('child_process');
     const resolved = resolveWorkspacePath(repoPath);
     const branch = execSync(`git -C "${resolved}" branch --show-current 2>/dev/null`, {
       encoding: 'utf-8',

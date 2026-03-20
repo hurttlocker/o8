@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 import os from 'node:os';
+/* eslint-disable @typescript-eslint/no-explicit-any -- runtime JSONL payloads vary by provider and are normalized defensively */
 
 // /api/panel/timeline — Aggregates today's agent activity into timeline segments.
 // Reads JSONL session files from three runtimes:
@@ -285,7 +286,6 @@ export async function GET() {
 
     for (const file of codexFiles) {
       // Extract a short label from the filename
-      const fileBase = file.split('/').pop() || '';
       const agent = 'codex';
 
       const lines = execQuiet(`tail -500 "${file}" 2>/dev/null`, { timeout: 10000 });

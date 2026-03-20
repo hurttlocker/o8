@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useRef, memo } from 'react';
+import { useState, useRef, memo } from 'react';
 import { createPortal } from 'react-dom';
 
-export type MobileScreen = 'chat' | 'fleet' | 'memory' | 'approvals' | 'costs' | 'settings';
+export type MobileScreen = 'chat' | 'fleet' | 'memory' | 'approvals' | 'costs' | 'settings' | 'issues';
 
 interface SpeedDialProps {
   activeScreen: MobileScreen;
@@ -26,6 +26,11 @@ const MENU_ITEMS: { screen: MobileScreen; label: string; iconPath: string }[] = 
     screen: 'memory',
     label: 'Memory',
     iconPath: 'M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z M9 21h6',
+  },
+  {
+    screen: 'issues',
+    label: 'Issues',
+    iconPath: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z M12 8v4 M12 16h.01',
   },
   {
     screen: 'approvals',
@@ -148,7 +153,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
             gap: 6,
             zIndex: 9999,
           }}>
-          {MENU_ITEMS.map((item, index) => {
+          {MENU_ITEMS.map((item) => {
             const isActive = item.screen === activeScreen;
             return (
               <button

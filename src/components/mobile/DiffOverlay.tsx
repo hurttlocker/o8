@@ -10,7 +10,7 @@ export function DiffOverlay({
   selectedReviewFilePath,
   reviewFiles,
   reviewFileByPath,
-  stickyReviewFilesRef,
+  stickyReviewFiles,
   reviewFileError,
   reviewFileLoadingPath,
   compactLine,
@@ -23,7 +23,7 @@ export function DiffOverlay({
     return null;
   }
 
-  const files = reviewFiles.length ? reviewFiles : stickyReviewFilesRef.current;
+  const files = reviewFiles.length ? reviewFiles : stickyReviewFiles;
   const currentFile = selectedFile ?? (selectedReviewFilePath ? reviewFileByPath[selectedReviewFilePath] : undefined);
   const selectedIndex = selectedReviewFilePath
     ? files.findIndex((file) => file.path === selectedReviewFilePath)

@@ -42,7 +42,6 @@ export const ComposeBar = memo(function ComposeBar({
   composeRef,
   fileInputRef,
   handlers,
-  onOpenRecall,
   onModelPillTap,
   streamingText = '',
   agentRunning = false,

@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps, react-hooks/set-state-in-effect -- timeline keeps temporary drill state during ongoing redesign */
 
 /**
  * SessionTimeline — Day-level activity bar below the TitleBar.

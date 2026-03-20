@@ -39,23 +39,19 @@ const FleetView = dynamic(() => import('./mobile/FleetView').then((m) => ({ defa
 import { PullToRefresh } from './mobile/PullToRefresh';
 import { PageTransition } from './mobile/PageTransition';
 import { useSwipeBack } from './mobile/useSwipeBack';
-import { ThemeProvider, useTheme } from './mobile/ThemeContext';
+import { ThemeProvider } from './mobile/ThemeContext';
 const LaunchSheet = dynamic(() => import('./mobile/LaunchSheet').then((m) => ({ default: m.LaunchSheet })), { ssr: false });
 const ActivityFeed = dynamic(() => import('./mobile/ActivityFeed').then((m) => ({ default: m.ActivityFeed })), { ssr: false, ...shimmerFallback });
 const PRReviewSheet = dynamic(() => import('./mobile/PRReviewSheet').then((m) => ({ default: m.PRReviewSheet })), { ssr: false });
 const SettingsView = dynamic(() => import('./mobile/SettingsView').then((m) => ({ default: m.SettingsView })), { ssr: false, ...shimmerFallback });
 const MemoryPage = dynamic(() => import('./mobile/MemoryPage'), { ssr: false, ...shimmerFallback });
+const IssuesPage = dynamic(() => import('./mobile/IssuesPage'), { ssr: false, ...shimmerFallback });
+const PRDetailSheet = dynamic(() => import('./mobile/PRDetailSheet'), { ssr: false, ...shimmerFallback });
 
 // Cortex memory surfaces (#78-#85) — typed via explicit generic param
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const RecallPanel = dynamic(() => import('./mobile/RecallPanel'), { ssr: false });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const MemoryHealth = dynamic(() => import('./mobile/MemoryHealth'), { ssr: false });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-// MemoryContext removed — recall trigger moved to ComposeBar action row
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const GraphExplorer = dynamic(() => import('./mobile/GraphExplorer'), { ssr: false });
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const CortexStatus = dynamic(() => import('./mobile/CortexStatus'), { ssr: false });
 const SessionInfoSheet = dynamic(() => import('./mobile/SessionInfoSheet').then((m) => ({ default: m.SessionInfoSheet })), { ssr: false });
 
@@ -83,7 +79,11 @@ interface MobileRemoteShellProps {
 }
 
 function formatSessionAge(lastEventAt: string): string {
-  const diff = Date.now() - new Date(lastEventAt).getTime();
+  const parsed = new Date(lastEventAt).getTime();
+  if (Number.isNaN(parsed)) {
+    return lastEventAt;
+  }
+  const diff = Date.now() - parsed;
   const mins = Math.floor(diff / 60_000);
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins}m`;
@@ -115,10 +115,10 @@ function MobileRemoteShellInner({
   const { wsConnected, wsConnectionState, sendTerminalAttach, sendTerminalInput } = useMobileStreaming(state);
 
   // ── Data fetching + polling ──
-  const { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, linkedOwnedKey } = useMobilePolling(state, wsConnected);
+  const { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, stickyReviewFiles, linkedOwnedKey } = useMobilePolling(state, wsConnected);
 
   // ── Action handlers ──
-  const actions = useMobileActions(state, { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, sendTerminalAttach, sendTerminalInput });
+  const actions = useMobileActions(state, { wsConnected, refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, sendTerminalAttach, sendTerminalInput });
 
   // ── Alert engine: feed agent data on each snapshot update ──
   const { updateAgents, alerts: activeAlerts, markRead: alertMarkRead, markAllRead: alertMarkAllRead, dismiss: alertDismiss, dismissAll: alertDismissAll } = useAlerts();
@@ -157,9 +157,9 @@ function MobileRemoteShellInner({
     isOwnedCodexSession, isChatSession,
     selectedReviewPacket, selectedReviewPacketError,
     historyBySession, historyGroupsBySession, historyLoading,
-    historyError, reviewPacketBySession, reviewPacketLoadingBySession,
+    historyError,
     selectedReviewFilePath, reviewFileByPath, reviewFileLoadingPath, reviewFileError,
-    diffOpen, stickyReviewFilesRef,
+    diffOpen,
     draftBySession, actionStateBySession, actionNoteBySession,
     draftAttachmentsBySession, pendingOwnedTurnBySession,
     enhancing, preEnhanceDraft,
@@ -167,38 +167,31 @@ function MobileRemoteShellInner({
     pendingApprovals, resolvedApprovals,
     surfaceRefreshing, expandedMedia, scrollY,
     isScrolling, headerVisible, viewportTopOffset,
-    composeFocused, waitingForResponse, hydrated,
-    expandedProject, streamingText,
+    composeFocused, composeHeight, waitingForResponse, hydrated,
+    squadPickerOpen, expandedProject, streamingText,
     // Setters
     setSelectedId, setActiveView, setSurfaceNote,
-    setDraftBySession, setActionStateBySession, setActionNoteBySession,
-    setDraftAttachmentsBySession, setPendingOwnedTurnBySession,
-    setEnhancing, setPreEnhanceDraft,
+    setDraftBySession, setPendingOwnedTurnBySession,
     setControlsOpen, setAlertsOpen, setSessionInfoOpen,
-    setPendingApprovals, setResolvedApprovals,
-    setSurfaceRefreshing, setExpandedMedia,
-    setComposeFocused, setWaitingForResponse,
-    setExpandedProject, setSelectedReviewFilePath,
-    setDiffOpen, setReviewFileError,
-    setHistoryBySession,
+    setExpandedMedia, setComposeHeight, setWaitingForResponse,
+    setExpandedProject, setDiffOpen,
+    setSquadPickerOpen,
     // Refs
     composeRef, fileInputRef, transcriptBottomRef,
-    stickToBottomRef, lastAssistantCountRef, seenMessageIdsRef,
+    lastAssistantCountRef, seenMessageIdsRef,
     refreshError, surfaceNote,
-    selectedId, activeView,
-    setReviewPacketBySession,
+    activeView,
     // Cortex memory
     cortexRecallOpen, setCortexRecallOpen,
     cortexHealthOpen, setCortexHealthOpen,
     cortexGraphOpen, setCortexGraphOpen,
-    // cortexContextEnabled/Block removed — recall moved to ComposeBar
   } = state;
 
   const [launchOpen, setLaunchOpen] = useState(false);
   const [prReviewOpen, setPrReviewOpen] = useState(false);
   const [prReviewNumber, setPrReviewNumber] = useState<number | null>(null);
   const [prReviewRepo, setPrReviewRepo] = useState('');
-  const { notifications, dismiss: dismissNotification, unreadCount } = useNotifications(snapshot);
+  const { notifications, dismiss: dismissNotification } = useNotifications(snapshot);
 
   // ── Swipe right from left edge to go back to chat ──
   useSwipeBack(
@@ -348,11 +341,11 @@ function MobileRemoteShellInner({
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
-      if (entry) state.setComposeHeight(entry.contentRect.height);
+      if (entry) setComposeHeight(entry.contentRect.height);
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [state.setComposeHeight]);
+  }, [setComposeHeight]);
 
   const shellStyle = {
     '--remodex-header-progress': headerProgress.toFixed(3),
@@ -360,13 +353,13 @@ function MobileRemoteShellInner({
     '--remodex-dock-motion-progress': dockMotionProgress.toFixed(3),
     '--remodex-compose-active': isComposerPrimed ? '1' : '0',
     '--remodex-viewport-top-offset': `${viewportTopOffset}px`,
-    '--remodex-compose-height': `${state.composeHeight}px`,
+    '--remodex-compose-height': `${composeHeight}px`,
   } as CSSProperties;
 
   // ── Render ──
   return (
     <ThemeProvider>
-    <div className="mobile-wrap remodex-mobile-page" style={shellStyle} suppressHydrationWarning>
+    <div className="mobile-wrap remodex-mobile-page" style={shellStyle}>
       <div className="remodex-phone-shell">
         {/* Frosted status bar — solid at clock, gentle fade */}
         <div className="remodex-frost-bar" style={{
@@ -381,15 +374,13 @@ function MobileRemoteShellInner({
           snapshot={snapshot}
           selectedSession={selectedSession}
           selectedReviewPacket={selectedReviewPacket}
-          selectedReviewFile={selectedReviewFile}
-          reviewFiles={reviewFiles}
           isOwnedCodexSession={isOwnedCodexSession}
           isHeaderCompact={isHeaderCompact}
           headerVisible={headerVisible}
           pendingApprovalsCount={pendingApprovals.length}
           wsConnectionState={wsConnectionState}
           compactLine={compactLine}
-          squadPickerOpen={state.squadPickerOpen}
+          squadPickerOpen={squadPickerOpen}
           activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : activeView === 'activity' ? 'approvals' : activeView === 'settings' ? 'settings' : activeView === 'memory' ? 'memory' : 'chat'}
           onNavigate={(screen: MobileScreen) => {
             switch (screen) {
@@ -413,10 +404,7 @@ function MobileRemoteShellInner({
                 break;
             }
           }}
-          onOpenControls={() => setControlsOpen(true)}
-          onOpenDiff={actions.openDiffViewer}
-          onOpenAlerts={() => state.setAlertsOpen(true)}
-          onToggleSquadPicker={() => state.setSquadPickerOpen(!state.squadPickerOpen)}
+          onToggleSquadPicker={() => setSquadPickerOpen(!squadPickerOpen)}
           onSessionFocus={actions.handleSessionFocus}
         />
         <PullToRefresh onRefresh={async () => { refreshInbox(); await new Promise(r => setTimeout(r, 600)); }}>
@@ -479,8 +467,8 @@ function MobileRemoteShellInner({
               snapshot={snapshot}
               onBack={() => setActiveView('squad')}
               onSessionSelect={(sessionId) => {
-                state.setSelectedId(sessionId);
-                state.setActiveView('chat');
+                setSelectedId(sessionId);
+                setActiveView('chat');
               }}
               compactLine={compactLine}
             />
@@ -494,7 +482,7 @@ function MobileRemoteShellInner({
               expandedProject={expandedProject}
               selectedSession={selectedSession}
               onSessionFocus={actions.handleSessionFocus}
-              onProjectToggle={(workspace) => state.setExpandedProject(workspace)}
+              onProjectToggle={(workspace) => setExpandedProject(workspace)}
               onCostsView={() => setActiveView('costs')}
               agentDisplayName={agentDisplayName}
             />
@@ -566,7 +554,7 @@ function MobileRemoteShellInner({
                 isOwnedCodexSession={isOwnedCodexSession}
                 transcriptLoading={transcriptLoading}
                 isRefreshing={surfaceRefreshing}
-                composeHeight={state.composeHeight}
+                composeHeight={composeHeight}
                 selectedReviewFile={selectedReviewFile}
                 streamingText={streamingText}
                 waitingForResponse={waitingForResponse}
@@ -697,7 +685,7 @@ function MobileRemoteShellInner({
         selectedReviewFilePath={selectedReviewFilePath}
         reviewFiles={reviewFiles}
         reviewFileByPath={reviewFileByPath}
-        stickyReviewFilesRef={stickyReviewFilesRef}
+        stickyReviewFiles={stickyReviewFiles}
         reviewFileError={reviewFileError}
         reviewFileLoadingPath={reviewFileLoadingPath}
         compactLine={compactLine}

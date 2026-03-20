@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @next/next/no-img-element -- transcript media here intentionally renders raw URLs from mixed runtimes */
 
 /**
  * DesktopChat — Right-sidebar chat panel for Dashboard v1.

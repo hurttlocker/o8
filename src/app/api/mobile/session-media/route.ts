@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
-import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
+import { existsSync, readdirSync, statSync } from 'fs';
 import { join, basename } from 'path';
 import { getGatewayStatus } from '@/lib/openclaw/gateway-client';
 
@@ -187,7 +187,7 @@ export async function GET(request: Request) {
       servable: servable.length,
       sessionKey,
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { media: [], sessionKey, error: 'Failed to extract media' },
       { status: 500 },

@@ -29,7 +29,6 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
     setReviewPacketLoadingBySession, setReviewPacketBySession, setReviewPacketErrorBySession,
     reviewFileByPath, setReviewFileLoadingPath, setReviewFileError, setReviewFileByPath,
     selectedReviewFilePath, setSelectedReviewFilePath,
-    stickyReviewFilesRef,
     setRefreshError,
     pendingOwnedTurnBySession, actionStateBySession,
     waitingForResponse, diffOpen,
@@ -87,15 +86,25 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
   // Sticky fallback: keep the last non-empty review file list.
   // Uses a state-based fallback instead of reading stickyReviewFilesRef during render (#195).
   const [stickyReviewFiles, setStickyReviewFiles] = useState(rawReviewFiles);
-  if (rawReviewFiles.length && rawReviewFiles !== stickyReviewFiles) {
-    // Safe: React batches setState during render when the value changes.
-    setStickyReviewFiles(rawReviewFiles);
-  }
-  // Keep the ref in sync via effect (for any external consumer of the ref)
+  /* eslint-disable react-hooks/set-state-in-effect -- sticky diff file list intentionally persists the last usable review set */
   useEffect(() => {
-    if (rawReviewFiles.length) stickyReviewFilesRef.current = rawReviewFiles;
-  }, [rawReviewFiles, stickyReviewFilesRef]);
-
+    if (!rawReviewFiles.length) return;
+    setStickyReviewFiles((current) => {
+      if (
+        current.length === rawReviewFiles.length
+        && current.every((file, index) => (
+          file.path === rawReviewFiles[index]?.path
+          && file.status === rawReviewFiles[index]?.status
+          && file.additions === rawReviewFiles[index]?.additions
+          && file.deletions === rawReviewFiles[index]?.deletions
+        ))
+      ) {
+        return current;
+      }
+      return rawReviewFiles;
+    });
+  }, [rawReviewFiles]);
+  /* eslint-enable react-hooks/set-state-in-effect */
   const reviewFiles = rawReviewFiles.length ? rawReviewFiles : stickyReviewFiles;
 
   // Load history for selected session on first mount
@@ -258,6 +267,7 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
     loadOwnedReviewPacket,
     loadReviewFile,
     reviewFiles,
+    stickyReviewFiles,
     linkedOwnedKey,
   };
 }

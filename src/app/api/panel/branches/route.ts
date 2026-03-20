@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execSync } from 'child_process';
-import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +34,7 @@ export async function GET(req: NextRequest) {
     ).trim();
 
     // Get worktree list
-    let worktrees: Map<string, string> = new Map();
+    const worktrees: Map<string, string> = new Map();
     try {
       const wtRaw = execSync(
         `git -C "${repoPath}" worktree list --porcelain`,

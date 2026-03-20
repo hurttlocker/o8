@@ -17,16 +17,37 @@ export function PullToRefresh({
 }: PullToRefreshProps) {
   const [pullDistance, setPullDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [isPulling, setIsPulling] = useState(false);
   const startYRef = useRef(0);
   const pullingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const shouldIgnoreTarget = useCallback((target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return false;
+    if (target.closest('textarea, input, button, a, select, [role="dialog"], [data-no-pull-refresh]')) {
+      return true;
+    }
+
+    let current: HTMLElement | null = target;
+    while (current && current !== document.body) {
+      const styles = window.getComputedStyle(current);
+      const canScrollY = /(auto|scroll)/.test(styles.overflowY);
+      if (canScrollY && current.scrollHeight > current.clientHeight && current.scrollTop > 0) {
+        return true;
+      }
+      current = current.parentElement;
+    }
+
+    return false;
+  }, []);
+
   const handleTouchStart = useCallback((e: TouchEvent) => {
     // Only start pull if at the top of the scroll
-    if (window.scrollY > 5 || refreshing) return;
+    if (window.scrollY > 5 || refreshing || shouldIgnoreTarget(e.target)) return;
     startYRef.current = e.touches[0].clientY;
     pullingRef.current = true;
-  }, [refreshing]);
+    setIsPulling(true);
+  }, [refreshing, shouldIgnoreTarget]);
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     if (!pullingRef.current || refreshing) return;
@@ -37,6 +58,7 @@ export function PullToRefresh({
     if (diff < 0) {
       // Scrolling up, cancel pull
       pullingRef.current = false;
+      setIsPulling(false);
       setPullDistance(0);
       return;
     }
@@ -55,6 +77,7 @@ export function PullToRefresh({
   const handleTouchEnd = useCallback(async () => {
     if (!pullingRef.current) return;
     pullingRef.current = false;
+    setIsPulling(false);
 
     if (pullDistance >= threshold && !refreshing) {
       setRefreshing(true);
@@ -71,7 +94,8 @@ export function PullToRefresh({
   }, [pullDistance, threshold, refreshing, onRefresh]);
 
   useEffect(() => {
-    const el = document.documentElement;
+    const el = containerRef.current;
+    if (!el) return undefined;
     el.addEventListener('touchstart', handleTouchStart, { passive: true });
     el.addEventListener('touchmove', handleTouchMove, { passive: false });
     el.addEventListener('touchend', handleTouchEnd, { passive: true });
@@ -86,7 +110,7 @@ export function PullToRefresh({
   const isTriggered = pullDistance >= threshold;
 
   return (
-    <div ref={containerRef}>
+    <div ref={containerRef} data-no-pull-refresh={refreshing ? 'true' : undefined}>
       {/* Pull indicator */}
       <div style={{
         position: 'fixed',
@@ -95,7 +119,7 @@ export function PullToRefresh({
         transform: `translateX(-50%) translateY(${Math.max(pullDistance - 20, 0)}px)`,
         zIndex: 50,
         opacity: progress > 0.1 ? Math.min(progress * 1.5, 1) : 0,
-        transition: pullingRef.current ? 'none' : 'all 300ms cubic-bezier(0.32, 0.72, 0, 1)',
+        transition: isPulling ? 'none' : 'all 300ms cubic-bezier(0.32, 0.72, 0, 1)',
         pointerEvents: 'none',
       }}>
         <div style={{
@@ -125,7 +149,7 @@ export function PullToRefresh({
               strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
               style={{
                 transform: `rotate(${progress * 180}deg)`,
-                transition: pullingRef.current ? 'none' : 'transform 200ms ease',
+                transition: isPulling ? 'none' : 'transform 200ms ease',
               }}>
               <line x1="12" y1="19" x2="12" y2="5" />
               <polyline points="5 12 12 5 19 12" />

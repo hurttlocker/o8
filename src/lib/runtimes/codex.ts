@@ -109,6 +109,8 @@ export const codexRuntime: AgentRuntime = {
   },
 
   async readTranscript(sessionKey: string, _sinceId?: string, _limit?: number): Promise<RuntimeTranscriptEntry[]> {
+    void _sinceId;
+    void _limit;
     // Route to the correct tail reader based on ownership
     const isOwned = sessionKey.startsWith('codex-owned:');
     const tail = isOwned

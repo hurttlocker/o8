@@ -66,14 +66,6 @@ export function trackScrollChrome({
     }
   };
 
-  const scheduleHeaderReveal = (delayMs = 700) => {
-    clearHeaderReveal();
-    headerRevealTimerRef.current = window.setTimeout(() => {
-      setHeaderVisible(true);
-      headerRevealTimerRef.current = null;
-    }, delayMs);
-  };
-
   const readScrollY = () => window.scrollY || document.documentElement.scrollTop || 0;
 
   const markScrollSettled = () => {

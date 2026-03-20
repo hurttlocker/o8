@@ -434,7 +434,6 @@ export const claudeCodeRuntime: AgentRuntime = {
       const encodedDir = `-${proc.cwd.replace(/^\/+/, '').replace(/\//g, '-')}`;
       const projectDirPath = path.join(CLAUDE_PROJECTS_DIR, encodedDir);
       let realSessionId: string | undefined;
-      let realJsonlPath: string | undefined;
       let contextUsedPercent: number | undefined;
       let firstUserMessage: string | undefined;
       let gitBranch: string | undefined;
@@ -454,7 +453,6 @@ export const claudeCodeRuntime: AgentRuntime = {
           withStats.sort((a, b) => b.mtime - a.mtime);
           const best = withStats[0];
           realSessionId = best.file.replace('.jsonl', '');
-          realJsonlPath = best.path;
 
           // Read tail for context % and metadata
           try {
