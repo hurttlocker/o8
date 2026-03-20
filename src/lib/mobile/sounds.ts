@@ -54,26 +54,18 @@ function playTone(
 
 /** Agent completed its task — gentle ascending chime */
 export function playAgentComplete() {
-  const ctx = getCtx();
-  if (!ctx) return;
-  // Two-note ascending: C5 → E5
   playTone(523, 0.15, 'sine', 0.06);
   setTimeout(() => playTone(659, 0.2, 'sine', 0.06), 120);
 }
 
 /** Approval needed — soft knock (two quick taps) */
 export function playApprovalNeeded() {
-  const ctx = getCtx();
-  if (!ctx) return;
-  // Short percussive pops
   playTone(880, 0.06, 'triangle', 0.05);
   setTimeout(() => playTone(880, 0.06, 'triangle', 0.05), 100);
 }
 
 /** Build failed — descending tone */
 export function playBuildFailed() {
-  const ctx = getCtx();
-  if (!ctx) return;
   playTone(440, 0.15, 'sine', 0.05);
   setTimeout(() => playTone(330, 0.2, 'sine', 0.05), 130);
 }

@@ -150,18 +150,19 @@ export function useLongPress(onLongPress: (x: number, y: number) => void, delay 
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const posRef = useRef({ x: 0, y: 0 });
   const movedRef = useRef(false);
+  const callbackRef = useRef(onLongPress);
+  callbackRef.current = onLongPress;
 
   const onTouchStart = useCallback((e: React.TouchEvent) => {
     movedRef.current = false;
     posRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     timerRef.current = setTimeout(() => {
       if (!movedRef.current) {
-        // Haptic feedback on supported devices
         if ('vibrate' in navigator) navigator.vibrate(10);
-        onLongPress(posRef.current.x, posRef.current.y);
+        callbackRef.current(posRef.current.x, posRef.current.y);
       }
     }, delay);
-  }, [onLongPress, delay]);
+  }, [delay]);
 
   const onTouchMove = useCallback((e: React.TouchEvent) => {
     const dx = Math.abs(e.touches[0].clientX - posRef.current.x);
