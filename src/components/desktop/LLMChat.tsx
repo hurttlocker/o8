@@ -149,24 +149,24 @@ function ModelPicker({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
-          paddingTop: 6,
-          paddingBottom: 6,
-          paddingLeft: 10,
-          paddingRight: 8,
-          border: '1px solid #e2e8f0',
+          gap: 5,
+          paddingTop: 5,
+          paddingBottom: 5,
+          paddingLeft: 8,
+          paddingRight: 6,
+          border: 'none',
           borderRadius: 8,
-          background: 'white',
-          color: '#1e293b',
+          background: 'transparent',
+          color: '#64748b',
           fontSize: 13,
-          fontWeight: 500,
+          fontWeight: 400,
           fontFamily: '-apple-system, system-ui, sans-serif',
           cursor: disabled ? 'default' : 'pointer',
           opacity: disabled ? 0.6 : 1,
-          transition: 'border-color 150ms, box-shadow 150ms',
+          transition: 'color 150ms, background 150ms',
         }}
-        onMouseEnter={(e) => { if (!disabled) (e.currentTarget).style.borderColor = '#94a3b8'; }}
-        onMouseLeave={(e) => { (e.currentTarget).style.borderColor = '#e2e8f0'; }}
+        onMouseEnter={(e) => { if (!disabled) { (e.currentTarget).style.color = '#1e293b'; (e.currentTarget).style.background = '#f1f5f9'; } }}
+        onMouseLeave={(e) => { (e.currentTarget).style.color = '#64748b'; (e.currentTarget).style.background = 'transparent'; }}
       >
         <span style={{
           width: 8,
@@ -182,15 +182,16 @@ function ModelPicker({
       {open && (
         <div style={{
           position: 'absolute',
-          top: 'calc(100% + 4px)',
-          left: 0,
+          bottom: 'calc(100% + 6px)',
+          right: 0,
           zIndex: 9000,
           minWidth: 240,
           background: 'white',
           border: '1px solid #e2e8f0',
-          borderRadius: 10,
+          borderRadius: 12,
           overflow: 'hidden',
-          boxShadow: '0 12px 40px rgba(0, 0, 0, 0.12)',
+          boxShadow: '0 -8px 40px rgba(0, 0, 0, 0.12)',
+          animation: 'llmFadeIn 100ms ease-out',
         }}>
           {MODELS.map((m) => (
             <button
