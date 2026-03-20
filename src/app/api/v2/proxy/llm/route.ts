@@ -65,7 +65,9 @@ type StreamEvent =
   | { type: 'tool_call_start'; toolName: string; toolId: string }
   | { type: 'tool_call_delta'; json: string }
   | { type: 'tool_call_end' }
-  | { type: 'tool_call'; toolName: string; toolId: string; args: Record<string, unknown> };
+  | { type: 'tool_call'; toolName: string; toolId: string; args: Record<string, unknown> }
+  | { type: 'thinking'; text: string }
+  | { type: 'thinking_done' };
 
 interface Message {
   role: string;
@@ -123,6 +125,13 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
         const parsed = JSON.parse(data);
         if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
           return { type: 'content', text: parsed.delta.text };
+        }
+        // Extended thinking detection
+        if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'thinking') {
+          return { type: 'thinking', text: '' };
+        }
+        if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'thinking_delta') {
+          return { type: 'thinking', text: parsed.delta.thinking ?? '' };
         }
         // Tool use detection
         if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
@@ -257,6 +266,10 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
         const parts = parsed.candidates?.[0]?.content?.parts;
         if (parts) {
           for (const part of parts) {
+            // Google thinking/thought parts
+            if (part.thought === true && part.text) {
+              return { type: 'thinking', text: part.text };
+            }
             if (part.functionCall) {
               return {
                 type: 'tool_call',
@@ -407,7 +420,9 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
               const parsed = config.parseStream(line);
               if (!parsed) continue;
 
-              if (parsed.type === 'content') {
+              if (parsed.type === 'thinking') {
+                enqueue(JSON.stringify({ type: 'thinking', text: parsed.text }));
+              } else if (parsed.type === 'content') {
                 enqueue(JSON.stringify({ type: 'content', text: parsed.text }));
               } else if (parsed.type === 'usage') {
                 totalInputTokens += parsed.inputTokens;
