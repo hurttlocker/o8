@@ -9,13 +9,20 @@
  */
 
 import React, { useState, useCallback, useEffect, useRef, memo } from 'react';
-import { Copy, Check, ChevronDown, ChevronRight } from 'lucide-react';
+import { Copy, Check, ChevronDown, ChevronRight, FileCode, PanelRight } from 'lucide-react';
 
 // ── Code Block with copy button ──
 
-const CodeBlock = memo(function CodeBlock({ code, lang }: { code: string; lang: string }) {
+const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInCanvas }: {
+  code: string;
+  lang: string;
+  onApplyToFile?: (code: string, language: string) => void;
+  onOpenInCanvas?: (code: string, language: string) => void;
+}) {
   const [copied, setCopied] = useState(false);
+  const [applied, setApplied] = useState(false);
   const isMermaid = lang === 'mermaid';
+  const isCode = !isMermaid && !!lang && ['ts', 'tsx', 'js', 'jsx', 'py', 'css', 'html', 'json', 'yaml', 'yml', 'toml', 'sh', 'bash', 'sql', 'go', 'rust', 'md', 'xml', 'graphql', 'typescript', 'javascript', 'python', 'ruby', 'shell'].includes(lang.toLowerCase());
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(code);
@@ -82,6 +89,72 @@ const CodeBlock = memo(function CodeBlock({ code, lang }: { code: string; lang: 
           {copied ? <Check size={12} /> : <Copy size={12} />}
           {copied ? 'Copied' : 'Copy'}
         </button>
+
+        {/* Apply to File */}
+        {isCode && onApplyToFile && (
+          <button
+            type="button"
+            onClick={() => {
+              if (!applied) {
+                onApplyToFile(code, lang);
+                setApplied(true);
+                setTimeout(() => setApplied(false), 2000);
+              }
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              paddingTop: 3,
+              paddingBottom: 3,
+              paddingLeft: 8,
+              paddingRight: 8,
+              border: 'none',
+              borderRadius: 5,
+              background: 'transparent',
+              color: applied ? '#10b981' : '#94a3b8',
+              fontSize: 11,
+              cursor: 'pointer',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+              transition: 'color 150ms, background 150ms',
+            }}
+            onMouseEnter={(e) => { if (!applied) { (e.currentTarget).style.background = '#e2e8f0'; (e.currentTarget).style.color = '#3b82f6'; } }}
+            onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; if (!applied) (e.currentTarget).style.color = '#94a3b8'; }}
+          >
+            {applied ? <Check size={12} /> : <FileCode size={12} />}
+            {applied ? 'Applied' : 'Apply'}
+          </button>
+        )}
+
+        {/* Open in Canvas */}
+        {isCode && onOpenInCanvas && (
+          <button
+            type="button"
+            onClick={() => onOpenInCanvas(code, lang)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              paddingTop: 3,
+              paddingBottom: 3,
+              paddingLeft: 8,
+              paddingRight: 8,
+              border: 'none',
+              borderRadius: 5,
+              background: 'transparent',
+              color: '#94a3b8',
+              fontSize: 11,
+              cursor: 'pointer',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+              transition: 'color 150ms, background 150ms',
+            }}
+            onMouseEnter={(e) => { (e.currentTarget).style.background = '#e2e8f0'; (e.currentTarget).style.color = '#3b82f6'; }}
+            onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; (e.currentTarget).style.color = '#94a3b8'; }}
+          >
+            <PanelRight size={12} />
+            Canvas
+          </button>
+        )}
       </div>
       {/* Code content */}
       <pre style={{
@@ -375,7 +448,10 @@ function renderInline(text: string): React.ReactNode {
 
 // ── Main markdown renderer ──
 
-export function renderLLMMarkdown(text: string): React.ReactNode[] {
+export function renderLLMMarkdown(text: string, opts?: {
+  onApplyToFile?: (code: string, language: string) => void;
+  onOpenInCanvas?: (code: string, language: string) => void;
+}): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   const lines = text.split('\n');
   let inCodeBlock = false;
@@ -395,7 +471,7 @@ export function renderLLMMarkdown(text: string): React.ReactNode[] {
         i++;
         continue;
       } else {
-        nodes.push(<CodeBlock key={`code-${i}`} code={codeContent} lang={codeLang} />);
+        nodes.push(<CodeBlock key={`code-${i}`} code={codeContent} lang={codeLang} onApplyToFile={opts?.onApplyToFile} onOpenInCanvas={opts?.onOpenInCanvas} />);
         inCodeBlock = false;
         codeContent = '';
         codeLang = '';
@@ -514,7 +590,7 @@ export function renderLLMMarkdown(text: string): React.ReactNode[] {
 
   // Unclosed code block
   if (inCodeBlock && codeContent) {
-    nodes.push(<CodeBlock key="code-end" code={codeContent} lang={codeLang} />);
+    nodes.push(<CodeBlock key="code-end" code={codeContent} lang={codeLang} onApplyToFile={opts?.onApplyToFile} onOpenInCanvas={opts?.onOpenInCanvas} />);
   }
 
   return nodes;

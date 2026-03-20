@@ -13,12 +13,14 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, Copy, Expand, Minus, Plus, X } from 'lucide-react';
+import { Check, ChevronDown, Copy, Expand, Minus, Plus, X, FileCode, PanelRight } from 'lucide-react';
 
 interface CodeBlockProps {
   code: string;
   language?: string;
   onOpenMermaid?: (code: string) => void;
+  onOpenInCanvas?: (code: string, language: string) => void;
+  onApplyToFile?: (code: string, language: string) => void;
 }
 
 const LANG_ALIASES: Record<string, string> = {
@@ -399,12 +401,14 @@ const MermaidDiagram = memo(function MermaidDiagram({ code, onOpenMermaid }: { c
   );
 });
 
-export const CodeBlock = memo(function CodeBlock({ code, language, onOpenMermaid }: CodeBlockProps) {
+export const CodeBlock = memo(function CodeBlock({ code, language, onOpenMermaid, onOpenInCanvas, onApplyToFile }: CodeBlockProps) {
   const lines = code.split('\n');
   const label = formatLabel(language);
   const isMermaid = language?.toLowerCase() === 'mermaid';
+  const isCode = !isMermaid && !!language && ['ts', 'tsx', 'js', 'jsx', 'py', 'css', 'html', 'json', 'yaml', 'yml', 'toml', 'sh', 'bash', 'sql', 'go', 'rust', 'md', 'xml', 'graphql', 'typescript', 'javascript', 'python', 'ruby', 'shell'].includes(language.toLowerCase());
   const [expanded, setExpanded] = useState(isMermaid); // Mermaid auto-expands
   const [copied, setCopied] = useState(false);
+  const [applied, setApplied] = useState(false);
 
   const handleCopy = useCallback(async () => {
     try {
@@ -490,6 +494,58 @@ export const CodeBlock = memo(function CodeBlock({ code, language, onOpenMermaid
           {copied ? <Check size={12} strokeWidth={2} /> : <Copy size={12} strokeWidth={1.8} />}
           {copied ? 'Copied' : 'Copy'}
         </span>
+
+        {/* Apply to File */}
+        {isCode && onApplyToFile && (
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!applied) {
+                onApplyToFile(code, language || '');
+                setApplied(true);
+                setTimeout(() => setApplied(false), 2000);
+              }
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+              fontSize: '0.7rem',
+              color: applied ? '#22c55e' : 'var(--t-text-muted)',
+              cursor: 'pointer',
+              transition: 'color 150ms',
+            }}
+            onMouseEnter={(e) => { if (!applied) (e.currentTarget).style.color = '#3b82f6'; }}
+            onMouseLeave={(e) => { if (!applied) (e.currentTarget).style.color = 'var(--t-text-muted)'; }}
+          >
+            {applied ? <Check size={12} strokeWidth={2} /> : <FileCode size={12} strokeWidth={1.8} />}
+            {applied ? 'Applied' : 'Apply'}
+          </span>
+        )}
+
+        {/* Open in Canvas */}
+        {isCode && onOpenInCanvas && (
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenInCanvas(code, language || '');
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+              fontSize: '0.7rem',
+              color: 'var(--t-text-muted)',
+              cursor: 'pointer',
+              transition: 'color 150ms',
+            }}
+            onMouseEnter={(e) => { (e.currentTarget).style.color = '#3b82f6'; }}
+            onMouseLeave={(e) => { (e.currentTarget).style.color = 'var(--t-text-muted)'; }}
+          >
+            <PanelRight size={12} strokeWidth={1.8} />
+            Canvas
+          </span>
+        )}
 
         {/* Chevron */}
         <ChevronDown
