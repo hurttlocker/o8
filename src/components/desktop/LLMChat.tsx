@@ -86,6 +86,7 @@ export interface LLMMessage {
   thinking?: string; // raw thinking text
   thinkingSteps?: ThinkingStep[];
   thinkingDurationMs?: number;
+  isError?: boolean; // error messages — excluded from API calls
 }
 
 interface ModelOption {
@@ -410,8 +411,8 @@ function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFork, onA
         paddingLeft: isUser ? 16 : 0,
         paddingRight: isUser ? 16 : 0,
         borderRadius: isUser ? 18 : 0,
-        background: isUser ? '#3b82f6' : 'transparent',
-        color: isUser ? 'white' : '#1e293b',
+        background: isUser ? '#3b82f6' : message.isError ? 'rgba(239,68,68,0.06)' : 'transparent',
+        color: isUser ? 'white' : message.isError ? '#dc2626' : '#1e293b',
         fontSize: 14,
         lineHeight: '1.6',
         fontFamily: '-apple-system, system-ui, sans-serif',
@@ -1600,11 +1601,29 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
     abortRef.current = controller;
 
     try {
+      // Filter messages for API: skip error messages, empty content, and limit context
+      const cleanMessages = messages
+        .filter((m) => {
+          // Skip error/system messages (they poison the conversation)
+          if (m.isError) return false;
+          if (m.content.startsWith('Error: ')) return false;
+          if (m.content.startsWith('Action cancelled:')) return false;
+          // Skip empty messages
+          if (!m.content.trim()) return false;
+          return true;
+        })
+        .map((m) => ({ role: m.role, content: m.content }));
+
+      // Keep last 40 messages max to avoid context overflow
+      const recentMessages = cleanMessages.length > 40
+        ? cleanMessages.slice(-40)
+        : cleanMessages;
+
       const reqBody = JSON.stringify({
         model: model.id,
         provider: model.provider,
         messages: [
-          ...messages.map((m) => ({ role: m.role, content: m.content })),
+          ...recentMessages,
           { role: 'user', content: messageForModel },
         ],
         approvedTools: [...approvedToolsSet],
@@ -1813,6 +1832,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
           role: 'assistant',
           content: `Error: ${(err as Error).message}`,
           timestamp: Date.now(),
+          isError: true,
         }]);
       }
       setStreamContent('');
