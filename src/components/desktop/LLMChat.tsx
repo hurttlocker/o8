@@ -14,6 +14,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Send,
   ChevronDown,
@@ -129,20 +130,35 @@ function ModelPicker({
   disabled: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
+  const [dropPos, setDropPos] = useState({ bottom: 0, right: 0 });
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (btnRef.current?.contains(e.target as Node)) return;
+      if (dropRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
+  // Position dropdown above the button using fixed coordinates
+  useEffect(() => {
+    if (!open || !btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    setDropPos({
+      bottom: window.innerHeight - rect.top + 6,
+      right: window.innerWidth - rect.right,
+    });
+  }, [open]);
+
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div style={{ position: 'relative' }}>
       <button
+        ref={btnRef}
         type="button"
         onClick={() => !disabled && setOpen(!open)}
         disabled={disabled}
@@ -156,8 +172,8 @@ function ModelPicker({
           paddingRight: 6,
           border: 'none',
           borderRadius: 8,
-          background: 'transparent',
-          color: '#64748b',
+          background: open ? '#f1f5f9' : 'transparent',
+          color: open ? '#1e293b' : '#64748b',
           fontSize: 13,
           fontWeight: 400,
           fontFamily: '-apple-system, system-ui, sans-serif',
@@ -165,8 +181,8 @@ function ModelPicker({
           opacity: disabled ? 0.6 : 1,
           transition: 'color 150ms, background 150ms',
         }}
-        onMouseEnter={(e) => { if (!disabled) { (e.currentTarget).style.color = '#1e293b'; (e.currentTarget).style.background = '#f1f5f9'; } }}
-        onMouseLeave={(e) => { (e.currentTarget).style.color = '#64748b'; (e.currentTarget).style.background = 'transparent'; }}
+        onMouseEnter={(e) => { if (!disabled && !open) { (e.currentTarget).style.color = '#1e293b'; (e.currentTarget).style.background = '#f1f5f9'; } }}
+        onMouseLeave={(e) => { if (!open) { (e.currentTarget).style.color = '#64748b'; (e.currentTarget).style.background = 'transparent'; } }}
       >
         <span style={{
           width: 8,
@@ -176,16 +192,16 @@ function ModelPicker({
           flexShrink: 0,
         }} />
         {selected.label}
-        <ChevronDown size={12} style={{ color: '#94a3b8', marginLeft: 2 }} />
+        <ChevronDown size={12} style={{ color: '#94a3b8', marginLeft: 2, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
       </button>
 
-      {open && (
-        <div style={{
-          position: 'absolute',
-          bottom: 'calc(100% + 6px)',
-          right: 0,
-          zIndex: 9000,
-          minWidth: 240,
+      {open && createPortal(
+        <div ref={dropRef} style={{
+          position: 'fixed',
+          bottom: dropPos.bottom,
+          right: dropPos.right,
+          zIndex: 9999,
+          minWidth: 260,
           background: 'white',
           border: '1px solid #e2e8f0',
           borderRadius: 12,
@@ -233,7 +249,8 @@ function ModelPicker({
               {m.id === selected.id && <Check size={14} style={{ color: '#3b82f6' }} />}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
