@@ -46,7 +46,6 @@ const PRReviewSheet = dynamic(() => import('./mobile/PRReviewSheet').then((m) =>
 const SettingsView = dynamic(() => import('./mobile/SettingsView').then((m) => ({ default: m.SettingsView })), { ssr: false, ...shimmerFallback });
 const MemoryPage = dynamic(() => import('./mobile/MemoryPage'), { ssr: false, ...shimmerFallback });
 const IssuesPage = dynamic(() => import('./mobile/IssuesPage'), { ssr: false, ...shimmerFallback });
-const PRDetailSheet = dynamic(() => import('./mobile/PRDetailSheet'), { ssr: false, ...shimmerFallback });
 
 // Cortex memory surfaces (#78-#85) — typed via explicit generic param
 const RecallPanel = dynamic(() => import('./mobile/RecallPanel'), { ssr: false });
@@ -381,7 +380,7 @@ function MobileRemoteShellInner({
           wsConnectionState={wsConnectionState}
           compactLine={compactLine}
           squadPickerOpen={squadPickerOpen}
-          activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : activeView === 'activity' ? 'approvals' : activeView === 'settings' ? 'settings' : activeView === 'memory' ? 'memory' : 'chat'}
+          activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : activeView === 'activity' ? 'approvals' : activeView === 'settings' ? 'settings' : activeView === 'memory' ? 'memory' : activeView === 'issues' ? 'issues' : 'chat'}
           onNavigate={(screen: MobileScreen) => {
             switch (screen) {
               case 'chat':
@@ -392,6 +391,9 @@ function MobileRemoteShellInner({
                 break;
               case 'memory':
                 setActiveView('memory');
+                break;
+              case 'issues':
+                setActiveView('issues');
                 break;
               case 'approvals':
                 setActiveView('activity');
@@ -437,6 +439,9 @@ function MobileRemoteShellInner({
               }}
             />
           ) : null}
+          {activeView === 'issues' ? (
+            <IssuesPage onBack={() => setActiveView('squad')} />
+          ) : null}
           {activeView === 'activity' ? (
             <ActivityFeed
               snapshot={snapshot}
@@ -473,10 +478,10 @@ function MobileRemoteShellInner({
               compactLine={compactLine}
             />
           ) : null}
-          {activeView !== 'costs' && activeView !== 'fleet' && activeView !== 'memory' ? (
+          {activeView !== 'costs' && activeView !== 'fleet' && activeView !== 'memory' && activeView !== 'issues' ? (
             <TokenUsageSummary snapshot={snapshot} onViewCosts={() => setActiveView('costs')} />
           ) : null}
-          {activeView !== 'costs' && activeView !== 'fleet' && activeView !== 'memory' ? (
+          {activeView !== 'costs' && activeView !== 'fleet' && activeView !== 'memory' && activeView !== 'issues' ? (
             <SquadRail
               snapshot={snapshot}
               expandedProject={expandedProject}
@@ -487,7 +492,7 @@ function MobileRemoteShellInner({
               agentDisplayName={agentDisplayName}
             />
           ) : null}
-          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' ? (
+          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' && activeView !== 'issues' ? (
           <SurfaceStatus
             snapshot={snapshot}
             selectedSession={selectedSession}
@@ -499,7 +504,7 @@ function MobileRemoteShellInner({
             selectedReviewPacketError={selectedReviewPacketError}
           />
           ) : null}
-          {hasTerminalSession && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' ? (
+          {hasTerminalSession && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' && activeView !== 'issues' ? (
             <div
               style={{
                 display: 'flex',
@@ -543,7 +548,7 @@ function MobileRemoteShellInner({
               </button>
             </div>
           ) : null}
-          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' ? (
+          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' && activeView !== 'issues' ? (
           terminalActive ? (
             <MobileTerminal tmuxSession={selectedSession!.tmuxSession!} />
           ) : (
@@ -597,7 +602,7 @@ function MobileRemoteShellInner({
         </PageTransition>
         </PullToRefresh>
         <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
-          {!terminalActive && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' ? (
+          {!terminalActive && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' && activeView !== 'issues' ? (
             <div className="remodex-compose-shell">
               <ComposeBar
                 session={selectedSession}
@@ -630,7 +635,7 @@ function MobileRemoteShellInner({
             </div>
           ) : null}
           {/* RuntimeBar — only when at bottom + keyboard closed + chat view */}
-          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' && !isComposerPrimed ? (
+          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' && activeView !== 'issues' && !isComposerPrimed ? (
             <div style={{
               transition: 'opacity 250ms ease, max-height 250ms ease',
               opacity: isAtBottom ? 1 : 0,
