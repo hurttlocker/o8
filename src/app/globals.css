@@ -1772,13 +1772,7 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-topbar[data-visible='false'] {
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  transform: translate(-50%, -18px);
-  padding-top: 0;
-  padding-bottom: 0;
-  pointer-events: none;
+  /* TopBar always visible — hamburger menu must never disappear */
 }
 
 .remodex-circle-button {
