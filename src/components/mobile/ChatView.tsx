@@ -297,12 +297,21 @@ export function ChatView({
 
   const estimateSize = useCallback((index: number) => {
     const entry = transcriptRef.current[index];
-    if (!entry) return 60;
-    const textLen = entry.text?.length ?? 0;
+    if (!entry) return 80;
+    const text = entry.text ?? '';
+    const textLen = text.length;
     const hasMedia = Boolean(entry.media?.length);
-    if (entry.role === 'user') return Math.max(52, 52 + Math.ceil(textLen / 60) * 20 + (hasMedia ? 200 : 0));
-    if (entry.role === 'system' && entry.text.toLowerCase().includes('compaction')) return 44;
-    return Math.max(64, 64 + Math.ceil(textLen / 50) * 22 + (hasMedia ? 200 : 0));
+    // Count code blocks — they render much taller
+    const codeBlocks = (text.match(/```/g) ?? []).length / 2;
+    const codeExtra = Math.floor(codeBlocks) * 120;
+    // Count line breaks — better proxy for height than char count
+    const lineBreaks = (text.match(/\n/g) ?? []).length;
+    const lineHeight = lineBreaks * 22;
+    if (entry.role === 'user') return Math.max(52, 52 + Math.ceil(textLen / 50) * 22 + (hasMedia ? 240 : 0));
+    if (entry.role === 'system' && text.toLowerCase().includes('compaction')) return 44;
+    // Use the larger of char-based or line-based estimate
+    const charEstimate = Math.ceil(textLen / 45) * 22;
+    return Math.max(80, 64 + Math.max(charEstimate, lineHeight) + codeExtra + (hasMedia ? 240 : 0));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Track scrollMargin via state to avoid render-time ref access (#195).
