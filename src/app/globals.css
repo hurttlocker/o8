@@ -2154,6 +2154,10 @@ button.workflow-file-item.workflow-file-item-active {
   transition: opacity 200ms ease, max-width 200ms ease;
 }
 
+.remodex-topbar[data-compact='true'] {
+  top: calc(env(safe-area-inset-top, 0px) + var(--remodex-viewport-top-offset, 0px) - 6px);
+}
+
 .remodex-topbar[data-compact='true'] .remodex-diff-pill-caption {
   opacity: 0;
   max-width: 0;
