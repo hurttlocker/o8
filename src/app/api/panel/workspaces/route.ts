@@ -3,6 +3,14 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 
+// Response cache — workspace list with PR data is expensive (gh CLI calls)
+let workspacesCache: { data: unknown; ts: number } | null = null;
+const WORKSPACES_CACHE_TTL_MS = 30_000; // 30s — workspaces change slowly
+
+// PR data cache — shared across requests, per repo
+const prCache = new Map<string, { prs: PRData[]; ts: number }>();
+const PR_CACHE_TTL_MS = 60_000; // 60s — PRs change slowly
+
 interface PRData {
   number: number;
   title: string;
@@ -195,15 +203,23 @@ export async function GET() {
       if (!ghRepo) continue;
 
       try {
-        const openJson = execSync(
-          `gh pr list --repo ${ghRepo} --state open --limit 20 --json number,title,state,author,headRefName,additions,deletions,changedFiles,createdAt`,
-          { encoding: 'utf-8', timeout: 10000 },
-        );
-        const mergedJson = execSync(
-          `gh pr list --repo ${ghRepo} --state merged --limit 10 --json number,title,state,author,headRefName,additions,deletions,changedFiles,createdAt`,
-          { encoding: 'utf-8', timeout: 10000 },
-        );
-        const prs = [...JSON.parse(openJson), ...JSON.parse(mergedJson)] as PRData[];
+        // Use PR cache to avoid hammering GitHub API on every page load
+        const cached = prCache.get(ghRepo);
+        let prs: PRData[];
+        if (cached && (Date.now() - cached.ts) < PR_CACHE_TTL_MS) {
+          prs = cached.prs;
+        } else {
+          const openJson = execSync(
+            `gh pr list --repo ${ghRepo} --state open --limit 20 --json number,title,state,author,headRefName,additions,deletions,changedFiles,createdAt`,
+            { encoding: 'utf-8', timeout: 10000 },
+          );
+          const mergedJson = execSync(
+            `gh pr list --repo ${ghRepo} --state merged --limit 10 --json number,title,state,author,headRefName,additions,deletions,changedFiles,createdAt`,
+            { encoding: 'utf-8', timeout: 10000 },
+          );
+          prs = [...JSON.parse(openJson), ...JSON.parse(mergedJson)] as PRData[];
+          prCache.set(ghRepo, { prs, ts: Date.now() });
+        }
         for (const pr of prs) {
           prsByBranch.set(`${repoName}:${pr.headRefName}`, { ...pr, ghRepo });
         }

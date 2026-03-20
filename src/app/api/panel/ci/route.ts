@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
+import { getCached, setCached, SLOW_TTL_MS } from '@/lib/github/cache';
 
 const DEFAULT_REPO = process.env.GITHUB_REPO || 'hurttlocker/cortex-ide';
 
@@ -13,6 +14,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Invalid repo format', runs: [] }, { status: 400 });
   }
 
+  // Check cache first (CI runs change slowly — 60s TTL)
+  const cacheKey = `ci:${repo}`;
+  const cached = getCached<unknown[]>(cacheKey, SLOW_TTL_MS);
+  if (cached) {
+    return NextResponse.json({ runs: cached, repo });
+  }
+
   try {
     const runsJson = execSync(
       `gh run list --repo ${repo} --limit 15 --json databaseId,displayTitle,event,headBranch,status,conclusion,createdAt,updatedAt,workflowName,url`,
@@ -20,6 +28,7 @@ export async function GET(request: Request) {
     );
 
     const runs = JSON.parse(runsJson);
+    setCached(cacheKey, runs);
     return NextResponse.json({ runs, repo });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';

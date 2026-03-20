@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { listRepos } from '@/lib/repos/registry';
+import { getCached, setCached } from '@/lib/github/cache';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_REPO = process.env.CORTEX_IDE_REVIEW_REPO || 'hurttlocker/cortex-ide';
@@ -42,6 +43,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Invalid repo format', issues: [] }, { status: 400 });
   }
 
+  // Check cache first
+  const cacheKey = `issues:${repo}`;
+  const cached = getCached<unknown[]>(cacheKey);
+  if (cached) {
+    return NextResponse.json({ issues: cached, repo });
+  }
+
   try {
     const { stdout } = await execFileAsync('gh', [
       'issue', 'list',
@@ -52,6 +60,7 @@ export async function GET(request: Request) {
     ], { timeout: 15_000 });
 
     const issues = JSON.parse(stdout || '[]');
+    setCached(cacheKey, issues);
     return NextResponse.json({ issues, repo });
   } catch {
     return NextResponse.json({ issues: [], repo });
