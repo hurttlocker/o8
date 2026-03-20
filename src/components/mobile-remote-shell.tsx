@@ -328,7 +328,7 @@ function MobileRemoteShellInner({
           top: 0, left: 0, right: 0,
           height: 'calc(env(safe-area-inset-top, 0px) + 56px)',
           background: 'linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(255,255,255,0.97) 25%, rgba(255,255,255,0.8) 45%, rgba(255,255,255,0.4) 70%, rgba(255,255,255,0.1) 85%, rgba(255,255,255,0) 100%)',
-          zIndex: 9,
+          zIndex: 7,
           pointerEvents: 'none',
         }} />
         <TopBar
