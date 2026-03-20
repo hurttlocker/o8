@@ -34,7 +34,7 @@ const capabilities: RuntimeCapabilities = {
 };
 
 async function resolveOpenClawLaunchSurface() {
-  const snapshot = await getRuntimeInventorySnapshot();
+  const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
   const primary = snapshot.meta.primarySessionKey
     ? snapshot.agents.find((agent) => agent.runtime === 'openclaw' && agent.sessionKey === snapshot.meta.primarySessionKey)
     : null;
@@ -75,6 +75,7 @@ export const openclawRuntime: AgentRuntime = {
         lastActivityAt: new Date(),
         initialTask: agent.currentTask,
         model: agent.model,
+        browserSurface: agent.browserSurface ?? agent.runtimeSurface?.browserSurface,
       }));
   },
 

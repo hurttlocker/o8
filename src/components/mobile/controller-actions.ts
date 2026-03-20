@@ -219,7 +219,7 @@ interface FocusSessionArgs {
   snapshot: MobileInboxSnapshot;
   compactLine: CompactLine;
   setSelectedId: Dispatch<SetStateAction<string>>;
-  setActiveView: Dispatch<SetStateAction<'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'memory'>>;
+  setActiveView: (view: 'chat') => void;
   setControlsOpen: Dispatch<SetStateAction<boolean>>;
   setDiffOpen: Dispatch<SetStateAction<boolean>>;
   setSurfaceNote: Dispatch<SetStateAction<string | null>>;

@@ -1,10 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo } from 'react';
-import type { RuntimeReviewPacket } from '@/lib/fleet/types';
-import type {
-  MobileReviewFileResponse,
-} from '@/lib/mobile/types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   loadOwnedReviewPacketForSession,
   loadReviewFilePreview,
@@ -12,6 +8,7 @@ import {
   refreshInboxSnapshot,
 } from '../controller';
 import {
+  computePollingTier,
   startUnifiedSyncPolling,
   trackVisibilityRefresh,
 } from '../effects';
@@ -41,7 +38,7 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
 
   const refreshInbox = useCallback(
     () => refreshInboxSnapshot({ setSnapshot, setRefreshError }),
-    [], // eslint-disable-line react-hooks/exhaustive-deps
+    [setRefreshError, setSnapshot],
   );
 
   const loadHistory = useCallback(
@@ -54,7 +51,7 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
       setHistoryGroupsBySession,
       setHistoryError,
     }),
-    [historyBySession], // eslint-disable-line react-hooks/exhaustive-deps
+    [historyBySession, setHistoryBySession, setHistoryError, setHistoryGroupsBySession, setHistoryLoading],
   );
 
   const loadOwnedReviewPacket = useCallback(
@@ -66,7 +63,7 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
       setReviewPacketBySession,
       setReviewPacketErrorBySession,
     }),
-    [reviewPacketBySession], // eslint-disable-line react-hooks/exhaustive-deps
+    [reviewPacketBySession, setReviewPacketBySession, setReviewPacketErrorBySession, setReviewPacketLoadingBySession],
   );
 
   const loadReviewFile = useCallback(
@@ -78,19 +75,28 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
       setReviewFileError,
       setReviewFileByPath,
     }),
-    [reviewFileByPath], // eslint-disable-line react-hooks/exhaustive-deps
+    [reviewFileByPath, setReviewFileByPath, setReviewFileError, setReviewFileLoadingPath],
   );
 
-  const reviewFiles = useMemo(() => {
-    const next = isOwnedCodexSession
+  const rawReviewFiles = useMemo(() => {
+    return isOwnedCodexSession
       ? state.selectedReviewPacket?.changedFiles ?? []
       : snapshot.review?.changedFiles ?? [];
-    if (next.length) {
-      stickyReviewFilesRef.current = next;
-      return next;
-    }
-    return stickyReviewFilesRef.current;
-  }, [isOwnedCodexSession, state.selectedReviewPacket, snapshot.review?.changedFiles, stickyReviewFilesRef]);
+  }, [isOwnedCodexSession, state.selectedReviewPacket, snapshot.review?.changedFiles]);
+
+  // Sticky fallback: keep the last non-empty review file list.
+  // Uses a state-based fallback instead of reading stickyReviewFilesRef during render (#195).
+  const [stickyReviewFiles, setStickyReviewFiles] = useState(rawReviewFiles);
+  if (rawReviewFiles.length && rawReviewFiles !== stickyReviewFiles) {
+    // Safe: React batches setState during render when the value changes.
+    setStickyReviewFiles(rawReviewFiles);
+  }
+  // Keep the ref in sync via effect (for any external consumer of the ref)
+  useEffect(() => {
+    if (rawReviewFiles.length) stickyReviewFilesRef.current = rawReviewFiles;
+  }, [rawReviewFiles, stickyReviewFilesRef]);
+
+  const reviewFiles = rawReviewFiles.length ? rawReviewFiles : stickyReviewFiles;
 
   // Load history for selected session on first mount
   useEffect(() => {
@@ -152,36 +158,63 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
     }
   }, [linkedOwnedKey, historyBySession, historyLoading, loadHistory]);
 
-  // Unified sync polling
-  // IMPORTANT: historyBySession is accessed via historyBySessionRef (a stable ref)
-  // instead of directly in the dependency array. Putting historyBySession in deps
-  // caused a restart loop: poll → update history → effect restart → immediate poll.
+  // ── Unified sync polling (#193) ──
+  // Compute a stable polling tier so the effect only restarts when the
+  // actual polling speed needs to change, not on ordinary state churn.
+  const pollingTier = computePollingTier({
+    wsConnected,
+    selectedSessionKey,
+    selectedSession,
+    pendingOwnedTurnBySession,
+    actionStateBySession,
+    waitingForResponse,
+  });
+
+  // Refs for values that the tick function reads but that should NOT restart the timer
+  const pollingTierRef = useRef(pollingTier);
+  useEffect(() => { pollingTierRef.current = pollingTier; }, [pollingTier]);
+  const selectedSessionKeyRef = useRef(selectedSessionKey);
+  useEffect(() => { selectedSessionKeyRef.current = selectedSessionKey; }, [selectedSessionKey]);
+  const linkedOwnedKeyRef = useRef(linkedOwnedKey);
+  useEffect(() => { linkedOwnedKeyRef.current = linkedOwnedKey; }, [linkedOwnedKey]);
+  const diffOpenRef = useRef(diffOpen);
+  useEffect(() => { diffOpenRef.current = diffOpen; }, [diffOpen]);
+  const selectedReviewFilePathRef = useRef(selectedReviewFilePath);
+  useEffect(() => { selectedReviewFilePathRef.current = selectedReviewFilePath; }, [selectedReviewFilePath]);
+  const loadOwnedReviewPacketRef = useRef(loadOwnedReviewPacket);
+  useEffect(() => { loadOwnedReviewPacketRef.current = loadOwnedReviewPacket; }, [loadOwnedReviewPacket]);
+
   useEffect(() => {
     return startUnifiedSyncPolling({
+      pollingTier,
       selectedSessionKey,
-      selectedSession,
       linkedOwnedKey,
-      pendingOwnedTurnBySession,
-      actionStateBySession,
-      waitingForResponse,
       diffOpen,
       selectedReviewFilePath,
       documentVisibleRef,
       historyBySessionRef,
-      wsConnected,
+      pollingTierRef,
+      selectedSessionKeyRef,
+      linkedOwnedKeyRef,
+      diffOpenRef,
+      selectedReviewFilePathRef,
       setSnapshot,
       setRefreshError,
       setHistoryBySession,
       setHistoryGroupsBySession,
       setReviewFileByPath,
-      loadOwnedReviewPacket,
+      loadOwnedReviewPacketRef,
     });
   }, [
-    actionStateBySession, diffOpen, linkedOwnedKey,
-    loadOwnedReviewPacket, pendingOwnedTurnBySession, selectedReviewFilePath,
-    selectedSession, selectedSessionKey, waitingForResponse, wsConnected,
+    pollingTier,
+    // Only these stable values restart the timer:
     setSnapshot, setRefreshError, setHistoryBySession, setHistoryGroupsBySession, setReviewFileByPath,
     documentVisibleRef, historyBySessionRef,
+    // Refs are stable (same identity)
+    pollingTierRef, selectedSessionKeyRef, linkedOwnedKeyRef,
+    diffOpenRef, selectedReviewFilePathRef, loadOwnedReviewPacketRef,
+    // These are still in deps for the initial sync (effect only re-runs when pollingTier changes):
+    selectedSessionKey, linkedOwnedKey, diffOpen, selectedReviewFilePath,
   ]);
 
   // Pre-fetch adjacent session history during idle (#46 optimistic rendering)

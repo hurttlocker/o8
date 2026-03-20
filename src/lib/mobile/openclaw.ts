@@ -3,6 +3,7 @@ import { getSessionActivity, getSessionTranscript } from '@/lib/openclaw/chat';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
 import type { MobileControlAction, MobileInboxItem, MobileInboxSnapshot, MobileReviewFocus } from '@/lib/mobile/types';
+import { invalidateMobileBootstrapBroker } from '@/lib/render/bootstrap';
 
 function sessionActions(agent: AgentSummary): MobileControlAction[] {
   const runtimeSurface = agent.runtimeSurface;
@@ -82,34 +83,48 @@ function summarizeTranscript(text: string) {
 
 let inboxCache: { snapshot: MobileInboxSnapshot; timestamp: number } | null = null;
 
-/** Invalidate the inbox cache — call after killing a session */
+/** Invalidate the inbox cache — call after any mutation (steer/stop/launch/resume). */
 export function invalidateInboxCache() {
+  inboxGeneration += 1;
   inboxCache = null;
+  inboxInflight = null;
+  invalidateMobileBootstrapBroker();
 }
-let inboxInflight: Promise<MobileInboxSnapshot> | null = null;
+let inboxInflight: { generation: number; promise: Promise<MobileInboxSnapshot> } | null = null;
+let inboxGeneration = 0;
 const INBOX_CACHE_TTL = 8000; // 8 seconds — generous idle TTL
 
-export async function getMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
-  if (inboxCache && Date.now() - inboxCache.timestamp < INBOX_CACHE_TTL) {
+export async function getMobileInboxSnapshot(options: { fresh?: boolean } = {}): Promise<MobileInboxSnapshot> {
+  const fresh = options.fresh ?? false;
+  const generation = inboxGeneration;
+  if (!fresh && inboxCache && Date.now() - inboxCache.timestamp < INBOX_CACHE_TTL) {
     return inboxCache.snapshot;
   }
 
   // Deduplicate: if a request is already in-flight, piggyback on it
-  if (inboxInflight) return inboxInflight;
+  if (!fresh && inboxInflight && inboxInflight.generation === generation) return inboxInflight.promise;
 
-  inboxInflight = (async () => {
+  const promise = (async () => {
     try {
-      return await _fetchMobileInboxSnapshot();
+      const snapshot = await _fetchMobileInboxSnapshot({ fresh });
+      if (generation === inboxGeneration) {
+        inboxCache = { snapshot, timestamp: Date.now() };
+      }
+      return snapshot;
     } finally {
-      inboxInflight = null;
+      if (inboxInflight?.generation === generation) {
+        inboxInflight = null;
+      }
     }
   })();
-  return inboxInflight;
+  inboxInflight = { generation, promise };
+  return promise;
 }
 
-async function _fetchMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
+async function _fetchMobileInboxSnapshot(options: { fresh?: boolean } = {}): Promise<MobileInboxSnapshot> {
+  const fresh = options.fresh ?? false;
 
-  const fleet = await getRuntimeInventorySnapshot();
+  const fleet = await getRuntimeInventorySnapshot({ fresh });
   const sessions = fleet.agents
     .filter((agent) => (
       agent.runtime === 'openclaw'
@@ -129,12 +144,16 @@ async function _fetchMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
 
   // Fetch review, transcript, and activity for all sessions in parallel
   const activityPromises = sessions.map((s) =>
-    getSessionActivity(s.sessionKey).catch(() => undefined),
+    s.activity
+      ? Promise.resolve(s.activity)
+      : s.runtime === 'openclaw'
+        ? getSessionActivity(s.sessionKey).catch(() => undefined)
+        : Promise.resolve(undefined),
   );
 
   const [reviewSnapshot, primaryTranscript, ...activities] = await Promise.all([
-    getWorkspaceReviewSnapshot().catch(() => null),
-    primarySession ? getSessionTranscript(primarySession.sessionKey, 3).catch(() => []) : Promise.resolve([]),
+    getWorkspaceReviewSnapshot({ fresh }).catch(() => null),
+    primarySession ? getSessionTranscript(primarySession.sessionKey, 3, fresh).catch(() => []) : Promise.resolve([]),
     ...activityPromises,
   ]);
 
@@ -258,6 +277,5 @@ async function _fetchMobileInboxSnapshot(): Promise<MobileInboxSnapshot> {
     review,
   };
 
-  inboxCache = { snapshot: result, timestamp: Date.now() };
   return result;
 }

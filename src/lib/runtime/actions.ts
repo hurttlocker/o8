@@ -11,6 +11,7 @@ export type RuntimeActionKind = 'steer' | 'stop' | 'send_input' | 'interrupt' | 
 export interface RuntimeActionRequest {
   action: RuntimeActionKind;
   surfaceId: string;
+  clientMutationId?: string;
   message?: string;
   runId?: string;
   cwd?: string;
@@ -27,6 +28,7 @@ export interface RuntimeActionResult {
   action: RuntimeActionKind;
   surfaceId: string;
   runtime: string;
+  clientMutationId?: string;
   status: 'queued' | 'completed' | 'unavailable';
   note: string;
   runId?: string;
@@ -36,6 +38,7 @@ export interface RuntimeActionResult {
 export interface RuntimeLaunchRequest {
   runtime: RuntimeId;
   prompt: string;
+  clientMutationId?: string;
   cwd?: string;
   repoPath?: string;
   taskName?: string;
@@ -47,6 +50,7 @@ export interface RuntimeLaunchRequest {
 export interface RuntimeLaunchResult {
   ok: boolean;
   runtime: RuntimeId;
+  clientMutationId?: string;
   surfaceId: string;
   note: string;
   cwd: string;
@@ -118,6 +122,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   return {
     ok: true,
     runtime: runtimeId,
+    clientMutationId: payload.clientMutationId,
     surfaceId: result.sessionKey,
     note: launchWorktree?.worktree
       ? `${result.note} Worktree: ${launchWorktree.worktree.branch} at ${launchWorktree.worktree.path}.`
@@ -140,6 +145,7 @@ function unavailable(agent: AgentSummary, action: RuntimeActionKind, note: strin
     action,
     surfaceId: agent.runtimeSurface?.id ?? agent.sessionKey,
     runtime: agent.runtime,
+    clientMutationId: undefined,
     status: 'unavailable',
     note,
   };
@@ -151,7 +157,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
     throw new Error('surfaceId is required');
   }
 
-  const snapshot = await getRuntimeInventorySnapshot();
+  const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
   const agent = findRuntimeAgent(snapshot, surfaceId);
   if (!agent) {
     throw new Error('Runtime surface not found.');
@@ -178,6 +184,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
           action: payload.action,
           surfaceId: runtimeSurface.id,
           runtime: agent.runtime,
+          clientMutationId: payload.clientMutationId,
           status: 'queued',
           note: 'Sent.',
           runId: result.runId,
@@ -191,6 +198,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
           action: payload.action,
           surfaceId: runtimeSurface.id,
           runtime: agent.runtime,
+          clientMutationId: payload.clientMutationId,
           status: 'completed',
           note: result.aborted
             ? 'Stop request sent to the active run for this session.'
@@ -220,6 +228,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
             action: payload.action,
             surfaceId: runtimeSurface.id,
             runtime: agent.runtime,
+            clientMutationId: payload.clientMutationId,
             status: 'queued',
             note: 'Sent.',
             runId: result.runId,
@@ -250,6 +259,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
           action: payload.action,
           surfaceId: runtimeSurface.id,
           runtime: agent.runtime,
+          clientMutationId: payload.clientMutationId,
           status: 'queued',
           note: result.note,
         };
@@ -269,6 +279,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
           action: payload.action,
           surfaceId: runtimeSurface.id,
           runtime: agent.runtime,
+          clientMutationId: payload.clientMutationId,
           status: 'completed',
           note: result.note,
           aborted: result.interrupted,
@@ -285,6 +296,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
           action: payload.action,
           surfaceId: runtimeSurface.id,
           runtime: agent.runtime,
+          clientMutationId: payload.clientMutationId,
           status: 'completed',
           note: result.note,
         };
@@ -315,6 +327,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
           action: payload.action,
           surfaceId: runtimeSurface.id,
           runtime: agent.runtime,
+          clientMutationId: payload.clientMutationId,
           status: 'queued',
           note: result.note,
         };
@@ -330,6 +343,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
           action: payload.action,
           surfaceId: runtimeSurface.id,
           runtime: agent.runtime,
+          clientMutationId: payload.clientMutationId,
           status: 'completed',
           note: result.note,
           aborted: result.ok,
@@ -352,6 +366,7 @@ export async function launchCodexFromMobile(cwd: string, prompt: string): Promis
     action: 'launch',
     surfaceId: result.surfaceId,
     runtime: 'codex',
+    clientMutationId: result.clientMutationId,
     status: 'queued',
     note: result.note,
   };

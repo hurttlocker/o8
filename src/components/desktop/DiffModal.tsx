@@ -10,7 +10,7 @@
 import { memo, useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronRight, FileText, FilePlus, FileMinus, FileEdit, X } from 'lucide-react';
-import { useDesktopWebSocket } from './hooks/useDesktopWebSocket';
+import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
 
 interface ChangedFile {
   path: string;
@@ -106,7 +106,7 @@ export const DiffModal = memo(function DiffModal({ onClose }: DiffModalProps) {
     finally { setDetailLoading(false); }
   }, []);
 
-  useDesktopWebSocket(undefined, {
+  useSharedDesktopWs(undefined, {
     onReviewUpdate: (data) => {
       if ((data.event as string | undefined) !== 'file-changes') return;
       void loadWorkspace();

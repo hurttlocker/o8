@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { demoFleet } from '@/lib/demo/fleet';
 import { getOwnedCodexFleetAdditions } from '@/lib/codex/owned';
 import { getCodexDiscoveredFleetAdditions } from '@/lib/codex/sessions';
+import { getSessionObservableState } from '@/lib/openclaw/chat';
 import { claudeCodeRuntime } from '@/lib/runtimes/claude-code';
 import type {
   AgentStatus,
@@ -233,6 +234,63 @@ function deriveSquadStatus(blockers: number, alerts: number, lastActiveAgeMs?: n
   return 'watching';
 }
 
+function truncateText(value: string, max: number) {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
+}
+
+function browserPageLabel(agent: AgentSummary) {
+  const browserSurface = agent.browserSurface ?? agent.runtimeSurface?.browserSurface;
+  if (!browserSurface) return null;
+  if (browserSurface.title) return truncateText(browserSurface.title, 48);
+  if (browserSurface.url) return truncateText(browserSurface.url, 64);
+  return 'browser page';
+}
+
+function browserEventSummary(agent: AgentSummary) {
+  const browserSurface = agent.browserSurface ?? agent.runtimeSurface?.browserSurface;
+  if (!browserSurface) return null;
+
+  const bits = [
+    `${browserSurface.provider} browser`,
+    browserSurface.lastAction ? `last ${browserSurface.lastAction}` : 'observed',
+    browserPageLabel(agent),
+    browserSurface.capabilities.persistentProfile ? 'persistent profile' : null,
+  ].filter(Boolean);
+
+  return bits.join(' • ');
+}
+
+function relativeAgeFromTimestamp(timestamp?: number) {
+  if (!timestamp) return 'recent';
+  return relativeAge(Math.max(0, Date.now() - timestamp));
+}
+
+function isScreenshotArtifactAction(action?: string) {
+  const normalized = action?.trim().toLowerCase();
+  return normalized === 'screenshot' || normalized === 'snapshot';
+}
+
+function buildBrowserArtifacts(agents: AgentSummary[]) {
+  return agents
+    .flatMap((agent) => {
+      const browserSurface = agent.browserSurface ?? agent.runtimeSurface?.browserSurface;
+      if (!browserSurface || !isScreenshotArtifactAction(browserSurface.lastAction)) return [];
+
+      const pageLabel = browserPageLabel(agent) ?? 'the current page';
+      const urlLabel = browserSurface.url ? truncateText(browserSurface.url, 88) : 'No page URL was exposed.';
+
+      return [{
+        kind: 'screenshot' as const,
+        title: `${agent.name} • ${browserSurface.lastAction}`,
+        state: browserSurface.status === 'active' ? 'reviewing' as const : 'approved' as const,
+        agentId: agent.id,
+        detail: `Observed ${browserSurface.lastAction} on ${pageLabel} via ${browserSurface.provider}. ${urlLabel}${browserSurface.capabilities.persistentProfile ? ' Persistent profile detected.' : ''}`,
+      }];
+    })
+    .slice(0, 6);
+}
+
 function buildDemoFallback(reason: string): FleetSnapshot {
   return {
     ...demoFleet,
@@ -245,6 +303,8 @@ function buildDemoFallback(reason: string): FleetSnapshot {
     },
   };
 }
+
+const CLAUDE_CODE_ADDITIONS_TTL_MS = 30_000;
 
 function shortenHomePath(filePath: string): string {
   const home = process.env.HOME ?? '/Users/unknown';
@@ -276,6 +336,7 @@ function mapClaudeCodeSessionToAgent(session: RuntimeSession): AgentSummary {
     sessionId: session.sessionKey.replace('claude-code:', ''),
     sessionKind: 'terminal',
     surfaceLabel: 'Claude Code terminal',
+    tmuxSession: session.tmuxSession,
     runtimeSurface: {
       id: session.sessionKey,
       runtime: 'claude-code',
@@ -308,7 +369,9 @@ function mapClaudeCodeSessionToAgent(session: RuntimeSession): AgentSummary {
         branch: session.branch,
         head: session.headSha,
       },
+      browserSurface: session.browserSurface,
     },
+    browserSurface: session.browserSurface,
   };
 }
 
@@ -360,13 +423,64 @@ async function discoverClaudeCodeSessions(): Promise<{
   }
 }
 
+let claudeCodeSessionsCache: { value: Awaited<ReturnType<typeof discoverClaudeCodeSessions>>; cachedAt: number } | null = null;
+let claudeCodeSessionsInflight: Promise<Awaited<ReturnType<typeof discoverClaudeCodeSessions>>> | null = null;
+let claudeCodeSessionsGeneration = 0;
+
+export function invalidateClaudeCodeFleetCache() {
+  claudeCodeSessionsGeneration += 1;
+  claudeCodeSessionsCache = null;
+  claudeCodeSessionsInflight = null;
+}
+
+async function getCachedClaudeCodeSessions(options: { fresh?: boolean } = {}) {
+  const fresh = options.fresh ?? false;
+  const generation = claudeCodeSessionsGeneration;
+  const now = Date.now();
+
+  if (!fresh && claudeCodeSessionsCache && (now - claudeCodeSessionsCache.cachedAt) < CLAUDE_CODE_ADDITIONS_TTL_MS) {
+    return claudeCodeSessionsCache.value;
+  }
+
+  if (!fresh && claudeCodeSessionsInflight) {
+    return claudeCodeSessionsInflight;
+  }
+
+  const promise = discoverClaudeCodeSessions().then((value) => {
+    if (generation === claudeCodeSessionsGeneration) {
+      claudeCodeSessionsCache = { value, cachedAt: Date.now() };
+    }
+    return value;
+  });
+
+  claudeCodeSessionsInflight = promise;
+  return promise.finally(() => {
+    if (claudeCodeSessionsInflight === promise) {
+      claudeCodeSessionsInflight = null;
+    }
+  });
+}
+
 export async function getOpenClawFleetSnapshot(
-  options: { fleetMode?: 'smart' | 'all' } = {},
+  options: { fleetMode?: 'smart' | 'all'; fresh?: boolean } = {},
 ): Promise<FleetSnapshot> {
   try {
     // Use gateway REST API (<50ms) with CLI fallback (30-40s)
     const { getGatewayStatus } = await import('@/lib/openclaw/gateway-client');
-    const parsed = await getGatewayStatus() as unknown as OpenClawStatusPayload;
+    const parsed = await getGatewayStatus({
+      fresh: options.fresh,
+    }) as unknown as OpenClawStatusPayload & {
+      gateway?: {
+        reachable?: boolean;
+        freshness?: 'fresh' | 'stale' | 'warming';
+        source?: 'rest' | 'cli';
+        mode?: string;
+        self?: {
+          version?: string;
+          platform?: string;
+        };
+      };
+    };
     const agentConfigModels = readOpenClawAgentConfigModels();
     const recent = (parsed.sessions?.recent ?? [])
       .filter((session) => !isDuplicateRunSurface(session.key))
@@ -457,7 +571,6 @@ export async function getOpenClawFleetSnapshot(
 
     // Separate agents into: main agent surfaces vs sub-agent sessions
     const mainAgentCards: AgentSummary[] = [];
-    const mainAgentLatestCron: AgentSummary | null = null;
     const subAgentBest = new Map<string, AgentSummary>();
 
     let latestMainCron: AgentSummary | null = null;
@@ -495,7 +608,7 @@ export async function getOpenClawFleetSnapshot(
 
     // Pin configured agents that have no active session at all
     const seenAgentIds = new Set<string>();
-    for (const card of mainAgentCards) seenAgentIds.add(mainAgentId);
+    if (mainAgentCards.length > 0) seenAgentIds.add(mainAgentId);
     for (const [id] of subAgentBest) seenAgentIds.add(id);
 
     for (const config of agentConfigs) {
@@ -539,15 +652,42 @@ export async function getOpenClawFleetSnapshot(
         ]
       : agents; // 'all' mode — show every session as-is
 
+    const emptyObservableState = { activity: undefined, browserSurface: undefined, pending: false };
+    const observableStates = await Promise.all(
+      deduplicatedAgents.map((agent) => (
+        agent.runtimeSurface?.ownership === 'provider'
+          ? getSessionObservableState(agent.sessionKey, { mode: options.fresh ? 'blocking' : 'fast' }).catch(() => emptyObservableState)
+          : Promise.resolve(emptyObservableState)
+      )),
+    );
+
+    const enrichedOpenClawAgents = deduplicatedAgents.map((agent, index) => {
+      const observable = observableStates[index];
+      if (!observable.activity && !observable.browserSurface) return agent;
+
+      return {
+        ...agent,
+        activity: observable.activity ?? agent.activity,
+        browserSurface: observable.browserSurface ?? agent.browserSurface,
+        runtimeSurface: agent.runtimeSurface
+          ? {
+              ...agent.runtimeSurface,
+              browserSurface: observable.browserSurface ?? agent.runtimeSurface.browserSurface,
+            }
+          : agent.runtimeSurface,
+      } satisfies AgentSummary;
+    });
+    const observablePending = observableStates.some((state) => state.pending);
+
     const openClawSquads: SquadSummary[] = (parsed.agents?.agents ?? [])
       .map((agent) => {
-        const members = deduplicatedAgents.filter((item) => item.squadId === `squad-${agent.id}`).map((item) => item.id);
+        const members = enrichedOpenClawAgents.filter((item) => item.squadId === `squad-${agent.id}`).map((item) => item.id);
         if (!members.length) return null;
 
-        const blockers = deduplicatedAgents.filter(
+        const blockers = enrichedOpenClawAgents.filter(
           (item) => item.squadId === `squad-${agent.id}` && item.status === 'blocked',
         ).length;
-        const alerts = deduplicatedAgents
+        const alerts = enrichedOpenClawAgents
           .filter((item) => item.squadId === `squad-${agent.id}`)
           .reduce((sum, item) => sum + item.alerts, 0);
 
@@ -564,20 +704,51 @@ export async function getOpenClawFleetSnapshot(
       })
       .filter((item): item is SquadSummary => Boolean(item));
 
-    const openClawEvents = deduplicatedAgents.slice(0, 6).map((agent) => ({
-      id: `evt-${agent.id}`,
-      agentId: agent.id,
-      squadId: agent.squadId,
-      severity: deriveEventSeverity(agent.status, Boolean(agent.isCurrentSession)),
-      title: `${agent.name} • ${agent.surfaceLabel}`,
-      detail: `${agent.currentTask} ${agent.tokenUsage?.totalTokens ? `• ${Intl.NumberFormat('en-US', { notation: 'compact' }).format(agent.tokenUsage.totalTokens)} tokens` : ''}`.trim(),
-      timestamp: agent.lastEventAt,
-    }));
+    const openClawEvents = enrichedOpenClawAgents.slice(0, 6).map((agent) => {
+      const detail = [
+        agent.currentTask,
+        agent.tokenUsage?.totalTokens ? `${Intl.NumberFormat('en-US', { notation: 'compact' }).format(agent.tokenUsage.totalTokens)} tokens` : null,
+        browserEventSummary(agent),
+      ]
+        .filter(Boolean)
+        .join(' • ');
+
+      return {
+        id: `evt-${agent.id}`,
+        agentId: agent.id,
+        squadId: agent.squadId,
+        severity: deriveEventSeverity(agent.status, Boolean(agent.isCurrentSession)),
+        title: `${agent.name} • ${agent.surfaceLabel}`,
+        detail,
+        timestamp: agent.lastEventAt,
+      };
+    });
+
+    const browserEvents = enrichedOpenClawAgents
+      .filter((agent) => agent.browserSurface?.lastAction)
+      .slice(0, 4)
+      .map((agent) => {
+        const browserSurface = agent.browserSurface ?? agent.runtimeSurface?.browserSurface;
+        const pageLabel = browserPageLabel(agent) ?? 'browser page';
+        return {
+          id: `evt-browser-${agent.id}`,
+          agentId: agent.id,
+          squadId: agent.squadId,
+          severity: browserSurface?.status === 'active' ? 'info' as const : 'warning' as const,
+          title: `${agent.name} • browser ${browserSurface?.lastAction ?? 'observed'}`,
+          detail: [
+            pageLabel,
+            browserSurface?.capabilities.persistentProfile ? 'persistent profile' : 'ephemeral browser',
+            browserSurface?.provider,
+          ].filter(Boolean).join(' • '),
+          timestamp: relativeAgeFromTimestamp(browserSurface?.lastActionAt),
+        };
+      });
 
     const [ownedCodex, codexDiscovery, claudeCodeSessions] = await Promise.all([
-      getOwnedCodexFleetAdditions(),
-      getCodexDiscoveredFleetAdditions(),
-      discoverClaudeCodeSessions(),
+      getOwnedCodexFleetAdditions({ fresh: options.fresh }),
+      getCodexDiscoveredFleetAdditions({ fresh: options.fresh }),
+      getCachedClaudeCodeSessions({ fresh: options.fresh }),
     ]);
 
     const ownedThreadIds = new Set(ownedCodex.ownedThreadIds);
@@ -614,20 +785,19 @@ export async function getOpenClawFleetSnapshot(
         } satisfies SquadSummary]
       : [];
 
-    // Only include Codex Owned sessions that are actively running (live PID)
-    const liveOwnedAgents = ownedCodex.agents.filter((agent) =>
-      agent.status === 'running' || agent.runtimeSurface?.lifecycle?.availability === 'running'
-    );
+    // Keep owned Codex surfaces visible even between runs so resume/review stays truthful.
+    const visibleOwnedAgents = ownedCodex.agents;
 
     // Only include Claude Code sessions with a live process
     const liveClaudeCodeAgents = claudeCodeSessions.agents.filter((agent) => agent.status === 'running');
     const liveClaudeCodeSquads = liveClaudeCodeAgents.length > 0 ? claudeCodeSessions.squads : [];
 
-    const allAgents = [...deduplicatedAgents, ...liveOwnedAgents, ...filteredDiscoveredAgents, ...liveClaudeCodeAgents];
+    const allAgents = [...enrichedOpenClawAgents, ...visibleOwnedAgents, ...filteredDiscoveredAgents, ...liveClaudeCodeAgents];
     // Only include squads that have live agents
-    const liveOwnedSquads = liveOwnedAgents.length > 0 ? ownedCodex.squads : [];
+    const liveOwnedSquads = visibleOwnedAgents.length > 0 ? ownedCodex.squads : [];
     const allSquads = [...openClawSquads, ...liveOwnedSquads, ...filteredDiscoveredSquads, ...liveClaudeCodeSquads];
-    const allEvents = [...openClawEvents, ...ownedCodex.events, ...filteredDiscoveredEvents, ...claudeCodeSessions.events];
+    const browserArtifacts = buildBrowserArtifacts(enrichedOpenClawAgents);
+    const allEvents = [...browserEvents, ...openClawEvents, ...ownedCodex.events, ...filteredDiscoveredEvents, ...claudeCodeSessions.events];
 
     return {
       generatedAt: new Date().toISOString(),
@@ -640,8 +810,10 @@ export async function getOpenClawFleetSnapshot(
           claudeCodeSessions.sourceLabel,
         ].filter(Boolean).join(' + '),
         gatewayLabel: parsed.gateway?.reachable
-          ? `OpenClaw ${parsed.gateway?.self?.version ?? 'unknown'} • ${parsed.gateway?.mode ?? 'local'} gateway`
+          ? `OpenClaw ${parsed.gateway?.self?.version ?? 'unknown'} • ${parsed.gateway?.mode ?? 'local'} gateway • ${parsed.gateway?.source ?? 'rest'} • ${parsed.gateway?.freshness ?? 'fresh'}`
           : 'Gateway unreachable',
+        gatewayFreshness: parsed.gateway?.freshness ?? (parsed.gateway?.reachable ? 'fresh' : 'warming'),
+        observablePending,
         primarySessionKey: primarySession.key,
         mirrorMode: 'current-session-first',
         note: [
@@ -678,6 +850,7 @@ export async function getOpenClawFleetSnapshot(
           state: 'reviewing',
           detail: 'Active code lane that turned the shell into a truthful live bridge.',
         },
+        ...browserArtifacts,
         ...ownedCodex.artifacts,
         ...filteredDiscoveredArtifacts,
       ],

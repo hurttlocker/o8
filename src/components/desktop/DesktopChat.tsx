@@ -1121,16 +1121,10 @@ const ThinkingXray = memo(function ThinkingXray({
 }) {
   const [expanded, setExpanded] = useState(false);
   const streamRef = useRef<HTMLDivElement>(null);
-  const [wordCount, setWordCount] = useState(0);
-
-  // Track word count of streaming text
-  useEffect(() => {
-    if (streamingText) {
-      setWordCount(streamingText.split(/\s+/).filter(Boolean).length);
-    } else {
-      setWordCount(0);
-    }
-  }, [streamingText]);
+  const wordCount = useMemo(
+    () => streamingText ? streamingText.split(/\s+/).filter(Boolean).length : 0,
+    [streamingText],
+  );
 
   // Auto-scroll thought stream
   useEffect(() => {
@@ -1717,6 +1711,8 @@ export function DesktopChat({
   const stickToBottomRef = useRef(true);
   const claudeSessionIdRef = useRef<string | undefined>(undefined);
   const codexThreadIdRef = useRef<string | undefined>(undefined);
+  const selectedKeyRef = useRef('');
+  const transcriptRequestRef = useRef(0);
 
   const selectedSession = useMemo(
     () => sessions.find(s => s.sessionKey === selectedKey),
@@ -1724,6 +1720,10 @@ export function DesktopChat({
   );
 
   const streamingTextRef = useRef('');
+
+  useEffect(() => {
+    selectedKeyRef.current = selectedKey;
+  }, [selectedKey]);
 
   // ── WebSocket — real-time updates ──
   const wsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
@@ -1893,6 +1893,7 @@ export function DesktopChat({
   // ── Fetch transcript ──
   const fetchTranscript = useCallback(async (key: string) => {
     if (!key) return;
+    const requestId = ++transcriptRequestRef.current;
     try {
       // Route to Claude Code transcript API for claude-code sessions
       const isCC = key.startsWith('claude-code:');
@@ -1902,6 +1903,7 @@ export function DesktopChat({
       const res = await fetch(url);
       if (!res.ok) return;
       const data = await res.json();
+      if (selectedKeyRef.current !== key || transcriptRequestRef.current !== requestId) return;
       const serverEntries: MobileTranscriptEntry[] = data.transcript ?? data.entries ?? [];
 
       // Append-only merge: never replace the full transcript (prevents old messages
@@ -1973,6 +1975,7 @@ export function DesktopChat({
         scrollToBottom();
       }
     } catch {
+      if (selectedKeyRef.current !== key || transcriptRequestRef.current !== requestId) return;
       setLoading(false);
     }
   }, [scrollToBottom]);
@@ -2445,7 +2448,7 @@ export function DesktopChat({
   // Safety-net poll: 30s when WS connected, 5s when disconnected
   useEffect(() => {
     if (!selectedKey) return;
-    const ms = wsConnected ? 30_000 : 5_000;
+    const ms = wsConnected ? 30_000 : 15_000;
     const interval = setInterval(() => void fetchTranscript(selectedKey), ms);
     return () => clearInterval(interval);
   }, [selectedKey, fetchTranscript, wsConnected]);

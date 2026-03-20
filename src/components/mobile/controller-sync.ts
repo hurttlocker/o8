@@ -13,6 +13,8 @@ import type {
   MobileRuntimeTailGroup,
   MobileTranscriptEntry,
 } from '@/lib/mobile/types';
+import { sameMobileInboxSnapshot } from '@/lib/mobile/inbox-signature';
+import { shouldRetainCurrentMobileSnapshot, type RenderBootstrapSource, type RenderBootstrapState } from '@/lib/render/client-merge';
 import { readJson } from './utils';
 
 // ── Consolidated sync ──
@@ -27,9 +29,9 @@ interface SyncRequest {
 interface SyncResponse {
   inbox?: MobileInboxSnapshot | null;
   inboxEtag?: string;
-  history?: { sessionKey: string; entries: MobileTranscriptEntry[] };
+  history?: { sessionKey: string; entries: MobileTranscriptEntry[]; replace?: boolean };
   review?: { file?: MobileReviewFileResponse['file'] };
-  linked?: { sessionKey: string; entries: MobileTranscriptEntry[] };
+  linked?: { sessionKey: string; entries: MobileTranscriptEntry[]; replace?: boolean };
   serverTime: string;
   errors?: Record<string, string>;
 }
@@ -46,7 +48,6 @@ interface MobileSyncArgs {
   setSnapshot: Dispatch<SetStateAction<MobileInboxSnapshot>>;
   setRefreshError: Dispatch<SetStateAction<string | null>>;
   setHistoryBySession: Dispatch<SetStateAction<Record<string, MobileTranscriptEntry[]>>>;
-  setHistoryGroupsBySession: Dispatch<SetStateAction<Record<string, MobileRuntimeTailGroup[]>>>;
   setReviewFileByPath: Dispatch<SetStateAction<Record<string, MobileReviewFileResponse['file']>>>;
 }
 
@@ -60,7 +61,6 @@ export async function mobileSyncOnce({
   setSnapshot,
   setRefreshError,
   setHistoryBySession,
-  setHistoryGroupsBySession,
   setReviewFileByPath,
 }: MobileSyncArgs): Promise<SyncResponse | null> {
   const body: SyncRequest = {};
@@ -83,19 +83,30 @@ export async function mobileSyncOnce({
     if (data.inboxEtag) cachedInboxEtag = data.inboxEtag;
     if (data.inbox) {
       setSnapshot((prev) => {
-        const prevKey = prev.sessions.map((s) => `${s.sessionKey}:${s.status}:${Math.round(s.context?.usedPercent ?? 0)}`).join('|');
-        const nextKey = data.inbox!.sessions.map((s) => `${s.sessionKey}:${s.status}:${Math.round(s.context?.usedPercent ?? 0)}`).join('|');
-        if (prevKey === nextKey && prev.summary.alerts === data.inbox!.summary.alerts) return prev;
+        if (sameMobileInboxSnapshot(prev, data.inbox!)) return prev;
         return data.inbox!;
       });
       setRefreshError(null);
     }
 
-    if (data.history && data.history.entries.length > 0) {
+    if (data.history) {
       const sk = data.history.sessionKey;
       const newEntries = data.history.entries;
       setHistoryBySession((current) => {
         const prev = current[sk] ?? [];
+        if (data.history?.replace) {
+          const optimistic = prev.filter((entry) => entry.id.startsWith('optimistic-'));
+          const serverIds = new Set(newEntries.map((entry) => entry.id));
+          const serverTexts = new Set(newEntries.map((entry) => `${entry.role}:${entry.text}`));
+          const pendingOptimistic = optimistic.filter((entry) => (
+            !serverIds.has(entry.id)
+            && !serverTexts.has(`${entry.role}:${entry.text}`)
+          ));
+          return {
+            ...current,
+            [sk]: pendingOptimistic.length > 0 ? [...newEntries, ...pendingOptimistic] : newEntries,
+          };
+        }
         if (prev.length === 0) return { ...current, [sk]: newEntries };
 
         // Deduplicate by timestamp+role (stable across index shifts).
@@ -120,11 +131,24 @@ export async function mobileSyncOnce({
       setReviewFileByPath((current) => ({ ...current, [reviewFilePath]: data.review!.file as MobileReviewFileResponse['file'] }));
     }
 
-    if (data.linked && data.linked.entries.length > 0 && linkedSessionKey) {
+    if (data.linked && linkedSessionKey) {
       const sk = data.linked.sessionKey;
       const newEntries = data.linked.entries;
       setHistoryBySession((current) => {
         const prev = current[sk] ?? [];
+        if (data.linked?.replace) {
+          const optimistic = prev.filter((entry) => entry.id.startsWith('optimistic-'));
+          const serverIds = new Set(newEntries.map((entry) => entry.id));
+          const serverTexts = new Set(newEntries.map((entry) => `${entry.role}:${entry.text}`));
+          const pendingOptimistic = optimistic.filter((entry) => (
+            !serverIds.has(entry.id)
+            && !serverTexts.has(`${entry.role}:${entry.text}`)
+          ));
+          return {
+            ...current,
+            [sk]: pendingOptimistic.length > 0 ? [...newEntries, ...pendingOptimistic] : newEntries,
+          };
+        }
         if (prev.length === 0) return { ...current, [sk]: newEntries };
 
         const existingKeys = new Set(
@@ -159,7 +183,7 @@ export async function refreshInboxSnapshot({
   setSnapshot,
   setRefreshError,
 }: RefreshInboxArgs) {
-  const response = await fetch(`/api/mobile/inbox?_t=${Date.now()}`, {
+  const response = await fetch(`/api/mobile/bootstrap?_t=${Date.now()}`, {
     cache: 'no-store',
     headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
   });
@@ -167,11 +191,17 @@ export async function refreshInboxSnapshot({
     throw new Error(`HTTP ${response.status}`);
   }
 
-  const nextSnapshot = (await response.json()) as MobileInboxSnapshot;
+  const payload = (await response.json()) as {
+    snapshot: MobileInboxSnapshot;
+    source: RenderBootstrapSource;
+    state: RenderBootstrapState;
+  };
+  const nextSnapshot = payload.snapshot;
   setSnapshot((prev) => {
-    const prevKey = prev.sessions.map((session) => `${session.sessionKey}:${session.status}:${Math.round(session.context?.usedPercent ?? 0)}`).join('|');
-    const nextKey = nextSnapshot.sessions.map((session) => `${session.sessionKey}:${session.status}:${Math.round(session.context?.usedPercent ?? 0)}`).join('|');
-    if (prevKey === nextKey && prev.summary.alerts === nextSnapshot.summary.alerts) {
+    if (shouldRetainCurrentMobileSnapshot(prev, payload)) {
+      return prev;
+    }
+    if (sameMobileInboxSnapshot(prev, nextSnapshot)) {
       return prev;
     }
     return nextSnapshot;
@@ -213,6 +243,20 @@ export async function loadSessionHistory({
     setHistoryBySession((current) => {
       const prev = current[sessionKey] ?? [];
       const next = payload.transcript;
+
+      if (force) {
+        const optimistic = prev.filter((entry) => entry.id.startsWith('optimistic-'));
+        const serverIds = new Set(next.map((entry) => entry.id));
+        const serverTexts = new Set(next.map((entry) => `${entry.role}:${entry.text}`));
+        const pendingOptimistic = optimistic.filter((entry) => (
+          !serverIds.has(entry.id)
+          && !serverTexts.has(`${entry.role}:${entry.text}`)
+        ));
+        return {
+          ...current,
+          [sessionKey]: pendingOptimistic.length > 0 ? [...next, ...pendingOptimistic] : next,
+        };
+      }
 
       // No existing entries — accept full transcript
       if (prev.length === 0) {

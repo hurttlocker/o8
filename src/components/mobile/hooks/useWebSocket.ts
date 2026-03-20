@@ -18,6 +18,14 @@ import type {
   MobileInboxSnapshot,
   MobileTranscriptEntry,
 } from '@/lib/mobile/types';
+import { sameMobileInboxSnapshot } from '@/lib/mobile/inbox-signature';
+import type {
+  MobileInboxRealtimeSnapshotPayload,
+  RealtimeEventEnvelope,
+  RealtimeMutationRecord,
+  RealtimeSubscription,
+  SessionHistoryRealtimePayload,
+} from '@/lib/realtime/types';
 
 export type WsConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
@@ -28,11 +36,20 @@ interface UseWebSocketArgs {
   setHistoryBySession: Dispatch<SetStateAction<Record<string, MobileTranscriptEntry[]>>>;
   setStreamingText: Dispatch<SetStateAction<string>>;
   streamingTextRef: MutableRefObject<string>;
+  setActionStateBySession: Dispatch<SetStateAction<Record<string, 'idle' | 'steering' | 'stopping' | 'reviewing'>>>;
+  setActionNoteBySession: Dispatch<SetStateAction<Record<string, string | null>>>;
+  setRealtimeMutationsById: Dispatch<SetStateAction<Record<string, RealtimeMutationRecord>>>;
+  setPendingMutationIdBySession: Dispatch<SetStateAction<Record<string, string>>>;
+  pendingMutationIdBySessionRef: MutableRefObject<Record<string, string>>;
 }
 
 interface UseWebSocketResult {
   connectionState: WsConnectionState;
   isConnected: boolean;
+  sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalInput: (sessionName: string, data: string) => void;
+  sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalDetach: (sessionName: string) => void;
 }
 
 const MAX_BACKOFF = 30_000;
@@ -66,6 +83,11 @@ export function useWebSocket({
   setHistoryBySession,
   setStreamingText,
   streamingTextRef,
+  setActionStateBySession,
+  setActionNoteBySession,
+  setRealtimeMutationsById,
+  setPendingMutationIdBySession,
+  pendingMutationIdBySessionRef,
 }: UseWebSocketArgs): UseWebSocketResult {
   const [connectionState, setConnectionState] = useState<WsConnectionState>('disconnected');
   const wsRef = useRef<WebSocket | null>(null);
@@ -74,18 +96,25 @@ export function useWebSocket({
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const disposedRef = useRef(false);
   const sessionKeyRef = useRef(selectedSessionKey);
+  const realtimeSeqByStreamRef = useRef<Record<string, number>>({});
 
   // Stable refs for state setters so the connection effect never re-fires
   const setSnapshotRef = useRef(setSnapshot);
   const setRefreshErrorRef = useRef(setRefreshError);
   const setHistoryBySessionRef = useRef(setHistoryBySession);
   const setStreamingTextRef = useRef(setStreamingText);
+  const setActionStateBySessionRef = useRef(setActionStateBySession);
+  const setActionNoteBySessionRef = useRef(setActionNoteBySession);
+  const setRealtimeMutationsByIdRef = useRef(setRealtimeMutationsById);
   const streamingTextRefRef = useRef(streamingTextRef);
 
   useEffect(() => { setSnapshotRef.current = setSnapshot; }, [setSnapshot]);
   useEffect(() => { setRefreshErrorRef.current = setRefreshError; }, [setRefreshError]);
   useEffect(() => { setHistoryBySessionRef.current = setHistoryBySession; }, [setHistoryBySession]);
   useEffect(() => { setStreamingTextRef.current = setStreamingText; }, [setStreamingText]);
+  useEffect(() => { setActionStateBySessionRef.current = setActionStateBySession; }, [setActionStateBySession]);
+  useEffect(() => { setActionNoteBySessionRef.current = setActionNoteBySession; }, [setActionNoteBySession]);
+  useEffect(() => { setRealtimeMutationsByIdRef.current = setRealtimeMutationsById; }, [setRealtimeMutationsById]);
   useEffect(() => { streamingTextRefRef.current = streamingTextRef; }, [streamingTextRef]);
 
   // Keep session key ref current
@@ -93,12 +122,85 @@ export function useWebSocket({
     sessionKeyRef.current = selectedSessionKey;
   }, [selectedSessionKey]);
 
+  const applyInboxSnapshot = useCallback((inbox: MobileInboxSnapshot) => {
+    setSnapshotRef.current((prev) => {
+      if (sameMobileInboxSnapshot(prev, inbox)) return prev;
+      return inbox;
+    });
+  }, []);
+
+  const mergeHistoryEntries = useCallback((sessionKey: string, entries: MobileTranscriptEntry[], replace = false) => {
+    if (!entries?.length && !replace) return;
+    setHistoryBySessionRef.current((current) => {
+      const prev = current[sessionKey] ?? [];
+      if (replace) {
+        const optimistic = prev.filter((entry) => entry.id.startsWith('optimistic-'));
+        const serverIds = new Set(entries.map((entry) => entry.id));
+        const serverTexts = new Set(entries.map((entry) => `${entry.role}:${entry.text}`));
+        const pendingOptimistic = optimistic.filter((entry) => (
+          !serverIds.has(entry.id)
+          && !serverTexts.has(`${entry.role}:${entry.text}`)
+        ));
+        return {
+          ...current,
+          [sessionKey]: pendingOptimistic.length > 0 ? [...entries, ...pendingOptimistic] : entries,
+        };
+      }
+      const existingIds = new Set(prev.map((entry) => entry.id));
+      const existingTexts = new Set(prev.filter((entry) => entry.id.startsWith('stream:')).map((entry) => entry.text));
+      const genuinelyNew = entries.filter((entry) => (
+        !existingIds.has(entry.id)
+        && !(entry.role === 'assistant' && existingTexts.has(entry.text))
+      ));
+      if (!genuinelyNew.length) return current;
+      const cleaned = prev.filter((entry) => (
+        !entry.id.startsWith('stream:')
+        || !genuinelyNew.some((next) => next.role === 'assistant' && next.text === entry.text)
+      ));
+      return { ...current, [sessionKey]: [...cleaned, ...genuinelyNew] };
+    });
+  }, []);
+
   // Send session switch when selected session changes
   useEffect(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN && selectedSessionKey) {
-      wsRef.current.send(JSON.stringify({ type: 'switch-session', sessionKey: selectedSessionKey }));
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      if (selectedSessionKey) {
+        wsRef.current.send(JSON.stringify({ type: 'switch-session', sessionKey: selectedSessionKey }));
+      }
+      const subscriptions: RealtimeSubscription[] = [{ stream: 'global', since: realtimeSeqByStreamRef.current.global }];
+      if (selectedSessionKey) {
+        subscriptions.push({
+          stream: `session:${selectedSessionKey}`,
+          since: realtimeSeqByStreamRef.current[`session:${selectedSessionKey}`],
+        });
+      }
+      wsRef.current.send(JSON.stringify({ type: 'realtime-subscribe', subscriptions }));
     }
   }, [selectedSessionKey]);
+
+  const sendTerminalAttach = useCallback((sessionName: string, cols: number, rows: number) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'terminal-attach', sessionName, cols, rows }));
+    }
+  }, []);
+
+  const sendTerminalInput = useCallback((sessionName: string, data: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'terminal-input', sessionName, data }));
+    }
+  }, []);
+
+  const sendTerminalResize = useCallback((sessionName: string, cols: number, rows: number) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'terminal-resize', sessionName, cols, rows }));
+    }
+  }, []);
+
+  const sendTerminalDetach = useCallback((sessionName: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'terminal-detach', sessionName }));
+    }
+  }, []);
 
   // Main connection effect — runs once on mount, never re-fires
   useEffect(() => {
@@ -123,34 +225,83 @@ export function useWebSocket({
           }
           break;
 
+        case 'realtime':
+          if (eventType === 'batch' && Array.isArray(data?.events)) {
+            const events = data.events as RealtimeEventEnvelope[];
+            for (const realtimeEvent of events) {
+              realtimeSeqByStreamRef.current[realtimeEvent.stream] = Math.max(
+                realtimeSeqByStreamRef.current[realtimeEvent.stream] ?? 0,
+                realtimeEvent.seq,
+              );
+              switch (realtimeEvent.event) {
+                case 'mobile.inbox.snapshot':
+                  applyInboxSnapshot((realtimeEvent.data as MobileInboxRealtimeSnapshotPayload).inbox);
+                  setRefreshErrorRef.current(null);
+                  break;
+                case 'history.snapshot':
+                  {
+                    const payload = realtimeEvent.data as SessionHistoryRealtimePayload;
+                    mergeHistoryEntries(payload.sessionKey, payload.entries, Boolean(payload.replace));
+                  }
+                  break;
+                case 'mutation.record':
+                case 'mutation.settled': {
+                  const mutation = (realtimeEvent.data as { mutation: RealtimeMutationRecord }).mutation;
+                  setRealtimeMutationsByIdRef.current((current) => ({
+                    ...current,
+                    [mutation.mutationId]: mutation,
+                  }));
+                  if (mutation.sessionKey) {
+                    const activeMutationId = pendingMutationIdBySessionRef.current[mutation.sessionKey];
+                    const affectsCurrentSessionUi = !activeMutationId || activeMutationId === mutation.mutationId;
+                    if (affectsCurrentSessionUi) {
+                      setActionNoteBySessionRef.current((current) => ({
+                        ...current,
+                        [mutation.sessionKey!]: mutation.note ?? current[mutation.sessionKey!] ?? null,
+                      }));
+                      setActionStateBySessionRef.current((current) => ({
+                        ...current,
+                        [mutation.sessionKey!]:
+                          mutation.status === 'pending'
+                            ? (mutation.action === 'stop' ? 'stopping' : mutation.action === 'watch' || mutation.action === 'resolve' ? 'reviewing' : 'steering')
+                            : 'idle',
+                      }));
+                    }
+                    if (mutation.settledAt) {
+                      if (pendingMutationIdBySessionRef.current[mutation.sessionKey] === mutation.mutationId) {
+                        const nextPending = { ...pendingMutationIdBySessionRef.current };
+                        delete nextPending[mutation.sessionKey];
+                        pendingMutationIdBySessionRef.current = nextPending;
+                      }
+                      setPendingMutationIdBySession((current) => {
+                        if (current[mutation.sessionKey!] !== mutation.mutationId) return current;
+                        const next = { ...current };
+                        delete next[mutation.sessionKey!];
+                        return next;
+                      });
+                    }
+                  }
+                  break;
+                }
+                default:
+                  break;
+              }
+            }
+          }
+          break;
+
         case 'inbox':
           if (eventType === 'update' && data) {
             const inbox = data as unknown as MobileInboxSnapshot;
-            setSnapshotRef.current((prev) => {
-              const prevKey = prev.sessions.map((s) =>
-                `${s.sessionKey}:${s.status}:${Math.round(s.context?.usedPercent ?? 0)}`
-              ).join('|');
-              const nextKey = inbox.sessions.map((s) =>
-                `${s.sessionKey}:${s.status}:${Math.round(s.context?.usedPercent ?? 0)}`
-              ).join('|');
-              if (prevKey === nextKey && prev.summary.alerts === inbox.summary.alerts) return prev;
-              return inbox;
-            });
+            applyInboxSnapshot(inbox);
+            setRefreshErrorRef.current(null);
           }
           break;
 
         case 'history':
           if (eventType === 'update' && data) {
             const { sessionKey, entries } = data as { sessionKey: string; entries: MobileTranscriptEntry[] };
-            if (entries?.length > 0) {
-              setHistoryBySessionRef.current((current) => {
-                const prev = current[sessionKey] ?? [];
-                const existingIds = new Set(prev.map((e) => e.id));
-                const genuinelyNew = entries.filter((e) => !existingIds.has(e.id));
-                if (genuinelyNew.length === 0) return current;
-                return { ...current, [sessionKey]: [...prev, ...genuinelyNew] };
-              });
-            }
+            mergeHistoryEntries(sessionKey, entries);
           }
           break;
 
@@ -202,6 +353,14 @@ export function useWebSocket({
         if (sessionKeyRef.current) {
           ws.send(JSON.stringify({ type: 'subscribe', sessionKey: sessionKeyRef.current }));
         }
+        const subscriptions: RealtimeSubscription[] = [{ stream: 'global', since: realtimeSeqByStreamRef.current.global }];
+        if (sessionKeyRef.current) {
+          subscriptions.push({
+            stream: `session:${sessionKeyRef.current}`,
+            since: realtimeSeqByStreamRef.current[`session:${sessionKeyRef.current}`],
+          });
+        }
+        ws.send(JSON.stringify({ type: 'realtime-subscribe', subscriptions }));
         // Start keepalive
         pingTimerRef.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
@@ -242,10 +401,19 @@ export function useWebSocket({
       if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
       setConnectionState('disconnected');
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- stable refs used internally
+  }, [
+    applyInboxSnapshot,
+    mergeHistoryEntries,
+    pendingMutationIdBySessionRef,
+    setPendingMutationIdBySession,
+  ]);
 
   return {
     connectionState,
     isConnected: connectionState === 'connected',
+    sendTerminalAttach,
+    sendTerminalInput,
+    sendTerminalResize,
+    sendTerminalDetach,
   };
 }

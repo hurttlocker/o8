@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { performance } from 'node:perf_hooks';
 import { getOwnedCodexRuntimeTail } from '@/lib/codex/owned';
 import { getCodexRuntimeTail } from '@/lib/codex/sessions';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
+import { mobileInboxSignature } from '@/lib/mobile/inbox-signature';
 import { getMobileInboxSnapshot } from '@/lib/mobile/openclaw';
 import { getSessionTranscript } from '@/lib/openclaw/chat';
 import '@/lib/runtimes'; // Ensure runtimes are registered
@@ -23,22 +25,15 @@ interface SyncRequest {
 interface SyncResponse {
   inbox?: MobileInboxSnapshot | null;
   inboxEtag?: string;
-  history?: { sessionKey: string; entries: MobileTranscriptEntry[] };
+  history?: { sessionKey: string; entries: MobileTranscriptEntry[]; replace?: boolean };
   review?: { file?: unknown };
-  linked?: { sessionKey: string; entries: MobileTranscriptEntry[] };
+  linked?: { sessionKey: string; entries: MobileTranscriptEntry[]; replace?: boolean };
   serverTime: string;
   errors?: Record<string, string>;
 }
 
-// ── Inbox cache with ETag ──
-
-let inboxCache: { snapshot: MobileInboxSnapshot; etag: string; timestamp: number } | null = null;
-const INBOX_CACHE_TTL = 5000;
-
 function computeEtag(snapshot: MobileInboxSnapshot): string {
-  const sig = snapshot.sessions
-    .map((s) => `${s.id}:${s.status}:${s.lastEventAt ?? ''}:${Math.round(s.context?.usedPercent ?? 0)}`)
-    .join('|');
+  const sig = mobileInboxSignature(snapshot);
   let hash = 0;
   for (let i = 0; i < sig.length; i++) {
     hash = ((hash << 5) - hash + sig.charCodeAt(i)) | 0;
@@ -47,17 +42,13 @@ function computeEtag(snapshot: MobileInboxSnapshot): string {
 }
 
 async function resolveInbox(req: SyncRequest['inbox']): Promise<{ snapshot: MobileInboxSnapshot | null; etag: string }> {
-  const now = Date.now();
-  if (!inboxCache || now - inboxCache.timestamp > INBOX_CACHE_TTL) {
-    const snapshot = await getMobileInboxSnapshot();
-    const etag = computeEtag(snapshot);
-    inboxCache = { snapshot, etag, timestamp: now };
-  }
+  const snapshot = await getMobileInboxSnapshot();
+  const etag = computeEtag(snapshot);
 
-  if (req?.etag && req.etag === inboxCache.etag) {
-    return { snapshot: null, etag: inboxCache.etag };
+  if (req?.etag && req.etag === etag) {
+    return { snapshot: null, etag };
   }
-  return { snapshot: inboxCache.snapshot, etag: inboxCache.etag };
+  return { snapshot, etag };
 }
 
 // ── History resolver ──
@@ -72,7 +63,7 @@ function runtimeTailRole(label: string): MobileTranscriptEntry['role'] {
 
 async function resolveHistory(
   req: NonNullable<SyncRequest['history']>,
-): Promise<{ sessionKey: string; entries: MobileTranscriptEntry[] }> {
+): Promise<{ sessionKey: string; entries: MobileTranscriptEntry[]; replace?: boolean }> {
   const { sessionKey, limit: rawLimit } = req;
   const limit = Math.min(Math.max(rawLimit ?? 18, 1), 40);
 
@@ -97,7 +88,8 @@ async function resolveHistory(
         }
       }
     }
-    return { sessionKey, entries: applyDelta(entries, req.sinceId) };
+    const delta = applyDelta(entries, req.sinceId);
+    return { sessionKey, ...delta };
   }
 
   if (sessionKey.startsWith('codex:')) {
@@ -134,7 +126,8 @@ async function resolveHistory(
       seen.add(key);
       deduped.push(entry);
     }
-    return { sessionKey, entries: applyDelta(deduped, req.sinceId) };
+    const delta = applyDelta(deduped, req.sinceId);
+    return { sessionKey, ...delta };
   }
 
   // Claude Code sessions — read from JSONL via runtime adapter
@@ -150,20 +143,30 @@ async function resolveHistory(
           ? entry.timestamp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
           : '',
       }));
-      return { sessionKey, entries: applyDelta(transcript, req.sinceId) };
+      const delta = applyDelta(transcript, req.sinceId);
+      return { sessionKey, ...delta };
     }
   }
 
   // OpenClaw sessions
   const transcript = await getSessionTranscript(sessionKey, limit);
-  return { sessionKey, entries: applyDelta(transcript, req.sinceId) };
+  const delta = applyDelta(transcript, req.sinceId);
+  return { sessionKey, ...delta };
 }
 
-function applyDelta(entries: MobileTranscriptEntry[], sinceId?: string): MobileTranscriptEntry[] {
-  if (!sinceId) return entries;
+function applyDelta(entries: MobileTranscriptEntry[], sinceId?: string): {
+  entries: MobileTranscriptEntry[];
+  replace?: boolean;
+} {
+  if (!sinceId) return { entries };
   const idx = entries.findIndex((e) => e.id === sinceId);
-  if (idx === -1) return entries; // sinceId not found — return all
-  return entries.slice(idx + 1);
+  if (idx === -1) {
+    return {
+      entries,
+      replace: true,
+    };
+  }
+  return { entries: entries.slice(idx + 1) };
 }
 
 // ── Review file resolver ──
@@ -184,6 +187,7 @@ async function resolveReviewFile(filePath: string): Promise<unknown> {
 // ── Main handler ──
 
 export async function POST(request: NextRequest) {
+  const startedAt = performance.now();
   const body = (await request.json()) as SyncRequest;
   const errors: Record<string, string> = {};
 
@@ -235,6 +239,9 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json(response, {
-    headers: { 'Cache-Control': 'no-store, max-age=0' },
+    headers: {
+      'Cache-Control': 'no-store, max-age=0',
+      'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}`,
+    },
   });
 }

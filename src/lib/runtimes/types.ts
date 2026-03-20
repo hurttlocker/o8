@@ -1,3 +1,5 @@
+import type { BrowserSurfaceSummary } from '@/lib/browser/types';
+
 /**
  * Universal Agent Runtime Contract
  *
@@ -88,6 +90,8 @@ export interface RuntimeSession {
   contextUsedPercent?: number;
   /** tmux session name for interactive terminal attachment */
   tmuxSession?: string;
+  /** Attached or mirrored browser lane, if the runtime exposes one */
+  browserSurface?: BrowserSurfaceSummary;
 }
 
 // ── Transcript ──

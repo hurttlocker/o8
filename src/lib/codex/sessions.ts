@@ -17,6 +17,7 @@ const CODEX_STATE_DB = path.join(CODEX_HOME, 'state_5.sqlite');
 const CODEX_SESSIONS_ROOT = path.join(CODEX_HOME, 'sessions');
 const CODEX_SOURCE_LABEL = 'Local Codex discovery';
 const RECENT_WINDOW_MS = 6 * 60 * 60_000;
+const CODEX_DISCOVERED_FLEET_TTL_MS = 30_000;
 
 type CodexThreadRow = {
   id: string;
@@ -50,6 +51,25 @@ type CodexThreadActivity = {
   tty?: string;
   active: boolean;
 };
+
+type CodexDiscoveredFleetAdditions = {
+  agents: AgentSummary[];
+  squads: SquadSummary[];
+  events: EventItem[];
+  artifacts: ReviewArtifact[];
+  sourceLabel?: string;
+  note?: string;
+};
+
+let discoveredFleetCache: { value: CodexDiscoveredFleetAdditions; cachedAt: number } | null = null;
+let discoveredFleetInflight: Promise<CodexDiscoveredFleetAdditions> | null = null;
+let discoveredFleetGeneration = 0;
+
+export function invalidateCodexDiscoveredFleetCache() {
+  discoveredFleetGeneration += 1;
+  discoveredFleetCache = null;
+  discoveredFleetInflight = null;
+}
 
 export type RuntimeTailEntry = {
   id: string;
@@ -437,14 +457,21 @@ async function buildActivityMap(threads: CodexThreadRow[]) {
   return byThreadId;
 }
 
-export async function getCodexDiscoveredFleetAdditions(): Promise<{
-  agents: AgentSummary[];
-  squads: SquadSummary[];
-  events: EventItem[];
-  artifacts: ReviewArtifact[];
-  sourceLabel?: string;
-  note?: string;
-}> {
+export async function getCodexDiscoveredFleetAdditions(
+  options: { fresh?: boolean } = {},
+): Promise<CodexDiscoveredFleetAdditions> {
+  const fresh = options.fresh ?? false;
+  const now = Date.now();
+  const generation = discoveredFleetGeneration;
+  if (!fresh && discoveredFleetCache && (now - discoveredFleetCache.cachedAt) < CODEX_DISCOVERED_FLEET_TTL_MS) {
+    return discoveredFleetCache.value;
+  }
+
+  if (!fresh && discoveredFleetInflight) {
+    return discoveredFleetInflight;
+  }
+
+  const promise = (async () => {
   try {
     const threads = await queryCodexThreads();
     if (!threads.length) {
@@ -541,6 +568,19 @@ export async function getCodexDiscoveredFleetAdditions(): Promise<{
       note: error instanceof Error ? `Codex discovery unavailable: ${error.message}` : 'Codex discovery unavailable.',
     };
   }
+  })();
+
+  discoveredFleetInflight = promise;
+  return promise.finally(() => {
+    if (discoveredFleetInflight === promise) {
+      discoveredFleetInflight = null;
+    }
+  }).then((value) => {
+    if (generation === discoveredFleetGeneration) {
+      discoveredFleetCache = { value, cachedAt: Date.now() };
+    }
+    return value;
+  });
 }
 
 async function readTailChunk(filePath: string, maxBytes = 220_000) {

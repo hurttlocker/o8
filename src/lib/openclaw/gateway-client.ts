@@ -25,6 +25,21 @@ interface GatewayConfig {
 }
 
 let cachedConfig: GatewayConfig | null = null;
+const REST_STATUS_TIMEOUT_MS = 1_500;
+const REST_RPC_TIMEOUT_MS = 10_000;
+const CLI_STATUS_TIMEOUT_MS = 20_000;
+const CLI_COLD_START_WAIT_MS = 2_500;
+const CLI_FRESH_MAX_AGE_MS = 5_000;
+
+// ── CLI circuit breaker + concurrency limiter (#140) ──
+
+const CLI_MAX_CONCURRENT = 2;
+const CLI_CIRCUIT_BREAKER_THRESHOLD = 3;
+const CLI_CIRCUIT_BREAKER_COOLDOWN_MS = 30_000;
+
+let cliInFlight = 0;
+let cliConsecutiveFailures = 0;
+let cliCircuitOpenUntil = 0;
 
 function loadConfig(): GatewayConfig {
   if (cachedConfig) return cachedConfig;
@@ -55,7 +70,7 @@ async function fetchRestApi<T>(endpoint: string, params?: Record<string, string>
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5_000);
+    const timeout = setTimeout(() => controller.abort(), REST_STATUS_TIMEOUT_MS);
 
     const res = await fetch(url.toString(), {
       headers: config.token ? { Authorization: `Bearer ${config.token}` } : {},
@@ -71,6 +86,46 @@ async function fetchRestApi<T>(endpoint: string, params?: Record<string, string>
   }
 }
 
+// ── REST API POST (for RPC methods — #138) ──
+
+async function postRestApi<T>(
+  endpoint: string,
+  body: Record<string, unknown>,
+  timeoutMs = REST_RPC_TIMEOUT_MS,
+): Promise<T | null> {
+  const config = loadConfig();
+  const url = `http://127.0.0.1:${config.port}/api/v1/${endpoint}`;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(config.token ? { Authorization: `Bearer ${config.token}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** Map RPC method names to REST API endpoints. */
+const RPC_REST_ENDPOINTS: Record<string, string> = {
+  'chat.history': 'chat/history',
+  'chat.send': 'chat/send',
+  'chat.abort': 'chat/abort',
+};
+
 // ── CLI fallback (slow path — 30-40s on modest hardware) ──
 
 function extractJsonPayload(raw: string): string {
@@ -85,29 +140,43 @@ function extractJsonPayload(raw: string): string {
 
 type CachedStatus = { data: Record<string, unknown>; ts: number };
 let statusCache: CachedStatus | null = null;
-let refreshing = false;
+let refreshPromise: Promise<void> | null = null;
 const CACHE_TTL_MS = 30_000;
+let statusGeneration = 0;
 
-async function refreshCliCache(): Promise<void> {
-  if (refreshing) return;
-  refreshing = true;
-  try {
-    const { stdout } = await execFileAsync('openclaw', ['status', '--json'], {
-      cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || '/Users/marquisehurtt',
-      maxBuffer: 4 * 1024 * 1024,
-      timeout: 45_000,
-      env: {
-        ...process.env,
-        PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
-      },
-    });
-    const parsed = JSON.parse(extractJsonPayload(stdout));
-    statusCache = { data: parsed, ts: Date.now() };
-  } catch (err) {
-    console.error('[gateway-client] CLI cache refresh failed:', (err as Error).message?.slice(0, 80));
-  } finally {
-    refreshing = false;
-  }
+export function invalidateGatewayStatusCache() {
+  statusGeneration += 1;
+  statusCache = null;
+  refreshPromise = null;
+}
+
+async function refreshCliCache(timeoutMs = CLI_STATUS_TIMEOUT_MS, force = false): Promise<void> {
+  if (!force && refreshPromise) return refreshPromise;
+
+  const generation = statusGeneration;
+  refreshPromise = (async () => {
+    try {
+      const { stdout } = await execFileAsync('openclaw', ['status', '--json'], {
+        cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || '/Users/marquisehurtt',
+        maxBuffer: 4 * 1024 * 1024,
+        timeout: timeoutMs,
+        env: {
+          ...process.env,
+          PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+        },
+      });
+      const parsed = JSON.parse(extractJsonPayload(stdout));
+      if (generation === statusGeneration) {
+        statusCache = { data: parsed, ts: Date.now() };
+      }
+    } catch (err) {
+      console.error('[gateway-client] CLI cache refresh failed:', (err as Error).message?.slice(0, 80));
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
 }
 
 // Background refresh loop
@@ -116,9 +185,18 @@ function ensureCliRefreshLoop() {
   if (refreshInterval) return;
   refreshInterval = setInterval(() => {
     if (statusCache && Date.now() - statusCache.ts < CACHE_TTL_MS) return;
-    refreshCliCache();
+    void refreshCliCache();
   }, CACHE_TTL_MS);
   if (refreshInterval.unref) refreshInterval.unref();
+}
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    if ('unref' in timer && typeof timer.unref === 'function') {
+      timer.unref();
+    }
+  });
 }
 
 // ── Public API ──
@@ -127,11 +205,16 @@ function ensureCliRefreshLoop() {
  * Get gateway status — sessions + agents.
  * Tries REST API first (<50ms), falls back to CLI cache.
  */
-export async function getGatewayStatus(): Promise<{
-  gateway: { reachable: boolean };
+export async function getGatewayStatus(options?: {
+  fresh?: boolean;
+  maxAgeMs?: number;
+}): Promise<{
+  gateway: { reachable: boolean; freshness: 'fresh' | 'stale' | 'warming'; source: 'rest' | 'cli' };
   sessions: { recent: Array<Record<string, unknown>> };
   agents: { agents: Array<Record<string, unknown>> };
 }> {
+  const fresh = options?.fresh ?? false;
+  const maxAgeMs = options?.maxAgeMs ?? (fresh ? CLI_FRESH_MAX_AGE_MS : CACHE_TTL_MS);
   // Strategy 1: REST API (fast path)
   const restResult = await fetchRestApi<{
     ts: number;
@@ -141,7 +224,7 @@ export async function getGatewayStatus(): Promise<{
 
   if (restResult?.sessions) {
     return {
-      gateway: { reachable: true },
+      gateway: { reachable: true, freshness: 'fresh', source: 'rest' },
       sessions: { recent: restResult.sessions.sessions ?? [] },
       agents: { agents: restResult.agents?.agents ?? [] },
     };
@@ -155,19 +238,48 @@ export async function getGatewayStatus(): Promise<{
   );
   ensureCliRefreshLoop();
 
-  if (!statusCache) {
-    await refreshCliCache();
+  if (fresh) {
+    // Force a new CLI refresh — don't piggyback a pre-mutation inflight request
+    await refreshCliCache(CLI_STATUS_TIMEOUT_MS, true);
+    const ageMs = statusCache ? Date.now() - statusCache.ts : Infinity;
+    if (!statusCache || ageMs > maxAgeMs) {
+      throw new Error('Gateway status unavailable — REST is down and a fresh CLI snapshot could not be obtained.');
+    }
+    const data = statusCache.data as Record<string, unknown>;
+    const sessions = data.sessions as { recent?: Array<Record<string, unknown>> } | undefined;
+    const agents = data.agents as { agents?: Array<Record<string, unknown>> } | undefined;
+    // Report freshness honestly based on actual data age, not request type
+    const cliFreshness = ageMs <= CLI_FRESH_MAX_AGE_MS ? 'fresh' : 'stale';
+    return {
+      gateway: { reachable: true, freshness: cliFreshness, source: 'cli' },
+      sessions: { recent: sessions?.recent ?? [] },
+      agents: { agents: agents?.agents ?? [] },
+    };
+  } else if (statusCache) {
+    const ageMs = Date.now() - statusCache.ts;
+    if (ageMs >= CACHE_TTL_MS) {
+      void refreshCliCache();
+    }
+  } else {
+    void refreshCliCache();
+    await Promise.race([
+      refreshPromise ?? Promise.resolve(),
+      wait(CLI_COLD_START_WAIT_MS),
+    ]);
   }
 
   if (!statusCache) {
-    throw new Error('Gateway status unavailable (both REST and CLI failed)');
+    throw new Error('Gateway status unavailable — REST is down and CLI cache is still warming.');
   }
 
   const data = statusCache.data as Record<string, unknown>;
+  const sessions = data.sessions as { recent?: Array<Record<string, unknown>> } | undefined;
+  const agents = data.agents as { agents?: Array<Record<string, unknown>> } | undefined;
+  const freshness = Date.now() - statusCache.ts <= CLI_FRESH_MAX_AGE_MS ? 'fresh' : 'stale';
   return {
-    gateway: { reachable: true },
-    sessions: { recent: (data.sessions as any)?.recent ?? [] },
-    agents: { agents: (data.agents as any)?.agents ?? [] },
+    gateway: { reachable: true, freshness, source: 'cli' },
+    sessions: { recent: sessions?.recent ?? [] },
+    agents: { agents: agents?.agents ?? [] },
   };
 }
 
@@ -217,7 +329,8 @@ async function saveAttachmentsToDisk(
   const fullMessage = message ? `${message}\n${mediaLines}` : mediaLines;
 
   // Return params WITHOUT attachments (they're now files on disk)
-  const { attachments: _, ...rest } = params;
+  const { attachments: ignoredAttachments, ...rest } = params;
+  void ignoredAttachments;
   return { ...rest, message: fullMessage };
 }
 
@@ -226,6 +339,18 @@ export async function gatewayRpc<T>(
   params: Record<string, unknown> = {},
   timeoutMs = 15_000,
 ): Promise<T> {
+  // Strategy 1: REST API fast path (#138)
+  const restEndpoint = RPC_REST_ENDPOINTS[method];
+  if (restEndpoint) {
+    const restResult = await postRestApi<T>(restEndpoint, params, Math.min(timeoutMs, REST_RPC_TIMEOUT_MS));
+    if (restResult !== null) {
+      // REST success resets CLI circuit breaker
+      cliConsecutiveFailures = 0;
+      return restResult;
+    }
+  }
+
+  // Strategy 2: CLI fallback with circuit breaker + concurrency limit (#140)
   const paramsJson = JSON.stringify(params);
 
   // If params are large (e.g. base64 image attachments), save images to
@@ -236,28 +361,72 @@ export async function gatewayRpc<T>(
     if (slimJson.length <= 100_000) {
       return gatewayRpc<T>(method, slimParams, timeoutMs);
     }
-    // Still too large — fall through to file-based approach
     return gatewayRpcViaFile<T>(method, slimJson, timeoutMs);
   }
   if (paramsJson.length > 100_000) {
     return gatewayRpcViaFile<T>(method, paramsJson, timeoutMs);
   }
 
-  const { stdout } = await execFileAsync(
-    'openclaw',
-    ['gateway', 'call', method, '--json', '--params', paramsJson],
-    {
-      cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || '/Users/marquisehurtt',
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: timeoutMs,
-      env: {
-        ...process.env,
-        PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
-      },
-    },
-  );
+  return gatewayRpcViaCli<T>(method, paramsJson, timeoutMs);
+}
 
-  return JSON.parse(extractJsonPayload(stdout)) as T;
+/** CLI RPC with concurrency limit and circuit breaker. */
+async function gatewayRpcViaCli<T>(
+  method: string,
+  paramsJson: string,
+  timeoutMs: number,
+): Promise<T> {
+  // Circuit breaker: if open, reject immediately
+  if (cliConsecutiveFailures >= CLI_CIRCUIT_BREAKER_THRESHOLD) {
+    if (Date.now() < cliCircuitOpenUntil) {
+      throw new Error(
+        `Gateway CLI circuit breaker open — ${CLI_CIRCUIT_BREAKER_THRESHOLD} consecutive failures. ` +
+        `Retrying in ${Math.ceil((cliCircuitOpenUntil - Date.now()) / 1000)}s.`
+      );
+    }
+    // Cooldown expired — allow a probe request through
+    cliConsecutiveFailures = CLI_CIRCUIT_BREAKER_THRESHOLD - 1;
+  }
+
+  // Concurrency limit: wait for a slot
+  if (cliInFlight >= CLI_MAX_CONCURRENT) {
+    await wait(200);
+    if (cliInFlight >= CLI_MAX_CONCURRENT) {
+      throw new Error(`Gateway CLI concurrency limit (${CLI_MAX_CONCURRENT}) reached — try again shortly.`);
+    }
+  }
+
+  cliInFlight++;
+  try {
+    const { stdout } = await execFileAsync(
+      'openclaw',
+      ['gateway', 'call', method, '--json', '--params', paramsJson],
+      {
+        cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || '/Users/marquisehurtt',
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: timeoutMs,
+        env: {
+          ...process.env,
+          PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+        },
+      },
+    );
+
+    cliConsecutiveFailures = 0;
+    return JSON.parse(extractJsonPayload(stdout)) as T;
+  } catch (err) {
+    cliConsecutiveFailures++;
+    if (cliConsecutiveFailures >= CLI_CIRCUIT_BREAKER_THRESHOLD) {
+      cliCircuitOpenUntil = Date.now() + CLI_CIRCUIT_BREAKER_COOLDOWN_MS;
+      console.warn(
+        `[gateway-client] CLI circuit breaker tripped after ${CLI_CIRCUIT_BREAKER_THRESHOLD} failures — ` +
+        `pausing CLI calls for ${CLI_CIRCUIT_BREAKER_COOLDOWN_MS / 1000}s.`
+      );
+    }
+    throw err;
+  } finally {
+    cliInFlight--;
+  }
 }
 
 /**

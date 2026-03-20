@@ -18,16 +18,47 @@
  *   { type: "subscribe", sessionKey: "..." }
  *   { type: "switch-session", sessionKey: "..." }
  *   { type: "ping" }
+ *
+ * Delivery semantics per channel (backpressure behavior):
+ *
+ *   chat (delta)      — LOSSY: intermediate deltas may be dropped. chat.done
+ *                        delivers final text and history safety-net recovers.
+ *   chat (done/error) — DURABLE: queued under backpressure and flushed when
+ *                        pressure clears (max 32 queued messages per client).
+ *   inbox             — DURABLE: queued under backpressure. Also recovered by
+ *                        10s safety-net polling.
+ *   history           — DURABLE: queued under backpressure. Also recovered by
+ *                        8s safety-net polling.
+ *   terminal (data)   — LOSSY: inherently best-effort like a real PTY. Frame
+ *                        drops are invisible to the user.
+ *   terminal (other)  — DURABLE: lifecycle events (created/exited/error) queued.
+ *   agent-lifecycle   — DURABLE: queued under backpressure.
+ *   review            — DURABLE: queued under backpressure.
+ *   conflicts         — DURABLE: queued under backpressure.
+ *   pong              — LOSSY: keepalive response, loss is harmless.
  */
 
 import { readFileSync, watch, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { execSync, execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { WebSocketServer, WebSocket } from 'ws';
+import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
+import { getBrowserInventorySnapshot, getBrowserProvider } from './lib/browser/inventory';
+import { getCommandCenterSnapshotWithOptions } from './lib/command-center/snapshot';
+import { getMobileInboxSnapshot } from './lib/mobile/openclaw';
+import { getSessionTranscript } from './lib/openclaw/chat';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
+import type {
+  RealtimeBatchMessage,
+  RealtimeEventEnvelope,
+  RealtimeHealthDescriptor,
+  RealtimeInternalRequest,
+  RealtimeStreamKey,
+  RealtimeSubscription,
+} from './lib/realtime/types';
 
 // Read repo registry directly (avoid importing registry.ts which uses 'server-only')
 function listRepoPathsSync(): string[] {
@@ -58,7 +89,9 @@ const WS_PORT = Number(process.env.WS_PORT ?? 3002);
 const NEXT_ORIGIN = process.env.NEXT_ORIGIN ?? 'http://127.0.0.1:3001';
 const PING_INTERVAL_MS = 25_000;
 const FETCH_TIMEOUT_MS = 8_000;
-const BACKPRESSURE_LIMIT = 64 * 1024; // 64KB — skip sends if client buffer exceeds this
+const BACKPRESSURE_LIMIT = 64 * 1024; // 64KB — queue durable messages if client buffer exceeds this
+const BACKPRESSURE_QUEUE_LIMIT = 32; // max queued messages per client before oldest are dropped
+const BACKPRESSURE_FLUSH_MS = 50; // check interval to flush queued messages
 
 interface GatewayConfig {
   port: number;
@@ -96,6 +129,11 @@ interface ClientState {
   lastHistoryId: string | null;
   alive: boolean;
   terminalSessions: Set<string>;
+  realtimeSubscriptions: RealtimeSubscription[];
+  /** Queued durable messages waiting for backpressure to clear */
+  backpressureQueue: string[];
+  /** Timer that periodically flushes the backpressure queue */
+  flushTimer: ReturnType<typeof setInterval> | null;
 }
 
 // ── Terminal attachment state ──
@@ -206,6 +244,8 @@ function connectGateway() {
     )) {
       // Debounce: push inbox to all clients after a short delay
       scheduleEventDrivenInboxPush();
+      scheduleRealtimeRuntimeRefresh({ reason: String(parsed.event), fresh: true });
+      scheduleRealtimeMobileInboxRefresh(250, true);
     }
   });
 
@@ -257,15 +297,87 @@ function extractText(delta: ChatDelta): string {
     .join('');
 }
 
+/**
+ * Determine whether a message is "lossy" (safe to drop under backpressure)
+ * or "durable" (must be queued and flushed later).
+ *
+ * Lossy channels: chat deltas, terminal data, pong — all are either
+ * inherently lossy or recovered by higher-level mechanisms.
+ */
+function isLossyMessage(json: string): boolean {
+  // Fast path: avoid parsing — check for known lossy patterns
+  if (json.includes('"channel":"pong"')) return true;
+  // Chat deltas (not done/error) are lossy
+  if (json.includes('"channel":"chat"') && json.includes('"event":"delta"')) return true;
+  // Terminal data frames are lossy (PTY output is best-effort)
+  if (json.includes('"channel":"terminal"') && json.includes('"event":"data"')) return true;
+  return false;
+}
+
+/** Flush any queued durable messages once backpressure clears. */
+function flushBackpressureQueue(client: ClientState) {
+  if (client.ws.readyState !== WebSocket.OPEN) {
+    client.backpressureQueue.length = 0;
+    stopFlushTimer(client);
+    return;
+  }
+  if (client.ws.bufferedAmount > BACKPRESSURE_LIMIT) return; // still pressured
+
+  // Drain the queue
+  while (client.backpressureQueue.length > 0) {
+    if (client.ws.bufferedAmount > BACKPRESSURE_LIMIT) return; // pause mid-flush
+    const queued = client.backpressureQueue.shift()!;
+    client.ws.send(queued);
+  }
+  stopFlushTimer(client);
+}
+
+function startFlushTimer(client: ClientState) {
+  if (client.flushTimer) return;
+  client.flushTimer = setInterval(() => flushBackpressureQueue(client), BACKPRESSURE_FLUSH_MS);
+}
+
+function stopFlushTimer(client: ClientState) {
+  if (client.flushTimer) {
+    clearInterval(client.flushTimer);
+    client.flushTimer = null;
+  }
+}
+
 function send(client: ClientState, msg: Record<string, unknown>) {
   if (client.ws.readyState !== WebSocket.OPEN) return;
-  if (client.ws.bufferedAmount > BACKPRESSURE_LIMIT) return; // drop if client can't keep up
-  client.ws.send(JSON.stringify(msg));
+  const json = JSON.stringify(msg);
+  if (client.ws.bufferedAmount > BACKPRESSURE_LIMIT) {
+    if (isLossyMessage(json)) return; // safe to drop
+    // Queue durable message for later delivery
+    if (client.backpressureQueue.length >= BACKPRESSURE_QUEUE_LIMIT) {
+      client.backpressureQueue.shift(); // drop oldest if queue is full
+    }
+    client.backpressureQueue.push(json);
+    startFlushTimer(client);
+    return;
+  }
+  // Flush any pending queue first (maintain ordering)
+  if (client.backpressureQueue.length > 0) {
+    flushBackpressureQueue(client);
+  }
+  client.ws.send(json);
 }
 
 function sendRaw(client: ClientState, preStringified: string) {
   if (client.ws.readyState !== WebSocket.OPEN) return;
-  if (client.ws.bufferedAmount > BACKPRESSURE_LIMIT) return;
+  if (client.ws.bufferedAmount > BACKPRESSURE_LIMIT) {
+    if (isLossyMessage(preStringified)) return; // safe to drop
+    if (client.backpressureQueue.length >= BACKPRESSURE_QUEUE_LIMIT) {
+      client.backpressureQueue.shift();
+    }
+    client.backpressureQueue.push(preStringified);
+    startFlushTimer(client);
+    return;
+  }
+  if (client.backpressureQueue.length > 0) {
+    flushBackpressureQueue(client);
+  }
   client.ws.send(preStringified);
 }
 
@@ -275,6 +387,684 @@ function broadcast(msg: Record<string, unknown>, filter?: (c: ClientState) => bo
     if (filter && !filter(client)) continue;
     sendRaw(client, json);
   }
+}
+
+// ── Realtime envelope log / replay ──
+
+const REALTIME_LOG_LIMIT = 400;
+const BROWSER_DISCOVERY_INTERVAL_MS = 15_000;
+const ATTACHED_BROWSER_REFRESH_MS = 2_000;
+
+let realtimeSeq = 0;
+const realtimeLog: RealtimeEventEnvelope[] = [];
+let runtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let runtimeRefreshFreshRequested = false;
+let mobileRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+let mobileRefreshFreshRequested = false;
+const sessionHistoryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+let browserDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
+let attachedBrowserRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
+const lastRealtimeFingerprint = {
+  runtime: '',
+  review: '',
+  browser: '',
+  mobileInbox: '',
+  history: new Map<string, string>(),
+};
+
+function currentIsoTime() {
+  return new Date().toISOString();
+}
+
+function clampRealtimeLog() {
+  if (realtimeLog.length <= REALTIME_LOG_LIMIT) return;
+  realtimeLog.splice(0, realtimeLog.length - REALTIME_LOG_LIMIT);
+}
+
+function normalizeRealtimeStreamKey(raw: string | undefined, sessionKey?: string | null): RealtimeStreamKey | null {
+  if (!raw) return null;
+  if (raw === 'global') return 'global';
+  if (raw === 'session' || raw === 'session:*') {
+    return sessionKey ? `session:${sessionKey}` : null;
+  }
+  if (raw.startsWith('session:')) return raw as RealtimeStreamKey;
+  return null;
+}
+
+function eventMatchesRealtimeSubscription(
+  envelope: RealtimeEventEnvelope,
+  subscription: RealtimeSubscription,
+) {
+  return envelope.stream === subscription.stream;
+}
+
+function sendRealtimeBatch(
+  client: ClientState,
+  stream: RealtimeStreamKey,
+  delivery: RealtimeBatchMessage['delivery'],
+  events: RealtimeEventEnvelope[],
+  gap?: RealtimeBatchMessage['gap'],
+) {
+  if (!events.length) return;
+  send(client, {
+    channel: 'realtime',
+    event: 'batch',
+    data: {
+      delivery,
+      stream,
+      events,
+      latestSeq: events[events.length - 1]?.seq ?? realtimeSeq,
+      gap,
+    } satisfies RealtimeBatchMessage,
+  });
+}
+
+function buildRealtimeEnvelope(
+  stream: RealtimeStreamKey,
+  channel: RealtimeEventEnvelope['channel'],
+  event: RealtimeEventEnvelope['event'],
+  data: RealtimeEventEnvelope['data'],
+  options: {
+    snapshot?: boolean;
+    health?: RealtimeHealthDescriptor;
+    entityId?: string;
+    delivery?: RealtimeEventEnvelope['delivery'];
+    capturedSeq?: number;
+  } = {},
+): RealtimeEventEnvelope {
+  const envelope: RealtimeEventEnvelope = {
+    protocol: 1,
+    seq: ++realtimeSeq,
+    capturedSeq: options.capturedSeq,
+    stream,
+    channel,
+    event,
+    ts: currentIsoTime(),
+    snapshot: options.snapshot,
+    delivery: options.delivery,
+    entityId: options.entityId,
+    health: options.health,
+    data,
+  };
+
+  if (options.delivery !== 'bootstrap') {
+    realtimeLog.push(envelope);
+    clampRealtimeLog();
+  }
+
+  return envelope;
+}
+
+function broadcastRealtimeEvents(events: RealtimeEventEnvelope[]) {
+  if (!events.length) return;
+  const eventsByStream = new Map<RealtimeStreamKey, RealtimeEventEnvelope[]>();
+
+  for (const event of events) {
+    const bucket = eventsByStream.get(event.stream);
+    if (bucket) {
+      bucket.push(event);
+    } else {
+      eventsByStream.set(event.stream, [event]);
+    }
+  }
+
+  for (const client of clients.values()) {
+    for (const subscription of client.realtimeSubscriptions) {
+      const matching = eventsByStream.get(subscription.stream);
+      if (!matching?.length) continue;
+      sendRealtimeBatch(client, subscription.stream, 'live', matching);
+    }
+  }
+}
+
+function retainedEventsForStream(stream: RealtimeStreamKey) {
+  return realtimeLog.filter((event) => event.stream === stream);
+}
+
+function earliestRetainedSeq(stream: RealtimeStreamKey) {
+  return retainedEventsForStream(stream)[0]?.seq;
+}
+
+function replayRealtimeSubscriptions(client: ClientState, subscriptions: RealtimeSubscription[]) {
+  client.realtimeSubscriptions = subscriptions;
+
+  for (const subscription of subscriptions) {
+    const stream = subscription.stream;
+    const since = subscription.since ?? 0;
+    const earliestAvailable = earliestRetainedSeq(stream);
+    if (since > 0 && (earliestAvailable == null || since < (earliestAvailable - 1))) {
+      void buildResyncEvents(stream).then((events) => {
+        sendRealtimeBatch(client, stream, 'bootstrap', events, {
+          requestedSince: since,
+          earliestAvailable: earliestAvailable ?? (realtimeSeq + 1),
+        });
+      });
+      continue;
+    }
+    const replay = realtimeLog.filter((event) => (
+      event.seq > since && eventMatchesRealtimeSubscription(event, subscription)
+    ));
+    if (replay.length > 0) {
+      sendRealtimeBatch(client, stream, 'replay', replay);
+    }
+  }
+}
+
+async function buildResyncEvents(stream: RealtimeStreamKey) {
+  const capturedSeq = realtimeSeq;
+  if (stream === 'global') {
+    try {
+      const snapshot = await getCommandCenterSnapshotWithOptions({ fresh: true });
+      const degradedHealth: RealtimeHealthDescriptor = {
+        state: 'degraded',
+        reason: 'Replay gap detected; forcing fresh global resync.',
+      };
+      const events: RealtimeEventEnvelope[] = [
+        buildRealtimeEnvelope(
+          'global',
+          'runtime',
+          'runtime.snapshot',
+          { fleet: snapshot.fleet },
+          { snapshot: true, entityId: 'fleet', health: degradedHealth, capturedSeq },
+        ),
+        buildRealtimeEnvelope(
+          'global',
+          'review',
+          'review.snapshot',
+          { review: snapshot.review, error: snapshot.reviewError ?? null },
+          { snapshot: true, entityId: 'workflow-review', health: degradedHealth, capturedSeq },
+        ),
+        buildRealtimeEnvelope(
+          'global',
+          'browser',
+          'browser.snapshot',
+          {
+            browserInventory: snapshot.browserInventory,
+            attachedBrowser: snapshot.attachedBrowser,
+            error: snapshot.browserError ?? null,
+          },
+          { snapshot: true, entityId: 'browser-inventory', health: degradedHealth, capturedSeq },
+        ),
+      ];
+
+      const inbox = await getMobileInboxSnapshot({ fresh: true }).catch(() => null);
+      if (inbox) {
+        events.push(buildRealtimeEnvelope(
+          'global',
+          'mobile',
+          'mobile.inbox.snapshot',
+          { inbox },
+          { snapshot: true, entityId: 'mobile-inbox', health: degradedHealth, capturedSeq },
+        ));
+      }
+
+      return events;
+    } catch {
+      return [] as RealtimeEventEnvelope[];
+    }
+  }
+
+  if (!stream.startsWith('session:')) return [] as RealtimeEventEnvelope[];
+  const sessionKey = stream.slice('session:'.length);
+  if (!sessionKey) return [] as RealtimeEventEnvelope[];
+
+  try {
+    const entries = await getSessionTranscript(sessionKey, 24, true);
+    return [
+      buildRealtimeEnvelope(
+        stream,
+        'history',
+        'history.snapshot',
+        { sessionKey, entries, replace: true },
+        {
+          snapshot: true,
+          entityId: sessionKey,
+          capturedSeq,
+          health: {
+            state: 'degraded',
+            reason: 'Replay gap detected; forcing fresh session resync.',
+          },
+        },
+      ),
+    ];
+  } catch {
+    return [] as RealtimeEventEnvelope[];
+  }
+}
+
+async function buildBootstrapEvents(stream: RealtimeStreamKey) {
+  const capturedSeq = realtimeSeq;
+  if (stream === 'global') {
+    try {
+      const snapshot = await getCommandCenterSnapshotWithOptions({ fresh: false });
+      const runtimeHealth = deriveRuntimeHealth(snapshot.fleet);
+      const events: RealtimeEventEnvelope[] = [
+        buildRealtimeEnvelope(
+          'global',
+          'runtime',
+          'runtime.snapshot',
+          { fleet: snapshot.fleet },
+          { snapshot: true, entityId: 'fleet', health: runtimeHealth, delivery: 'bootstrap', capturedSeq },
+        ),
+        buildRealtimeEnvelope(
+          'global',
+          'review',
+          'review.snapshot',
+          { review: snapshot.review, error: snapshot.reviewError ?? null },
+          {
+            snapshot: true,
+            entityId: 'workflow-review',
+            health: snapshot.reviewError ? { state: 'stale', reason: snapshot.reviewError } : runtimeHealth,
+            delivery: 'bootstrap',
+            capturedSeq,
+          },
+        ),
+        buildRealtimeEnvelope(
+          'global',
+          'browser',
+          'browser.snapshot',
+          {
+            browserInventory: snapshot.browserInventory,
+            attachedBrowser: snapshot.attachedBrowser,
+            error: snapshot.browserError ?? null,
+          },
+          {
+            snapshot: true,
+            entityId: 'browser-inventory',
+            health: snapshot.browserError ? { state: 'stale', reason: snapshot.browserError } : runtimeHealth,
+            delivery: 'bootstrap',
+            capturedSeq,
+          },
+        ),
+      ];
+
+      const inbox = await getMobileInboxSnapshot().catch(() => null);
+      if (inbox) {
+        events.push(buildRealtimeEnvelope(
+          'global',
+          'mobile',
+          'mobile.inbox.snapshot',
+          { inbox },
+          {
+            snapshot: true,
+            entityId: 'mobile-inbox',
+            health: inbox.mode === 'live' ? { state: 'live' } : { state: 'degraded', reason: inbox.note },
+            delivery: 'bootstrap',
+            capturedSeq,
+          },
+        ));
+      }
+
+      return events;
+    } catch {
+      return [] as RealtimeEventEnvelope[];
+    }
+  }
+
+  if (!stream.startsWith('session:')) return [] as RealtimeEventEnvelope[];
+  const sessionKey = stream.slice('session:'.length);
+  if (!sessionKey) return [] as RealtimeEventEnvelope[];
+
+  try {
+    const entries = await getSessionTranscript(sessionKey, 24, false);
+    return [
+      buildRealtimeEnvelope(
+        stream,
+        'history',
+        'history.snapshot',
+        { sessionKey, entries, replace: true },
+        {
+          snapshot: true,
+          entityId: sessionKey,
+          health: { state: 'live' },
+          delivery: 'bootstrap',
+          capturedSeq,
+        },
+      ),
+    ];
+  } catch {
+    return [] as RealtimeEventEnvelope[];
+  }
+}
+
+function fingerprintRuntimeSnapshot(fleet: Awaited<ReturnType<typeof getCommandCenterSnapshotWithOptions>>['fleet']) {
+  return JSON.stringify({
+    mode: fleet.meta.mode,
+    gatewayFreshness: fleet.meta.gatewayFreshness,
+    observablePending: fleet.meta.observablePending,
+    primarySessionKey: fleet.meta.primarySessionKey,
+    agents: fleet.agents.map((agent) => ({
+      id: agent.id,
+      status: agent.status,
+      task: agent.currentTask,
+      approval: agent.approvalStatus,
+      lastEventAt: agent.lastEventAt,
+      ctx: Math.round(agent.context.usedPercent ?? 0),
+      alerts: agent.alerts,
+      availability: agent.runtimeSurface?.lifecycle?.availability,
+      lastOutcome: agent.runtimeSurface?.lifecycle?.lastOutcome,
+      activity: agent.activity?.headline,
+      browser: agent.browserSurface?.lastAction,
+    })),
+  });
+}
+
+function fingerprintReviewSnapshot(review: Awaited<ReturnType<typeof getCommandCenterSnapshotWithOptions>>['review']) {
+  if (!review) return 'no-review';
+  return JSON.stringify({
+    repoSlug: review.repoSlug,
+    branch: review.branch,
+    dirty: review.dirty,
+    diffStat: review.diffStat,
+    issues: review.activeIssues.map((issue) => issue.number),
+    pulls: review.pullRequests.map((pr) => pr.number),
+    changedFiles: review.changedFiles.map((file) => [file.path, file.status, file.additions ?? 0, file.deletions ?? 0]),
+  });
+}
+
+function fingerprintBrowserSnapshot(
+  browserInventory: Awaited<ReturnType<typeof getCommandCenterSnapshotWithOptions>>['browserInventory'],
+  attachedBrowser: ReturnType<typeof getAttachedBrowserSummary>,
+) {
+  return JSON.stringify(
+    {
+      surfaces: browserInventory.surfaces.map((surface) => ({
+        id: surface.id,
+        provider: surface.provider,
+        status: surface.status,
+        url: surface.url,
+        title: surface.title,
+        lastAction: surface.lastAction,
+        lastActionAt: surface.lastActionAt ?? 0,
+      })),
+      attachedBrowser: attachedBrowser
+        ? {
+            provider: attachedBrowser.provider,
+            surfaceId: attachedBrowser.surface.id,
+            pageIds: attachedBrowser.pages.map((page) => page.id),
+            pageTitles: attachedBrowser.pages.map((page) => page.title ?? page.url ?? ''),
+            attachedAt: attachedBrowser.attachedAt,
+          }
+        : null,
+    },
+  );
+}
+
+function fingerprintInboxSnapshot(inbox: Awaited<ReturnType<typeof getMobileInboxSnapshot>>) {
+  return JSON.stringify({
+    summary: inbox.summary,
+    sessions: inbox.sessions.map((session) => ({
+      id: session.id,
+      sessionKey: session.sessionKey,
+      status: session.status,
+      currentTask: session.currentTask,
+      approvalStatus: session.approvalStatus,
+      lastEventAt: session.lastEventAt,
+      branch: session.branch,
+      alerts: session.alerts,
+    })),
+    items: inbox.items.map((item) => ({
+      id: item.id,
+      kind: item.kind,
+      severity: item.severity,
+      detail: item.detail,
+      title: item.title,
+      sessionKey: item.sessionKey,
+    })),
+    review: inbox.review
+      ? {
+          repoSlug: inbox.review.repoSlug,
+          branch: inbox.review.branch,
+          diffStat: inbox.review.diffStat,
+          files: inbox.review.changedFiles.map((file) => [file.path, file.status]),
+        }
+      : null,
+  });
+}
+
+function fingerprintHistory(sessionKey: string, entries: Awaited<ReturnType<typeof getSessionTranscript>>) {
+  return JSON.stringify({
+    sessionKey,
+    entries: entries.map((entry) => [entry.id, entry.timestamp ?? 0, entry.role, entry.text.slice(0, 80)]),
+  });
+}
+
+function deriveRuntimeHealth(fleet: Awaited<ReturnType<typeof getCommandCenterSnapshotWithOptions>>['fleet']): RealtimeHealthDescriptor {
+  if (fleet.meta.mode !== 'live') {
+    return { state: 'degraded', reason: fleet.meta.note ?? 'demo fallback' };
+  }
+  if (fleet.meta.gatewayFreshness === 'stale') {
+    return { state: 'stale', reason: fleet.meta.gatewayLabel ?? 'gateway status is stale' };
+  }
+  if (fleet.meta.gatewayFreshness === 'warming' || fleet.meta.observablePending) {
+    return { state: 'warming', reason: fleet.meta.gatewayLabel ?? 'runtime state is warming' };
+  }
+  return { state: 'live' };
+}
+
+async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?: string } = {}) {
+  try {
+    const snapshot = await getCommandCenterSnapshotWithOptions({ fresh: options.fresh });
+    const runtimeHealth = deriveRuntimeHealth(snapshot.fleet);
+    const events: RealtimeEventEnvelope[] = [];
+
+    const runtimeFingerprint = fingerprintRuntimeSnapshot(snapshot.fleet);
+    if (runtimeFingerprint !== lastRealtimeFingerprint.runtime) {
+      lastRealtimeFingerprint.runtime = runtimeFingerprint;
+      events.push(buildRealtimeEnvelope(
+        'global',
+        'runtime',
+        'runtime.snapshot',
+        { fleet: snapshot.fleet },
+        { snapshot: true, entityId: 'fleet', health: runtimeHealth },
+      ));
+    }
+
+    const reviewFingerprint = fingerprintReviewSnapshot(snapshot.review);
+    if (reviewFingerprint !== lastRealtimeFingerprint.review || options.fresh) {
+      lastRealtimeFingerprint.review = reviewFingerprint;
+      events.push(buildRealtimeEnvelope(
+        'global',
+        'review',
+        'review.snapshot',
+        { review: snapshot.review, error: snapshot.reviewError ?? null },
+        {
+          snapshot: true,
+          entityId: 'workflow-review',
+          health: snapshot.reviewError ? { state: 'stale', reason: snapshot.reviewError } : runtimeHealth,
+        },
+      ));
+    }
+
+    const browserFingerprint = fingerprintBrowserSnapshot(snapshot.browserInventory, snapshot.attachedBrowser);
+    if (browserFingerprint !== lastRealtimeFingerprint.browser || options.fresh) {
+      lastRealtimeFingerprint.browser = browserFingerprint;
+      events.push(buildRealtimeEnvelope(
+        'global',
+        'browser',
+        'browser.snapshot',
+        {
+          browserInventory: snapshot.browserInventory,
+          attachedBrowser: snapshot.attachedBrowser,
+          error: snapshot.browserError ?? null,
+        },
+        {
+          snapshot: true,
+          entityId: 'browser-inventory',
+          health: snapshot.browserError ? { state: 'stale', reason: snapshot.browserError } : runtimeHealth,
+        },
+      ));
+    }
+
+    broadcastRealtimeEvents(events);
+  } catch (error) {
+    console.error('[ws-server] realtime global snapshot failed:', error instanceof Error ? error.message : 'unknown');
+  }
+}
+
+async function publishMobileInboxRealtimeSnapshot(fresh = false) {
+  try {
+    const inbox = await getMobileInboxSnapshot({ fresh });
+    const fingerprint = fingerprintInboxSnapshot(inbox);
+    if (fingerprint === lastRealtimeFingerprint.mobileInbox) return;
+    lastRealtimeFingerprint.mobileInbox = fingerprint;
+
+    broadcastRealtimeEvents([
+      buildRealtimeEnvelope(
+        'global',
+        'mobile',
+        'mobile.inbox.snapshot',
+        { inbox },
+        {
+          snapshot: true,
+          entityId: 'mobile-inbox',
+          health: inbox.mode === 'live' ? { state: 'live' } : { state: 'degraded', reason: inbox.note },
+        },
+      ),
+    ]);
+  } catch (error) {
+    console.error('[ws-server] realtime mobile inbox snapshot failed:', error instanceof Error ? error.message : 'unknown');
+  }
+}
+
+async function publishSessionHistoryRealtimeSnapshot(sessionKey: string, fresh = false) {
+  if (!sessionKey) return;
+  try {
+    const entries = await getSessionTranscript(sessionKey, 24, fresh);
+    const fingerprint = fingerprintHistory(sessionKey, entries);
+    if (!fresh && lastRealtimeFingerprint.history.get(sessionKey) === fingerprint) return;
+    lastRealtimeFingerprint.history.set(sessionKey, fingerprint);
+
+    broadcastRealtimeEvents([
+      buildRealtimeEnvelope(
+        `session:${sessionKey}`,
+        'history',
+        'history.snapshot',
+        { sessionKey, entries },
+        {
+          snapshot: true,
+          entityId: sessionKey,
+          health: { state: 'live' },
+        },
+      ),
+    ]);
+  } catch (error) {
+    console.error('[ws-server] realtime session history failed:', error instanceof Error ? error.message : 'unknown');
+  }
+}
+
+function scheduleRealtimeRuntimeRefresh(options: { fresh?: boolean; reason?: string } = {}) {
+  runtimeRefreshFreshRequested = runtimeRefreshFreshRequested || Boolean(options.fresh);
+  if (runtimeRefreshTimer) return;
+  runtimeRefreshTimer = setTimeout(() => {
+    const fresh = runtimeRefreshFreshRequested;
+    runtimeRefreshFreshRequested = false;
+    runtimeRefreshTimer = null;
+    void publishGlobalRealtimeSnapshot({ fresh, reason: options.reason });
+  }, options.fresh ? 50 : 250);
+}
+
+function scheduleRealtimeMobileInboxRefresh(delayMs = 250, fresh = false) {
+  if (mobileRefreshTimer) {
+    mobileRefreshFreshRequested = mobileRefreshFreshRequested || fresh;
+    return;
+  }
+  mobileRefreshFreshRequested = mobileRefreshFreshRequested || fresh;
+  mobileRefreshTimer = setTimeout(() => {
+    const nextFresh = mobileRefreshFreshRequested;
+    mobileRefreshFreshRequested = false;
+    mobileRefreshTimer = null;
+    void publishMobileInboxRealtimeSnapshot(nextFresh);
+  }, delayMs);
+}
+
+function scheduleRealtimeSessionHistoryRefresh(sessionKey: string, fresh = false, delayMs = 350) {
+  const existing = sessionHistoryTimers.get(sessionKey);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    sessionHistoryTimers.delete(sessionKey);
+    void publishSessionHistoryRealtimeSnapshot(sessionKey, fresh);
+  }, delayMs);
+  sessionHistoryTimers.set(sessionKey, timer);
+}
+
+function startBrowserDiscoveryRealtimeLoop() {
+  if (browserDiscoveryTimer) return;
+  browserDiscoveryTimer = setInterval(async () => {
+    if (clients.size === 0) return;
+    try {
+      const browserInventory = await getBrowserInventorySnapshot();
+      const attachedBrowser = getAttachedBrowserSummary();
+      const fingerprint = fingerprintBrowserSnapshot(browserInventory, attachedBrowser);
+      if (fingerprint === lastRealtimeFingerprint.browser) return;
+      lastRealtimeFingerprint.browser = fingerprint;
+      broadcastRealtimeEvents([
+        buildRealtimeEnvelope(
+          'global',
+          'browser',
+          'browser.snapshot',
+          {
+            browserInventory,
+            attachedBrowser,
+            error: null,
+          },
+          { snapshot: true, entityId: 'browser-inventory', health: { state: 'live' } },
+        ),
+      ]);
+    } catch {
+      // Best-effort discovery loop
+    }
+  }, BROWSER_DISCOVERY_INTERVAL_MS);
+  if (browserDiscoveryTimer.unref) browserDiscoveryTimer.unref();
+}
+
+function attachedBrowserFingerprint(summary: ReturnType<typeof getAttachedBrowserSummary>) {
+  if (!summary) return 'no-attached-browser';
+  return JSON.stringify({
+    provider: summary.provider,
+    surfaceId: summary.surface.id,
+    surfaceStatus: summary.surface.status,
+    surfaceUrl: summary.surface.url,
+    surfaceTitle: summary.surface.title,
+    browserName: summary.browserName,
+    browserVersion: summary.browserVersion,
+    attachedAt: summary.attachedAt,
+    note: summary.note,
+    pages: summary.pages.map((page) => ({
+      id: page.id,
+      title: page.title,
+      url: page.url,
+      status: page.status,
+      type: page.type,
+    })),
+  });
+}
+
+function startAttachedBrowserRefreshLoop() {
+  if (attachedBrowserRefreshTimer) return;
+  attachedBrowserRefreshTimer = setInterval(async () => {
+    if (clients.size === 0) return;
+    const attachedBrowser = getAttachedBrowserSummary();
+    if (!attachedBrowser) return;
+
+    const provider = getBrowserProvider(attachedBrowser.provider);
+    if (!provider?.attachSurface) return;
+
+    try {
+      const refreshed = await provider.attachSurface(attachedBrowser.surface.id);
+      const previousFingerprint = attachedBrowserFingerprint(attachedBrowser);
+      const nextFingerprint = attachedBrowserFingerprint(refreshed);
+      if (previousFingerprint === nextFingerprint) return;
+
+      setAttachedBrowserSummary(refreshed);
+
+      scheduleRealtimeRuntimeRefresh({ reason: `browser.attach-refresh:${refreshed.provider}`, fresh: true });
+    } catch {
+      // If the attached surface disappears, keep the last known state until an explicit attach replaces it.
+    }
+  }, ATTACHED_BROWSER_REFRESH_MS);
+  if (attachedBrowserRefreshTimer.unref) attachedBrowserRefreshTimer.unref();
 }
 
 // ── Client management ──
@@ -294,6 +1084,26 @@ function handleClientMessage(client: ClientState, raw: string) {
       // Send immediate sync for the new session
       if (sessionKey) {
         void syncClientHistory(client);
+      }
+      break;
+    }
+    case 'realtime-subscribe': {
+      const rawSubscriptions = Array.isArray(msg.subscriptions) ? msg.subscriptions as Array<Record<string, unknown>> : [];
+      const subscriptions: RealtimeSubscription[] = [];
+      for (const item of rawSubscriptions) {
+        const sessionKey = typeof item.sessionKey === 'string' ? item.sessionKey : null;
+        const stream = normalizeRealtimeStreamKey(typeof item.stream === 'string' ? item.stream : undefined, sessionKey);
+        if (!stream) continue;
+        const since = typeof item.since === 'number' && Number.isFinite(item.since) ? item.since : undefined;
+        subscriptions.push({ stream, since });
+      }
+
+      replayRealtimeSubscriptions(client, subscriptions);
+      for (const subscription of subscriptions) {
+        if (subscription.since != null) continue;
+        void buildBootstrapEvents(subscription.stream).then((events) => {
+          sendRealtimeBatch(client, subscription.stream, 'bootstrap', events);
+        });
       }
       break;
     }
@@ -371,9 +1181,15 @@ function onChatDelta(delta: ChatDelta) {
     broadcast({ channel: 'chat', event: 'done', data: { text, runId: delta.runId, seq: delta.seq } }, sessionFilter);
     setTimeout(() => pushHistoryForSession(delta.sessionKey), 500);
     scheduleEventDrivenInboxPush();
+    scheduleRealtimeSessionHistoryRefresh(delta.sessionKey, true);
+    scheduleRealtimeRuntimeRefresh({ reason: 'chat.done', fresh: true });
+    scheduleRealtimeMobileInboxRefresh(250, true);
   } else if (delta.state === 'error' || delta.state === 'aborted') {
     broadcast({ channel: 'chat', event: 'error', data: { state: delta.state, error: delta.error, runId: delta.runId } }, sessionFilter);
     scheduleEventDrivenInboxPush();
+    scheduleRealtimeSessionHistoryRefresh(delta.sessionKey, true);
+    scheduleRealtimeRuntimeRefresh({ reason: `chat.${delta.state}`, fresh: true });
+    scheduleRealtimeMobileInboxRefresh(250, true);
   }
 }
 
@@ -687,8 +1503,7 @@ function handleTerminalImage(_client: ClientState, msg: Record<string, unknown>)
     const resolved = filePath.replace(/^~/, process.env.HOME ?? '/tmp');
     const data = readFileSync(resolved);
     const b64 = data.toString('base64');
-    const filename = require('path').basename(resolved);
-    const filenameB64 = Buffer.from(filename).toString('base64');
+    const filename = basename(resolved);
     // Send raw components — client builds the IIP escape sequence
     const attachment = terminalAttachments.get(sessionName);
     if (!attachment) {
@@ -824,6 +1639,8 @@ function broadcastLifecycle(sessionName: string, state: LifecycleState, exitCode
   for (const [, c] of clients) {
     sendRaw(c, msg);
   }
+  scheduleRealtimeRuntimeRefresh({ reason: `terminal.${state}`, fresh: true });
+  scheduleRealtimeMobileInboxRefresh(250, true);
   console.log(`[ws-server] Agent lifecycle: ${sessionName} → ${state}${exitCode !== undefined ? ` (exit ${exitCode})` : ''}`);
 }
 
@@ -888,6 +1705,86 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  if (req.url === '/internal/realtime' && req.method === 'POST') {
+    const auth = req.headers.authorization ?? '';
+    if (auth !== `Bearer ${WS_TOKEN}`) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      let payload: RealtimeInternalRequest | null = null;
+      try {
+        payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as RealtimeInternalRequest;
+      } catch {
+        res.writeHead(400);
+        res.end('invalid json');
+        return;
+      }
+
+      if (!payload) {
+        res.writeHead(400);
+        res.end('missing payload');
+        return;
+      }
+
+      if (payload.kind === 'mutation') {
+        const event = buildRealtimeEnvelope(
+          'global',
+          'mutation',
+          payload.mutation.status === 'pending' ? 'mutation.record' : 'mutation.settled',
+          { mutation: payload.mutation },
+          {
+            entityId: payload.mutation.surfaceId ?? payload.mutation.sessionKey ?? payload.mutation.mutationId,
+            health: { state: 'live' },
+          },
+        );
+        broadcastRealtimeEvents([event]);
+
+        if (payload.refreshTargets?.includes('global')) {
+          scheduleRealtimeRuntimeRefresh({ fresh: payload.fresh, reason: payload.mutation.action });
+        }
+        if (payload.refreshTargets?.includes('mobileInbox')) {
+          scheduleRealtimeMobileInboxRefresh(250, Boolean(payload.fresh));
+        }
+        if (payload.refreshTargets?.includes('sessionHistory')) {
+          for (const sessionKey of payload.sessionKeys ?? []) {
+            scheduleRealtimeSessionHistoryRefresh(sessionKey, true);
+          }
+        }
+
+        res.writeHead(202);
+        res.end('accepted');
+        return;
+      }
+
+      if (payload.kind === 'refresh') {
+        if (payload.targets.includes('global')) {
+          scheduleRealtimeRuntimeRefresh({ fresh: payload.fresh, reason: payload.reason });
+        }
+        if (payload.targets.includes('mobileInbox')) {
+          scheduleRealtimeMobileInboxRefresh(250, Boolean(payload.fresh));
+        }
+        if (payload.targets.includes('sessionHistory')) {
+          for (const sessionKey of payload.sessionKeys ?? []) {
+            scheduleRealtimeSessionHistoryRefresh(sessionKey, Boolean(payload.fresh));
+          }
+        }
+
+        res.writeHead(202);
+        res.end('accepted');
+        return;
+      }
+
+      res.writeHead(400);
+      res.end('unsupported kind');
+    });
+    return;
+  }
+
   // Health check endpoint
   if (req.url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -931,6 +1828,9 @@ wss.on('connection', (ws) => {
     lastHistoryId: null,
     alive: true,
     terminalSessions: new Set(),
+    realtimeSubscriptions: [],
+    backpressureQueue: [],
+    flushTimer: null,
   };
 
   clients.set(client.id, client);
@@ -943,11 +1843,13 @@ wss.on('connection', (ws) => {
     data: {
       clientId: client.id,
       gateway: gatewayWs?.readyState === WebSocket.OPEN ? 'connected' : 'connecting',
+      realtimeSeq,
     },
   });
 
   // Send initial inbox
   void syncClientInbox(client);
+  startBrowserDiscoveryRealtimeLoop();
 
   ws.on('message', (raw) => {
     handleClientMessage(client, typeof raw === 'string' ? raw : raw.toString());
@@ -956,6 +1858,9 @@ wss.on('connection', (ws) => {
   ws.on('pong', () => { client.alive = true; });
 
   ws.on('close', () => {
+    // Stop backpressure flush timer
+    stopFlushTimer(client);
+    client.backpressureQueue.length = 0;
     // Detach from all terminal sessions
     for (const sessionName of client.terminalSessions) {
       removeClientFromTerminal(client.id, sessionName);
@@ -973,6 +1878,7 @@ wss.on('connection', (ws) => {
 setInterval(() => {
   for (const client of clients.values()) {
     if (!client.alive) {
+      stopFlushTimer(client);
       client.ws.terminate();
       clients.delete(client.id);
       continue;
@@ -1132,6 +2038,8 @@ function scheduleReviewRefresh(delayMs = 500) {
   diffDebounceTimer = setTimeout(() => {
     void broadcastReviewFileChanges();
     broadcastDiffStats();
+    scheduleRealtimeRuntimeRefresh({ reason: 'review.refresh', fresh: true });
+    scheduleRealtimeMobileInboxRefresh(250, true);
   }, delayMs);
 }
 
@@ -1159,13 +2067,18 @@ reviewPollTimer = setInterval(() => {
 }, REVIEW_POLL_INTERVAL_MS);
 if (reviewPollTimer.unref) reviewPollTimer.unref();
 
-// Don't purge tmux sessions on startup — the reuse logic in handleTerminalCreate
-// will find and reattach to existing cortex-dash-* sessions. Purging here races
-// with clients that reconnect immediately after a hot reload.
+// Session preservation strategy:
+// - cortex-dash-* sessions survive server restarts for reuse (findExistingDashSession).
+// - On WS disconnect, a 10s grace period allows hot-reload reconnects before killing.
+// - cortex-codex-*/cortex-claude-* sessions persist indefinitely (stall detector manages them).
 
 // Start everything
 connectGateway();
 startPollingLoops();
+startBrowserDiscoveryRealtimeLoop();
+startAttachedBrowserRefreshLoop();
+scheduleRealtimeRuntimeRefresh({ reason: 'startup', fresh: false });
+scheduleRealtimeMobileInboxRefresh(500);
 
 httpServer.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
@@ -1191,21 +2104,11 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
   }
 });
 
-// Kill all stale cortex-dash-* tmux sessions on startup (clean slate)
-try {
-  const sessions = execSync('tmux list-sessions -F "#{session_name}" 2>/dev/null || true', { encoding: 'utf-8' })
-    .trim()
-    .split('\n')
-    .filter(s => s.startsWith('cortex-dash-'));
-  for (const s of sessions) {
-    try {
-      execSync(`tmux kill-session -t ${s}`, { encoding: 'utf-8' });
-    } catch { /* already gone */ }
-  }
-  if (sessions.length > 0) {
-    console.log(`[ws-server] Cleaned up ${sessions.length} stale tmux session(s)`);
-  }
-} catch { /* tmux not running — fine */ }
+// Dashboard tmux sessions (cortex-dash-*) are NOT purged on startup.
+// The reuse logic in handleTerminalCreate will find and reattach to them,
+// and the disconnect handler gives a 10s grace period for hot-reload reconnects.
+// Agent-launched sessions (cortex-codex-*, cortex-claude-*) are separately
+// managed by the stall detector and lifecycle system.
 
 httpServer.listen(WS_PORT, '0.0.0.0', () => {
   console.log(`[ws-server] Cortex IDE WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
@@ -1218,6 +2121,14 @@ function shutdown(signal: string) {
 
   // Stop stall detection
   clearInterval(stallCheckTimer);
+  if (runtimeRefreshTimer) clearTimeout(runtimeRefreshTimer);
+  if (mobileRefreshTimer) clearTimeout(mobileRefreshTimer);
+  for (const timer of sessionHistoryTimers.values()) {
+    clearTimeout(timer);
+  }
+  sessionHistoryTimers.clear();
+  if (browserDiscoveryTimer) clearInterval(browserDiscoveryTimer);
+  if (attachedBrowserRefreshTimer) clearInterval(attachedBrowserRefreshTimer);
 
   // Close gateway connection
   if (gatewayWs) {
