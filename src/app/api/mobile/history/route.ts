@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
   const sessionKey = request.nextUrl.searchParams.get('sessionKey')?.trim();
   const rawLimit = request.nextUrl.searchParams.get('limit');
   const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : 6;
-  const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 20) : 6;
+  const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 6;
 
   if (!sessionKey) {
     return NextResponse.json({ error: 'sessionKey is required' }, { status: 400 });
