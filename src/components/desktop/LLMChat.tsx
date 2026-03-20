@@ -1216,12 +1216,35 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal }: {
   const [applyModal, setApplyModal] = useState<{ code: string; language: string } | null>(null);
   const [applyPath, setApplyPath] = useState('');
   const [applyStatus, setApplyStatus] = useState<'idle' | 'applying' | 'done' | 'error'>('idle');
+  const [applyFileSuggestions, setApplyFileSuggestions] = useState<{ path: string }[]>([]);
+  const [applyFileIndex, setApplyFileIndex] = useState(0);
+  const applySearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Apply code to a file
   const handleApplyToFile = useCallback((code: string, language: string) => {
     setApplyModal({ code, language });
     setApplyPath('');
     setApplyStatus('idle');
+    setApplyFileSuggestions([]);
+  }, []);
+
+  // Search files for apply modal
+  const searchApplyFiles = useCallback((query: string) => {
+    if (applySearchTimeout.current) clearTimeout(applySearchTimeout.current);
+    if (!query.trim()) {
+      setApplyFileSuggestions([]);
+      return;
+    }
+    applySearchTimeout.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/v2/context/files?q=${encodeURIComponent(query)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setApplyFileSuggestions(data.files ?? []);
+          setApplyFileIndex(0);
+        }
+      } catch { /* ignore */ }
+    }, 100);
   }, []);
 
   const doApply = useCallback(async () => {
@@ -2630,17 +2653,49 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal }: {
               </div>
             </div>
 
-            {/* Path input */}
-            <div style={{ paddingTop: 16, paddingBottom: 16, paddingLeft: 20, paddingRight: 20 }}>
+            {/* File search input */}
+            <div style={{ paddingTop: 16, paddingBottom: 16, paddingLeft: 20, paddingRight: 20, position: 'relative' }}>
               <label style={{ fontSize: 12, fontWeight: 500, color: '#64748b', display: 'block', marginBottom: 6 }}>
-                File path (relative to repo root)
+                Search for a file or type a new path
               </label>
               <input
                 type="text"
                 value={applyPath}
-                onChange={(e) => setApplyPath(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') doApply(); }}
-                placeholder="src/components/Example.tsx"
+                onChange={(e) => {
+                  setApplyPath(e.target.value);
+                  searchApplyFiles(e.target.value);
+                }}
+                onKeyDown={(e) => {
+                  if (applyFileSuggestions.length > 0) {
+                    if (e.key === 'ArrowDown') {
+                      e.preventDefault();
+                      setApplyFileIndex(prev => Math.min(prev + 1, applyFileSuggestions.length - 1));
+                      return;
+                    }
+                    if (e.key === 'ArrowUp') {
+                      e.preventDefault();
+                      setApplyFileIndex(prev => Math.max(prev - 1, 0));
+                      return;
+                    }
+                    if (e.key === 'Tab') {
+                      e.preventDefault();
+                      setApplyPath(applyFileSuggestions[applyFileIndex].path);
+                      setApplyFileSuggestions([]);
+                      return;
+                    }
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      setApplyPath(applyFileSuggestions[applyFileIndex].path);
+                      setApplyFileSuggestions([]);
+                      return;
+                    }
+                  }
+                  if (e.key === 'Enter' && applyFileSuggestions.length === 0) {
+                    e.preventDefault();
+                    doApply();
+                  }
+                }}
+                placeholder="Start typing to search files..."
                 autoFocus
                 style={{
                   width: '100%',
@@ -2657,10 +2712,66 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal }: {
                   transition: 'border-color 150ms',
                 }}
                 onFocus={(e) => { (e.currentTarget).style.borderColor = '#3b82f6'; }}
-                onBlur={(e) => { (e.currentTarget).style.borderColor = '#e2e8f0'; }}
+                onBlur={(e) => {
+                  // Delay blur so click on suggestion registers
+                  setTimeout(() => {
+                    (e.currentTarget).style.borderColor = '#e2e8f0';
+                    setApplyFileSuggestions([]);
+                  }, 200);
+                }}
               />
+
+              {/* File search results dropdown */}
+              {applyFileSuggestions.length > 0 && (
+                <div style={{
+                  position: 'absolute',
+                  left: 20,
+                  right: 20,
+                  top: '100%',
+                  marginTop: -12,
+                  background: 'white',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 8,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.1)',
+                  maxHeight: 200,
+                  overflowY: 'auto',
+                  zIndex: 10,
+                }}>
+                  {applyFileSuggestions.map((f, idx) => (
+                    <button
+                      key={f.path}
+                      type="button"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        setApplyPath(f.path);
+                        setApplyFileSuggestions([]);
+                      }}
+                      style={{
+                        display: 'block',
+                        width: '100%',
+                        paddingTop: 8,
+                        paddingBottom: 8,
+                        paddingLeft: 12,
+                        paddingRight: 12,
+                        border: 'none',
+                        background: idx === applyFileIndex ? '#f1f5f9' : 'transparent',
+                        color: '#1e293b',
+                        fontSize: 12,
+                        fontFamily: 'ui-monospace, monospace',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        transition: 'background 60ms',
+                      }}
+                      onMouseEnter={() => setApplyFileIndex(idx)}
+                    >
+                      {f.path}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>
-                File will be created if it doesn't exist, or overwritten if it does.
+                {applyPath.trim() ? `Will write to: ${applyPath}` : 'Type to search existing files or enter a new path'}
               </div>
             </div>
 
