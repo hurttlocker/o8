@@ -1,17 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { demoApprovals } from '@/lib/json-render/demo-specs';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ApprovalRequest } from '@/lib/json-render/demo-specs';
 import type { ReviewChangedFile, RuntimeReviewPacket } from '@/lib/fleet/types';
 import type {
-  MobileActionRequest,
   MobileInboxSnapshot,
   MobileReviewFileResponse,
   MobileRuntimeTailGroup,
   MobileTranscriptEntry,
   MobileTranscriptMedia,
 } from '@/lib/mobile/types';
+import type { RealtimeMutationRecord } from '@/lib/realtime/types';
 import type { DraftAttachment, PendingOwnedTurn } from '../types';
 import { pickCurrentSession } from '../utils';
 
@@ -28,7 +27,7 @@ export function useMobileState(init: MobileStateInit) {
   // ── Core state ──
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot>(initialSnapshot);
   const [selectedId, setSelectedId] = useState(() => pickCurrentSession(initialSnapshot)?.id ?? '');
-  const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings'>('squad');
+  const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'memory'>('squad');
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [surfaceNote, setSurfaceNote] = useState<string | null>(null);
 
@@ -70,6 +69,10 @@ export function useMobileState(init: MobileStateInit) {
   const [actionNoteBySession, setActionNoteBySession] = useState<Record<string, string | null>>({});
   const [draftAttachmentsBySession, setDraftAttachmentsBySession] = useState<Record<string, DraftAttachment[]>>({});
   const [pendingOwnedTurnBySession, setPendingOwnedTurnBySession] = useState<Record<string, PendingOwnedTurn>>({});
+  const [realtimeMutationsById, setRealtimeMutationsById] = useState<Record<string, RealtimeMutationRecord>>({});
+  const [pendingMutationIdBySession, setPendingMutationIdBySession] = useState<Record<string, string>>({});
+  const pendingMutationIdBySessionRef = useRef(pendingMutationIdBySession);
+  useEffect(() => { pendingMutationIdBySessionRef.current = pendingMutationIdBySession; }, [pendingMutationIdBySession]);
   const [enhancing, setEnhancing] = useState(false);
   const [preEnhanceDraft, setPreEnhanceDraft] = useState<string | null>(null);
 
@@ -158,6 +161,9 @@ export function useMobileState(init: MobileStateInit) {
     actionNoteBySession, setActionNoteBySession,
     draftAttachmentsBySession, setDraftAttachmentsBySession,
     pendingOwnedTurnBySession, setPendingOwnedTurnBySession,
+    realtimeMutationsById, setRealtimeMutationsById,
+    pendingMutationIdBySession, setPendingMutationIdBySession,
+    pendingMutationIdBySessionRef,
     enhancing, setEnhancing,
     preEnhanceDraft, setPreEnhanceDraft,
 
