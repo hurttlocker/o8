@@ -1,37 +1,31 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
-const DEFAULT_REPO = process.env.GITHUB_REPO || 'hurttlocker/cortex-ide';
+const execFileAsync = promisify(execFile);
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const repo = searchParams.get('repo') || DEFAULT_REPO;
+  const repo = searchParams.get('repo');
 
-  // Validate repo format
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+  if (!repo || !/^[\w.-]+\/[\w.-]+$/.test(repo)) {
     return NextResponse.json({ error: 'Invalid repo format', prs: [] }, { status: 400 });
   }
 
   try {
-    const openJson = execSync(
-      `gh pr list --repo ${repo} --state open --limit 10 --json number,title,state,author,headRefName,additions,deletions,changedFiles,createdAt,labels`,
-      { encoding: 'utf-8', timeout: 15000 },
-    );
+    const { stdout } = await execFileAsync('gh', [
+      'pr', 'list',
+      '--repo', repo,
+      '--state', 'open',
+      '--limit', '10',
+      '--json', 'number,title,author,headRefName,baseRefName,state,additions,deletions,changedFiles,statusCheckRollup,reviewDecision,url,createdAt',
+    ], { timeout: 15_000, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' } });
 
-    const closedJson = execSync(
-      `gh pr list --repo ${repo} --state closed --limit 10 --json number,title,state,author,headRefName,additions,deletions,changedFiles,createdAt,labels`,
-      { encoding: 'utf-8', timeout: 15000 },
-    );
-
-    const open = JSON.parse(openJson);
-    const closed = JSON.parse(closedJson);
-    const all = [...open, ...closed];
-
-    return NextResponse.json({ prs: all, repo });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    return NextResponse.json({ error: message, prs: [], repo }, { status: 200 });
+    const prs = JSON.parse(stdout || '[]');
+    return NextResponse.json({ prs, repo });
+  } catch {
+    return NextResponse.json({ prs: [], repo });
   }
 }
