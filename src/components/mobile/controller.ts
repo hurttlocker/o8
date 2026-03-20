@@ -11,6 +11,7 @@ export {
   mobileSyncOnce,
   refreshInboxSnapshot,
   loadSessionHistory,
+  loadMoreHistory,
   loadOwnedReviewPacketForSession,
   loadReviewFilePreview,
 } from './controller-sync';

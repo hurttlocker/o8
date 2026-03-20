@@ -313,7 +313,7 @@ export async function getSessionTranscript(sessionKey: string, limit = 12, fresh
     try {
       const payload = await callGateway<GatewayChatHistoryResult>('chat.history', {
         sessionKey,
-        limit: Math.min(Math.max(limit * 5, 24), 100),
+        limit: Math.min(Math.max(limit * 3, 24), 300),
       });
 
   // Track per-timestamp-role counts to generate stable IDs.

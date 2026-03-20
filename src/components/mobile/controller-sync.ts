@@ -65,7 +65,7 @@ export async function mobileSyncOnce({
 }: MobileSyncArgs): Promise<SyncResponse | null> {
   const body: SyncRequest = {};
   if (wantInbox) body.inbox = { etag: cachedInboxEtag };
-  if (historySessionKey) body.history = { sessionKey: historySessionKey, sinceId: historyLastId, limit: 18 };
+  if (historySessionKey) body.history = { sessionKey: historySessionKey, sinceId: historyLastId, limit: 50 };
   if (reviewFilePath) body.review = { includeFile: reviewFilePath };
   if (linkedSessionKey) body.linked = { sessionKey: linkedSessionKey, sinceId: linkedLastId };
 
@@ -235,7 +235,7 @@ export async function loadSessionHistory({
 
   setHistoryLoading((current) => ({ ...current, [sessionKey]: true }));
   try {
-    const response = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=18&_t=${Date.now()}`, {
+    const response = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=50&_t=${Date.now()}`, {
       cache: 'no-store',
       headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
     });
@@ -300,6 +300,45 @@ export async function loadSessionHistory({
     throw error;
   } finally {
     setHistoryLoading((current) => ({ ...current, [sessionKey]: false }));
+  }
+}
+
+/**
+ * Load older messages beyond what's currently in the transcript.
+ * Fetches a larger window and prepends anything new to the front.
+ */
+export async function loadMoreHistory({
+  sessionKey,
+  historyBySession,
+  setHistoryLoading,
+  setHistoryBySession,
+}: Pick<LoadHistoryArgs, 'sessionKey' | 'historyBySession' | 'setHistoryLoading' | 'setHistoryBySession'>) {
+  const current = historyBySession[sessionKey] ?? [];
+  const nextLimit = Math.min(current.length + 50, 100);
+
+  setHistoryLoading((prev) => ({ ...prev, [sessionKey]: true }));
+  try {
+    const response = await fetch(
+      `/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=${nextLimit}&fresh=1&_t=${Date.now()}`,
+      { cache: 'no-store', headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' } },
+    );
+    const payload = await readJson<MobileHistoryResponse>(response);
+    const next = payload.transcript;
+
+    // Merge: new messages that aren't already in the list go at front
+    const existingIds = new Set(current.map(e => e.id));
+    const olderMessages = next.filter(e => !existingIds.has(e.id));
+    if (olderMessages.length > 0) {
+      setHistoryBySession((prev) => ({
+        ...prev,
+        [sessionKey]: [...olderMessages, ...current],
+      }));
+    }
+    return olderMessages.length;
+  } catch {
+    return 0;
+  } finally {
+    setHistoryLoading((prev) => ({ ...prev, [sessionKey]: false }));
   }
 }
 

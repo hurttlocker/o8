@@ -102,6 +102,8 @@ export interface ChatViewProps {
   setExpandedMedia: Dispatch<SetStateAction<MobileTranscriptMedia | null>>;
   onOpenDiff: () => void;
   onScrollToLatestMessage: (force?: boolean) => void;
+  onLoadMore?: () => Promise<number>;
+  hasMoreHistory?: boolean;
 }
 
 export interface ComposeBarHandlers {
