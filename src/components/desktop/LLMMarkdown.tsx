@@ -175,7 +175,26 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
           }}
         >
           {error ? (
-            <div style={{ color: '#ef4444', fontSize: 12 }}>Diagram error: {error}</div>
+            <div>
+              <div style={{ color: '#ef4444', fontSize: 11, marginBottom: 8, fontFamily: '-apple-system, system-ui, sans-serif' }}>⚠ Diagram syntax error — showing raw code</div>
+              <pre style={{
+                margin: 0,
+                paddingTop: 12,
+                paddingBottom: 12,
+                paddingLeft: 16,
+                paddingRight: 16,
+                fontSize: 12,
+                lineHeight: 1.5,
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                background: '#fef2f2',
+                borderRadius: 6,
+                overflowX: 'auto',
+                color: '#334155',
+                border: '1px solid #fecaca',
+              }}>
+                {code}
+              </pre>
+            </div>
           ) : svg ? (
             <div dangerouslySetInnerHTML={{ __html: svg }} style={{ maxWidth: '100%' }} />
           ) : (

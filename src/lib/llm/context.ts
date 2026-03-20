@@ -66,5 +66,6 @@ ${ctx.fileTreeSummary}
 - Be concise and actionable. Suggest specific file paths when discussing code.
 - You can see the repo structure but cannot yet read or edit files directly.
 - When the user asks about code, reference the file tree to guide them.
-- Format code blocks with language tags for syntax highlighting.`;
+- Format code blocks with language tags for syntax highlighting.
+- When generating Mermaid diagrams, use simple syntax: short node IDs (A, B, C), avoid special characters in labels, use \`graph TD\` or \`flowchart TD\` for flow charts. Keep labels short and wrap in square brackets like \`A[Label]\`. Avoid pipes in labels.`;
 }
