@@ -1,6 +1,8 @@
 'use client';
 import {
+  useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -61,6 +63,9 @@ import { useMobileScroll } from './mobile/hooks/useMobileScroll';
 import { useMobileStreaming } from './mobile/hooks/useMobileStreaming';
 import { useMobileActions } from './mobile/hooks/useMobileActions';
 import { NotificationBanner, useNotifications } from './mobile/NotificationBanner';
+import { ProactiveSurface, useProactiveItems } from './mobile/ProactiveSurface';
+import { CrossAgentPill } from './mobile/CrossAgentPill';
+import { initSounds, playAgentComplete, playApprovalNeeded } from '@/lib/mobile/sounds';
 
 export function MobileRemoteShell(props: MobileRemoteShellProps) {
   return (
@@ -191,6 +196,30 @@ function MobileRemoteShellInner({
   const [prReviewNumber, setPrReviewNumber] = useState<number | null>(null);
   const [prReviewRepo, setPrReviewRepo] = useState('');
   const { notifications, dismiss: dismissNotification } = useNotifications(snapshot);
+
+  // Proactive surface — context-aware cards at top of chat
+  const openPR = useCallback((repo: string, prNumber: number) => {
+    setPrReviewRepo(repo);
+    setPrReviewNumber(prNumber);
+    setPrReviewOpen(true);
+  }, []);
+  const { items: proactiveItems, dismiss: dismissProactive } = useProactiveItems(snapshot.sessions, openPR);
+
+  // Cross-agent awareness
+  const runningAgentCount = useMemo(() => snapshot.sessions.filter(s => s.status === 'running').length, [snapshot.sessions]);
+  const totalAgentCount = snapshot.sessions.length;
+
+  // Sound effects on notifications
+  useEffect(() => { initSounds(); }, []);
+  const prevNotifCount = useRef(notifications.length);
+  useEffect(() => {
+    if (notifications.length > prevNotifCount.current) {
+      const latest = notifications[0];
+      if (latest?.type === 'agent_complete') playAgentComplete();
+      else if (latest?.type === 'approval') playApprovalNeeded();
+    }
+    prevNotifCount.current = notifications.length;
+  }, [notifications]);
 
   // ── Swipe right from left edge to go back to chat ──
   useSwipeBack(
@@ -560,6 +589,8 @@ function MobileRemoteShellInner({
             <MobileTerminal tmuxSession={selectedSession!.tmuxSession!} />
           ) : (
             <>
+              {/* Proactive surface — ambient awareness cards */}
+              <ProactiveSurface items={proactiveItems} onDismiss={dismissProactive} />
               <ChatView
                 transcriptEntries={transcriptEntries}
                 selectedSession={selectedSession}
@@ -620,6 +651,16 @@ function MobileRemoteShellInner({
         <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
           {!terminalActive && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' && activeView !== 'issues' ? (
             <div className="remodex-compose-shell">
+              {/* Cross-agent awareness pill */}
+              {runningAgentCount > 0 || totalAgentCount > 1 ? (
+                <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 4 }}>
+                  <CrossAgentPill
+                    runningCount={runningAgentCount}
+                    totalCount={totalAgentCount}
+                    onTap={() => setActiveView('fleet')}
+                  />
+                </div>
+              ) : null}
               <ComposeBar
                 session={selectedSession}
                 sessionKey={selectedSessionKey}

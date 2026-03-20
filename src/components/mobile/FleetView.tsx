@@ -1,8 +1,10 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo, useState, useCallback } from 'react';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type { AgentSummary } from '@/lib/fleet/types';
+import { useLongPress, ContextMenu, type ContextMenuItem } from './ContextMenu';
+import { EmptyState } from './EmptyState';
 
 interface FleetViewProps {
   snapshot: MobileInboxSnapshot;
@@ -59,15 +61,32 @@ function ContextRing({ percent, size = 28 }: { percent: number; size?: number })
   );
 }
 
-function AgentCard({ agent, onSelect }: { agent: AgentSummary; onSelect: () => void }) {
+function AgentCard({ agent, onSelect, onKill, onMessage }: { agent: AgentSummary; onSelect: () => void; onKill?: () => void; onMessage?: () => void }) {
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const longPress = useLongPress((x, y) => setCtxMenu({ x, y }));
+
+  const ctxItems: ContextMenuItem[] = [
+    { id: 'message', label: 'Message', iconPath: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' },
+    ...(agent.status === 'running' ? [{
+      id: 'kill', label: 'Stop Agent', iconPath: 'M18 6L6 18 M6 6l12 12', destructive: true,
+    }] : []),
+  ];
+
+  const handleCtxSelect = useCallback((id: string) => {
+    if (id === 'message') onMessage?.() ?? onSelect();
+    if (id === 'kill') onKill?.();
+    setCtxMenu(null);
+  }, [onSelect, onKill, onMessage]);
   const isRunning = agent.status === 'running';
   const isDone = agent.status === 'idle' && agent.currentTask;
   const contextPct = agent.context?.usedPercent ?? 0;
 
   return (
+    <>
     <button
       type="button"
       onClick={onSelect}
+      {...longPress}
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -191,6 +210,16 @@ function AgentCard({ agent, onSelect }: { agent: AgentSummary; onSelect: () => v
         <polyline points="9 18 15 12 9 6" />
       </svg>
     </button>
+    {ctxMenu ? (
+      <ContextMenu
+        visible={true}
+        x={ctxMenu.x} y={ctxMenu.y}
+        items={ctxItems}
+        onSelect={handleCtxSelect}
+        onClose={() => setCtxMenu(null)}
+      />
+    ) : null}
+    </>
   );
 }
 
@@ -430,33 +459,15 @@ export const FleetView = memo(function FleetView({
         </CollapsibleSection>
       )}
 
-      {/* Empty state */}
+      {/* Empty state with personality */}
       {totalAgents === 0 && (
-        <div style={{
-          padding: '40px 20px',
-          textAlign: 'center',
-        }}>
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none"
-            stroke="rgba(0,122,255,0.2)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-            style={{ margin: '0 auto 12px' }}>
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-            <circle cx="9" cy="7" r="4" />
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-          </svg>
-          <p style={{
-            fontSize: 15, fontWeight: 600, color: '#8e8e93',
-            margin: 0,
-          }}>
-            No agents connected
-          </p>
-          <p style={{
-            fontSize: 12, color: '#c7c7cc',
-            margin: '4px 0 0',
-          }}>
-            Agents will appear here when they connect to your gateway.
-          </p>
-        </div>
+        <EmptyState
+          iconPath="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75"
+          title="No agents running"
+          subtitle="Launch one to get started."
+          actionLabel="Launch Agent"
+          onAction={onLaunch}
+        />
       )}
 
       <style>{`

@@ -255,17 +255,19 @@ export function useNotifications(snapshot: { items: Array<{ id: string; kind: st
     if (newNotifs.length > 0) {
       setNotifications(prev => [...newNotifs, ...prev].slice(0, 20));
 
-      // Auto-dismiss after 2.5 seconds
-      for (const notification of newNotifs) {
+      // Auto-dismiss after 3 seconds, staggered sequentially so reader can read each one
+      for (let idx = 0; idx < newNotifs.length; idx++) {
+        const notification = newNotifs[idx];
         const existingTimer = dismissTimersRef.current.get(notification.id);
         if (existingTimer) clearTimeout(existingTimer);
 
+        const delay = 3000 + idx * 1500; // 3s for first, +1.5s per additional
         const timer = setTimeout(() => {
           dismissTimersRef.current.delete(notification.id);
           setNotifications(prev =>
             prev.map(n => n.id === notification.id ? { ...n, dismissed: true } : n)
           );
-        }, 2500);
+        }, delay);
 
         dismissTimersRef.current.set(notification.id, timer);
       }
