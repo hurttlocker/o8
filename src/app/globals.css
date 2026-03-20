@@ -42,7 +42,7 @@ html::-webkit-scrollbar {
   --msg-assistant-bg: rgba(255,255,255,0.9);
 }
 
-:root.dark-mode {
+:root.dark-mode, .dark-mode {
   color-scheme: dark;
   --bg: #000000;
   --panel: rgba(28, 28, 30, 0.82);
@@ -76,135 +76,140 @@ html::-webkit-scrollbar {
 }
 
 /* ═══ Dark Mode ═══ */
-:root.dark-mode body { background: #000000; color: #f5f5f7; }
-:root.dark-mode .mobile-wrap { background: #000000 !important; }
-:root.dark-mode .remodex-phone-shell { background: #000000 !important; }
-:root.dark-mode .remodex-scroll-view { background: transparent !important; }
+/* Use both :root.dark-mode, .dark-mode and .dark-mode for iOS Safari compat */
+:root.dark-mode, .dark-mode, .dark-mode { background: #000000 !important; color: #f5f5f7 !important; }
+:root.dark-mode, .dark-mode body, body.dark-mode {
+  background: #000000 !important;
+  color: #f5f5f7 !important;
+}
+:root.dark-mode, .dark-mode .mobile-wrap, .dark-mode .mobile-wrap { background: #000000 !important; }
+:root.dark-mode, .dark-mode .remodex-phone-shell { background: #000000 !important; }
+:root.dark-mode, .dark-mode .remodex-scroll-view { background: transparent !important; }
 
 /* Frost bar */
-:root.dark-mode .remodex-frost-bar {
+:root.dark-mode, .dark-mode .remodex-frost-bar {
   background: linear-gradient(180deg, rgba(0,0,0,1) 0%, rgba(0,0,0,0.97) 25%, rgba(0,0,0,0.8) 45%, rgba(0,0,0,0.4) 70%, rgba(0,0,0,0.1) 85%, rgba(0,0,0,0) 100%) !important;
 }
 
 /* TopBar */
-:root.dark-mode .remodex-topbar { color: #f5f5f7; }
-:root.dark-mode .remodex-title-kicker { color: #98989d !important; }
-:root.dark-mode .remodex-title-stack h1 { color: #f5f5f7 !important; }
-:root.dark-mode .remodex-title-stack p { color: #636366 !important; }
+:root.dark-mode, .dark-mode .remodex-topbar { color: #f5f5f7; }
+:root.dark-mode, .dark-mode .remodex-title-kicker { color: #98989d !important; }
+:root.dark-mode, .dark-mode .remodex-title-stack h1 { color: #f5f5f7 !important; }
+:root.dark-mode, .dark-mode .remodex-title-stack p { color: #636366 !important; }
 
 /* Compose bar */
-:root.dark-mode .remodex-compose-shell {
+:root.dark-mode, .dark-mode .remodex-compose-shell {
   background: rgba(28,28,30,0.8) !important;
   border-color: rgba(56,56,58,0.5) !important;
 }
-:root.dark-mode .remodex-compose-input {
+:root.dark-mode, .dark-mode .remodex-compose-input {
   color: #f5f5f7 !important;
 }
-:root.dark-mode .remodex-compose-input::placeholder {
+:root.dark-mode, .dark-mode .remodex-compose-input::placeholder {
   color: rgba(255,255,255,0.25) !important;
 }
 
 /* User messages */
-:root.dark-mode .remodex-user-bubble {
+:root.dark-mode, .dark-mode .remodex-user-bubble {
   background: rgba(10,132,255,0.2) !important;
   color: #f5f5f7 !important;
 }
-:root.dark-mode .remodex-user-turn-wrap { color: #f5f5f7; }
+:root.dark-mode, .dark-mode .remodex-user-turn-wrap { color: #f5f5f7; }
 
 /* Assistant messages */
-:root.dark-mode .remodex-message-card {
+:root.dark-mode, .dark-mode .remodex-message-card {
   background: rgba(44,44,46,0.6) !important;
   border-color: rgba(255,255,255,0.06) !important;
   color: #e5e5ea !important;
 }
-:root.dark-mode .remodex-message-card .remodex-speaker-label,
-:root.dark-mode .remodex-message-card h1,
-:root.dark-mode .remodex-message-card h2,
-:root.dark-mode .remodex-message-card h3,
-:root.dark-mode .remodex-message-card strong { color: #f5f5f7 !important; }
-:root.dark-mode .remodex-message-body { color: #e5e5ea !important; }
-:root.dark-mode .remodex-message-body p { color: #e5e5ea !important; }
-:root.dark-mode .remodex-message-body pre {
+:root.dark-mode, .dark-mode .remodex-message-card .remodex-speaker-label,
+:root.dark-mode, .dark-mode .remodex-message-card h1,
+:root.dark-mode, .dark-mode .remodex-message-card h2,
+:root.dark-mode, .dark-mode .remodex-message-card h3,
+:root.dark-mode, .dark-mode .remodex-message-card strong { color: #f5f5f7 !important; }
+:root.dark-mode, .dark-mode .remodex-message-body { color: #e5e5ea !important; }
+:root.dark-mode, .dark-mode .remodex-message-body p { color: #e5e5ea !important; }
+:root.dark-mode, .dark-mode .remodex-message-body pre {
   background: rgba(0,0,0,0.5) !important;
   color: #e5e5ea !important;
 }
-:root.dark-mode .remodex-message-body code {
+:root.dark-mode, .dark-mode .remodex-message-body code {
   background: rgba(0,0,0,0.4) !important;
   color: #e5e5ea !important;
 }
-:root.dark-mode .remodex-message-body li { color: #e5e5ea !important; }
-:root.dark-mode .remodex-timestamp-label { color: #636366 !important; }
+:root.dark-mode, .dark-mode .remodex-message-body li { color: #e5e5ea !important; }
+:root.dark-mode, .dark-mode .remodex-timestamp-label { color: #636366 !important; }
 
 /* Streaming card */
-:root.dark-mode .remodex-streaming-card {
+:root.dark-mode, .dark-mode .remodex-streaming-card {
   background: rgba(44,44,46,0.6) !important;
   border-color: rgba(255,255,255,0.06) !important;
 }
 
 /* Typing indicators */
-:root.dark-mode .remodex-typing-bubble { background: rgba(44,44,46,0.6) !important; }
-:root.dark-mode .remodex-typing-bubble-label { color: #98989d !important; }
-:root.dark-mode .remodex-typing-dot { background: #636366 !important; }
+:root.dark-mode, .dark-mode .remodex-typing-bubble { background: rgba(44,44,46,0.6) !important; }
+:root.dark-mode, .dark-mode .remodex-typing-bubble-label { color: #98989d !important; }
+:root.dark-mode, .dark-mode .remodex-typing-dot { background: #636366 !important; }
 
 /* System lines */
-:root.dark-mode .remodex-system-line { color: #636366 !important; }
-:root.dark-mode .remodex-compaction-card {
+:root.dark-mode, .dark-mode .remodex-system-line { color: #636366 !important; }
+:root.dark-mode, .dark-mode .remodex-compaction-card {
   background: rgba(44,44,46,0.6) !important;
   border-color: rgba(255,255,255,0.06) !important;
 }
 
 /* Bottom dock */
-:root.dark-mode .remodex-bottom-dock { background: transparent !important; }
+:root.dark-mode, .dark-mode .remodex-bottom-dock { background: transparent !important; }
 
 /* Diff pill */
-:root.dark-mode .remodex-diff-pill { color: #e5e5ea !important; }
-:root.dark-mode .remodex-diff-pill-caption { color: #636366 !important; }
+:root.dark-mode, .dark-mode .remodex-diff-pill { color: #e5e5ea !important; }
+:root.dark-mode, .dark-mode .remodex-diff-pill-caption { color: #636366 !important; }
 
 /* Scroll-to-bottom pill */
-:root.dark-mode .remodex-scroll-bottom-pill {
+:root.dark-mode, .dark-mode .remodex-scroll-bottom-pill {
   background: rgba(10,132,255,0.15) !important;
   border-color: rgba(10,132,255,0.25) !important;
 }
 
 /* Runtime bar */
-:root.dark-mode .remodex-runtime-bar { color: #636366 !important; }
+:root.dark-mode, .dark-mode .remodex-runtime-bar { color: #636366 !important; }
 
 /* Squad picker dropdown */
-:root.dark-mode .remodex-squad-picker {
+:root.dark-mode, .dark-mode .remodex-squad-picker {
   background: rgba(28,28,30,0.95) !important;
   border-color: rgba(255,255,255,0.08) !important;
 }
 
 /* Rich text in dark mode */
-:root.dark-mode .remodex-rich-paragraph,
-:root.dark-mode .remodex-rich-heading,
-:root.dark-mode .remodex-rich-list,
-:root.dark-mode .remodex-rich-text { color: #e5e5ea !important; }
-:root.dark-mode .remodex-rich-heading { color: #f5f5f7 !important; }
-:root.dark-mode .remodex-rich-code-block {
+:root.dark-mode, .dark-mode .remodex-rich-paragraph,
+:root.dark-mode, .dark-mode .remodex-rich-heading,
+:root.dark-mode, .dark-mode .remodex-rich-list,
+:root.dark-mode, .dark-mode .remodex-rich-text { color: #e5e5ea !important; }
+:root.dark-mode, .dark-mode .remodex-rich-heading { color: #f5f5f7 !important; }
+:root.dark-mode, .dark-mode .remodex-rich-code-block {
   background: rgba(0,0,0,0.5) !important;
   border-color: rgba(255,255,255,0.06) !important;
 }
-:root.dark-mode .remodex-rich-inline-code {
+:root.dark-mode, .dark-mode .remodex-rich-inline-code {
   background: rgba(0,0,0,0.35) !important;
   color: #e5e5ea !important;
 }
 
 /* Speaker label */
-:root.dark-mode .remodex-speaker-label { color: #f5f5f7 !important; }
-:root.dark-mode .remodex-message-head span { color: #98989d !important; }
+:root.dark-mode, .dark-mode .remodex-speaker-label { color: #f5f5f7 !important; }
+:root.dark-mode, .dark-mode .remodex-message-head span { color: #98989d !important; }
 
 /* Kill decorative gradient in dark mode */
-:root.dark-mode .mobile-wrap::before {
+:root.dark-mode, .dark-mode .mobile-wrap::before {
   background: radial-gradient(circle at 50% 30%, rgba(10,132,255,0.08), transparent 50%) !important;
 }
 
 /* Full page dark mode */
-:root.dark-mode .remodex-mobile-page {
+:root.dark-mode, .dark-mode .remodex-mobile-page {
   background: #000000 !important;
   color: #f5f5f7 !important;
 }
-:root.dark-mode .remodex-phone-shell {
+:root.dark-mode, .dark-mode .remodex-phone-shell {
   background: #000000 !important;
   color: #f5f5f7 !important;
 }
