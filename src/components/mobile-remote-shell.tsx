@@ -543,18 +543,6 @@ function MobileRemoteShellInner({
             </>
           )
           ) : null}
-          {/* RuntimeBar — sits at bottom of scroll content, not fixed */}
-          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' ? (
-            <RuntimeBar
-              snapshot={snapshot}
-              selectedSession={selectedSession}
-              selectedReviewPacket={selectedReviewPacket}
-              isOwnedCodexSession={isOwnedCodexSession}
-              compactLine={compactLine}
-              reviewFiles={reviewFiles}
-              onOpenDiff={actions.openDiffViewer}
-            />
-          ) : null}
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
         <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
@@ -590,8 +578,19 @@ function MobileRemoteShellInner({
               />
             </div>
           ) : null}
+          {/* RuntimeBar — below compose, bottom of dock */}
+          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' ? (
+            <RuntimeBar
+              snapshot={snapshot}
+              selectedSession={selectedSession}
+              selectedReviewPacket={selectedReviewPacket}
+              isOwnedCodexSession={isOwnedCodexSession}
+              compactLine={compactLine}
+              reviewFiles={reviewFiles}
+              onOpenDiff={actions.openDiffViewer}
+            />
+          ) : null}
         </div>
-        
       </div>
       <ControlsSheet
         controlsOpen={controlsOpen}
