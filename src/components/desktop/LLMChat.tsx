@@ -37,6 +37,9 @@ import {
   FileText,
   Zap,
   Eye,
+  Trash2,
+  GitBranch,
+  Scissors,
 } from 'lucide-react';
 import { renderLLMMarkdown } from './LLMMarkdown';
 import { saveChatHistory, loadChatHistory } from '@/lib/llm/chat-history';
@@ -234,6 +237,8 @@ interface MessageBubbleProps {
   isLast: boolean;
   onRetry?: () => void;
   onEdit?: (content: string) => void;
+  onDelete?: () => void;
+  onFork?: () => void;
   onApplyToFile?: (code: string, language: string) => void;
   onOpenInCanvas?: (code: string, language: string) => void;
   onRunInTerminal?: (command: string) => void;
@@ -288,7 +293,7 @@ function ActionButton({ icon, label, active, activeColor, onClick }: {
   );
 }
 
-function MessageBubble({ message, isLast, onRetry, onEdit, onApplyToFile, onOpenInCanvas, onRunInTerminal }: MessageBubbleProps) {
+function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFork, onApplyToFile, onOpenInCanvas, onRunInTerminal }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [liked, setLiked] = useState<'up' | 'down' | null>(null);
   const [bookmarked, setBookmarked] = useState(false);
@@ -754,6 +759,27 @@ function MessageBubble({ message, isLast, onRetry, onEdit, onApplyToFile, onOpen
             activeColor="#3b82f6"
             onClick={() => setBookmarked(!bookmarked)}
           />
+
+          {/* Divider */}
+          <div style={{ width: 1, height: 14, background: '#e2e8f0', marginLeft: 2, marginRight: 2 }} />
+
+          {/* Fork conversation from here */}
+          {onFork && (
+            <ActionButton
+              icon={<GitBranch size={14} />}
+              label="Fork from here"
+              onClick={() => onFork()}
+            />
+          )}
+
+          {/* Delete this exchange */}
+          {onDelete && (
+            <ActionButton
+              icon={<Trash2 size={14} />}
+              label="Delete message"
+              onClick={() => onDelete()}
+            />
+          )}
         </div>
       )}
 
@@ -777,6 +803,13 @@ function MessageBubble({ message, isLast, onRetry, onEdit, onApplyToFile, onOpen
             active={copied}
             onClick={handleCopy}
           />
+          {onDelete && (
+            <ActionButton
+              icon={<Trash2 size={13} />}
+              label="Delete"
+              onClick={() => onDelete()}
+            />
+          )}
         </div>
       )}
     </div>
@@ -1274,6 +1307,51 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal }: {
     inputRef.current?.focus();
   }, [tabId]);
 
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+
+      // Cmd+L — focus chat input
+      if (meta && e.key === 'l') {
+        e.preventDefault();
+        inputRef.current?.focus();
+        return;
+      }
+
+      // Escape — cancel streaming
+      if (e.key === 'Escape' && isStreaming) {
+        e.preventDefault();
+        abortRef.current?.abort();
+        return;
+      }
+
+      // Up Arrow in empty input — edit last message
+      if (e.key === 'ArrowUp' && !e.shiftKey && document.activeElement === inputRef.current) {
+        const val = inputRef.current?.value ?? '';
+        if (val === '') {
+          e.preventDefault();
+          const lastUser = [...messages].reverse().find(m => m.role === 'user');
+          if (lastUser) {
+            setInput(lastUser.content);
+            setMessages(messages.filter(m => m.id !== lastUser.id));
+            requestAnimationFrame(() => {
+              if (inputRef.current) {
+                inputRef.current.style.height = 'auto';
+                inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 200) + 'px';
+                inputRef.current.selectionStart = inputRef.current.value.length;
+                inputRef.current.selectionEnd = inputRef.current.value.length;
+              }
+            });
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isStreaming, messages]);
+
   // Auto-resize textarea + @file detection
   const handleInputChange = useCallback((value: string) => {
     setInput(value);
@@ -1750,6 +1828,37 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal }: {
           disabled={isStreaming}
         />
         <div style={{ flex: 1 }} />
+
+        {/* Token/message counter */}
+        {messages.length > 0 && (
+          <span style={{
+            fontSize: 11,
+            color: '#94a3b8',
+            fontFamily: 'ui-monospace, monospace',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}>
+            <span>{messages.length} msg{messages.length !== 1 ? 's' : ''}</span>
+            {(() => {
+              const totalTokens = messages.reduce((sum, m) => sum + (m.tokens?.input ?? 0) + (m.tokens?.output ?? 0), 0);
+              const totalCost = messages.reduce((sum, m) => sum + (m.costUsd ?? 0), 0);
+              return totalTokens > 0 ? (
+                <>
+                  <span style={{ color: '#cbd5e1' }}>·</span>
+                  <span>{totalTokens > 1000 ? `${(totalTokens / 1000).toFixed(1)}K` : totalTokens} tokens</span>
+                  {totalCost > 0 && (
+                    <>
+                      <span style={{ color: '#cbd5e1' }}>·</span>
+                      <span>${totalCost.toFixed(4)}</span>
+                    </>
+                  )}
+                </>
+              ) : null;
+            })()}
+          </span>
+        )}
+
         {messages.length > 0 && (
           <button
             type="button"
@@ -1928,6 +2037,43 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal }: {
                 setInput(content);
                 setMessages(messages.slice(0, i));
                 inputRef.current?.focus();
+              } : undefined}
+              onDelete={() => {
+                // Delete this message (and its pair if applicable)
+                if (msg.role === 'user' && messages[i + 1]?.role === 'assistant') {
+                  // Delete user + its response
+                  setMessages(messages.filter((_, idx) => idx !== i && idx !== i + 1));
+                } else if (msg.role === 'assistant' && i > 0 && messages[i - 1]?.role === 'user') {
+                  // Delete response + its prompt
+                  setMessages(messages.filter((_, idx) => idx !== i && idx !== i - 1));
+                } else {
+                  setMessages(messages.filter((_, idx) => idx !== i));
+                }
+              }}
+              onFork={msg.role === 'assistant' ? () => {
+                // Fork: keep messages up to this point, save to new tab
+                const forkedMessages = messages.slice(0, i + 1);
+                const forkId = `fork-${Date.now()}`;
+                // Store forked messages for new tab to pick up
+                try {
+                  fetch('/api/v2/chat-history', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      tabId: forkId,
+                      messages: forkedMessages.map(m => ({
+                        ...m,
+                        images: undefined,
+                        thinking: undefined,
+                      })),
+                      modelId: model.id,
+                    }),
+                  });
+                } catch { /* ignore */ }
+                // Trigger a tab creation event
+                window.dispatchEvent(new CustomEvent('cortex-fork-chat', {
+                  detail: { forkId, label: `Fork from "${forkedMessages[forkedMessages.length - 1]?.content.slice(0, 30)}..."` },
+                }));
               } : undefined}
               onApplyToFile={handleApplyToFile}
               onOpenInCanvas={onOpenInCanvas}
@@ -2436,7 +2582,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal }: {
           fontSize: 11,
           color: '#cbd5e1',
         }}>
-          {model.label} · @file to attach · Shift+Enter for new line
+          {model.label} · @file · /commands · ⌘L focus · ↑ edit · Esc cancel
         </div>
       </div>
 
