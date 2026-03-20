@@ -565,12 +565,16 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
             }
           }
         } catch (err) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({
-            type: 'error',
-            message: err instanceof Error ? err.message : 'Stream error',
-          })}\n\n`));
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+              type: 'error',
+              message: err instanceof Error ? err.message : 'Stream error',
+            })}\n\n`));
+          } catch { /* controller may already be closed */ }
         } finally {
-          controller.close();
+          try {
+            controller.close();
+          } catch { /* already closed (e.g. approval early-exit) */ }
         }
       },
     });
