@@ -30,6 +30,8 @@ interface MessageBubbleProps {
   setExpandedMedia: ChatViewProps['setExpandedMedia'];
   onOpenDiff: ChatViewProps['onOpenDiff'];
   onScrollToLatestMessage: ChatViewProps['onScrollToLatestMessage'];
+  expandedMessageId: string | null;
+  onToggleExpanded: (id: string) => void;
 }
 
 const MessageBubble = memo(function MessageBubble({
@@ -45,6 +47,8 @@ const MessageBubble = memo(function MessageBubble({
   setExpandedMedia,
   onOpenDiff,
   onScrollToLatestMessage,
+  expandedMessageId,
+  onToggleExpanded,
 }: MessageBubbleProps) {
   const isUser = entry.role === 'user';
   const hasText = Boolean(entry.text.trim());
@@ -111,7 +115,11 @@ const MessageBubble = memo(function MessageBubble({
   const agentName = isOwnedCodexSession ? 'Codex' : (selectedSession?.isCurrentSession ? 'Mister' : undefined);
 
   return (
-    <article className={`remodex-message-card remodex-message-card-assistant${fadeClass}`}>
+    <article
+      className={`remodex-message-card remodex-message-card-assistant${fadeClass}`}
+      onClick={() => onToggleExpanded(entry.id)}
+      style={{ cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+    >
       {speakerChanged ? (
         <div className="remodex-message-head">
           <span>{roleLabel(entry.role, agentName)}</span>
@@ -132,7 +140,7 @@ const MessageBubble = memo(function MessageBubble({
         </button>
       ) : null}
       {hasText ? (
-        <MessageActions messageId={entry.id} messageText={entry.text} />
+        <MessageActions messageId={entry.id} messageText={entry.text} visible={expandedMessageId === entry.id} />
       ) : null}
     </article>
   );
@@ -151,45 +159,73 @@ function MediaGrid({
   setExpandedMedia: (media: MobileTranscriptMedia | null) => void;
   onScrollToLatestMessage: () => void;
 }) {
+  const images = media.filter(isImageMedia);
+  const files = media.filter(m => !isImageMedia(m));
+
+  // Telegram-style grid layout
+  const gridStyle = (): React.CSSProperties => {
+    const count = images.length;
+    if (count === 1) return { display: 'grid', gridTemplateColumns: '1fr', gap: 2 };
+    if (count === 2) return { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 };
+    if (count === 3) return { display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: 'auto auto', gap: 2 };
+    return { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }; // 4+ = 2×N
+  };
+
   return (
     <div className={`remodex-media-grid ${align === 'right' ? 'remodex-media-grid-right' : ''}`}>
-      {media.map((item) => {
-        if (isImageMedia(item)) {
-          return (
+      {images.length > 0 ? (
+        <div style={{
+          ...gridStyle(),
+          borderRadius: 12,
+          overflow: 'hidden',
+          maxWidth: images.length === 1 ? '85%' : '100%',
+        }}>
+          {images.map((item, i) => (
             <button
               key={item.path}
               type="button"
               className="remodex-media-card remodex-media-card-image"
               onClick={() => setExpandedMedia(item)}
+              style={{
+                // First image in a 3-grid spans full width
+                ...(images.length === 3 && i === 0 ? { gridColumn: '1 / -1' } : {}),
+                margin: 0, padding: 0, border: 'none', background: 'none',
+                cursor: 'pointer', display: 'block',
+                WebkitTapHighlightColor: 'transparent',
+              }}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={mediaHref(item.path)}
                 alt={item.name}
                 loading="lazy"
-                style={{ width: '100%', height: 'auto', borderRadius: 8, display: 'block' }}
+                style={{
+                  width: '100%',
+                  height: images.length === 1 ? 'auto' : 160,
+                  objectFit: 'cover',
+                  display: 'block',
+                }}
               />
-              <span className="remodex-media-card-caption">Tap to expand</span>
             </button>
-          );
-        }
+          ))}
+        </div>
+      ) : null}
 
-        return (
-          <div key={item.path} className="remodex-media-card remodex-media-card-file">
-            <div className="remodex-media-file-icon">
-              {item.kind === 'pdf' ? <FileText size={18} strokeWidth={2.1} /> : <ImageIcon size={18} strokeWidth={2.1} />}
-            </div>
-            <div className="remodex-media-file-copy">
-              <strong>{item.name}</strong>
-              <span>{item.kind === 'pdf' ? 'PDF artifact' : 'File artifact'}</span>
-            </div>
-            <div className="remodex-media-file-actions">
-              <a href={mediaHref(item.path)} target="_blank" rel="noreferrer">Open</a>
-              <a href={mediaHref(item.path, true)} download={item.name}>Save</a>
-            </div>
+      {files.map((item) => (
+        <div key={item.path} className="remodex-media-card remodex-media-card-file">
+          <div className="remodex-media-file-icon">
+            {item.kind === 'pdf' ? <FileText size={18} strokeWidth={2.1} /> : <ImageIcon size={18} strokeWidth={2.1} />}
           </div>
-        );
-      })}
+          <div className="remodex-media-file-copy">
+            <strong>{item.name}</strong>
+            <span>{item.kind === 'pdf' ? 'PDF artifact' : 'File artifact'}</span>
+          </div>
+          <div className="remodex-media-file-actions">
+            <a href={mediaHref(item.path)} target="_blank" rel="noreferrer">Open</a>
+            <a href={mediaHref(item.path, true)} download={item.name}>Save</a>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -219,6 +255,10 @@ export function ChatView({
   const listRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
+  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
+  const toggleExpanded = useCallback((id: string) => {
+    setExpandedMessageId((prev) => prev === id ? null : id);
+  }, []);
   const prevEntryCountRef = useRef(transcriptEntries.length);
 
   // Track which messages are "new" (not yet seen) via state, avoiding
@@ -364,6 +404,8 @@ export function ChatView({
                     setExpandedMedia={setExpandedMedia}
                     onOpenDiff={onOpenDiff}
                     onScrollToLatestMessage={onScrollToLatestMessage}
+                    expandedMessageId={expandedMessageId}
+                    onToggleExpanded={toggleExpanded}
                   />
                 </div>
               );
