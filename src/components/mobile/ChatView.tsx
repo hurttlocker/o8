@@ -555,7 +555,7 @@ export function ChatView({
           }}
           style={{
             position: 'fixed',
-            bottom: `${composeHeight + 16}px`,
+            bottom: `${composeHeight + 48}px`,
             left: '50%',
             transform: 'translateX(-50%)',
             zIndex: 20,
