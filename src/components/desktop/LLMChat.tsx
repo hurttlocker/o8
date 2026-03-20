@@ -22,6 +22,13 @@ import {
   Check,
   Sparkles,
   RotateCcw,
+  ThumbsUp,
+  ThumbsDown,
+  Volume2,
+  RefreshCw,
+  Pencil,
+  Bookmark,
+  MoreHorizontal,
 } from 'lucide-react';
 import { renderLLMMarkdown } from './LLMMarkdown';
 import { saveChatHistory, loadChatHistory } from '@/lib/llm/chat-history';
@@ -187,8 +194,68 @@ function ModelPicker({
 }
 
 /** Single message bubble */
-function MessageBubble({ message, isLast }: { message: LLMMessage; isLast: boolean }) {
+interface MessageBubbleProps {
+  message: LLMMessage;
+  isLast: boolean;
+  onRetry?: () => void;
+  onEdit?: (content: string) => void;
+  onSpeak?: (content: string) => void;
+}
+
+const ACTION_BTN_STYLE: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: 28,
+  height: 28,
+  border: 'none',
+  background: 'transparent',
+  color: '#cbd5e1',
+  cursor: 'pointer',
+  borderRadius: 6,
+  transition: 'color 150ms, background 150ms',
+  padding: 0,
+};
+
+function ActionButton({ icon, label, active, activeColor, onClick }: {
+  icon: React.ReactNode;
+  label: string;
+  active?: boolean;
+  activeColor?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      style={{
+        ...ACTION_BTN_STYLE,
+        color: active ? (activeColor || '#10b981') : '#cbd5e1',
+      }}
+      onMouseEnter={(e) => {
+        if (!active) {
+          (e.currentTarget).style.color = '#64748b';
+          (e.currentTarget).style.background = '#f1f5f9';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!active) {
+          (e.currentTarget).style.color = '#cbd5e1';
+          (e.currentTarget).style.background = 'transparent';
+        }
+      }}
+    >
+      {icon}
+    </button>
+  );
+}
+
+function MessageBubble({ message, isLast, onRetry, onEdit, onSpeak }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
+  const [liked, setLiked] = useState<'up' | 'down' | null>(null);
+  const [bookmarked, setBookmarked] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const isUser = message.role === 'user';
 
   const handleCopy = useCallback(() => {
@@ -198,13 +265,17 @@ function MessageBubble({ message, isLast }: { message: LLMMessage; isLast: boole
   }, [message.content]);
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: isUser ? 'flex-end' : 'flex-start',
-      gap: 4,
-      animation: isLast ? 'llmFadeIn 200ms ease-out' : undefined,
-    }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: isUser ? 'flex-end' : 'flex-start',
+        gap: 4,
+        animation: isLast ? 'llmFadeIn 200ms ease-out' : undefined,
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       {/* Message content */}
       <div style={{
         maxWidth: isUser ? '75%' : '90%',
@@ -251,50 +322,126 @@ function MessageBubble({ message, isLast }: { message: LLMMessage; isLast: boole
         ) : renderLLMMarkdown(message.content)}
       </div>
 
-      {/* Meta bar — model, tokens, actions */}
+      {/* Action bar — assistant messages */}
       {!isUser && message.content && (
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 2,
           paddingTop: 2,
           paddingBottom: 4,
+          opacity: hovered || isLast ? 1 : 0,
+          transition: 'opacity 150ms',
         }}>
+          {/* Meta info */}
           {message.model && (
-            <span style={{ fontSize: 11, color: '#94a3b8' }}>{message.model}</span>
+            <span style={{
+              fontSize: 11,
+              color: '#94a3b8',
+              marginRight: 4,
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}>
+              {message.model}
+            </span>
           )}
           {message.tokens && (
-            <span style={{ fontSize: 11, color: '#cbd5e1' }}>
-              {message.tokens.input + message.tokens.output} tokens
+            <span style={{
+              fontSize: 10,
+              color: '#cbd5e1',
+              marginRight: 4,
+              fontFamily: 'ui-monospace, monospace',
+            }}>
+              {message.tokens.input + message.tokens.output} tok
             </span>
           )}
           {message.costUsd != null && message.costUsd > 0 && (
-            <span style={{ fontSize: 11, color: '#cbd5e1' }}>
+            <span style={{
+              fontSize: 10,
+              color: '#cbd5e1',
+              marginRight: 6,
+              fontFamily: 'ui-monospace, monospace',
+            }}>
               ${message.costUsd.toFixed(4)}
             </span>
           )}
-          <button
-            type="button"
+
+          {/* Divider */}
+          <div style={{ width: 1, height: 14, background: '#e2e8f0', marginLeft: 2, marginRight: 2 }} />
+
+          {/* Copy */}
+          <ActionButton
+            icon={copied ? <Check size={14} /> : <Copy size={14} />}
+            label={copied ? 'Copied' : 'Copy'}
+            active={copied}
             onClick={handleCopy}
-            title="Copy"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 24,
-              height: 24,
-              border: 'none',
-              background: 'transparent',
-              color: copied ? '#10b981' : '#cbd5e1',
-              cursor: 'pointer',
-              borderRadius: 4,
-              transition: 'color 150ms',
-            }}
-            onMouseEnter={(e) => { if (!copied) (e.currentTarget).style.color = '#64748b'; }}
-            onMouseLeave={(e) => { if (!copied) (e.currentTarget).style.color = '#cbd5e1'; }}
-          >
-            {copied ? <Check size={13} /> : <Copy size={13} />}
-          </button>
+          />
+
+          {/* Read aloud */}
+          <ActionButton
+            icon={<Volume2 size={14} />}
+            label="Read aloud"
+            onClick={() => onSpeak?.(message.content)}
+          />
+
+          {/* Retry / Regenerate */}
+          <ActionButton
+            icon={<RefreshCw size={14} />}
+            label="Retry"
+            onClick={() => onRetry?.()}
+          />
+
+          {/* Divider */}
+          <div style={{ width: 1, height: 14, background: '#e2e8f0', marginLeft: 2, marginRight: 2 }} />
+
+          {/* Thumbs up */}
+          <ActionButton
+            icon={<ThumbsUp size={14} />}
+            label="Good response"
+            active={liked === 'up'}
+            activeColor="#10b981"
+            onClick={() => setLiked(liked === 'up' ? null : 'up')}
+          />
+
+          {/* Thumbs down */}
+          <ActionButton
+            icon={<ThumbsDown size={14} />}
+            label="Bad response"
+            active={liked === 'down'}
+            activeColor="#ef4444"
+            onClick={() => setLiked(liked === 'down' ? null : 'down')}
+          />
+
+          {/* Bookmark */}
+          <ActionButton
+            icon={<Bookmark size={14} fill={bookmarked ? '#3b82f6' : 'none'} />}
+            label={bookmarked ? 'Bookmarked' : 'Bookmark'}
+            active={bookmarked}
+            activeColor="#3b82f6"
+            onClick={() => setBookmarked(!bookmarked)}
+          />
+        </div>
+      )}
+
+      {/* Action bar — user messages (edit only, on hover) */}
+      {isUser && hovered && (
+        <div style={{
+          display: 'flex',
+          gap: 2,
+          paddingTop: 2,
+          opacity: hovered ? 1 : 0,
+          transition: 'opacity 150ms',
+        }}>
+          <ActionButton
+            icon={<Pencil size={13} />}
+            label="Edit message"
+            onClick={() => onEdit?.(message.content)}
+          />
+          <ActionButton
+            icon={copied ? <Check size={13} /> : <Copy size={13} />}
+            label="Copy"
+            active={copied}
+            onClick={handleCopy}
+          />
         </div>
       )}
     </div>
@@ -808,6 +955,35 @@ export default function LLMChat({ tabId }: { tabId: string }) {
               key={msg.id}
               message={msg}
               isLast={i === messages.length - 1 && !isStreaming}
+              onRetry={msg.role === 'assistant' ? () => {
+                // Remove this response and resend the previous user message
+                const prevMsgs = messages.slice(0, i);
+                const lastUserMsg = [...prevMsgs].reverse().find(m => m.role === 'user');
+                if (lastUserMsg) {
+                  setMessages(prevMsgs);
+                  setInput(lastUserMsg.content);
+                  // Remove last user msg so handleSend re-adds it
+                  setMessages(prevMsgs.filter(m => m.id !== lastUserMsg.id));
+                  setTimeout(() => {
+                    // Trigger send programmatically
+                    setInput(lastUserMsg.content);
+                  }, 50);
+                }
+              } : undefined}
+              onEdit={msg.role === 'user' ? (content) => {
+                // Edit: populate input with message content, remove it and everything after
+                setInput(content);
+                setMessages(messages.slice(0, i));
+                inputRef.current?.focus();
+              } : undefined}
+              onSpeak={msg.role === 'assistant' ? (content) => {
+                // TTS: use SpeechSynthesis API
+                const utterance = new SpeechSynthesisUtterance(content.replace(/[#*`_~\[\]]/g, ''));
+                utterance.rate = 1;
+                utterance.pitch = 1;
+                speechSynthesis.cancel();
+                speechSynthesis.speak(utterance);
+              } : undefined}
             />
           ))}
 
