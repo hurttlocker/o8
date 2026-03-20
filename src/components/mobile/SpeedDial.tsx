@@ -138,7 +138,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
           inset: 0,
           zIndex: 9998,
         }}>
-          {/* Frost backdrop */}
+          {/* Frost backdrop — pointer-events so pills above are tappable */}
           <div
             onClick={() => setOpen(false)}
             style={{
@@ -148,10 +148,11 @@ export const SpeedDialButton = memo(function SpeedDialButton({
               backdropFilter: 'blur(12px) saturate(1.4)',
               WebkitBackdropFilter: 'blur(12px) saturate(1.4)',
               animation: 'menuFrostIn 200ms ease',
+              zIndex: 0,
             }}
           />
 
-          {/* Floating pills — positioned from top-left */}
+          {/* Floating pills — positioned from top-left, above frost */}
           <div style={{
             position: 'absolute',
             top: 'calc(env(safe-area-inset-top, 0px) + 52px)',
@@ -160,7 +161,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
             flexDirection: 'column',
             alignItems: 'flex-start',
             gap: 6,
-            zIndex: 9999,
+            zIndex: 1,
           }}>
           {MENU_ITEMS.map((item, index) => {
             const isActive = item.screen === activeScreen;
