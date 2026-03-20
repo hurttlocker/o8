@@ -291,6 +291,17 @@ function MobileRemoteShellInner({
   const headerProgress = Math.min(scrollY / 88, 1);
   const isHeaderCompact = headerProgress > 0.12;
   const isComposerPrimed = isChatSession && (composeFocused || transcriptAttachments.length > 0);
+  // RuntimeBar only visible when at bottom of chat + keyboard closed
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  useEffect(() => {
+    const check = () => {
+      const dist = document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
+      setIsAtBottom(dist < 140);
+    };
+    window.addEventListener('scroll', check, { passive: true });
+    check();
+    return () => window.removeEventListener('scroll', check);
+  }, []);
   const dockMotionProgress = !isComposerPrimed && isScrolling ? 1 : 0;
   const dockFadeProgress = dockMotionProgress;
   const ownedAvailability = selectedSession?.runtimeSurface?.lifecycle?.availability;
@@ -616,11 +627,14 @@ function MobileRemoteShellInner({
               />
             </div>
           ) : null}
-          {/* RuntimeBar — below compose, hidden when keyboard is up */}
+          {/* RuntimeBar — only when at bottom + keyboard closed + chat view */}
           {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && !isComposerPrimed ? (
             <div style={{
-              transition: 'opacity 200ms ease, max-height 200ms ease',
-              opacity: 1, maxHeight: 40, overflow: 'hidden',
+              transition: 'opacity 250ms ease, max-height 250ms ease',
+              opacity: isAtBottom ? 1 : 0,
+              maxHeight: isAtBottom ? 40 : 0,
+              overflow: 'hidden',
+              pointerEvents: isAtBottom ? 'auto' : 'none',
             }}>
               <RuntimeBar
                 snapshot={snapshot}
