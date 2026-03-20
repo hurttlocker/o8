@@ -133,35 +133,31 @@ export const SpeedDialButton = memo(function SpeedDialButton({
 
       {/* Portal: frosted overlay + floating pills at document.body level */}
       {open && typeof document !== 'undefined' && createPortal(
-        <div style={{
-          position: 'fixed',
-          inset: 0,
-          zIndex: 9998,
-        }}>
-          {/* Frost backdrop — pointer-events so pills above are tappable */}
+        <>
+          {/* Frost backdrop — separate layer, closes menu on tap */}
           <div
             onClick={() => setOpen(false)}
             style={{
-              position: 'absolute',
+              position: 'fixed',
               inset: 0,
               background: 'rgba(0,122,255,0.03)',
               backdropFilter: 'blur(12px) saturate(1.4)',
               WebkitBackdropFilter: 'blur(12px) saturate(1.4)',
               animation: 'menuFrostIn 200ms ease',
-              zIndex: 0,
+              zIndex: 9997,
             }}
           />
 
-          {/* Floating pills — positioned from top-left, above frost */}
+          {/* Floating pills — separate layer above frost */}
           <div style={{
-            position: 'absolute',
+            position: 'fixed',
             top: 'calc(env(safe-area-inset-top, 0px) + 52px)',
             left: 14,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'flex-start',
             gap: 6,
-            zIndex: 1,
+            zIndex: 9999,
           }}>
           {MENU_ITEMS.map((item, index) => {
             const isActive = item.screen === activeScreen;
@@ -238,7 +234,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
             );
           })}
           </div>
-        </div>,
+        </>,
         document.body,
       )}
 
