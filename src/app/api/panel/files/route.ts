@@ -7,6 +7,10 @@ import path from 'node:path';
 
 const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
 const IGNORE = new Set(['node_modules', '.next', '.turbo', 'target', 'dist', '.DS_Store', '.pnpm-store', '.cache']);
+
+// Response cache — file tree doesn't change every second
+const filesCache = new Map<string, { data: unknown; ts: number }>();
+const FILES_CACHE_TTL_MS = 15_000;
 const MAX_DEPTH = 3;
 // Dotfiles/dirs to show (everything else starting with . is hidden)
 const SHOW_DOT = new Set(['.github', '.vscode', '.claude', '.env', '.env.local', '.env.example', '.env.development', '.gitignore', '.gitattributes', '.eslintrc', '.eslintrc.js', '.eslintrc.json', '.prettierrc', '.prettierrc.js']);
@@ -79,7 +83,15 @@ export async function GET(request: Request) {
     root = workspaceParam.startsWith('~') ? workspaceParam.replace('~', home) : workspaceParam;
   }
 
+  // Return cached if fresh
+  const cached = filesCache.get(root);
+  if (cached && (Date.now() - cached.ts) < FILES_CACHE_TTL_MS) {
+    return NextResponse.json(cached.data);
+  }
+
   const tree = await buildTree(root, '', 0);
   const changedFiles = Array.from(getChangedFiles(root));
-  return NextResponse.json({ tree, root, changedFiles });
+  const result = { tree, root, changedFiles };
+  filesCache.set(root, { data: result, ts: Date.now() });
+  return NextResponse.json(result);
 }

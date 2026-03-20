@@ -21,11 +21,17 @@ const API_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
 
 function isTrustedPanelRequest(req: NextRequest) {
   const origin = req.headers.get('origin');
-  if (origin && origin === req.nextUrl.origin) {
-    return true;
+  if (origin) {
+    try {
+      const url = new URL(origin);
+      if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true;
+    } catch { /* ignore */ }
+    if (origin === req.nextUrl.origin) return true;
   }
-
-  return req.headers.get('sec-fetch-site') === 'same-origin';
+  const fetchSite = req.headers.get('sec-fetch-site');
+  if (fetchSite === 'same-origin' || fetchSite === 'none') return true;
+  if (!origin && !fetchSite) return true;
+  return false;
 }
 
 function checkAuth(req: NextRequest): NextResponse | null {
