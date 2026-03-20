@@ -18,6 +18,7 @@ import { NextRequest } from 'next/server';
 import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
 import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
+import { toolsForAnthropic, toolsForOpenAI, toolsForGoogle, executeTool, type ToolResult } from '@/lib/llm/tools';
 
 // ── Pricing (per 1M tokens) ──
 
@@ -54,8 +55,17 @@ interface ProviderConfig {
   envKey: string;
   buildHeaders: (apiKey: string) => Record<string, string>;
   buildBody: (model: string, messages: Message[]) => Record<string, unknown>;
-  parseStream: (line: string) => { type: 'content'; text: string } | { type: 'usage'; inputTokens: number; outputTokens: number } | { type: 'done' } | null;
+  parseStream: (line: string) => StreamEvent | null;
 }
+
+type StreamEvent =
+  | { type: 'content'; text: string }
+  | { type: 'usage'; inputTokens: number; outputTokens: number }
+  | { type: 'done' }
+  | { type: 'tool_call_start'; toolName: string; toolId: string }
+  | { type: 'tool_call_delta'; json: string }
+  | { type: 'tool_call_end' }
+  | { type: 'tool_call'; toolName: string; toolId: string; args: Record<string, unknown> };
 
 interface Message {
   role: string;
@@ -103,6 +113,7 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
       ...(messages.find(m => m.role === 'system')
         ? { system: messages.find(m => m.role === 'system')!.content }
         : {}),
+      tools: toolsForAnthropic(),
     }),
     parseStream: (line) => {
       if (!line.startsWith('data: ')) return null;
@@ -112,6 +123,16 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
         const parsed = JSON.parse(data);
         if (parsed.type === 'content_block_delta' && parsed.delta?.text) {
           return { type: 'content', text: parsed.delta.text };
+        }
+        // Tool use detection
+        if (parsed.type === 'content_block_start' && parsed.content_block?.type === 'tool_use') {
+          return { type: 'tool_call_start', toolName: parsed.content_block.name, toolId: parsed.content_block.id };
+        }
+        if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'input_json_delta') {
+          return { type: 'tool_call_delta', json: parsed.delta.partial_json };
+        }
+        if (parsed.type === 'content_block_stop') {
+          return { type: 'tool_call_end' };
         }
         if (parsed.type === 'message_delta' && parsed.usage) {
           return { type: 'usage', inputTokens: parsed.usage.input_tokens ?? 0, outputTokens: parsed.usage.output_tokens ?? 0 };
@@ -155,6 +176,7 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
         }
         return m;
       }),
+      tools: toolsForOpenAI(),
     }),
     parseStream: (line) => {
       if (!line.startsWith('data: ')) return null;
@@ -164,6 +186,17 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
         const parsed = JSON.parse(data);
         if (parsed.choices?.[0]?.delta?.content) {
           return { type: 'content', text: parsed.choices[0].delta.content };
+        }
+        // OpenAI tool calls
+        const tc = parsed.choices?.[0]?.delta?.tool_calls?.[0];
+        if (tc?.function?.name) {
+          return { type: 'tool_call_start', toolName: tc.function.name, toolId: tc.id || '' };
+        }
+        if (tc?.function?.arguments) {
+          return { type: 'tool_call_delta', json: tc.function.arguments };
+        }
+        if (parsed.choices?.[0]?.finish_reason === 'tool_calls') {
+          return { type: 'tool_call_end' };
         }
         if (parsed.usage) {
           return { type: 'usage', inputTokens: parsed.usage.prompt_tokens ?? 0, outputTokens: parsed.usage.completion_tokens ?? 0 };
@@ -211,6 +244,7 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
       ...(messages.find(m => m.role === 'system')
         ? { systemInstruction: { parts: [{ text: messages.find(m => m.role === 'system')!.content }] } }
         : {}),
+      tools: toolsForGoogle(),
     }),
     parseStream: (line) => {
       // Google SSE: "data: {...}" lines
@@ -223,6 +257,14 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
         const parts = parsed.candidates?.[0]?.content?.parts;
         if (parts) {
           for (const part of parts) {
+            if (part.functionCall) {
+              return {
+                type: 'tool_call',
+                toolName: part.functionCall.name,
+                toolId: part.functionCall.name + '-' + Date.now(),
+                args: part.functionCall.args ?? {},
+              };
+            }
             if (part.text) {
               return { type: 'content', text: part.text };
             }
@@ -330,23 +372,29 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
       );
     }
 
-    // Stream the response
+    // Stream the response with tool call support
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
-        const reader = upstream.body?.getReader();
-        if (!reader) {
-          controller.close();
-          return;
-        }
+        const enqueue = (data: string) => controller.enqueue(encoder.encode(`data: ${data}\n\n`));
 
-        const decoder = new TextDecoder();
-        let buffer = '';
+        // Helper: read a stream and process events
+        async function processStream(response: globalThis.Response): Promise<{
+          toolCalls: { name: string; id: string; args: Record<string, unknown> }[];
+        }> {
+          const reader = response.body?.getReader();
+          if (!reader) return { toolCalls: [] };
 
-        try {
+          const decoder = new TextDecoder();
+          let buffer = '';
+          const toolCalls: { name: string; id: string; args: Record<string, unknown> }[] = [];
+          let currentToolName = '';
+          let currentToolId = '';
+          let currentToolArgs = '';
+
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -360,14 +408,90 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
               if (!parsed) continue;
 
               if (parsed.type === 'content') {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'content', text: parsed.text })}\n\n`));
+                enqueue(JSON.stringify({ type: 'content', text: parsed.text }));
               } else if (parsed.type === 'usage') {
                 totalInputTokens += parsed.inputTokens;
                 totalOutputTokens += parsed.outputTokens;
+              } else if (parsed.type === 'tool_call_start') {
+                currentToolName = parsed.toolName;
+                currentToolId = parsed.toolId;
+                currentToolArgs = '';
+                // Notify frontend
+                enqueue(JSON.stringify({ type: 'tool_call', name: parsed.toolName, status: 'calling' }));
+              } else if (parsed.type === 'tool_call_delta') {
+                currentToolArgs += parsed.json;
+              } else if (parsed.type === 'tool_call_end') {
+                try {
+                  const args = currentToolArgs ? JSON.parse(currentToolArgs) : {};
+                  toolCalls.push({ name: currentToolName, id: currentToolId, args });
+                } catch {
+                  toolCalls.push({ name: currentToolName, id: currentToolId, args: {} });
+                }
+              } else if (parsed.type === 'tool_call') {
+                // Google returns complete tool calls
+                toolCalls.push({ name: parsed.toolName, id: parsed.toolId, args: parsed.args });
+                enqueue(JSON.stringify({ type: 'tool_call', name: parsed.toolName, status: 'calling' }));
               } else if (parsed.type === 'done') {
                 break;
               }
             }
+          }
+
+          return { toolCalls };
+        }
+
+        try {
+          // Process initial stream
+          let { toolCalls } = await processStream(upstream);
+          let loopCount = 0;
+          const maxLoops = 5; // Safety limit
+          const allSources: { title: string; url?: string; path?: string }[] = [];
+
+          // Tool call loop — execute tools and send results back to model
+          while (toolCalls.length > 0 && loopCount < maxLoops) {
+            loopCount++;
+
+            for (const tc of toolCalls) {
+              enqueue(JSON.stringify({ type: 'tool_call', name: tc.name, status: 'running', args: tc.args }));
+
+              // Execute the tool
+              const result: ToolResult = await executeTool(tc.name, tc.args);
+
+              if (result.sources) {
+                allSources.push(...result.sources);
+              }
+
+              enqueue(JSON.stringify({ type: 'tool_result', name: tc.name, status: 'done', preview: result.content.slice(0, 200) }));
+
+              // Build follow-up request with tool results
+              // For now, make a new request with the tool result as context
+              const toolResultMsg = `Tool "${tc.name}" returned:\n${result.content}`;
+              messages.push(
+                { role: 'assistant', content: `I'll use the ${tc.name} tool to help answer this.` },
+                { role: 'user', content: toolResultMsg }
+              );
+            }
+
+            // Make follow-up request to model with tool results
+            const followUrl = provider === 'google'
+              ? `${config.url}/${model}:streamGenerateContent?alt=sse&key=${apiKey}`
+              : config.url;
+            const followBody = config.buildBody(model, messages);
+            const followRes = await fetch(followUrl, {
+              method: 'POST',
+              headers,
+              body: JSON.stringify(followBody),
+            });
+
+            if (!followRes.ok) break;
+
+            const result = await processStream(followRes);
+            toolCalls = result.toolCalls;
+          }
+
+          // Send sources if any were collected
+          if (allSources.length > 0) {
+            enqueue(JSON.stringify({ type: 'sources', sources: allSources }));
           }
 
           // Send final usage event
