@@ -44,6 +44,8 @@ import {
   Star,
   PanelLeftClose,
   MessageSquare,
+  ArrowUp,
+  Plus,
 } from 'lucide-react';
 import { renderLLMMarkdown } from './LLMMarkdown';
 import { saveChatHistory, loadChatHistory } from '@/lib/llm/chat-history';
@@ -2212,11 +2214,6 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
           <History size={14} />
         </button>
 
-        <ModelPicker
-          selected={model}
-          onSelect={setModel}
-          disabled={isStreaming}
-        />
         <div style={{ flex: 1 }} />
 
         {/* Token/message counter */}
@@ -2998,115 +2995,188 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
           </div>
         )}
 
-        <div style={{
-          display: 'flex',
-          alignItems: 'flex-end',
-          gap: 8,
-          maxWidth: 720,
-          marginLeft: 'auto',
-          marginRight: 'auto',
-          paddingTop: 10,
-          paddingBottom: 10,
-          paddingLeft: 16,
-          paddingRight: 10,
-          border: '1px solid #e2e8f0',
-          borderRadius: 16,
-          background: '#fafafa',
-          transition: 'border-color 200ms, box-shadow 200ms',
-        }}
-        onFocus={(e) => {
-          (e.currentTarget).style.borderColor = '#3b82f6';
-          (e.currentTarget).style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
-        }}
-        onBlur={(e) => {
-          (e.currentTarget).style.borderColor = '#e2e8f0';
-          (e.currentTarget).style.boxShadow = 'none';
-        }}
+        {/* Unified input container — textarea + toolbar in one box */}
+        <div
+          style={{
+            maxWidth: 720,
+            marginLeft: 'auto',
+            marginRight: 'auto',
+            border: '1px solid #e2e8f0',
+            borderRadius: 18,
+            background: '#fafafa',
+            transition: 'border-color 200ms, box-shadow 200ms',
+            overflow: 'hidden',
+          }}
+          onFocus={(e) => {
+            (e.currentTarget).style.borderColor = '#3b82f6';
+            (e.currentTarget).style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
+          }}
+          onBlur={(e) => {
+            (e.currentTarget).style.borderColor = '#e2e8f0';
+            (e.currentTarget).style.boxShadow = 'none';
+          }}
         >
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => handleInputChange(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            placeholder={`Message ${model.label}... (@ files, paste images)`}
-            rows={1}
-            style={{
-              flex: 1,
-              border: 'none',
-              outline: 'none',
-              background: 'transparent',
-              color: '#1e293b',
-              fontSize: 14,
-              fontFamily: '-apple-system, system-ui, sans-serif',
-              lineHeight: '1.5',
-              resize: 'none',
-              minHeight: 24,
-              maxHeight: 200,
-            }}
-          />
-          {isStreaming ? (
-            <button
-              type="button"
-              onClick={handleStop}
-              title="Stop generating"
+          {/* Textarea area — upper portion */}
+          <div style={{
+            paddingTop: 14,
+            paddingBottom: 8,
+            paddingLeft: 18,
+            paddingRight: 18,
+          }}>
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => handleInputChange(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              placeholder={`Message ${model.label}...`}
+              rows={1}
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 32,
-                height: 32,
+                width: '100%',
                 border: 'none',
-                borderRadius: 8,
-                background: '#ef4444',
-                color: 'white',
-                cursor: 'pointer',
-                flexShrink: 0,
-                transition: 'background 150ms',
+                outline: 'none',
+                background: 'transparent',
+                color: '#1e293b',
+                fontSize: 14,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                lineHeight: '1.5',
+                resize: 'none',
+                minHeight: 24,
+                maxHeight: 200,
+                boxSizing: 'border-box',
               }}
-              onMouseEnter={(e) => { (e.currentTarget).style.background = '#dc2626'; }}
-              onMouseLeave={(e) => { (e.currentTarget).style.background = '#ef4444'; }}
-            >
-              <Square size={14} />
-            </button>
-          ) : (
-            <button
-              type="button"
-              data-send-btn="true"
-              onClick={handleSend}
-              disabled={!input.trim()}
-              title="Send message"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 32,
-                height: 32,
-                border: 'none',
-                borderRadius: 8,
-                background: input.trim() ? '#3b82f6' : '#e2e8f0',
-                color: input.trim() ? 'white' : '#94a3b8',
-                cursor: input.trim() ? 'pointer' : 'default',
-                flexShrink: 0,
-                transition: 'background 150ms',
-              }}
-              onMouseEnter={(e) => { if (input.trim()) (e.currentTarget).style.background = '#2563eb'; }}
-              onMouseLeave={(e) => { if (input.trim()) (e.currentTarget).style.background = '#3b82f6'; }}
-            >
-              <Send size={14} />
-            </button>
-          )}
-        </div>
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          paddingTop: 6,
-          fontSize: 11,
-          color: '#cbd5e1',
-        }}>
-          {model.label} · @file · /commands · ⌘L focus · ↑ edit · Esc cancel
+            />
+          </div>
+
+          {/* Bottom toolbar — icons left, model picker + send right */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingTop: 4,
+            paddingBottom: 10,
+            paddingLeft: 14,
+            paddingRight: 10,
+          }}>
+            {/* Left icons */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              {/* Attach file */}
+              <label
+                title="Attach file or image"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 30,
+                  height: 30,
+                  borderRadius: 8,
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  transition: 'color 150ms, background 150ms',
+                }}
+                onMouseEnter={(e) => { (e.currentTarget).style.color = '#64748b'; (e.currentTarget).style.background = '#f1f5f9'; }}
+                onMouseLeave={(e) => { (e.currentTarget).style.color = '#94a3b8'; (e.currentTarget).style.background = 'transparent'; }}
+              >
+                <Plus size={16} />
+                <input
+                  type="file"
+                  accept="image/*,.txt,.md,.ts,.tsx,.js,.jsx,.py,.json,.yaml,.yml,.toml,.css,.html"
+                  multiple
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const files = e.target.files;
+                    if (!files) return;
+                    for (const file of files) {
+                      if (file.type.startsWith('image/')) {
+                        const reader = new FileReader();
+                        reader.onload = () => {
+                          setAttachedImages(prev => [...prev.slice(0, 3), { dataUri: reader.result as string, name: file.name, mimeType: file.type }]);
+                        };
+                        reader.readAsDataURL(file);
+                      } else {
+                        setAttachedFiles(prev => [...new Set([...prev, file.name])]);
+                      }
+                    }
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+
+              {/* Keyboard shortcuts hint */}
+              <span style={{
+                fontSize: 10,
+                color: '#cbd5e1',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}>
+                @file · /cmds
+              </span>
+            </div>
+
+            {/* Right — model picker + send */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ModelPicker
+                selected={model}
+                onSelect={setModel}
+                disabled={isStreaming}
+              />
+
+              {isStreaming ? (
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  title="Stop generating (Esc)"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 32,
+                    height: 32,
+                    border: 'none',
+                    borderRadius: 10,
+                    background: '#ef4444',
+                    color: 'white',
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                    transition: 'background 150ms',
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget).style.background = '#dc2626'; }}
+                  onMouseLeave={(e) => { (e.currentTarget).style.background = '#ef4444'; }}
+                >
+                  <Square size={14} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  data-send-btn="true"
+                  onClick={handleSend}
+                  disabled={!input.trim()}
+                  title="Send message (Enter)"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 32,
+                    height: 32,
+                    border: 'none',
+                    borderRadius: 10,
+                    background: input.trim() ? '#1e293b' : '#e2e8f0',
+                    color: input.trim() ? 'white' : '#94a3b8',
+                    cursor: input.trim() ? 'pointer' : 'default',
+                    flexShrink: 0,
+                    transition: 'all 150ms',
+                  }}
+                  onMouseEnter={(e) => { if (input.trim()) (e.currentTarget).style.background = '#0f172a'; }}
+                  onMouseLeave={(e) => { if (input.trim()) (e.currentTarget).style.background = '#1e293b'; }}
+                >
+                  <ArrowUp size={16} />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
