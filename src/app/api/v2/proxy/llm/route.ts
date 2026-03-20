@@ -30,7 +30,7 @@ const PRICING: Record<string, { input: number; output: number }> = {
   'gpt-4o':            { input: 2.50, output: 10 },
   'o3':                { input: 10,   output: 40 },
   // Google
-  'gemini-3-pro':      { input: 1.25, output: 10 },
+  'gemini-2.5-pro':    { input: 1.25, output: 10 },
   'gemini-2.5-flash':  { input: 0.15, output: 0.60 },
 };
 
@@ -143,10 +143,13 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
         : {}),
     }),
     parseStream: (line) => {
-      // Google streams JSON array chunks
-      if (!line.trim() || line.trim() === '[' || line.trim() === ']' || line.trim() === ',') return null;
+      // Google SSE: "data: {...}" lines
+      let raw = line.trim();
+      if (!raw) return null;
+      if (raw.startsWith('data: ')) raw = raw.slice(6).trim();
+      if (!raw || raw === '[' || raw === ']' || raw === ',') return null;
       try {
-        const parsed = JSON.parse(line.replace(/^,/, ''));
+        const parsed = JSON.parse(raw.replace(/^,/, ''));
         if (parsed.candidates?.[0]?.content?.parts?.[0]?.text) {
           return { type: 'content', text: parsed.candidates[0].content.parts[0].text };
         }

@@ -50,8 +50,8 @@ const MODELS: ModelOption[] = [
   { id: 'claude-haiku-4-5', label: 'Claude Haiku', provider: 'anthropic', color: '#e07a3a', description: 'Instant' },
   { id: 'gpt-5.4', label: 'GPT-5.4', provider: 'openai', color: '#10a37f', description: 'Latest OpenAI' },
   { id: 'gpt-4o', label: 'GPT-4o', provider: 'openai', color: '#10a37f', description: 'Multimodal' },
-  { id: 'gemini-3-pro', label: 'Gemini 3 Pro', provider: 'google', color: '#4285f4', description: 'Google flagship' },
-  { id: 'gemini-2.5-flash', label: 'Gemini Flash', provider: 'google', color: '#4285f4', description: 'Fast + cheap' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', provider: 'google', color: '#4285f4', description: 'Google flagship' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'google', color: '#4285f4', description: 'Fast + cheap' },
 ];
 
 // ── Subcomponents ──
@@ -298,9 +298,31 @@ export default function LLMChat({ tabId }: { tabId: string }) {
   const [model, setModel] = useState<ModelOption>(MODELS[0]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamContent, setStreamContent] = useState('');
+  const [modelResolved, setModelResolved] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // Auto-select model based on configured API keys
+  useEffect(() => {
+    if (modelResolved) return;
+    (async () => {
+      try {
+        const res = await fetch('/api/v2/keys');
+        if (!res.ok) return;
+        const data = await res.json();
+        const configured = new Set(
+          (data.providers ?? [])
+            .filter((p: { configured: boolean }) => p.configured)
+            .map((p: { id: string }) => p.id)
+        );
+        // Pick first model whose provider has a key
+        const match = MODELS.find(m => configured.has(m.provider));
+        if (match) setModel(match);
+      } catch { /* ignore */ }
+      setModelResolved(true);
+    })();
+  }, [modelResolved]);
 
   // Auto-scroll on new messages
   useEffect(() => {
