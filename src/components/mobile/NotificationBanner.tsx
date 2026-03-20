@@ -106,66 +106,53 @@ function BannerCard({ notification, onDismiss, onTap }: {
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 8,
-        padding: '8px 12px',
-        borderRadius: 12,
-        background: 'rgba(0,122,255,0.06)',
+        gap: 6,
+        padding: '5px 10px',
+        borderRadius: 10,
+        background: 'rgba(0,122,255,0.05)',
         backdropFilter: 'blur(40px) saturate(1.8)',
         WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-        border: '1px solid rgba(0,122,255,0.12)',
-        boxShadow: '0 4px 16px rgba(0,122,255,0.08), 0 1px 4px rgba(0,0,0,0.04)',
+        border: '1px solid rgba(0,122,255,0.1)',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.03)',
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
         transition: 'transform 200ms ease, opacity 200ms ease',
         animation: 'bannerSlideDown 350ms cubic-bezier(0.32, 0.72, 0, 1)',
       }}
     >
-      {/* Icon */}
+      {/* Icon — small colored dot */}
       <span style={{
-        width: 24, height: 24, borderRadius: 6,
-        background: `${icon.color}12`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 6, height: 6, borderRadius: '50%',
+        background: icon.color,
         flexShrink: 0,
-      }}>
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-          stroke={icon.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <path d={icon.path} />
-        </svg>
-      </span>
+      }} />
 
-      {/* Content */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{
-          margin: 0, fontSize: 12, fontWeight: 700,
-          color: '#0a0a0a',
-          fontFamily: '-apple-system, system-ui, sans-serif',
-          letterSpacing: '-0.01em',
-        }}>
-          {notification.title}
-        </p>
-        <p style={{
-          margin: '1px 0 0', fontSize: 11, color: '#8e8e93',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {notification.body}
-        </p>
-      </div>
+      {/* Content — single line */}
+      <p style={{
+        margin: 0, fontSize: 11, fontWeight: 600,
+        color: '#3c3c43',
+        fontFamily: '-apple-system, system-ui, sans-serif',
+        flex: 1, minWidth: 0,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
+        {notification.title}
+      </p>
 
       {/* Dismiss × */}
       <button
         type="button"
         onClick={(e) => { e.stopPropagation(); onDismiss(); }}
         style={{
-          width: 18, height: 18, borderRadius: '50%',
-          background: 'rgba(0,122,255,0.08)',
+          width: 14, height: 14, borderRadius: '50%',
+          background: 'rgba(0,0,0,0.04)',
           border: 'none', cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0,
+          flexShrink: 0, padding: 0,
           WebkitTapHighlightColor: 'transparent',
         }}
       >
-        <svg width="7" height="7" viewBox="0 0 24 24" fill="none"
-          stroke="#007aff" strokeWidth="3" strokeLinecap="round">
+        <svg width="6" height="6" viewBox="0 0 24 24" fill="none"
+          stroke="#8e8e93" strokeWidth="3" strokeLinecap="round">
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>
@@ -179,19 +166,19 @@ export const NotificationBanner = memo(function NotificationBanner({
   onDismiss,
   onTap,
 }: NotificationBannerProps) {
-  const visible = notifications.filter(n => !n.dismissed).slice(0, 3);
+  const visible = notifications.filter(n => !n.dismissed).slice(0, 4);
 
   if (visible.length === 0) return null;
 
   return (
     <div style={{
       position: 'fixed',
-      top: 'calc(env(safe-area-inset-top, 0px) + 62px)',
-      left: 12, right: 12,
+      top: 'calc(env(safe-area-inset-top, 0px) + 80px)',
+      left: 20, right: 20,
       zIndex: 9997,
       display: 'flex',
       flexDirection: 'column',
-      gap: 4,
+      gap: 3,
       pointerEvents: 'auto',
     }}>
       {visible.map((n) => (
