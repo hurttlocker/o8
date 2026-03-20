@@ -24,8 +24,15 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
   const [applied, setApplied] = useState(false);
   const [ran, setRan] = useState(false);
   const isMermaid = lang === 'mermaid';
-  const isCode = !isMermaid && !!lang && ['ts', 'tsx', 'js', 'jsx', 'py', 'css', 'html', 'json', 'yaml', 'yml', 'toml', 'sh', 'bash', 'sql', 'go', 'rust', 'md', 'xml', 'graphql', 'typescript', 'javascript', 'python', 'ruby', 'shell', 'zsh'].includes(lang.toLowerCase());
-  const isShell = !!lang && ['sh', 'bash', 'shell', 'zsh'].includes(lang.toLowerCase());
+  const isCode = !isMermaid && (!!lang && ['ts', 'tsx', 'js', 'jsx', 'py', 'css', 'html', 'json', 'yaml', 'yml', 'toml', 'sh', 'bash', 'sql', 'go', 'rust', 'md', 'xml', 'graphql', 'typescript', 'javascript', 'python', 'ruby', 'shell', 'zsh', 'console', 'terminal', 'powershell', 'fish', 'cmd'].includes(lang.toLowerCase()));
+  // Detect shell blocks: explicit tags OR untagged blocks that look like commands
+  const shellTags = ['sh', 'bash', 'shell', 'zsh', 'console', 'terminal', 'powershell', 'fish', 'cmd'];
+  const looksLikeShell = !lang && code.split('\n').every((line: string) => {
+    const t = line.trim();
+    if (!t || t.startsWith('#') || t.startsWith('$')) return true;
+    return /^(npm|npx|yarn|pnpm|bun|brew|pip|cargo|go |git |cd |ls|mkdir|rm |cp |mv |cat |echo |curl |wget |docker |kubectl |sudo |apt|dnf|yum|chmod|chown|export |source |\.\/|node |python|ruby |make|cmake|gcc|g\+\+|rustc|deno|open |pbcopy|which|env |set )/.test(t);
+  });
+  const isShell = (!!lang && shellTags.includes(lang.toLowerCase())) || looksLikeShell;
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(code);
@@ -64,7 +71,7 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
           color: '#64748b',
           fontFamily: '"SF Mono", ui-monospace, monospace',
         }}>
-          {lang || 'text'}
+          {lang || (isShell ? 'shell' : 'text')}
         </span>
         <button
           type="button"

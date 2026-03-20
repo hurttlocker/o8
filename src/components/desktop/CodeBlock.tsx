@@ -406,8 +406,15 @@ export const CodeBlock = memo(function CodeBlock({ code, language, onOpenMermaid
   const lines = code.split('\n');
   const label = formatLabel(language);
   const isMermaid = language?.toLowerCase() === 'mermaid';
-  const isCode = !isMermaid && !!language && ['ts', 'tsx', 'js', 'jsx', 'py', 'css', 'html', 'json', 'yaml', 'yml', 'toml', 'sh', 'bash', 'sql', 'go', 'rust', 'md', 'xml', 'graphql', 'typescript', 'javascript', 'python', 'ruby', 'shell', 'zsh'].includes(language.toLowerCase());
-  const isShell = !!language && ['sh', 'bash', 'shell', 'zsh'].includes(language.toLowerCase());
+  const isCode = !isMermaid && (!!language && ['ts', 'tsx', 'js', 'jsx', 'py', 'css', 'html', 'json', 'yaml', 'yml', 'toml', 'sh', 'bash', 'sql', 'go', 'rust', 'md', 'xml', 'graphql', 'typescript', 'javascript', 'python', 'ruby', 'shell', 'zsh', 'console', 'terminal', 'powershell', 'fish', 'cmd'].includes(language.toLowerCase()));
+  // Detect shell: explicit tags OR untagged blocks that look like commands
+  const shellTags = ['sh', 'bash', 'shell', 'zsh', 'console', 'terminal', 'powershell', 'fish', 'cmd'];
+  const looksLikeShell = !language && code.split('\n').every((line: string) => {
+    const t = line.trim();
+    if (!t || t.startsWith('#') || t.startsWith('$')) return true;
+    return /^(npm|npx|yarn|pnpm|bun|brew|pip|cargo|go |git |cd |ls|mkdir|rm |cp |mv |cat |echo |curl |wget |docker |kubectl |sudo |apt|dnf|yum|chmod|chown|export |source |\.\/|node |python|ruby |make|cmake|gcc|g\+\+|rustc|deno|open |pbcopy|which|env |set )/.test(t);
+  });
+  const isShell = (!!language && shellTags.includes(language.toLowerCase())) || looksLikeShell;
   const [ran, setRan] = useState(false);
   const [expanded, setExpanded] = useState(isMermaid); // Mermaid auto-expands
   const [copied, setCopied] = useState(false);
