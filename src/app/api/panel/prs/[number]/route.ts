@@ -2,8 +2,43 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
+import { listRepos } from '@/lib/repos/registry';
 
 const DEFAULT_REPO = process.env.GITHUB_REPO || 'hurttlocker/cortex-ide';
+
+function normalizeRepoSlug(remoteUrl: string | null | undefined) {
+  if (!remoteUrl) return null;
+  const normalized = remoteUrl
+    .replace(/\.git$/, '')
+    .replace(/^git@github\.com:/, 'https://github.com/');
+  const match = normalized.match(/github\.com\/([^/]+\/[^/]+)$/);
+  return match?.[1] ?? null;
+}
+
+async function resolveCandidateRepos(preferredRepo: string) {
+  const registered = await listRepos().catch(() => []);
+  const candidateRepos = new Set<string>([preferredRepo, DEFAULT_REPO]);
+  for (const entry of registered) {
+    const slug = normalizeRepoSlug(entry.remoteUrl);
+    if (slug) candidateRepos.add(slug);
+  }
+  return Array.from(candidateRepos).filter((repo) => /^[\w.-]+\/[\w.-]+$/.test(repo));
+}
+
+function isMissingPrError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes('Could not resolve to a PullRequest')
+    || message.includes('no pull requests found')
+    || message.includes('pull request not found');
+}
+
+function loadPrDetail(prNum: number, repo: string) {
+  const prJson = execSync(
+    `gh pr view ${prNum} --repo ${repo} --json number,title,body,state,author,headRefName,baseRefName,additions,deletions,changedFiles,createdAt,mergedAt,closedAt,mergedBy,labels,reviews,comments,statusCheckRollup,files,url`,
+    { encoding: 'utf-8', timeout: 15000 },
+  );
+  return JSON.parse(prJson);
+}
 
 export async function GET(
   request: Request,
@@ -23,17 +58,33 @@ export async function GET(
   }
 
   try {
-    const prJson = execSync(
-      `gh pr view ${prNum} --repo ${repo} --json number,title,body,state,author,headRefName,baseRefName,additions,deletions,changedFiles,createdAt,mergedAt,closedAt,mergedBy,labels,reviews,comments,statusCheckRollup,files,url`,
-      { encoding: 'utf-8', timeout: 15000 },
-    );
+    const candidateRepos = await resolveCandidateRepos(repo);
+    let resolvedRepo = repo;
+    let pr: Record<string, unknown> | null = null;
+    let lastError: unknown = null;
 
-    const pr = JSON.parse(prJson);
+    for (const candidateRepo of candidateRepos) {
+      try {
+        pr = loadPrDetail(prNum, candidateRepo);
+        resolvedRepo = candidateRepo;
+        break;
+      } catch (error) {
+        lastError = error;
+        if (!isMissingPrError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    if (!pr) {
+      const message = lastError instanceof Error ? lastError.message : `PR #${prNum} not found`;
+      return NextResponse.json({ error: message }, { status: 404 });
+    }
 
     let reviewComments: unknown[] = [];
     try {
       const commentsJson = execSync(
-        `gh api repos/${repo}/pulls/${prNum}/comments --jq '[.[] | {id: .id, body: .body, user: .user.login, path: .path, line: .line, created_at: .created_at}]'`,
+        `gh api repos/${resolvedRepo}/pulls/${prNum}/comments --jq '[.[] | {id: .id, body: .body, user: .user.login, path: .path, line: .line, created_at: .created_at}]'`,
         { encoding: 'utf-8', timeout: 10000 },
       );
       reviewComments = JSON.parse(commentsJson);
@@ -42,7 +93,7 @@ export async function GET(
     let issueComments: unknown[] = [];
     try {
       const icJson = execSync(
-        `gh api repos/${repo}/issues/${prNum}/comments --jq '[.[] | {id: .id, body: .body, user: .user.login, created_at: .created_at}]'`,
+        `gh api repos/${resolvedRepo}/issues/${prNum}/comments --jq '[.[] | {id: .id, body: .body, user: .user.login, created_at: .created_at}]'`,
         { encoding: 'utf-8', timeout: 10000 },
       );
       issueComments = JSON.parse(icJson);
@@ -51,7 +102,7 @@ export async function GET(
     let diffStat = '';
     try {
       diffStat = execSync(
-        `gh pr diff ${prNum} --repo ${repo} --stat`,
+        `gh pr diff ${prNum} --repo ${resolvedRepo} --stat`,
         { encoding: 'utf-8', timeout: 10000, maxBuffer: 512 * 1024 },
       ).trim();
     } catch { /* no diff stat */ }
@@ -59,6 +110,7 @@ export async function GET(
     return NextResponse.json({
       pr: {
         ...pr,
+        resolvedRepo,
         reviewComments,
         issueComments,
         diffStat,
