@@ -3,7 +3,6 @@ import type { SurfaceStatusProps } from './types';
 import { sessionStatusSummary } from './utils';
 
 export const SurfaceStatus = memo(function SurfaceStatus({
-  snapshot,
   selectedSession,
   selectedReviewPacket,
   isOwnedCodexSession,

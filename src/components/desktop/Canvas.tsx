@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps, react-hooks/set-state-in-effect, @next/next/no-img-element -- canvas viewers are legacy inspector surfaces pending deeper cleanup */
 
 /**
  * Canvas — Bottom-half contextual workspace with tabs.

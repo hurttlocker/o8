@@ -3514,7 +3514,7 @@ button.workflow-file-item.workflow-file-item-active {
   background: transparent;
   color: #111111;
   font: inherit;
-  font-size: 0.95rem;
+  font-size: 1rem;
   line-height: 1.35;
   overflow-y: auto;
   transition: none;

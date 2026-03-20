@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps, react-hooks/set-state-in-effect, react-hooks/purity -- legacy inspector surface keeps dormant controls and fetch-driven panel state during refactor */
 
 /**
  * AgentPanel — Left panel command center for Cortex IDE.

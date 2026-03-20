@@ -93,32 +93,6 @@ async function searchConversations(query: string): Promise<UniversalResult[]> {
   return results.slice(0, 5);
 }
 
-function searchAgents(query: string, agents: string): UniversalResult[] {
-  if (!agents) return [];
-  try {
-    const parsed = JSON.parse(agents);
-    const lowerQuery = query.toLowerCase();
-    const results: UniversalResult[] = [];
-    for (const agent of parsed) {
-      const name = (agent.name ?? '').toLowerCase();
-      const task = (agent.currentTask ?? '').toLowerCase();
-      const model = (agent.model ?? '').toLowerCase();
-      if (name.includes(lowerQuery) || task.includes(lowerQuery) || model.includes(lowerQuery)) {
-        results.push({
-          kind: 'agent',
-          title: agent.name ?? 'Unknown Agent',
-          detail: `${agent.status} · ${agent.currentTask || agent.model || ''}`.slice(0, 120),
-          target: { sessionKey: agent.sessionKey },
-          score: name.includes(lowerQuery) ? 0.9 : 0.6,
-        });
-      }
-    }
-    return results;
-  } catch {
-    return [];
-  }
-}
-
 function searchMemory(query: string): UniversalResult[] {
   const raw = execQuiet(
     `"${CORTEX_BINARY}" search "${query.replace(/"/g, '\\"')}" --limit 5 --json 2>/dev/null`,
@@ -270,7 +244,7 @@ export async function GET(request: Request) {
       query,
       categories,
     });
-  } catch (error) {
+  } catch {
     return NextResponse.json(
       { results: [], query, error: 'Search failed', categories },
       { status: 500 },

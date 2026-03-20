@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable react-hooks/refs -- particle counts are displayed from an imperative animation ref */
 
 /**
  * MemoryLavaLamp — Living particle visualization of Cortex memory.

@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
         process.kill(payload.pid, 'SIGTERM');
         invalidateInboxCache();
         return NextResponse.json({ success: true, method: 'direct-pid', pid: payload.pid });
-      } catch (e) {
+      } catch {
         invalidateInboxCache();
         return NextResponse.json({ success: true, method: 'already-dead', pid: payload.pid });
       }

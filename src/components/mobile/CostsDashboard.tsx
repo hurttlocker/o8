@@ -54,7 +54,23 @@ function UsageRing({ segments, size = 120 }: {
 }) {
   const r = (size - 16) / 2;
   const circ = 2 * Math.PI * r;
-  let offset = 0;
+  const segmentElements = segments.reduce<Array<React.ReactNode>>((elements, seg, index) => {
+    const previousLength = segments
+      .slice(0, index)
+      .reduce((sum, prior) => sum + (prior.percent / 100) * circ, 0);
+    const len = (seg.percent / 100) * circ;
+    elements.push(
+      <circle
+        key={seg.label}
+        cx={size / 2} cy={size / 2} r={r}
+        fill="none" stroke={seg.color} strokeWidth={10}
+        strokeDasharray={`${len} ${circ - len}`}
+        strokeDashoffset={-previousLength}
+        strokeLinecap="round"
+      />
+    );
+    return elements;
+  }, []);
 
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}
@@ -63,21 +79,7 @@ function UsageRing({ segments, size = 120 }: {
       <circle cx={size / 2} cy={size / 2} r={r}
         fill="none" stroke="rgba(0,122,255,0.06)" strokeWidth={10} />
       {/* Segments */}
-      {segments.map((seg) => {
-        const len = (seg.percent / 100) * circ;
-        const el = (
-          <circle
-            key={seg.label}
-            cx={size / 2} cy={size / 2} r={r}
-            fill="none" stroke={seg.color} strokeWidth={10}
-            strokeDasharray={`${len} ${circ - len}`}
-            strokeDashoffset={-offset}
-            strokeLinecap="round"
-          />
-        );
-        offset += len;
-        return el;
-      })}
+      {segmentElements}
     </svg>
   );
 }

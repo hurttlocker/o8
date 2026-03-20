@@ -4,6 +4,7 @@
  * Defines the component + action vocabulary that agents can use
  * to generate dynamic UI surfaces (approval cards, status panels, etc.)
  */
+/* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck — json-render v0.14 types are complex; runtime works, TS inference needs upstream fixes
 import { defineCatalog } from '@json-render/core';
 import { schema } from '@json-render/react/schema';

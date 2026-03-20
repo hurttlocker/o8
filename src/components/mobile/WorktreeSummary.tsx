@@ -8,7 +8,7 @@
  */
 
 import { memo, useCallback, useState } from 'react';
-import type { WorktreeInfo, ConflictReport } from '@/lib/worktree/types';
+import type { WorktreeInfo } from '@/lib/worktree/types';
 
 interface WorktreeSummaryProps {
   worktrees: WorktreeInfo[];
@@ -36,8 +36,6 @@ export const WorktreeSummary = memo(function WorktreeSummary({
     wt.status === 'active' || wt.status === 'ready' || wt.status === 'setup',
   );
 
-  if (active.length === 0) return null;
-
   const handlePrune = useCallback(async () => {
     if (!pruneConfirm) {
       setPruneConfirm(true);
@@ -55,6 +53,8 @@ export const WorktreeSummary = memo(function WorktreeSummary({
   }, [onPrune, pruneConfirm]);
 
   const totalFiles = active.reduce((sum, wt) => sum + wt.dirtyFiles.length, 0);
+
+  if (active.length === 0) return null;
 
   return (
     <div

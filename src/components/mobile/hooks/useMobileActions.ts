@@ -26,6 +26,7 @@ import {
 import { compactLine } from '../utils';
 
 interface ActionDeps {
+  wsConnected: boolean;
   refreshInbox: () => Promise<MobileInboxSnapshot>;
   loadHistory: (sessionKey: string, force?: boolean) => Promise<unknown>;
   loadOwnedReviewPacket: (sessionKey: string, force?: boolean) => Promise<RuntimeReviewPacket | null | undefined>;
@@ -35,9 +36,23 @@ interface ActionDeps {
   sendTerminalInput: (sessionName: string, data: string) => void;
 }
 
+let sendClickAudioContext: AudioContext | null = null;
+
 function playSendClick() {
   try {
-    const ctx = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+    const AudioContextCtor = window.AudioContext
+      || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return;
+
+    if (!sendClickAudioContext || sendClickAudioContext.state === 'closed') {
+      sendClickAudioContext = new AudioContextCtor();
+    }
+
+    const ctx = sendClickAudioContext;
+    if (ctx.state === 'suspended') {
+      void ctx.resume().catch(() => undefined);
+    }
+
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
@@ -48,11 +63,16 @@ function playSendClick() {
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.06);
+    osc.onended = () => {
+      osc.disconnect();
+      gain.disconnect();
+    };
   } catch { /* audio not available */ }
 }
 
 export function useMobileActions(state: MobileState, deps: ActionDeps) {
   const {
+    wsConnected,
     refreshInbox,
     loadHistory,
     loadOwnedReviewPacket,
@@ -109,6 +129,7 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
         payload: { ...payload, clientMutationId },
         setActionStateBySession,
         setActionNoteBySession,
+        realtimeEnabled: wsConnected,
         refreshInbox,
         loadHistory,
         loadOwnedReviewPacket,
@@ -145,7 +166,7 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
       }
       throw error;
     }
-  }, [pendingMutationIdBySessionRef, setPendingMutationIdBySession, setRealtimeMutationsById, setActionStateBySession, setActionNoteBySession, refreshInbox, loadHistory, loadOwnedReviewPacket]);
+  }, [pendingMutationIdBySessionRef, setPendingMutationIdBySession, setRealtimeMutationsById, setActionStateBySession, setActionNoteBySession, wsConnected, refreshInbox, loadHistory, loadOwnedReviewPacket]);
 
   const relaySlashCommand = useCallback(async (sessionKey: string, commandText: string) => {
     const session = snapshot.sessions.find((item) => item.sessionKey === sessionKey);
@@ -207,8 +228,16 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
   }, [selectedSessionKey, preEnhanceDraft, setDraftBySession, setPreEnhanceDraft]);
 
   const handleAttachmentSelection = useCallback(async (files: FileList | null) => {
-    await prepareImageAttachments({ selectedSessionKey, files, isChatSession, setSurfaceNote, setDraftAttachmentsBySession, composeRef });
-  }, [selectedSessionKey, isChatSession, setSurfaceNote, setDraftAttachmentsBySession, composeRef]);
+    await prepareImageAttachments({
+      selectedSessionKey,
+      files,
+      isChatSession,
+      draftAttachmentsBySession,
+      setSurfaceNote,
+      setDraftAttachmentsBySession,
+      composeRef,
+    });
+  }, [selectedSessionKey, isChatSession, draftAttachmentsBySession, setSurfaceNote, setDraftAttachmentsBySession, composeRef]);
 
   const removeDraftAttachment = useCallback((sessionKey: string, attachmentId: string) => {
     removeImageAttachment({ sessionKey, attachmentId, setDraftAttachmentsBySession });

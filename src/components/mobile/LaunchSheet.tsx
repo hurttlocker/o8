@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, memo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 
 interface RepoEntry {
   name: string;
@@ -75,18 +75,16 @@ export const LaunchSheet = memo(function LaunchSheet({
     }
   }, [open]);
 
-  // Auto-generate branch name from task
-  useEffect(() => {
-    if (branchMode === 'new' && task.length > 3) {
-      const slug = task
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, '')
-        .trim()
-        .replace(/\s+/g, '-')
-        .slice(0, 40);
-      setNewBranch(`feat/${slug}`);
-    }
-  }, [task, branchMode]);
+  const suggestedBranch = useMemo(() => {
+    const slug = task
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .slice(0, 40);
+    return slug ? `feat/${slug}` : '';
+  }, [task]);
+  const branchValue = newBranch || suggestedBranch;
 
   const handleLaunch = useCallback(async () => {
     if (!task.trim() || !selectedRepo) return;
@@ -101,8 +99,8 @@ export const LaunchSheet = memo(function LaunchSheet({
         repoPath: selectedRepo.path,
       };
 
-      if (branchMode === 'new' && newBranch.trim()) {
-        body.baseBranch = newBranch.trim();
+      if (branchMode === 'new' && branchValue.trim()) {
+        body.baseBranch = branchValue.trim();
         body.isolate = true;
         body.skipSetup = false;
       } else {
@@ -134,7 +132,7 @@ export const LaunchSheet = memo(function LaunchSheet({
       setError(err instanceof Error ? err.message : 'Launch failed');
       setLaunching(false);
     }
-  }, [task, selectedRepo, selectedRuntime, branchMode, newBranch, onLaunched, onClose]);
+  }, [task, selectedRepo, selectedRuntime, branchMode, branchValue, onLaunched, onClose]);
 
   if (!open) return null;
 
@@ -485,7 +483,7 @@ export const LaunchSheet = memo(function LaunchSheet({
           {branchMode === 'new' && (
             <input
               type="text"
-              value={newBranch}
+              value={branchValue}
               onChange={(e) => setNewBranch(e.target.value)}
               placeholder="feat/my-feature"
               style={{

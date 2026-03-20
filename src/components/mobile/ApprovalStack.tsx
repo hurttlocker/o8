@@ -1,6 +1,6 @@
 'use client';
 
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import type { ApprovalStackProps } from './types';
 
 export function ApprovalStack({
@@ -9,6 +9,8 @@ export function ApprovalStack({
   onApprove,
   onReject,
 }: ApprovalStackProps) {
+  const [now] = useState(() => Date.now());
+
   if (!pendingApprovals.length) {
     return null;
   }
@@ -22,7 +24,7 @@ export function ApprovalStack({
           : approval.severity === 'warning'
             ? '#ff9f0a'
             : '#007aff';
-        const elapsed = Math.round((Date.now() - approval.createdAt) / 60_000);
+        const elapsed = Math.round((now - approval.createdAt) / 60_000);
         const timeLabel = elapsed < 1 ? 'just now' : `${elapsed}m ago`;
 
         const cardStyle: CSSProperties = {

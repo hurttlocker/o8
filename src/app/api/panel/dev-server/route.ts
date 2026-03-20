@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { spawn, execSync, type ChildProcess } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 
 // ── Active dev server processes ──
 const activeServers = new Map<string, {

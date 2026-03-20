@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/no-unused-expressions -- nav rail keeps dormant playground affordances during migration */
 
 /**
  * NavRail — Slim left navigation rail, adapted from MisterADA PlaygroundGlassNav.

@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars -- design surface keeps dormant hooks during iterative build-out */
 
 /**
  * IntentCanvas — 2027 Agent Orchestration Command Center

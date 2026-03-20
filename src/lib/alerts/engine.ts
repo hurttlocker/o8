@@ -19,6 +19,7 @@ const DEFAULT_HEARTBEAT_INTERVAL = 120; // 2h fallback
 /** Parse "Xm ago" / "Xh ago" / "Xd ago" into minutes. Returns Infinity if unparseable. */
 function parseAgeMinutes(ageStr: string | undefined): number {
   if (!ageStr) return Infinity;
+  if (ageStr.trim().toLowerCase() === 'just now') return 0;
   const m = ageStr.match(/(\d+)\s*(m|min|h|hr|d|day|s|sec)/i);
   if (!m) return Infinity;
   const val = parseInt(m[1], 10);
@@ -82,6 +83,7 @@ export function detectAlerts(agents: AgentSummary[]): Alert[] {
     // ── Agent stuck (running but no activity) ──
     if (
       agent.status === 'running' &&
+      ageMinutes < Infinity &&
       ageMinutes >= STUCK_MINUTES &&
       agent.approvalStatus !== 'pending' // don't double-alert
     ) {

@@ -9,7 +9,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Gauge, ShieldCheck, X } from 'lucide-react';
-import type { Alert, AlertType } from '@/lib/alerts/types';
+import type { Alert } from '@/lib/alerts/types';
 import { SEVERITY_COLOR } from '@/lib/alerts/types';
 
 const TOAST_DURATION = 5_000;
@@ -38,12 +38,24 @@ export const AlertToast = memo(function AlertToast({
   onAction,
 }: AlertToastProps) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
-  // Prevent hydration mismatch — alert state is client-only
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
-  // Note: can't early-return before hooks, so guard the render below
   const shownRef = useRef<Set<string>>(new Set());
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) =>
+      prev.map((t) => (t.alert.id === id ? { ...t, exiting: true } : t)),
+    );
+    // Remove after animation
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.alert.id !== id));
+    }, 300);
+    // Clear timer
+    const timer = timersRef.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      timersRef.current.delete(id);
+    }
+  }, []);
 
   // Watch for new urgent alerts
   useEffect(() => {
@@ -71,34 +83,20 @@ export const AlertToast = memo(function AlertToast({
       }, TOAST_DURATION);
       timersRef.current.set(alert.id, timer);
     }
-  }, [alerts]);
-
-  const dismissToast = useCallback((id: string) => {
-    setToasts((prev) =>
-      prev.map((t) => (t.alert.id === id ? { ...t, exiting: true } : t)),
-    );
-    // Remove after animation
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.alert.id !== id));
-    }, 300);
-    // Clear timer
-    const timer = timersRef.current.get(id);
-    if (timer) {
-      clearTimeout(timer);
-      timersRef.current.delete(id);
-    }
-  }, []);
+  }, [alerts, dismissToast]);
 
   // Cleanup timers on unmount
   useEffect(() => {
+    const timers = timersRef.current;
     return () => {
-      for (const timer of timersRef.current.values()) {
+      for (const timer of timers.values()) {
         clearTimeout(timer);
       }
+      timers.clear();
     };
   }, []);
 
-  if (!mounted || toasts.length === 0) return null;
+  if (toasts.length === 0) return null;
 
   return (
     <div

@@ -93,16 +93,24 @@ export function AlertProvider({ children }: { children: ReactNode }) {
   // Start empty to match server render — hydrate from sessionStorage after mount
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const alertsRef = useRef(alerts);
-  alertsRef.current = alerts;
   const mountedRef = useRef(false);
+
+  useEffect(() => {
+    alertsRef.current = alerts;
+  }, [alerts]);
 
   // Load from sessionStorage AFTER mount (avoids hydration mismatch)
   useEffect(() => {
     const stored = loadAlerts();
     if (stored.length > 0) {
-      setAlerts(sortAlerts(stored));
+      const timer = window.setTimeout(() => {
+        setAlerts(sortAlerts(stored));
+      }, 0);
+      mountedRef.current = true;
+      return () => window.clearTimeout(timer);
     }
     mountedRef.current = true;
+    return undefined;
   }, []);
 
   // Persist on change (skip first render to avoid overwriting before load)

@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable react-hooks/exhaustive-deps -- card callbacks intentionally capture the current target agent snapshot */
 
 /**
  * ThoughtsCard — Floating glass command surface.

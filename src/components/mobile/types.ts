@@ -181,7 +181,7 @@ export interface DiffOverlayProps {
   selectedReviewFilePath: string | null;
   reviewFiles: ReviewChangedFile[];
   reviewFileByPath: Record<string, ReviewFileDetail>;
-  stickyReviewFilesRef: MutableRefObject<ReviewChangedFile[]>;
+  stickyReviewFiles: ReviewChangedFile[];
   reviewFileError: string | null;
   reviewFileLoadingPath: string | null;
   compactLine: CompactLine;
@@ -195,8 +195,6 @@ export interface TopBarProps {
   snapshot: MobileInboxSnapshot;
   selectedSession?: SessionSummary;
   selectedReviewPacket?: RuntimeReviewPacket | null;
-  selectedReviewFile?: ReviewFileDetail;
-  reviewFiles: ReviewChangedFile[];
   isOwnedCodexSession: boolean;
   isHeaderCompact: boolean;
   headerVisible: boolean;
@@ -206,9 +204,6 @@ export interface TopBarProps {
   squadPickerOpen: boolean;
   activeScreen: import('./SpeedDial').MobileScreen;
   onNavigate: (screen: import('./SpeedDial').MobileScreen) => void;
-  onOpenControls: () => void;
-  onOpenDiff: () => void;
-  onOpenAlerts: () => void;
   onToggleSquadPicker: () => void;
   onSessionFocus: (sessionId: string) => void;
 }
