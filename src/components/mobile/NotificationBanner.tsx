@@ -105,15 +105,15 @@ function BannerCard({ notification, onDismiss, onTap }: {
       }}
       style={{
         display: 'flex',
-        alignItems: 'flex-start',
-        gap: 10,
-        padding: '12px 14px',
-        borderRadius: 16,
-        background: 'rgba(0,122,255,0.08)',
+        alignItems: 'center',
+        gap: 8,
+        padding: '8px 12px',
+        borderRadius: 12,
+        background: 'rgba(0,122,255,0.06)',
         backdropFilter: 'blur(40px) saturate(1.8)',
         WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-        border: '1px solid rgba(0,122,255,0.15)',
-        boxShadow: '0 8px 32px rgba(0,122,255,0.12), 0 2px 8px rgba(0,0,0,0.06)',
+        border: '1px solid rgba(0,122,255,0.12)',
+        boxShadow: '0 4px 16px rgba(0,122,255,0.08), 0 1px 4px rgba(0,0,0,0.04)',
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
         transition: 'transform 200ms ease, opacity 200ms ease',
@@ -122,13 +122,13 @@ function BannerCard({ notification, onDismiss, onTap }: {
     >
       {/* Icon */}
       <span style={{
-        width: 32, height: 32, borderRadius: 8,
+        width: 24, height: 24, borderRadius: 6,
         background: `${icon.color}12`,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         flexShrink: 0,
       }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-          stroke={icon.color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+          stroke={icon.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
           <path d={icon.path} />
         </svg>
       </span>
@@ -136,14 +136,15 @@ function BannerCard({ notification, onDismiss, onTap }: {
       {/* Content */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <p style={{
-          margin: 0, fontSize: 13, fontWeight: 700,
+          margin: 0, fontSize: 12, fontWeight: 700,
           color: '#0a0a0a',
           fontFamily: '-apple-system, system-ui, sans-serif',
+          letterSpacing: '-0.01em',
         }}>
           {notification.title}
         </p>
         <p style={{
-          margin: '2px 0 0', fontSize: 12, color: '#64748b',
+          margin: '1px 0 0', fontSize: 11, color: '#8e8e93',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
           {notification.body}
@@ -155,15 +156,15 @@ function BannerCard({ notification, onDismiss, onTap }: {
         type="button"
         onClick={(e) => { e.stopPropagation(); onDismiss(); }}
         style={{
-          width: 20, height: 20, borderRadius: '50%',
-          background: 'rgba(0,122,255,0.1)',
+          width: 18, height: 18, borderRadius: '50%',
+          background: 'rgba(0,122,255,0.08)',
           border: 'none', cursor: 'pointer',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0, marginTop: 2,
+          flexShrink: 0,
           WebkitTapHighlightColor: 'transparent',
         }}
       >
-        <svg width="8" height="8" viewBox="0 0 24 24" fill="none"
+        <svg width="7" height="7" viewBox="0 0 24 24" fill="none"
           stroke="#007aff" strokeWidth="3" strokeLinecap="round">
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
@@ -185,12 +186,12 @@ export const NotificationBanner = memo(function NotificationBanner({
   return (
     <div style={{
       position: 'fixed',
-      top: 'calc(env(safe-area-inset-top, 0px) + 56px)',
-      left: 8, right: 8,
+      top: 'calc(env(safe-area-inset-top, 0px) + 62px)',
+      left: 12, right: 12,
       zIndex: 9997,
       display: 'flex',
       flexDirection: 'column',
-      gap: 6,
+      gap: 4,
       pointerEvents: 'auto',
     }}>
       {visible.map((n) => (
