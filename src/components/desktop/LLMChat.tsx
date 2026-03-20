@@ -23,6 +23,7 @@ import {
   Sparkles,
   RotateCcw,
 } from 'lucide-react';
+import { renderLLMMarkdown } from './LLMMarkdown';
 
 // ── Types ──
 
@@ -204,7 +205,7 @@ function MessageBubble({ message, isLast }: { message: LLMMessage; isLast: boole
     }}>
       {/* Message content */}
       <div style={{
-        maxWidth: '85%',
+        maxWidth: isUser ? '75%' : '90%',
         paddingTop: isUser ? 10 : 16,
         paddingBottom: isUser ? 10 : 16,
         paddingLeft: isUser ? 16 : 0,
@@ -215,10 +216,10 @@ function MessageBubble({ message, isLast }: { message: LLMMessage; isLast: boole
         fontSize: 14,
         lineHeight: '1.6',
         fontFamily: '-apple-system, system-ui, sans-serif',
-        whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
+        ...(isUser ? { whiteSpace: 'pre-wrap' as const } : {}),
       }}>
-        {message.content}
+        {isUser ? message.content : renderLLMMarkdown(message.content)}
       </div>
 
       {/* Meta bar — model, tokens, actions */}
@@ -719,17 +720,16 @@ export default function LLMChat({ tabId }: { tabId: string }) {
             }}>
               {streamContent ? (
                 <div style={{
-                  maxWidth: '85%',
+                  maxWidth: '90%',
                   paddingTop: 16,
                   paddingBottom: 16,
                   fontSize: 14,
                   lineHeight: '1.6',
                   color: '#1e293b',
-                  whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
                   animation: 'llmFadeIn 200ms ease-out',
                 }}>
-                  {streamContent}
+                  {renderLLMMarkdown(streamContent)}
                   <span style={{
                     display: 'inline-block',
                     width: 2,
