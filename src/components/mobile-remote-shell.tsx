@@ -322,6 +322,15 @@ function MobileRemoteShellInner({
   return (
     <div className="mobile-wrap remodex-mobile-page" style={shellStyle} suppressHydrationWarning>
       <div className="remodex-phone-shell">
+        {/* Frosted status bar blend — white gradient above TopBar */}
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0,
+          height: 'calc(env(safe-area-inset-top, 0px) + 12px)',
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.92) 60%, rgba(255,255,255,0) 100%)',
+          zIndex: 9,
+          pointerEvents: 'none',
+        }} />
         <TopBar
           snapshot={snapshot}
           selectedSession={selectedSession}
@@ -569,7 +578,19 @@ function MobileRemoteShellInner({
               />
             </div>
           ) : null}
-          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' ? (
+        </div>
+      {/* RuntimeBar — pinned to very bottom, separate from compose dock */}
+      {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' ? (
+        <div style={{
+          position: 'fixed',
+          left: 0, right: 0,
+          bottom: 0,
+          zIndex: 5,
+          background: 'rgba(255,255,255,0.85)',
+          backdropFilter: 'blur(20px) saturate(1.6)',
+          WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
+          borderTop: '1px solid rgba(0,0,0,0.04)',
+        }}>
           <RuntimeBar
             snapshot={snapshot}
             selectedSession={selectedSession}
@@ -579,8 +600,8 @@ function MobileRemoteShellInner({
             reviewFiles={reviewFiles}
             onOpenDiff={actions.openDiffViewer}
           />
-          ) : null}
         </div>
+      ) : null}
       </div>
       <ControlsSheet
         controlsOpen={controlsOpen}

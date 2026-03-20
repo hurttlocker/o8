@@ -189,9 +189,15 @@ export const ComposeBar = memo(function ComposeBar({
             <textarea
               ref={composeRef}
               className="remodex-compose-input"
-              rows={2}
+              rows={1}
               value={draft}
-              onChange={(event) => handlers.onDraftChange(event.target.value)}
+              onChange={(event) => {
+                handlers.onDraftChange(event.target.value);
+                // Auto-grow: expand with each line, max ~6 lines
+                const el = event.target;
+                el.style.height = 'auto';
+                el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+              }}
               onKeyDown={(event) => {
                 // Up arrow: recall last message (placeholder for mobile)
                 if (event.key === 'Tab' && showSlashSuggestions) {
