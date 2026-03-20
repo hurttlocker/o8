@@ -1093,6 +1093,8 @@ const SLASH_COMMANDS = [
   { command: '/explain', label: 'Explain this', description: 'Break down complex code or concepts', icon: '💡', prefix: 'Explain in detail: ' },
   { command: '/test', label: 'Write tests', description: 'Generate test cases', icon: '🧪', prefix: 'Write comprehensive tests for: ' },
   { command: '/fix', label: 'Fix this', description: 'Debug and fix an issue', icon: '🔧', prefix: 'Debug and fix this issue: ' },
+  { command: '/issue', label: 'Create issue', description: 'File a GitHub issue from chat context', icon: '📋', prefix: 'Create a GitHub issue for: ' },
+  { command: '/pr', label: 'Create PR', description: 'Open a pull request from current changes', icon: '🔀', prefix: 'Create a pull request with these changes: ' },
 ];
 
 // ── Follow-up question generation ──
@@ -1218,6 +1220,12 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
   const [followUpsLoading, setFollowUpsLoading] = useState(false);
   const [showSlashPicker, setShowSlashPicker] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
+  const [approvedToolsSet, setApprovedToolsSet] = useState<Set<string>>(new Set());
+  const [pendingApproval, setPendingApproval] = useState<{
+    name: string;
+    args: Record<string, unknown>;
+    summary: string;
+  } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
   const [historyItems, setHistoryItems] = useState<{
@@ -1602,6 +1610,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
             ...messages.map((m) => ({ role: m.role, content: m.content })),
             { role: 'user', content: messageForModel },
           ],
+          approvedTools: [...approvedToolsSet],
         }),
         signal: controller.signal,
       });
@@ -1715,6 +1724,12 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
                 const toolStep = [...thinkingSteps].reverse().find(s => s.status === 'active' && s.type !== 'thinking');
                 if (toolStep) toolStep.status = 'complete';
                 setActiveThinking({ steps: [...thinkingSteps], thinking: thinkingText });
+              } else if (parsed.type === 'approval_required') {
+                setPendingApproval({
+                  name: parsed.name,
+                  args: parsed.args,
+                  summary: parsed.summary,
+                });
               } else if (parsed.type === 'sources') {
                 sources.push(...(parsed.sources ?? []));
               } else if (parsed.type === 'error') {
@@ -2578,6 +2593,139 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
         </div>
       </div>
 
+      {/* Approval Banner — blue glass */}
+      {pendingApproval && (
+        <div style={{
+          marginLeft: 24,
+          marginRight: 24,
+          marginBottom: 8,
+          paddingTop: 14,
+          paddingBottom: 14,
+          paddingLeft: 16,
+          paddingRight: 16,
+          background: 'linear-gradient(135deg, rgba(59,130,246,0.08) 0%, rgba(99,102,241,0.06) 100%)',
+          backdropFilter: 'blur(12px)',
+          border: '1px solid rgba(59,130,246,0.2)',
+          borderRadius: 12,
+          animation: 'llmFadeIn 200ms ease-out',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 14 }}>
+              {pendingApproval.name === 'create_github_issue' ? '📋' : '🔀'}
+            </span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>
+              Approval Required
+            </span>
+          </div>
+          <div style={{ fontSize: 12, color: '#475569', marginBottom: 10, lineHeight: 1.5 }}>
+            {pendingApproval.summary}
+          </div>
+          {/* Show details */}
+          {pendingApproval.args && (
+            <div style={{
+              background: 'rgba(255,255,255,0.6)',
+              borderRadius: 8,
+              paddingTop: 8,
+              paddingBottom: 8,
+              paddingLeft: 10,
+              paddingRight: 10,
+              marginBottom: 10,
+              fontSize: 11,
+              fontFamily: 'ui-monospace, monospace',
+              color: '#334155',
+              maxHeight: 80,
+              overflowY: 'auto',
+            }}>
+              {pendingApproval.name === 'create_github_issue' && (
+                <>
+                  <div><strong>Repo:</strong> {String(pendingApproval.args.repo)}</div>
+                  <div><strong>Title:</strong> {String(pendingApproval.args.title)}</div>
+                  {pendingApproval.args.labels && (
+                    <div><strong>Labels:</strong> {(pendingApproval.args.labels as string[]).join(', ')}</div>
+                  )}
+                </>
+              )}
+              {pendingApproval.name === 'create_pull_request' && (
+                <>
+                  <div><strong>Repo:</strong> {String(pendingApproval.args.repo)}</div>
+                  <div><strong>Branch:</strong> {String(pendingApproval.args.branch)}</div>
+                  <div><strong>Title:</strong> {String(pendingApproval.args.title)}</div>
+                  <div><strong>Base:</strong> {String(pendingApproval.args.baseBranch || 'main')}</div>
+                </>
+              )}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setApprovedToolsSet(prev => new Set([...prev, pendingApproval.name]));
+                setPendingApproval(null);
+                // Re-send the last message with approval
+                const lastUserMsg = messages.filter(m => m.role === 'user').pop();
+                if (lastUserMsg) {
+                  setInput(lastUserMsg.content);
+                  // Auto-send after state updates
+                  setTimeout(() => {
+                    const sendBtn = document.querySelector('[data-send-btn]') as HTMLButtonElement;
+                    if (sendBtn) sendBtn.click();
+                  }, 100);
+                }
+              }}
+              style={{
+                paddingTop: 7,
+                paddingBottom: 7,
+                paddingLeft: 16,
+                paddingRight: 16,
+                borderRadius: 8,
+                border: 'none',
+                background: '#3b82f6',
+                color: 'white',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'background 150ms',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget).style.background = '#2563eb'; }}
+              onMouseLeave={(e) => { (e.currentTarget).style.background = '#3b82f6'; }}
+            >
+              Approve
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPendingApproval(null);
+                // Add denial message
+                setMessages(prev => [...prev, {
+                  id: `deny-${Date.now()}`,
+                  role: 'assistant',
+                  content: `Action cancelled: ${pendingApproval.summary}`,
+                  timestamp: Date.now(),
+                }]);
+              }}
+              style={{
+                paddingTop: 7,
+                paddingBottom: 7,
+                paddingLeft: 16,
+                paddingRight: 16,
+                borderRadius: 8,
+                border: '1px solid #e2e8f0',
+                background: 'white',
+                color: '#64748b',
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: 'pointer',
+                transition: 'all 150ms',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget).style.borderColor = '#cbd5e1'; }}
+              onMouseLeave={(e) => { (e.currentTarget).style.borderColor = '#e2e8f0'; }}
+            >
+              Deny
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Input area — bottom, ChatGPT style */}
       <div style={{
         paddingTop: 12,
@@ -2888,6 +3036,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
           ) : (
             <button
               type="button"
+              data-send-btn="true"
               onClick={handleSend}
               disabled={!input.trim()}
               title="Send message"
