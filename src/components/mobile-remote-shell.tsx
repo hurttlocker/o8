@@ -578,17 +578,22 @@ function MobileRemoteShellInner({
               />
             </div>
           ) : null}
-          {/* RuntimeBar — below compose, bottom of dock */}
-          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' ? (
-            <RuntimeBar
-              snapshot={snapshot}
-              selectedSession={selectedSession}
-              selectedReviewPacket={selectedReviewPacket}
-              isOwnedCodexSession={isOwnedCodexSession}
-              compactLine={compactLine}
-              reviewFiles={reviewFiles}
-              onOpenDiff={actions.openDiffViewer}
-            />
+          {/* RuntimeBar — below compose, hidden when keyboard is up */}
+          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && !isComposerPrimed ? (
+            <div style={{
+              transition: 'opacity 200ms ease, max-height 200ms ease',
+              opacity: 1, maxHeight: 40, overflow: 'hidden',
+            }}>
+              <RuntimeBar
+                snapshot={snapshot}
+                selectedSession={selectedSession}
+                selectedReviewPacket={selectedReviewPacket}
+                isOwnedCodexSession={isOwnedCodexSession}
+                compactLine={compactLine}
+                reviewFiles={reviewFiles}
+                onOpenDiff={actions.openDiffViewer}
+              />
+            </div>
           ) : null}
         </div>
       </div>
