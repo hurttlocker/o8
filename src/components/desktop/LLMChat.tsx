@@ -37,6 +37,19 @@ import { saveChatHistory, loadChatHistory } from '@/lib/llm/chat-history';
 
 // ── Types ──
 
+export interface ToolCallInfo {
+  name: string;
+  status: 'calling' | 'running' | 'done';
+  args?: Record<string, unknown>;
+  preview?: string;
+}
+
+export interface SourceInfo {
+  title: string;
+  url?: string;
+  path?: string;
+}
+
 export interface LLMMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -46,6 +59,8 @@ export interface LLMMessage {
   costUsd?: number;
   timestamp: number;
   images?: string[]; // data URIs for display
+  toolCalls?: ToolCallInfo[];
+  sources?: SourceInfo[];
 }
 
 interface ModelOption {
@@ -403,6 +418,111 @@ function MessageBubble({ message, isLast, onRetry, onEdit }: MessageBubbleProps)
         ) : renderLLMMarkdown(message.content)}
       </div>
 
+      {/* Tool calls display */}
+      {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+          maxWidth: '90%',
+          marginTop: 4,
+        }}>
+          {message.toolCalls.map((tc, i) => (
+            <div key={i} style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              paddingTop: 6,
+              paddingBottom: 6,
+              paddingLeft: 10,
+              paddingRight: 10,
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: 8,
+              fontSize: 12,
+              fontFamily: '-apple-system, system-ui, sans-serif',
+              animation: 'llmFadeIn 200ms ease-out',
+            }}>
+              {/* Status indicator */}
+              <div style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: tc.status === 'done' ? '#10b981' : '#3b82f6',
+                flexShrink: 0,
+                ...(tc.status !== 'done' ? { animation: 'llmDot 1.4s ease-in-out infinite' } : {}),
+              }} />
+              {/* Tool name + args */}
+              <span style={{ color: '#64748b', fontWeight: 500 }}>
+                {tc.name === 'search_web' ? '🔍 Searched' :
+                 tc.name === 'read_file' ? '📄 Read' :
+                 tc.name === 'list_files' ? '📁 Listed' :
+                 tc.name === 'search_code' ? '🔎 Searched code' :
+                 `🔧 ${tc.name}`}
+              </span>
+              <span style={{ color: '#94a3b8' }}>
+                {tc.name === 'search_web' && tc.args?.query ? `"${tc.args.query}"` :
+                 tc.name === 'read_file' && tc.args?.path ? String(tc.args.path) :
+                 tc.name === 'search_code' && tc.args?.query ? `"${tc.args.query}"` :
+                 tc.name === 'list_files' && tc.args?.path ? String(tc.args.path) :
+                 ''}
+              </span>
+              {tc.status === 'done' && (
+                <Check size={12} style={{ color: '#10b981', marginLeft: 'auto' }} />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Sources */}
+      {!isUser && message.sources && message.sources.length > 0 && (
+        <div style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 6,
+          maxWidth: '90%',
+          marginTop: 6,
+        }}>
+          {message.sources.map((src, i) => (
+            <a
+              key={i}
+              href={src.url || '#'}
+              target={src.url ? '_blank' : undefined}
+              rel="noopener noreferrer"
+              onClick={src.path && !src.url ? (e) => {
+                e.preventDefault();
+                // Could open file in canvas in the future
+              } : undefined}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                paddingTop: 4,
+                paddingBottom: 4,
+                paddingLeft: 8,
+                paddingRight: 10,
+                background: '#f0f9ff',
+                border: '1px solid #bae6fd',
+                borderRadius: 6,
+                fontSize: 11,
+                color: '#0369a1',
+                textDecoration: 'none',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                transition: 'background 100ms',
+                cursor: 'pointer',
+                animation: 'llmFadeIn 200ms ease-out',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget).style.background = '#e0f2fe'; }}
+              onMouseLeave={(e) => { (e.currentTarget).style.background = '#f0f9ff'; }}
+            >
+              <span style={{ fontSize: 10 }}>{src.url ? '🌐' : '📄'}</span>
+              <span style={{ fontWeight: 500 }}>{src.title}</span>
+            </a>
+          ))}
+        </div>
+      )}
+
       {/* Audio progress bar — appears when TTS is loading or playing */}
       {!isUser && ttsState !== 'idle' && (
         <div style={{
@@ -657,6 +777,7 @@ export default function LLMChat({ tabId }: { tabId: string }) {
   const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
   const [filePickerIndex, setFilePickerIndex] = useState(0);
   const [attachedImages, setAttachedImages] = useState<{ name: string; dataUri: string }[]>([]);
+  const [activeToolCalls, setActiveToolCalls] = useState<ToolCallInfo[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -899,6 +1020,9 @@ export default function LLMChat({ tabId }: { tabId: string }) {
       let fullContent = '';
       let tokens: { input: number; output: number } | undefined;
       let costUsd: number | undefined;
+      const toolCalls: ToolCallInfo[] = [];
+      const sources: SourceInfo[] = [];
+      setActiveToolCalls([]);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -918,10 +1042,31 @@ export default function LLMChat({ tabId }: { tabId: string }) {
               } else if (parsed.type === 'usage') {
                 tokens = { input: parsed.inputTokens, output: parsed.outputTokens };
                 costUsd = parsed.costUsd;
+              } else if (parsed.type === 'tool_call') {
+                const existing = toolCalls.find(t => t.name === parsed.name);
+                if (existing) {
+                  existing.status = parsed.status;
+                  existing.args = parsed.args ?? existing.args;
+                } else {
+                  toolCalls.push({ name: parsed.name, status: parsed.status, args: parsed.args });
+                }
+                setActiveToolCalls([...toolCalls]);
+              } else if (parsed.type === 'tool_result') {
+                const existing = toolCalls.find(t => t.name === parsed.name);
+                if (existing) {
+                  existing.status = 'done';
+                  existing.preview = parsed.preview;
+                }
+                setActiveToolCalls([...toolCalls]);
+              } else if (parsed.type === 'sources') {
+                sources.push(...(parsed.sources ?? []));
               } else if (parsed.type === 'error') {
                 throw new Error(parsed.message);
               }
             } catch (e) {
+              if (e instanceof Error && e.message !== 'Unexpected') {
+                if ((e as Error).name !== 'SyntaxError') throw e;
+              }
               // Non-JSON line, might be raw text
               if (!line.startsWith('data: [') && !line.startsWith('data: {')) {
                 fullContent += data;
@@ -941,6 +1086,8 @@ export default function LLMChat({ tabId }: { tabId: string }) {
         tokens,
         costUsd,
         timestamp: Date.now(),
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        sources: sources.length > 0 ? sources : undefined,
       };
       setMessages((prev) => [...prev, assistantMsg]);
       setStreamContent('');
@@ -1168,6 +1315,48 @@ export default function LLMChat({ tabId }: { tabId: string }) {
               alignItems: 'flex-start',
               gap: 4,
             }}>
+              {/* Live tool call indicators */}
+              {activeToolCalls.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: '90%' }}>
+                  {activeToolCalls.map((tc, i) => (
+                    <div key={i} style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      paddingTop: 6,
+                      paddingBottom: 6,
+                      paddingLeft: 10,
+                      paddingRight: 10,
+                      background: '#f8fafc',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 8,
+                      fontSize: 12,
+                      animation: 'llmFadeIn 200ms ease-out',
+                    }}>
+                      <div style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: '50%',
+                        background: tc.status === 'done' ? '#10b981' : '#3b82f6',
+                        ...(tc.status !== 'done' ? { animation: 'llmDot 1.4s ease-in-out infinite' } : {}),
+                      }} />
+                      <span style={{ color: '#64748b', fontWeight: 500 }}>
+                        {tc.name === 'search_web' ? '🔍 Searching' :
+                         tc.name === 'read_file' ? '📄 Reading' :
+                         tc.name === 'list_files' ? '📁 Listing' :
+                         tc.name === 'search_code' ? '🔎 Searching code' :
+                         `🔧 ${tc.name}`}
+                      </span>
+                      <span style={{ color: '#94a3b8' }}>
+                        {tc.args?.query ? `"${tc.args.query}"` :
+                         tc.args?.path ? String(tc.args.path) : ''}
+                      </span>
+                      {tc.status === 'done' && <Check size={12} style={{ color: '#10b981' }} />}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {streamContent ? (
                 <div style={{
                   maxWidth: '90%',
