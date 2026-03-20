@@ -217,20 +217,21 @@ export const FleetView = memo(function FleetView({
 
   return (
     <div style={{
-      padding: '0 10px 24px',
+      padding: '0 14px 24px',
       display: 'flex',
       flexDirection: 'column',
-      gap: 16,
+      gap: 14,
       width: '100%',
       maxWidth: '100%',
       boxSizing: 'border-box',
+      overflow: 'hidden',
     }}>
       {/* Header */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingTop: 4,
+        paddingTop: 8,
       }}>
         <div>
           <h2 style={{
