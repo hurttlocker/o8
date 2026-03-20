@@ -1,6 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
+import { fetchGitHubUser, fetchGitHubEmail } from '@/lib/auth/github';
+import { findOrCreateByGithub } from '@/lib/db/users';
+import { signToken } from '@/lib/auth/jwt';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -211,13 +214,65 @@ export async function POST(request: Request) {
     );
 
     if (pollPayload?.access_token) {
+      // 1. Login gh CLI (existing behavior)
       execGhWithToken(pollPayload.access_token);
+
+      // 2. Create/update user in our database + sign JWT (new: #216)
+      let authResult: { token?: string; user?: Record<string, unknown> } = {};
+      try {
+        const ghUser = await fetchGitHubUser(pollPayload.access_token);
+        if (ghUser) {
+          let email = ghUser.email;
+          if (!email) email = await fetchGitHubEmail(pollPayload.access_token);
+
+          const user = findOrCreateByGithub(ghUser.id, {
+            email: email ?? undefined,
+            name: ghUser.name ?? ghUser.login,
+            avatarUrl: ghUser.avatar_url,
+          });
+
+          const jwt = await signToken({
+            uid: user.id,
+            ghUser: ghUser.login,
+            plan: user.plan,
+          });
+
+          authResult = {
+            token: jwt,
+            user: {
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              avatarUrl: user.avatarUrl,
+              plan: user.plan,
+              githubUsername: ghUser.login,
+            },
+          };
+        }
+      } catch (authErr) {
+        console.error('[github-device] User creation failed (gh CLI auth still succeeded):', authErr);
+      }
+
       flows.delete(flowId);
-      return NextResponse.json({
+      const response = NextResponse.json({
         ok: true,
         status: 'complete',
         note: 'GitHub connected locally through device flow. Refreshing account state now.',
+        ...authResult,
       });
+
+      // Set auth cookie if we got a token
+      if (authResult.token) {
+        response.cookies.set('cortex-ide-token', authResult.token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'lax',
+          maxAge: 30 * 24 * 60 * 60,
+          path: '/',
+        });
+      }
+
+      return response;
     }
 
     switch (pollPayload?.error) {
