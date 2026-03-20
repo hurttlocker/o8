@@ -54,6 +54,7 @@ export interface SourceInfo {
   title: string;
   url?: string;
   path?: string;
+  index?: number;
 }
 
 export interface ThinkingStep {
@@ -235,6 +236,7 @@ interface MessageBubbleProps {
   onEdit?: (content: string) => void;
   onApplyToFile?: (code: string, language: string) => void;
   onOpenInCanvas?: (code: string, language: string) => void;
+  onRunInTerminal?: (command: string) => void;
 }
 
 const ACTION_BTN_STYLE: React.CSSProperties = {
@@ -286,7 +288,7 @@ function ActionButton({ icon, label, active, activeColor, onClick }: {
   );
 }
 
-function MessageBubble({ message, isLast, onRetry, onEdit, onApplyToFile, onOpenInCanvas }: MessageBubbleProps) {
+function MessageBubble({ message, isLast, onRetry, onEdit, onApplyToFile, onOpenInCanvas, onRunInTerminal }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [liked, setLiked] = useState<'up' | 'down' | null>(null);
   const [bookmarked, setBookmarked] = useState(false);
@@ -434,7 +436,7 @@ function MessageBubble({ message, isLast, onRetry, onEdit, onApplyToFile, onOpen
               </div>
             )}
           </>
-        ) : renderLLMMarkdown(message.content, { onApplyToFile, onOpenInCanvas })}
+        ) : renderLLMMarkdown(message.content, { onApplyToFile, onOpenInCanvas, onRunInTerminal })}
       </div>
 
       {/* Chain of Thought — shows above message content for completed messages */}
@@ -544,8 +546,24 @@ function MessageBubble({ message, isLast, onRetry, onEdit, onApplyToFile, onOpen
               onMouseEnter={(e) => { (e.currentTarget).style.background = '#e0f2fe'; }}
               onMouseLeave={(e) => { (e.currentTarget).style.background = '#f0f9ff'; }}
             >
-              <span style={{ fontSize: 10 }}>{src.url ? '🌐' : '📄'}</span>
-              <span style={{ fontWeight: 500 }}>{src.title}</span>
+              {src.index && (
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 16,
+                  height: 16,
+                  borderRadius: '50%',
+                  background: '#3b82f6',
+                  color: 'white',
+                  fontSize: 9,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}>
+                  {src.index}
+                </span>
+              )}
+              <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{src.title}</span>
             </a>
           ))}
         </div>
@@ -1027,6 +1045,19 @@ function ThinkingText({ text }: { text: string }) {
   );
 }
 
+// ── Slash Commands ──
+
+const SLASH_COMMANDS = [
+  { command: '/web', label: 'Search the web', description: 'Find current information online', icon: '🌐', prefix: 'Search the web for: ' },
+  { command: '/code', label: 'Search codebase', description: 'Find functions, imports, patterns', icon: '🔎', prefix: 'Search this codebase for: ' },
+  { command: '/file', label: 'Read a file', description: 'Read and analyze a specific file', icon: '📄', prefix: 'Read and explain the file: ' },
+  { command: '/think', label: 'Think step by step', description: 'Reason through a complex problem', icon: '🧠', prefix: 'Think step by step about this: ' },
+  { command: '/review', label: 'Code review', description: 'Review code for bugs and improvements', icon: '🔍', prefix: 'Review this code for bugs, improvements, and best practices: ' },
+  { command: '/explain', label: 'Explain this', description: 'Break down complex code or concepts', icon: '💡', prefix: 'Explain in detail: ' },
+  { command: '/test', label: 'Write tests', description: 'Generate test cases', icon: '🧪', prefix: 'Write comprehensive tests for: ' },
+  { command: '/fix', label: 'Fix this', description: 'Debug and fix an issue', icon: '🔧', prefix: 'Debug and fix this issue: ' },
+];
+
 // ── Follow-up question generation ──
 
 async function generateFollowUps(
@@ -1127,9 +1158,10 @@ function StreamingIndicator() {
 
 // ── Main Component ──
 
-export default function LLMChat({ tabId, onOpenInCanvas }: {
+export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal }: {
   tabId: string;
   onOpenInCanvas?: (code: string, language: string) => void;
+  onRunInTerminal?: (command: string) => void;
 }) {
   const [messages, setMessages] = useState<LLMMessage[]>([]);
   const [input, setInput] = useState('');
@@ -1146,6 +1178,8 @@ export default function LLMChat({ tabId, onOpenInCanvas }: {
   const [activeThinking, setActiveThinking] = useState<{ steps: ThinkingStep[]; thinking: string } | null>(null);
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [followUpsLoading, setFollowUpsLoading] = useState(false);
+  const [showSlashPicker, setShowSlashPicker] = useState(false);
+  const [slashIndex, setSlashIndex] = useState(0);
   const [applyModal, setApplyModal] = useState<{ code: string; language: string } | null>(null);
   const [applyPath, setApplyPath] = useState('');
   const [applyStatus, setApplyStatus] = useState<'idle' | 'applying' | 'done' | 'error'>('idle');
@@ -1270,6 +1304,16 @@ export default function LLMChat({ tabId, onOpenInCanvas }: {
     } else {
       setShowFilePicker(false);
       setFileSuggestions([]);
+    }
+
+    // Detect /slash commands
+    if (value.startsWith('/') && !value.includes(' ')) {
+      const query = value.toLowerCase();
+      const matches = SLASH_COMMANDS.filter(c => c.command.startsWith(query));
+      setShowSlashPicker(matches.length > 0 && value.length <= 10);
+      setSlashIndex(0);
+    } else {
+      setShowSlashPicker(false);
     }
   }, []);
 
@@ -1617,11 +1661,43 @@ export default function LLMChat({ tabId, onOpenInCanvas }: {
       }
     }
 
+    // Slash command picker navigation
+    if (showSlashPicker) {
+      const filtered = SLASH_COMMANDS.filter(c => c.command.startsWith(input.toLowerCase()));
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSlashIndex(prev => Math.min(prev + 1, filtered.length - 1));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSlashIndex(prev => Math.max(prev - 1, 0));
+        return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        const cmd = filtered[slashIndex];
+        if (cmd) {
+          setInput(cmd.prefix);
+          setShowSlashPicker(false);
+          if (inputRef.current) {
+            inputRef.current.style.height = 'auto';
+            inputRef.current.style.height = Math.min(inputRef.current.scrollHeight, 200) + 'px';
+          }
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        setShowSlashPicker(false);
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-  }, [handleSend, showFilePicker, fileSuggestions, filePickerIndex, handleFileSelect]);
+  }, [handleSend, showFilePicker, fileSuggestions, filePickerIndex, handleFileSelect, showSlashPicker, input, slashIndex]);
 
   const isEmpty = messages.length === 0 && !isStreaming;
 
@@ -1855,6 +1931,7 @@ export default function LLMChat({ tabId, onOpenInCanvas }: {
               } : undefined}
               onApplyToFile={handleApplyToFile}
               onOpenInCanvas={onOpenInCanvas}
+              onRunInTerminal={onRunInTerminal}
             />
           ))}
 
@@ -2180,6 +2257,78 @@ export default function LLMChat({ tabId, onOpenInCanvas }: {
             ))}
           </div>
         )}
+        {/* Slash command picker */}
+        {showSlashPicker && (
+          <div style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: 24,
+            right: 24,
+            maxWidth: 720,
+            marginLeft: 'auto',
+            marginRight: 'auto',
+            marginBottom: 4,
+            background: 'white',
+            border: '1px solid #e2e8f0',
+            borderRadius: 12,
+            boxShadow: '0 8px 30px rgba(0, 0, 0, 0.12)',
+            overflow: 'hidden',
+            zIndex: 100,
+            animation: 'llmFadeIn 150ms ease-out',
+          }}>
+            <div style={{
+              paddingTop: 8,
+              paddingBottom: 4,
+              paddingLeft: 12,
+              paddingRight: 12,
+              fontSize: 10,
+              fontWeight: 600,
+              color: '#94a3b8',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+            }}>
+              Commands
+            </div>
+            {SLASH_COMMANDS
+              .filter(c => c.command.startsWith(input.toLowerCase()))
+              .map((cmd, i) => (
+                <button
+                  key={cmd.command}
+                  type="button"
+                  onClick={() => {
+                    setInput(cmd.prefix);
+                    setShowSlashPicker(false);
+                    inputRef.current?.focus();
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    width: '100%',
+                    paddingTop: 8,
+                    paddingBottom: 8,
+                    paddingLeft: 12,
+                    paddingRight: 12,
+                    border: 'none',
+                    background: i === slashIndex ? '#f1f5f9' : 'transparent',
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    transition: 'background 60ms',
+                  }}
+                  onMouseEnter={() => setSlashIndex(i)}
+                >
+                  <span style={{ fontSize: 16 }}>{cmd.icon}</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: '#1e293b' }}>
+                      {cmd.command} <span style={{ fontWeight: 400, color: '#64748b' }}>{cmd.label}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{cmd.description}</div>
+                  </div>
+                </button>
+              ))}
+          </div>
+        )}
+
         <div style={{
           display: 'flex',
           alignItems: 'flex-end',

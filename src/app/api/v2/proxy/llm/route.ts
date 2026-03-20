@@ -504,9 +504,10 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
             toolCalls = result.toolCalls;
           }
 
-          // Send sources if any were collected
+          // Send numbered sources
           if (allSources.length > 0) {
-            enqueue(JSON.stringify({ type: 'sources', sources: allSources }));
+            const numbered = allSources.map((s, i) => ({ ...s, index: i + 1 }));
+            enqueue(JSON.stringify({ type: 'sources', sources: numbered }));
           }
 
           // Send final usage event

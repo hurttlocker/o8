@@ -9,20 +9,23 @@
  */
 
 import React, { useState, useCallback, useEffect, useRef, memo } from 'react';
-import { Copy, Check, ChevronDown, ChevronRight, FileCode, PanelRight } from 'lucide-react';
+import { Copy, Check, ChevronDown, ChevronRight, FileCode, PanelRight, Play } from 'lucide-react';
 
 // ── Code Block with copy button ──
 
-const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInCanvas }: {
+const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInCanvas, onRunInTerminal }: {
   code: string;
   lang: string;
   onApplyToFile?: (code: string, language: string) => void;
   onOpenInCanvas?: (code: string, language: string) => void;
+  onRunInTerminal?: (command: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [applied, setApplied] = useState(false);
+  const [ran, setRan] = useState(false);
   const isMermaid = lang === 'mermaid';
-  const isCode = !isMermaid && !!lang && ['ts', 'tsx', 'js', 'jsx', 'py', 'css', 'html', 'json', 'yaml', 'yml', 'toml', 'sh', 'bash', 'sql', 'go', 'rust', 'md', 'xml', 'graphql', 'typescript', 'javascript', 'python', 'ruby', 'shell'].includes(lang.toLowerCase());
+  const isCode = !isMermaid && !!lang && ['ts', 'tsx', 'js', 'jsx', 'py', 'css', 'html', 'json', 'yaml', 'yml', 'toml', 'sh', 'bash', 'sql', 'go', 'rust', 'md', 'xml', 'graphql', 'typescript', 'javascript', 'python', 'ruby', 'shell', 'zsh'].includes(lang.toLowerCase());
+  const isShell = !!lang && ['sh', 'bash', 'shell', 'zsh'].includes(lang.toLowerCase());
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(code);
@@ -153,6 +156,42 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
           >
             <PanelRight size={12} />
             Canvas
+          </button>
+        )}
+
+        {/* Run in Terminal */}
+        {isShell && onRunInTerminal && (
+          <button
+            type="button"
+            onClick={() => {
+              if (!ran) {
+                onRunInTerminal(code);
+                setRan(true);
+                setTimeout(() => setRan(false), 3000);
+              }
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              paddingTop: 3,
+              paddingBottom: 3,
+              paddingLeft: 8,
+              paddingRight: 8,
+              border: 'none',
+              borderRadius: 5,
+              background: 'transparent',
+              color: ran ? '#10b981' : '#94a3b8',
+              fontSize: 11,
+              cursor: 'pointer',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+              transition: 'color 150ms, background 150ms',
+            }}
+            onMouseEnter={(e) => { if (!ran) { (e.currentTarget).style.background = '#dcfce7'; (e.currentTarget).style.color = '#16a34a'; } }}
+            onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; if (!ran) (e.currentTarget).style.color = '#94a3b8'; }}
+          >
+            {ran ? <Check size={12} /> : <Play size={12} fill="currentColor" />}
+            {ran ? 'Sent' : 'Run'}
           </button>
         )}
       </div>
@@ -366,8 +405,8 @@ function renderInline(text: string): React.ReactNode {
   if (!text) return null;
 
   const parts: React.ReactNode[] = [];
-  // Match: **bold**, *italic*, ~~strikethrough~~, `code`, [text](url), ![alt](url)
-  const regex = /(!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`([^`]+)`)/g;
+  // Match: **bold**, *italic*, ~~strikethrough~~, `code`, [text](url), ![alt](url), [N] citation
+  const regex = /(!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\)|\*\*(.+?)\*\*|\*(.+?)\*|~~(.+?)~~|`([^`]+)`|\[(\d{1,2})\])/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
@@ -434,6 +473,46 @@ function renderInline(text: string): React.ReactNode {
           {match[9]}
         </code>
       );
+    } else if (match[10]) {
+      // Inline citation [N] — Perplexity style
+      const num = match[10];
+      parts.push(
+        <span
+          key={`cite-${match.index}`}
+          data-citation={num}
+          title={`Source ${num}`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 18,
+            height: 18,
+            borderRadius: '50%',
+            background: '#3b82f6',
+            color: 'white',
+            fontSize: 10,
+            fontWeight: 600,
+            cursor: 'pointer',
+            verticalAlign: 'super',
+            marginLeft: 1,
+            marginRight: 1,
+            lineHeight: 1,
+            transition: 'transform 100ms, background 100ms',
+            position: 'relative' as const,
+            top: -2,
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget).style.transform = 'scale(1.15)';
+            (e.currentTarget).style.background = '#2563eb';
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget).style.transform = 'scale(1)';
+            (e.currentTarget).style.background = '#3b82f6';
+          }}
+        >
+          {num}
+        </span>
+      );
     }
 
     lastIndex = match.index + match[0].length;
@@ -451,6 +530,7 @@ function renderInline(text: string): React.ReactNode {
 export function renderLLMMarkdown(text: string, opts?: {
   onApplyToFile?: (code: string, language: string) => void;
   onOpenInCanvas?: (code: string, language: string) => void;
+  onRunInTerminal?: (command: string) => void;
 }): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   const lines = text.split('\n');
@@ -471,7 +551,7 @@ export function renderLLMMarkdown(text: string, opts?: {
         i++;
         continue;
       } else {
-        nodes.push(<CodeBlock key={`code-${i}`} code={codeContent} lang={codeLang} onApplyToFile={opts?.onApplyToFile} onOpenInCanvas={opts?.onOpenInCanvas} />);
+        nodes.push(<CodeBlock key={`code-${i}`} code={codeContent} lang={codeLang} onApplyToFile={opts?.onApplyToFile} onOpenInCanvas={opts?.onOpenInCanvas} onRunInTerminal={opts?.onRunInTerminal} />);
         inCodeBlock = false;
         codeContent = '';
         codeLang = '';
@@ -590,7 +670,7 @@ export function renderLLMMarkdown(text: string, opts?: {
 
   // Unclosed code block
   if (inCodeBlock && codeContent) {
-    nodes.push(<CodeBlock key="code-end" code={codeContent} lang={codeLang} onApplyToFile={opts?.onApplyToFile} onOpenInCanvas={opts?.onOpenInCanvas} />);
+    nodes.push(<CodeBlock key="code-end" code={codeContent} lang={codeLang} onApplyToFile={opts?.onApplyToFile} onOpenInCanvas={opts?.onOpenInCanvas} onRunInTerminal={opts?.onRunInTerminal} />);
   }
 
   return nodes;
