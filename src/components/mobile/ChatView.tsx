@@ -385,28 +385,121 @@ export function ChatView({
         )}
       </div>
 
-      {streamingText ? (
-        <article className="remodex-message-card remodex-message-card-assistant remodex-streaming-card">
-          <div className="remodex-message-header">
-            <span className="remodex-speaker-label">{selectedSession ? agentDisplayName(selectedSession) : 'Mister'}</span>
-            <div className="remodex-typing-bubble-dots" style={{ display: 'inline-flex', marginLeft: 6 }}>
-              <span className="remodex-typing-dot" />
-              <span className="remodex-typing-dot" />
-              <span className="remodex-typing-dot" />
+      {(() => {
+        // Detect active compaction — last message mentions compact while waiting
+        const lastEntry = transcriptEntries[transcriptEntries.length - 1];
+        const isCompacting = (waitingForResponse || actionState === 'steering')
+          && lastEntry
+          && lastEntry.text?.toLowerCase().includes('compact');
+
+        if (streamingText && !isCompacting) {
+          return (
+            <article className="remodex-message-card remodex-message-card-assistant remodex-streaming-card">
+              <div className="remodex-message-header">
+                <span className="remodex-speaker-label">{selectedSession ? agentDisplayName(selectedSession) : 'Mister'}</span>
+                <div className="remodex-typing-bubble-dots" style={{ display: 'inline-flex', marginLeft: 6 }}>
+                  <span className="remodex-typing-dot" />
+                  <span className="remodex-typing-dot" />
+                  <span className="remodex-typing-dot" />
+                </div>
+              </div>
+              <div className="remodex-streaming-preview" style={{ maxHeight: 60, overflow: 'hidden', fontSize: '0.85rem', lineHeight: 1.4, color: '#475569' }}>{formatStreamingPreview(streamingText)}</div>
+            </article>
+          );
+        }
+
+        if (isCompacting) {
+          return (
+            <div style={{
+              margin: '8px 14px',
+              padding: '14px 16px',
+              borderRadius: 16,
+              background: 'rgba(255,149,0,0.06)',
+              border: '1px solid rgba(255,149,0,0.15)',
+              backdropFilter: 'blur(20px) saturate(1.6)',
+              WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
+              display: 'flex', flexDirection: 'column', gap: 8,
+            }}>
+              {/* Header with spinner */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+              }}>
+                <div style={{
+                  width: 18, height: 18, borderRadius: '50%',
+                  border: '2.5px solid rgba(255,149,0,0.25)',
+                  borderTopColor: '#ff9500',
+                  animation: 'spin 1s linear infinite',
+                  flexShrink: 0,
+                }} />
+                <span style={{
+                  fontSize: 14, fontWeight: 700,
+                  color: '#ff9500',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}>
+                  Compacting context
+                </span>
+              </div>
+
+              {/* Description */}
+              <p style={{
+                margin: 0, fontSize: 12, lineHeight: 1.5,
+                color: '#8e8e93',
+              }}>
+                {selectedSession ? agentDisplayName(selectedSession) : 'Agent'} is compressing context to free up memory. Messages you send now will be queued and delivered after compaction completes.
+              </p>
+
+              {/* Animated progress bar */}
+              <div style={{
+                height: 4, borderRadius: 2,
+                background: 'rgba(255,149,0,0.12)',
+                overflow: 'hidden',
+              }}>
+                <div style={{
+                  height: '100%', borderRadius: 2,
+                  background: 'linear-gradient(90deg, #ff9500, #ffcc00)',
+                  width: '65%',
+                  animation: 'compactPulse 2s ease-in-out infinite',
+                }} />
+              </div>
+
+              {/* Tip */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '6px 10px',
+                borderRadius: 8,
+                background: 'rgba(255,149,0,0.04)',
+              }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                  stroke="#ff9500" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="16" x2="12" y2="12" />
+                  <line x1="12" y1="8" x2="12.01" y2="8" />
+                </svg>
+                <span style={{
+                  fontSize: 11, color: '#8e8e93', fontWeight: 500,
+                }}>
+                  Usually takes 10–30 seconds
+                </span>
+              </div>
             </div>
-          </div>
-          <div className="remodex-streaming-preview" style={{ maxHeight: 60, overflow: 'hidden', fontSize: '0.85rem', lineHeight: 1.4, color: '#475569' }}>{formatStreamingPreview(streamingText)}</div>
-        </article>
-      ) : (waitingForResponse || actionState === 'steering') ? (
-        <div className="remodex-typing-bubble">
-          <span className="remodex-typing-bubble-label">{selectedSession ? agentDisplayName(selectedSession) : 'Mister'}</span>
-          <div className="remodex-typing-bubble-dots">
-            <span className="remodex-typing-dot" />
-            <span className="remodex-typing-dot" />
-            <span className="remodex-typing-dot" />
-          </div>
-        </div>
-      ) : null}
+          );
+        }
+
+        if (waitingForResponse || actionState === 'steering') {
+          return (
+            <div className="remodex-typing-bubble">
+              <span className="remodex-typing-bubble-label">{selectedSession ? agentDisplayName(selectedSession) : 'Mister'}</span>
+              <div className="remodex-typing-bubble-dots">
+                <span className="remodex-typing-dot" />
+                <span className="remodex-typing-dot" />
+                <span className="remodex-typing-dot" />
+              </div>
+            </div>
+          );
+        }
+
+        return null;
+      })()}
 
       {hasNewMessages ? (
         <button

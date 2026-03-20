@@ -1707,6 +1707,11 @@ button.workflow-file-item.workflow-file-item-active {
     transform: rotate(360deg);
   }
 }
+@keyframes compactPulse {
+  0% { width: 20%; opacity: 0.6; }
+  50% { width: 75%; opacity: 1; }
+  100% { width: 20%; opacity: 0.6; }
+}
 
 .remodex-mobile-page {
   --remodex-header-progress: 0;
