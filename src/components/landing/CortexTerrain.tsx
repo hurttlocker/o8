@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useRef, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 /* ─────────────────────── CONFIG ─────────────────────── */
@@ -11,53 +11,40 @@ const BAR_SPACING = 4.5;
 const MAX_HEIGHT = 300;
 const BASE_BAR_WIDTH = 3.0;
 
-// Color stops: warm base → purple mid → cyan peak → white hot
+// Color stops tuned for the cream page background: cream/lilac base → coral/orange → green peak
 function heightColor(t: number): string {
-  if (t < 0.15) {
-    // Dark purple base
-    const s = t / 0.15;
-    const r = Math.floor(40 + s * 60);
-    const g = Math.floor(10 + s * 20);
-    const b = Math.floor(80 + s * 80);
+  if (t < 0.18) {
+    const s = t / 0.18;
+    const r = Math.floor(239 - s * 42);
+    const g = Math.floor(231 - s * 62);
+    const b = Math.floor(211 + s * 24);
     return `rgb(${r},${g},${b})`;
   }
-  if (t < 0.35) {
-    // Purple → pink/coral
-    const s = (t - 0.15) / 0.2;
-    const r = Math.floor(100 + s * 140);
-    const g = Math.floor(30 + s * 50);
-    const b = Math.floor(160 - s * 40);
+  if (t < 0.4) {
+    const s = (t - 0.18) / 0.22;
+    const r = Math.floor(197 + s * 40);
+    const g = Math.floor(169 - s * 28);
+    const b = Math.floor(235 - s * 31);
     return `rgb(${r},${g},${b})`;
   }
-  if (t < 0.55) {
-    // Coral → orange
-    const s = (t - 0.35) / 0.2;
-    const r = Math.floor(240 + s * 15);
-    const g = Math.floor(80 + s * 80);
-    const b = Math.floor(120 - s * 80);
+  if (t < 0.62) {
+    const s = (t - 0.4) / 0.22;
+    const r = Math.floor(237 + s * 18);
+    const g = Math.floor(141 + s * 55);
+    const b = Math.floor(204 - s * 112);
     return `rgb(${r},${g},${b})`;
   }
-  if (t < 0.75) {
-    // Orange → amber/yellow
-    const s = (t - 0.55) / 0.2;
-    const r = 255;
-    const g = Math.floor(160 + s * 60);
-    const b = Math.floor(40 + s * 20);
+  if (t < 0.82) {
+    const s = (t - 0.62) / 0.2;
+    const r = Math.floor(255 - s * 58);
+    const g = Math.floor(196 + s * 41);
+    const b = Math.floor(92 + s * 74);
     return `rgb(${r},${g},${b})`;
   }
-  if (t < 0.9) {
-    // Yellow → cyan
-    const s = (t - 0.75) / 0.15;
-    const r = Math.floor(255 - s * 200);
-    const g = Math.floor(220 + s * 35);
-    const b = Math.floor(60 + s * 150);
-    return `rgb(${r},${g},${b})`;
-  }
-  // Cyan → white (peak glow)
-  const s = (t - 0.9) / 0.1;
-  const r = Math.floor(55 + s * 200);
-  const g = Math.floor(255);
-  const b = Math.floor(210 + s * 45);
+  const s = (t - 0.82) / 0.18;
+  const r = Math.floor(197 + s * 42);
+  const g = Math.floor(237 + s * 18);
+  const b = Math.floor(166 + s * 45);
   return `rgb(${r},${g},${b})`;
 }
 
@@ -179,9 +166,9 @@ function project3D(
   // Center the grid
   const halfW = (GRID_X * BAR_SPACING) / 2;
   const halfD = (GRID_Z * BAR_SPACING) / 2;
-  let px = x - halfW;
-  let py = y;
-  let pz = z - halfD;
+  const px = x - halfW;
+  const py = y;
+  const pz = z - halfD;
 
   // Rotate Y (horizontal orbit)
   const cosY = Math.cos(rotY);
@@ -233,7 +220,7 @@ export default function CortexTerrain() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d", { alpha: false });
+    const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) return;
 
     let animating = true;
@@ -297,9 +284,8 @@ export default function CortexTerrain() {
         targetRotRef.current.y = -0.6 + Math.sin(t * 0.003) * 0.15;
       }
 
-      // Clear
-      ctx.fillStyle = "#09090b";
-      ctx.fillRect(0, 0, w, h);
+      // Keep the canvas transparent so the page background shows through.
+      ctx.clearRect(0, 0, w, h);
 
       const terrain = terrainRef.current;
       const rotY = rotRef.current.y;
@@ -316,7 +302,7 @@ export default function CortexTerrain() {
       for (let ix = 0; ix < GRID_X; ix++) {
         for (let iz = 0; iz < GRID_Z; iz++) {
           const cell = terrain[ix][iz];
-          if (cell.rawHeight < 1) continue;
+          if (cell.rawHeight < 12 || cell.height < 0.18) continue;
 
           const worldX = ix * BAR_SPACING;
           const worldZ = iz * BAR_SPACING;
@@ -352,9 +338,12 @@ export default function CortexTerrain() {
       let closestDist = 20;
 
       for (const bar of bars) {
+        const barAlpha = Math.max(0, (bar.cell.height - 0.18) / 0.82);
+        if (barAlpha <= 0.01) continue;
+
         // Bar body
         ctx.fillStyle = bar.color;
-        ctx.globalAlpha = 0.85 + bar.cell.height * 0.15;
+        ctx.globalAlpha = 0.18 + barAlpha * 0.74;
         ctx.fillRect(
           bar.sx - bar.barW / 2,
           bar.topY,
@@ -363,7 +352,7 @@ export default function CortexTerrain() {
         );
 
         // Top cap (brighter)
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = 0.3 + barAlpha * 0.7;
         ctx.fillStyle = bar.color;
         ctx.fillRect(
           bar.sx - bar.barW / 2,
@@ -495,16 +484,16 @@ export default function CortexTerrain() {
               padding: "8px 14px",
               left: Math.min(hoverInfo.screenX + 16, (typeof window !== 'undefined' ? window.innerWidth - 220 : 400)),
               top: hoverInfo.screenY - 10,
-              background: "rgba(9, 9, 11, 0.92)",
+              background: "rgba(239, 231, 211, 0.92)",
               backdropFilter: "blur(10px)",
               boxShadow: `0 0 24px ${hoverInfo.color}15`,
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div style={{ width: 8, height: 8, borderRadius: "50%", background: hoverInfo.color, boxShadow: `0 0 8px ${hoverInfo.color}` }} />
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>{hoverInfo.label}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#1A0089" }}>{hoverInfo.label}</span>
             </div>
-            <div style={{ marginTop: 2, fontSize: 11, color: "#71717a" }}>
+            <div style={{ marginTop: 2, fontSize: 11, color: "rgba(26, 0, 137, 0.62)" }}>
               {hoverInfo.category} · density {Math.round(hoverInfo.height * 100)}%
             </div>
           </motion.div>

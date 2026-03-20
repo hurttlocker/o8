@@ -496,9 +496,10 @@ function PreviewToolbar({ preview, selectionEnabled, onToggleSelection, onRefres
 
 /* ── Workspace Chat Pane ── */
 
-const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessages }: {
+const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessages, onUpdateSessionKey }: {
   tab: TerminalTab;
   onUpdateMessages: (tabId: string, messages: ChatMessage[]) => void;
+  onUpdateSessionKey: (tabId: string, sessionKey: string) => void;
 }) {
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -618,7 +619,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
 
               // Capture session ID for conversation continuity
               if (event.sessionId && chatRuntime === 'claude-code') {
-                tab.chatSessionKey = event.sessionId;
+                onUpdateSessionKey(tabId, event.sessionId);
               }
 
               if (event.type === 'done' || event.type === 'close') {
@@ -661,7 +662,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
       setSending(false);
       setStreaming(false);
     }
-  }, [input, sending, messages, tabId, chatRuntime, chatSessionKey, onUpdateMessages, tab]);
+  }, [input, sending, messages, tabId, chatRuntime, chatSessionKey, onUpdateMessages, onUpdateSessionKey]);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -2149,6 +2150,18 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
       setActiveTabId(tabId);
     }, []);
 
+    const handleUpdateChatMessages = useCallback((tabId: string, messages: ChatMessage[]) => {
+      setTabs(prev => prev.map(t =>
+        t.id === tabId ? { ...t, chatMessages: messages, lastActivity: Date.now() } : t
+      ));
+    }, []);
+
+    const handleUpdateChatSessionKey = useCallback((tabId: string, sessionKey: string) => {
+      setTabs(prev => prev.map(t =>
+        t.id === tabId ? { ...t, chatSessionKey: sessionKey } : t
+      ));
+    }, []);
+
     const handleCloseTab = useCallback((tabId: string) => {
       setTabs(prev => {
         const idx = prev.findIndex(t => t.id === tabId);
@@ -2312,11 +2325,8 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
               }}>
                 <WorkspaceChatPane
                   tab={tab}
-                  onUpdateMessages={(tabId, msgs) => {
-                    setTabs(prev => prev.map(t =>
-                      t.id === tabId ? { ...t, chatMessages: msgs, lastActivity: Date.now() } : t
-                    ));
-                  }}
+                  onUpdateMessages={handleUpdateChatMessages}
+                  onUpdateSessionKey={handleUpdateChatSessionKey}
                 />
               </div>
             ) : tab.tmuxSession ? (

@@ -1,3 +1,5 @@
+import type { BrowserSurfaceSummary } from '@/lib/browser/types';
+
 export type AgentStatus =
   | 'idle'
   | 'running'
@@ -59,6 +61,7 @@ export interface RuntimeSurfaceSummary {
   tailSourceLabel?: string;
   capabilities: RuntimeSurfaceCapabilities;
   lifecycle?: RuntimeSurfaceLifecycle;
+  browserSurface?: BrowserSurfaceSummary;
   reviewContext?: {
     repoSlug?: string;
     branch?: string;
@@ -101,6 +104,7 @@ export interface AgentSummary {
   isCurrentSession?: boolean;
   tokenUsage?: TokenUsageSnapshot;
   runtimeSurface?: RuntimeSurfaceSummary;
+  browserSurface?: BrowserSurfaceSummary;
   activity?: AgentActivity;
   tmuxSession?: string;
 }
@@ -149,6 +153,14 @@ export interface RuntimeReviewPacket {
   reviewDisposition: 'watching' | 'resolved';
   reviewDispositionUpdatedAt?: string;
   reviewDispositionUpdatedAtLabel?: string;
+  worktree?: {
+    id: string;
+    path: string;
+    branch: string;
+    baseBranch: string;
+    status: string;
+    dirtyFiles: string[];
+  } | null;
   lastRun?: {
     id: string;
     mode: 'launch' | 'resume';
@@ -236,6 +248,8 @@ export interface FleetMeta {
   mode: 'live' | 'demo';
   sourceLabel: string;
   gatewayLabel?: string;
+  gatewayFreshness?: 'fresh' | 'stale' | 'warming';
+  observablePending?: boolean;
   primarySessionKey?: string;
   mirrorMode: 'current-session-first' | 'demo-only';
   note?: string;

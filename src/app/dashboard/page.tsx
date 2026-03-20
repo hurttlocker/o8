@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { useDesktopWebSocket, type DesktopWsCallbacks } from '@/components/desktop/hooks/useDesktopWebSocket';
-import type { WsConnectionState } from '@/components/desktop/hooks/useDesktopWebSocket';
+import { DesktopWebSocketProvider, useSharedDesktopWs, type WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
+import type { DesktopWsCallbacks } from '@/components/desktop/hooks/useDesktopWebSocket';
 import type { TerminalHandle } from '@/components/desktop/LiveOutput';
 import { TerminalWorkspace, type TerminalTabHandle } from '@/components/desktop/TerminalWorkspace';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
@@ -33,7 +33,9 @@ export default function DashboardPage() {
   return (
     <ThemeProvider>
       <AlertProvider>
-        <DashboardInner />
+        <DesktopWebSocketProvider>
+          <DashboardInner />
+        </DesktopWebSocketProvider>
       </AlertProvider>
     </ThemeProvider>
   );
@@ -159,7 +161,7 @@ function DashboardInner() {
     sendTerminalResize,
     sendTerminalDetach,
     sendAgentKill,
-  } = useDesktopWebSocket(undefined, terminalWsCallbacks);
+  } = useSharedDesktopWs(undefined, terminalWsCallbacks);
 
   // Terminal auto-creation now handled by TerminalWorkspace component
 

@@ -1,40 +1,53 @@
+import { Suspense } from 'react';
 import { MobileRemoteShell } from '@/components/mobile-remote-shell';
-import { getOwnedCodexReviewPacket } from '@/lib/codex/owned';
-import { getMobileInboxSnapshot } from '@/lib/mobile/openclaw';
-import { getSessionTranscript } from '@/lib/openclaw/chat';
-import { getReviewFileDetail } from '@/lib/review/workspace';
+import { ShimmerCard } from '@/components/mobile/ShimmerCard';
+import { createMobileShellSnapshot, getMobileBootstrap } from '@/lib/render/bootstrap';
 
 export const dynamic = 'force-dynamic';
 
-export default async function MobilePage() {
-  const initialSnapshot = await getMobileInboxSnapshot();
-  const initialSession = initialSnapshot.sessions.find((session) => session.sessionKey === initialSnapshot.primarySessionKey)
-    ?? initialSnapshot.sessions.find((session) => session.isCurrentSession)
-    ?? initialSnapshot.sessions[0];
-  const initialSessionKey = initialSession?.sessionKey;
-  const initialOwnedReviewPacket = initialSessionKey && initialSession?.runtime === 'codex' && initialSession.runtimeSurface?.ownership === 'owned'
-    ? await getOwnedCodexReviewPacket(initialSessionKey).catch(() => null)
-    : null;
-  const initialReviewPath = initialOwnedReviewPacket?.changedFiles[0]?.path
-    ?? initialSnapshot.review?.changedFiles[0]?.path;
-
-  const [initialTranscript, initialReviewFile] = await Promise.all([
-    initialSessionKey
-      ? getSessionTranscript(initialSessionKey, 18)
-          .then((transcript) => ({ sessionKey: initialSessionKey, transcript }))
-          .catch(() => undefined)
-      : Promise.resolve(undefined),
-    initialReviewPath
-      ? getReviewFileDetail(initialReviewPath).catch(() => null)
-      : Promise.resolve(null),
-  ]);
+function MobileRouteFallback() {
+  const shell = createMobileShellSnapshot();
 
   return (
-    <MobileRemoteShell
-      initialSnapshot={initialSnapshot}
-      initialTranscript={initialTranscript}
-      initialReviewFile={initialReviewFile}
-      initialOwnedReviewPacket={initialOwnedReviewPacket}
-    />
+    <div className="mobile-wrap">
+      <div className="announcement-bar">
+        <span className="status-pill status-warning">shell-only</span>
+        <span className="status-pill status-warning">warming</span>
+        <span className="muted">{shell.note}</span>
+      </div>
+      <ShimmerCard />
+      <ShimmerCard />
+      <ShimmerCard />
+    </div>
+  );
+}
+
+async function MobileBootstrapView() {
+  const bootstrap = await getMobileBootstrap({ fresh: false, budgetMs: 0 });
+
+  return (
+    <>
+      <div
+        hidden
+        data-cortex-bootstrap-marker="page"
+        data-cortex-bootstrap-source={bootstrap.source}
+        data-cortex-bootstrap-state={bootstrap.state}
+        data-cortex-bootstrap-refreshed-at={bootstrap.refreshedAt ?? ''}
+      />
+      <MobileRemoteShell
+        initialSnapshot={bootstrap.snapshot}
+        initialTranscript={undefined}
+        initialReviewFile={undefined}
+        initialOwnedReviewPacket={undefined}
+      />
+    </>
+  );
+}
+
+export default function MobilePage() {
+  return (
+    <Suspense fallback={<MobileRouteFallback />}>
+      <MobileBootstrapView />
+    </Suspense>
   );
 }

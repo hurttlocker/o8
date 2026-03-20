@@ -13,6 +13,7 @@
     "start": "next start -p 3001",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "measure:render": "bash scripts/measure-render-speed.sh",
     "desktop:dev": "npm run predev:cleanup && concurrently -k -s first \"npm run dev\" \"npm run dev:ws\"",
     "tauri:dev": "cargo tauri dev",
     "tauri:build": "cargo tauri build",

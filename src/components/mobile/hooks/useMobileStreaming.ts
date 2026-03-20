@@ -10,26 +10,54 @@ import { useWebSocket } from './useWebSocket';
 export function useMobileStreaming(state: MobileState) {
   const {
     selectedSessionKey,
+    selectedSession,
     setSnapshot, setRefreshError,
     setHistoryBySession,
     setStreamingText, streamingTextRef,
-    waitingForResponse, setWaitingForResponse,
-    lastAssistantCountRef,
+    setActionStateBySession,
+    setActionNoteBySession,
+    setRealtimeMutationsById,
+    setPendingMutationIdBySession,
+    pendingMutationIdBySessionRef,
     seenMessageIdsRef,
     setHydrated,
   } = state;
 
   // WebSocket connection
-  const { connectionState: wsConnectionState } = useWebSocket({
+  const {
+    connectionState: wsConnectionState,
+    sendTerminalAttach,
+    sendTerminalInput,
+    sendTerminalResize,
+    sendTerminalDetach,
+  } = useWebSocket({
     selectedSessionKey,
     setSnapshot,
     setRefreshError,
     setHistoryBySession,
     setStreamingText,
     streamingTextRef,
+    setActionStateBySession,
+    setActionNoteBySession,
+    setRealtimeMutationsById,
+    setPendingMutationIdBySession,
+    pendingMutationIdBySessionRef,
   });
 
   const wsConnected = wsConnectionState === 'connected';
+
+  useEffect(() => {
+    const tmuxSession = selectedSession?.tmuxSession;
+    const supportsSlashRelay = Boolean(
+      tmuxSession && (selectedSession?.runtime === 'codex' || selectedSession?.runtime === 'claude-code'),
+    );
+    if (!supportsSlashRelay || !tmuxSession) return;
+
+    sendTerminalAttach(tmuxSession, 120, 32);
+    return () => {
+      sendTerminalDetach(tmuxSession);
+    };
+  }, [selectedSession?.runtime, selectedSession?.tmuxSession, sendTerminalAttach, sendTerminalDetach]);
 
   // Hydration + seen message tracking
   useEffect(() => {
@@ -43,5 +71,9 @@ export function useMobileStreaming(state: MobileState) {
   return {
     wsConnected,
     wsConnectionState,
+    sendTerminalInput,
+    sendTerminalResize,
+    sendTerminalAttach,
+    sendTerminalDetach,
   };
 }

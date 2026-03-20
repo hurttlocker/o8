@@ -6,6 +6,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
+import { getWorktreeManager } from '@/lib/worktree/launch';
 import { isTmuxAvailable, tmuxSessionName, createTmuxSession } from '@/lib/terminal/tmux';
 import type {
   AgentSummary,
@@ -24,6 +25,7 @@ const RUNS_DIR = 'runs';
 const METADATA_FILE = 'session.json';
 const ACTIVE_WINDOW_MS = 10 * 60_000;
 const RECENT_WINDOW_MS = 6 * 60 * 60_000;
+const OWNED_CODEX_FLEET_TTL_MS = 20_000;
 
 type OwnedRunMode = 'launch' | 'resume';
 type OwnedRunOutcome = 'running' | 'finished' | 'interrupted' | 'failed';
@@ -75,6 +77,26 @@ type OwnedCodexSessionRecord = {
   activeRun?: OwnedCodexRunRecord;
   recentRuns: OwnedCodexRunRecord[];
 };
+
+type OwnedCodexFleetAdditions = {
+  agents: AgentSummary[];
+  squads: SquadSummary[];
+  events: EventItem[];
+  artifacts: ReviewArtifact[];
+  sourceLabel?: string;
+  note?: string;
+  ownedThreadIds: string[];
+};
+
+let ownedFleetCache: { value: OwnedCodexFleetAdditions; cachedAt: number } | null = null;
+let ownedFleetInflight: Promise<OwnedCodexFleetAdditions> | null = null;
+let ownedFleetGeneration = 0;
+
+export function invalidateOwnedCodexFleetCache() {
+  ownedFleetGeneration += 1;
+  ownedFleetCache = null;
+  ownedFleetInflight = null;
+}
 
 type OwnedTailEntry = {
   id: string;
@@ -752,6 +774,7 @@ export async function launchOwnedCodexSession(request: OwnedCodexLaunchRequest):
 
   await saveOwnedSession(session);
   await spawnOwnedRun(session, prompt, 'launch');
+  invalidateOwnedCodexFleetCache();
 
   return {
     ok: true,
@@ -776,6 +799,7 @@ export async function continueOwnedCodexSession(surfaceId: string, prompt: strin
   }
 
   await spawnOwnedRun(session, prompt.trim(), 'resume');
+  invalidateOwnedCodexFleetCache();
   return {
     ok: true,
     note: 'Queued a new turn on the IDE-owned Codex session via codex exec resume.',
@@ -810,6 +834,7 @@ export async function interruptOwnedCodexSession(surfaceId: string) {
         : run,
     );
     await saveOwnedSession(session);
+    invalidateOwnedCodexFleetCache();
     return { interrupted: true, note: 'Interrupt sent to the active IDE-owned Codex run.' };
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : 'Unable to interrupt the owned Codex run.');
@@ -825,6 +850,7 @@ export async function setOwnedCodexReviewDisposition(surfaceId: string, disposit
   session.reviewDisposition = disposition;
   session.reviewDispositionUpdatedAt = nowIso();
   await saveOwnedSession(session);
+  invalidateOwnedCodexFleetCache();
 
   return {
     disposition,
@@ -975,6 +1001,9 @@ export async function getOwnedCodexReviewPacket(surfaceId: string): Promise<Runt
     ? parseOwnedRunEvidence(lastRunArtifacts.stdoutRaw, lastRun, lastRunOutcome)
     : null;
   const runtimeSurface = buildOwnedRuntimeSurface(session, Boolean(session.activeRun && isPidAlive(session.activeRun.pid)));
+  const linkedWorktree = await getWorktreeManager(session.repoPath).list()
+    .then((worktrees) => worktrees.find((worktree) => worktree.sessionKey === session.surfaceId) ?? null)
+    .catch(() => null);
 
   const packet: RuntimeReviewPacket = {
     surfaceId: session.surfaceId,
@@ -992,6 +1021,14 @@ export async function getOwnedCodexReviewPacket(surfaceId: string): Promise<Runt
     reviewDisposition: reviewDisposition(session),
     reviewDispositionUpdatedAt: session.reviewDispositionUpdatedAt,
     reviewDispositionUpdatedAtLabel: formatClock(session.reviewDispositionUpdatedAt),
+    worktree: linkedWorktree ? {
+      id: linkedWorktree.id,
+      path: linkedWorktree.path,
+      branch: linkedWorktree.branch,
+      baseBranch: linkedWorktree.baseBranch,
+      status: linkedWorktree.status,
+      dirtyFiles: linkedWorktree.dirtyFiles,
+    } : null,
     lastRun: lastRun
       ? {
           id: lastRun.id,
@@ -1014,15 +1051,21 @@ export async function getOwnedCodexReviewPacket(surfaceId: string): Promise<Runt
   return packet;
 }
 
-export async function getOwnedCodexFleetAdditions(): Promise<{
-  agents: AgentSummary[];
-  squads: SquadSummary[];
-  events: EventItem[];
-  artifacts: ReviewArtifact[];
-  sourceLabel?: string;
-  note?: string;
-  ownedThreadIds: string[];
-}> {
+export async function getOwnedCodexFleetAdditions(
+  options: { fresh?: boolean } = {},
+): Promise<OwnedCodexFleetAdditions> {
+  const fresh = options.fresh ?? false;
+  const now = Date.now();
+  const generation = ownedFleetGeneration;
+  if (!fresh && ownedFleetCache && (now - ownedFleetCache.cachedAt) < OWNED_CODEX_FLEET_TTL_MS) {
+    return ownedFleetCache.value;
+  }
+
+  if (!fresh && ownedFleetInflight) {
+    return ownedFleetInflight;
+  }
+
+  const promise = (async () => {
   const sessionDirs = await listOwnedSessionDirs();
   if (!sessionDirs.length) {
     return {
@@ -1130,4 +1173,17 @@ export async function getOwnedCodexFleetAdditions(): Promise<{
       : undefined,
     ownedThreadIds: agents.map((agent) => agent.sessionId ?? '').filter((value) => value && !value.startsWith('codex-owned:')),
   };
+  })();
+
+  ownedFleetInflight = promise;
+  return promise.finally(() => {
+    if (ownedFleetInflight === promise) {
+      ownedFleetInflight = null;
+    }
+  }).then((value) => {
+    if (generation === ownedFleetGeneration) {
+      ownedFleetCache = { value, cachedAt: Date.now() };
+    }
+    return value;
+  });
 }

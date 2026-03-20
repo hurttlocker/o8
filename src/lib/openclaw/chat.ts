@@ -1,12 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { basename, extname } from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import type { BrowserSurfaceSummary } from '@/lib/browser/types';
 import type { MobileTranscriptMedia } from '@/lib/mobile/types';
 import type { AgentActivity } from '@/lib/fleet/types';
-
-const execFileAsync = promisify(execFile);
-const WORKSPACE_ROOT = process.env.CORTEX_IDE_WORKSPACE_ROOT || '/Users/marquisehurtt/clawd';
 
 export interface SessionTranscriptEntry {
   id: string;
@@ -45,29 +41,6 @@ type ExtractedVisiblePayload = {
   text: string;
   media: MobileTranscriptMedia[];
 };
-
-function extractJsonPayload(raw: string) {
-  const trimmed = raw.trim();
-  if (!trimmed) {
-    throw new Error('OpenClaw gateway call returned an empty response.');
-  }
-
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    return trimmed;
-  }
-
-  const objectIndex = trimmed.indexOf('{');
-  const arrayIndex = trimmed.indexOf('[');
-  const startIndex = [objectIndex, arrayIndex]
-    .filter((value) => value >= 0)
-    .sort((left, right) => left - right)[0];
-
-  if (startIndex == null) {
-    throw new Error('OpenClaw gateway call did not return JSON output.');
-  }
-
-  return trimmed.slice(startIndex);
-}
 
 function formatGatewayError(error: unknown) {
   if (error && typeof error === 'object') {
@@ -307,10 +280,18 @@ function isBareDeliveryMirrorEcho(text: string) {
 }
 
 const transcriptCache = new Map<string, { entries: SessionTranscriptEntry[]; timestamp: number }>();
-const transcriptInflight = new Map<string, Promise<SessionTranscriptEntry[]>>();
+const transcriptInflight = new Map<string, { generation: number; promise: Promise<SessionTranscriptEntry[]> }>();
+const transcriptGeneration = new Map<string, number>();
 const TRANSCRIPT_CACHE_TTL = 5000; // 5 seconds
 
+export function invalidateSessionTranscriptCache(sessionKey: string) {
+  transcriptGeneration.set(sessionKey, (transcriptGeneration.get(sessionKey) ?? 0) + 1);
+  transcriptCache.delete(sessionKey);
+  transcriptInflight.delete(sessionKey);
+}
+
 export async function getSessionTranscript(sessionKey: string, limit = 12, fresh = false) {
+  const generation = transcriptGeneration.get(sessionKey) ?? 0;
   if (!fresh) {
     const cached = transcriptCache.get(sessionKey);
     if (cached && Date.now() - cached.timestamp < TRANSCRIPT_CACHE_TTL) {
@@ -318,11 +299,14 @@ export async function getSessionTranscript(sessionKey: string, limit = 12, fresh
     }
   }
 
-  // Deduplicate: if a request is already in-flight for this session, piggyback
-  const existing = transcriptInflight.get(sessionKey);
-  if (existing) {
-    const entries = await existing;
-    return entries.slice(-limit);
+  // Deduplicate: if a request is already in-flight for this session, piggyback.
+  // Fresh requests skip the inflight join to avoid piggybacking pre-mutation data.
+  if (!fresh) {
+    const existing = transcriptInflight.get(sessionKey);
+    if (existing && existing.generation === generation) {
+      const entries = await existing.promise;
+      return entries.slice(-limit);
+    }
   }
 
   const promise = (async () => {
@@ -392,14 +376,19 @@ export async function getSessionTranscript(sessionKey: string, limit = 12, fresh
     })
     .filter(Boolean) as SessionTranscriptEntry[];
 
-      transcriptCache.set(sessionKey, { entries, timestamp: Date.now() });
+      if ((transcriptGeneration.get(sessionKey) ?? 0) === generation) {
+        transcriptCache.set(sessionKey, { entries, timestamp: Date.now() });
+      }
       return entries;
     } finally {
-      transcriptInflight.delete(sessionKey);
+      const inflight = transcriptInflight.get(sessionKey);
+      if (inflight?.generation === generation) {
+        transcriptInflight.delete(sessionKey);
+      }
     }
   })();
 
-  transcriptInflight.set(sessionKey, promise);
+  transcriptInflight.set(sessionKey, { generation, promise });
   const entries = await promise;
   return entries.slice(-limit);
 }
@@ -423,19 +412,25 @@ export async function steerOpenClawSession(
     throw new Error('Steer message or image attachment is required.');
   }
 
-  return callGateway<GatewayChatSendResult>('chat.send', {
+  const result = await callGateway<GatewayChatSendResult>('chat.send', {
     sessionKey,
     message: trimmed,
     attachments: normalizedAttachments.length > 0 ? normalizedAttachments : undefined,
     idempotencyKey: randomUUID(),
   });
+  invalidateSessionTranscriptCache(sessionKey);
+  invalidateSessionObservableState(sessionKey);
+  return result;
 }
 
 export async function abortOpenClawSession(sessionKey: string, runId?: string) {
-  return callGateway<GatewayChatAbortResult>('chat.abort', {
+  const result = await callGateway<GatewayChatAbortResult>('chat.abort', {
     sessionKey,
     ...(runId ? { runId } : {}),
   });
+  invalidateSessionTranscriptCache(sessionKey);
+  invalidateSessionObservableState(sessionKey);
+  return result;
 }
 
 // ── Observable agent activity extraction ──
@@ -547,7 +542,129 @@ function safeJsonParse(text: string): unknown {
   try { return JSON.parse(text); } catch { return {}; }
 }
 
-function deriveActivityFromMessages(messages: GatewayChatHistoryMessage[]): AgentActivity | undefined {
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
+}
+
+function firstTruthyBoolean(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'string') {
+      if (value === 'true') return true;
+      if (value === 'false') return false;
+    }
+  }
+  return undefined;
+}
+
+function deriveBrowserSurfaceFromToolCall(
+  sessionKey: string,
+  toolName: string,
+  args: Record<string, unknown>,
+  timestamp?: number,
+): BrowserSurfaceSummary | undefined {
+  if (toolName !== 'browser') return undefined;
+
+  const browser = asRecord(args.browser);
+  const context = asRecord(args.context);
+  const page = asRecord(args.page);
+  const action = firstString(args.action, args.kind, args.operation) ?? 'browser';
+  const url = firstString(
+    args.url,
+    args.href,
+    args.currentUrl,
+    page?.url,
+    browser?.url,
+    context?.url,
+  );
+  const title = firstString(
+    args.title,
+    args.pageTitle,
+    args.documentTitle,
+    page?.title,
+    browser?.title,
+    context?.title,
+  );
+  const pageId = firstString(
+    args.pageId,
+    args.targetId,
+    args.tabId,
+    page?.id,
+    page?.pageId,
+    page?.targetId,
+  );
+  const browserSessionId = firstString(
+    args.browserId,
+    args.browserSessionId,
+    args.sessionId,
+    browser?.id,
+    browser?.browserId,
+    context?.sessionId,
+  );
+  const profileId = firstString(
+    args.profileId,
+    args.browserProfileId,
+    args.persistentProfileId,
+    args.userDataDir,
+    context?.profileId,
+    context?.contextId,
+    browser?.profileId,
+  );
+  const persistentProfile = Boolean(
+    profileId
+    || firstTruthyBoolean(args.persist, args.persistent, args.keepAlive, args.reuseBrowser, args.reuseProfile)
+    || firstString(args.userDataDir, args.storageStatePath),
+  );
+
+  return {
+    id: firstString(pageId, browserSessionId, profileId) ?? `openclaw-browser:${sessionKey}`,
+    provider: 'openclaw',
+    ownership: 'provider',
+    status: timestamp && (Date.now() - timestamp) < 5 * 60_000 ? 'active' : 'idle',
+    sourceLabel: 'OpenClaw browser tool mirror',
+    sessionKey,
+    browserSessionId,
+    profileId,
+    pageId,
+    url,
+    title,
+    lastAction: action,
+    lastActionAt: timestamp,
+    capabilities: {
+      attach: false,
+      liveViewport: false,
+      inspectDom: false,
+      selectElement: false,
+      controlledNavigation: false,
+      screenshots: false,
+      persistentProfile,
+    },
+  };
+}
+
+type SessionObservableState = {
+  activity?: AgentActivity;
+  browserSurface?: BrowserSurfaceSummary;
+  pending?: boolean;
+};
+
+function deriveObservableStateFromMessages(
+  sessionKey: string,
+  messages: GatewayChatHistoryMessage[],
+): SessionObservableState {
+  let activity: AgentActivity | undefined;
+  let browserSurface: BrowserSurfaceSummary | undefined;
+
   // Walk backward from the last message to find the latest meaningful activity
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
@@ -560,54 +677,144 @@ function deriveActivityFromMessages(messages: GatewayChatHistoryMessage[]): Agen
     if (msg.role === 'assistant') {
       const toolCalls = extractToolCallsFromContent(msg.content);
       if (toolCalls.length > 0) {
-        const lastCall = toolCalls[toolCalls.length - 1];
-        const headlineFn = TOOL_HEADLINES[lastCall.name];
-        const headline = headlineFn
-          ? headlineFn(lastCall.args)
-          : `Using ${lastCall.name}`;
-        const filePath = String(lastCall.args.file_path ?? lastCall.args.path ?? '');
-        return {
-          headline,
-          toolName: lastCall.name,
-          filePath: filePath || undefined,
-          timestamp: msg.timestamp,
-        };
+        if (!activity) {
+          const lastCall = toolCalls[toolCalls.length - 1];
+          const headlineFn = TOOL_HEADLINES[lastCall.name];
+          const headline = headlineFn
+            ? headlineFn(lastCall.args)
+            : `Using ${lastCall.name}`;
+          const filePath = String(lastCall.args.file_path ?? lastCall.args.path ?? '');
+          activity = {
+            headline,
+            toolName: lastCall.name,
+            filePath: filePath || undefined,
+            timestamp: msg.timestamp,
+          };
+        }
+
+        if (!browserSurface) {
+          for (let j = toolCalls.length - 1; j >= 0; j--) {
+            const candidate = deriveBrowserSurfaceFromToolCall(
+              sessionKey,
+              toolCalls[j].name,
+              toolCalls[j].args,
+              msg.timestamp,
+            );
+            if (candidate) {
+              browserSurface = candidate;
+              break;
+            }
+          }
+        }
+
+        if (activity && browserSurface) break;
+        continue;
       }
 
       // Assistant text without tool calls — agent is composing a response
-      const text = typeof msg.content === 'string' ? msg.content : '';
-      if (text.length > 10) {
-        return {
+      if (!activity) {
+        const text = typeof msg.content === 'string' ? msg.content : '';
+        if (text.length > 10) {
+          activity = {
           headline: `Responded · ${truncate(text.replace(/\n/g, ' '), 38)}`,
           timestamp: msg.timestamp,
-        };
+          };
+        }
       }
     }
   }
 
-  return undefined;
+  return { activity, browserSurface };
 }
 
-const activityCache = new Map<string, { activity: AgentActivity | undefined; timestamp: number }>();
-const ACTIVITY_CACHE_TTL = 8000;
+const observableStateCache = new Map<string, { state: SessionObservableState; timestamp: number }>();
+const observableStateInflight = new Map<string, { generation: number; promise: Promise<SessionObservableState> }>();
+const observableStateGeneration = new Map<string, number>();
+const OBSERVABLE_STATE_CACHE_TTL = 8000;
+const OBSERVABLE_STATE_STALE_TTL = 45_000;
+
+type ObservableStateMode = 'blocking' | 'fast';
+
+export function invalidateSessionObservableState(sessionKey: string) {
+  observableStateGeneration.set(sessionKey, (observableStateGeneration.get(sessionKey) ?? 0) + 1);
+  observableStateCache.delete(sessionKey);
+  observableStateInflight.delete(sessionKey);
+}
+
+function startObservableStateRefresh(sessionKey: string) {
+  const generation = observableStateGeneration.get(sessionKey) ?? 0;
+  const inflight = observableStateInflight.get(sessionKey);
+  if (inflight && inflight.generation === generation) return inflight.promise;
+
+  const promise = (async () => {
+    try {
+      const payload = await callGateway<GatewayChatHistoryResult>('chat.history', {
+        sessionKey,
+        limit: 8,
+      });
+
+      const state = deriveObservableStateFromMessages(sessionKey, payload.messages ?? []);
+      if ((observableStateGeneration.get(sessionKey) ?? 0) === generation) {
+        observableStateCache.set(sessionKey, { state, timestamp: Date.now() });
+      }
+      return state;
+    } catch {
+      return {};
+    } finally {
+      const current = observableStateInflight.get(sessionKey);
+      if (current?.generation === generation) {
+        observableStateInflight.delete(sessionKey);
+      }
+    }
+  })();
+
+  observableStateInflight.set(sessionKey, { generation, promise });
+  return promise;
+}
+
+/** Fetch the latest observable state for an agent session. */
+export async function getSessionObservableState(
+  sessionKey: string,
+  options: { mode?: ObservableStateMode } = {},
+): Promise<SessionObservableState> {
+  const mode = options.mode ?? 'blocking';
+  const generation = observableStateGeneration.get(sessionKey) ?? 0;
+  const cached = observableStateCache.get(sessionKey);
+  const cacheAgeMs = cached ? Date.now() - cached.timestamp : Infinity;
+
+  if (cached && cacheAgeMs < OBSERVABLE_STATE_CACHE_TTL) {
+    return cached.state;
+  }
+
+  const inflight = observableStateInflight.get(sessionKey);
+  if (inflight && inflight.generation === generation) return inflight.promise;
+
+  if (mode === 'fast') {
+    void startObservableStateRefresh(sessionKey);
+    if (cached && cacheAgeMs < OBSERVABLE_STATE_STALE_TTL) {
+      return { ...cached.state, pending: cacheAgeMs >= OBSERVABLE_STATE_CACHE_TTL };
+    }
+    return { pending: true };
+  }
+
+  return startObservableStateRefresh(sessionKey);
+}
 
 /** Fetch the latest observable activity for an agent session */
 export async function getSessionActivity(sessionKey: string): Promise<AgentActivity | undefined> {
-  const cached = activityCache.get(sessionKey);
-  if (cached && Date.now() - cached.timestamp < ACTIVITY_CACHE_TTL) {
-    return cached.activity;
-  }
+  const state = await getSessionObservableState(sessionKey);
+  return state.activity;
+}
 
-  try {
-    const payload = await callGateway<GatewayChatHistoryResult>('chat.history', {
-      sessionKey,
-      limit: 8,
-    });
+/** Fetch the latest mirrored browser surface for an agent session */
+export async function getSessionBrowserSurface(sessionKey: string): Promise<BrowserSurfaceSummary | undefined> {
+  const state = await getSessionObservableState(sessionKey);
+  return state.browserSurface;
+}
 
-    const activity = deriveActivityFromMessages(payload.messages ?? []);
-    activityCache.set(sessionKey, { activity, timestamp: Date.now() });
-    return activity;
-  } catch {
-    return undefined;
-  }
+export function extractObservableStateFromHistory(
+  sessionKey: string,
+  messages: GatewayChatHistoryMessage[],
+): SessionObservableState {
+  return deriveObservableStateFromMessages(sessionKey, messages);
 }

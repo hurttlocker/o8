@@ -7,6 +7,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(request: NextRequest) {
   const sessionKey = request.nextUrl.searchParams.get('sessionKey')?.trim();
   const rawLimit = request.nextUrl.searchParams.get('limit');
+  const fresh = request.nextUrl.searchParams.get('fresh') === '1';
   const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : 12;
   const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 30) : 12;
 
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const transcript = await getSessionTranscript(sessionKey, limit);
+    const transcript = await getSessionTranscript(sessionKey, limit, fresh);
     return NextResponse.json(
       {
         sessionKey,
