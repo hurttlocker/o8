@@ -117,9 +117,25 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
       try {
         const mermaid = (await import('mermaid')).default;
         mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        // Render in an offscreen container to prevent DOM pollution on error
+        const offscreen = document.createElement('div');
+        offscreen.style.position = 'absolute';
+        offscreen.style.left = '-9999px';
+        offscreen.style.top = '-9999px';
+        document.body.appendChild(offscreen);
         const id = 'mermaid-' + Math.random().toString(36).slice(2, 8);
-        const { svg: rendered } = await mermaid.render(id, code);
-        if (!cancelled) setSvg(rendered);
+        try {
+          const { svg: rendered } = await mermaid.render(id, code, offscreen);
+          if (!cancelled) setSvg(rendered);
+        } finally {
+          // Clean up offscreen container and any error elements mermaid injected
+          offscreen.remove();
+          // Also remove any stray mermaid error elements from the DOM
+          document.querySelectorAll('[id^="d-mermaid-"], .mermaid-error, [id^="mermaid-"]').forEach(el => {
+            if (el.closest('[data-llm-mermaid]')) return; // don't remove our own
+            el.remove();
+          });
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Render failed');
       }
@@ -163,6 +179,7 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
       {!collapsed && (
         <div
           ref={containerRef}
+          data-llm-mermaid="true"
           style={{
             paddingTop: 16,
             paddingBottom: 16,
