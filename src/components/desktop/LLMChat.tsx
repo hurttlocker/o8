@@ -233,6 +233,8 @@ interface MessageBubbleProps {
   isLast: boolean;
   onRetry?: () => void;
   onEdit?: (content: string) => void;
+  onApplyToFile?: (code: string, language: string) => void;
+  onOpenInCanvas?: (code: string, language: string) => void;
 }
 
 const ACTION_BTN_STYLE: React.CSSProperties = {
@@ -284,7 +286,7 @@ function ActionButton({ icon, label, active, activeColor, onClick }: {
   );
 }
 
-function MessageBubble({ message, isLast, onRetry, onEdit }: MessageBubbleProps) {
+function MessageBubble({ message, isLast, onRetry, onEdit, onApplyToFile, onOpenInCanvas }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [liked, setLiked] = useState<'up' | 'down' | null>(null);
   const [bookmarked, setBookmarked] = useState(false);
@@ -432,7 +434,7 @@ function MessageBubble({ message, isLast, onRetry, onEdit }: MessageBubbleProps)
               </div>
             )}
           </>
-        ) : renderLLMMarkdown(message.content)}
+        ) : renderLLMMarkdown(message.content, { onApplyToFile, onOpenInCanvas })}
       </div>
 
       {/* Chain of Thought — shows above message content for completed messages */}
@@ -1125,7 +1127,10 @@ function StreamingIndicator() {
 
 // ── Main Component ──
 
-export default function LLMChat({ tabId }: { tabId: string }) {
+export default function LLMChat({ tabId, onOpenInCanvas }: {
+  tabId: string;
+  onOpenInCanvas?: (code: string, language: string) => void;
+}) {
   const [messages, setMessages] = useState<LLMMessage[]>([]);
   const [input, setInput] = useState('');
   const [model, setModel] = useState<ModelOption>(MODELS[0]);
@@ -1141,6 +1146,36 @@ export default function LLMChat({ tabId }: { tabId: string }) {
   const [activeThinking, setActiveThinking] = useState<{ steps: ThinkingStep[]; thinking: string } | null>(null);
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [followUpsLoading, setFollowUpsLoading] = useState(false);
+  const [applyModal, setApplyModal] = useState<{ code: string; language: string } | null>(null);
+  const [applyPath, setApplyPath] = useState('');
+  const [applyStatus, setApplyStatus] = useState<'idle' | 'applying' | 'done' | 'error'>('idle');
+
+  // Apply code to a file
+  const handleApplyToFile = useCallback((code: string, language: string) => {
+    setApplyModal({ code, language });
+    setApplyPath('');
+    setApplyStatus('idle');
+  }, []);
+
+  const doApply = useCallback(async () => {
+    if (!applyModal || !applyPath.trim()) return;
+    setApplyStatus('applying');
+    try {
+      const res = await fetch('/api/v2/files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: applyPath.trim(), content: applyModal.code }),
+      });
+      if (res.ok) {
+        setApplyStatus('done');
+        setTimeout(() => { setApplyModal(null); setApplyStatus('idle'); }, 1500);
+      } else {
+        setApplyStatus('error');
+      }
+    } catch {
+      setApplyStatus('error');
+    }
+  }, [applyModal, applyPath]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -1818,6 +1853,8 @@ export default function LLMChat({ tabId }: { tabId: string }) {
                 setMessages(messages.slice(0, i));
                 inputRef.current?.focus();
               } : undefined}
+              onApplyToFile={handleApplyToFile}
+              onOpenInCanvas={onOpenInCanvas}
             />
           ))}
 
@@ -2253,6 +2290,143 @@ export default function LLMChat({ tabId }: { tabId: string }) {
           {model.label} · @file to attach · Shift+Enter for new line
         </div>
       </div>
+
+      {/* Apply to File Modal */}
+      {applyModal && (
+        <div style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.3)',
+          backdropFilter: 'blur(2px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 50,
+          animation: 'llmFadeIn 150ms ease-out',
+        }} onClick={() => setApplyModal(null)}>
+          <div
+            style={{
+              background: 'white',
+              borderRadius: 16,
+              boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+              width: 420,
+              maxWidth: '90%',
+              overflow: 'hidden',
+              animation: 'llmFadeIn 200ms ease-out',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{
+              paddingTop: 16,
+              paddingBottom: 12,
+              paddingLeft: 20,
+              paddingRight: 20,
+              borderBottom: '1px solid #f1f5f9',
+            }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: '#0f172a' }}>
+                Apply to File
+              </div>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 2 }}>
+                {applyModal.language} · {applyModal.code.split('\n').length} lines
+              </div>
+            </div>
+
+            {/* Path input */}
+            <div style={{ paddingTop: 16, paddingBottom: 16, paddingLeft: 20, paddingRight: 20 }}>
+              <label style={{ fontSize: 12, fontWeight: 500, color: '#64748b', display: 'block', marginBottom: 6 }}>
+                File path (relative to repo root)
+              </label>
+              <input
+                type="text"
+                value={applyPath}
+                onChange={(e) => setApplyPath(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') doApply(); }}
+                placeholder="src/components/Example.tsx"
+                autoFocus
+                style={{
+                  width: '100%',
+                  paddingTop: 10,
+                  paddingBottom: 10,
+                  paddingLeft: 12,
+                  paddingRight: 12,
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontFamily: 'ui-monospace, monospace',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                  transition: 'border-color 150ms',
+                }}
+                onFocus={(e) => { (e.currentTarget).style.borderColor = '#3b82f6'; }}
+                onBlur={(e) => { (e.currentTarget).style.borderColor = '#e2e8f0'; }}
+              />
+              <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>
+                File will be created if it doesn't exist, or overwritten if it does.
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'flex-end',
+              gap: 8,
+              paddingTop: 12,
+              paddingBottom: 16,
+              paddingLeft: 20,
+              paddingRight: 20,
+              borderTop: '1px solid #f1f5f9',
+            }}>
+              <button
+                type="button"
+                onClick={() => setApplyModal(null)}
+                style={{
+                  paddingTop: 8,
+                  paddingBottom: 8,
+                  paddingLeft: 16,
+                  paddingRight: 16,
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 8,
+                  background: 'white',
+                  color: '#64748b',
+                  fontSize: 13,
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={doApply}
+                disabled={!applyPath.trim() || applyStatus === 'applying'}
+                style={{
+                  paddingTop: 8,
+                  paddingBottom: 8,
+                  paddingLeft: 16,
+                  paddingRight: 16,
+                  border: 'none',
+                  borderRadius: 8,
+                  background: applyStatus === 'done' ? '#10b981' : applyStatus === 'error' ? '#ef4444' : '#3b82f6',
+                  color: 'white',
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: applyPath.trim() ? 'pointer' : 'not-allowed',
+                  opacity: applyPath.trim() ? 1 : 0.5,
+                  transition: 'background 150ms',
+                }}
+              >
+                {applyStatus === 'applying' ? 'Applying...' :
+                 applyStatus === 'done' ? '✓ Applied' :
+                 applyStatus === 'error' ? 'Error — Try Again' :
+                 'Apply'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
