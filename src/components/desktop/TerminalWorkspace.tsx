@@ -2029,10 +2029,13 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           tabs: currentTabs.map(t => ({
             id: t.id,
             label: t.label,
+            kind: t.kind,
             cliAgent: t.cliAgent ?? 'shell',
             repoName: t.repo?.name,
             repoPath: t.repo?.localPath,
             tmuxSession: t.tmuxSession ?? undefined,
+            chatRuntime: t.chatRuntime,
+            chatSessionKey: t.chatSessionKey,
           })),
           savedAt: new Date().toISOString(),
         };
@@ -2068,35 +2071,64 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           const restoredTabs: TerminalTab[] = [];
           for (const st of saved.tabs) {
             tabCountRef.current += 1;
-            const tabId = `tab-${tabCountRef.current}`;
-
             const now = Date.now();
-            if (st.tmuxSession && alive.has(st.tmuxSession)) {
-              // Tmux session survived — reattach directly
+            const tabKind = st.kind ?? 'terminal';
+
+            if (tabKind === 'llm-chat') {
+              // LLM Chat tab — restore without tmux
+              const tabId = `llm-${tabCountRef.current}`;
               restoredTabs.push({
                 id: tabId,
                 label: st.label,
-                kind: 'terminal',
-                tmuxSession: st.tmuxSession,
-                cliAgent: st.cliAgent,
-                repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : undefined,
+                kind: 'llm-chat',
+                tmuxSession: null,
                 createdAt: now,
                 lastActivity: now,
               });
-              // Attach to the existing session
-              sendTerminalAttach(st.tmuxSession, 120, 30);
+            } else if (tabKind === 'chat') {
+              // CLI Session tab — restore without tmux
+              const tabId = `chat-${tabCountRef.current}`;
+              restoredTabs.push({
+                id: tabId,
+                label: st.label,
+                kind: 'chat',
+                tmuxSession: null,
+                chatRuntime: st.chatRuntime,
+                chatSessionKey: st.chatSessionKey,
+                createdAt: now,
+                lastActivity: now,
+                chatMessages: [],
+              });
             } else {
-              // Tmux session died — create a new shell in the same directory
-              restoredTabs.push({
-                id: tabId,
-                label: st.label,
-                kind: 'terminal',
-                tmuxSession: null, // will be assigned when session created
-                cliAgent: 'shell', // don't auto-restart agents (could be destructive)
-                repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : undefined,
-                createdAt: now,
-                lastActivity: now,
-              });
+              // Terminal tab
+              const tabId = `tab-${tabCountRef.current}`;
+              if (st.tmuxSession && alive.has(st.tmuxSession)) {
+                // Tmux session survived — reattach directly
+                restoredTabs.push({
+                  id: tabId,
+                  label: st.label,
+                  kind: 'terminal',
+                  tmuxSession: st.tmuxSession,
+                  cliAgent: st.cliAgent,
+                  repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : undefined,
+                  createdAt: now,
+                  lastActivity: now,
+                });
+                // Attach to the existing session
+                sendTerminalAttach(st.tmuxSession, 120, 30);
+              } else {
+                // Tmux session died — create a new shell in the same directory
+                restoredTabs.push({
+                  id: tabId,
+                  label: st.label,
+                  kind: 'terminal',
+                  tmuxSession: null,
+                  cliAgent: 'shell',
+                  repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : undefined,
+                  createdAt: now,
+                  lastActivity: now,
+                });
+              }
             }
           }
 
@@ -2105,15 +2137,26 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           const activeMatch = restoredTabs.find(t => t.id === saved.activeTabId);
           setActiveTabId(activeMatch?.id ?? restoredTabs[0]?.id ?? '');
 
-          // Create new sessions for tabs that need them
-          const deadTabs = restoredTabs.filter(t => t.tmuxSession === null);
-          for (const deadTab of deadTabs) {
+          // Create new sessions for terminal tabs that need them (not chat/llm-chat)
+          const deadTerminalTabs = restoredTabs.filter(t => t.kind === 'terminal' && t.tmuxSession === null);
+          for (const deadTab of deadTerminalTabs) {
             void deadTab;
             sendTerminalCreate(120, 30);
           }
         } else {
-          // No saved state — create default shell tab
-          sendTerminalCreate(120, 30);
+          // No saved state — create default LLM Chat tab
+          tabCountRef.current += 1;
+          const now = Date.now();
+          const defaultChat: TerminalTab = {
+            id: `llm-${tabCountRef.current}`,
+            label: 'Chat',
+            kind: 'llm-chat',
+            tmuxSession: null,
+            createdAt: now,
+            lastActivity: now,
+          };
+          setTabs([defaultChat]);
+          setActiveTabId(defaultChat.id);
         }
       })();
     }, [termWsConnected, sendTerminalCreate, sendTerminalAttach]);
