@@ -107,14 +107,22 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   const isDark = theme === 'dark' || (theme === 'system' && systemDark);
 
-  // Apply class to documentElement
+  // Apply dark-mode class to html AND body (belt and suspenders)
   useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
     if (isDark) {
-      document.documentElement.classList.add('dark-mode');
-      document.documentElement.style.backgroundColor = '#000000';
+      html.classList.add('dark-mode');
+      body.classList.add('dark-mode');
+      html.style.backgroundColor = '#000000';
+      body.style.backgroundColor = '#000000';
+      html.style.colorScheme = 'dark';
     } else {
-      document.documentElement.classList.remove('dark-mode');
-      document.documentElement.style.backgroundColor = '#f5f7fb';
+      html.classList.remove('dark-mode');
+      body.classList.remove('dark-mode');
+      html.style.backgroundColor = '#f5f7fb';
+      body.style.backgroundColor = '#f5f7fb';
+      html.style.colorScheme = 'light';
     }
   }, [isDark]);
 
