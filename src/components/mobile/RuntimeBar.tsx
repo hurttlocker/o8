@@ -57,8 +57,7 @@ export const RuntimeBar = memo(function RuntimeBar({
       display: 'flex',
       alignItems: 'center',
       gap: 6,
-      padding: '6px 14px',
-      paddingBottom: 'calc(6px + env(safe-area-inset-bottom, 0px))',
+      padding: '8px 14px 12px',
     }}>
       {/* Status dot */}
       <span style={{
