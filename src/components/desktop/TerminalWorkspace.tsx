@@ -2522,7 +2522,26 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
                 flexDirection: 'column',
                 height: '100%',
               }}>
-                <LLMChat tabId={tab.id} />
+                <LLMChat
+                  tabId={tab.id}
+                  onRunInTerminal={(command: string) => {
+                    // Find the first terminal tab with a tmux session
+                    const shellTab = tabs.find(t => t.kind === 'terminal' && t.tmuxSession);
+                    if (shellTab?.tmuxSession) {
+                      sendTerminalInput(shellTab.tmuxSession, command + '\n');
+                    } else {
+                      // No terminal tab — create one first
+                      sendTerminalCreate(120, 30);
+                      // Wait for it to be ready, then send
+                      setTimeout(() => {
+                        const newShell = tabs.find(t => t.kind === 'terminal' && t.tmuxSession);
+                        if (newShell?.tmuxSession) {
+                          sendTerminalInput(newShell.tmuxSession, command + '\n');
+                        }
+                      }, 1500);
+                    }
+                  }}
+                />
               </div>
             ) : tab.kind === 'chat' ? (
               <div key={tab.id} style={{
