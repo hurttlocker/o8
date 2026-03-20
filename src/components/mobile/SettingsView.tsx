@@ -1,6 +1,65 @@
 'use client';
 
 import { useState, useEffect, useCallback, memo } from 'react';
+import { useTheme } from './ThemeContext';
+
+function AppearanceSection() {
+  const { theme, setTheme } = useTheme();
+  const options: Array<{ value: 'light' | 'dark' | 'system'; label: string }> = [
+    { value: 'light', label: 'Light' },
+    { value: 'dark', label: 'Dark' },
+    { value: 'system', label: 'System' },
+  ];
+
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <span style={{
+        display: 'block', fontSize: 12, fontWeight: 700,
+        color: '#8e8e93', textTransform: 'uppercase',
+        letterSpacing: '0.04em', padding: '0 16px', marginBottom: 6,
+      }}>
+        Appearance
+      </span>
+      <div style={{
+        borderRadius: 14,
+        background: 'rgba(0,122,255,0.03)',
+        border: '1px solid rgba(0,122,255,0.08)',
+        overflow: 'hidden', padding: '10px 16px',
+      }}>
+        {/* iOS-style segmented control */}
+        <div style={{
+          display: 'flex', gap: 0,
+          background: 'rgba(0,122,255,0.06)',
+          borderRadius: 9, padding: 2,
+        }}>
+          {options.map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setTheme(opt.value)}
+              style={{
+                flex: 1,
+                padding: '7px 0',
+                borderRadius: 7,
+                border: 'none',
+                background: theme === opt.value ? '#fff' : 'transparent',
+                boxShadow: theme === opt.value ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                color: theme === opt.value ? '#007aff' : '#8e8e93',
+                fontSize: 13, fontWeight: 600,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                cursor: 'pointer',
+                transition: 'all 200ms ease',
+                WebkitTapHighlightColor: 'transparent',
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface SettingsViewProps {
   onBack: () => void;
@@ -316,6 +375,9 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
           last
         />
       </SettingsGroup>
+
+      {/* Appearance */}
+      <AppearanceSection />
 
       {/* Runtimes */}
       <SettingsGroup label="Runtimes">

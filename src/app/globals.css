@@ -15,10 +15,15 @@ html::-webkit-scrollbar {
   --panel: rgba(255, 255, 255, 0.82);
   --panel-strong: #ffffff;
   --text: #111827;
+  --text-secondary: #64748b;
+  --text-tertiary: #8e8e93;
   --muted: #5b6475;
   --border: rgba(15, 23, 42, 0.08);
   --blue: #2563eb;
+  --blue-accent: #007aff;
   --blue-soft: rgba(37, 99, 235, 0.12);
+  --blue-glass: rgba(0,122,255,0.08);
+  --blue-glass-border: rgba(0,122,255,0.15);
   --green: #059669;
   --green-soft: rgba(5, 150, 105, 0.12);
   --yellow: #b45309;
@@ -27,6 +32,142 @@ html::-webkit-scrollbar {
   --red-soft: rgba(220, 38, 38, 0.12);
   --shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
   --radius: 20px;
+  --card-bg: rgba(0,122,255,0.03);
+  --card-border: rgba(0,122,255,0.08);
+  --compose-bg: rgba(219,234,254,0.6);
+  --compose-border: rgba(191,219,254,0.24);
+  --frost-bg: rgba(255,255,255,0.92);
+  --frost-strong: rgba(255,255,255,1);
+  --msg-user-bg: rgba(0,122,255,0.08);
+  --msg-assistant-bg: rgba(255,255,255,0.9);
+}
+
+:root.dark-mode {
+  color-scheme: dark;
+  --bg: #000000;
+  --panel: rgba(28, 28, 30, 0.82);
+  --panel-strong: #1c1c1e;
+  --text: #f5f5f7;
+  --text-secondary: #98989d;
+  --text-tertiary: #636366;
+  --muted: #98989d;
+  --border: rgba(255, 255, 255, 0.08);
+  --blue: #3b82f6;
+  --blue-accent: #0a84ff;
+  --blue-soft: rgba(59, 130, 246, 0.15);
+  --blue-glass: rgba(10,132,255,0.12);
+  --blue-glass-border: rgba(10,132,255,0.2);
+  --green: #30d158;
+  --green-soft: rgba(48, 209, 88, 0.15);
+  --yellow: #ffd60a;
+  --yellow-soft: rgba(255, 214, 10, 0.15);
+  --red: #ff453a;
+  --red-soft: rgba(255, 69, 58, 0.15);
+  --shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+  --radius: 20px;
+  --card-bg: rgba(10,132,255,0.06);
+  --card-border: rgba(10,132,255,0.12);
+  --compose-bg: rgba(28,28,30,0.8);
+  --compose-border: rgba(56,56,58,0.5);
+  --frost-bg: rgba(28,28,30,0.92);
+  --frost-strong: rgba(0,0,0,1);
+  --msg-user-bg: rgba(10,132,255,0.15);
+  --msg-assistant-bg: rgba(44,44,46,0.9);
+}
+
+/* Dark mode global overrides */
+:root.dark-mode body { background: #000000; color: #f5f5f7; }
+:root.dark-mode .mobile-wrap { background: #000000 !important; }
+:root.dark-mode .remodex-phone-shell { background: #000000; }
+:root.dark-mode .remodex-scroll-view { background: transparent; }
+
+/* Compose bar dark mode */
+:root.dark-mode .remodex-compose-shell {
+  background: rgba(28,28,30,0.8) !important;
+  border-color: rgba(56,56,58,0.5) !important;
+}
+:root.dark-mode .remodex-compose-input {
+  color: #f5f5f7;
+}
+:root.dark-mode .remodex-compose-input::placeholder {
+  color: rgba(255,255,255,0.25);
+}
+:root.dark-mode .remodex-compose-chip {
+  color: #98989d;
+}
+:root.dark-mode .remodex-compose-pill {
+  color: #0a84ff !important;
+}
+
+/* Message cards dark mode */
+:root.dark-mode .remodex-message-card {
+  background: rgba(44,44,46,0.6) !important;
+  border-color: rgba(255,255,255,0.06) !important;
+}
+:root.dark-mode .remodex-message-card-user {
+  background: rgba(10,132,255,0.15) !important;
+  border-color: rgba(10,132,255,0.2) !important;
+}
+:root.dark-mode .remodex-message-header .remodex-speaker-label {
+  color: #f5f5f7;
+}
+:root.dark-mode .remodex-message-body {
+  color: #e5e5ea;
+}
+:root.dark-mode .remodex-message-body pre,
+:root.dark-mode .remodex-message-body code {
+  background: rgba(0,0,0,0.4);
+  color: #e5e5ea;
+}
+:root.dark-mode .remodex-timestamp-label {
+  color: #636366;
+}
+
+/* TopBar dark mode */
+:root.dark-mode .remodex-topbar {
+  color: #f5f5f7;
+}
+:root.dark-mode .remodex-title-kicker {
+  color: #98989d !important;
+}
+:root.dark-mode .remodex-title-stack h1 {
+  color: #f5f5f7 !important;
+}
+:root.dark-mode .remodex-title-stack p {
+  color: #636366 !important;
+}
+
+/* Typing/streaming indicators */
+:root.dark-mode .remodex-typing-bubble {
+  background: rgba(44,44,46,0.6);
+}
+:root.dark-mode .remodex-typing-bubble-label {
+  color: #98989d;
+}
+:root.dark-mode .remodex-typing-dot {
+  background: #636366;
+}
+
+/* System rows */
+:root.dark-mode .remodex-system-line {
+  color: #636366 !important;
+}
+:root.dark-mode .remodex-compaction-card {
+  background: rgba(44,44,46,0.6) !important;
+  border-color: rgba(255,255,255,0.06) !important;
+}
+
+/* Bottom dock */
+:root.dark-mode .remodex-bottom-dock {
+  background: transparent;
+}
+
+/* Diff pill */
+:root.dark-mode .remodex-diff-pill {
+  color: #e5e5ea !important;
+}
+:root.dark-mode .remodex-diff-pill-caption {
+  color: #636366 !important;
 }
 
 * {
