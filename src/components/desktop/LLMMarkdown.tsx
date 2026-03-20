@@ -11,6 +11,174 @@
 import React, { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { Copy, Check, ChevronDown, ChevronRight, FileCode, PanelRight, Play } from 'lucide-react';
 
+// ── Syntax Highlighting ──
+
+// Token colors (One Dark inspired, light bg friendly)
+const SYN = {
+  keyword: '#8250df',    // purple — const, let, function, if, return, import, export
+  string: '#0a3069',     // dark blue — "string", 'string', `template`
+  number: '#0550ae',     // blue — 42, 3.14, 0xff
+  comment: '#6e7781',    // grey — // comment, /* comment */
+  type: '#953800',       // orange — types, interfaces
+  fn: '#8250df',         // purple — function names
+  prop: '#0550ae',       // blue — object properties
+  tag: '#116329',        // green — HTML/JSX tags
+  attr: '#0550ae',       // blue — attributes
+  punct: '#24292f',      // dark — brackets, semicolons
+  builtin: '#cf222e',    // red — true, false, null, undefined, this
+  operator: '#cf222e',   // red — =, +, -, *, &&, ||
+};
+
+function highlightCode(code: string, lang: string): React.ReactNode[] {
+  const lines = code.split('\n');
+  const lcLang = lang?.toLowerCase() || '';
+  const isJS = ['ts', 'tsx', 'js', 'jsx', 'typescript', 'javascript'].includes(lcLang);
+  const isPython = ['py', 'python'].includes(lcLang);
+  const isCSS = lcLang === 'css';
+  const isJSON = lcLang === 'json';
+  const isShellLang = ['sh', 'bash', 'shell', 'zsh', 'console', 'terminal'].includes(lcLang);
+  const isGo = lcLang === 'go';
+  const isRust = lcLang === 'rust';
+  const isHTML = ['html', 'xml', 'svg'].includes(lcLang);
+
+  return lines.map((line, lineIdx) => {
+    if (!line.trim()) return <React.Fragment key={lineIdx}>{'\n'}</React.Fragment>;
+
+    const tokens: React.ReactNode[] = [];
+    let remaining = line;
+    let pos = 0;
+
+    while (remaining.length > 0) {
+      let matched = false;
+
+      // Comments
+      const commentMatch = remaining.match(/^(\/\/.*|#.*|\/\*[\s\S]*?\*\/|<!--[\s\S]*?-->)/);
+      if (commentMatch && (isJS || isPython || isGo || isRust || isCSS || isShellLang || isHTML)) {
+        tokens.push(<span key={`${lineIdx}-${pos}`} style={{ color: SYN.comment, fontStyle: 'italic' }}>{commentMatch[0]}</span>);
+        remaining = remaining.slice(commentMatch[0].length);
+        pos++;
+        matched = true;
+        continue;
+      }
+
+      // Strings (double, single, template)
+      const strMatch = remaining.match(/^("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/);
+      if (strMatch) {
+        tokens.push(<span key={`${lineIdx}-${pos}`} style={{ color: SYN.string }}>{strMatch[0]}</span>);
+        remaining = remaining.slice(strMatch[0].length);
+        pos++;
+        matched = true;
+        continue;
+      }
+
+      // Numbers
+      const numMatch = remaining.match(/^(0x[\da-fA-F]+|0b[01]+|0o[0-7]+|\d+\.?\d*(?:[eE][+-]?\d+)?)/);
+      if (numMatch && !/[a-zA-Z_]/.test(remaining[numMatch[0].length] || '')) {
+        tokens.push(<span key={`${lineIdx}-${pos}`} style={{ color: SYN.number }}>{numMatch[0]}</span>);
+        remaining = remaining.slice(numMatch[0].length);
+        pos++;
+        matched = true;
+        continue;
+      }
+
+      // Keywords
+      const kwPattern = isJS ? /^(const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|class|extends|implements|interface|type|enum|import|export|from|default|async|await|try|catch|finally|throw|typeof|instanceof|in|of|as|is|void|declare|readonly|abstract|static|public|private|protected|get|set|yield|super|constructor)\b/
+        : isPython ? /^(def|class|return|if|elif|else|for|while|import|from|as|try|except|finally|raise|with|yield|lambda|pass|break|continue|and|or|not|in|is|global|nonlocal|assert|del|async|await)\b/
+        : isGo ? /^(func|return|if|else|for|range|switch|case|default|break|continue|go|defer|chan|select|import|package|type|struct|interface|map|var|const|nil)\b/
+        : isRust ? /^(fn|let|mut|return|if|else|for|while|loop|match|use|mod|pub|struct|enum|impl|trait|where|async|await|move|ref|self|Self|super|crate|const|static|type|as|in|unsafe|extern|dyn)\b/
+        : isCSS ? /^(@media|@import|@keyframes|@font-face|@supports|!important)\b/
+        : isHTML ? null
+        : null;
+
+      if (kwPattern) {
+        const kwMatch = remaining.match(kwPattern);
+        if (kwMatch) {
+          tokens.push(<span key={`${lineIdx}-${pos}`} style={{ color: SYN.keyword, fontWeight: 600 }}>{kwMatch[0]}</span>);
+          remaining = remaining.slice(kwMatch[0].length);
+          pos++;
+          matched = true;
+          continue;
+        }
+      }
+
+      // Builtins: true, false, null, undefined, this, self, None, True, False
+      const builtinMatch = remaining.match(/^(true|false|null|undefined|this|self|None|True|False|NaN|Infinity)\b/);
+      if (builtinMatch) {
+        tokens.push(<span key={`${lineIdx}-${pos}`} style={{ color: SYN.builtin }}>{builtinMatch[0]}</span>);
+        remaining = remaining.slice(builtinMatch[0].length);
+        pos++;
+        matched = true;
+        continue;
+      }
+
+      // Type annotations (PascalCase words after : or < or extends)
+      const typeMatch = remaining.match(/^([A-Z][a-zA-Z0-9_]*)\b/);
+      if (typeMatch && isJS) {
+        tokens.push(<span key={`${lineIdx}-${pos}`} style={{ color: SYN.type }}>{typeMatch[0]}</span>);
+        remaining = remaining.slice(typeMatch[0].length);
+        pos++;
+        matched = true;
+        continue;
+      }
+
+      // Function calls (word followed by parenthesis)
+      const fnMatch = remaining.match(/^([a-zA-Z_$][\w$]*)\s*(?=\()/);
+      if (fnMatch && !matched) {
+        tokens.push(<span key={`${lineIdx}-${pos}`} style={{ color: SYN.fn }}>{fnMatch[1]}</span>);
+        remaining = remaining.slice(fnMatch[1].length);
+        pos++;
+        matched = true;
+        continue;
+      }
+
+      // Operators
+      const opMatch = remaining.match(/^(===|!==|==|!=|<=|>=|=>|&&|\|\||\.\.\.|\?\?|[+\-*/%=<>!&|^~?:])/);
+      if (opMatch) {
+        tokens.push(<span key={`${lineIdx}-${pos}`} style={{ color: SYN.operator }}>{opMatch[0]}</span>);
+        remaining = remaining.slice(opMatch[0].length);
+        pos++;
+        matched = true;
+        continue;
+      }
+
+      // HTML/JSX tags
+      if (isHTML || isJS) {
+        const tagMatch = remaining.match(/^(<\/?[a-zA-Z][\w.-]*)/);
+        if (tagMatch) {
+          tokens.push(<span key={`${lineIdx}-${pos}`} style={{ color: SYN.tag }}>{tagMatch[0]}</span>);
+          remaining = remaining.slice(tagMatch[0].length);
+          pos++;
+          matched = true;
+          continue;
+        }
+      }
+
+      // JSON keys
+      if (isJSON) {
+        const jsonKeyMatch = remaining.match(/^("[^"]*")\s*:/);
+        if (jsonKeyMatch) {
+          tokens.push(<span key={`${lineIdx}-${pos}`} style={{ color: SYN.prop }}>{jsonKeyMatch[1]}</span>);
+          remaining = remaining.slice(jsonKeyMatch[1].length);
+          pos++;
+          matched = true;
+          continue;
+        }
+      }
+
+      if (!matched) {
+        // Take one character at a time for unmatched content
+        const nextSpecial = remaining.search(/[/"'`\d(A-Z]|\/\/|#|const |let |var |function |return |if |import |export |from |class |def |true|false|null|===|!==|&&|\|\|/);
+        const chunk = nextSpecial > 0 ? remaining.slice(0, nextSpecial) : remaining;
+        tokens.push(<span key={`${lineIdx}-${pos}`}>{chunk}</span>);
+        remaining = remaining.slice(chunk.length);
+        pos++;
+      }
+    }
+
+    return <React.Fragment key={lineIdx}>{tokens}{'\n'}</React.Fragment>;
+  });
+}
+
 // ── Code Block with copy button ──
 
 const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInCanvas, onRunInTerminal }: {
@@ -216,7 +384,7 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
         color: '#334155',
         tabSize: 2,
       }}>
-        {code}
+        {lang && !isMermaid ? highlightCode(code, lang) : code}
       </pre>
     </div>
   );
@@ -481,43 +649,84 @@ function renderInline(text: string): React.ReactNode {
         </code>
       );
     } else if (match[10]) {
-      // Inline citation [N] — Perplexity style
+      // Inline citation [N] — Perplexity style with hover card
       const num = match[10];
       parts.push(
         <span
           key={`cite-${match.index}`}
           data-citation={num}
-          title={`Source ${num}`}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            width: 18,
-            height: 18,
-            borderRadius: '50%',
-            background: '#3b82f6',
-            color: 'white',
-            fontSize: 10,
-            fontWeight: 600,
-            cursor: 'pointer',
-            verticalAlign: 'super',
-            marginLeft: 1,
-            marginRight: 1,
-            lineHeight: 1,
-            transition: 'transform 100ms, background 100ms',
             position: 'relative' as const,
-            top: -2,
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget).style.transform = 'scale(1.15)';
-            (e.currentTarget).style.background = '#2563eb';
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget).style.transform = 'scale(1)';
-            (e.currentTarget).style.background = '#3b82f6';
           }}
         >
-          {num}
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 16,
+              height: 16,
+              borderRadius: '50%',
+              background: '#eff6ff',
+              color: '#3b82f6',
+              fontSize: 9,
+              fontWeight: 700,
+              cursor: 'pointer',
+              verticalAlign: 'super',
+              marginLeft: 1,
+              marginRight: 1,
+              lineHeight: 1,
+              border: '1px solid #bfdbfe',
+              transition: 'all 100ms',
+              position: 'relative' as const,
+              top: -4,
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget).style.background = '#3b82f6';
+              (e.currentTarget).style.color = 'white';
+              (e.currentTarget).style.borderColor = '#3b82f6';
+              // Show tooltip
+              const tooltip = (e.currentTarget.parentElement as HTMLElement)?.querySelector('[data-cite-tooltip]') as HTMLElement;
+              if (tooltip) tooltip.style.display = 'block';
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget).style.background = '#eff6ff';
+              (e.currentTarget).style.color = '#3b82f6';
+              (e.currentTarget).style.borderColor = '#bfdbfe';
+              const tooltip = (e.currentTarget.parentElement as HTMLElement)?.querySelector('[data-cite-tooltip]') as HTMLElement;
+              if (tooltip) tooltip.style.display = 'none';
+            }}
+          >
+            {num}
+          </span>
+          <span
+            data-cite-tooltip="true"
+            style={{
+              display: 'none',
+              position: 'absolute' as const,
+              bottom: '100%',
+              left: '50%',
+              transform: 'translateX(-50%)',
+              marginBottom: 6,
+              paddingTop: 6,
+              paddingBottom: 6,
+              paddingLeft: 10,
+              paddingRight: 10,
+              background: 'white',
+              border: '1px solid #e2e8f0',
+              borderRadius: 8,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              fontSize: 11,
+              color: '#475569',
+              whiteSpace: 'nowrap' as const,
+              zIndex: 50,
+              pointerEvents: 'none' as const,
+            }}
+          >
+            Source {num}
+          </span>
         </span>
       );
     }
@@ -539,15 +748,85 @@ export function renderLLMMarkdown(text: string, opts?: {
   onOpenInCanvas?: (code: string, language: string) => void;
   onRunInTerminal?: (command: string) => void;
 }): React.ReactNode[] {
+  // Handle <think>...</think> blocks — render as italic, smaller, muted text
+  const processedText = text.replace(/<think>([\s\S]*?)(<\/think>|$)/g, (_match, content, closer) => {
+    const isUnclosed = closer !== '</think>';
+    // Convert to a special marker we'll detect below
+    return `\n%%THINK_START%%\n${content.trim()}${isUnclosed ? '\n%%THINK_STREAMING%%' : ''}\n%%THINK_END%%\n`;
+  });
+
   const nodes: React.ReactNode[] = [];
-  const lines = text.split('\n');
+  const lines = processedText.split('\n');
   let inCodeBlock = false;
   let codeContent = '';
   let codeLang = '';
+  let inThinking = false;
+  let thinkingContent = '';
+  let thinkingStreaming = false;
   let i = 0;
 
   while (i < lines.length) {
     const line = lines[i];
+
+    // Thinking block markers
+    if (line === '%%THINK_START%%') {
+      inThinking = true;
+      thinkingContent = '';
+      thinkingStreaming = false;
+      i++;
+      continue;
+    }
+    if (line === '%%THINK_STREAMING%%') {
+      thinkingStreaming = true;
+      i++;
+      continue;
+    }
+    if (line === '%%THINK_END%%') {
+      if (thinkingContent.trim()) {
+        nodes.push(
+          <div key={`think-${i}`} style={{
+            fontSize: 12,
+            fontStyle: 'italic',
+            color: '#94a3b8',
+            lineHeight: 1.5,
+            paddingTop: 6,
+            paddingBottom: 6,
+            paddingLeft: 12,
+            borderLeft: '2px solid #e2e8f0',
+            marginTop: 4,
+            marginBottom: 8,
+            animation: 'llmFadeIn 200ms ease-out',
+          }}>
+            {thinkingContent.split('\n').map((tLine, tIdx) => (
+              <React.Fragment key={tIdx}>
+                {tLine}
+                {tIdx < thinkingContent.split('\n').length - 1 && <br />}
+              </React.Fragment>
+            ))}
+            {thinkingStreaming && (
+              <span style={{
+                display: 'inline-block',
+                width: 2,
+                height: 12,
+                background: '#94a3b8',
+                marginLeft: 2,
+                verticalAlign: 'text-bottom',
+                animation: 'llmDot 1s ease-in-out infinite',
+              }} />
+            )}
+          </div>
+        );
+      }
+      inThinking = false;
+      thinkingContent = '';
+      i++;
+      continue;
+    }
+    if (inThinking) {
+      thinkingContent += (thinkingContent ? '\n' : '') + line;
+      i++;
+      continue;
+    }
 
     // Code block toggle
     if (line.startsWith('```')) {
@@ -736,7 +1015,7 @@ export function renderLLMMarkdown(text: string, opts?: {
           color: '#334155',
           tabSize: 2,
         }}>
-          {codeContent}
+          {codeLang ? highlightCode(codeContent, codeLang) : codeContent}
           <span style={{
             display: 'inline-block',
             width: 2,
