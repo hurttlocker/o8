@@ -52,20 +52,9 @@ export const SpeedDialButton = memo(function SpeedDialButton({
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: TouchEvent | MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener('touchstart', handler, { passive: true });
-    document.addEventListener('mousedown', handler);
-    return () => {
-      document.removeEventListener('touchstart', handler);
-      document.removeEventListener('mousedown', handler);
-    };
-  }, [open]);
+  // Close-on-outside-tap handled by frost backdrop onClick.
+  // No document-level touchstart listener — it was killing pill taps
+  // because the portaled pills are outside menuRef.
 
   return (
     <div ref={menuRef} style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
