@@ -6,10 +6,13 @@
 export interface PersistedTab {
   id: string;
   label: string;
+  kind?: 'terminal' | 'chat' | 'llm-chat'; // defaults to 'terminal' for backward compat
   cliAgent: string; // 'shell' | 'claude' | 'codex' | etc
   repoName?: string;
   repoPath?: string;
   tmuxSession?: string; // last known tmux session name (may still be alive)
+  chatRuntime?: 'codex' | 'claude-code' | 'openclaw'; // for kind='chat' (CLI Session)
+  chatSessionKey?: string; // for kind='chat' (CLI Session)
 }
 
 export interface PersistedTabState {
