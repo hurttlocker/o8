@@ -9,7 +9,7 @@
  * All mutating tools require user approval before execution.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 interface GitHubToolResult {
   content: string;
@@ -28,12 +28,17 @@ export async function createGithubIssue(args: {
 }): Promise<GitHubToolResult> {
   try {
     const { repo, title, body, labels } = args;
-    const labelArgs = labels?.length ? labels.map(l => `-l "${l}"`).join(' ') : '';
 
-    const cmd = `gh issue create --repo "${repo}" --title "${title.replace(/"/g, '\\"')}" --body "${body.replace(/"/g, '\\"').replace(/\n/g, '\\n')}" ${labelArgs} 2>&1`;
-    const output = execSync(cmd, { encoding: 'utf-8', timeout: 15000 }).trim();
+    // Use argument array — no shell, no escaping issues
+    const ghArgs = ['issue', 'create', '--repo', repo, '--title', title, '--body', body];
+    if (labels?.length) {
+      for (const label of labels) {
+        ghArgs.push('-l', label);
+      }
+    }
 
-    // Extract issue URL from output
+    const output = execFileSync('gh', ghArgs, { encoding: 'utf-8', timeout: 15000 }).trim();
+
     const urlMatch = output.match(/(https:\/\/github\.com\/[^\s]+)/);
     const issueUrl = urlMatch ? urlMatch[1] : output;
 
@@ -54,10 +59,15 @@ export async function readGithubIssueOrPr(args: {
 }): Promise<GitHubToolResult> {
   try {
     const { repo, number: num } = args;
+    const numStr = String(num);
 
-    // Get issue/PR details
-    const detailCmd = `gh issue view ${num} --repo "${repo}" --json title,body,state,labels,assignees,comments,url 2>&1 || gh pr view ${num} --repo "${repo}" --json title,body,state,labels,assignees,comments,url,additions,deletions,files 2>&1`;
-    const raw = execSync(detailCmd, { encoding: 'utf-8', timeout: 10000 }).trim();
+    // Try issue first, fall back to PR
+    let raw: string;
+    try {
+      raw = execFileSync('gh', ['issue', 'view', numStr, '--repo', repo, '--json', 'title,body,state,labels,assignees,comments,url'], { encoding: 'utf-8', timeout: 10000 }).trim();
+    } catch {
+      raw = execFileSync('gh', ['pr', 'view', numStr, '--repo', repo, '--json', 'title,body,state,labels,assignees,comments,url,additions,deletions,files'], { encoding: 'utf-8', timeout: 10000 }).trim();
+    }
 
     const data = JSON.parse(raw);
     const lines: string[] = [];
@@ -88,16 +98,16 @@ export async function readGithubIssueOrPr(args: {
       }
     }
 
-    // If it's a PR, get the diff too (abbreviated)
+    // If it's a PR, get the diff too
     if (data.additions !== undefined) {
       try {
-        const diffCmd = `gh pr diff ${num} --repo "${repo}" 2>&1 | head -200`;
-        const diff = execSync(diffCmd, { encoding: 'utf-8', timeout: 10000 }).trim();
+        const diff = execFileSync('gh', ['pr', 'diff', numStr, '--repo', repo], { encoding: 'utf-8', timeout: 10000 }).trim();
         if (diff) {
+          const diffLines = diff.split('\n').slice(0, 200);
           lines.push('');
           lines.push('## Diff (first 200 lines)');
           lines.push('```diff');
-          lines.push(diff);
+          lines.push(diffLines.join('\n'));
           lines.push('```');
         }
       } catch { /* no diff available */ }
@@ -121,48 +131,52 @@ export async function createPullRequest(args: {
   body: string;
   baseBranch?: string;
 }): Promise<GitHubToolResult> {
+  const repoRoot = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+  const opts = { encoding: 'utf-8' as const, cwd: repoRoot, timeout: 15000 };
+
   try {
     const { repo, branch, title, body, baseBranch } = args;
-    const repoRoot = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
 
     // 1. Check for uncommitted changes
-    const status = execSync(`cd "${repoRoot}" && git status --porcelain`, { encoding: 'utf-8' }).trim();
+    const status = execFileSync('git', ['status', '--porcelain'], opts).trim();
     if (!status) {
       return { content: 'No uncommitted changes to create a PR from.' };
     }
 
     // 2. Create branch
     const safeBranch = branch.replace(/[^a-zA-Z0-9/_-]/g, '-');
-    execSync(`cd "${repoRoot}" && git checkout -b "${safeBranch}"`, { encoding: 'utf-8', timeout: 5000 });
+    execFileSync('git', ['checkout', '-b', safeBranch], opts);
 
-    // 3. Stage and commit all changes
-    const commitMsg = title;
-    execSync(`cd "${repoRoot}" && git add -A && git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { encoding: 'utf-8', timeout: 10000 });
+    // 3. Stage and commit
+    execFileSync('git', ['add', '-A'], opts);
+    execFileSync('git', ['commit', '-m', title], opts);
 
     // 4. Push branch
-    execSync(`cd "${repoRoot}" && git push origin "${safeBranch}" 2>&1`, { encoding: 'utf-8', timeout: 15000 });
+    execFileSync('git', ['push', 'origin', safeBranch], opts);
 
     // 5. Create PR
     const base = baseBranch || 'main';
-    const prCmd = `gh pr create --repo "${repo}" --base "${base}" --head "${safeBranch}" --title "${title.replace(/"/g, '\\"')}" --body "${body.replace(/"/g, '\\"').replace(/\n/g, '\\n')}" 2>&1`;
-    const output = execSync(prCmd, { encoding: 'utf-8', timeout: 15000 }).trim();
+    const output = execFileSync('gh', [
+      'pr', 'create',
+      '--repo', repo,
+      '--base', base,
+      '--head', safeBranch,
+      '--title', title,
+      '--body', body,
+    ], opts).trim();
 
     const urlMatch = output.match(/(https:\/\/github\.com\/[^\s]+)/);
     const prUrl = urlMatch ? urlMatch[1] : output;
 
     // 6. Return to main
-    execSync(`cd "${repoRoot}" && git checkout main 2>&1`, { encoding: 'utf-8', timeout: 5000 });
+    execFileSync('git', ['checkout', 'main'], opts);
 
     return {
       content: `✅ Pull request created: ${prUrl}\n\nBranch: \`${safeBranch}\`\nChanges:\n\`\`\`\n${status}\n\`\`\``,
       sources: [{ title, url: prUrl }],
     };
   } catch (err) {
-    // Try to return to main on failure
-    try {
-      const repoRoot = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
-      execSync(`cd "${repoRoot}" && git checkout main 2>&1`, { encoding: 'utf-8' });
-    } catch { /* best effort */ }
+    try { execFileSync('git', ['checkout', 'main'], opts); } catch { /* best effort */ }
     return { content: `Error creating PR: ${err instanceof Error ? err.message : 'Unknown'}` };
   }
 }
