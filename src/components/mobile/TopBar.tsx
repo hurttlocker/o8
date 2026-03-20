@@ -131,47 +131,60 @@ export const TopBar = memo(function TopBar({
           aria-label="Switch session"
           aria-expanded={squadPickerOpen}
         >
-          {isHeaderCompact ? (
-            /* ── Collapsed pill — centered, agent name + status dot ── */
+          {/* ── Collapsed pill — centered, agent name + status dot ── */}
+          <div style={{
+            display: 'flex', justifyContent: 'center', width: '100%',
+            position: 'absolute', left: 0, right: 0,
+            top: '50%',
+            transform: isHeaderCompact
+              ? 'translateY(-50%) scale(1)'
+              : 'translateY(-50%) scale(0.85)',
+            opacity: isHeaderCompact ? 1 : 0,
+            transition: 'all 350ms cubic-bezier(0.32, 0.72, 0, 1)',
+            pointerEvents: isHeaderCompact ? 'auto' : 'none',
+          }}>
             <div style={{
-              display: 'flex', justifyContent: 'center', width: '100%',
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '5px 16px',
+              borderRadius: 20,
+              background: 'rgba(0,122,255,0.08)',
+              backdropFilter: 'blur(20px) saturate(1.6)',
+              WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
+              border: '1px solid rgba(0,122,255,0.15)',
+              maxWidth: '75%',
             }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: 8,
-                padding: '5px 16px',
-                borderRadius: 20,
-                background: 'rgba(0,122,255,0.08)',
-                backdropFilter: 'blur(20px) saturate(1.6)',
-                WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-                border: '1px solid rgba(0,122,255,0.15)',
-                maxWidth: '75%',
+              <span style={{
+                width: 7, height: 7, borderRadius: '50%',
+                background: connectionDotColor,
+                flexShrink: 0,
+                boxShadow: connectionDotColor === '#34c759' ? '0 0 6px rgba(52,199,89,0.4)' : 'none',
+              }} />
+              <span style={{
+                fontSize: 14, fontWeight: 600,
+                color: '#007aff',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                fontFamily: '-apple-system, system-ui, sans-serif',
               }}>
-                <span style={{
-                  width: 7, height: 7, borderRadius: '50%',
-                  background: connectionDotColor,
-                  flexShrink: 0,
-                  boxShadow: connectionDotColor === '#34c759' ? '0 0 6px rgba(52,199,89,0.4)' : 'none',
-                }} />
-                <span style={{
-                  fontSize: 14, fontWeight: 600,
-                  color: '#007aff',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                }}>
-                  {activeTitle}
-                </span>
-                <ChevronDown size={12} strokeWidth={2.5}
-                  style={{
-                    flexShrink: 0, color: '#007aff',
-                    transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
-                    transform: squadPickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                  }}
-                />
-              </div>
+                {activeTitle}
+              </span>
+              <ChevronDown size={12} strokeWidth={2.5}
+                style={{
+                  flexShrink: 0, color: '#007aff',
+                  transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
+                  transform: squadPickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                }}
+              />
             </div>
-          ) : (
-            /* ── Expanded header — full details ── */
-            <>
+          </div>
+
+          {/* ── Expanded header — full details ── */}
+          <div style={{
+            opacity: isHeaderCompact ? 0 : 1,
+            transform: isHeaderCompact ? 'scale(1.05)' : 'scale(1)',
+            transition: 'all 350ms cubic-bezier(0.32, 0.72, 0, 1)',
+            pointerEvents: isHeaderCompact ? 'none' : 'auto',
+            display: 'flex', alignItems: 'center', width: '100%',
+          }}>
               <div className="remodex-title-shell" style={{ minWidth: 0, flex: 1 }}>
                 <div className="remodex-title-stack">
                   <span className="remodex-title-kicker">
@@ -203,8 +216,7 @@ export const TopBar = memo(function TopBar({
                   transform: squadPickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
                 }}
               />
-            </>
-          )}
+          </div>
         </button>
 
         {/* Squad picker dropdown — grouped by project */}
