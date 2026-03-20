@@ -122,19 +122,18 @@ export const TopBar = memo(function TopBar({
           aria-label="Switch session"
           aria-expanded={squadPickerOpen}
         >
-          {/* ── Collapsed pill — screen-centered (ignores grid column offset) ── */}
+          {/* ── Collapsed pill — screen-centered ── */}
           <div style={{
             display: 'flex', justifyContent: 'center',
             position: 'fixed',
             left: 0, right: 0,
-            top: 'inherit',
-            transform: isHeaderCompact
-              ? 'scale(1)'
-              : 'scale(0.85)',
+            top: 'env(safe-area-inset-top, 0px)',
+            paddingTop: 6,
             opacity: isHeaderCompact ? 1 : 0,
-            transition: 'opacity 350ms ease, transform 350ms cubic-bezier(0.32, 0.72, 0, 1)',
             pointerEvents: isHeaderCompact ? 'auto' : 'none',
             zIndex: 1,
+            transition: 'opacity 200ms ease',
+            willChange: 'opacity',
           }}>
             <div style={{
               display: 'flex', alignItems: 'center', gap: 8,
@@ -144,10 +143,7 @@ export const TopBar = memo(function TopBar({
               WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
               border: '1px solid rgba(0,122,255,0.15)',
               maxWidth: '75%',
-              boxShadow: hasRunningAgents
-                ? '0 0 0 1px rgba(0,122,255,0.1), 0 0 12px rgba(0,122,255,0.15)'
-                : '0 2px 8px rgba(0,0,0,0.04)',
-              animation: hasRunningAgents ? 'pillBreathe 3s ease-in-out infinite' : 'none',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
             }}>
               <span style={{
                 width: 7, height: 7, borderRadius: '50%',
@@ -176,9 +172,8 @@ export const TopBar = memo(function TopBar({
           {/* ── Expanded header — full details ── */}
           <div style={{
             opacity: isHeaderCompact ? 0 : 1,
-            transform: isHeaderCompact ? 'scale(1.05)' : 'scale(1)',
-            transition: 'opacity 350ms ease, transform 350ms cubic-bezier(0.32, 0.72, 0, 1)',
             pointerEvents: isHeaderCompact ? 'none' : 'auto',
+            transition: 'opacity 200ms ease',
             display: 'flex', alignItems: 'center', width: '100%',
           }}>
               <div className="remodex-title-shell" style={{ minWidth: 0, flex: 1 }}>
