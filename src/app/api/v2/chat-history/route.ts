@@ -55,13 +55,37 @@ export async function POST(request: NextRequest) {
       : m.content,
   }));
 
+  // Preserve starred status from existing file
+  let starred = false;
+  try {
+    const existing = JSON.parse(readFileSync(filePath, 'utf-8'));
+    starred = existing.starred || false;
+  } catch { /* new file */ }
+
   writeFileSync(filePath, JSON.stringify({
     messages,
     model: body.model,
     savedAt: new Date().toISOString(),
+    starred: body.starred ?? starred,
   }));
 
   return NextResponse.json({ ok: true });
+}
+
+export async function PATCH(request: NextRequest) {
+  const body = await request.json().catch(() => null);
+  if (!body?.tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
+
+  const filePath = safePath(body.tabId);
+  try {
+    const data = JSON.parse(readFileSync(filePath, 'utf-8'));
+    if (body.starred !== undefined) data.starred = body.starred;
+    if (body.title !== undefined) data.title = body.title;
+    writeFileSync(filePath, JSON.stringify(data));
+    return NextResponse.json({ ok: true });
+  } catch {
+    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+  }
 }
 
 export async function DELETE(request: NextRequest) {

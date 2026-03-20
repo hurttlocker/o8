@@ -40,6 +40,10 @@ import {
   Trash2,
   GitBranch,
   Scissors,
+  History,
+  Star,
+  PanelLeftClose,
+  MessageSquare,
 } from 'lucide-react';
 import { renderLLMMarkdown } from './LLMMarkdown';
 import { saveChatHistory, loadChatHistory } from '@/lib/llm/chat-history';
@@ -1191,10 +1195,11 @@ function StreamingIndicator() {
 
 // ── Main Component ──
 
-export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal }: {
+export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpenHistoryChat }: {
   tabId: string;
   onOpenInCanvas?: (code: string, language: string) => void;
   onRunInTerminal?: (command: string) => void;
+  onOpenHistoryChat?: (historyTabId: string, title: string) => void;
 }) {
   const [messages, setMessages] = useState<LLMMessage[]>([]);
   const [input, setInput] = useState('');
@@ -1213,6 +1218,13 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal }: {
   const [followUpsLoading, setFollowUpsLoading] = useState(false);
   const [showSlashPicker, setShowSlashPicker] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyItems, setHistoryItems] = useState<{
+    tabId: string; title: string; preview: string; messageCount: number;
+    model: string; savedAt: string; modifiedAt: string; starred: boolean;
+  }[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [applyModal, setApplyModal] = useState<{ code: string; language: string } | null>(null);
   const [applyPath, setApplyPath] = useState('');
   const [applyStatus, setApplyStatus] = useState<'idle' | 'applying' | 'done' | 'error'>('idle');
@@ -1246,6 +1258,49 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal }: {
       } catch { /* ignore */ }
     }, 100);
   }, []);
+
+  // Load chat history list
+  const loadHistory = useCallback(async (search?: string) => {
+    setHistoryLoading(true);
+    try {
+      const url = search
+        ? `/api/v2/chat-history/list?q=${encodeURIComponent(search)}`
+        : '/api/v2/chat-history/list';
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setHistoryItems(data.conversations ?? []);
+      }
+    } catch { /* ignore */ }
+    setHistoryLoading(false);
+  }, []);
+
+  // Toggle star
+  const toggleStar = useCallback(async (histTabId: string, starred: boolean) => {
+    try {
+      await fetch('/api/v2/chat-history', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tabId: histTabId, starred }),
+      });
+      setHistoryItems(prev => prev.map(h =>
+        h.tabId === histTabId ? { ...h, starred } : h
+      ));
+    } catch { /* ignore */ }
+  }, []);
+
+  // Delete a history entry
+  const deleteHistory = useCallback(async (histTabId: string) => {
+    try {
+      await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(histTabId)}`, { method: 'DELETE' });
+      setHistoryItems(prev => prev.filter(h => h.tabId !== histTabId));
+    } catch { /* ignore */ }
+  }, []);
+
+  // Open history panel
+  useEffect(() => {
+    if (historyOpen) loadHistory();
+  }, [historyOpen, loadHistory]);
 
   const doApply = useCallback(async () => {
     if (!applyModal || !applyPath.trim()) return;
@@ -1802,14 +1857,245 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal }: {
 
   const isEmpty = messages.length === 0 && !isStreaming;
 
+  // Group history by date
+  const groupedHistory = (() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const yesterday = today - 86400000;
+    const thisWeek = today - 7 * 86400000;
+
+    const groups: { label: string; items: typeof historyItems }[] = [];
+    const starred = historyItems.filter(h => h.starred);
+    const todayItems = historyItems.filter(h => !h.starred && new Date(h.modifiedAt).getTime() >= today);
+    const yesterdayItems = historyItems.filter(h => !h.starred && new Date(h.modifiedAt).getTime() >= yesterday && new Date(h.modifiedAt).getTime() < today);
+    const weekItems = historyItems.filter(h => !h.starred && new Date(h.modifiedAt).getTime() >= thisWeek && new Date(h.modifiedAt).getTime() < yesterday);
+    const olderItems = historyItems.filter(h => !h.starred && new Date(h.modifiedAt).getTime() < thisWeek);
+
+    if (starred.length) groups.push({ label: '⭐ Starred', items: starred });
+    if (todayItems.length) groups.push({ label: 'Today', items: todayItems });
+    if (yesterdayItems.length) groups.push({ label: 'Yesterday', items: yesterdayItems });
+    if (weekItems.length) groups.push({ label: 'This Week', items: weekItems });
+    if (olderItems.length) groups.push({ label: 'Older', items: olderItems });
+    return groups;
+  })();
+
   return (
     <div style={{
       display: 'flex',
-      flexDirection: 'column',
+      flexDirection: 'row',
       height: '100%',
       background: '#ffffff',
       fontFamily: '-apple-system, system-ui, sans-serif',
+      overflow: 'hidden',
     }}>
+      {/* ── History Sidebar ── */}
+      <div style={{
+        width: historyOpen ? 260 : 0,
+        minWidth: historyOpen ? 260 : 0,
+        borderRight: historyOpen ? '1px solid #f1f5f9' : 'none',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        transition: 'width 200ms ease, min-width 200ms ease',
+        background: '#fafbfc',
+      }}>
+        {historyOpen && (
+          <>
+            {/* Sidebar header */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingTop: 12,
+              paddingBottom: 12,
+              paddingLeft: 14,
+              paddingRight: 10,
+              borderBottom: '1px solid #f1f5f9',
+            }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>History</span>
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(false)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  paddingTop: 4,
+                  paddingBottom: 4,
+                  paddingLeft: 4,
+                  paddingRight: 4,
+                  borderRadius: 6,
+                }}
+              >
+                <PanelLeftClose size={14} />
+              </button>
+            </div>
+
+            {/* Search */}
+            <div style={{ paddingTop: 8, paddingBottom: 8, paddingLeft: 10, paddingRight: 10 }}>
+              <input
+                type="text"
+                value={historySearch}
+                onChange={(e) => {
+                  setHistorySearch(e.target.value);
+                  loadHistory(e.target.value || undefined);
+                }}
+                placeholder="Search conversations..."
+                style={{
+                  width: '100%',
+                  paddingTop: 7,
+                  paddingBottom: 7,
+                  paddingLeft: 10,
+                  paddingRight: 10,
+                  border: '1px solid #e2e8f0',
+                  borderRadius: 8,
+                  fontSize: 12,
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                  background: 'white',
+                  transition: 'border-color 150ms',
+                }}
+                onFocus={(e) => { (e.currentTarget).style.borderColor = '#3b82f6'; }}
+                onBlur={(e) => { (e.currentTarget).style.borderColor = '#e2e8f0'; }}
+              />
+            </div>
+
+            {/* Conversation list */}
+            <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 8 }}>
+              {historyLoading ? (
+                <div style={{ textAlign: 'center', paddingTop: 20, color: '#94a3b8', fontSize: 12 }}>
+                  Loading...
+                </div>
+              ) : historyItems.length === 0 ? (
+                <div style={{ textAlign: 'center', paddingTop: 20, color: '#94a3b8', fontSize: 12 }}>
+                  {historySearch ? 'No matches' : 'No saved conversations'}
+                </div>
+              ) : (
+                groupedHistory.map(group => (
+                  <div key={group.label}>
+                    <div style={{
+                      paddingTop: 10,
+                      paddingBottom: 4,
+                      paddingLeft: 14,
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: '#94a3b8',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                    }}>
+                      {group.label}
+                    </div>
+                    {group.items.map(conv => (
+                      <div
+                        key={conv.tabId}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: 6,
+                          paddingTop: 8,
+                          paddingBottom: 8,
+                          paddingLeft: 14,
+                          paddingRight: 10,
+                          cursor: 'pointer',
+                          transition: 'background 100ms',
+                          borderRadius: 6,
+                          marginLeft: 4,
+                          marginRight: 4,
+                        }}
+                        onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                        onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
+                        onClick={() => {
+                          if (onOpenHistoryChat) {
+                            onOpenHistoryChat(conv.tabId, conv.title);
+                          }
+                        }}
+                      >
+                        <MessageSquare size={13} style={{ color: '#94a3b8', marginTop: 2, flexShrink: 0 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontSize: 12,
+                            fontWeight: 500,
+                            color: '#1e293b',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {conv.title}
+                          </div>
+                          <div style={{
+                            fontSize: 11,
+                            color: '#94a3b8',
+                            marginTop: 2,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            {conv.messageCount} msgs · {conv.model.split('/').pop()}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleStar(conv.tabId, !conv.starred);
+                            }}
+                            style={{
+                              border: 'none',
+                              background: 'transparent',
+                              cursor: 'pointer',
+                              paddingTop: 2,
+                              paddingBottom: 2,
+                              paddingLeft: 2,
+                              paddingRight: 2,
+                              color: conv.starred ? '#f59e0b' : '#cbd5e1',
+                            }}
+                            title={conv.starred ? 'Unstar' : 'Star'}
+                          >
+                            <Star size={12} fill={conv.starred ? '#f59e0b' : 'none'} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteHistory(conv.tabId);
+                            }}
+                            style={{
+                              border: 'none',
+                              background: 'transparent',
+                              cursor: 'pointer',
+                              paddingTop: 2,
+                              paddingBottom: 2,
+                              paddingLeft: 2,
+                              paddingRight: 2,
+                              color: '#cbd5e1',
+                            }}
+                            title="Delete"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* ── Main Chat Column ── */}
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minWidth: 0,
+        height: '100%',
+      }}>
       {/* CSS animations */}
       <style>{`
         @keyframes llmFadeIn {
@@ -1845,6 +2131,34 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal }: {
         paddingRight: 24,
         borderBottom: '1px solid #f1f5f9',
       }}>
+        {/* History toggle */}
+        <button
+          type="button"
+          onClick={() => setHistoryOpen(!historyOpen)}
+          title={historyOpen ? 'Close history' : 'Chat history'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 5,
+            paddingTop: 6,
+            paddingBottom: 6,
+            paddingLeft: 8,
+            paddingRight: 8,
+            border: 'none',
+            borderRadius: 8,
+            background: historyOpen ? '#f1f5f9' : 'transparent',
+            color: historyOpen ? '#3b82f6' : '#94a3b8',
+            fontSize: 12,
+            cursor: 'pointer',
+            fontFamily: '-apple-system, system-ui, sans-serif',
+            transition: 'all 150ms',
+          }}
+          onMouseEnter={(e) => { if (!historyOpen) (e.currentTarget).style.background = '#f8fafc'; }}
+          onMouseLeave={(e) => { if (!historyOpen) (e.currentTarget).style.background = 'transparent'; }}
+        >
+          <History size={14} />
+        </button>
+
         <ModelPicker
           selected={model}
           onSelect={setModel}
@@ -2833,6 +3147,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal }: {
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }
