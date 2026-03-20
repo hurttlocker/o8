@@ -188,7 +188,12 @@ async function resolveReviewFile(filePath: string): Promise<unknown> {
 
 export async function POST(request: NextRequest) {
   const startedAt = performance.now();
-  const body = (await request.json()) as SyncRequest;
+  let body: SyncRequest;
+  try {
+    body = (await request.json()) as SyncRequest;
+  } catch {
+    return NextResponse.json({ error: 'Invalid or empty request body' }, { status: 400 });
+  }
   const errors: Record<string, string> = {};
 
   // Resolve ALL requested sections in parallel — one failure doesn't block others
