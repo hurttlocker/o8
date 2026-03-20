@@ -68,6 +68,8 @@ export const TopBar = memo(function TopBar({
   const focusedAdditions = selectedReviewFile?.additions ?? totalAdditions;
   const focusedDeletions = selectedReviewFile?.deletions ?? totalDeletions;
   const diffFileLabel = reviewFiles.length === 1 ? 'file' : 'files';
+  const hasRunningAgents = snapshot.sessions.some(s => s.status === 'running');
+
   const activeTitle = compactLine(
     isOwnedCodexSession
       ? selectedReviewPacket?.title ?? selectedSession?.name ?? selectedSession?.currentTask
@@ -152,6 +154,10 @@ export const TopBar = memo(function TopBar({
               WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
               border: '1px solid rgba(0,122,255,0.15)',
               maxWidth: '75%',
+              boxShadow: hasRunningAgents
+                ? '0 0 0 1px rgba(0,122,255,0.1), 0 0 12px rgba(0,122,255,0.15)'
+                : '0 2px 8px rgba(0,0,0,0.04)',
+              animation: hasRunningAgents ? 'pillBreathe 3s ease-in-out infinite' : 'none',
             }}>
               <span style={{
                 width: 7, height: 7, borderRadius: '50%',
