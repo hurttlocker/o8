@@ -31,6 +31,12 @@ import {
   Bookmark,
   MoreHorizontal,
   Loader2,
+  Brain,
+  ChevronRight,
+  Search,
+  FileText,
+  Zap,
+  Eye,
 } from 'lucide-react';
 import { renderLLMMarkdown } from './LLMMarkdown';
 import { saveChatHistory, loadChatHistory } from '@/lib/llm/chat-history';
@@ -50,6 +56,14 @@ export interface SourceInfo {
   path?: string;
 }
 
+export interface ThinkingStep {
+  type: 'thinking' | 'tool' | 'search' | 'reading' | 'analyzing';
+  label: string;
+  description?: string;
+  status: 'active' | 'complete' | 'pending';
+  detail?: string; // collapsed content
+}
+
 export interface LLMMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -61,6 +75,9 @@ export interface LLMMessage {
   images?: string[]; // data URIs for display
   toolCalls?: ToolCallInfo[];
   sources?: SourceInfo[];
+  thinking?: string; // raw thinking text
+  thinkingSteps?: ThinkingStep[];
+  thinkingDurationMs?: number;
 }
 
 interface ModelOption {
@@ -418,8 +435,17 @@ function MessageBubble({ message, isLast, onRetry, onEdit }: MessageBubbleProps)
         ) : renderLLMMarkdown(message.content)}
       </div>
 
+      {/* Chain of Thought — shows above message content for completed messages */}
+      {!isUser && (message.thinkingSteps || message.thinking) && (
+        <ChainOfThought
+          steps={message.thinkingSteps || []}
+          thinking={message.thinking}
+          durationMs={message.thinkingDurationMs}
+        />
+      )}
+
       {/* Tool calls display */}
-      {!isUser && message.toolCalls && message.toolCalls.length > 0 && (
+      {!isUser && message.toolCalls && message.toolCalls.length > 0 && !(message.thinkingSteps && message.thinkingSteps.length > 0) && (
         <div style={{
           display: 'flex',
           flexDirection: 'column',
@@ -738,6 +764,267 @@ function MessageBubble({ message, isLast, onRetry, onEdit }: MessageBubbleProps)
 }
 
 /** Streaming dots indicator */
+// ── Chain of Thought Component ──
+
+function ChainOfThought({
+  steps,
+  thinking,
+  durationMs,
+  isLive = false,
+}: {
+  steps: ThinkingStep[];
+  thinking?: string;
+  durationMs?: number;
+  isLive?: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (steps.length === 0 && !thinking) return null;
+
+  const completedCount = steps.filter(s => s.status === 'complete').length;
+  const activeStep = steps.find(s => s.status === 'active');
+  const durationSec = durationMs ? (durationMs / 1000).toFixed(1) : null;
+
+  return (
+    <div style={{
+      maxWidth: '90%',
+      marginBottom: 8,
+      animation: 'llmFadeIn 200ms ease-out',
+    }}>
+      {/* Header — click to expand */}
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          paddingTop: 8,
+          paddingBottom: 8,
+          paddingLeft: 12,
+          paddingRight: 12,
+          background: isLive ? 'linear-gradient(135deg, #f8fafc 0%, #f0f9ff 100%)' : '#f8fafc',
+          border: `1px solid ${isLive ? '#bae6fd' : '#e2e8f0'}`,
+          borderRadius: 10,
+          cursor: 'pointer',
+          width: '100%',
+          textAlign: 'left',
+          transition: 'all 150ms ease',
+          fontFamily: '-apple-system, system-ui, sans-serif',
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget).style.background = '#f0f9ff';
+          (e.currentTarget).style.borderColor = '#93c5fd';
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget).style.background = isLive ? 'linear-gradient(135deg, #f8fafc 0%, #f0f9ff 100%)' : '#f8fafc';
+          (e.currentTarget).style.borderColor = isLive ? '#bae6fd' : '#e2e8f0';
+        }}
+      >
+        {/* Brain icon */}
+        <div style={{
+          width: 24,
+          height: 24,
+          borderRadius: 6,
+          background: isLive ? 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' : '#e2e8f0',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          ...(isLive ? { animation: 'llmDot 2s ease-in-out infinite' } : {}),
+        }}>
+          <Brain size={13} style={{ color: isLive ? 'white' : '#64748b' }} />
+        </div>
+
+        {/* Label */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 12,
+            fontWeight: 500,
+            color: '#1e293b',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}>
+            {isLive && activeStep ? (
+              <span>{activeStep.label}</span>
+            ) : (
+              <span>Thought for {durationSec ? `${durationSec}s` : `${completedCount} step${completedCount !== 1 ? 's' : ''}`}</span>
+            )}
+          </div>
+          {isLive && (
+            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1 }}>
+              {completedCount} step{completedCount !== 1 ? 's' : ''} completed
+            </div>
+          )}
+        </div>
+
+        {/* Progress dots */}
+        {isLive && (
+          <div style={{ display: 'flex', gap: 3, marginRight: 4 }}>
+            {[0, 1, 2].map(i => (
+              <div key={i} style={{
+                width: 4,
+                height: 4,
+                borderRadius: '50%',
+                background: '#3b82f6',
+                animation: `llmDot 1.4s ease-in-out ${i * 0.2}s infinite`,
+              }} />
+            ))}
+          </div>
+        )}
+
+        {/* Chevron */}
+        <ChevronRight
+          size={14}
+          style={{
+            color: '#94a3b8',
+            transform: expanded ? 'rotate(90deg)' : 'rotate(0)',
+            transition: 'transform 200ms ease',
+            flexShrink: 0,
+          }}
+        />
+      </button>
+
+      {/* Expanded content */}
+      {expanded && (
+        <div style={{
+          marginTop: 4,
+          paddingLeft: 12,
+          borderLeft: '2px solid #e2e8f0',
+          marginLeft: 23,
+          animation: 'llmFadeIn 200ms ease-out',
+        }}>
+          {/* Steps */}
+          {steps.map((step, i) => {
+            const StepIcon = step.type === 'search' ? Search :
+                            step.type === 'reading' ? FileText :
+                            step.type === 'analyzing' ? Zap :
+                            step.type === 'tool' ? Eye :
+                            Brain;
+            return (
+              <div key={i} style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                paddingTop: 8,
+                paddingBottom: 8,
+                animation: `llmFadeIn 200ms ease-out ${i * 50}ms both`,
+              }}>
+                {/* Status dot */}
+                <div style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  marginTop: 1,
+                  background: step.status === 'complete' ? '#dcfce7' :
+                             step.status === 'active' ? '#dbeafe' : '#f1f5f9',
+                  border: `1px solid ${
+                    step.status === 'complete' ? '#86efac' :
+                    step.status === 'active' ? '#93c5fd' : '#e2e8f0'
+                  }`,
+                }}>
+                  {step.status === 'complete' ? (
+                    <Check size={10} style={{ color: '#16a34a' }} />
+                  ) : step.status === 'active' ? (
+                    <StepIcon size={10} style={{ color: '#3b82f6', animation: 'llmDot 1.4s ease-in-out infinite' }} />
+                  ) : (
+                    <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#cbd5e1' }} />
+                  )}
+                </div>
+
+                {/* Step content */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 12,
+                    fontWeight: 500,
+                    color: step.status === 'active' ? '#1e40af' : '#374151',
+                  }}>
+                    {step.label}
+                  </div>
+                  {step.description && (
+                    <div style={{
+                      fontSize: 11,
+                      color: '#94a3b8',
+                      marginTop: 2,
+                      lineHeight: '1.4',
+                    }}>
+                      {step.description}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Raw thinking text (collapsed by default) */}
+          {thinking && (
+            <ThinkingText text={thinking} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThinkingText({ text }: { text: string }) {
+  const [showRaw, setShowRaw] = useState(false);
+  return (
+    <div style={{ marginTop: 4, marginBottom: 4 }}>
+      <button
+        type="button"
+        onClick={() => setShowRaw(!showRaw)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          border: 'none',
+          background: 'transparent',
+          color: '#94a3b8',
+          fontSize: 11,
+          cursor: 'pointer',
+          paddingTop: 4,
+          paddingBottom: 4,
+          paddingLeft: 0,
+          paddingRight: 0,
+        }}
+      >
+        <ChevronRight size={10} style={{
+          transform: showRaw ? 'rotate(90deg)' : 'rotate(0)',
+          transition: 'transform 200ms ease',
+        }} />
+        View raw thinking
+      </button>
+      {showRaw && (
+        <div style={{
+          marginTop: 4,
+          paddingTop: 8,
+          paddingBottom: 8,
+          paddingLeft: 10,
+          paddingRight: 10,
+          background: '#f8fafc',
+          borderRadius: 6,
+          fontSize: 11,
+          color: '#64748b',
+          lineHeight: '1.6',
+          fontFamily: 'ui-monospace, monospace',
+          maxHeight: 200,
+          overflowY: 'auto',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          animation: 'llmFadeIn 200ms ease-out',
+        }}>
+          {text}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Follow-up question generation ──
 
 async function generateFollowUps(
@@ -851,6 +1138,7 @@ export default function LLMChat({ tabId }: { tabId: string }) {
   const [filePickerIndex, setFilePickerIndex] = useState(0);
   const [attachedImages, setAttachedImages] = useState<{ name: string; dataUri: string }[]>([]);
   const [activeToolCalls, setActiveToolCalls] = useState<ToolCallInfo[]>([]);
+  const [activeThinking, setActiveThinking] = useState<{ steps: ThinkingStep[]; thinking: string } | null>(null);
   const [followUps, setFollowUps] = useState<string[]>([]);
   const [followUpsLoading, setFollowUpsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1098,7 +1386,12 @@ export default function LLMChat({ tabId }: { tabId: string }) {
       let costUsd: number | undefined;
       const toolCalls: ToolCallInfo[] = [];
       const sources: SourceInfo[] = [];
+      let thinkingText = '';
+      const thinkingSteps: ThinkingStep[] = [];
+      const thinkingStartTime = Date.now();
+      let isThinking = false;
       setActiveToolCalls([]);
+      setActiveThinking(null);
 
       while (true) {
         const { done, value } = await reader.read();
@@ -1112,7 +1405,43 @@ export default function LLMChat({ tabId }: { tabId: string }) {
             if (data === '[DONE]') continue;
             try {
               const parsed = JSON.parse(data);
-              if (parsed.type === 'content') {
+              if (parsed.type === 'thinking') {
+                thinkingText += parsed.text;
+                if (!isThinking) {
+                  isThinking = true;
+                  thinkingSteps.push({
+                    type: 'thinking',
+                    label: 'Reasoning through the problem...',
+                    status: 'active',
+                  });
+                }
+                // Parse thinking text for structure (look for step-like patterns)
+                const lines = parsed.text.split('\n').filter((l: string) => l.trim());
+                for (const line of lines) {
+                  const trimmed = line.trim();
+                  if (trimmed.length > 10 && (
+                    trimmed.startsWith('I need to') ||
+                    trimmed.startsWith('Let me') ||
+                    trimmed.startsWith('First,') ||
+                    trimmed.startsWith('Now') ||
+                    trimmed.startsWith('The ') ||
+                    trimmed.startsWith('This ')
+                  )) {
+                    // Update the active step label
+                    const active = thinkingSteps.find(s => s.status === 'active');
+                    if (active) {
+                      active.label = trimmed.slice(0, 60) + (trimmed.length > 60 ? '...' : '');
+                    }
+                  }
+                }
+                setActiveThinking({ steps: [...thinkingSteps], thinking: thinkingText });
+              } else if (parsed.type === 'content') {
+                // First content after thinking = thinking is done
+                if (isThinking) {
+                  isThinking = false;
+                  thinkingSteps.forEach(s => { if (s.status === 'active') s.status = 'complete'; });
+                  setActiveThinking({ steps: [...thinkingSteps], thinking: thinkingText });
+                }
                 fullContent += parsed.text;
                 setStreamContent(fullContent);
               } else if (parsed.type === 'usage') {
@@ -1127,6 +1456,19 @@ export default function LLMChat({ tabId }: { tabId: string }) {
                   toolCalls.push({ name: parsed.name, status: parsed.status, args: parsed.args });
                 }
                 setActiveToolCalls([...toolCalls]);
+                // Add tool call as a thinking step
+                const toolLabel = parsed.name === 'search_web' ? `Searching "${parsed.args?.query || ''}"` :
+                                  parsed.name === 'read_file' ? `Reading ${parsed.args?.path || ''}` :
+                                  parsed.name === 'search_code' ? `Searching code for "${parsed.args?.query || ''}"` :
+                                  parsed.name === 'list_files' ? `Listing ${parsed.args?.path || ''}` :
+                                  `Running ${parsed.name}`;
+                thinkingSteps.push({
+                  type: parsed.name === 'search_web' || parsed.name === 'search_code' ? 'search' :
+                        parsed.name === 'read_file' ? 'reading' : 'tool',
+                  label: toolLabel,
+                  status: 'active',
+                });
+                setActiveThinking({ steps: [...thinkingSteps], thinking: thinkingText });
               } else if (parsed.type === 'tool_result') {
                 const existing = toolCalls.find(t => t.name === parsed.name);
                 if (existing) {
@@ -1134,6 +1476,10 @@ export default function LLMChat({ tabId }: { tabId: string }) {
                   existing.preview = parsed.preview;
                 }
                 setActiveToolCalls([...toolCalls]);
+                // Mark matching thinking step as complete
+                const toolStep = [...thinkingSteps].reverse().find(s => s.status === 'active' && s.type !== 'thinking');
+                if (toolStep) toolStep.status = 'complete';
+                setActiveThinking({ steps: [...thinkingSteps], thinking: thinkingText });
               } else if (parsed.type === 'sources') {
                 sources.push(...(parsed.sources ?? []));
               } else if (parsed.type === 'error') {
@@ -1164,9 +1510,13 @@ export default function LLMChat({ tabId }: { tabId: string }) {
         timestamp: Date.now(),
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
         sources: sources.length > 0 ? sources : undefined,
+        thinking: thinkingText || undefined,
+        thinkingSteps: thinkingSteps.length > 0 ? thinkingSteps.map(s => ({ ...s, status: 'complete' as const })) : undefined,
+        thinkingDurationMs: thinkingSteps.length > 0 || thinkingText ? Date.now() - thinkingStartTime : undefined,
       };
       setMessages((prev) => [...prev, assistantMsg]);
       setStreamContent('');
+      setActiveThinking(null);
 
       // Generate follow-up suggestions (async, non-blocking)
       if (fullContent.length > 20) {
@@ -1550,8 +1900,17 @@ export default function LLMChat({ tabId }: { tabId: string }) {
               alignItems: 'flex-start',
               gap: 4,
             }}>
-              {/* Live tool call indicators */}
-              {activeToolCalls.length > 0 && (
+              {/* Live Chain of Thought */}
+              {activeThinking && activeThinking.steps.length > 0 && (
+                <ChainOfThought
+                  steps={activeThinking.steps}
+                  thinking={activeThinking.thinking}
+                  isLive
+                />
+              )}
+
+              {/* Live tool call indicators (only if no chain of thought) */}
+              {activeToolCalls.length > 0 && !activeThinking?.steps.length && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: '90%' }}>
                   {activeToolCalls.map((tc, i) => (
                     <div key={i} style={{
