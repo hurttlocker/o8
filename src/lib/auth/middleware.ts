@@ -82,9 +82,9 @@ export function withAuth(handler: AuthHandler) {
  * Optional auth — doesn't block if no token, but provides user if available.
  */
 export function withOptionalAuth(
-  handler: (request: NextRequest, context: AuthContext | null) => Promise<NextResponse> | NextResponse,
+  handler: (request: NextRequest, context: AuthContext | null) => Promise<NextResponse | Response> | NextResponse | Response,
 ) {
-  return async (request: NextRequest): Promise<NextResponse> => {
+  return async (request: NextRequest): Promise<NextResponse | Response> => {
     const authHeader = request.headers.get('Authorization');
     let token: string | null = null;
 
