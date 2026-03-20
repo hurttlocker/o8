@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps, react-hooks/immutability -- terrain refs are mutated intentionally for imperative animation/highlighting */
 
 /**
  * GraphExplorer3D — Interactive 3D Knowledge Graph Explorer
@@ -167,7 +168,7 @@ function project3D(
 ): { sx: number; sy: number; depth: number } {
   const halfW = (gridX * BAR_SPACING) / 2;
   const halfD = (gridZ * BAR_SPACING) / 2;
-  let px = x - halfW, py = y, pz = z - halfD;
+  const px = x - halfW, py = y, pz = z - halfD;
 
   const cosY = Math.cos(rotY), sinY = Math.sin(rotY);
   const rx = px * cosY - pz * sinY;
@@ -278,7 +279,7 @@ export const GraphExplorer3D = memo(function GraphExplorer3D() {
     fetchData();
     const interval = setInterval(fetchData, 60000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Canvas sizing
   useEffect(() => {

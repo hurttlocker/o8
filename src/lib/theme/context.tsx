@@ -30,6 +30,16 @@ export function useTheme() {
 
 const STORAGE_KEY = 'cortex-theme';
 
+function readStoredThemeId() {
+  if (typeof window === 'undefined') return 'light';
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved && themes.find((theme) => theme.id === saved) ? saved : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
 function applyThemeVars(theme: ThemeTokens, animate: boolean) {
   const root = document.documentElement;
 
@@ -58,17 +68,12 @@ function applyThemeVars(theme: ThemeTokens, animate: boolean) {
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [themeId, setThemeId] = useState('light');
+  const [themeId, setThemeId] = useState(readStoredThemeId);
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && themes.find(t => t.id === saved)) {
-      setThemeId(saved);
-      applyThemeVars(themes.find(t => t.id === saved)!, false);
-    } else {
-      applyThemeVars(themes[0], false);
-    }
-  }, []);
+    const selectedTheme = themes.find((theme) => theme.id === themeId) ?? themes[0];
+    applyThemeVars(selectedTheme, false);
+  }, [themeId]);
 
   const setTheme = useCallback((id: string) => {
     const theme = themes.find(t => t.id === id);

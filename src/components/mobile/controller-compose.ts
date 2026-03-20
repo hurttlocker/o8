@@ -33,6 +33,7 @@ interface AttachmentSelectionArgs {
   selectedSessionKey?: string;
   files: FileList | null;
   isChatSession: boolean;
+  draftAttachmentsBySession: Record<string, DraftAttachment[]>;
   setSurfaceNote: Dispatch<SetStateAction<string | null>>;
   setDraftAttachmentsBySession: Dispatch<SetStateAction<Record<string, DraftAttachment[]>>>;
   composeRef: RefObject<HTMLTextAreaElement | null>;
@@ -42,6 +43,7 @@ export async function prepareImageAttachments({
   selectedSessionKey,
   files,
   isChatSession,
+  draftAttachmentsBySession,
   setSurfaceNote,
   setDraftAttachmentsBySession,
   composeRef,
@@ -52,7 +54,16 @@ export async function prepareImageAttachments({
     return;
   }
 
-  const chosenFiles = Array.from(files).filter((file) => file.type.startsWith('image/'));
+  const existingAttachments = draftAttachmentsBySession[selectedSessionKey] ?? [];
+  const availableSlots = Math.max(0, 4 - existingAttachments.length);
+  if (availableSlots === 0) {
+    setSurfaceNote('You can attach up to 4 images at a time.');
+    return;
+  }
+
+  const chosenFiles = Array.from(files)
+    .filter((file) => file.type.startsWith('image/'))
+    .slice(0, availableSlots);
   if (!chosenFiles.length) {
     setSurfaceNote('Only image attachments are supported right now.');
     return;
@@ -75,7 +86,7 @@ export async function prepareImageAttachments({
 
     setDraftAttachmentsBySession((current) => ({
       ...current,
-      [selectedSessionKey]: [...(current[selectedSessionKey] ?? []), ...nextAttachments].slice(0, 4),
+      [selectedSessionKey]: [...(current[selectedSessionKey] ?? []), ...nextAttachments],
     }));
     setSurfaceNote(`Attached ${nextAttachments.length} image${nextAttachments.length === 1 ? '' : 's'}.`);
     window.requestAnimationFrame(() => composeRef.current?.focus());

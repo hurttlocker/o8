@@ -172,7 +172,7 @@ class GatewayStream {
         this.ws?.close();
         return;
       }
-      this.sendConnect(nonce);
+      this.sendConnect();
       return;
     }
 
@@ -219,7 +219,7 @@ class GatewayStream {
     }
   }
 
-  private sendConnect(nonce: string) {
+  private sendConnect() {
     const frame = buildRequestFrame('connect', {
       minProtocol: 3,
       maxProtocol: 3,

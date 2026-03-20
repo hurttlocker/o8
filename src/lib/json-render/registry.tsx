@@ -4,6 +4,7 @@
  * Maps catalog component types to actual React rendering.
  * Styled to match the existing mobile design language (red accent, Apple-inspired).
  */
+/* eslint-disable @typescript-eslint/ban-ts-comment */
 // @ts-nocheck — json-render v0.14 types are complex; runtime works, TS inference needs upstream fixes
 'use client';
 

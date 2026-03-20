@@ -256,20 +256,14 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
 }: SessionInfoSheetProps) {
   const { media, loading } = useSessionMedia(sessionKey, open);
   const sheetRef = useRef<HTMLDivElement>(null);
-  const [backdropVisible, setBackdropVisible] = useState(false);
 
   // Pull-to-dismiss
   usePullToDismiss(sheetRef, onClose, open);
 
-  // Staggered backdrop: sheet starts moving first, backdrop fades in 80ms later
+  // Haptic feedback on open
   useEffect(() => {
     if (open) {
-      const t = setTimeout(() => setBackdropVisible(true), 80);
-      // Haptic feedback
       try { navigator?.vibrate?.(10); } catch { /* no vibrate support */ }
-      return () => clearTimeout(t);
-    } else {
-      setBackdropVisible(false);
     }
   }, [open]);
 
@@ -308,9 +302,10 @@ export const SessionInfoSheet = memo(function SessionInfoSheet({
         inset: 0,
         zIndex: 9998,
         background: 'rgba(0, 0, 0, 0.35)',
-        opacity: backdropVisible && open ? 1 : 0,
+        opacity: open ? 1 : 0,
         pointerEvents: open ? 'auto' : 'none',
         transition: backdropTransition,
+        transitionDelay: open && !prefersReducedMotion ? '80ms' : '0ms',
         WebkitTapHighlightColor: 'transparent',
       }}
     >

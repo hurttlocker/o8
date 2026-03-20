@@ -24,6 +24,7 @@ interface RunActionArgs {
   payload: MobileActionRequest;
   setActionStateBySession: Dispatch<SetStateAction<Record<string, ActionState>>>;
   setActionNoteBySession: Dispatch<SetStateAction<Record<string, string | null>>>;
+  realtimeEnabled?: boolean;
   refreshInbox: () => Promise<MobileInboxSnapshot>;
   loadHistory: (sessionKey: string, force?: boolean) => Promise<unknown>;
   loadOwnedReviewPacket: (sessionKey: string, force?: boolean) => Promise<RuntimeReviewPacket | null | undefined>;
@@ -33,6 +34,7 @@ export async function runMobileAction({
   payload,
   setActionStateBySession,
   setActionNoteBySession,
+  realtimeEnabled = false,
   refreshInbox,
   loadHistory,
   loadOwnedReviewPacket,
@@ -57,10 +59,12 @@ export async function runMobileAction({
     window.setTimeout(() => {
       setActionNoteBySession((current) => (current[sessionKey] === result.note ? { ...current, [sessionKey]: null } : current));
     }, 3000);
-    await refreshInbox();
-    await loadHistory(sessionKey, true).catch(() => undefined);
-    if (sessionKey.startsWith('codex-owned:')) {
-      await loadOwnedReviewPacket(sessionKey, true).catch(() => undefined);
+    if (!realtimeEnabled) {
+      await refreshInbox();
+      await loadHistory(sessionKey, true).catch(() => undefined);
+      if (sessionKey.startsWith('codex-owned:')) {
+        await loadOwnedReviewPacket(sessionKey, true).catch(() => undefined);
+      }
     }
     return result;
   } finally {

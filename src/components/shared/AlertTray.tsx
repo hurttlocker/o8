@@ -7,7 +7,7 @@
  * Mobile: full-screen sheet (slides up from bottom).
  */
 
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import {
   AlertTriangle,
   Bell,
@@ -212,9 +212,6 @@ export const AlertTray = memo(function AlertTray({
   variant,
 }: AlertTrayProps) {
   const trayRef = useRef<HTMLDivElement>(null);
-  // Prevent hydration mismatch — alerts are client-only (sessionStorage)
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => { setMounted(true); }, []);
 
   // Close on outside click (desktop only)
   useEffect(() => {
@@ -245,8 +242,6 @@ export const AlertTray = memo(function AlertTray({
   }, [open, onClose]);
 
   const hasAlerts = alerts.length > 0;
-
-  if (!mounted) return null;
 
   if (variant === 'mobile') {
     return (

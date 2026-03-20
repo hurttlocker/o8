@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable react-hooks/refs -- drag refs are read during render only for cursor/transition affordances */
 
 /**
  * CodeBlock — styled code blocks for desktop chat.
@@ -355,7 +356,14 @@ const MermaidDiagram = memo(function MermaidDiagram({ code, onOpenMermaid }: { c
           {/* Expand button */}
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onOpenMermaid ? onOpenMermaid(code) : setModalOpen(true); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onOpenMermaid) {
+                onOpenMermaid(code);
+              } else {
+                setModalOpen(true);
+              }
+            }}
             title="Expand diagram"
             style={{
               position: 'absolute',

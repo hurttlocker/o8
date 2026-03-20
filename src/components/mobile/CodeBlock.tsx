@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, createElement, memo } from 'react';
+import { useState, useEffect, createElement, memo } from 'react';
 
 interface CodeBlockProps {
   code: string;

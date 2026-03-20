@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable react-hooks/purity -- relative age labels intentionally snapshot current time during render */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { X, ChevronDown, FileCode, FilePlus, PenLine, Eye, Terminal } from 'lucide-react';
@@ -370,7 +371,7 @@ const InlineTerminal = forwardRef<TerminalHandle, InlineTerminalProps>(function 
   const fitAddonRef = useRef<any>(null);
   const attachedRef = useRef(false);
   const [termError, setTermError] = useState<string | null>(null);
-  const [termExited, setTermExited] = useState(false);
+  const [, setTermExited] = useState(false);
 
   // Stable refs for callbacks
   const onTerminalDataRef = useRef(onTerminalData);

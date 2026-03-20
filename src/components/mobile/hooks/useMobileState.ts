@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ApprovalRequest } from '@/lib/json-render/demo-specs';
-import type { ReviewChangedFile, RuntimeReviewPacket } from '@/lib/fleet/types';
+import type { RuntimeReviewPacket } from '@/lib/fleet/types';
 import type {
   MobileInboxSnapshot,
   MobileReviewFileResponse,
@@ -61,7 +61,6 @@ export function useMobileState(init: MobileStateInit) {
   const [reviewFileLoadingPath, setReviewFileLoadingPath] = useState<string | null>(null);
   const [reviewFileError, setReviewFileError] = useState<string | null>(null);
   const [diffOpen, setDiffOpen] = useState(false);
-  const stickyReviewFilesRef = useRef<ReviewChangedFile[]>([]);
 
   // ── Compose / actions ──
   const [draftBySession, setDraftBySession] = useState<Record<string, string>>({});
@@ -99,8 +98,6 @@ export function useMobileState(init: MobileStateInit) {
   const [cortexRecallOpen, setCortexRecallOpen] = useState(false);
   const [cortexHealthOpen, setCortexHealthOpen] = useState(false);
   const [cortexGraphOpen, setCortexGraphOpen] = useState(false);
-  const [cortexContextEnabled, setCortexContextEnabled] = useState(true);
-  const [cortexContextBlock, setCortexContextBlock] = useState('');
 
   // ── Streaming ──
   const [streamingText, setStreamingText] = useState('');
@@ -117,6 +114,33 @@ export function useMobileState(init: MobileStateInit) {
   const lastAssistantCountRef = useRef(0);
   const seenMessageIdsRef = useRef<Set<string> | null>(null);
   const documentVisibleRef = useRef(true);
+  const attachmentPreviewUrlsRef = useRef<Record<string, string>>({});
+
+  useEffect(() => {
+    const nextPreviewUrls: Record<string, string> = {};
+    for (const [sessionKey, attachments] of Object.entries(draftAttachmentsBySession)) {
+      for (const attachment of attachments) {
+        nextPreviewUrls[`${sessionKey}:${attachment.id}`] = attachment.previewUrl;
+      }
+    }
+
+    for (const [attachmentKey, previewUrl] of Object.entries(attachmentPreviewUrlsRef.current)) {
+      if (!(attachmentKey in nextPreviewUrls)) {
+        URL.revokeObjectURL(previewUrl);
+      }
+    }
+
+    attachmentPreviewUrlsRef.current = nextPreviewUrls;
+  }, [draftAttachmentsBySession]);
+
+  useEffect(() => {
+    return () => {
+      for (const previewUrl of Object.values(attachmentPreviewUrlsRef.current)) {
+        URL.revokeObjectURL(previewUrl);
+      }
+      attachmentPreviewUrlsRef.current = {};
+    };
+  }, []);
 
   // ── Derived ──
   const selectedSession = useMemo(
@@ -153,7 +177,6 @@ export function useMobileState(init: MobileStateInit) {
     reviewFileLoadingPath, setReviewFileLoadingPath,
     reviewFileError, setReviewFileError,
     diffOpen, setDiffOpen,
-    stickyReviewFilesRef,
 
     // Compose / actions
     draftBySession, setDraftBySession,
@@ -190,8 +213,6 @@ export function useMobileState(init: MobileStateInit) {
     cortexRecallOpen, setCortexRecallOpen,
     cortexHealthOpen, setCortexHealthOpen,
     cortexGraphOpen, setCortexGraphOpen,
-    cortexContextEnabled, setCortexContextEnabled,
-    cortexContextBlock, setCortexContextBlock,
 
     // Streaming
     streamingText, setStreamingText,

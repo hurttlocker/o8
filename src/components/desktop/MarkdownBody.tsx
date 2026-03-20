@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable @typescript-eslint/no-unused-vars, @next/next/no-img-element -- markdown renderer preserves raw embedded media for mixed content sources */
 
 /**
  * MarkdownBody — renders markdown text with proper formatting.

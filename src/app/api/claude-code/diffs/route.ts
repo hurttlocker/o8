@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
     // Sort by most recent first, read all (but cap total lines)
     allFiles.sort((a, b) => b.mtime - a.mtime);
 
-    let lines: string[] = [];
+    const lines: string[] = [];
     for (const f of allFiles.slice(0, 5)) { // Read up to 5 most recent session files
       const raw = await readFile(f.path, 'utf-8');
       lines.push(...raw.trim().split('\n').filter(Boolean));

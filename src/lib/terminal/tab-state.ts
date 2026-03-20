@@ -19,7 +19,6 @@ export interface PersistedTabState {
   savedAt: string; // ISO timestamp
 }
 
-const STATE_PATH = '~/.cortex-ide/terminal-state.json';
 const API_PATH = '/api/panel/terminal-state';
 
 /** Save tab state to server */

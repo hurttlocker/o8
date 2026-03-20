@@ -12,6 +12,7 @@ const config = [
       'build/**',
       'coverage/**',
       'electron/**',
+      'src-tauri/target/**',
       'next-env.d.ts',
     ],
   },

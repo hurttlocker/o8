@@ -2,15 +2,12 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { TopBarProps } from './types';
 import { buildProjectGroups } from './utils';
-import { useAlerts } from '@/lib/alerts/context';
 import { SpeedDialButton } from './SpeedDial';
 
 export const TopBar = memo(function TopBar({
   snapshot,
   selectedSession,
   selectedReviewPacket,
-  selectedReviewFile,
-  reviewFiles,
   isOwnedCodexSession,
   isHeaderCompact,
   headerVisible,
@@ -20,20 +17,17 @@ export const TopBar = memo(function TopBar({
   squadPickerOpen,
   activeScreen,
   onNavigate,
-  onOpenControls,
-  onOpenDiff,
-  onOpenAlerts,
   onToggleSquadPicker,
   onSessionFocus,
 }: TopBarProps) {
-  const { hasUnread } = useAlerts();
   const pickerRef = useRef<HTMLDivElement>(null);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
-
-  // Reset expanded group when picker closes
-  useEffect(() => {
-    if (!squadPickerOpen) setExpandedGroup(null);
-  }, [squadPickerOpen]);
+  const togglePicker = useCallback(() => {
+    if (squadPickerOpen) {
+      setExpandedGroup(null);
+    }
+    onToggleSquadPicker();
+  }, [onToggleSquadPicker, squadPickerOpen]);
 
   const projectGroups = useMemo(
     () => buildProjectGroups(snapshot, selectedSession),
@@ -43,9 +37,9 @@ export const TopBar = memo(function TopBar({
   // Close picker on outside tap
   const handleOutsideTap = useCallback((e: MouseEvent | TouchEvent) => {
     if (squadPickerOpen && pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
-      onToggleSquadPicker();
+      togglePicker();
     }
-  }, [squadPickerOpen, onToggleSquadPicker]);
+  }, [squadPickerOpen, togglePicker]);
 
   useEffect(() => {
     if (squadPickerOpen) {
@@ -63,11 +57,6 @@ export const TopBar = memo(function TopBar({
     : wsConnectionState === 'connecting'
       ? '#ff9f0a'
       : '#ff3b30';
-  const totalAdditions = reviewFiles.reduce((sum, file) => sum + (file.additions ?? 0), 0);
-  const totalDeletions = reviewFiles.reduce((sum, file) => sum + (file.deletions ?? 0), 0);
-  const focusedAdditions = selectedReviewFile?.additions ?? totalAdditions;
-  const focusedDeletions = selectedReviewFile?.deletions ?? totalDeletions;
-  const diffFileLabel = reviewFiles.length === 1 ? 'file' : 'files';
   const hasRunningAgents = snapshot.sessions.some(s => s.status === 'running');
 
   const activeTitle = compactLine(
@@ -116,7 +105,7 @@ export const TopBar = memo(function TopBar({
       <div ref={pickerRef} style={{ minWidth: 0, flex: 1, position: 'relative' }}>
         <button
           type="button"
-          onClick={onToggleSquadPicker}
+          onClick={togglePicker}
           style={{
             display: 'flex',
             alignItems: 'center',
@@ -268,7 +257,7 @@ export const TopBar = memo(function TopBar({
                   onClick={() => {
                     if (isSingle) {
                       onSessionFocus(group.sessions[0].id);
-                      onToggleSquadPicker();
+                      togglePicker();
                     } else {
                       setExpandedGroup(isExpanded ? null : group.workspace);
                     }
@@ -360,7 +349,7 @@ export const TopBar = memo(function TopBar({
                           type="button"
                           onClick={() => {
                             onSessionFocus(session.id);
-                            onToggleSquadPicker();
+                            togglePicker();
                           }}
                           style={{
                             display: 'flex',

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Brain, ChevronRight } from 'lucide-react';
+import { Brain } from 'lucide-react';
 import type { RecallCard } from '@/lib/cortex/types';
 
 interface MemoryContextProps {

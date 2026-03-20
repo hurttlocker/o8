@@ -205,6 +205,7 @@ export function useNotifications(snapshot: { items: Array<{ id: string; kind: st
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const seenIds = useRef(new Set<string>());
   const initialized = useRef(false);
+  const dismissTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   useEffect(() => {
     if (!initialized.current) {
@@ -250,20 +251,44 @@ export function useNotifications(snapshot: { items: Array<{ id: string; kind: st
       }
     }
 
+    /* eslint-disable react-hooks/set-state-in-effect -- notification queue is reconciled from snapshot changes */
     if (newNotifs.length > 0) {
       setNotifications(prev => [...newNotifs, ...prev].slice(0, 20));
 
       // Auto-dismiss after 2.5 seconds
-      const ids = newNotifs.map(n => n.id);
-      setTimeout(() => {
-        setNotifications(prev =>
-          prev.map(n => ids.includes(n.id) ? { ...n, dismissed: true } : n)
-        );
-      }, 2500);
+      for (const notification of newNotifs) {
+        const existingTimer = dismissTimersRef.current.get(notification.id);
+        if (existingTimer) clearTimeout(existingTimer);
+
+        const timer = setTimeout(() => {
+          dismissTimersRef.current.delete(notification.id);
+          setNotifications(prev =>
+            prev.map(n => n.id === notification.id ? { ...n, dismissed: true } : n)
+          );
+        }, 2500);
+
+        dismissTimersRef.current.set(notification.id, timer);
+      }
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [snapshot.items, snapshot.sessions]);
 
+  useEffect(() => {
+    const timers = dismissTimersRef.current;
+    return () => {
+      for (const timer of timers.values()) {
+        clearTimeout(timer);
+      }
+      timers.clear();
+    };
+  }, []);
+
   const dismiss = useCallback((id: string) => {
+    const timer = dismissTimersRef.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      dismissTimersRef.current.delete(id);
+    }
     setNotifications(prev =>
       prev.map(n => n.id === id ? { ...n, dismissed: true } : n)
     );

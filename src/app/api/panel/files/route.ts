@@ -1,7 +1,8 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { readdir, stat } from 'node:fs/promises';
+import { execSync } from 'child_process';
+import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
@@ -51,7 +52,6 @@ async function buildTree(dir: string, relPath: string, depth: number): Promise<F
 
 function getChangedFiles(root: string): Set<string> {
   try {
-    const { execSync } = require('child_process');
     const output = execSync('git status --porcelain', {
       cwd: root,
       encoding: 'utf-8',

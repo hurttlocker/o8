@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Brain, Search, Activity, GitBranch, ExternalLink, AlertTriangle } from 'lucide-react';
 
 interface CortexStatusProps {
@@ -21,21 +21,34 @@ interface StatusData {
 export default function CortexStatus({ compact, onMemoryHealthOpen, onRecallOpen, onGraphOpen }: CortexStatusProps) {
   const [status, setStatus] = useState<StatusData | null>(null);
 
-  const checkStatus = useCallback(async () => {
-    try {
-      const res = await fetch('/api/mobile/cortex/health');
-      const data = await res.json();
-      setStatus({
-        available: data.available ?? false,
-        facts: data.stats?.facts,
-        conflicts: data.conflicts?.length,
-        stale: data.staleFacts?.length,
-        error: data.error,
-      });
-    } catch { setStatus({ available: false, error: 'Could not reach Cortex API' }); }
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkStatus() {
+      try {
+        const res = await fetch('/api/mobile/cortex/health');
+        const data = await res.json();
+        if (cancelled) return;
+        setStatus({
+          available: data.available ?? false,
+          facts: data.stats?.facts,
+          conflicts: data.conflicts?.length,
+          stale: data.staleFacts?.length,
+          error: data.error,
+        });
+      } catch {
+        if (!cancelled) {
+          setStatus({ available: false, error: 'Could not reach Cortex API' });
+        }
+      }
+    }
+
+    void checkStatus();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  useEffect(() => { checkStatus(); }, [checkStatus]);
   if (status === null) return null;
 
   if (compact) {

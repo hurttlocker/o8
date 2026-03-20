@@ -52,7 +52,6 @@ export async function GET(request: Request) {
     });
 
     if (!res.ok) {
-      const errText = await res.text();
       return NextResponse.json({ error: `Vercel API error: ${res.status}`, deployments: [] });
     }
 

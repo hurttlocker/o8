@@ -126,7 +126,7 @@ export async function GET(request: Request) {
           }
 
           // Pass 2: Get structured facts for those IDs (if any)
-          let factMap = new Map<number, Record<string, unknown>>();
+          const factMap = new Map<number, Record<string, unknown>>();
           if (factIds.size > 0) {
             try {
               const beliefsOutput = execSync(
