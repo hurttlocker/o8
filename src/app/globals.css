@@ -1904,8 +1904,6 @@ button.workflow-file-item.workflow-file-item-active {
 
 .remodex-mobile-page {
   --remodex-header-progress: 0;
-  --remodex-dock-fade-progress: 0;
-  --remodex-dock-motion-progress: 0;
   --remodex-compose-active: 0;
   width: min(100%, 430px);
   max-width: 100%;
@@ -3506,20 +3504,10 @@ button.workflow-file-item.workflow-file-item-active {
   min-height: 32px;
   padding: 0.42rem 0.58rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, calc(0.32 - (var(--remodex-dock-motion-progress) * 0.14) + (var(--remodex-compose-active) * 0.16)));
-  background: rgba(
-    255,
-    255,
-    255,
-    calc(0.56 - (var(--remodex-dock-fade-progress) * 0.12) - (var(--remodex-dock-motion-progress) * 0.2) + (var(--remodex-compose-active) * 0.26))
-  );
-  backdrop-filter: blur(calc(6px + (var(--remodex-compose-active) * 10px) - (var(--remodex-dock-motion-progress) * 3px)));
-  box-shadow: 0 6px 14px rgba(
-    96,
-    165,
-    250,
-    calc(0.05 - (var(--remodex-dock-fade-progress) * 0.02) - (var(--remodex-dock-motion-progress) * 0.03) + (var(--remodex-compose-active) * 0.08))
-  );
+  border: 1px solid rgba(255, 255, 255, calc(0.32 + (var(--remodex-compose-active) * 0.16)));
+  background: rgba(255, 255, 255, calc(0.56 + (var(--remodex-compose-active) * 0.26)));
+  backdrop-filter: blur(calc(6px + (var(--remodex-compose-active) * 10px)));
+  box-shadow: 0 6px 14px rgba(96, 165, 250, calc(0.05 + (var(--remodex-compose-active) * 0.08)));
   color: rgba(17, 24, 39, calc(0.72 + (var(--remodex-compose-active) * 0.12)));
   font-size: 0.78rem;
   font-weight: 500;
@@ -3610,9 +3598,8 @@ button.workflow-file-item.workflow-file-item-active {
   backdrop-filter: blur(20px) saturate(1.4);
   -webkit-backdrop-filter: blur(20px) saturate(1.4);
   border-top: 1px solid rgba(15, 23, 42, 0.04);
-  opacity: calc(0.96 - (var(--remodex-dock-fade-progress) * 0.28) - (var(--remodex-dock-motion-progress) * 0.4));
-  transform: translateY(calc((var(--remodex-dock-fade-progress) * 2px) + (var(--remodex-dock-motion-progress) * 6px)));
-  transition: opacity 220ms ease, transform 220ms ease;
+  opacity: 0.96;
+  transition: opacity 220ms ease;
 }
 
 .remodex-runtime-chip {
@@ -3623,14 +3610,9 @@ button.workflow-file-item.workflow-file-item-active {
   min-height: 30px;
   padding: 0.4rem 0.32rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, calc(0.42 - (var(--remodex-dock-motion-progress) * 0.1) + (var(--remodex-compose-active) * 0.12)));
-  background: rgba(
-    255,
-    255,
-    255,
-    calc(0.72 - (var(--remodex-dock-fade-progress) * 0.12) - (var(--remodex-dock-motion-progress) * 0.2) + (var(--remodex-compose-active) * 0.14))
-  );
-  backdrop-filter: blur(calc(10px + (var(--remodex-compose-active) * 10px) - (var(--remodex-dock-motion-progress) * 3px)));
+  border: 1px solid rgba(255, 255, 255, calc(0.42 + (var(--remodex-compose-active) * 0.12)));
+  background: rgba(255, 255, 255, calc(0.72 + (var(--remodex-compose-active) * 0.14)));
+  backdrop-filter: blur(calc(10px + (var(--remodex-compose-active) * 10px)));
   color: rgba(17, 24, 39, calc(0.76 + (var(--remodex-compose-active) * 0.1)));
   font-size: 0.74rem;
   font-weight: 500;
@@ -3638,12 +3620,7 @@ button.workflow-file-item.workflow-file-item-active {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  box-shadow: 0 8px 16px rgba(
-    96,
-    165,
-    250,
-    calc(0.03 - (var(--remodex-dock-fade-progress) * 0.01) - (var(--remodex-dock-motion-progress) * 0.02) + (var(--remodex-compose-active) * 0.06))
-  );
+  box-shadow: 0 8px 16px rgba(96, 165, 250, calc(0.03 + (var(--remodex-compose-active) * 0.06)));
   transition: background 220ms ease, border-color 220ms ease, box-shadow 220ms ease, color 220ms ease, backdrop-filter 220ms ease;
 }
 
