@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- terminal image previews intentionally use raw panel-served URLs */
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Plus, X, Terminal as TerminalIcon, ChevronDown, Crosshair } from 'lucide-react';
+import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio } from 'lucide-react';
 import { ChatBubble } from './ChatBubble';
 import { saveTabState, loadTabState, checkAliveSessions, type PersistedTabState } from '@/lib/terminal/tab-state';
 import {
@@ -1358,7 +1358,7 @@ const TabBar = memo(function TabBar({
   onRegisterRepo?: (localPath: string) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerStep, setPickerStep] = useState<'agent' | 'repo'>('agent');
+  const [pickerStep, setPickerStep] = useState<'main' | 'terminal' | 'session' | 'repo'>('main');
   const [selectedAgent, setSelectedAgent] = useState<typeof CLI_AGENTS[0] | null>(null);
   const [repos, setRepos] = useState<RegisteredRepo[]>([]);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -1369,7 +1369,7 @@ const TabBar = memo(function TabBar({
     const handler = (e: MouseEvent) => {
       if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
         setPickerOpen(false);
-        setPickerStep('agent');
+        setPickerStep('main');
         setSelectedAgent(null);
       }
     };
@@ -1523,33 +1523,155 @@ const TabBar = memo(function TabBar({
             overflow: 'hidden',
             boxShadow: '0 12px 40px rgba(0, 0, 0, 0.12)',
           }}>
-            {/* Step 1: Pick a CLI agent */}
-            {pickerStep === 'agent' && (<>
-              <div style={{
-                paddingTop: 8,
-                paddingRight: 10,
-                paddingBottom: 4,
-                paddingLeft: 10,
-                fontSize: 10,
-                fontWeight: 600,
-                color: '#94a3b8',
-                letterSpacing: '0.05em',
-                textTransform: 'uppercase',
-              }}>
-                New Terminal
-              </div>
+            {/* Step 1: Main menu — 3 clear choices */}
+            {pickerStep === 'main' && (<>
+              {/* New Chat — direct LLM, opens immediately */}
+              <button
+                type="button"
+                onClick={() => {
+                  // TODO: open LLM Chat tab (#230)
+                  // For now, placeholder — will wire to LLMChat component
+                  setPickerOpen(false);
+                  setPickerStep('main');
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  width: '100%',
+                  paddingTop: 10,
+                  paddingRight: 12,
+                  paddingBottom: 10,
+                  paddingLeft: 12,
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#1e293b',
+                  fontSize: 13,
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'background 100ms',
+                }}
+                onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
+              >
+                <span style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <MessageSquare size={14} style={{ color: '#3b82f6' }} />
+                </span>
+                <div>
+                  <div style={{ fontWeight: 500 }}>New Chat</div>
+                  <div style={{ fontSize: 11, color: '#94a3b8' }}>Direct LLM conversation</div>
+                </div>
+              </button>
+
+              <div style={{ height: 1, background: '#f1f5f9' }} />
+
+              {/* CLI Terminal — cascading submenu */}
+              <button
+                type="button"
+                onClick={() => setPickerStep('terminal')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  width: '100%',
+                  paddingTop: 10,
+                  paddingRight: 12,
+                  paddingBottom: 10,
+                  paddingLeft: 12,
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#1e293b',
+                  fontSize: 13,
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'background 100ms',
+                }}
+                onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
+              >
+                <span style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <TerminalIcon size={14} style={{ color: '#64748b' }} />
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 500 }}>CLI Terminal</div>
+                  <div style={{ fontSize: 11, color: '#94a3b8' }}>Shell or agent CLI</div>
+                </div>
+                <ChevronRight size={12} style={{ color: '#94a3b8' }} />
+              </button>
+
+              {/* CLI Session — cascading submenu */}
+              <button
+                type="button"
+                onClick={() => setPickerStep('session')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  width: '100%',
+                  paddingTop: 10,
+                  paddingRight: 12,
+                  paddingBottom: 10,
+                  paddingLeft: 12,
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#1e293b',
+                  fontSize: 13,
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  transition: 'background 100ms',
+                }}
+                onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
+              >
+                <span style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Radio size={14} style={{ color: '#8b5cf6' }} />
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 500 }}>CLI Session</div>
+                  <div style={{ fontSize: 11, color: '#94a3b8' }}>Agent conversation</div>
+                </div>
+                <ChevronRight size={12} style={{ color: '#94a3b8' }} />
+              </button>
+            </>)}
+
+            {/* Step 2a: CLI Terminal submenu */}
+            {pickerStep === 'terminal' && (<>
+              <button
+                type="button"
+                onClick={() => setPickerStep('main')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  width: '100%',
+                  paddingTop: 6,
+                  paddingRight: 10,
+                  paddingBottom: 6,
+                  paddingLeft: 10,
+                  border: 'none',
+                  borderBottom: '1px solid #f1f5f9',
+                  background: 'transparent',
+                  color: '#94a3b8',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}
+              >
+                ← CLI Terminal
+              </button>
               {CLI_AGENTS.map((agent) => (
                 <button
                   type="button"
                   key={agent.id}
                   onClick={() => {
                     if (agent.id === 'shell') {
-                      // Shell — launch directly in home dir
                       onNewTab(agent.id);
                       setPickerOpen(false);
-                      setPickerStep('agent');
+                      setPickerStep('main');
                     } else {
-                      // CLI agent — always show repo picker (even with 0 repos)
                       setSelectedAgent(agent);
                       setPickerStep('repo');
                     }
@@ -1592,22 +1714,33 @@ const TabBar = memo(function TabBar({
                   </div>
                 </button>
               ))}
-              {/* Chat section divider */}
-              <div style={{
-                paddingTop: 8,
-                paddingRight: 10,
-                paddingBottom: 4,
-                paddingLeft: 10,
-                fontSize: 10,
-                fontWeight: 600,
-                color: '#94a3b8',
-                letterSpacing: '0.05em',
-                textTransform: 'uppercase',
-                borderTop: '1px solid #f1f5f9',
-                marginTop: 4,
-              }}>
-                New Chat
-              </div>
+            </>)}
+
+            {/* Step 2b: CLI Session submenu */}
+            {pickerStep === 'session' && (<>
+              <button
+                type="button"
+                onClick={() => setPickerStep('main')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  width: '100%',
+                  paddingTop: 6,
+                  paddingRight: 10,
+                  paddingBottom: 6,
+                  paddingLeft: 10,
+                  border: 'none',
+                  borderBottom: '1px solid #f1f5f9',
+                  background: 'transparent',
+                  color: '#94a3b8',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}
+              >
+                ← CLI Session
+              </button>
               {([
                 { id: 'codex' as const, label: 'Codex', color: '#10b981' },
                 { id: 'claude-code' as const, label: 'Claude Code', color: '#8b5cf6' },
@@ -1615,11 +1748,11 @@ const TabBar = memo(function TabBar({
               ]).map((rt) => (
                 <button
                   type="button"
-                  key={`chat-${rt.id}`}
+                  key={`session-${rt.id}`}
                   onClick={() => {
                     onNewChatTab(rt.id);
                     setPickerOpen(false);
-                    setPickerStep('agent');
+                    setPickerStep('main');
                   }}
                   style={{
                     display: 'flex',
@@ -1647,7 +1780,7 @@ const TabBar = memo(function TabBar({
                   </span>
                   <div>
                     <div style={{ fontWeight: 500 }}>{rt.label}</div>
-                    <div style={{ fontSize: 11, color: '#94a3b8' }}>Chat interface</div>
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>Agent conversation</div>
                   </div>
                 </button>
               ))}
@@ -1657,7 +1790,7 @@ const TabBar = memo(function TabBar({
             {pickerStep === 'repo' && selectedAgent && (<>
               <button
                 type="button"
-                onClick={() => { setPickerStep('agent'); setSelectedAgent(null); }}
+                onClick={() => { setPickerStep('terminal'); setSelectedAgent(null); }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -1698,7 +1831,7 @@ const TabBar = memo(function TabBar({
                 onClick={() => {
                   onNewTab(selectedAgent.id);
                   setPickerOpen(false);
-                  setPickerStep('agent');
+                  setPickerStep('terminal');
                   setSelectedAgent(null);
                 }}
                 style={{
@@ -1752,7 +1885,7 @@ const TabBar = memo(function TabBar({
                   onClick={() => {
                     onNewTab(selectedAgent.id, repo);
                     setPickerOpen(false);
-                    setPickerStep('agent');
+                    setPickerStep('terminal');
                     setSelectedAgent(null);
                   }}
                   style={{
@@ -1818,7 +1951,7 @@ const TabBar = memo(function TabBar({
                     // Auto-register so it shows under Repos next time
                     onRegisterRepo?.(folderPath);
                     setPickerOpen(false);
-                    setPickerStep('agent');
+                    setPickerStep('terminal');
                     setSelectedAgent(null);
                   }
                 }}
