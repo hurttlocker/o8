@@ -19,7 +19,7 @@ const MENU_ITEMS: { screen: MobileScreen; label: string; iconPath: string }[] = 
   },
   {
     screen: 'fleet',
-    label: 'Fleet',
+    label: 'Agents',
     iconPath: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 7a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',
   },
   {
