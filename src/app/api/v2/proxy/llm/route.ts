@@ -18,7 +18,7 @@ import { NextRequest } from 'next/server';
 import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
 import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
-import { toolsForAnthropic, toolsForOpenAI, toolsForGoogle, executeTool, type ToolResult } from '@/lib/llm/tools';
+import { toolsForAnthropic, toolsForOpenAI, toolsForGoogle, executeTool, APPROVAL_REQUIRED_TOOLS, type ToolResult } from '@/lib/llm/tools';
 
 // ── Pricing (per 1M tokens) ──
 
@@ -321,7 +321,13 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     );
   }
 
-  const { model, provider, messages: rawMessages } = body as { model: string; provider: Provider; messages: Message[] };
+  const { model, provider, messages: rawMessages, approvedTools: approvedToolsList } = body as {
+    model: string;
+    provider: Provider;
+    messages: Message[];
+    approvedTools?: string[];
+  };
+  const approvedTools = new Set(approvedToolsList ?? []);
 
   // Inject workspace context as system prompt (Phase 1)
   const wsContext = getWorkspaceContext();
@@ -467,6 +473,26 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
             loopCount++;
 
             for (const tc of toolCalls) {
+              // Check if this tool requires user approval (skip if pre-approved)
+              if (APPROVAL_REQUIRED_TOOLS.has(tc.name) && !approvedTools.has(tc.name)) {
+                enqueue(JSON.stringify({
+                  type: 'approval_required',
+                  name: tc.name,
+                  args: tc.args,
+                  summary: tc.name === 'create_github_issue'
+                    ? `Create issue: "${tc.args.title}" in ${tc.args.repo}`
+                    : tc.name === 'create_pull_request'
+                    ? `Create PR: "${tc.args.title}" on branch ${tc.args.branch}`
+                    : `Execute ${tc.name}`,
+                }));
+                // Stop the loop — frontend will re-submit with approval
+                enqueue(JSON.stringify({ type: 'content', text: '' }));
+                enqueue(JSON.stringify({ type: 'usage', inputTokens: totalInputTokens, outputTokens: totalOutputTokens, costUsd: 0 }));
+                enqueue('[DONE]');
+                controller.close();
+                return;
+              }
+
               enqueue(JSON.stringify({ type: 'tool_call', name: tc.name, status: 'running', args: tc.args }));
 
               // Execute the tool

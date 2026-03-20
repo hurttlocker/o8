@@ -11,6 +11,7 @@
 import { execSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { createGithubIssue, readGithubIssueOrPr, createPullRequest } from '@/lib/github/tools';
 
 const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
 const MAX_FILE_SIZE = 50_000; // 50KB
@@ -73,7 +74,54 @@ export const TOOLS: ToolDef[] = [
       required: ['query'],
     },
   },
+  {
+    name: 'create_github_issue',
+    description: 'Create a new GitHub issue. REQUIRES USER APPROVAL. Use when the user asks to file a bug, feature request, or task.',
+    parameters: {
+      type: 'object',
+      properties: {
+        repo: { type: 'string', description: 'Repository in owner/name format (e.g. hurttlocker/cortex-ide)' },
+        title: { type: 'string', description: 'Issue title' },
+        body: { type: 'string', description: 'Issue body in markdown' },
+        labels: { type: 'array', items: { type: 'string' }, description: 'Optional labels' },
+      },
+      required: ['repo', 'title', 'body'],
+    },
+  },
+  {
+    name: 'read_github_issue_or_pr',
+    description: 'Read the details, comments, and diff of a GitHub issue or pull request. Does NOT require approval.',
+    parameters: {
+      type: 'object',
+      properties: {
+        repo: { type: 'string', description: 'Repository in owner/name format' },
+        number: { type: 'number', description: 'Issue or PR number' },
+      },
+      required: ['repo', 'number'],
+    },
+  },
+  {
+    name: 'create_pull_request',
+    description: 'Create a new branch from uncommitted changes, commit, push, and open a pull request. REQUIRES USER APPROVAL. Use when the user asks to submit their work as a PR.',
+    parameters: {
+      type: 'object',
+      properties: {
+        repo: { type: 'string', description: 'Repository in owner/name format' },
+        branch: { type: 'string', description: 'Branch name to create (e.g. feat/add-auth)' },
+        title: { type: 'string', description: 'PR title' },
+        body: { type: 'string', description: 'PR description in markdown' },
+        baseBranch: { type: 'string', description: 'Base branch (default: main)' },
+      },
+      required: ['repo', 'branch', 'title', 'body'],
+    },
+  },
 ];
+
+// Tools that require user approval before execution
+export const APPROVAL_REQUIRED_TOOLS = new Set([
+  'create_github_issue',
+  'create_pull_request',
+]);
 
 // ── Tool Execution ──
 
@@ -88,6 +136,9 @@ export async function executeTool(name: string, args: Record<string, unknown>): 
     case 'read_file': return readFile(args.path as string, args.startLine as number | undefined, args.endLine as number | undefined);
     case 'list_files': return listFiles(args.path as string | undefined, args.pattern as string | undefined);
     case 'search_code': return searchCode(args.query as string, args.filePattern as string | undefined, args.maxResults as number | undefined);
+    case 'create_github_issue': return await createGithubIssue(args as Parameters<typeof createGithubIssue>[0]);
+    case 'read_github_issue_or_pr': return await readGithubIssueOrPr(args as Parameters<typeof readGithubIssueOrPr>[0]);
+    case 'create_pull_request': return await createPullRequest(args as Parameters<typeof createPullRequest>[0]);
     default: return { content: `Unknown tool: ${name}` };
   }
 }
