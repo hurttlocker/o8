@@ -47,6 +47,13 @@ import {
 import { MarkdownBody } from './MarkdownBody';
 import { IssueCreator } from './IssueCreator';
 import { GraphExplorer3D } from './GraphExplorer3D';
+import {
+  formatCiCheckBatchInjection,
+  formatCiCheckInjection,
+  formatReviewCommentBatchInjection,
+  formatReviewCommentInjection,
+  type DesktopChatInjectionPayload,
+} from '@/lib/chat/injection';
 
 // ── Tab Types ──
 
@@ -68,6 +75,7 @@ export interface CanvasProps {
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onSelectCommit?: (hash: string) => void;
+  onInjectChatContext?: (payload: DesktopChatInjectionPayload) => void;
 }
 
 // ── Main Canvas ──
@@ -78,6 +86,7 @@ export const Canvas = memo(function Canvas({
   onSelectTab,
   onCloseTab,
   onSelectCommit,
+  onInjectChatContext,
 }: CanvasProps) {
   const activeTab = tabs.find((t) => t.id === activeTabId) || null;
 
@@ -186,7 +195,7 @@ export const Canvas = memo(function Canvas({
         overflow: 'auto',
       }}>
         {activeTab ? (
-          <TabContent tab={activeTab} onSelectCommit={onSelectCommit} />
+          <TabContent tab={activeTab} onSelectCommit={onSelectCommit} onInjectChatContext={onInjectChatContext} />
         ) : (
           <CanvasEmpty />
         )}
@@ -221,7 +230,15 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
 
 // ── Tab Content Router ──
 
-const TabContent = memo(function TabContent({ tab, onSelectCommit }: { tab: CanvasTab; onSelectCommit?: (hash: string) => void }) {
+const TabContent = memo(function TabContent({
+  tab,
+  onSelectCommit,
+  onInjectChatContext,
+}: {
+  tab: CanvasTab;
+  onSelectCommit?: (hash: string) => void;
+  onInjectChatContext?: (payload: DesktopChatInjectionPayload) => void;
+}) {
   switch (tab.kind) {
     case 'issue':
       return <IssueViewer issueNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} />;
@@ -234,7 +251,7 @@ const TabContent = memo(function TabContent({ tab, onSelectCommit }: { tab: Canv
     case 'commit':
       return <CommitViewer commitHash={tab.resourceId} />;
     case 'pr':
-      return <PRViewer prNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} />;
+      return <PRViewer prNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} onInjectChatContext={onInjectChatContext} />;
     case 'readme':
       return <ReadmeViewer workspace={tab.resourceId} />;
     case 'ci':
@@ -1878,7 +1895,78 @@ const prStateStyles: Record<string, { color: string; label: string; bg: string }
   CLOSED: { color: '#ef4444', label: 'Closed', bg: 'rgba(239,68,68,0.08)' },
 };
 
-function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
+function createDesktopGlassActionStyle(variant: 'primary' | 'muted' = 'primary') {
+  const isPrimary = variant === 'primary';
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 5,
+    paddingRight: 10,
+    paddingBottom: 5,
+    paddingLeft: 10,
+    borderRadius: 999,
+    border: `1px solid ${isPrimary ? 'rgba(96, 165, 250, 0.26)' : 'rgba(148, 163, 184, 0.22)'}`,
+    background: isPrimary
+      ? 'linear-gradient(180deg, rgba(255,255,255,0.68), rgba(219,234,254,0.46))'
+      : 'linear-gradient(180deg, rgba(255,255,255,0.42), rgba(226,232,240,0.24))',
+    boxShadow: isPrimary
+      ? '0 10px 24px rgba(37, 99, 235, 0.12)'
+      : '0 6px 16px rgba(15, 23, 42, 0.06)',
+    color: isPrimary ? '#1d4ed8' : '#475569',
+    backdropFilter: 'blur(14px) saturate(1.35)',
+    WebkitBackdropFilter: 'blur(14px) saturate(1.35)',
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: '-apple-system, system-ui, sans-serif',
+  } satisfies React.CSSProperties;
+}
+
+function DesktopGlassActionChip({
+  icon,
+  label,
+  onClick,
+  variant = 'primary',
+  disabled = false,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  variant?: 'primary' | 'muted';
+  disabled?: boolean;
+}) {
+  const style = createDesktopGlassActionStyle(variant);
+
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      disabled={disabled}
+      style={{
+        ...style,
+        opacity: disabled ? 0.62 : 1,
+        cursor: disabled ? 'default' : style.cursor,
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function PRViewer({
+  prNumber,
+  repo,
+  onInjectChatContext,
+}: {
+  prNumber: number;
+  repo?: string;
+  onInjectChatContext?: (payload: DesktopChatInjectionPayload) => void;
+}) {
   const [pr, setPr] = useState<PRDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1891,6 +1979,8 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
   const [commentText, setCommentText] = useState('');
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionResult, setActionResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [addedContextKeys, setAddedContextKeys] = useState<Record<string, true>>({});
+  const [hiddenCommentKeys, setHiddenCommentKeys] = useState<Record<string, true>>({});
 
   const submitAction = useCallback(async (action: string, comment?: string) => {
     setActionLoading(action);
@@ -1971,6 +2061,16 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
     return () => { cancelled = true; };
   }, [activeSection, prNumber, repo, reviewComments.length]);
 
+  const injectPayload = useCallback((key: string, payload: DesktopChatInjectionPayload) => {
+    if (!onInjectChatContext) return;
+    onInjectChatContext(payload);
+    setAddedContextKeys((current) => ({ ...current, [key]: true }));
+  }, [onInjectChatContext]);
+
+  const hideComment = useCallback((key: string) => {
+    setHiddenCommentKeys((current) => ({ ...current, [key]: true }));
+  }, []);
+
   if (loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading PR…</div>;
   }
@@ -1995,6 +2095,9 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
     { id: 'comments', label: 'Comments', count: allComments.length },
     { id: 'reviews', label: 'Reviews' },
   ];
+  const visibleComments = allComments.filter((comment) => !hiddenCommentKeys[`${comment.kind}:${comment.id}`]);
+  const visibleReviewComments = reviewComments.filter((comment) => !hiddenCommentKeys[`review-thread:${comment.id}`]);
+  const failedChecks = ciChecks.filter((check) => check.conclusion && check.conclusion.toLowerCase() !== 'success');
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -2390,7 +2493,34 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
             {ciChecks.length === 0 ? (
               <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>No checks configured</div>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {failedChecks.length > 0 && onInjectChatContext ? (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <DesktopGlassActionChip
+                      icon={<MessageSquare size={12} strokeWidth={2} />}
+                      label={addedContextKeys[`checks-all:${pr.number}`] ? 'Added to chat' : 'Add all failed checks'}
+                      onClick={() => injectPayload(
+                        `checks-all:${pr.number}`,
+                        formatCiCheckBatchInjection(
+                          pr.number,
+                          repo,
+                          failedChecks.map((check) => ({
+                            prNumber: pr.number,
+                            repo,
+                            name: check.name,
+                            status: check.status,
+                            conclusion: check.conclusion,
+                            detailsUrl: check.detailsUrl,
+                            startedAt: check.startedAt,
+                            completedAt: check.completedAt,
+                          })),
+                        ),
+                      )}
+                      disabled={Boolean(addedContextKeys[`checks-all:${pr.number}`])}
+                    />
+                  </div>
+                ) : null}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {ciChecks.map((check, i) => {
                   const passed = check.conclusion === 'SUCCESS' || check.conclusion === 'success';
                   const pending = check.status === 'IN_PROGRESS' || check.status === 'QUEUED' || check.status === 'PENDING';
@@ -2427,9 +2557,9 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                         color: passed ? '#22c55e' : pending ? '#f59e0b' : '#ef4444',
                         fontSize: 12, fontWeight: 700,
                         flexShrink: 0,
-                      }}>
-                        {passed ? '✓' : pending ? '○' : '✗'}
-                      </span>
+                        }}>
+                          {passed ? '✓' : pending ? '○' : '✗'}
+                        </span>
                       {/* Check name */}
                       <span style={{
                         flex: 1,
@@ -2457,9 +2587,30 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                       {check.detailsUrl ? (
                         <ExternalLink size={12} strokeWidth={1.5} color="var(--t-text-faint)" style={{ flexShrink: 0 }} />
                       ) : null}
+                      {!passed && onInjectChatContext ? (
+                        <DesktopGlassActionChip
+                          icon={addedContextKeys[`check:${check.name}`] ? <Check size={12} strokeWidth={2.4} /> : <MessageSquare size={12} strokeWidth={2} />}
+                          label={addedContextKeys[`check:${check.name}`] ? 'Added' : 'Add to chat'}
+                          onClick={() => injectPayload(
+                            `check:${check.name}`,
+                            formatCiCheckInjection({
+                              prNumber: pr.number,
+                              repo,
+                              name: check.name,
+                              status: check.status,
+                              conclusion: check.conclusion,
+                              detailsUrl: check.detailsUrl,
+                              startedAt: check.startedAt,
+                              completedAt: check.completedAt,
+                            }),
+                          )}
+                          disabled={Boolean(addedContextKeys[`check:${check.name}`])}
+                        />
+                      ) : null}
                     </div>
                   );
                 })}
+                </div>
               </div>
             )}
           </div>
@@ -2467,16 +2618,43 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
 
         {activeSection === 'comments' ? (
           <div>
-            {allComments.length === 0 ? (
+            {visibleComments.length === 0 ? (
               <div style={{ fontSize: 13, color: 'var(--t-text-muted)' }}>No comments</div>
             ) : (
-              allComments.map((comment) => (
+              <>
+                {onInjectChatContext ? (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+                    <DesktopGlassActionChip
+                      icon={<MessageSquare size={12} strokeWidth={2} />}
+                      label={addedContextKeys[`comments-all:${pr.number}`] ? 'Added to chat' : 'Add all to chat'}
+                      onClick={() => injectPayload(
+                        `comments-all:${pr.number}`,
+                        formatReviewCommentBatchInjection(
+                          pr.number,
+                          repo,
+                          visibleComments.map((comment) => ({
+                            prNumber: pr.number,
+                            repo,
+                            author: comment.user,
+                            body: comment.body,
+                            createdAt: comment.created_at,
+                            path: comment.kind === 'review' ? (comment as { path?: string }).path : undefined,
+                          })),
+                        ),
+                      )}
+                      disabled={Boolean(addedContextKeys[`comments-all:${pr.number}`])}
+                    />
+                  </div>
+                ) : null}
+              {visibleComments.map((comment) => {
+                const commentKey = `${comment.kind}:${comment.id}`;
+                return (
                 <div key={`${comment.kind}-${comment.id}`} style={{
                   marginBottom: 16,
                   paddingBottom: 16,
                   borderBottom: '1px solid var(--t-divider)',
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12, flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 600, color: 'var(--t-text-strong)' }}>{comment.user}</span>
                     {comment.kind === 'review' ? (
                       <span style={{
@@ -2494,12 +2672,41 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                       </span>
                     ) : null}
                     <span style={{ color: 'var(--t-text-muted)' }}>{formatAge(comment.created_at)}</span>
+                    {onInjectChatContext ? (
+                      <>
+                        <div style={{ flex: 1 }} />
+                        <DesktopGlassActionChip
+                          icon={addedContextKeys[commentKey] ? <Check size={12} strokeWidth={2.4} /> : <MessageSquare size={12} strokeWidth={2} />}
+                          label={addedContextKeys[commentKey] ? 'Added' : 'Add to chat'}
+                          onClick={() => injectPayload(
+                            commentKey,
+                            formatReviewCommentInjection({
+                              prNumber: pr.number,
+                              repo,
+                              author: comment.user,
+                              body: comment.body,
+                              createdAt: comment.created_at,
+                              path: comment.kind === 'review' ? (comment as { path?: string }).path : undefined,
+                            }),
+                          )}
+                          disabled={Boolean(addedContextKeys[commentKey])}
+                        />
+                        <DesktopGlassActionChip
+                          icon={<X size={12} strokeWidth={2.2} />}
+                          label="Hide"
+                          variant="muted"
+                          onClick={() => hideComment(commentKey)}
+                        />
+                      </>
+                    ) : null}
                   </div>
                   <div style={{ fontSize: 13, lineHeight: 1.6 }}>
                     <MarkdownBody text={comment.body} />
                   </div>
                 </div>
-              ))
+                );
+              })}
+              </>
             )}
           </div>
         ) : null}
@@ -2508,19 +2715,46 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
           <div>
             {reviewsLoading ? (
               <div style={{ fontSize: 13, color: 'var(--t-text-muted)' }}>Loading review comments…</div>
-            ) : reviewComments.length === 0 ? (
+            ) : visibleReviewComments.length === 0 ? (
               <div style={{ fontSize: 13, color: 'var(--t-text-muted)' }}>No inline review comments</div>
             ) : (
               (() => {
                 // Group comments into threads by file path
-                const threads = new Map<string, typeof reviewComments>();
-                for (const c of reviewComments) {
+                const threads = new Map<string, typeof visibleReviewComments>();
+                for (const c of visibleReviewComments) {
                   const key = c.path;
                   if (!threads.has(key)) threads.set(key, []);
                   threads.get(key)!.push(c);
                 }
 
-                return Array.from(threads.entries()).map(([path, comments]) => (
+                return (
+                  <>
+                    {onInjectChatContext ? (
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+                        <DesktopGlassActionChip
+                          icon={<MessageSquare size={12} strokeWidth={2} />}
+                          label={addedContextKeys[`review-threads-all:${pr.number}`] ? 'Added to chat' : 'Add all to chat'}
+                          onClick={() => injectPayload(
+                            `review-threads-all:${pr.number}`,
+                            formatReviewCommentBatchInjection(
+                              pr.number,
+                              repo,
+                              visibleReviewComments.map((comment) => ({
+                                prNumber: pr.number,
+                                repo,
+                                author: comment.author,
+                                body: comment.body,
+                                createdAt: comment.createdAt,
+                                path: comment.path,
+                                line: comment.line,
+                              })),
+                            ),
+                          )}
+                          disabled={Boolean(addedContextKeys[`review-threads-all:${pr.number}`])}
+                        />
+                      </div>
+                    ) : null}
+                  {Array.from(threads.entries()).map(([path, comments]) => (
                   <div key={path} style={{ marginBottom: 20 }}>
                     {/* File path header */}
                     <div style={{
@@ -2545,7 +2779,9 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                     </div>
 
                     {/* Comments for this file */}
-                    {comments.map((comment) => (
+                    {comments.map((comment) => {
+                      const commentKey = `review-thread:${comment.id}`;
+                      return (
                       <div key={comment.id} style={{
                         marginBottom: 12,
                         paddingLeft: 16,
@@ -2595,9 +2831,38 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                           gap: 6,
                           marginBottom: 4,
                           fontSize: 12,
+                          flexWrap: 'wrap',
                         }}>
                           <span style={{ fontWeight: 600, color: 'var(--t-text-strong)' }}>{comment.author}</span>
                           <span style={{ color: 'var(--t-text-muted)' }}>{formatAge(comment.createdAt)}</span>
+                          {onInjectChatContext ? (
+                            <>
+                              <div style={{ flex: 1 }} />
+                              <DesktopGlassActionChip
+                                icon={addedContextKeys[commentKey] ? <Check size={12} strokeWidth={2.4} /> : <MessageSquare size={12} strokeWidth={2} />}
+                                label={addedContextKeys[commentKey] ? 'Added' : 'Add to chat'}
+                                onClick={() => injectPayload(
+                                  commentKey,
+                                  formatReviewCommentInjection({
+                                    prNumber: pr.number,
+                                    repo,
+                                    author: comment.author,
+                                    body: comment.body,
+                                    createdAt: comment.createdAt,
+                                    path: comment.path,
+                                    line: comment.line,
+                                  }),
+                                )}
+                                disabled={Boolean(addedContextKeys[commentKey])}
+                              />
+                              <DesktopGlassActionChip
+                                icon={<X size={12} strokeWidth={2.2} />}
+                                label="Hide"
+                                variant="muted"
+                                onClick={() => hideComment(commentKey)}
+                              />
+                            </>
+                          ) : null}
                         </div>
 
                         {/* Comment body */}
@@ -2605,9 +2870,12 @@ function PRViewer({ prNumber, repo }: { prNumber: number; repo?: string }) {
                           <MarkdownBody text={comment.body} />
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
-                ));
+                  ))}
+                  </>
+                );
               })()
             )}
           </div>

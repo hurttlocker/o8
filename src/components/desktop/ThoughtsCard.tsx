@@ -167,6 +167,7 @@ interface ThoughtsCardProps {
   open: boolean;
   onClose: () => void;
   agents?: FleetAgent[];
+  draftInjection?: { id: string; text: string } | null;
 }
 
 interface AgentTarget {
@@ -243,7 +244,7 @@ function generateSuggestions(agents: FleetAgent[]): ContextSuggestion[] {
   return suggestions.slice(0, 3); // max 3 suggestions
 }
 
-export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) {
+export function ThoughtsCard({ open, onClose, agents = [], draftInjection }: ThoughtsCardProps) {
   const [mode, setMode] = useState<ThoughtMode>('pick');
   const [input, setInput] = useState('');
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
@@ -292,6 +293,16 @@ export function ThoughtsCard({ open, onClose, agents = [] }: ThoughtsCardProps) 
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [open, minimized, mode]);
+
+  useEffect(() => {
+    if (!open || !draftInjection?.id) return;
+    setMode('task');
+    setMinimized(false);
+    setInput((prev) => prev.trim()
+      ? `${prev.trimEnd()}\n\n${draftInjection.text}\n\n`
+      : `${draftInjection.text}\n\n`);
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, [draftInjection?.id, draftInjection?.text, open]);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
