@@ -17,6 +17,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest } from 'next/server';
 import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
+import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
 
 // ── Pricing (per 1M tokens) ──
 
@@ -189,7 +190,15 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     );
   }
 
-  const { model, provider, messages } = body as { model: string; provider: Provider; messages: Message[] };
+  const { model, provider, messages: rawMessages } = body as { model: string; provider: Provider; messages: Message[] };
+
+  // Inject workspace context as system prompt (Phase 1)
+  const wsContext = getWorkspaceContext();
+  const systemPrompt = buildSystemPrompt(wsContext);
+  const hasSystem = rawMessages.some(m => m.role === 'system');
+  const messages: Message[] = hasSystem
+    ? rawMessages
+    : [{ role: 'system', content: systemPrompt }, ...rawMessages];
 
   if (!PROVIDERS[provider]) {
     return new Response(
