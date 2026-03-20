@@ -322,12 +322,14 @@ function MobileRemoteShellInner({
   return (
     <div className="mobile-wrap remodex-mobile-page" style={shellStyle} suppressHydrationWarning>
       <div className="remodex-phone-shell">
-        {/* Frosted status bar blend — soft white gradient above TopBar */}
+        {/* Frosted status bar — solid white at clock, frosty fade below */}
         <div style={{
           position: 'fixed',
           top: 0, left: 0, right: 0,
-          height: 'calc(env(safe-area-inset-top, 0px) + 24px)',
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.7) 35%, rgba(255,255,255,0.3) 65%, rgba(255,255,255,0) 100%)',
+          height: 'calc(env(safe-area-inset-top, 0px) + 28px)',
+          background: 'linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(255,255,255,0.92) 30%, rgba(255,255,255,0.5) 60%, rgba(255,255,255,0) 100%)',
+          backdropFilter: 'blur(12px) saturate(1.4)',
+          WebkitBackdropFilter: 'blur(12px) saturate(1.4)',
           zIndex: 9,
           pointerEvents: 'none',
         }} />
