@@ -17,7 +17,23 @@ import { generateConflictReport } from '@/lib/worktree/conflicts';
 
 const API_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
 
+function isTrustedPanelRequest(req: NextRequest) {
+  const origin = req.headers.get('origin');
+  if (origin) {
+    try {
+      const url = new URL(origin);
+      if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true;
+    } catch { /* ignore */ }
+    if (origin === req.nextUrl.origin) return true;
+  }
+  const fetchSite = req.headers.get('sec-fetch-site');
+  if (fetchSite === 'same-origin' || fetchSite === 'none') return true;
+  if (!origin && !fetchSite) return true;
+  return false;
+}
+
 function checkAuth(req: NextRequest): NextResponse | null {
+  if (isTrustedPanelRequest(req)) return null;
   const auth = req.headers.get('authorization');
   const token = auth?.startsWith('Bearer ') ? auth.slice(7) : req.nextUrl.searchParams.get('token');
   if (token !== API_TOKEN) {

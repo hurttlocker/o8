@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execSync } from 'child_process';
+import { getCached, setCached } from '@/lib/github/cache';
 
 export async function GET(req: NextRequest) {
   const repo = req.nextUrl.searchParams.get('repo') ?? 'hurttlocker/cortex-ide';
   const limit = Math.min(parseInt(req.nextUrl.searchParams.get('limit') ?? '15', 10), 30);
+
+  const cacheKey = `commits:${repo}:${limit}`;
+  const cached = getCached<unknown[]>(cacheKey);
+  if (cached) {
+    return NextResponse.json({ commits: cached, repo });
+  }
 
   try {
     const raw = execSync(
@@ -18,9 +25,9 @@ export async function GET(req: NextRequest) {
       date: c.commit?.committer?.date ?? '',
     }));
 
+    setCached(cacheKey, commits);
     return NextResponse.json({ commits, repo });
   } catch {
     return NextResponse.json({ commits: [], repo, error: 'Failed to fetch commits' });
   }
 }
-// test PR
