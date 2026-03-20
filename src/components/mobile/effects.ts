@@ -102,13 +102,9 @@ export function trackScrollChrome({
     stickToBottomRef.current = isWindowNearBottom();
     setScrollY((current) => (Math.abs(current - nextScrollY) > 1 ? nextScrollY : current));
     setIsScrolling(true);
-    if (nextScrollY > 12) {
-      setHeaderVisible(false);
-      scheduleHeaderReveal(700);
-    } else {
-      clearHeaderReveal();
-      setHeaderVisible(true);
-    }
+    // TopBar always visible — never hide hamburger on scroll
+    setHeaderVisible(true);
+    clearHeaderReveal();
     markScrollSettled();
     if (frame) {
       return;
@@ -170,20 +166,60 @@ export function trackVisibilityRefresh({
 
 // ── Unified sync polling ──
 
-interface UnifiedSyncPollingArgs {
+/**
+ * Polling interval tier — used as the effect dependency instead of the raw
+ * objects. This prevents the polling loop from restarting when objects like
+ * actionStateBySession or pendingOwnedTurnBySession churn identity without
+ * changing the actual polling speed (#193).
+ */
+export type PollingTier = 'ws-safety' | 'owned-active' | 'owned-idle' | 'active' | 'idle';
+
+const POLLING_INTERVALS: Record<PollingTier, number> = {
+  'ws-safety': 30_000,
+  'owned-active': 1500,
+  'owned-idle': 4000,
+  'active': 2500,
+  'idle': 20000,
+};
+
+export function computePollingTier(args: {
+  wsConnected?: boolean;
   selectedSessionKey?: string;
   selectedSession?: SessionSummary;
-  linkedOwnedKey: string | null;
   pendingOwnedTurnBySession: Record<string, PendingOwnedTurn>;
   actionStateBySession: Record<string, ActionState>;
   waitingForResponse: boolean;
+}): PollingTier {
+  if (args.wsConnected) return 'ws-safety';
+  const sk = args.selectedSessionKey;
+  const isOwned = sk?.startsWith('codex-owned:');
+  const ownedActive = isOwned && (
+    args.selectedSession?.runtimeSurface?.lifecycle?.availability === 'running'
+    || Boolean(sk && args.pendingOwnedTurnBySession[sk])
+    || (sk != null && args.actionStateBySession[sk] === 'steering')
+  );
+  if (ownedActive) return 'owned-active';
+  if (isOwned) return 'owned-idle';
+  const isActive = args.selectedSession?.status === 'running' || args.waitingForResponse;
+  return isActive ? 'active' : 'idle';
+}
+
+interface UnifiedSyncPollingArgs {
+  /** Stable polling tier — only restarts the loop when this changes */
+  pollingTier: PollingTier;
+  selectedSessionKey?: string;
+  linkedOwnedKey: string | null;
   diffOpen: boolean;
   selectedReviewFilePath: string | null;
   documentVisibleRef: MutableRefObject<boolean>;
   /** Stable ref to historyBySession — avoids putting the state object in deps which causes a restart loop */
   historyBySessionRef: MutableRefObject<Record<string, MobileTranscriptEntry[]>>;
-  /** When true, WebSocket is handling real-time push — polling backs off to safety-net interval */
-  wsConnected?: boolean;
+  // Refs for churny values read during tick, not in the dependency array
+  pollingTierRef: MutableRefObject<PollingTier>;
+  selectedSessionKeyRef: MutableRefObject<string | undefined>;
+  linkedOwnedKeyRef: MutableRefObject<string | null>;
+  diffOpenRef: MutableRefObject<boolean>;
+  selectedReviewFilePathRef: MutableRefObject<string | null>;
   // State setters for sync
   setSnapshot: Dispatch<SetStateAction<MobileInboxSnapshot>>;
   setRefreshError: Dispatch<SetStateAction<string | null>>;
@@ -191,50 +227,27 @@ interface UnifiedSyncPollingArgs {
   setHistoryGroupsBySession: Dispatch<SetStateAction<Record<string, MobileRuntimeTailGroup[]>>>;
   setReviewFileByPath: Dispatch<SetStateAction<Record<string, MobileReviewFileResponse['file']>>>;
   // Legacy loaders for owned review packet (stays separate — not in sync endpoint yet)
-  loadOwnedReviewPacket: (sessionKey: string, force?: boolean) => Promise<RuntimeReviewPacket | null | undefined>;
+  loadOwnedReviewPacketRef: MutableRefObject<(sessionKey: string, force?: boolean) => Promise<RuntimeReviewPacket | null | undefined>>;
 }
 
 export function startUnifiedSyncPolling(args: UnifiedSyncPollingArgs) {
   const {
-    selectedSessionKey,
-    selectedSession,
-    linkedOwnedKey,
-    pendingOwnedTurnBySession,
-    actionStateBySession,
-    waitingForResponse,
-    diffOpen,
-    selectedReviewFilePath,
+    pollingTier,
     documentVisibleRef,
     historyBySessionRef,
-    wsConnected,
-    setSnapshot,
-    setRefreshError,
-    setHistoryBySession,
-    setHistoryGroupsBySession,
-    setReviewFileByPath,
-    loadOwnedReviewPacket,
-  } = args;
+    pollingTierRef,
+    selectedSessionKeyRef,
+    linkedOwnedKeyRef,
+    diffOpenRef,
+    selectedReviewFilePathRef,
+  setSnapshot,
+  setRefreshError,
+  setHistoryBySession,
+  setReviewFileByPath,
+  loadOwnedReviewPacketRef,
+} = args;
 
-  // Determine polling interval based on activity level
-  const ownedActive = selectedSessionKey?.startsWith('codex-owned:')
-    && (
-      selectedSession?.runtimeSurface?.lifecycle?.availability === 'running'
-      || Boolean(selectedSessionKey && pendingOwnedTurnBySession[selectedSessionKey])
-      || (selectedSessionKey && actionStateBySession[selectedSessionKey] === 'steering')
-    );
-  const isActive = ownedActive || selectedSession?.status === 'running' || waitingForResponse;
-
-  // When WS is connected, polling is just a safety net (30s).
-  // When WS is down, polling runs at normal speed.
-  const intervalMs = wsConnected
-    ? 30_000
-    : ownedActive
-      ? 1500
-      : selectedSessionKey?.startsWith('codex-owned:')
-        ? 4000
-        : isActive
-          ? 2500
-          : 20000;
+  const intervalMs = POLLING_INTERVALS[pollingTier];
 
   function getLastId(sessionKey: string): string | undefined {
     const entries = historyBySessionRef.current[sessionKey];
@@ -246,29 +259,35 @@ export function startUnifiedSyncPolling(args: UnifiedSyncPollingArgs) {
   async function tick() {
     if (!documentVisibleRef.current) return;
 
+    // Read current values from refs — these may have changed since the
+    // effect started, but we don't restart the timer for them.
+    const sk = selectedSessionKeyRef.current;
+    const linked = linkedOwnedKeyRef.current;
+    const tier = pollingTierRef.current;
+    const isActive = tier === 'owned-active' || tier === 'active';
+
     const wantReviewFile = !!(
-      selectedReviewFilePath
-      && diffOpen
-      && (isActive || selectedSessionKey?.startsWith('codex-owned:'))
+      selectedReviewFilePathRef.current
+      && diffOpenRef.current
+      && (isActive || sk?.startsWith('codex-owned:'))
     );
 
     await mobileSyncOnce({
-      wantInbox: isActive || !selectedSessionKey, // Always sync inbox when idle on squad view
-      historySessionKey: selectedSessionKey,
-      historyLastId: selectedSessionKey ? getLastId(selectedSessionKey) : undefined,
-      reviewFilePath: wantReviewFile ? selectedReviewFilePath ?? undefined : undefined,
-      linkedSessionKey: linkedOwnedKey ?? undefined,
-      linkedLastId: linkedOwnedKey ? getLastId(linkedOwnedKey) : undefined,
+      wantInbox: isActive || !sk,
+      historySessionKey: sk,
+      historyLastId: sk ? getLastId(sk) : undefined,
+      reviewFilePath: wantReviewFile ? selectedReviewFilePathRef.current ?? undefined : undefined,
+      linkedSessionKey: linked ?? undefined,
+      linkedLastId: linked ? getLastId(linked) : undefined,
       setSnapshot,
       setRefreshError,
       setHistoryBySession,
-      setHistoryGroupsBySession,
       setReviewFileByPath,
     });
 
     // Owned review packet stays on the legacy endpoint (not consolidated yet)
-    if (selectedSessionKey?.startsWith('codex-owned:')) {
-      void loadOwnedReviewPacket(selectedSessionKey, true).catch(() => undefined);
+    if (sk?.startsWith('codex-owned:')) {
+      void loadOwnedReviewPacketRef.current(sk, true).catch(() => undefined);
     }
   }
 
@@ -286,7 +305,6 @@ interface ScrollPinArgs {
   pendingOwnedTurn: PendingOwnedTurn | null;
   initialBottomPinBySessionRef: MutableRefObject<Record<string, boolean>>;
   transcriptBottomRef: RefObject<HTMLDivElement | null>;
-  stickToBottomRef: MutableRefObject<boolean>;
 }
 
 export function pinTranscriptToBottom({
@@ -296,7 +314,6 @@ export function pinTranscriptToBottom({
   pendingOwnedTurn,
   initialBottomPinBySessionRef,
   transcriptBottomRef,
-  stickToBottomRef,
 }: ScrollPinArgs) {
   if (!selectedSessionKey || typeof window === 'undefined') {
     return;
