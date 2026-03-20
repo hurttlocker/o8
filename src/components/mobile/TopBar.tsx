@@ -133,17 +133,19 @@ export const TopBar = memo(function TopBar({
           aria-label="Switch session"
           aria-expanded={squadPickerOpen}
         >
-          {/* ── Collapsed pill — centered, agent name + status dot ── */}
+          {/* ── Collapsed pill — screen-centered (ignores grid column offset) ── */}
           <div style={{
-            display: 'flex', justifyContent: 'center', width: '100%',
-            position: 'absolute', left: 0, right: 0,
-            top: '50%',
+            display: 'flex', justifyContent: 'center',
+            position: 'fixed',
+            left: 0, right: 0,
+            top: 'inherit',
             transform: isHeaderCompact
-              ? 'translateY(-50%) scale(1)'
-              : 'translateY(-50%) scale(0.85)',
+              ? 'scale(1)'
+              : 'scale(0.85)',
             opacity: isHeaderCompact ? 1 : 0,
             transition: 'all 350ms cubic-bezier(0.32, 0.72, 0, 1)',
             pointerEvents: isHeaderCompact ? 'auto' : 'none',
+            zIndex: 1,
           }}>
             <div style={{
               display: 'flex', alignItems: 'center', gap: 8,
