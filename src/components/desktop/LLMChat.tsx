@@ -35,6 +35,7 @@ export interface LLMMessage {
   tokens?: { input: number; output: number };
   costUsd?: number;
   timestamp: number;
+  images?: string[]; // data URIs for display
 }
 
 interface ModelOption {
@@ -219,7 +220,34 @@ function MessageBubble({ message, isLast }: { message: LLMMessage; isLast: boole
         wordBreak: 'break-word',
         ...(isUser ? { whiteSpace: 'pre-wrap' as const } : {}),
       }}>
-        {isUser ? message.content : renderLLMMarkdown(message.content)}
+        {isUser ? (
+          <>
+            {message.content}
+            {message.images && message.images.length > 0 && (
+              <div style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 6,
+                marginTop: 8,
+              }}>
+                {message.images.map((img, i) => (
+                  <img
+                    key={i}
+                    src={img}
+                    alt={`Attached ${i + 1}`}
+                    style={{
+                      maxWidth: 200,
+                      maxHeight: 200,
+                      borderRadius: 10,
+                      objectFit: 'cover',
+                      border: '1px solid rgba(255,255,255,0.2)',
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+          </>
+        ) : renderLLMMarkdown(message.content)}
       </div>
 
       {/* Meta bar — model, tokens, actions */}
@@ -311,6 +339,7 @@ export default function LLMChat({ tabId }: { tabId: string }) {
   const [showFilePicker, setShowFilePicker] = useState(false);
   const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
   const [filePickerIndex, setFilePickerIndex] = useState(0);
+  const [attachedImages, setAttachedImages] = useState<{ name: string; dataUri: string }[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -382,6 +411,44 @@ export default function LLMChat({ tabId }: { tabId: string }) {
     }
   }, []);
 
+  // Handle image paste/drop
+  const handleImageFile = useCallback((file: File) => {
+    if (!file.type.startsWith('image/')) return;
+    if (attachedImages.length >= 4) return; // max 4 images
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUri = reader.result as string;
+      setAttachedImages(prev => [...prev, { name: file.name, dataUri }]);
+    };
+    reader.readAsDataURL(file);
+  }, [attachedImages.length]);
+
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.startsWith('image/')) {
+        e.preventDefault();
+        const file = items[i].getAsFile();
+        if (file) handleImageFile(file);
+        return;
+      }
+    }
+  }, [handleImageFile]);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const files = e.dataTransfer?.files;
+    if (!files) return;
+    for (let i = 0; i < files.length; i++) {
+      handleImageFile(files[i]);
+    }
+  }, [handleImageFile]);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+  }, []);
+
   // Select a file from the autocomplete
   const handleFileSelect = useCallback((filePath: string) => {
     // Replace the @query with the full path
@@ -433,20 +500,27 @@ export default function LLMChat({ tabId }: { tabId: string }) {
       } catch { /* ignore */ }
     }
 
-    // Build the user message (display version without file contents)
+    // Build the user message (display version — images shown inline, file contents hidden)
     const userMsg: LLMMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
       content: text,
       timestamp: Date.now(),
+      images: attachedImages.length > 0 ? attachedImages.map(img => img.dataUri) : undefined,
     };
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
     setAttachedFiles([]);
+    setAttachedImages([]);
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
-    // Build the actual message sent to the model (includes file contents)
-    const messageForModel = fileContext ? text + fileContext : text;
+    // Build image markdown for model
+    const imageMarkdown = attachedImages.map((img, i) =>
+      `![Image ${i + 1}](${img.dataUri})`
+    ).join('\n');
+
+    // Build the actual message sent to the model (includes file contents + images)
+    const messageForModel = [text, fileContext, imageMarkdown].filter(Boolean).join('\n\n');
 
     // Start streaming
     setIsStreaming(true);
@@ -757,6 +831,58 @@ export default function LLMChat({ tabId }: { tabId: string }) {
         borderTop: '1px solid #f1f5f9',
         position: 'relative',
       }}>
+        {/* Attached image previews */}
+        {attachedImages.length > 0 && (
+          <div style={{
+            display: 'flex',
+            gap: 8,
+            maxWidth: 720,
+            marginLeft: 'auto',
+            marginRight: 'auto',
+            marginBottom: 8,
+            overflowX: 'auto',
+          }}>
+            {attachedImages.map((img, i) => (
+              <div key={i} style={{ position: 'relative', flexShrink: 0 }}>
+                <img
+                  src={img.dataUri}
+                  alt={img.name}
+                  style={{
+                    width: 64,
+                    height: 64,
+                    objectFit: 'cover',
+                    borderRadius: 8,
+                    border: '1px solid #e2e8f0',
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setAttachedImages(prev => prev.filter((_, j) => j !== i))}
+                  style={{
+                    position: 'absolute',
+                    top: -6,
+                    right: -6,
+                    width: 18,
+                    height: 18,
+                    borderRadius: '50%',
+                    border: '1px solid #e2e8f0',
+                    background: 'white',
+                    color: '#94a3b8',
+                    fontSize: 11,
+                    lineHeight: '16px',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    padding: 0,
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Attached files pills */}
         {attachedFiles.length > 0 && (
           <div style={{
@@ -888,7 +1014,10 @@ export default function LLMChat({ tabId }: { tabId: string }) {
             value={input}
             onChange={(e) => handleInputChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={`Message ${model.label}... (type @ to attach files)`}
+            onPaste={handlePaste}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            placeholder={`Message ${model.label}... (@ files, paste images)`}
             rows={1}
             style={{
               flex: 1,
