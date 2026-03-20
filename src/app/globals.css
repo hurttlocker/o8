@@ -2100,7 +2100,7 @@ button.workflow-file-item.workflow-file-item-active {
   gap: 0.82rem;
   min-width: 0;
   overflow-x: hidden;
-  padding: 0.05rem 0.25rem calc(13rem + env(safe-area-inset-bottom, 0px));
+  padding: 0.05rem 0.25rem calc(10rem + env(safe-area-inset-bottom, 0px));
 }
 
 .remodex-system-row {
