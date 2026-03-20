@@ -13,7 +13,7 @@
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, ChevronDown, Copy, Expand, Minus, Plus, X, FileCode, PanelRight } from 'lucide-react';
+import { Check, ChevronDown, Copy, Expand, Minus, Plus, X, FileCode, PanelRight, Play } from 'lucide-react';
 
 interface CodeBlockProps {
   code: string;
@@ -21,6 +21,7 @@ interface CodeBlockProps {
   onOpenMermaid?: (code: string) => void;
   onOpenInCanvas?: (code: string, language: string) => void;
   onApplyToFile?: (code: string, language: string) => void;
+  onRunInTerminal?: (command: string) => void;
 }
 
 const LANG_ALIASES: Record<string, string> = {
@@ -401,11 +402,13 @@ const MermaidDiagram = memo(function MermaidDiagram({ code, onOpenMermaid }: { c
   );
 });
 
-export const CodeBlock = memo(function CodeBlock({ code, language, onOpenMermaid, onOpenInCanvas, onApplyToFile }: CodeBlockProps) {
+export const CodeBlock = memo(function CodeBlock({ code, language, onOpenMermaid, onOpenInCanvas, onApplyToFile, onRunInTerminal }: CodeBlockProps) {
   const lines = code.split('\n');
   const label = formatLabel(language);
   const isMermaid = language?.toLowerCase() === 'mermaid';
-  const isCode = !isMermaid && !!language && ['ts', 'tsx', 'js', 'jsx', 'py', 'css', 'html', 'json', 'yaml', 'yml', 'toml', 'sh', 'bash', 'sql', 'go', 'rust', 'md', 'xml', 'graphql', 'typescript', 'javascript', 'python', 'ruby', 'shell'].includes(language.toLowerCase());
+  const isCode = !isMermaid && !!language && ['ts', 'tsx', 'js', 'jsx', 'py', 'css', 'html', 'json', 'yaml', 'yml', 'toml', 'sh', 'bash', 'sql', 'go', 'rust', 'md', 'xml', 'graphql', 'typescript', 'javascript', 'python', 'ruby', 'shell', 'zsh'].includes(language.toLowerCase());
+  const isShell = !!language && ['sh', 'bash', 'shell', 'zsh'].includes(language.toLowerCase());
+  const [ran, setRan] = useState(false);
   const [expanded, setExpanded] = useState(isMermaid); // Mermaid auto-expands
   const [copied, setCopied] = useState(false);
   const [applied, setApplied] = useState(false);
@@ -544,6 +547,34 @@ export const CodeBlock = memo(function CodeBlock({ code, language, onOpenMermaid
           >
             <PanelRight size={12} strokeWidth={1.8} />
             Canvas
+          </span>
+        )}
+
+        {/* Run in Terminal */}
+        {isShell && onRunInTerminal && (
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!ran) {
+                onRunInTerminal(code);
+                setRan(true);
+                setTimeout(() => setRan(false), 3000);
+              }
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 3,
+              fontSize: '0.7rem',
+              color: ran ? '#22c55e' : 'var(--t-text-muted)',
+              cursor: 'pointer',
+              transition: 'color 150ms',
+            }}
+            onMouseEnter={(e) => { if (!ran) (e.currentTarget).style.color = '#10b981'; }}
+            onMouseLeave={(e) => { if (!ran) (e.currentTarget).style.color = 'var(--t-text-muted)'; }}
+          >
+            {ran ? <Check size={12} strokeWidth={2} /> : <Play size={12} strokeWidth={1.8} fill="currentColor" />}
+            {ran ? 'Sent' : 'Run'}
           </span>
         )}
 
