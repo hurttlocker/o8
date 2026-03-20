@@ -138,12 +138,12 @@ export const TopBar = memo(function TopBar({
             display: 'flex', justifyContent: 'center',
             position: 'fixed',
             left: 0, right: 0,
-            top: 'inherit',
+            top: `calc(env(safe-area-inset-top, 0px) + 2px)`,
             transform: isHeaderCompact
               ? 'scale(1)'
               : 'scale(0.85)',
             opacity: isHeaderCompact ? 1 : 0,
-            transition: 'all 350ms cubic-bezier(0.32, 0.72, 0, 1)',
+            transition: 'opacity 350ms cubic-bezier(0.32, 0.72, 0, 1), transform 350ms cubic-bezier(0.32, 0.72, 0, 1)',
             pointerEvents: isHeaderCompact ? 'auto' : 'none',
             zIndex: 1,
           }}>
@@ -227,13 +227,13 @@ export const TopBar = memo(function TopBar({
           </div>
         </button>
 
-        {/* Squad picker dropdown — grouped by project */}
+        {/* Squad picker dropdown — screen-centered like the pill */}
         <div
           style={{
-            position: 'absolute',
-            top: 'calc(100% + 8px)',
-            left: '-12px',
-            right: '-12px',
+            position: 'fixed',
+            top: `calc(env(safe-area-inset-top, 0px) + 40px)`,
+            left: 16,
+            right: 16,
             zIndex: 100,
             borderRadius: '14px',
             background: 'rgba(255, 255, 255, 0.96)',
