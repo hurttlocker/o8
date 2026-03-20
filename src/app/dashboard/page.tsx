@@ -123,7 +123,8 @@ function DashboardInner() {
       .catch(() => {});
   }, [globalRepo]);
   const [lifecycleEvents, setLifecycleEvents] = useState<Map<string, { state: string; exitCode?: number; ts: number }>>(new Map());
-  const [draftInjection, setDraftInjection] = useState<{ id: string; text: string } | null>(null);
+  const [desktopDraftInjection, setDesktopDraftInjection] = useState<{ id: string; text: string } | null>(null);
+  const [thoughtsDraftInjection, setThoughtsDraftInjection] = useState<{ id: string; text: string } | null>(null);
 
   // Terminal WS hook — routes events to TerminalWorkspace (multi-tab)
   const terminalWsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
@@ -288,19 +289,24 @@ function DashboardInner() {
       text: formatPreviewSelectionContext(selection),
     };
     setChatVisible(true);
-    setDraftInjection({
+    setDesktopDraftInjection({
       id: `${payload.reason}-${Date.now()}`,
       text: payload.text,
     });
   }, []);
 
   const handleDesktopChatInjection = useCallback((payload: DesktopChatInjectionPayload) => {
-    setChatVisible(true);
-    setDraftInjection({
+    const nextInjection = {
       id: `${payload.reason}-${Date.now()}`,
       text: payload.text,
-    });
-  }, []);
+    };
+    if (thoughtsOpen) {
+      setThoughtsDraftInjection(nextInjection);
+      return;
+    }
+    setChatVisible(true);
+    setDesktopDraftInjection(nextInjection);
+  }, [thoughtsOpen]);
 
   // ── Feed agent data to alert engine + search ──
   const handleAgentsUpdate = useCallback((agents: unknown[]) => {
@@ -735,7 +741,7 @@ function DashboardInner() {
       }}>
         <DesktopChat
           externalSessionKey={activeSessionKey}
-          draftInjection={draftInjection}
+          draftInjection={desktopDraftInjection}
           onOpenDiff={() => {
             openCanvasTab({
               id: 'diff:workspace',
@@ -765,7 +771,7 @@ function DashboardInner() {
         open={thoughtsOpen}
         onClose={() => setThoughtsOpen(false)}
         agents={JSON.parse(agentsJson)}
-        draftInjection={draftInjection}
+        draftInjection={thoughtsDraftInjection}
       />
     </div>
   );
