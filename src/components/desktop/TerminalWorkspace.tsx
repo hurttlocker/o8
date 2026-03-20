@@ -2524,6 +2524,28 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
               }}>
                 <LLMChat
                   tabId={tab.id}
+                  onOpenHistoryChat={(historyTabId: string, title: string) => {
+                    // Create a new tab that loads the history
+                    tabCountRef.current += 1;
+                    const now = Date.now();
+                    const newTab: TerminalTab = {
+                      id: historyTabId,
+                      label: title.slice(0, 20) + (title.length > 20 ? '...' : ''),
+                      kind: 'llm-chat',
+                      tmuxSession: null,
+                      createdAt: now,
+                      lastActivity: now,
+                    };
+                    setTabs(prev => {
+                      // Don't create duplicate tabs
+                      if (prev.some(t => t.id === historyTabId)) {
+                        setActiveTabId(historyTabId);
+                        return prev;
+                      }
+                      return [...prev, newTab];
+                    });
+                    setActiveTabId(historyTabId);
+                  }}
                   onRunInTerminal={(command: string) => {
                     // Find the first terminal tab with a tmux session
                     const shellTab = tabs.find(t => t.kind === 'terminal' && t.tmuxSession);
