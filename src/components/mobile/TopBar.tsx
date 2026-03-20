@@ -136,13 +136,14 @@ export const TopBar = memo(function TopBar({
             willChange: 'opacity',
           }}>
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 8,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               padding: '5px 16px',
               borderRadius: 20,
               background: 'rgba(0,122,255,0.08)',
               WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
               border: '1px solid rgba(0,122,255,0.15)',
               maxWidth: '75%',
+              minWidth: 140,
               boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
             }}>
               <span style={{
@@ -156,6 +157,7 @@ export const TopBar = memo(function TopBar({
                 color: '#007aff',
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 fontFamily: '-apple-system, system-ui, sans-serif',
+                textAlign: 'center',
               }}>
                 {activeTitle}
               </span>
