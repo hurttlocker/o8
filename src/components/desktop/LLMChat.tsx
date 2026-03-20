@@ -1757,18 +1757,25 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
                   toolCalls.push({ name: parsed.name, status: parsed.status, args: parsed.args });
                 }
                 setActiveToolCalls([...toolCalls]);
-                // Add tool call as a thinking step
+                // Add tool call as a thinking step — deduplicate same tool+args
                 const toolLabel = parsed.name === 'search_web' ? `Searching "${parsed.args?.query || ''}"` :
-                                  parsed.name === 'read_file' ? `Reading ${parsed.args?.path || ''}` :
+                                  parsed.name === 'read_file' ? `Reading ${parsed.args?.path?.split('/').pop() || ''}` :
                                   parsed.name === 'search_code' ? `Searching code for "${parsed.args?.query || ''}"` :
-                                  parsed.name === 'list_files' ? `Listing ${parsed.args?.path || ''}` :
+                                  parsed.name === 'list_files' ? `Listing ${parsed.args?.path || '.'}` :
+                                  parsed.name === 'create_github_issue' ? `Creating issue` :
+                                  parsed.name === 'read_github_issue_or_pr' ? `Reading #${parsed.args?.number || ''}` :
+                                  parsed.name === 'create_pull_request' ? `Creating PR` :
                                   `Running ${parsed.name}`;
-                thinkingSteps.push({
-                  type: parsed.name === 'search_web' || parsed.name === 'search_code' ? 'search' :
-                        parsed.name === 'read_file' ? 'reading' : 'tool',
-                  label: toolLabel,
-                  status: 'active',
-                });
+                // Only add if we don't already have this exact step
+                const existingStep = thinkingSteps.find(s => s.label === toolLabel);
+                if (!existingStep) {
+                  thinkingSteps.push({
+                    type: parsed.name === 'search_web' || parsed.name === 'search_code' ? 'search' :
+                          parsed.name === 'read_file' || parsed.name === 'list_files' ? 'reading' : 'tool',
+                    label: toolLabel,
+                    status: 'active',
+                  });
+                }
                 setActiveThinking({ steps: [...thinkingSteps], thinking: thinkingText });
               } else if (parsed.type === 'tool_result') {
                 const existing = toolCalls.find(t => t.name === parsed.name);
@@ -1806,17 +1813,33 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
         }
       }
 
+      // Clean up content: strip tool narration lines the model adds before tool use
+      let cleanContent = fullContent
+        .replace(/^I'll use the \w+ tool[^\n]*\n*/gm, '')
+        .replace(/^I'll use the \w+ tool[^\n]*/gm, '')
+        .replace(/^Let me use[^\n]*tool[^\n]*\n*/gm, '')
+        .trim();
+
+      // Deduplicate sources by title+url
+      const seenSources = new Set<string>();
+      const uniqueSources = sources.filter(s => {
+        const key = `${s.title}|${s.url ?? ''}`;
+        if (seenSources.has(key)) return false;
+        seenSources.add(key);
+        return true;
+      });
+
       // Add assistant message
       const assistantMsg: LLMMessage = {
         id: `asst-${Date.now()}`,
         role: 'assistant',
-        content: fullContent,
+        content: cleanContent,
         model: model.label,
         tokens,
         costUsd,
         timestamp: Date.now(),
         toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        sources: sources.length > 0 ? sources : undefined,
+        sources: uniqueSources.length > 0 ? uniqueSources : undefined,
         thinking: thinkingText || undefined,
         thinkingSteps: thinkingSteps.length > 0 ? thinkingSteps.map(s => ({ ...s, status: 'complete' as const })) : undefined,
         thinkingDurationMs: thinkingSteps.length > 0 || thinkingText ? Date.now() - thinkingStartTime : undefined,
