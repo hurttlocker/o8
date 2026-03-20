@@ -543,6 +543,18 @@ function MobileRemoteShellInner({
             </>
           )
           ) : null}
+          {/* RuntimeBar — sits at bottom of scroll content, not fixed */}
+          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' ? (
+            <RuntimeBar
+              snapshot={snapshot}
+              selectedSession={selectedSession}
+              selectedReviewPacket={selectedReviewPacket}
+              isOwnedCodexSession={isOwnedCodexSession}
+              compactLine={compactLine}
+              reviewFiles={reviewFiles}
+              onOpenDiff={actions.openDiffViewer}
+            />
+          ) : null}
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
         <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
@@ -579,29 +591,7 @@ function MobileRemoteShellInner({
             </div>
           ) : null}
         </div>
-      {/* RuntimeBar — pinned to very bottom, separate from compose dock */}
-      {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' ? (
-        <div style={{
-          position: 'fixed',
-          left: 0, right: 0,
-          bottom: 0,
-          zIndex: 5,
-          background: 'rgba(255,255,255,0.85)',
-          backdropFilter: 'blur(20px) saturate(1.6)',
-          WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-          borderTop: '1px solid rgba(0,0,0,0.04)',
-        }}>
-          <RuntimeBar
-            snapshot={snapshot}
-            selectedSession={selectedSession}
-            selectedReviewPacket={selectedReviewPacket}
-            isOwnedCodexSession={isOwnedCodexSession}
-            compactLine={compactLine}
-            reviewFiles={reviewFiles}
-            onOpenDiff={actions.openDiffViewer}
-          />
-        </div>
-      ) : null}
+        
       </div>
       <ControlsSheet
         controlsOpen={controlsOpen}
