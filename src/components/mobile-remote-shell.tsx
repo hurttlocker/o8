@@ -311,7 +311,12 @@ function MobileRemoteShellInner({
   // ── UI layout values ──
   const sessionSwitcher = snapshot.sessions.slice(0, 5);
   const headerProgress = Math.min(scrollY / 88, 1);
-  const isHeaderCompact = headerProgress > 0.12;
+  // Hysteresis: go compact at 15%, un-compact at 5% — prevents flicker at threshold
+  const [isHeaderCompact, setIsHeaderCompact] = useState(false);
+  useEffect(() => {
+    if (!isHeaderCompact && headerProgress > 0.15) setIsHeaderCompact(true);
+    else if (isHeaderCompact && headerProgress < 0.05) setIsHeaderCompact(false);
+  }, [headerProgress, isHeaderCompact]);
   const isComposerPrimed = isChatSession && (composeFocused || transcriptAttachments.length > 0);
   // RuntimeBar only visible when at bottom of chat + keyboard closed
   const [isAtBottom, setIsAtBottom] = useState(true);
