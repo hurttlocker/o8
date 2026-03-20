@@ -117,8 +117,21 @@ const MessageBubble = memo(function MessageBubble({
   return (
     <article
       className={`remodex-message-card remodex-message-card-assistant${fadeClass}`}
-      onClick={() => onToggleExpanded(entry.id)}
-      style={{ cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+      role="button"
+      tabIndex={0}
+      onClick={(e) => {
+        // Don't toggle when tapping links, buttons, or code blocks
+        const tag = (e.target as HTMLElement).tagName;
+        if (tag === 'A' || tag === 'BUTTON' || tag === 'CODE' || tag === 'PRE') return;
+        onToggleExpanded(entry.id);
+      }}
+      onTouchEnd={(e) => {
+        const tag = (e.target as HTMLElement).tagName;
+        if (tag === 'A' || tag === 'BUTTON' || tag === 'CODE' || tag === 'PRE') return;
+        onToggleExpanded(entry.id);
+        e.preventDefault();
+      }}
+      style={{ cursor: 'pointer', WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation' }}
     >
       {speakerChanged ? (
         <div className="remodex-message-head">
