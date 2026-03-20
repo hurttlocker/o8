@@ -4,6 +4,7 @@
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio } from 'lucide-react';
 import { ChatBubble } from './ChatBubble';
+import LLMChat from './LLMChat';
 import { saveTabState, loadTabState, checkAliveSessions, type PersistedTabState } from '@/lib/terminal/tab-state';
 import {
   PREVIEW_HOST_MESSAGE_SOURCE,
@@ -16,7 +17,7 @@ import {
 export interface TerminalTab {
   id: string;
   label: string;
-  kind: 'terminal' | 'chat';
+  kind: 'terminal' | 'chat' | 'llm-chat';
   tmuxSession: string | null; // null = pending creation (terminal only)
   cliAgent?: string; // which CLI agent was launched (or 'shell')
   repo?: RegisteredRepo; // optional repo context
@@ -1347,6 +1348,7 @@ const TabBar = memo(function TabBar({
   onCloseTab,
   onNewTab,
   onNewChatTab,
+  onNewLLMChatTab,
   onRegisterRepo,
 }: {
   tabs: TerminalTab[];
@@ -1355,6 +1357,7 @@ const TabBar = memo(function TabBar({
   onCloseTab: (id: string) => void;
   onNewTab: (agentId: string, repo?: RegisteredRepo) => void;
   onNewChatTab: (runtime: 'codex' | 'claude-code' | 'openclaw', repo?: RegisteredRepo) => void;
+  onNewLLMChatTab: () => void;
   onRegisterRepo?: (localPath: string) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -1431,7 +1434,9 @@ const TabBar = memo(function TabBar({
                 borderBottom: isActive ? '2px solid #93c5fd' : '2px solid transparent',
               }}
             >
-              {tab.kind === 'chat' ? (
+              {tab.kind === 'llm-chat' ? (
+                <MessageSquare size={12} style={{ color: '#3b82f6' }} />
+              ) : tab.kind === 'chat' ? (
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={
                   tab.chatRuntime === 'codex' ? '#10b981' : tab.chatRuntime === 'claude-code' ? '#8b5cf6' : '#ef4444'
                 } strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1529,8 +1534,7 @@ const TabBar = memo(function TabBar({
               <button
                 type="button"
                 onClick={() => {
-                  // TODO: open LLM Chat tab (#230)
-                  // For now, placeholder — will wire to LLMChat component
+                  onNewLLMChatTab();
                   setPickerOpen(false);
                   setPickerStep('main');
                 }}
@@ -2284,6 +2288,22 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
       setActiveTabId(tabId);
     }, []);
 
+    const handleNewLLMChatTab = useCallback(() => {
+      tabCountRef.current += 1;
+      const tabId = `llm-${tabCountRef.current}`;
+      const now = Date.now();
+      const newTab: TerminalTab = {
+        id: tabId,
+        label: 'Chat',
+        kind: 'llm-chat',
+        tmuxSession: null,
+        createdAt: now,
+        lastActivity: now,
+      };
+      setTabs(prev => [...prev, newTab]);
+      setActiveTabId(tabId);
+    }, []);
+
     const handleUpdateChatMessages = useCallback((tabId: string, messages: ChatMessage[]) => {
       setTabs(prev => prev.map(t =>
         t.id === tabId ? { ...t, chatMessages: messages, lastActivity: Date.now() } : t
@@ -2445,13 +2465,23 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           onCloseTab={handleCloseTab}
           onNewTab={handleNewTab}
           onNewChatTab={handleNewChatTab}
+          onNewLLMChatTab={handleNewLLMChatTab}
           onRegisterRepo={handleRegisterRepo}
         />
 
         {/* Terminal panels — all mounted, only active is visible */}
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
           {tabs.map((tab) => (
-            tab.kind === 'chat' ? (
+            tab.kind === 'llm-chat' ? (
+              <div key={tab.id} style={{
+                flex: 1,
+                display: tab.id === activeTabId ? 'flex' : 'none',
+                flexDirection: 'column',
+                height: '100%',
+              }}>
+                <LLMChat tabId={tab.id} />
+              </div>
+            ) : tab.kind === 'chat' ? (
               <div key={tab.id} style={{
                 flex: 1,
                 display: tab.id === activeTabId ? 'flex' : 'none',
