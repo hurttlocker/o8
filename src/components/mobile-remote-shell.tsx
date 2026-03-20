@@ -36,6 +36,9 @@ const TokenUsageSummary = dynamic(() => import('./mobile/TokenUsageSummary').the
 const MobileTerminal = dynamic(() => import('./mobile/MobileTerminal').then((m) => ({ default: m.MobileTerminal })), { ssr: false, ...shimmerFallback });
 const WorktreeActions = dynamic(() => import('./mobile/WorktreeActions').then((m) => ({ default: m.WorktreeActions })), { ssr: false, ...shimmerFallback });
 const FleetView = dynamic(() => import('./mobile/FleetView').then((m) => ({ default: m.FleetView })), { ssr: false, ...shimmerFallback });
+import { PullToRefresh } from './mobile/PullToRefresh';
+import { PageTransition } from './mobile/PageTransition';
+import { useSwipeBack } from './mobile/useSwipeBack';
 const LaunchSheet = dynamic(() => import('./mobile/LaunchSheet').then((m) => ({ default: m.LaunchSheet })), { ssr: false });
 const ActivityFeed = dynamic(() => import('./mobile/ActivityFeed').then((m) => ({ default: m.ActivityFeed })), { ssr: false, ...shimmerFallback });
 const PRReviewSheet = dynamic(() => import('./mobile/PRReviewSheet').then((m) => ({ default: m.PRReviewSheet })), { ssr: false });
@@ -171,6 +174,12 @@ function MobileRemoteShellInner({
   const [prReviewNumber, setPrReviewNumber] = useState<number | null>(null);
   const [prReviewRepo, setPrReviewRepo] = useState('');
   const { notifications, dismiss: dismissNotification, unreadCount } = useNotifications(snapshot);
+
+  // ── Swipe right from left edge to go back to chat ──
+  useSwipeBack(
+    () => { if (activeView !== 'squad' && activeView !== 'chat') setActiveView('squad'); },
+    activeView !== 'squad' && activeView !== 'chat',
+  );
 
   // Lock body scroll when diff overlay is open
   useEffect(() => {
@@ -373,6 +382,8 @@ function MobileRemoteShellInner({
           onToggleSquadPicker={() => state.setSquadPickerOpen(!state.squadPickerOpen)}
           onSessionFocus={actions.handleSessionFocus}
         />
+        <PullToRefresh onRefresh={async () => { refreshInbox(); await new Promise(r => setTimeout(r, 600)); }}>
+        <PageTransition activeKey={activeView}>
         <div className="remodex-scroll-view">
           {activeView === 'fleet' ? (
             <FleetView
@@ -545,6 +556,8 @@ function MobileRemoteShellInner({
           ) : null}
           <div ref={transcriptBottomRef} className="remodex-scroll-anchor" aria-hidden="true" />
         </div>
+        </PageTransition>
+        </PullToRefresh>
         <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
           {!terminalActive && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' ? (
             <div className="remodex-compose-shell">
