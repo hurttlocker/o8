@@ -75,7 +75,31 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
       model,
       max_tokens: 4096,
       stream: true,
-      messages: messages.filter(m => m.role !== 'system'),
+      messages: messages
+        .filter(m => m.role !== 'system')
+        .map(m => {
+          // Check for inline images (data URIs in markdown syntax)
+          const imgRegex = /!\[([^\]]*)\]\((data:([^;]+);base64,([^)]+))\)/g;
+          const contentParts: Record<string, unknown>[] = [];
+          let lastIdx = 0;
+          let match: RegExpExecArray | null;
+          while ((match = imgRegex.exec(m.content))) {
+            const textBefore = m.content.slice(lastIdx, match.index).trim();
+            if (textBefore) contentParts.push({ type: 'text', text: textBefore });
+            contentParts.push({
+              type: 'image',
+              source: { type: 'base64', media_type: match[3], data: match[4] },
+            });
+            lastIdx = match.index + match[0].length;
+          }
+          const remaining = m.content.slice(lastIdx).trim();
+          if (remaining) contentParts.push({ type: 'text', text: remaining });
+          // Only use multipart if images found
+          if (contentParts.length > 1 || contentParts.some(p => p.type === 'image')) {
+            return { role: m.role, content: contentParts };
+          }
+          return { role: m.role, content: m.content };
+        }),
       ...(messages.find(m => m.role === 'system')
         ? { system: messages.find(m => m.role === 'system')!.content }
         : {}),
@@ -111,7 +135,26 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
       model,
       stream: true,
       stream_options: { include_usage: true },
-      messages,
+      messages: messages.map(m => {
+        // Check for inline images (data URIs in markdown syntax)
+        const imgRegex = /!\[([^\]]*)\]\((data:([^;]+);base64,[^)]+)\)/g;
+        if (imgRegex.test(m.content)) {
+          imgRegex.lastIndex = 0;
+          const contentParts: Record<string, unknown>[] = [];
+          let lastIdx = 0;
+          let match: RegExpExecArray | null;
+          while ((match = imgRegex.exec(m.content))) {
+            const textBefore = m.content.slice(lastIdx, match.index).trim();
+            if (textBefore) contentParts.push({ type: 'text', text: textBefore });
+            contentParts.push({ type: 'image_url', image_url: { url: match[2] } });
+            lastIdx = match.index + match[0].length;
+          }
+          const remaining = m.content.slice(lastIdx).trim();
+          if (remaining) contentParts.push({ type: 'text', text: remaining });
+          return { role: m.role, content: contentParts };
+        }
+        return m;
+      }),
     }),
     parseStream: (line) => {
       if (!line.startsWith('data: ')) return null;
@@ -139,10 +182,32 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
     buildBody: (model, messages) => ({
       contents: messages
         .filter(m => m.role !== 'system')
-        .map(m => ({
-          role: m.role === 'assistant' ? 'model' : 'user',
-          parts: [{ text: m.content }],
-        })),
+        .map(m => {
+          const parts: Record<string, unknown>[] = [];
+          // Parse content for inline images (data URIs)
+          const imgRegex = /!\[([^\]]*)\]\((data:[^)]+)\)/g;
+          let lastIdx = 0;
+          let match: RegExpExecArray | null;
+          const content = m.content;
+          while ((match = imgRegex.exec(content))) {
+            const textBefore = content.slice(lastIdx, match.index).trim();
+            if (textBefore) parts.push({ text: textBefore });
+            // Parse data URI: data:mime;base64,DATA
+            const dataUri = match[2];
+            const commaIdx = dataUri.indexOf(',');
+            if (commaIdx > 0) {
+              const mimeMatch = dataUri.match(/^data:([^;]+);base64/);
+              const mime = mimeMatch?.[1] || 'image/png';
+              const data = dataUri.slice(commaIdx + 1);
+              parts.push({ inlineData: { mimeType: mime, data } });
+            }
+            lastIdx = match.index + match[0].length;
+          }
+          const remaining = content.slice(lastIdx).trim();
+          if (remaining) parts.push({ text: remaining });
+          if (parts.length === 0) parts.push({ text: content });
+          return { role: m.role === 'assistant' ? 'model' : 'user', parts };
+        }),
       ...(messages.find(m => m.role === 'system')
         ? { systemInstruction: { parts: [{ text: messages.find(m => m.role === 'system')!.content }] } }
         : {}),
@@ -155,8 +220,19 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
       if (!raw || raw === '[' || raw === ']' || raw === ',') return null;
       try {
         const parsed = JSON.parse(raw.replace(/^,/, ''));
-        if (parsed.candidates?.[0]?.content?.parts?.[0]?.text) {
-          return { type: 'content', text: parsed.candidates[0].content.parts[0].text };
+        const parts = parsed.candidates?.[0]?.content?.parts;
+        if (parts) {
+          for (const part of parts) {
+            if (part.text) {
+              return { type: 'content', text: part.text };
+            }
+            if (part.inlineData) {
+              // Gemini returns images as base64 inlineData
+              const mime = part.inlineData.mimeType || 'image/png';
+              const b64 = part.inlineData.data;
+              return { type: 'content', text: `\n![Generated Image](data:${mime};base64,${b64})\n` };
+            }
+          }
         }
         if (parsed.usageMetadata) {
           return {
