@@ -1,7 +1,14 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState } from "react";
 import CortexTerrain from "./CortexTerrain";
+
+const palette = {
+  darkBlue: "#1A0089",
+  portlandOrange: "#FF5E39",
+  whiteChocolate: "#EFE7D3",
+  juneBud: "#B7CF4F",
+};
 
 /* ─────────────────────── FEATURE DATA ─────────────────────── */
 
@@ -9,37 +16,37 @@ const features = [
   {
     title: "Memory That Forgets",
     desc: "Ebbinghaus decay curves. Facts reinforce or fade. Your agents remember what matters and forget what doesn't.",
-    color: "#06b6d4",
+    color: palette.juneBud,
     icon: "⬡",
   },
   {
     title: "Fleet Command",
     desc: "See every agent. Steer any session. Approve, deny, redirect — from desktop or phone.",
-    color: "#a855f7",
+    color: palette.portlandOrange,
     icon: "◎",
   },
   {
     title: "Worktree Isolation",
     desc: "One branch per agent. Parallel PRs. No merge conflicts. Git-native safety for multi-agent work.",
-    color: "#22c55e",
+    color: palette.juneBud,
     icon: "⌥",
   },
   {
     title: "Runtime Agnostic",
     desc: "Codex. Claude Code. OpenClaw. Gemini. Any ACP runtime. One control plane for all of them.",
-    color: "#f59e0b",
+    color: palette.portlandOrange,
     icon: "⚡",
   },
   {
     title: "Knowledge Graph",
     desc: "Facts connect to facts. Traverse by subject. Visualize in 2D/3D. See how your agents think.",
-    color: "#ec4899",
+    color: palette.juneBud,
     icon: "◇",
   },
   {
     title: "Mobile Operator",
     desc: "PWA from day one. Approve PRs from your phone. Monitor agents from anywhere.",
-    color: "#8b5cf6",
+    color: palette.portlandOrange,
     icon: "▣",
   },
 ];
@@ -55,8 +62,9 @@ const stats = [
 
 const s = {
   page: {
-    background: "#09090b",
-    color: "#f4f4f5",
+    background:
+      "radial-gradient(circle at 18% 18%, rgba(183,207,79,0.14) 0%, transparent 24%), radial-gradient(circle at 82% 10%, rgba(255,94,57,0.12) 0%, transparent 28%), linear-gradient(180deg, #F4EEDF 0%, #EFE7D3 42%, #E8E0CC 100%)",
+    color: palette.darkBlue,
     minHeight: "100vh",
     fontFamily: '-apple-system, "SF Pro Display", "Segoe UI", system-ui, sans-serif',
     overflow: "hidden auto" as const,
@@ -71,10 +79,10 @@ const s = {
     alignItems: "center",
     justifyContent: "space-between",
     padding: "16px 40px",
-    background: "rgba(9, 9, 11, 0.7)",
+    background: "rgba(239,231,211,0.82)",
     backdropFilter: "blur(16px)",
     WebkitBackdropFilter: "blur(16px)",
-    borderBottom: "1px solid rgba(255,255,255,0.06)",
+    borderBottom: "1px solid rgba(26,0,137,0.12)",
   },
   navBrand: {
     display: "flex",
@@ -85,22 +93,23 @@ const s = {
     width: 32,
     height: 32,
     borderRadius: 8,
-    background: "linear-gradient(135deg, #a855f7, #7c3aed)",
+    background: "linear-gradient(135deg, #1A0089, #3E2BBA)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     fontSize: 14,
     fontWeight: 900,
-    color: "#fff",
-    boxShadow: "0 4px 16px rgba(168,85,247,0.3)",
+    color: palette.whiteChocolate,
+    boxShadow: "0 4px 16px rgba(26,0,137,0.16)",
   },
   navTitle: {
     fontSize: 17,
     fontWeight: 700,
     letterSpacing: "-0.02em",
+    color: palette.darkBlue,
   },
   navTitleDim: {
-    color: "#71717a",
+    color: "rgba(255,94,57,0.82)",
     fontWeight: 500,
   },
   navLinks: {
@@ -110,7 +119,7 @@ const s = {
   },
   navLink: {
     fontSize: 14,
-    color: "#a1a1aa",
+    color: "rgba(26,0,137,0.78)",
     textDecoration: "none",
     fontWeight: 500,
     transition: "color 0.2s",
@@ -118,42 +127,46 @@ const s = {
   navCta: {
     fontSize: 13,
     fontWeight: 600,
-    color: "#fff",
-    background: "linear-gradient(135deg, #a855f7, #7c3aed)",
-    border: "none",
+    color: palette.whiteChocolate,
+    background: "linear-gradient(135deg, #FF5E39, #FF7B54)",
+    border: "1px solid rgba(26,0,137,0.08)",
     borderRadius: 10,
     padding: "8px 20px",
     cursor: "pointer",
     textDecoration: "none",
-    boxShadow: "0 6px 20px rgba(168,85,247,0.25)",
+    boxShadow: "0 6px 20px rgba(255,94,57,0.18)",
     transition: "transform 0.15s, box-shadow 0.15s",
   },
   hero: {
     position: "relative" as const,
-    height: "100vh",
-    minHeight: 700,
     display: "flex",
     flexDirection: "column" as const,
     alignItems: "center",
     justifyContent: "flex-start",
-    paddingTop: "11vh",
+    paddingTop: "16vh",
+    paddingBottom: 72,
     overflow: "hidden",
   },
   terrainWrap: {
-    position: "absolute" as const,
-    left: "-10%",
-    right: "-10%",
-    bottom: 0,
-    height: "70%",
-    zIndex: 1,
+    position: "relative" as const,
+    width: "min(92vw, 980px)",
+    height: "min(62vh, 560px)",
+    marginTop: 64,
+    borderRadius: 32,
+    overflow: "hidden",
+    zIndex: 10,
+    background:
+      "radial-gradient(circle at 18% 18%, rgba(183,207,79,0.14) 0%, transparent 24%), radial-gradient(circle at 82% 10%, rgba(255,94,57,0.12) 0%, transparent 28%), linear-gradient(180deg, #F4EEDF 0%, #EFE7D3 42%, #E8E0CC 100%)",
+    border: "1px solid rgba(26,0,137,0.12)",
+    boxShadow: "0 26px 70px rgba(26,0,137,0.08), 0 10px 30px rgba(255,94,57,0.08)",
   },
   heroOverlay: {
     position: "absolute" as const,
     left: "-10%",
     right: "-10%",
     bottom: 0,
-    height: "75%",
-    background: "linear-gradient(180deg, rgba(9,9,11,1) 0%, rgba(9,9,11,0.6) 18%, rgba(9,9,11,0.1) 45%, rgba(9,9,11,0.35) 100%)",
+    height: "52%",
+    background: "linear-gradient(180deg, rgba(239,231,211,0.98) 0%, rgba(239,231,211,0.78) 16%, rgba(239,231,211,0.12) 46%, rgba(239,231,211,0) 100%)",
     pointerEvents: "none" as const,
     zIndex: 5,
   },
@@ -170,7 +183,7 @@ const s = {
     fontWeight: 600,
     textTransform: "uppercase" as const,
     letterSpacing: "0.3em",
-    color: "#a855f7",
+    color: palette.portlandOrange,
     marginBottom: 20,
   },
   h1: {
@@ -178,7 +191,7 @@ const s = {
     fontWeight: 800,
     lineHeight: 0.92,
     letterSpacing: "-0.04em",
-    background: "linear-gradient(180deg, #ffffff 0%, #a1a1aa 100%)",
+    background: "linear-gradient(180deg, #1A0089 0%, #2510A0 100%)",
     WebkitBackgroundClip: "text",
     WebkitTextFillColor: "transparent",
     margin: 0,
@@ -186,7 +199,7 @@ const s = {
   heroSub: {
     fontSize: "clamp(15px, 1.8vw, 18px)",
     lineHeight: 1.65,
-    color: "rgba(255,255,255,0.6)",
+    color: "rgba(26,0,137,0.72)",
     marginTop: 24,
     maxWidth: 520,
     marginLeft: "auto",
@@ -205,14 +218,14 @@ const s = {
     gap: 8,
     fontSize: 15,
     fontWeight: 600,
-    color: "#09090b",
-    background: "linear-gradient(135deg, #ffffff, #e4e4e7)",
-    border: "1px solid rgba(255,255,255,0.6)",
+    color: palette.whiteChocolate,
+    background: "linear-gradient(135deg, #FF5E39, #FF7B54)",
+    border: "1px solid rgba(26,0,137,0.08)",
     borderRadius: 12,
     padding: "14px 32px",
     cursor: "pointer",
     textDecoration: "none",
-    boxShadow: "0 12px 40px rgba(255,255,255,0.15), 0 0 0 1px rgba(255,255,255,0.1)",
+    boxShadow: "0 12px 40px rgba(255,94,57,0.18), 0 0 0 1px rgba(255,94,57,0.12)",
     transition: "transform 0.2s, box-shadow 0.2s",
   },
   ctaSecondary: {
@@ -221,9 +234,9 @@ const s = {
     gap: 8,
     fontSize: 15,
     fontWeight: 500,
-    color: "#a1a1aa",
-    background: "transparent",
-    border: "1px solid rgba(255,255,255,0.1)",
+    color: palette.darkBlue,
+    background: "rgba(239,231,211,0.56)",
+    border: "1px solid rgba(183,207,79,0.4)",
     borderRadius: 12,
     padding: "14px 32px",
     cursor: "pointer",
@@ -232,7 +245,7 @@ const s = {
   },
   hint: {
     fontSize: 12,
-    color: "#3f3f46",
+    color: "rgba(26,0,137,0.42)",
     marginTop: 24,
     textAlign: "center" as const,
   },
@@ -243,8 +256,8 @@ const s = {
     justifyContent: "center",
     gap: 56,
     flexWrap: "wrap" as const,
-    marginTop: "auto",
-    paddingBottom: 80,
+    marginTop: 40,
+    paddingBottom: 0,
   },
   statItem: {
     textAlign: "center" as const,
@@ -252,14 +265,14 @@ const s = {
   statValue: {
     fontSize: 28,
     fontWeight: 700,
-    color: "#fff",
+    color: palette.darkBlue,
     letterSpacing: "-0.02em",
   },
   statLabel: {
     fontSize: 11,
     textTransform: "uppercase" as const,
     letterSpacing: "0.15em",
-    color: "rgba(255,255,255,0.7)",
+    color: "rgba(255,94,57,0.82)",
     marginTop: 4,
   },
   section: {
@@ -271,7 +284,7 @@ const s = {
   },
   paperBg: {
     position: "relative" as const,
-    background: "linear-gradient(180deg, #0c0c0f 0%, #131318 20%, #111116 50%, #0f0f13 80%, #09090b 100%)",
+    background: "linear-gradient(180deg, #EFE7D3 0%, #F4EEDF 26%, #ECE4D0 58%, #E6DCC7 100%)",
     overflow: "hidden" as const,
   },
   sectionEyebrow: {
@@ -279,7 +292,7 @@ const s = {
     fontWeight: 600,
     textTransform: "uppercase" as const,
     letterSpacing: "0.3em",
-    color: "#a855f7",
+    color: palette.portlandOrange,
     textAlign: "center" as const,
   },
   sectionTitle: {
@@ -288,7 +301,7 @@ const s = {
     letterSpacing: "-0.03em",
     textAlign: "center" as const,
     marginTop: 12,
-    color: "#f4f4f5",
+    color: palette.darkBlue,
   },
   grid: {
     display: "grid",
@@ -300,8 +313,8 @@ const s = {
     position: "relative" as const,
     padding: "28px 28px 24px",
     borderRadius: 16,
-    border: `1px solid rgba(255,255,255,0.08)`,
-    background: "rgba(255, 255, 255, 0.03)",
+    border: `1px solid ${color}55`,
+    background: "rgba(255,255,255,0.34)",
     backdropFilter: "blur(16px)",
     WebkitBackdropFilter: "blur(16px)",
     overflow: "hidden",
@@ -315,7 +328,7 @@ const s = {
     height: 140,
     borderRadius: "50%",
     background: color,
-    opacity: 0.06,
+    opacity: 0.08,
     filter: "blur(50px)",
     pointerEvents: "none" as const,
   }),
@@ -328,13 +341,13 @@ const s = {
   cardTitle: {
     fontSize: 17,
     fontWeight: 700,
-    color: "#f4f4f5",
+    color: palette.darkBlue,
     marginBottom: 8,
   },
   cardDesc: {
     fontSize: 14,
     lineHeight: 1.6,
-    color: "#71717a",
+    color: "rgba(26,0,137,0.72)",
   },
   downloadSection: {
     textAlign: "center" as const,
@@ -348,37 +361,37 @@ const s = {
     fontSize: "clamp(28px, 4vw, 44px)",
     fontWeight: 800,
     letterSpacing: "-0.03em",
-    background: "linear-gradient(135deg, #a855f7, #ec4899)",
+    background: "linear-gradient(135deg, #1A0089, #2510A0)",
     WebkitBackgroundClip: "text",
     WebkitTextFillColor: "transparent",
   },
   downloadSub: {
     fontSize: 15,
     lineHeight: 1.6,
-    color: "#71717a",
+    color: "rgba(26,0,137,0.72)",
     marginTop: 16,
   },
   downloadNote: {
     fontSize: 12,
-    color: "#3f3f46",
+    color: "rgba(26,0,137,0.5)",
     marginTop: 24,
   },
   footer: {
-    borderTop: "1px solid rgba(255,255,255,0.06)",
+    borderTop: "1px solid rgba(26,0,137,0.08)",
     padding: "24px 40px",
     textAlign: "center" as const,
     fontSize: 13,
-    color: "#3f3f46",
+    color: "rgba(26,0,137,0.5)",
   },
   footerLink: {
-    color: "#52525b",
+    color: palette.portlandOrange,
     textDecoration: "underline",
     transition: "color 0.2s",
   },
   divider: {
     width: "100%",
     height: 120,
-    background: "linear-gradient(180deg, #09090b 0%, #0d0d0f 100%)",
+    background: "linear-gradient(180deg, #F1EADB 0%, #ECE4D0 100%)",
   },
 };
 
@@ -436,7 +449,13 @@ export default function CortexLanding() {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    setMounted(true);
+    const frame = window.requestAnimationFrame(() => {
+      setMounted(true);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
   }, []);
 
   return (
@@ -461,12 +480,6 @@ export default function CortexLanding() {
 
       {/* ──── HERO ──── */}
       <section style={s.hero}>
-        {/* Terrain background — FULL VIEWPORT */}
-        <div style={s.terrainWrap}>
-          {mounted && <CortexTerrain />}
-        </div>
-        <div style={s.heroOverlay} />
-
         {/* Radial glow behind text */}
         <div style={{
           position: "absolute",
@@ -476,7 +489,7 @@ export default function CortexLanding() {
           width: 600,
           height: 400,
           borderRadius: "50%",
-          background: "radial-gradient(ellipse, rgba(168,85,247,0.12) 0%, transparent 70%)",
+          background: "radial-gradient(ellipse, rgba(255,94,57,0.14) 0%, rgba(183,207,79,0.1) 42%, transparent 72%)",
           filter: "blur(60px)",
           pointerEvents: "none",
           zIndex: 8,
@@ -517,6 +530,10 @@ export default function CortexLanding() {
             </div>
           ))}
         </div>
+
+        <div style={s.terrainWrap}>
+          {mounted && <CortexTerrain />}
+        </div>
       </section>
 
       {/* ──── FADE + PAPER SECTION ──── */}
@@ -529,23 +546,23 @@ export default function CortexLanding() {
         {/* Ambient gradient orbs — give glass something to blur */}
         <div style={{
           position: "absolute", top: "15%", left: "15%", width: 400, height: 400,
-          borderRadius: "50%", background: "radial-gradient(circle, rgba(168,85,247,0.07) 0%, transparent 70%)",
+          borderRadius: "50%", background: "radial-gradient(circle, rgba(255,94,57,0.08) 0%, transparent 70%)",
           filter: "blur(80px)", pointerEvents: "none", zIndex: 0,
         }} />
         <div style={{
           position: "absolute", top: "40%", right: "10%", width: 350, height: 350,
-          borderRadius: "50%", background: "radial-gradient(circle, rgba(6,182,212,0.05) 0%, transparent 70%)",
+          borderRadius: "50%", background: "radial-gradient(circle, rgba(183,207,79,0.1) 0%, transparent 70%)",
           filter: "blur(80px)", pointerEvents: "none", zIndex: 0,
         }} />
         <div style={{
           position: "absolute", bottom: "20%", left: "30%", width: 300, height: 300,
-          borderRadius: "50%", background: "radial-gradient(circle, rgba(236,72,153,0.04) 0%, transparent 70%)",
+          borderRadius: "50%", background: "radial-gradient(circle, rgba(26,0,137,0.06) 0%, transparent 70%)",
           filter: "blur(80px)", pointerEvents: "none", zIndex: 0,
         }} />
 
         {/* ──── FEATURES ──── */}
         <section style={s.section}>
-          <p style={s.sectionEyebrow}>What's inside</p>
+          <p style={s.sectionEyebrow}>What&apos;s inside</p>
           <h2 style={s.sectionTitle}>Built for the multi-agent era</h2>
         <div style={s.grid}>
           {features.map((f) => (
@@ -553,13 +570,13 @@ export default function CortexLanding() {
               key={f.title}
               style={s.card(f.color)}
               onMouseEnter={(e) => {
-                (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(255,255,255,0.14)";
-                (e.currentTarget as HTMLDivElement).style.background = "rgba(255, 255, 255, 0.05)";
+                (e.currentTarget as HTMLDivElement).style.borderColor = `${f.color}88`;
+                (e.currentTarget as HTMLDivElement).style.background = "rgba(255, 255, 255, 0.52)";
                 (e.currentTarget as HTMLDivElement).style.boxShadow = `0 20px 60px ${f.color}12, 0 0 40px ${f.color}08`;
               }}
               onMouseLeave={(e) => {
-                (e.currentTarget as HTMLDivElement).style.borderColor = "rgba(255,255,255,0.08)";
-                (e.currentTarget as HTMLDivElement).style.background = "rgba(255, 255, 255, 0.03)";
+                (e.currentTarget as HTMLDivElement).style.borderColor = `${f.color}55`;
+                (e.currentTarget as HTMLDivElement).style.background = "rgba(255, 255, 255, 0.34)";
                 (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
               }}
             >
@@ -580,7 +597,7 @@ export default function CortexLanding() {
           Zero config. One binary. Local-first forever.
         </p>
         <div style={{ ...s.ctaRow, marginTop: 32 }}>
-          <a href="#" style={{ ...s.ctaPrimary, padding: "16px 40px", fontSize: 16, color: "#09090b" }}>
+          <a href="#" style={{ ...s.ctaPrimary, padding: "16px 40px", fontSize: 16, color: palette.whiteChocolate }}>
             ⬇ Download for macOS
           </a>
         </div>

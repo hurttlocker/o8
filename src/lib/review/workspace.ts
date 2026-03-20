@@ -26,6 +26,16 @@ let _cachedChangedFiles: ReviewChangedFile[] | null = null;
 let _cachedChangedFilesAt = 0;
 const CHANGED_FILES_CACHE_TTL_MS = 30_000;
 
+// Full snapshot cache — prevents repeated git/gh spawns from mobile inbox and API routes
+const REVIEW_SNAPSHOT_TTL_MS = 20_000;
+let _reviewSnapshotCache: { snapshot: WorkflowReviewSnapshot; cachedAt: number } | null = null;
+let _reviewSnapshotInflight: Promise<WorkflowReviewSnapshot> | null = null;
+
+export function invalidateReviewSnapshotCache() {
+  _reviewSnapshotCache = null;
+  _reviewSnapshotInflight = null;
+}
+
 async function getCachedChangedFiles(): Promise<ReviewChangedFile[]> {
   const now = Date.now();
   if (_cachedChangedFiles && now - _cachedChangedFilesAt < CHANGED_FILES_CACHE_TTL_MS) {
@@ -544,7 +554,24 @@ export async function getReviewFileDetail(reviewPath: string): Promise<MobileRev
   throw new Error('Requested file is no longer part of the live review surface.');
 }
 
-export async function getWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapshot> {
+export async function getWorkspaceReviewSnapshot(options: { fresh?: boolean } = {}): Promise<WorkflowReviewSnapshot> {
+  const fresh = options.fresh ?? false;
+  const now = Date.now();
+  if (!fresh && _reviewSnapshotCache && now - _reviewSnapshotCache.cachedAt < REVIEW_SNAPSHOT_TTL_MS) {
+    return _reviewSnapshotCache.snapshot;
+  }
+  if (!fresh && _reviewSnapshotInflight) return _reviewSnapshotInflight;
+
+  _reviewSnapshotInflight = _fetchWorkspaceReviewSnapshot().then((snapshot) => {
+    _reviewSnapshotCache = { snapshot, cachedAt: Date.now() };
+    return snapshot;
+  }).finally(() => {
+    _reviewSnapshotInflight = null;
+  });
+  return _reviewSnapshotInflight;
+}
+
+async function _fetchWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapshot> {
   const warnings: string[] = [];
 
   const branchStatusRaw = await tryRunFile('git', ['status', '--branch', '--porcelain=v2']);

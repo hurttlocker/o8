@@ -142,6 +142,7 @@ export interface MobileActionAttachment {
 export interface MobileActionRequest {
   action: Extract<MobileControlActionKind, 'send' | 'steer' | 'stop' | 'approve' | 'deny' | 'pause' | 'resume' | 'watch' | 'resolve' | 'launch'>;
   sessionKey: string;
+  clientMutationId?: string;
   message?: string;
   attachments?: MobileActionAttachment[];
   runId?: string;
@@ -152,6 +153,7 @@ export interface MobileActionResponse {
   ok: boolean;
   action: MobileActionRequest['action'];
   sessionKey: string;
+  clientMutationId?: string;
   status: 'queued' | 'completed' | 'unavailable' | 'sent' | 'error';
   note: string;
   runId?: string;

@@ -11,11 +11,13 @@
  */
 
 import { useEffect, useRef, useCallback, useState } from 'react';
+import type { RealtimeEventEnvelope, RealtimeSubscription } from '@/lib/realtime/types';
 
 export type WsConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 // Callbacks the consumer provides
 export interface DesktopWsCallbacks {
+  onRealtimeEvent?: (event: RealtimeEventEnvelope) => void;
   onChatDelta?: (text: string, runId: string) => void;
   onChatDone?: (text: string, runId: string) => void;
   onChatError?: (error: string) => void;
@@ -74,6 +76,7 @@ export function useDesktopWebSocket(
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const disposedRef = useRef(false);
   const sessionKeyRef = useRef(sessionKey);
+  const realtimeSeqByStreamRef = useRef<Record<string, number>>({});
 
   // Stable callback refs
   const cbRef = useRef(callbacks);
@@ -82,20 +85,42 @@ export function useDesktopWebSocket(
   // Track session key
   useEffect(() => { sessionKeyRef.current = sessionKey; }, [sessionKey]);
 
+  const syncRealtimeSubscriptions = useCallback((key?: string) => {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    const subscriptions: RealtimeSubscription[] = [
+      {
+        stream: 'global',
+        since: realtimeSeqByStreamRef.current.global,
+      },
+    ];
+    if (key) {
+      const stream = `session:${key}` as const;
+      subscriptions.push({
+        stream,
+        since: realtimeSeqByStreamRef.current[stream],
+      });
+    }
+    wsRef.current.send(JSON.stringify({ type: 'realtime-subscribe', subscriptions }));
+  }, []);
+
   // Send session switch when key changes
   useEffect(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN && sessionKey) {
-      wsRef.current.send(JSON.stringify({ type: 'switch-session', sessionKey }));
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      if (sessionKey) {
+        wsRef.current.send(JSON.stringify({ type: 'switch-session', sessionKey }));
+      }
+      syncRealtimeSubscriptions(sessionKey);
     }
-  }, [sessionKey]);
+  }, [sessionKey, syncRealtimeSubscriptions]);
 
   // Imperative session switch
   const switchSession = useCallback((key: string) => {
     sessionKeyRef.current = key;
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'switch-session', sessionKey: key }));
+      syncRealtimeSubscriptions(key);
     }
-  }, []);
+  }, [syncRealtimeSubscriptions]);
 
   // Terminal commands
   const sendTerminalCreate = useCallback((cols: number, rows: number) => {
@@ -147,6 +172,19 @@ export function useDesktopWebSocket(
           if (eventType === 'connected') {
             setConnectionState('connected');
             backoffRef.current = INITIAL_BACKOFF;
+          }
+          break;
+
+        case 'realtime':
+          if (eventType === 'batch' && Array.isArray(data?.events)) {
+            const events = data.events as RealtimeEventEnvelope[];
+            for (const realtimeEvent of events) {
+              realtimeSeqByStreamRef.current[realtimeEvent.stream] = Math.max(
+                realtimeSeqByStreamRef.current[realtimeEvent.stream] ?? 0,
+                realtimeEvent.seq,
+              );
+              cbRef.current.onRealtimeEvent?.(realtimeEvent);
+            }
           }
           break;
 
@@ -228,6 +266,7 @@ export function useDesktopWebSocket(
         if (sessionKeyRef.current) {
           ws.send(JSON.stringify({ type: 'subscribe', sessionKey: sessionKeyRef.current }));
         }
+        syncRealtimeSubscriptions(sessionKeyRef.current);
         pingTimerRef.current = setInterval(() => {
           if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'ping' }));
@@ -262,7 +301,7 @@ export function useDesktopWebSocket(
       if (wsRef.current) wsRef.current.close();
       setConnectionState('disconnected');
     };
-  }, []);
+  }, [syncRealtimeSubscriptions]);
 
   return {
     connectionState,

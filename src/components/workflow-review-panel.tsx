@@ -58,12 +58,35 @@ async function readJson<T>(response: Response) {
   return payload as T;
 }
 
-export function WorkflowReviewPanel({ initialSnapshot }: { initialSnapshot?: WorkflowReviewSnapshot | null }) {
+export function WorkflowReviewPanel({
+  initialSnapshot,
+  controlled = false,
+  error: externalError = null,
+  onRefresh,
+}: {
+  initialSnapshot?: WorkflowReviewSnapshot | null;
+  controlled?: boolean;
+  error?: string | null;
+  onRefresh?: () => Promise<unknown> | unknown;
+}) {
   const [snapshot, setSnapshot] = useState<WorkflowReviewSnapshot | null>(initialSnapshot ?? null);
-  const [loading, setLoading] = useState(!initialSnapshot);
+  const [loading, setLoading] = useState(!initialSnapshot && !controlled);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
+    if (controlled) {
+      setLoading(true);
+      try {
+        await onRefresh?.();
+        setError(null);
+      } catch (nextError) {
+        setError(nextError instanceof Error ? nextError.message : 'Unable to refresh review surface');
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     setLoading(true);
     try {
       const response = await fetch('/api/review/workspace', {
@@ -77,9 +100,17 @@ export function WorkflowReviewPanel({ initialSnapshot }: { initialSnapshot?: Wor
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [controlled, onRefresh]);
 
   useEffect(() => {
+    if (!controlled) return;
+    setSnapshot(initialSnapshot ?? null);
+    setError(externalError ?? null);
+    setLoading(false);
+  }, [controlled, initialSnapshot, externalError]);
+
+  useEffect(() => {
+    if (controlled) return;
     let active = true;
 
     async function safeRefresh() {
@@ -96,7 +127,7 @@ export function WorkflowReviewPanel({ initialSnapshot }: { initialSnapshot?: Wor
       active = false;
       window.clearInterval(timer);
     };
-  }, [refresh]);
+  }, [controlled, refresh]);
 
   const warnings = snapshot?.warnings?.filter(Boolean) ?? [];
   const changedFiles = snapshot?.changedFiles ?? [];

@@ -2,7 +2,8 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { X, ChevronDown, FileCode, FilePlus, PenLine, Eye, Terminal } from 'lucide-react';
-import { useDesktopWebSocket, type DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
+import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
+import type { DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
 
 /* ── Terminal Handle (ref-based API for parent → terminal communication) ── */
 export interface TerminalHandle {
@@ -645,7 +646,7 @@ export function LiveOutput({
     },
   }), [sessionKey]);
 
-  const { isConnected: reviewWsConnected } = useDesktopWebSocket(undefined, wsCallbacks);
+  const { isConnected: reviewWsConnected } = useSharedDesktopWs(undefined, wsCallbacks);
 
   useEffect(() => {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;

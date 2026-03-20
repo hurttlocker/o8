@@ -93,9 +93,8 @@ export function useMobileScroll(state: MobileState, transcriptEntries: MobileTra
       pendingOwnedTurn,
       initialBottomPinBySessionRef,
       transcriptBottomRef,
-      stickToBottomRef,
     });
-  }, [pendingOwnedTurn, scrollMarker, selectedSessionKey, transcriptEntries, transcriptGroups, initialBottomPinBySessionRef, transcriptBottomRef, stickToBottomRef]);
+  }, [pendingOwnedTurn, scrollMarker, selectedSessionKey, transcriptEntries, transcriptGroups, initialBottomPinBySessionRef, transcriptBottomRef]);
 
   return {
     isWindowNearBottom,

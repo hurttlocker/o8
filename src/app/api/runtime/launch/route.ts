@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
+import { invalidateInboxCache } from '@/lib/mobile/openclaw';
+import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { launchRuntimeSurface, type RuntimeLaunchRequest } from '@/lib/runtime/actions';
 
 export const runtime = 'nodejs';
@@ -13,8 +16,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    const clientMutationId = payload?.clientMutationId?.trim() || `mutation-${Date.now()}`;
     const result = await launchRuntimeSurface({
       runtime: runtimeName,
+      clientMutationId,
       cwd: payload?.cwd ?? '',
       repoPath: payload?.repoPath,
       prompt: payload?.prompt ?? '',
@@ -24,12 +29,53 @@ export async function POST(request: NextRequest) {
       skipSetup: payload?.skipSetup,
     });
 
+    if (result.ok) {
+      invalidateCommandCenterSnapshotCaches();
+      invalidateInboxCache();
+    }
+    await publishRealtimeMutation({
+      mutation: {
+        mutationId: clientMutationId,
+        source: 'desktop',
+        action: 'launch',
+        runtime: result.runtime,
+        surfaceId: result.surfaceId,
+        sessionKey: result.surfaceId,
+        status: result.ok ? 'queued' : 'failed',
+        note: result.note,
+        createdAt: new Date().toISOString(),
+        settledAt: new Date().toISOString(),
+      },
+      refreshTargets: ['global', 'mobileInbox', 'sessionHistory'],
+      sessionKeys: result.surfaceId ? [result.surfaceId] : [],
+      fresh: true,
+    });
+
     return NextResponse.json(result, {
       headers: {
         'Cache-Control': 'no-store, max-age=0',
       },
     });
   } catch (error) {
+    const clientMutationId = payload?.clientMutationId?.trim() || `mutation-${Date.now()}`;
+    invalidateCommandCenterSnapshotCaches();
+    invalidateInboxCache();
+    await publishRealtimeMutation({
+      mutation: {
+        mutationId: clientMutationId,
+        source: 'desktop',
+        action: 'launch',
+        runtime: runtimeName ?? 'unknown',
+        surfaceId: payload?.cwd?.trim() || payload?.repoPath?.trim(),
+        sessionKey: payload?.cwd?.trim() || payload?.repoPath?.trim(),
+        status: 'failed',
+        note: error instanceof Error ? error.message : 'Unable to launch runtime session',
+        createdAt: new Date().toISOString(),
+        settledAt: new Date().toISOString(),
+      },
+      refreshTargets: ['global', 'mobileInbox'],
+      fresh: true,
+    });
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : 'Unable to launch runtime session',

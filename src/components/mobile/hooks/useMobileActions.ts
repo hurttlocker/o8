@@ -31,6 +31,8 @@ interface ActionDeps {
   loadOwnedReviewPacket: (sessionKey: string, force?: boolean) => Promise<RuntimeReviewPacket | null | undefined>;
   loadReviewFile: (reviewPath: string, force?: boolean) => Promise<MobileReviewFileResponse['file'] | undefined>;
   reviewFiles: RuntimeReviewPacket['changedFiles'];
+  sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
+  sendTerminalInput: (sessionName: string, data: string) => void;
 }
 
 function playSendClick() {
@@ -50,7 +52,15 @@ function playSendClick() {
 }
 
 export function useMobileActions(state: MobileState, deps: ActionDeps) {
-  const { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles } = deps;
+  const {
+    refreshInbox,
+    loadHistory,
+    loadOwnedReviewPacket,
+    loadReviewFile,
+    reviewFiles,
+    sendTerminalAttach,
+    sendTerminalInput,
+  } = deps;
   const {
     snapshot, selectedSessionKey, isChatSession, isOwnedCodexSession,
     selectedReviewPacket, reviewPacketBySession, reviewFileByPath,
@@ -59,6 +69,8 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
     setSelectedId, setActiveView, setSurfaceNote,
     setDraftBySession, setActionStateBySession, setActionNoteBySession,
     setDraftAttachmentsBySession, setPendingOwnedTurnBySession,
+    setRealtimeMutationsById, setPendingMutationIdBySession,
+    pendingMutationIdBySessionRef,
     setEnhancing, setPreEnhanceDraft,
     setControlsOpen, setPendingApprovals, setResolvedApprovals,
     setSurfaceRefreshing, setSelectedReviewFilePath,
@@ -68,8 +80,86 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
   } = state;
 
   const runAction = useCallback(async (payload: MobileActionRequest): Promise<MobileActionResponse | undefined> => {
-    return await runMobileAction({ payload, setActionStateBySession, setActionNoteBySession, refreshInbox, loadHistory, loadOwnedReviewPacket });
-  }, [setActionStateBySession, setActionNoteBySession, refreshInbox, loadHistory, loadOwnedReviewPacket]);
+    const clientMutationId = payload.clientMutationId
+      ?? (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `mutation-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+    if (payload.sessionKey) {
+      pendingMutationIdBySessionRef.current = {
+        ...pendingMutationIdBySessionRef.current,
+        [payload.sessionKey]: clientMutationId,
+      };
+      setPendingMutationIdBySession((current) => ({ ...current, [payload.sessionKey]: clientMutationId }));
+      setRealtimeMutationsById((current) => ({
+        ...current,
+        [clientMutationId]: {
+          mutationId: clientMutationId,
+          source: 'mobile',
+          action: payload.action,
+          status: 'pending',
+          sessionKey: payload.sessionKey,
+          surfaceId: payload.sessionKey,
+          createdAt: new Date().toISOString(),
+          optimistic: true,
+        },
+      }));
+    }
+    try {
+      return await runMobileAction({
+        payload: { ...payload, clientMutationId },
+        setActionStateBySession,
+        setActionNoteBySession,
+        refreshInbox,
+        loadHistory,
+        loadOwnedReviewPacket,
+      });
+    } catch (error) {
+      if (payload.sessionKey) {
+        if (pendingMutationIdBySessionRef.current[payload.sessionKey] === clientMutationId) {
+          const nextPending = { ...pendingMutationIdBySessionRef.current };
+          delete nextPending[payload.sessionKey];
+          pendingMutationIdBySessionRef.current = nextPending;
+        }
+        setPendingMutationIdBySession((current) => {
+          if (current[payload.sessionKey] !== clientMutationId) return current;
+          const next = { ...current };
+          delete next[payload.sessionKey];
+          return next;
+        });
+        setRealtimeMutationsById((current) => ({
+          ...current,
+          [clientMutationId]: {
+            ...(current[clientMutationId] ?? {
+              mutationId: clientMutationId,
+              source: 'mobile',
+              action: payload.action,
+              sessionKey: payload.sessionKey,
+              surfaceId: payload.sessionKey,
+              createdAt: new Date().toISOString(),
+            }),
+            status: 'failed',
+            note: error instanceof Error ? error.message : 'Mobile action failed before reconciliation.',
+            settledAt: new Date().toISOString(),
+          },
+        }));
+      }
+      throw error;
+    }
+  }, [pendingMutationIdBySessionRef, setPendingMutationIdBySession, setRealtimeMutationsById, setActionStateBySession, setActionNoteBySession, refreshInbox, loadHistory, loadOwnedReviewPacket]);
+
+  const relaySlashCommand = useCallback(async (sessionKey: string, commandText: string) => {
+    const session = snapshot.sessions.find((item) => item.sessionKey === sessionKey);
+    const supportsTerminalRelay = Boolean(
+      session?.tmuxSession && (session.runtime === 'codex' || session.runtime === 'claude-code'),
+    );
+    if (!supportsTerminalRelay || !session?.tmuxSession) {
+      return false;
+    }
+    sendTerminalAttach(session.tmuxSession, 120, 32);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    sendTerminalInput(session.tmuxSession, commandText);
+    return true;
+  }, [snapshot.sessions, sendTerminalAttach, sendTerminalInput]);
 
   const handleSteerSubmit = useCallback(async (sessionKey: string) => {
     const transcriptEntries = state.historyBySession[sessionKey] ?? [];
@@ -93,16 +183,18 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
       refreshInbox,
       loadHistory,
       playSendClick,
+      relaySlashCommand,
     });
-  }, [actionStateBySession, snapshot, draftBySession, draftAttachmentsBySession, state.historyBySession, lastAssistantCountRef, setWaitingForResponse, setHistoryBySession, setDraftBySession, setDraftAttachmentsBySession, setPreEnhanceDraft, setSurfaceNote, setActionNoteBySession, setSelectedId, runAction, refreshInbox, loadHistory]);
+  }, [actionStateBySession, snapshot, draftBySession, draftAttachmentsBySession, state.historyBySession, lastAssistantCountRef, setWaitingForResponse, setHistoryBySession, setDraftBySession, setDraftAttachmentsBySession, setPreEnhanceDraft, setSurfaceNote, setActionNoteBySession, setSelectedId, runAction, refreshInbox, loadHistory, relaySlashCommand]);
 
   const handleOwnedResumeSubmit = useCallback(async (sessionKey: string) => {
     await submitOwnedResumeTurn({
       sessionKey, actionStateBySession, draftBySession,
       setActionNoteBySession, setPendingOwnedTurnBySession,
       setDraftBySession, setSurfaceNote, runAction, playSendClick,
+      relaySlashCommand,
     });
-  }, [actionStateBySession, draftBySession, setActionNoteBySession, setPendingOwnedTurnBySession, setDraftBySession, setSurfaceNote, runAction]);
+  }, [actionStateBySession, draftBySession, setActionNoteBySession, setPendingOwnedTurnBySession, setDraftBySession, setSurfaceNote, runAction, relaySlashCommand]);
 
   const handleEnhancePrompt = useCallback(async () => {
     await enhancePromptDraft({ selectedSessionKey, enhancing, draftBySession, setEnhancing, setPreEnhanceDraft, setDraftBySession, setSurfaceNote });

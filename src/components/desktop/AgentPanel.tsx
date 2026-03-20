@@ -11,7 +11,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useDesktopWebSocket } from './hooks/useDesktopWebSocket';
+import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
 import { createPortal } from 'react-dom';
 import {
@@ -147,6 +147,36 @@ interface FileNode {
 }
 
 type Tab = 'activity' | 'issues' | 'prs' | 'files' | 'ci' | 'deploy';
+
+// ── Lightweight collection comparisons (replaces JSON.stringify deep compare) ──
+
+/** Compare two arrays by length + a scalar fingerprint per element. */
+function arraysMatchBy<T>(a: T[], b: T[], key: (item: T) => string | number): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (key(a[i]) !== key(b[i])) return false;
+  }
+  return true;
+}
+
+/** Fingerprint an AgentDetail by its most-volatile scalar fields. */
+function agentFp(a: AgentDetail): string {
+  return `${a.id}|${a.status}|${a.currentTask}|${a.lastEventAt}|${a.alerts}|${a.branch ?? ''}|${a.workspaceStatus ?? ''}|${a.lifecycleState ?? ''}`;
+}
+
+/** Fingerprint an EventEntry. */
+function eventFp(e: EventEntry): string {
+  return `${e.id}|${e.timestamp}`;
+}
+
+/** Two Sets are equal if same size and all members match. */
+function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
+  if (a.size !== b.size) return false;
+  for (const v of a) {
+    if (!b.has(v)) return false;
+  }
+  return true;
+}
 
 // ── Status colors ──
 
@@ -2396,7 +2426,7 @@ export const AgentPanel = memo(function AgentPanel({
     onReviewUpdate: () => { fetchNowRef.current(); setActivityRefreshKey(k => k + 1); },
   }), []);
 
-  const { isConnected: wsConnected } = useDesktopWebSocket(undefined, wsCallbacks);
+  const { isConnected: wsConnected } = useSharedDesktopWs(undefined, wsCallbacks);
 
   // Fetch agent inventory + workspace/PR data in single pass (prevents pop-in/out)
   useEffect(() => {
@@ -2414,7 +2444,8 @@ export const AgentPanel = memo(function AgentPanel({
         if (invRes?.ok) {
           const data = await invRes.json();
           newAgents = data.agents ?? [];
-          setEvents(prev => JSON.stringify(prev) === JSON.stringify(data.events ?? []) ? prev : (data.events ?? []));
+          const freshEvents: EventEntry[] = data.events ?? [];
+          setEvents(prev => arraysMatchBy(prev, freshEvents, eventFp) ? prev : freshEvents);
         }
 
         // Parse workspace data
@@ -2468,7 +2499,7 @@ export const AgentPanel = memo(function AgentPanel({
         });
 
         if (onAgentsUpdate) onAgentsUpdate(enriched);
-        setAgents(prev => JSON.stringify(prev) === JSON.stringify(enriched) ? prev : enriched);
+        setAgents(prev => arraysMatchBy(prev, enriched, agentFp) ? prev : enriched);
       } catch { /* silent */ }
     }
     // Debounced immediate fetch (WS events may fire rapidly)
@@ -2502,7 +2533,7 @@ export const AgentPanel = memo(function AgentPanel({
           const age = ageMatch ? ageMatch[1] : '';
           return { hash, message, age };
         });
-        setCommits(prev => JSON.stringify(prev) === JSON.stringify(parsed) ? prev : parsed);
+        setCommits(prev => arraysMatchBy(prev, parsed, c => c.hash) ? prev : parsed);
       } catch { /* silent */ }
     }
     void fetchCommits();
@@ -2510,37 +2541,27 @@ export const AgentPanel = memo(function AgentPanel({
     return () => clearInterval(id);
   }, []);
 
-  // Fetch GitHub issues (re-fetch when activeRepo changes)
+  // Fetch GitHub issues + PRs in a single effect (same dep + same cadence)
   useEffect(() => {
-    async function fetchIssues() {
-      try {
-        const repoParam = activeRepo ? `?repo=${encodeURIComponent(activeRepo)}` : '';
-        const res = await fetch(`/api/panel/issues${repoParam}`);
-        if (!res.ok) return;
-        const data = await res.json();
+    const repoParam = activeRepo ? `?repo=${encodeURIComponent(activeRepo)}` : '';
+    async function fetchGitHub() {
+      const [issuesRes, prsRes] = await Promise.all([
+        fetch(`/api/panel/issues${repoParam}`).catch(() => null),
+        fetch(`/api/panel/prs${repoParam}`).catch(() => null),
+      ]);
+      if (issuesRes?.ok) {
+        const data = await issuesRes.json();
         const fresh = data.issues ?? [];
-        setIssues(prev => JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh);
-      } catch { /* silent */ }
-    }
-    void fetchIssues();
-    const id = setInterval(fetchIssues, 60_000);
-    return () => clearInterval(id);
-  }, [activeRepo]);
-
-  // Fetch PRs (re-fetch when activeRepo changes)
-  useEffect(() => {
-    async function fetchPrs() {
-      try {
-        const repoParam = activeRepo ? `?repo=${encodeURIComponent(activeRepo)}` : '';
-        const res = await fetch(`/api/panel/prs${repoParam}`);
-        if (!res.ok) return;
-        const data = await res.json();
+        setIssues(prev => arraysMatchBy(prev, fresh, (i: GHIssue) => `${i.number}|${i.state ?? ''}`) ? prev : fresh);
+      }
+      if (prsRes?.ok) {
+        const data = await prsRes.json();
         const fresh = data.prs ?? [];
-        setPrs(prev => JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh);
-      } catch { /* silent */ }
+        setPrs(prev => arraysMatchBy(prev, fresh, (p: GHPullRequest) => `${p.number}|${p.state}|${p.additions}|${p.deletions}`) ? prev : fresh);
+      }
     }
-    void fetchPrs();
-    const id = setInterval(fetchPrs, 60_000);
+    void fetchGitHub();
+    const id = setInterval(fetchGitHub, 60_000);
     return () => clearInterval(id);
   }, [activeRepo]);
 
@@ -2571,13 +2592,9 @@ export const AgentPanel = memo(function AgentPanel({
         if (!res.ok) return;
         const data = await res.json();
         const freshTree = data.tree ?? [];
-        setFileTree(prev => JSON.stringify(prev) === JSON.stringify(freshTree) ? prev : freshTree);
+        setFileTree(prev => arraysMatchBy(prev, freshTree, (f: FileNode) => f.path) ? prev : freshTree);
         const freshChanged = new Set<string>(data.changedFiles ?? []);
-        setChangedFiles(prev => {
-          const prevArr = Array.from(prev).sort();
-          const newArr = Array.from(freshChanged).sort();
-          return JSON.stringify(prevArr) === JSON.stringify(newArr) ? prev : freshChanged;
-        });
+        setChangedFiles(prev => setsEqual(prev, freshChanged) ? prev : freshChanged);
       } catch { /* silent */ }
     }
     void fetchFiles();

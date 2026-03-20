@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
+import { invalidateInboxCache } from '@/lib/mobile/openclaw';
 import type { MobileActionRequest, MobileActionResponse } from '@/lib/mobile/types';
+import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { launchCodexFromMobile, performRuntimeAction } from '@/lib/runtime/actions';
 import { steerOpenClawSession } from '@/lib/openclaw/chat';
 import '@/lib/runtimes'; // Ensure runtimes are registered
@@ -7,6 +10,40 @@ import { getRuntime } from '@/lib/runtimes/registry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+function invalidateMutationCaches() {
+  invalidateCommandCenterSnapshotCaches();
+  invalidateInboxCache();
+}
+
+async function publishMobileMutation(
+  mutationId: string,
+  payload: {
+    action: string;
+    sessionKey?: string;
+    runtime?: string;
+    status: 'pending' | 'queued' | 'completed' | 'failed';
+    note: string;
+  },
+) {
+  await publishRealtimeMutation({
+    mutation: {
+      mutationId,
+      source: 'mobile',
+      action: payload.action,
+      runtime: payload.runtime,
+      surfaceId: payload.sessionKey,
+      sessionKey: payload.sessionKey,
+      status: payload.status,
+      note: payload.note,
+      createdAt: new Date().toISOString(),
+      settledAt: payload.status === 'pending' ? undefined : new Date().toISOString(),
+    },
+    refreshTargets: ['global', 'mobileInbox', ...(payload.sessionKey ? ['sessionHistory' as const] : [])],
+    sessionKeys: payload.sessionKey ? [payload.sessionKey] : [],
+    fresh: payload.status !== 'failed',
+  });
+}
 
 export async function POST(request: NextRequest) {
   const payload = (await request.json().catch(() => null)) as MobileActionRequest | null;
@@ -16,6 +53,8 @@ export async function POST(request: NextRequest) {
   if (!action || !sessionKey) {
     return NextResponse.json({ error: 'action and sessionKey are required' }, { status: 400 });
   }
+
+  const clientMutationId = payload?.clientMutationId?.trim() || `mutation-${Date.now()}`;
 
   try {
     const isOwnedCodex = sessionKey.startsWith('codex-owned:');
@@ -35,16 +74,33 @@ export async function POST(request: NextRequest) {
           ok: true,
           action: 'send',
           sessionKey,
+          clientMutationId,
           status: 'sent',
           note: `Message sent to ${sessionKey}`,
           runId: (result as Record<string, unknown>)?.runId as string | undefined,
         };
+        invalidateMutationCaches();
+        await publishMobileMutation(clientMutationId, {
+          action: 'send',
+          sessionKey,
+          runtime: 'openclaw',
+          status: 'queued',
+          note: response.note,
+        });
         return NextResponse.json(response, {
           headers: { 'Cache-Control': 'no-store, max-age=0' },
         });
       } catch (err) {
+        const note = err instanceof Error ? err.message : 'Send failed';
+        await publishMobileMutation(clientMutationId, {
+          action: 'send',
+          sessionKey,
+          runtime: 'openclaw',
+          status: 'failed',
+          note,
+        });
         return NextResponse.json(
-          { ok: false, action: 'send', sessionKey, status: 'error', note: err instanceof Error ? err.message : 'Send failed' },
+          { ok: false, action: 'send', sessionKey, clientMutationId, status: 'error', note },
           { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
         );
       }
@@ -64,9 +120,20 @@ export async function POST(request: NextRequest) {
         ok: result.ok,
         action,
         sessionKey: result.surfaceId ?? sessionKey,
+        clientMutationId,
         status: result.status,
         note: result.note,
       };
+      if (result.ok) {
+        invalidateMutationCaches();
+      }
+      await publishMobileMutation(clientMutationId, {
+        action,
+        sessionKey: response.sessionKey,
+        runtime: 'codex',
+        status: result.ok ? 'queued' : 'failed',
+        note: result.note,
+      });
       return NextResponse.json(response, {
         status: 200,
         headers: { 'Cache-Control': 'no-store, max-age=0' },
@@ -81,6 +148,7 @@ export async function POST(request: NextRequest) {
         const result = await performRuntimeAction({
           action: 'send_input',
           surfaceId: sessionKey,
+          clientMutationId,
           message,
           runId: payload?.runId,
         });
@@ -89,11 +157,22 @@ export async function POST(request: NextRequest) {
           ok: result.ok,
           action,
           sessionKey,
+          clientMutationId,
           status: result.status,
           note: result.note,
           runId: result.runId,
           aborted: result.aborted,
         };
+        if (result.ok) {
+          invalidateMutationCaches();
+        }
+        await publishMobileMutation(clientMutationId, {
+          action,
+          sessionKey,
+          runtime: 'codex',
+          status: result.ok ? (result.status === 'queued' ? 'queued' : 'completed') : 'failed',
+          note: result.note,
+        });
 
         return NextResponse.json(response, {
           status: result.status === 'unavailable' ? 501 : 200,
@@ -111,8 +190,18 @@ export async function POST(request: NextRequest) {
           );
         }
         const result = await ccRuntime.resume(sessionKey, message ?? '');
+        if (result.ok) {
+          invalidateMutationCaches();
+        }
+        await publishMobileMutation(clientMutationId, {
+          action,
+          sessionKey,
+          runtime: 'claude-code',
+          status: result.ok ? 'queued' : 'failed',
+          note: result.note,
+        });
         return NextResponse.json(
-          { ok: result.ok, action, sessionKey, status: result.ok ? 'sent' : 'error', note: result.note },
+          { ok: result.ok, action, sessionKey, clientMutationId, status: result.ok ? 'sent' : 'error', note: result.note },
           { status: result.ok ? 200 : 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
         );
       }
@@ -127,8 +216,18 @@ export async function POST(request: NextRequest) {
           );
         }
         const result = await codexRuntime.resume(sessionKey, message ?? '');
+        if (result.ok) {
+          invalidateMutationCaches();
+        }
+        await publishMobileMutation(clientMutationId, {
+          action,
+          sessionKey,
+          runtime: 'codex',
+          status: result.ok ? 'queued' : 'failed',
+          note: result.note,
+        });
         return NextResponse.json(
-          { ok: result.ok, action, sessionKey, status: result.ok ? 'sent' : 'error', note: result.note },
+          { ok: result.ok, action, sessionKey, clientMutationId, status: result.ok ? 'sent' : 'error', note: result.note },
           { status: result.ok ? 200 : 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
         );
       }
@@ -160,15 +259,27 @@ export async function POST(request: NextRequest) {
       const result = await performRuntimeAction({
         action,
         surfaceId: sessionKey,
+        clientMutationId,
       });
 
       const response: MobileActionResponse = {
         ok: result.ok,
         action,
         sessionKey,
+        clientMutationId,
         status: result.status,
         note: result.note,
       };
+      if (result.ok) {
+        invalidateMutationCaches();
+      }
+      await publishMobileMutation(clientMutationId, {
+        action,
+        sessionKey,
+        runtime: 'codex',
+        status: result.ok ? 'completed' : 'failed',
+        note: result.note,
+      });
 
       return NextResponse.json(response, {
         status: result.status === 'unavailable' ? 501 : 200,
@@ -197,6 +308,7 @@ export async function POST(request: NextRequest) {
     const result = await performRuntimeAction({
       action,
       surfaceId: sessionKey,
+      clientMutationId,
       message: payload?.message,
       attachments: payload?.attachments,
       runId: payload?.runId,
@@ -206,11 +318,22 @@ export async function POST(request: NextRequest) {
       ok: result.ok,
       action,
       sessionKey,
+      clientMutationId,
       status: result.status,
       note: result.note,
       runId: result.runId,
       aborted: result.aborted,
     };
+    if (result.ok) {
+      invalidateMutationCaches();
+    }
+    await publishMobileMutation(clientMutationId, {
+      action,
+      sessionKey,
+      runtime: sessionKey.startsWith('codex') ? 'codex' : 'openclaw',
+      status: result.ok ? (result.status === 'queued' ? 'queued' : 'completed') : 'failed',
+      note: result.note,
+    });
 
     return NextResponse.json(response, {
       status: result.status === 'unavailable' ? 501 : 200,
@@ -219,6 +342,12 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    await publishMobileMutation(clientMutationId, {
+      action,
+      sessionKey,
+      status: 'failed',
+      note: error instanceof Error ? error.message : 'Unable to perform mobile action',
+    });
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : 'Unable to perform mobile action',
