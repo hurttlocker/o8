@@ -1,8 +1,10 @@
 'use client';
 
-import { memo, useMemo } from 'react';
+import { memo, useMemo, lazy, Suspense } from 'react';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type { AgentSummary } from '@/lib/fleet/types';
+
+const DeployStatus = lazy(() => import('./DeployStatus'));
 
 interface FleetViewProps {
   snapshot: MobileInboxSnapshot;
@@ -438,6 +440,25 @@ export const FleetView = memo(function FleetView({
           </p>
         </div>
       )}
+
+      {/* Deployments section */}
+      <div style={{ marginTop: 24 }}>
+        <h2 style={{
+          fontSize: 17, fontWeight: 700, color: '#0a0a0a',
+          fontFamily: '-apple-system, system-ui, sans-serif',
+          letterSpacing: '-0.02em',
+          margin: '0 0 10px',
+        }}>
+          Deployments
+        </h2>
+        <Suspense fallback={
+          <div style={{ padding: 20, textAlign: 'center', color: '#8e8e93', fontSize: 13 }}>
+            Loading...
+          </div>
+        }>
+          <DeployStatus />
+        </Suspense>
+      </div>
 
       <style>{`
         @keyframes fleetPulse {
