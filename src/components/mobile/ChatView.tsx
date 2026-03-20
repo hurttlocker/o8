@@ -67,6 +67,7 @@ const MessageBubble = memo(function MessageBubble({
     const isSlashCommand = isSlashCommandText(entry.text);
     return (
       <div className={`remodex-user-turn-wrap${fadeClass}`}>
+        {hasMedia ? <MediaGrid media={entry.media ?? []} align="right" setExpandedMedia={setExpandedMedia} onScrollToLatestMessage={onScrollToLatestMessage} /> : null}
         {hasText ? (
           <div
             className="remodex-user-bubble"
@@ -95,7 +96,6 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           </div>
         ) : null}
-        {hasMedia ? <MediaGrid media={entry.media ?? []} align="right" setExpandedMedia={setExpandedMedia} onScrollToLatestMessage={onScrollToLatestMessage} /> : null}
         {showTimestamp ? <span className="remodex-turn-time">{entry.timestampLabel ?? 'now'}</span> : null}
       </div>
     );
@@ -125,8 +125,8 @@ const MessageBubble = memo(function MessageBubble({
           <span>{roleLabel(entry.role, agentName)}</span>
         </div>
       ) : null}
-      {hasText ? renderMessageBody(entry.text, `${entry.id}-assistant`) : null}
       {hasMedia ? <MediaGrid media={entry.media ?? []} align="left" setExpandedMedia={setExpandedMedia} onScrollToLatestMessage={onScrollToLatestMessage} /> : null}
+      {hasText ? renderMessageBody(entry.text, `${entry.id}-assistant`) : null}
       {isLatest && selectedReviewFile ? (
         <button type="button" className="remodex-inline-diff-thumb" onClick={onOpenDiff}>
           <div className="remodex-inline-diff-mini">
@@ -163,31 +163,23 @@ function MediaGrid({
   const files = media.filter(m => !isImageMedia(m));
   const imgCount = images.length;
 
-  // Telegram-style grid: columns based on image count
-  const gridCols = imgCount === 1 ? '1fr' : '1fr 1fr';
-
   return (
     <div style={{
-      display: 'flex', flexDirection: 'column', gap: 8,
+      display: 'flex', flexDirection: 'column', gap: 0,
       width: '100%',
-      ...(align === 'right' ? { alignItems: 'flex-end' } : {}),
     }}>
       {imgCount > 0 ? (
         <div style={{
           display: 'grid',
-          gridTemplateColumns: gridCols,
+          gridTemplateColumns: imgCount === 1 ? '1fr' : '1fr 1fr',
           gap: 2,
           borderRadius: 14,
           overflow: 'hidden',
-          width: imgCount === 1 ? '75%' : '100%',
-          ...(align === 'right' ? { marginLeft: 'auto' } : {}),
+          width: '100%',
+          marginBottom: 0,
         }}>
           {images.map((item, i) => {
-            // 3 images: first one spans full width
             const span = imgCount === 3 && i === 0;
-            // Single image: auto height; multiple: fixed 150px
-            const h = imgCount === 1 ? 'auto' : 150;
-            const maxH = imgCount === 1 ? 300 : undefined;
             return (
               <button
                 key={item.path}
@@ -210,9 +202,9 @@ function MediaGrid({
                   loading="lazy"
                   style={{
                     width: '100%',
-                    height: h,
-                    maxHeight: maxH,
-                    objectFit: imgCount === 1 ? 'contain' : 'cover',
+                    height: imgCount === 1 ? 'auto' : 160,
+                    maxHeight: imgCount === 1 ? 400 : undefined,
+                    objectFit: 'cover',
                     display: 'block',
                   }}
                 />
