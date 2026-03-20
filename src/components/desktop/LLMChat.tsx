@@ -1600,20 +1600,38 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
     abortRef.current = controller;
 
     try {
-      const res = await fetch('/api/v2/proxy/llm', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: model.id,
-          provider: model.provider,
-          messages: [
-            ...messages.map((m) => ({ role: m.role, content: m.content })),
-            { role: 'user', content: messageForModel },
-          ],
-          approvedTools: [...approvedToolsSet],
-        }),
-        signal: controller.signal,
+      const reqBody = JSON.stringify({
+        model: model.id,
+        provider: model.provider,
+        messages: [
+          ...messages.map((m) => ({ role: m.role, content: m.content })),
+          { role: 'user', content: messageForModel },
+        ],
+        approvedTools: [...approvedToolsSet],
       });
+
+      // Fetch with automatic retry on transient failures (dev server HMR, network blip)
+      let res: Response | null = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          res = await fetch('/api/v2/proxy/llm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: reqBody,
+            signal: controller.signal,
+          });
+          break; // Success — exit retry loop
+        } catch (fetchErr) {
+          if (attempt === 0 && !controller.signal.aborted) {
+            // First failure — wait 1s and retry (likely dev server recompiling)
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
+          }
+          throw fetchErr;
+        }
+      }
+
+      if (!res) throw new Error('Load failed');
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Request failed' }));
