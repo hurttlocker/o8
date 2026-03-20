@@ -530,9 +530,16 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
             toolCalls = result.toolCalls;
           }
 
-          // Send numbered sources
+          // Send numbered sources (deduplicated)
           if (allSources.length > 0) {
-            const numbered = allSources.map((s, i) => ({ ...s, index: i + 1 }));
+            const seen = new Set<string>();
+            const unique = allSources.filter(s => {
+              const key = `${s.title}|${s.url ?? ''}|${s.path ?? ''}`;
+              if (seen.has(key)) return false;
+              seen.add(key);
+              return true;
+            });
+            const numbered = unique.map((s, i) => ({ ...s, index: i + 1 }));
             enqueue(JSON.stringify({ type: 'sources', sources: numbered }));
           }
 
