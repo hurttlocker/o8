@@ -579,6 +579,15 @@ function MobileRemoteShellInner({
                 onOpenDiff={actions.openDiffViewer}
                 onScrollToLatestMessage={scrollToLatestMessage}
                 actionState={transcriptActionState}
+                onLoadMore={selectedSessionKey ? async () => {
+                  const { loadMoreHistory } = await import('./mobile/controller-sync');
+                  return loadMoreHistory({
+                    sessionKey: selectedSessionKey,
+                    historyBySession: state.historyBySession,
+                    setHistoryLoading: state.setHistoryLoading,
+                    setHistoryBySession: state.setHistoryBySession,
+                  });
+                } : undefined}
               />
               <ApprovalStack
                 pendingApprovals={pendingApprovals}

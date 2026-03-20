@@ -267,10 +267,14 @@ export function ChatView({
   setExpandedMedia,
   onOpenDiff,
   onScrollToLatestMessage,
+  onLoadMore,
+  hasMoreHistory = true,
 }: ChatViewProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
   const [hasNewMessages, setHasNewMessages] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [canLoadMore, setCanLoadMore] = useState(hasMoreHistory);
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
   const toggleExpanded = useCallback((id: string) => {
     setExpandedMessageId((prev) => prev === id ? null : id);
@@ -435,6 +439,40 @@ export function ChatView({
         key={selectedSession?.sessionKey ?? 'none'}
         style={{ animation: 'session-fade-in 0.2s ease-out' }}
       >
+        {/* Load earlier messages */}
+        {hasEntries && onLoadMore && canLoadMore ? (
+          <div style={{ textAlign: 'center', padding: '12px 0 4px' }}>
+            <button
+              type="button"
+              disabled={loadingMore}
+              onClick={async () => {
+                setLoadingMore(true);
+                const added = await onLoadMore();
+                if (added === 0) setCanLoadMore(false);
+                setLoadingMore(false);
+              }}
+              onTouchEnd={async (e) => {
+                e.preventDefault();
+                if (loadingMore) return;
+                setLoadingMore(true);
+                const added = await (onLoadMore?.() ?? Promise.resolve(0));
+                if (added === 0) setCanLoadMore(false);
+                setLoadingMore(false);
+              }}
+              style={{
+                padding: '8px 20px', borderRadius: 10, border: 'none',
+                background: 'rgba(0,122,255,0.06)',
+                color: '#007aff', fontSize: 13, fontWeight: 600,
+                cursor: loadingMore ? 'default' : 'pointer',
+                opacity: loadingMore ? 0.5 : 1,
+                WebkitTapHighlightColor: 'transparent',
+                touchAction: 'manipulation',
+              }}
+            >
+              {loadingMore ? 'Loading...' : 'Load earlier messages'}
+            </button>
+          </div>
+        ) : null}
         {hasEntries ? (
           <div style={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
             {virtualItems.map((virtualRow) => {
