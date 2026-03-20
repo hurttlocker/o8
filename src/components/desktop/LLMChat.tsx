@@ -738,6 +738,79 @@ function MessageBubble({ message, isLast, onRetry, onEdit }: MessageBubbleProps)
 }
 
 /** Streaming dots indicator */
+// ── Follow-up question generation ──
+
+async function generateFollowUps(
+  lastResponse: string,
+  model: { id: string; label: string; provider: string },
+  userQuestion: string,
+): Promise<string[]> {
+  try {
+    const res = await fetch('/api/v2/proxy/llm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: model.id,
+        provider: model.provider,
+        messages: [
+          {
+            role: 'system',
+            content: 'Generate exactly 3 brief follow-up questions the user might ask next based on this conversation. Return ONLY the questions, one per line, no numbering, no bullets, no quotes. Keep each under 60 characters. Be specific and insightful, not generic.',
+          },
+          {
+            role: 'user',
+            content: `User asked: "${userQuestion.slice(0, 200)}"\n\nAssistant responded: "${lastResponse.slice(0, 500)}"\n\nGenerate 3 follow-up questions:`,
+          },
+        ],
+      }),
+    });
+
+    if (!res.ok) return [];
+
+    // Parse the SSE stream
+    const reader = res.body?.getReader();
+    if (!reader) return [];
+    const decoder = new TextDecoder();
+    let content = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      for (const line of chunk.split('\n')) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') continue;
+          try {
+            const parsed = JSON.parse(data);
+            if (parsed.type === 'content') content += parsed.text;
+          } catch { /* ignore */ }
+        }
+      }
+    }
+
+    // Parse into individual questions
+    return content
+      .split('\n')
+      .map(l => l.replace(/^[\d\.\-\*\)]+\s*/, '').replace(/^["']|["']$/g, '').trim())
+      .filter(l => l.length > 5 && l.length < 100 && l.includes(' '))
+      .slice(0, 3);
+  } catch {
+    return [];
+  }
+}
+
+// ── Suggested prompts for empty state ──
+
+const SUGGESTED_PROMPTS = [
+  { icon: '💡', text: 'Explain this codebase architecture', description: 'Get a high-level overview of how the project is structured' },
+  { icon: '🔍', text: 'Find all TODO comments in the code', description: 'Search for technical debt and pending work' },
+  { icon: '📝', text: 'Write a README for this project', description: 'Generate documentation from the codebase' },
+  { icon: '🐛', text: 'Review the most recent changes', description: 'Analyze recent commits for potential issues' },
+  { icon: '🧪', text: 'Suggest tests for the auth module', description: 'Generate test cases for critical paths' },
+  { icon: '⚡', text: 'What could be optimized here?', description: 'Find performance improvements in the codebase' },
+];
+
 function StreamingIndicator() {
   return (
     <div style={{
@@ -778,6 +851,8 @@ export default function LLMChat({ tabId }: { tabId: string }) {
   const [filePickerIndex, setFilePickerIndex] = useState(0);
   const [attachedImages, setAttachedImages] = useState<{ name: string; dataUri: string }[]>([]);
   const [activeToolCalls, setActiveToolCalls] = useState<ToolCallInfo[]>([]);
+  const [followUps, setFollowUps] = useState<string[]>([]);
+  const [followUpsLoading, setFollowUpsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -976,6 +1051,7 @@ export default function LLMChat({ tabId }: { tabId: string }) {
     setInput('');
     setAttachedFiles([]);
     setAttachedImages([]);
+    setFollowUps([]);
     if (inputRef.current) inputRef.current.style.height = 'auto';
 
     // Build image markdown for model
@@ -1091,6 +1167,16 @@ export default function LLMChat({ tabId }: { tabId: string }) {
       };
       setMessages((prev) => [...prev, assistantMsg]);
       setStreamContent('');
+
+      // Generate follow-up suggestions (async, non-blocking)
+      if (fullContent.length > 20) {
+        setFollowUps([]);
+        setFollowUpsLoading(true);
+        generateFollowUps(fullContent, model, text).then(suggestions => {
+          setFollowUps(suggestions);
+          setFollowUpsLoading(false);
+        }).catch(() => setFollowUpsLoading(false));
+      }
     } catch (err) {
       if ((err as Error).name === 'AbortError') {
         // User cancelled
@@ -1206,7 +1292,7 @@ export default function LLMChat({ tabId }: { tabId: string }) {
         {messages.length > 0 && (
           <button
             type="button"
-            onClick={() => { setMessages([]); setStreamContent(''); }}
+            onClick={() => { setMessages([]); setStreamContent(''); setFollowUps([]); }}
             title="New conversation"
             style={{
               display: 'flex',
@@ -1245,7 +1331,7 @@ export default function LLMChat({ tabId }: { tabId: string }) {
           paddingRight: 24,
         }}
       >
-        {/* Empty state — centered, Claude Desktop style */}
+        {/* Empty state — beautiful onboarding */}
         {isEmpty && (
           <div style={{
             display: 'flex',
@@ -1253,25 +1339,103 @@ export default function LLMChat({ tabId }: { tabId: string }) {
             alignItems: 'center',
             justifyContent: 'center',
             height: '100%',
-            gap: 12,
-            opacity: 0.7,
+            gap: 32,
+            animation: 'llmFadeIn 400ms ease-out',
           }}>
-            <Sparkles size={32} style={{ color: '#cbd5e1' }} />
+            {/* Greeting */}
             <div style={{
-              fontSize: 18,
-              fontWeight: 500,
-              color: '#94a3b8',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 8,
             }}>
-              Start a conversation
+              <div style={{
+                width: 48,
+                height: 48,
+                borderRadius: 14,
+                background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 4px 16px rgba(59, 130, 246, 0.2)',
+              }}>
+                <Sparkles size={24} style={{ color: 'white' }} />
+              </div>
+              <div style={{
+                fontSize: 24,
+                fontWeight: 600,
+                color: '#0f172a',
+                letterSpacing: '-0.02em',
+              }}>
+                What can I help you build?
+              </div>
+              <div style={{
+                fontSize: 14,
+                color: '#94a3b8',
+                textAlign: 'center',
+                maxWidth: 400,
+                lineHeight: '1.5',
+              }}>
+                Chat with {model.label} — with full workspace context, file access, and code search built in.
+              </div>
             </div>
+
+            {/* Suggested prompts grid */}
             <div style={{
-              fontSize: 13,
-              color: '#cbd5e1',
-              textAlign: 'center',
-              maxWidth: 320,
-              lineHeight: '1.5',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, 1fr)',
+              gap: 10,
+              maxWidth: 560,
+              width: '100%',
             }}>
-              Chat directly with {model.label}. Your messages go straight to the model — no agent runtime needed.
+              {SUGGESTED_PROMPTS.map((prompt, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => {
+                    setInput(prompt.text);
+                    setTimeout(() => inputRef.current?.focus(), 50);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 10,
+                    paddingTop: 14,
+                    paddingBottom: 14,
+                    paddingLeft: 14,
+                    paddingRight: 14,
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 12,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 150ms ease',
+                    animation: `llmFadeIn 400ms ease-out ${100 + i * 50}ms both`,
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget).style.borderColor = '#3b82f6';
+                    (e.currentTarget).style.background = '#f0f9ff';
+                    (e.currentTarget).style.transform = 'translateY(-1px)';
+                    (e.currentTarget).style.boxShadow = '0 2px 8px rgba(59, 130, 246, 0.08)';
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget).style.borderColor = '#e2e8f0';
+                    (e.currentTarget).style.background = '#f8fafc';
+                    (e.currentTarget).style.transform = 'translateY(0)';
+                    (e.currentTarget).style.boxShadow = 'none';
+                  }}
+                >
+                  <span style={{ fontSize: 18, lineHeight: '1', flexShrink: 0 }}>{prompt.icon}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1e293b', lineHeight: '1.3' }}>
+                      {prompt.text}
+                    </span>
+                    <span style={{ fontSize: 11, color: '#94a3b8', lineHeight: '1.4' }}>
+                      {prompt.description}
+                    </span>
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
         )}
@@ -1308,6 +1472,77 @@ export default function LLMChat({ tabId }: { tabId: string }) {
           ))}
 
           {/* Streaming response */}
+          {/* Follow-up suggestions */}
+          {!isStreaming && (followUps.length > 0 || followUpsLoading) && (
+            <div style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 8,
+              marginTop: 12,
+              animation: 'llmFadeIn 300ms ease-out',
+            }}>
+              {followUpsLoading ? (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  paddingTop: 8,
+                  paddingBottom: 8,
+                  paddingLeft: 12,
+                  paddingRight: 12,
+                  fontSize: 12,
+                  color: '#94a3b8',
+                }}>
+                  <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                  Thinking of follow-ups...
+                </div>
+              ) : followUps.map((q, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => {
+                    setInput(q);
+                    setFollowUps([]);
+                    setTimeout(() => {
+                      inputRef.current?.focus();
+                    }, 50);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    paddingTop: 8,
+                    paddingBottom: 8,
+                    paddingLeft: 12,
+                    paddingRight: 14,
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 20,
+                    fontSize: 12,
+                    color: '#475569',
+                    cursor: 'pointer',
+                    transition: 'all 150ms ease',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    animation: `llmFadeIn 300ms ease-out ${i * 80}ms both`,
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget).style.borderColor = '#3b82f6';
+                    (e.currentTarget).style.background = '#f0f9ff';
+                    (e.currentTarget).style.color = '#1e40af';
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget).style.borderColor = '#e2e8f0';
+                    (e.currentTarget).style.background = '#f8fafc';
+                    (e.currentTarget).style.color = '#475569';
+                  }}
+                >
+                  <Sparkles size={11} style={{ opacity: 0.5 }} />
+                  {q}
+                </button>
+              ))}
+            </div>
+          )}
+
           {isStreaming && (
             <div style={{
               display: 'flex',
