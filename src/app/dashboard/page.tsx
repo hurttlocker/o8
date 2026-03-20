@@ -25,6 +25,7 @@ import { IntentCanvas } from '@/components/desktop/IntentCanvas';
 import { SettingsPage } from '@/components/desktop/SettingsPage';
 import { AnalyticsPage } from '@/components/desktop/AnalyticsPage';
 import { ThoughtsCard } from '@/components/desktop/ThoughtsCard';
+import type { DesktopChatInjectionPayload } from '@/lib/chat/injection';
 import {
   formatPreviewSelectionContext,
   type PreviewSelectionPayload,
@@ -282,10 +283,22 @@ function DashboardInner() {
   }, []);
 
   const handlePreviewSelection = useCallback((selection: PreviewSelectionPayload) => {
+    const payload: DesktopChatInjectionPayload = {
+      reason: 'preview',
+      text: formatPreviewSelectionContext(selection),
+    };
     setChatVisible(true);
     setDraftInjection({
-      id: `preview-${Date.now()}`,
-      text: formatPreviewSelectionContext(selection),
+      id: `${payload.reason}-${Date.now()}`,
+      text: payload.text,
+    });
+  }, []);
+
+  const handleDesktopChatInjection = useCallback((payload: DesktopChatInjectionPayload) => {
+    setChatVisible(true);
+    setDraftInjection({
+      id: `${payload.reason}-${Date.now()}`,
+      text: payload.text,
     });
   }, []);
 
@@ -642,6 +655,7 @@ function DashboardInner() {
               activeTabId={activeCanvasTabId}
               onSelectTab={setActiveCanvasTabId}
               onCloseTab={closeCanvasTab}
+              onInjectChatContext={handleDesktopChatInjection}
               onSelectCommit={handleSelectCommit}
             />
           </div>
@@ -747,7 +761,12 @@ function DashboardInner() {
       </div>{/* end main layout */}
 
       {/* ── Thoughts Card (floating overlay — sits on top of everything) ── */}
-      <ThoughtsCard open={thoughtsOpen} onClose={() => setThoughtsOpen(false)} agents={JSON.parse(agentsJson)} />
+      <ThoughtsCard
+        open={thoughtsOpen}
+        onClose={() => setThoughtsOpen(false)}
+        agents={JSON.parse(agentsJson)}
+        draftInjection={draftInjection}
+      />
     </div>
   );
 }

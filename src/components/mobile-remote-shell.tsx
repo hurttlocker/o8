@@ -324,6 +324,8 @@ function MobileRemoteShellInner({
     check();
     return () => window.removeEventListener('scroll', check);
   }, []);
+  // Dock hides during scroll — but via CSS transition, not per-frame recalc
+  // Only toggle 0/1 — the CSS transition handles interpolation
   const dockMotionProgress = !isComposerPrimed && isScrolling ? 1 : 0;
   const dockFadeProgress = dockMotionProgress;
   const ownedAvailability = selectedSession?.runtimeSurface?.lifecycle?.availability;
@@ -377,8 +379,6 @@ function MobileRemoteShellInner({
 
   const shellStyle = {
     '--remodex-header-progress': headerProgress.toFixed(3),
-    '--remodex-dock-fade-progress': dockFadeProgress.toFixed(3),
-    '--remodex-dock-motion-progress': dockMotionProgress.toFixed(3),
     '--remodex-compose-active': isComposerPrimed ? '1' : '0',
     '--remodex-viewport-top-offset': `${viewportTopOffset}px`,
     '--remodex-compose-height': `${composeHeight}px`,
@@ -648,7 +648,7 @@ function MobileRemoteShellInner({
         </div>
         </PageTransition>
         </PullToRefresh>
-        <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
+        <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'} data-scrolling={isScrolling && !isComposerPrimed ? 'true' : 'false'}>
           {!terminalActive && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' && activeView !== 'issues' ? (
             <div className="remodex-compose-shell">
               {/* Cross-agent awareness — whisper-thin, barely there */}
