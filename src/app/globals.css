@@ -3319,7 +3319,8 @@ button.workflow-file-item.workflow-file-item-active {
 
 .remodex-compose-input {
   width: 100%;
-  min-height: calc(38px + (var(--remodex-compose-active) * 20px));
+  min-height: 24px;
+  max-height: 160px;
   border: 0;
   outline: none;
   resize: none;
@@ -3328,7 +3329,8 @@ button.workflow-file-item.workflow-file-item-active {
   font: inherit;
   font-size: 0.95rem;
   line-height: 1.35;
-  transition: min-height 220ms ease;
+  overflow-y: auto;
+  transition: none;
 }
 
 .remodex-compose-input::placeholder {
