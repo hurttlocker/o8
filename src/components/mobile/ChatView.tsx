@@ -19,35 +19,36 @@ import { isSlashCommandText } from '@/lib/slash-commands';
 
 interface MessageBubbleProps {
   entry: ChatViewProps['transcriptEntries'][number];
-  index: number;
   previousEntry: ChatViewProps['transcriptEntries'][number] | null;
   isLatest: boolean;
   isNewMessage: boolean;
+  isExpanded: boolean;
   isOwnedCodexSession: boolean;
   selectedSession: ChatViewProps['selectedSession'];
   selectedReviewFile: ChatViewProps['selectedReviewFile'];
   renderMessageBody: ChatViewProps['renderMessageBody'];
   setExpandedMedia: ChatViewProps['setExpandedMedia'];
   onOpenDiff: ChatViewProps['onOpenDiff'];
-  onScrollToLatestMessage: ChatViewProps['onScrollToLatestMessage'];
-  expandedMessageId: string | null;
   onToggleExpanded: (id: string) => void;
+}
+
+function shouldIgnoreToggleTarget(target: EventTarget | null) {
+  return target instanceof HTMLElement
+    && Boolean(target.closest('a, button, code, pre, input, textarea'));
 }
 
 const MessageBubble = memo(function MessageBubble({
   entry,
-  index,
   previousEntry,
   isLatest,
   isNewMessage,
+  isExpanded,
   isOwnedCodexSession,
   selectedSession,
   selectedReviewFile,
   renderMessageBody,
   setExpandedMedia,
   onOpenDiff,
-  onScrollToLatestMessage,
-  expandedMessageId,
   onToggleExpanded,
 }: MessageBubbleProps) {
   const isUser = entry.role === 'user';
@@ -67,7 +68,7 @@ const MessageBubble = memo(function MessageBubble({
     const isSlashCommand = isSlashCommandText(entry.text);
     return (
       <div className={`remodex-user-turn-wrap${fadeClass}`}>
-        {hasMedia ? <MediaGrid media={entry.media ?? []} align="right" setExpandedMedia={setExpandedMedia} onScrollToLatestMessage={onScrollToLatestMessage} /> : null}
+        {hasMedia ? <MediaGrid media={entry.media ?? []} setExpandedMedia={setExpandedMedia} /> : null}
         {hasText ? (
           <div
             className="remodex-user-bubble"
@@ -119,17 +120,20 @@ const MessageBubble = memo(function MessageBubble({
       className={`remodex-message-card remodex-message-card-assistant${fadeClass}`}
       role="button"
       tabIndex={0}
+      aria-expanded={isExpanded}
       onClick={(e) => {
-        // Don't toggle when tapping links, buttons, or code blocks
-        const tag = (e.target as HTMLElement).tagName;
-        if (tag === 'A' || tag === 'BUTTON' || tag === 'CODE' || tag === 'PRE') return;
+        if (shouldIgnoreToggleTarget(e.target)) return;
         onToggleExpanded(entry.id);
       }}
       onTouchEnd={(e) => {
-        const tag = (e.target as HTMLElement).tagName;
-        if (tag === 'A' || tag === 'BUTTON' || tag === 'CODE' || tag === 'PRE') return;
+        if (shouldIgnoreToggleTarget(e.target)) return;
         onToggleExpanded(entry.id);
         e.preventDefault();
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        onToggleExpanded(entry.id);
       }}
       style={{ cursor: 'pointer', WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation' }}
     >
@@ -138,7 +142,7 @@ const MessageBubble = memo(function MessageBubble({
           <span>{roleLabel(entry.role, agentName)}</span>
         </div>
       ) : null}
-      {hasMedia ? <MediaGrid media={entry.media ?? []} align="left" setExpandedMedia={setExpandedMedia} onScrollToLatestMessage={onScrollToLatestMessage} /> : null}
+      {hasMedia ? <MediaGrid media={entry.media ?? []} setExpandedMedia={setExpandedMedia} /> : null}
       {hasText ? renderMessageBody(entry.text, `${entry.id}-assistant`) : null}
       {isLatest && selectedReviewFile ? (
         <button type="button" className="remodex-inline-diff-thumb" onClick={onOpenDiff}>
@@ -153,7 +157,7 @@ const MessageBubble = memo(function MessageBubble({
         </button>
       ) : null}
       {hasText ? (
-        <MessageActions messageId={entry.id} messageText={entry.text} visible={expandedMessageId === entry.id} />
+        <MessageActions messageId={entry.id} messageText={entry.text} visible={isExpanded} />
       ) : null}
     </article>
   );
@@ -163,14 +167,10 @@ const MessageBubble = memo(function MessageBubble({
 
 function MediaGrid({
   media,
-  align,
   setExpandedMedia,
-  onScrollToLatestMessage,
 }: {
   media: MobileTranscriptMedia[];
-  align: 'left' | 'right';
   setExpandedMedia: (media: MobileTranscriptMedia | null) => void;
-  onScrollToLatestMessage: () => void;
 }) {
   const images = media.filter(isImageMedia);
   const files = media.filter(m => !isImageMedia(m));
@@ -325,24 +325,63 @@ export function ChatView({
     // Use the larger of char-based or line-based estimate
     const charEstimate = Math.ceil(textLen / 45) * 22;
     return Math.max(80, 64 + Math.max(charEstimate, lineHeight) + codeExtra + (hasMedia ? 240 : 0));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Track scrollMargin via state to avoid render-time ref access (#195).
   const [scrollMargin, setScrollMargin] = useState(0);
+  /* eslint-disable react-hooks/set-state-in-effect -- resetting local UI state when the virtualized transcript is replaced */
   useEffect(() => {
     if (listRef.current) setScrollMargin(listRef.current.offsetTop);
   }, [transcriptEntries.length]); // re-measure when list size changes
 
+  const getItemKey = useCallback((index: number) => transcriptRef.current[index]?.id ?? `row-${index}`, []);
   const virtualizer = useWindowVirtualizer({
     count: transcriptEntries.length,
     estimateSize,
-    overscan: 8,
+    getItemKey,
+    overscan: 6,
     scrollMargin,
   });
+
+  const transcriptIds = useMemo(
+    () => transcriptEntries.map((entry) => entry.id),
+    [transcriptEntries],
+  );
+  const previousVirtualStateRef = useRef<{ sessionKey?: string; ids: string[] }>({
+    sessionKey: selectedSession?.sessionKey,
+    ids: transcriptIds,
+  });
+
+  useEffect(() => {
+    const previous = previousVirtualStateRef.current;
+    const sessionChanged = previous.sessionKey !== selectedSession?.sessionKey;
+    const appendedOnly = (
+      !sessionChanged
+      && transcriptIds.length >= previous.ids.length
+      && previous.ids.every((id, index) => transcriptIds[index] === id)
+    );
+    const idsChanged = (
+      transcriptIds.length !== previous.ids.length
+      || transcriptIds.some((id, index) => previous.ids[index] !== id)
+    );
+
+    if (sessionChanged || (idsChanged && !appendedOnly)) {
+      virtualizer.measure();
+      setExpandedMessageId(null);
+      setHasNewMessages(false);
+    }
+
+    previousVirtualStateRef.current = {
+      sessionKey: selectedSession?.sessionKey,
+      ids: transcriptIds,
+    };
+  }, [selectedSession?.sessionKey, transcriptIds, virtualizer]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // No auto-scroll — user controls position via "new messages" button.
   // Only scroll to bottom on initial load (first non-zero entry set).
   const initialScrollDone = useRef(false);
+  /* eslint-disable react-hooks/set-state-in-effect -- local badge state depends on transcript append events */
   useEffect(() => {
     if (initialScrollDone.current || transcriptEntries.length === 0) return;
     initialScrollDone.current = true;
@@ -374,6 +413,7 @@ export function ChatView({
       }
     }
   }, [transcriptEntries]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const hasEntries = transcriptEntries.length > 0;
   const virtualItems = virtualizer.getVirtualItems();
@@ -418,18 +458,16 @@ export function ChatView({
                 >
                   <MessageBubble
                     entry={entry}
-                    index={virtualRow.index}
                     previousEntry={previousEntry}
                     isLatest={isLatest}
                     isNewMessage={isNew}
+                    isExpanded={expandedMessageId === entry.id}
                     isOwnedCodexSession={isOwnedCodexSession}
                     selectedSession={selectedSession}
                     selectedReviewFile={selectedReviewFile}
                     renderMessageBody={renderMessageBody}
                     setExpandedMedia={setExpandedMedia}
                     onOpenDiff={onOpenDiff}
-                    onScrollToLatestMessage={onScrollToLatestMessage}
-                    expandedMessageId={expandedMessageId}
                     onToggleExpanded={toggleExpanded}
                   />
                 </div>
@@ -571,6 +609,7 @@ export function ChatView({
       {hasNewMessages ? (
         <button
           type="button"
+          aria-label="Jump to newest message"
           onClick={() => {
             setHasNewMessages(false);
             onScrollToLatestMessage(true);

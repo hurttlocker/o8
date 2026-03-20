@@ -76,8 +76,6 @@ export const MessageActions = memo(function MessageActions({
 
   const retryIcon = <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>;
 
-  const moreIcon = <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>;
-
   const btnStyle: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
@@ -108,27 +106,45 @@ export const MessageActions = memo(function MessageActions({
         pointerEvents: visible ? 'auto' : 'none',
       }}
     >
-      <button type="button" onClick={handlePlay} style={{
-        ...btnStyle,
-        color: playActive ? '#007aff' : '#8e8e93',
-      }}>
+      <button type="button" aria-label={playActive ? 'Pause spoken playback' : 'Play spoken playback'}
+        onClick={handlePlay}
+        onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handlePlay(); }}
+        style={{
+          ...btnStyle,
+          color: playActive ? '#007aff' : '#8e8e93',
+          touchAction: 'manipulation',
+        }}>
         {playIcon}
       </button>
 
-      <button type="button" onClick={() => void handleCopy()} style={{
-        ...btnStyle,
-        color: copied ? '#30d158' : '#8e8e93',
-      }}>
+      {playActive ? (
+        <button type="button" aria-label="Stop playback"
+          onClick={() => ttsEngine.stop()}
+          onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); ttsEngine.stop(); }}
+          style={{ ...btnStyle, color: '#ff3b30', touchAction: 'manipulation' }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+        </button>
+      ) : null}
+
+      <button type="button" aria-label={copied ? 'Copied message text' : 'Copy message text'}
+        onClick={() => void handleCopy()}
+        onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); void handleCopy(); }}
+        style={{
+          ...btnStyle,
+          color: copied ? '#30d158' : '#8e8e93',
+          touchAction: 'manipulation',
+        }}>
         {copyIcon}
       </button>
 
-      <button type="button" onClick={onRetry ?? (() => {})} style={btnStyle}>
-        {retryIcon}
-      </button>
-
-      <button type="button" style={btnStyle}>
-        {moreIcon}
-      </button>
+      {onRetry ? (
+        <button type="button" aria-label="Retry message"
+          onClick={onRetry}
+          onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); onRetry?.(); }}
+          style={{ ...btnStyle, touchAction: 'manipulation' }}>
+          {retryIcon}
+        </button>
+      ) : null}
     </div>
   );
 });
