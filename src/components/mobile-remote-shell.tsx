@@ -440,7 +440,14 @@ function MobileRemoteShellInner({
             />
           ) : null}
           {activeView === 'issues' ? (
-            <IssuesPage onBack={() => setActiveView('squad')} />
+            <IssuesPage
+              onBack={() => setActiveView('squad')}
+              onOpenPR={(repo, prNumber) => {
+                setPrReviewRepo(repo);
+                setPrReviewNumber(prNumber);
+                setPrReviewOpen(true);
+              }}
+            />
           ) : null}
           {activeView === 'activity' ? (
             <ActivityFeed

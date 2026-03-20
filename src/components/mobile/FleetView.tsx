@@ -1,10 +1,8 @@
 'use client';
 
-import { memo, useMemo, lazy, Suspense } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type { AgentSummary } from '@/lib/fleet/types';
-
-const DeployStatus = lazy(() => import('./DeployStatus'));
 
 interface FleetViewProps {
   snapshot: MobileInboxSnapshot;
@@ -196,6 +194,70 @@ function AgentCard({ agent, onSelect }: { agent: AgentSummary; onSelect: () => v
   );
 }
 
+function CollapsibleSection({ label, count, color, defaultOpen = true, children }: {
+  label: string; count: number; color: string; defaultOpen?: boolean; children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        onTouchEnd={(e) => { setOpen(!open); e.preventDefault(); }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          marginBottom: open ? 8 : 0,
+          padding: '6px 0',
+          border: 'none', background: 'transparent',
+          cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+          width: '100%', touchAction: 'manipulation',
+        }}
+      >
+        {label === 'Running' ? (
+          <span style={{
+            width: 6, height: 6, borderRadius: '50%',
+            background: color,
+            boxShadow: `0 0 6px ${color}60`,
+            animation: 'fleetPulse 2s ease-in-out infinite',
+          }} />
+        ) : null}
+        <span style={{
+          fontSize: 12, fontWeight: 700, color,
+          textTransform: 'uppercase', letterSpacing: '0.05em',
+        }}>
+          {label}
+        </span>
+        <span style={{
+          fontSize: 10, fontWeight: 700, color: '#8e8e93',
+          minWidth: 16, height: 16, borderRadius: 8, padding: '0 4px',
+          background: 'rgba(0,0,0,0.04)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          {count}
+        </span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+          stroke="#8e8e93" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          style={{
+            marginLeft: 'auto',
+            transition: 'transform 200ms ease',
+            transform: open ? 'rotate(180deg)' : 'rotate(0deg)',
+          }}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      <div style={{
+        maxHeight: open ? 2000 : 0,
+        opacity: open ? 1 : 0,
+        overflow: 'hidden',
+        transition: 'all 300ms cubic-bezier(0.32, 0.72, 0, 1)',
+        display: 'flex', flexDirection: 'column', gap: 8,
+      }}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
 export const FleetView = memo(function FleetView({
   snapshot,
   onAgentSelect,
@@ -340,76 +402,32 @@ export const FleetView = memo(function FleetView({
         ))}
       </div>
 
-      {/* Running agents */}
+      {/* Running agents — expanded by default */}
       {running.length > 0 && (
-        <section>
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            marginBottom: 8,
-          }}>
-            <span style={{
-              width: 6, height: 6, borderRadius: '50%',
-              background: '#34c759',
-              boxShadow: '0 0 6px rgba(52,199,89,0.4)',
-              animation: 'fleetPulse 2s ease-in-out infinite',
-            }} />
-            <span style={{
-              fontSize: 12, fontWeight: 700,
-              color: '#34c759',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-            }}>
-              Running
-            </span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {running.map((agent) => (
-              <AgentCard key={agent.id} agent={agent} onSelect={() => onAgentSelect(agent.sessionKey)} />
-            ))}
-          </div>
-        </section>
+        <CollapsibleSection label="Running" count={running.length} color="#34c759" defaultOpen>
+          {running.map((agent) => (
+            <AgentCard key={agent.id} agent={agent} onSelect={() => onAgentSelect(agent.sessionKey)} />
+          ))}
+        </CollapsibleSection>
       )}
 
-      {/* Idle agents */}
+      {/* Idle agents — collapsed by default */}
       {idle.length > 0 && (
-        <section>
-          <span style={{
-            display: 'block',
-            fontSize: 12, fontWeight: 700,
-            color: '#8e8e93',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            marginBottom: 8,
-          }}>
-            Idle
-          </span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {idle.map((agent) => (
-              <AgentCard key={agent.id} agent={agent} onSelect={() => onAgentSelect(agent.sessionKey)} />
-            ))}
-          </div>
-        </section>
+        <CollapsibleSection label="Idle" count={idle.length} color="#8e8e93" defaultOpen={false}>
+          {idle.map((agent) => (
+            <AgentCard key={agent.id} agent={agent} onSelect={() => onAgentSelect(agent.sessionKey)} />
+          ))}
+        </CollapsibleSection>
       )}
 
       {/* Done */}
+      {/* Done — collapsed by default */}
       {done.length > 0 && (
-        <section>
-          <span style={{
-            display: 'block',
-            fontSize: 12, fontWeight: 700,
-            color: '#007aff',
-            textTransform: 'uppercase',
-            letterSpacing: '0.05em',
-            marginBottom: 8,
-          }}>
-            Completed
-          </span>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {done.map((agent) => (
-              <AgentCard key={agent.id} agent={agent} onSelect={() => onAgentSelect(agent.sessionKey)} />
-            ))}
-          </div>
-        </section>
+        <CollapsibleSection label="Completed" count={done.length} color="#007aff" defaultOpen={false}>
+          {done.map((agent) => (
+            <AgentCard key={agent.id} agent={agent} onSelect={() => onAgentSelect(agent.sessionKey)} />
+          ))}
+        </CollapsibleSection>
       )}
 
       {/* Empty state */}
@@ -440,25 +458,6 @@ export const FleetView = memo(function FleetView({
           </p>
         </div>
       )}
-
-      {/* Deployments section */}
-      <div style={{ marginTop: 24 }}>
-        <h2 style={{
-          fontSize: 17, fontWeight: 700, color: '#0a0a0a',
-          fontFamily: '-apple-system, system-ui, sans-serif',
-          letterSpacing: '-0.02em',
-          margin: '0 0 10px',
-        }}>
-          Deployments
-        </h2>
-        <Suspense fallback={
-          <div style={{ padding: 20, textAlign: 'center', color: '#8e8e93', fontSize: 13 }}>
-            Loading...
-          </div>
-        }>
-          <DeployStatus />
-        </Suspense>
-      </div>
 
       <style>{`
         @keyframes fleetPulse {
