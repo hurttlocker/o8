@@ -651,9 +651,9 @@ function MobileRemoteShellInner({
         <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'}>
           {!terminalActive && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' && activeView !== 'issues' ? (
             <div className="remodex-compose-shell">
-              {/* Cross-agent awareness pill */}
+              {/* Cross-agent awareness — whisper-thin, barely there */}
               {runningAgentCount > 0 || totalAgentCount > 1 ? (
-                <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 1 }}>
                   <CrossAgentPill
                     runningCount={runningAgentCount}
                     totalCount={totalAgentCount}
