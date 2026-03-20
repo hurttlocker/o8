@@ -639,8 +639,13 @@ function DashboardInner() {
           </div>
         )}
 
-        {/* Terminal-first workspace — fills center column */}
-        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (
+        {/* Terminal-first workspace — always mounted to preserve tabs, hidden when other sections active */}
+        <div style={{
+          flex: 1,
+          display: (!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && activeNavSection !== 'analytics') ? 'flex' : 'none',
+          flexDirection: 'column',
+          minHeight: 0,
+        }}>
           <TerminalWorkspace
             ref={termWorkspaceRef}
             sendTerminalCreate={sendTerminalCreate}
@@ -651,7 +656,7 @@ function DashboardInner() {
             termWsConnected={termWsConnected}
             onPreviewSelection={handlePreviewSelection}
           />
-        )}
+        </div>
 
         {/* Canvas — only when tabs open, overlays below terminal */}
         {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && canvasTabs.length > 0 && bottomPanelVisible && (
