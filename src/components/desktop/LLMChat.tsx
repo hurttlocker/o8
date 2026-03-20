@@ -25,10 +25,12 @@ import {
   ThumbsUp,
   ThumbsDown,
   Volume2,
+  VolumeOff,
   RefreshCw,
   Pencil,
   Bookmark,
   MoreHorizontal,
+  Loader2,
 } from 'lucide-react';
 import { renderLLMMarkdown } from './LLMMarkdown';
 import { saveChatHistory, loadChatHistory } from '@/lib/llm/chat-history';
@@ -199,7 +201,6 @@ interface MessageBubbleProps {
   isLast: boolean;
   onRetry?: () => void;
   onEdit?: (content: string) => void;
-  onSpeak?: (content: string) => void;
 }
 
 const ACTION_BTN_STYLE: React.CSSProperties = {
@@ -251,12 +252,92 @@ function ActionButton({ icon, label, active, activeColor, onClick }: {
   );
 }
 
-function MessageBubble({ message, isLast, onRetry, onEdit, onSpeak }: MessageBubbleProps) {
+function MessageBubble({ message, isLast, onRetry, onEdit }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [liked, setLiked] = useState<'up' | 'down' | null>(null);
   const [bookmarked, setBookmarked] = useState(false);
   const [hovered, setHovered] = useState(false);
+  const [ttsState, setTtsState] = useState<'idle' | 'loading' | 'playing'>('idle');
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [ttsProgress, setTtsProgress] = useState(0);
   const isUser = message.role === 'user';
+
+  // Clean up audio on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleSpeak = useCallback(async () => {
+    if (ttsState === 'playing') {
+      // Stop
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      setTtsState('idle');
+      setTtsProgress(0);
+      return;
+    }
+
+    if (ttsState === 'loading') return;
+
+    setTtsState('loading');
+    try {
+      // Strip markdown formatting for cleaner speech
+      const cleanText = message.content
+        .replace(/```[\s\S]*?```/g, ' code block ')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/!\[[^\]]*\]\([^)]+\)/g, ' image ')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/[#*_~|>/]/g, '')
+        .replace(/\n{2,}/g, '. ')
+        .replace(/\n/g, ' ')
+        .trim();
+
+      const res = await fetch('/api/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: cleanText }),
+      });
+
+      if (!res.ok) throw new Error('TTS failed');
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+
+      audio.addEventListener('timeupdate', () => {
+        if (audio.duration > 0) {
+          setTtsProgress((audio.currentTime / audio.duration) * 100);
+        }
+      });
+
+      audio.addEventListener('ended', () => {
+        setTtsState('idle');
+        setTtsProgress(0);
+        URL.revokeObjectURL(url);
+        audioRef.current = null;
+      });
+
+      audio.addEventListener('error', () => {
+        setTtsState('idle');
+        setTtsProgress(0);
+        audioRef.current = null;
+      });
+
+      await audio.play();
+      setTtsState('playing');
+    } catch {
+      setTtsState('idle');
+      setTtsProgress(0);
+    }
+  }, [message.content, ttsState]);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(message.content);
@@ -322,6 +403,88 @@ function MessageBubble({ message, isLast, onRetry, onEdit, onSpeak }: MessageBub
         ) : renderLLMMarkdown(message.content)}
       </div>
 
+      {/* Audio progress bar — appears when TTS is loading or playing */}
+      {!isUser && ttsState !== 'idle' && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          paddingTop: 6,
+          paddingBottom: 2,
+          paddingLeft: 2,
+          maxWidth: '90%',
+          animation: 'llmFadeIn 200ms ease-out',
+        }}>
+          {/* Stop button */}
+          <button
+            type="button"
+            onClick={handleSpeak}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 32,
+              height: 32,
+              borderRadius: '50%',
+              border: 'none',
+              background: ttsState === 'playing' ? '#3b82f6' : '#e2e8f0',
+              color: ttsState === 'playing' ? 'white' : '#94a3b8',
+              cursor: 'pointer',
+              transition: 'all 200ms',
+              flexShrink: 0,
+            }}
+          >
+            {ttsState === 'loading' ? (
+              <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+            ) : (
+              <Square size={12} fill="currentColor" />
+            )}
+          </button>
+
+          {/* Progress bar */}
+          <div style={{
+            flex: 1,
+            height: 4,
+            background: '#e2e8f0',
+            borderRadius: 2,
+            overflow: 'hidden',
+            minWidth: 100,
+          }}>
+            {ttsState === 'loading' ? (
+              <div style={{
+                width: '30%',
+                height: '100%',
+                background: 'linear-gradient(90deg, #3b82f6, #60a5fa, #3b82f6)',
+                borderRadius: 2,
+                animation: 'ttsShimmer 1.5s ease-in-out infinite',
+              }} />
+            ) : (
+              <div style={{
+                width: `${ttsProgress}%`,
+                height: '100%',
+                background: '#3b82f6',
+                borderRadius: 2,
+                transition: 'width 100ms linear',
+              }} />
+            )}
+          </div>
+
+          {/* Waveform dots — animated when playing */}
+          {ttsState === 'playing' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 4 }}>
+              {[0, 1, 2, 3, 4].map(i => (
+                <div key={i} style={{
+                  width: 3,
+                  background: '#3b82f6',
+                  borderRadius: 1.5,
+                  animation: `ttsWave 0.8s ease-in-out ${i * 0.1}s infinite alternate`,
+                }} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Action bar — assistant messages */}
       {!isUser && message.content && (
         <div style={{
@@ -376,11 +539,17 @@ function MessageBubble({ message, isLast, onRetry, onEdit, onSpeak }: MessageBub
             onClick={handleCopy}
           />
 
-          {/* Read aloud */}
+          {/* Read aloud / Stop */}
           <ActionButton
-            icon={<Volume2 size={14} />}
-            label="Read aloud"
-            onClick={() => onSpeak?.(message.content)}
+            icon={
+              ttsState === 'loading' ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> :
+              ttsState === 'playing' ? <VolumeOff size={14} /> :
+              <Volume2 size={14} />
+            }
+            label={ttsState === 'playing' ? 'Stop' : ttsState === 'loading' ? 'Loading...' : 'Read aloud'}
+            active={ttsState === 'playing'}
+            activeColor="#3b82f6"
+            onClick={handleSpeak}
           />
 
           {/* Retry / Regenerate */}
@@ -856,6 +1025,18 @@ export default function LLMChat({ tabId }: { tabId: string }) {
           0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
           40% { opacity: 1; transform: scale(1); }
         }
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes ttsShimmer {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(400%); }
+        }
+        @keyframes ttsWave {
+          0% { height: 4px; }
+          100% { height: 16px; }
+        }
       `}</style>
 
       {/* Top bar — model picker */}
@@ -975,14 +1156,6 @@ export default function LLMChat({ tabId }: { tabId: string }) {
                 setInput(content);
                 setMessages(messages.slice(0, i));
                 inputRef.current?.focus();
-              } : undefined}
-              onSpeak={msg.role === 'assistant' ? (content) => {
-                // TTS: use SpeechSynthesis API
-                const utterance = new SpeechSynthesisUtterance(content.replace(/[#*`_~\[\]]/g, ''));
-                utterance.rate = 1;
-                utterance.pitch = 1;
-                speechSynthesis.cancel();
-                speechSynthesis.speak(utterance);
               } : undefined}
             />
           ))}
