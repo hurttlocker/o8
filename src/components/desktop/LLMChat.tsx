@@ -1268,6 +1268,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
     args: Record<string, unknown>;
     summary: string;
     editable?: boolean;
+    diff?: { before?: string; after?: string; path?: string };
   } | null>(null);
   const [editedCommand, setEditedCommand] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -1848,6 +1849,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
                   args: parsed.args,
                   summary: parsed.summary,
                   editable: parsed.editable ?? isTerminal,
+                  diff: parsed.diff,
                 });
                 if (isTerminal) {
                   setEditedCommand(String(parsed.args?.command || ''));
@@ -2805,10 +2807,10 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <span style={{ fontSize: 14 }}>
-              {pendingApproval.name === 'run_terminal_command' ? '⚡' : pendingApproval.name === 'create_github_issue' ? '📋' : '🔀'}
+              {pendingApproval.name === 'run_terminal_command' ? '⚡' : pendingApproval.name === 'write_file' || pendingApproval.name === 'edit_file' ? '✏️' : pendingApproval.name === 'delete_file' ? '🗑️' : pendingApproval.name === 'create_github_issue' ? '📋' : '🔀'}
             </span>
             <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>
-              {pendingApproval.name === 'run_terminal_command' ? 'Run Command?' : 'Approval Required'}
+              {pendingApproval.name === 'run_terminal_command' ? 'Run Command?' : pendingApproval.name === 'edit_file' ? 'Apply Edit?' : pendingApproval.name === 'write_file' ? 'Write File?' : pendingApproval.name === 'delete_file' ? 'Delete File?' : 'Approval Required'}
             </span>
             {pendingApproval.name === 'run_terminal_command' && (
               <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 400 }}>You can edit before running</span>
@@ -2866,7 +2868,75 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
               <div style={{ fontSize: 12, color: '#475569', marginBottom: 10, lineHeight: 1.5 }}>
                 {pendingApproval.summary}
               </div>
-              {pendingApproval.args && (
+
+              {/* Diff preview for file operations */}
+              {pendingApproval.diff ? (
+                <div style={{
+                  background: 'rgba(15,23,42,0.95)',
+                  borderRadius: 8,
+                  paddingTop: 8,
+                  paddingBottom: 8,
+                  paddingLeft: 0,
+                  paddingRight: 0,
+                  marginBottom: 10,
+                  fontSize: 11,
+                  fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+                  maxHeight: 200,
+                  overflowY: 'auto',
+                  overflowX: 'auto',
+                }}>
+                  {pendingApproval.diff.path && (
+                    <div style={{ paddingLeft: 10, paddingBottom: 6, color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.06)', marginBottom: 4 }}>
+                      {pendingApproval.diff.path}
+                    </div>
+                  )}
+                  {(() => {
+                    const before = (pendingApproval.diff?.before || '').split('\n');
+                    const after = (pendingApproval.diff?.after || '').split('\n');
+                    const isNewFile = !pendingApproval.diff?.before;
+                    const isEdit = pendingApproval.name === 'edit_file';
+
+                    if (isNewFile) {
+                      // New file — show all lines as additions
+                      return after.slice(0, 30).map((line, i) => (
+                        <div key={i} style={{ paddingTop: 1, paddingBottom: 1, paddingLeft: 10, paddingRight: 10, background: 'rgba(52,211,153,0.08)', color: '#6ee7b7' }}>
+                          <span style={{ color: '#34d399', marginRight: 8, userSelect: 'none' }}>+</span>{line}
+                        </div>
+                      ));
+                    }
+
+                    if (isEdit) {
+                      // Edit — show removed and added lines
+                      return (
+                        <>
+                          {before.map((line, i) => (
+                            <div key={`r${i}`} style={{ paddingTop: 1, paddingBottom: 1, paddingLeft: 10, paddingRight: 10, background: 'rgba(96,165,250,0.08)', color: '#93c5fd', textDecoration: 'line-through', opacity: 0.7 }}>
+                              <span style={{ color: '#60a5fa', marginRight: 8, userSelect: 'none' }}>−</span>{line}
+                            </div>
+                          ))}
+                          {after.map((line, i) => (
+                            <div key={`a${i}`} style={{ paddingTop: 1, paddingBottom: 1, paddingLeft: 10, paddingRight: 10, background: 'rgba(52,211,153,0.08)', color: '#6ee7b7' }}>
+                              <span style={{ color: '#34d399', marginRight: 8, userSelect: 'none' }}>+</span>{line}
+                            </div>
+                          ))}
+                        </>
+                      );
+                    }
+
+                    // Full file overwrite — simplified diff
+                    return after.slice(0, 30).map((line, i) => (
+                      <div key={i} style={{ paddingTop: 1, paddingBottom: 1, paddingLeft: 10, paddingRight: 10, color: '#e2e8f0' }}>
+                        {line}
+                      </div>
+                    ));
+                  })()}
+                  {(pendingApproval.diff?.after || '').split('\n').length > 30 && (
+                    <div style={{ paddingLeft: 10, paddingTop: 4, color: '#64748b', fontStyle: 'italic' }}>
+                      ... {(pendingApproval.diff?.after || '').split('\n').length - 30} more lines
+                    </div>
+                  )}
+                </div>
+              ) : pendingApproval.args && (pendingApproval.name === 'create_github_issue' || pendingApproval.name === 'create_pull_request' || pendingApproval.name === 'delete_file') ? (
                 <div style={{
                   background: 'rgba(255,255,255,0.6)',
                   borderRadius: 8,
@@ -2885,9 +2955,9 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
                     <>
                       <div><strong>Repo:</strong> {String(pendingApproval.args.repo)}</div>
                       <div><strong>Title:</strong> {String(pendingApproval.args.title)}</div>
-                      {pendingApproval.args.labels && (
+                      {pendingApproval.args.labels ? (
                         <div><strong>Labels:</strong> {(pendingApproval.args.labels as string[]).join(', ')}</div>
-                      )}
+                      ) : null}
                     </>
                   )}
                   {pendingApproval.name === 'create_pull_request' && (
@@ -2898,8 +2968,13 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
                       <div><strong>Base:</strong> {String(pendingApproval.args.baseBranch || 'main')}</div>
                     </>
                   )}
+                  {pendingApproval.name === 'delete_file' && (
+                    <div style={{ color: '#ef4444' }}>
+                      <strong>File:</strong> {String(pendingApproval.args.path)}
+                    </div>
+                  )}
                 </div>
-              )}
+              ) : null}
             </>
           )}
           <div style={{ display: 'flex', gap: 8 }}>

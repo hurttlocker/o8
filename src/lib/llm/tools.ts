@@ -9,8 +9,8 @@
  */
 
 import { execSync } from 'node:child_process';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkSync, mkdirSync } from 'node:fs';
+import { join, relative, dirname } from 'node:path';
 import { createGithubIssue, readGithubIssueOrPr, createPullRequest } from '@/lib/github/tools';
 
 const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
@@ -116,6 +116,42 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: 'write_file',
+    description: 'Create a new file or overwrite an existing file in the workspace. REQUIRES USER APPROVAL with full content preview. Use when creating new files, writing configs, generating code, or overwriting content.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Relative file path from repo root (e.g. "src/utils/helpers.ts")' },
+        content: { type: 'string', description: 'Full file content to write' },
+      },
+      required: ['path', 'content'],
+    },
+  },
+  {
+    name: 'edit_file',
+    description: 'Make a surgical edit to an existing file by replacing exact text. REQUIRES USER APPROVAL with diff preview showing exactly what changes. Use for modifying code, fixing bugs, updating configs — any targeted change.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Relative file path from repo root' },
+        oldText: { type: 'string', description: 'Exact text to find and replace (must match exactly including whitespace)' },
+        newText: { type: 'string', description: 'New text to replace it with' },
+      },
+      required: ['path', 'oldText', 'newText'],
+    },
+  },
+  {
+    name: 'delete_file',
+    description: 'Delete a file from the workspace. REQUIRES USER APPROVAL. Use only when explicitly asked to remove a file.',
+    parameters: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: 'Relative file path from repo root' },
+      },
+      required: ['path'],
+    },
+  },
+  {
     name: 'run_terminal_command',
     description: 'Execute a shell command in the workspace and return the output. Safe read-only commands run automatically. Write/mutation commands REQUIRE USER APPROVAL. Dangerous commands are blocked. Use for running tests, checking git status, building, installing packages, or any CLI task.',
     parameters: {
@@ -133,6 +169,9 @@ export const TOOLS: ToolDef[] = [
 export const APPROVAL_REQUIRED_TOOLS = new Set([
   'create_github_issue',
   'create_pull_request',
+  'write_file',
+  'edit_file',
+  'delete_file',
   // run_terminal_command uses dynamic approval — see classifyCommand()
 ]);
 
@@ -241,10 +280,147 @@ export async function executeTool(name: string, args: Record<string, unknown>): 
     case 'create_github_issue': return await createGithubIssue(args as Parameters<typeof createGithubIssue>[0]);
     case 'read_github_issue_or_pr': return await readGithubIssueOrPr(args as Parameters<typeof readGithubIssueOrPr>[0]);
     case 'create_pull_request': return await createPullRequest(args as Parameters<typeof createPullRequest>[0]);
+    case 'write_file': return writeFile(args.path as string, args.content as string);
+    case 'edit_file': return editFile(args.path as string, args.oldText as string, args.newText as string);
+    case 'delete_file': return deleteFile(args.path as string);
     case 'run_terminal_command': return runTerminalCommand(args.command as string, args.cwd as string | undefined);
     default: return { content: `Unknown tool: ${name}` };
   }
 }
+
+// ── File Operation Tools ──
+
+function validatePath(path: string): { resolved: string; rel: string } | { error: string } {
+  const resolved = join(REPO_ROOT, path);
+  const rel = relative(REPO_ROOT, resolved);
+  if (rel.startsWith('..') || rel.startsWith('/')) {
+    return { error: 'Error: Path must be within the repository' };
+  }
+  // Block sensitive files
+  if (rel.includes('.env') && !rel.includes('.env.example')) {
+    return { error: 'Error: Cannot modify .env files from chat (security)' };
+  }
+  if (rel === '.git' || rel.startsWith('.git/')) {
+    return { error: 'Error: Cannot modify .git directory' };
+  }
+  return { resolved, rel };
+}
+
+function writeFile(path: string, content: string): ToolResult {
+  const validation = validatePath(path);
+  if ('error' in validation) return { content: validation.error };
+
+  try {
+    const { resolved, rel } = validation;
+    const isNew = !existsSync(resolved);
+
+    // Create parent directories if needed
+    const dir = dirname(resolved);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+
+    writeFileSync(resolved, content, 'utf-8');
+
+    const lineCount = content.split('\n').length;
+    const byteCount = Buffer.byteLength(content, 'utf-8');
+
+    return {
+      content: `✅ ${isNew ? 'Created' : 'Wrote'} ${rel} (${lineCount} lines, ${byteCount.toLocaleString()} bytes)`,
+      sources: [{ title: rel, path: rel }],
+    };
+  } catch (err) {
+    return { content: `Error writing file: ${err instanceof Error ? err.message : 'Unknown'}` };
+  }
+}
+
+function editFile(path: string, oldText: string, newText: string): ToolResult {
+  const validation = validatePath(path);
+  if ('error' in validation) return { content: validation.error };
+
+  try {
+    const { resolved, rel } = validation;
+
+    if (!existsSync(resolved)) {
+      return { content: `Error: File not found: ${rel}` };
+    }
+
+    const original = readFileSync(resolved, 'utf-8');
+
+    // Check if oldText exists in the file
+    const idx = original.indexOf(oldText);
+    if (idx === -1) {
+      // Try to help the model — show nearby content
+      const lines = original.split('\n');
+      const searchLower = oldText.toLowerCase().slice(0, 50);
+      const nearLine = lines.findIndex(l => l.toLowerCase().includes(searchLower));
+
+      if (nearLine >= 0) {
+        const context = lines.slice(Math.max(0, nearLine - 2), nearLine + 3).join('\n');
+        return {
+          content: `Error: Exact text not found in ${rel}. A similar section was found near line ${nearLine + 1}:\n\n\`\`\`\n${context}\n\`\`\`\n\nThe oldText must match exactly (including whitespace and indentation).`,
+        };
+      }
+
+      return { content: `Error: Text not found in ${rel}. The oldText must match the file content exactly.` };
+    }
+
+    // Check for multiple occurrences
+    const occurrences = original.split(oldText).length - 1;
+    if (occurrences > 1) {
+      return {
+        content: `Error: Found ${occurrences} occurrences of the text in ${rel}. The oldText must be unique. Add more surrounding context to make it unambiguous.`,
+      };
+    }
+
+    // Apply the edit
+    const updated = original.replace(oldText, newText);
+    writeFileSync(resolved, updated, 'utf-8');
+
+    // Calculate change stats
+    const oldLines = oldText.split('\n').length;
+    const newLines = newText.split('\n').length;
+    const added = Math.max(0, newLines - oldLines);
+    const removed = Math.max(0, oldLines - newLines);
+
+    return {
+      content: `✅ Edited ${rel} — replaced ${oldLines} lines with ${newLines} lines (+${added} -${removed})`,
+      sources: [{ title: rel, path: rel }],
+    };
+  } catch (err) {
+    return { content: `Error editing file: ${err instanceof Error ? err.message : 'Unknown'}` };
+  }
+}
+
+function deleteFile(path: string): ToolResult {
+  const validation = validatePath(path);
+  if ('error' in validation) return { content: validation.error };
+
+  try {
+    const { resolved, rel } = validation;
+
+    if (!existsSync(resolved)) {
+      return { content: `Error: File not found: ${rel}` };
+    }
+
+    const stat = statSync(resolved);
+    if (stat.isDirectory()) {
+      return { content: `Error: ${rel} is a directory. Use run_terminal_command with 'rm -r' for directories (requires approval).` };
+    }
+
+    const size = stat.size;
+    unlinkSync(resolved);
+
+    return {
+      content: `✅ Deleted ${rel} (${size.toLocaleString()} bytes)`,
+      sources: [{ title: `${rel} (deleted)`, path: rel }],
+    };
+  } catch (err) {
+    return { content: `Error deleting file: ${err instanceof Error ? err.message : 'Unknown'}` };
+  }
+}
+
+// ── Terminal Command Tool ──
 
 const MAX_OUTPUT = 10_000; // 10KB output cap for LLM
 const COMMAND_TIMEOUT = 30_000; // 30s timeout
