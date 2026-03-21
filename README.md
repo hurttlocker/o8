@@ -1,6 +1,6 @@
 # Cortex IDE
 
-Private working repo for the **Cortex IDE** concept.
+Private working repository for the **Cortex IDE** concept and AI-native desktop app.
 
 ## What this is
 

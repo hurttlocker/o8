@@ -490,12 +490,13 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
           // Process initial stream
           let { toolCalls } = await processStream(upstream);
           let loopCount = 0;
-          const maxLoops = 5; // Safety limit
+          const maxLoops = 8; // Safety limit — allows multi-step tool chains
           const allSources: { title: string; url?: string; path?: string }[] = [];
 
           // Tool call loop — execute tools and send results back to model
           while (toolCalls.length > 0 && loopCount < maxLoops) {
             loopCount++;
+            const toolResultParts: string[] = [];
 
             for (const tc of toolCalls) {
               // Check if this tool requires user approval (skip if pre-approved)
@@ -588,14 +589,15 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
 
               enqueue(JSON.stringify({ type: 'tool_result', name: tc.name, status: 'done', preview: result.content.slice(0, 200) }));
 
-              // Build follow-up request with tool results
-              // For now, make a new request with the tool result as context
-              const toolResultMsg = `Tool "${tc.name}" returned:\n${result.content}`;
-              messages.push(
-                { role: 'assistant', content: `I'll use the ${tc.name} tool to help answer this.` },
-                { role: 'user', content: toolResultMsg }
-              );
+              toolResultParts.push(`[${tc.name}] ${result.content}`);
             }
+
+            // Combine ALL tool results from this turn into one clean message pair
+            const toolNames = toolCalls.map(tc => tc.name).join(', ');
+            messages.push(
+              { role: 'assistant', content: `I used the following tools: ${toolNames}` },
+              { role: 'user', content: `Tool results:\n\n${toolResultParts.join('\n\n---\n\n')}\n\nBased on these results, provide your complete response to the user. Do not call more tools unless absolutely necessary.` }
+            );
 
             // Make follow-up request to model with tool results
             const followUrl = provider === 'google'
