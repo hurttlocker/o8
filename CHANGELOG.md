@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `a523c66` fix: Normalize detection API response for SetupWizard type contract
 - `3714eb1` perf: WebSocket RPC replaces CLI fallback — agents load in <500ms
 - `b6f3b5d` feat: First Launch Setup Wizard — blue glass onboarding flow
 - `7097222` feat: Setup detection + config API for first-launch wizard
