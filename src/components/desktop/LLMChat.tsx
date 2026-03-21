@@ -51,6 +51,8 @@ import {
 } from 'lucide-react';
 import { renderLLMMarkdown } from './LLMMarkdown';
 import { saveChatHistory, loadChatHistory } from '@/lib/llm/chat-history';
+import { CompactionNode } from './CompactionNode';
+import { shouldCompact, compactConversation, type LLMMessage as CompactMessage } from '@/lib/chat/compaction';
 
 // ── Types ──
 
@@ -92,6 +94,8 @@ export interface LLMMessage {
   thinkingDurationMs?: number;
   isError?: boolean; // error messages — excluded from API calls
   recalledFacts?: number; // Cortex memory facts recalled for this message
+  isCompaction?: boolean; // compaction node — compressed older messages
+  compactedCount?: number; // how many messages were compressed
 }
 
 interface ModelOption {
@@ -1905,7 +1909,41 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
         thinkingDurationMs: thinkingSteps.length > 0 || thinkingText ? Date.now() - thinkingStartTime : undefined,
         recalledFacts: recalledFacts > 0 ? recalledFacts : undefined,
       };
-      setMessages((prev) => [...prev, assistantMsg]);
+      setMessages((prev) => {
+        const updated = [...prev, assistantMsg];
+
+        // Check if compaction should trigger
+        if (shouldCompact(updated.length)) {
+          // Fire async compaction — don't block the UI
+          const msgsToCompact: CompactMessage[] = updated.map(m => ({
+            id: m.id,
+            role: m.role as 'user' | 'assistant' | 'system',
+            content: m.content,
+            timestamp: m.timestamp,
+            isError: m.isError,
+            isCompaction: m.isCompaction,
+            compactedCount: m.compactedCount,
+          }));
+
+          compactConversation(msgsToCompact, tabId).then((result) => {
+            if (result.compactedCount > 0) {
+              setMessages(result.newMessages.map(cm => ({
+                id: cm.id,
+                role: cm.role as 'user' | 'assistant',
+                content: cm.content,
+                timestamp: cm.timestamp ?? Date.now(),
+                isCompaction: cm.isCompaction,
+                compactedCount: cm.compactedCount,
+              })));
+              console.log(`[compaction] Compressed ${result.compactedCount} messages`);
+            }
+          }).catch(err => {
+            console.error('[compaction] Failed:', err);
+          });
+        }
+
+        return updated;
+      });
       setStreamContent('');
       setActiveThinking(null);
 
@@ -2536,6 +2574,13 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
                     <div style={{ flex: 1, height: 1, background: '#f1f5f9' }} />
                   </div>
                 )}
+                {/* Compaction node — renders instead of regular bubble */}
+                {msg.isCompaction ? (
+                  <CompactionNode
+                    compactedCount={msg.compactedCount ?? 0}
+                    summary={msg.content}
+                  />
+                ) : (
                 <MessageBubble
               key={msg.id}
               message={msg}
@@ -2602,6 +2647,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
               onOpenInCanvas={onOpenInCanvas}
               onRunInTerminal={onRunInTerminal}
             />
+                )}
               </div>
             );
           })}
