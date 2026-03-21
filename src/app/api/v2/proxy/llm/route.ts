@@ -519,18 +519,55 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
 
               if (needsApproval) {
                 const cmd = tc.name === 'run_terminal_command' ? (tc.args.command as string) : '';
+
+                // Build rich summary based on tool type
+                let summary = `Execute ${tc.name}`;
+                let diff: { before?: string; after?: string; path?: string } | undefined;
+
+                if (tc.name === 'create_github_issue') {
+                  summary = `Create issue: "${tc.args.title}" in ${tc.args.repo}`;
+                } else if (tc.name === 'create_pull_request') {
+                  summary = `Create PR: "${tc.args.title}" on branch ${tc.args.branch}`;
+                } else if (tc.name === 'run_terminal_command') {
+                  summary = `Run command: ${cmd}`;
+                } else if (tc.name === 'write_file') {
+                  const filePath = String(tc.args.path || '');
+                  const content = String(tc.args.content || '');
+                  const lineCount = content.split('\n').length;
+                  // Check if file exists for before/after diff
+                  try {
+                    const { readFileSync, existsSync } = require('node:fs');
+                    const { join } = require('node:path');
+                    const repoRoot = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+                    const fullPath = join(repoRoot, filePath);
+                    if (existsSync(fullPath)) {
+                      const before = readFileSync(fullPath, 'utf-8');
+                      summary = `Overwrite ${filePath} (${lineCount} lines)`;
+                      diff = { before, after: content, path: filePath };
+                    } else {
+                      summary = `Create new file: ${filePath} (${lineCount} lines)`;
+                      diff = { before: '', after: content, path: filePath };
+                    }
+                  } catch {
+                    summary = `Write to ${filePath} (${lineCount} lines)`;
+                  }
+                } else if (tc.name === 'edit_file') {
+                  const filePath = String(tc.args.path || '');
+                  const oldText = String(tc.args.oldText || '');
+                  const newText = String(tc.args.newText || '');
+                  summary = `Edit ${filePath}`;
+                  diff = { before: oldText, after: newText, path: filePath };
+                } else if (tc.name === 'delete_file') {
+                  summary = `Delete file: ${tc.args.path}`;
+                }
+
                 enqueue(JSON.stringify({
                   type: 'approval_required',
                   name: tc.name,
                   args: tc.args,
-                  editable: tc.name === 'run_terminal_command', // terminal commands can be edited
-                  summary: tc.name === 'create_github_issue'
-                    ? `Create issue: "${tc.args.title}" in ${tc.args.repo}`
-                    : tc.name === 'create_pull_request'
-                    ? `Create PR: "${tc.args.title}" on branch ${tc.args.branch}`
-                    : tc.name === 'run_terminal_command'
-                    ? `Run command: ${cmd}`
-                    : `Execute ${tc.name}`,
+                  editable: tc.name === 'run_terminal_command',
+                  summary,
+                  diff,
                 }));
                 // Stop the loop — frontend will re-submit with approval
                 enqueue(JSON.stringify({ type: 'content', text: '' }));
