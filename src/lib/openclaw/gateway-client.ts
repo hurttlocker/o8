@@ -150,17 +150,174 @@ async function fetchGatewaySessionHistory(
   };
 }
 
-// ── CLI fallback (slow path — 30-40s on modest hardware) ──
-
 function extractJsonPayload(raw: string): string {
   const trimmed = raw.trim();
   const start = trimmed.indexOf('{');
   const end = trimmed.lastIndexOf('}');
-  if (start >= 0 && end > start) {
-    return trimmed.slice(start, end + 1);
-  }
+  if (start >= 0 && end > start) return trimmed.slice(start, end + 1);
   return trimmed;
 }
+
+// ── WebSocket RPC (fast path — <500ms) ──
+
+import WebSocket from 'ws';
+
+/**
+ * Opens a short-lived WebSocket to the gateway, authenticates via
+ * challenge-response, sends an RPC request, and returns the result.
+ * Replaces the CLI fallback which hangs on some OpenClaw versions.
+ */
+async function wsRpc(
+  method: string,
+  params: Record<string, unknown>,
+  timeoutMs = 8000,
+): Promise<Record<string, unknown>> {
+  const config = loadConfig();
+  const token = config.token ?? '';
+
+  return new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${config.port}`);
+    let authed = false;
+    let settled = false;
+    const requestId = `cortex-ide-${randomUUID().slice(0, 8)}`;
+
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        ws.close();
+        reject(new Error(`WS RPC timeout after ${timeoutMs}ms for ${method}`));
+      }
+    }, timeoutMs);
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      try { ws.close(); } catch { /* ignore */ }
+    };
+
+    ws.on('error', (err) => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        reject(err);
+      }
+    });
+
+    ws.on('message', (data) => {
+      let msg: Record<string, unknown>;
+      try {
+        msg = JSON.parse(data.toString()) as Record<string, unknown>;
+      } catch { return; }
+
+      // Step 1: Answer challenge
+      if (msg.type === 'event' && msg.event === 'connect.challenge') {
+        ws.send(JSON.stringify({
+          type: 'req',
+          id: 'connect-' + requestId,
+          method: 'connect',
+          params: {
+            minProtocol: 3,
+            maxProtocol: 3,
+            client: {
+              id: 'gateway-client',
+              displayName: 'Cortex IDE',
+              version: '0.1.0',
+              platform: process.platform,
+              mode: 'backend',
+              instanceId: randomUUID(),
+            },
+            caps: [],
+            auth: token ? { token } : undefined,
+            role: 'operator',
+            scopes: ['operator.read'],
+          },
+        }));
+        return;
+      }
+
+      // Step 2: Auth response
+      if (msg.type === 'res' && String(msg.id).startsWith('connect-')) {
+        if (msg.ok) {
+          authed = true;
+          // Send the actual RPC request
+          ws.send(JSON.stringify({
+            type: 'req',
+            id: requestId,
+            method,
+            params,
+          }));
+        } else {
+          if (!settled) {
+            settled = true;
+            cleanup();
+            const error = msg.error as { message?: string } | undefined;
+            reject(new Error(`WS auth failed: ${error?.message ?? 'unknown'}`));
+          }
+        }
+        return;
+      }
+
+      // Step 3: RPC response
+      if (msg.type === 'res' && msg.id === requestId && authed) {
+        settled = true;
+        cleanup();
+        if (msg.ok) {
+          resolve((msg.payload ?? msg.result ?? {}) as Record<string, unknown>);
+        } else {
+          const error = msg.error as { message?: string } | undefined;
+          reject(new Error(`WS RPC error: ${error?.message ?? 'unknown'}`));
+        }
+      }
+    });
+  });
+}
+
+async function runStatusSnapshot(): Promise<Record<string, unknown>> {
+  // Primary: WebSocket RPC (fast — <500ms)
+  try {
+    const [statusResult, sessionsResult] = await Promise.all([
+      wsRpc('status', { activeMinutes: 60 }),
+      wsRpc('sessions.list', { activeMinutes: 60, limit: 50 }),
+    ]);
+
+    const sessions = (sessionsResult.sessions ?? []) as Array<Record<string, unknown>>;
+    const agents = (statusResult.heartbeat as Record<string, unknown>)?.agents as Array<Record<string, unknown>> | undefined;
+
+    return {
+      gateway: { reachable: true },
+      sessions: { sessions, recent: sessions },
+      agents: { agents: agents ?? [] },
+      ...statusResult,
+    };
+  } catch (err) {
+    const message = (err as Error).message?.slice(0, 100) ?? 'unknown';
+    console.warn(`[gateway-client] WS RPC failed, trying CLI fallback: ${message}`);
+  }
+
+  // Fallback: CLI (may hang but try with tight timeout)
+  try {
+    const { stdout } = await execFileAsync(
+      'openclaw',
+      ['gateway', 'call', 'status', '--json'],
+      {
+        cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || homedir(),
+        maxBuffer: 4 * 1024 * 1024,
+        timeout: 10_000,
+        env: { ...process.env, PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin' },
+      },
+    );
+    const trimmed = stdout.trim();
+    const start = trimmed.indexOf('{');
+    const end = trimmed.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      return JSON.parse(trimmed.slice(start, end + 1)) as Record<string, unknown>;
+    }
+    return JSON.parse(trimmed) as Record<string, unknown>;
+  } catch {
+    throw new Error('Both WS RPC and CLI fallback failed');
+  }
+}
+
+// ── Status cache ──
 
 type CachedStatus = { data: Record<string, unknown>; ts: number };
 let statusCache: CachedStatus | null = null;
@@ -172,36 +329,6 @@ let cliStatusFailureCount = 0;
 let cliStatusRetryAfter = 0;
 let cliStatusLastErrorLogAt = 0;
 let cliBackoffMs = CLI_BACKOFF_BASE_MS;
-
-async function runCliStatusSnapshot(timeoutMs: number): Promise<Record<string, unknown>> {
-  try {
-    const { stdout } = await execFileAsync(
-      'openclaw',
-      ['gateway', 'call', 'status', '--json'],
-      {
-        cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || '/Users/marquisehurtt',
-        maxBuffer: 4 * 1024 * 1024,
-        timeout: timeoutMs,
-        env: {
-          ...process.env,
-          PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
-        },
-      },
-    );
-    return JSON.parse(extractJsonPayload(stdout)) as Record<string, unknown>;
-  } catch {
-    const { stdout } = await execFileAsync('openclaw', ['status', '--json'], {
-      cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || '/Users/marquisehurtt',
-      maxBuffer: 4 * 1024 * 1024,
-      timeout: timeoutMs,
-      env: {
-        ...process.env,
-        PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
-      },
-    });
-    return JSON.parse(extractJsonPayload(stdout)) as Record<string, unknown>;
-  }
-}
 
 export function invalidateGatewayStatusCache() {
   statusGeneration += 1;
@@ -241,7 +368,7 @@ async function refreshCliCache(timeoutMs = CLI_STATUS_TIMEOUT_MS, force = false)
   const generation = statusGeneration;
   refreshPromise = (async () => {
     try {
-      const parsed = await runCliStatusSnapshot(timeoutMs);
+      const parsed = await runStatusSnapshot();
       if (generation === statusGeneration) {
         statusCache = { data: parsed, ts: Date.now() };
       }
@@ -445,6 +572,7 @@ export async function gatewayRpc<T>(
   params: Record<string, unknown> = {},
   timeoutMs = 15_000,
 ): Promise<T> {
+  // Strategy 0: REST API for session history (fastest for this specific call)
   if (method === 'chat.history') {
     const sessionKey = typeof params.sessionKey === 'string' ? params.sessionKey : '';
     const limit = typeof params.limit === 'number' ? params.limit : 24;
@@ -457,8 +585,22 @@ export async function gatewayRpc<T>(
     }
   }
 
-  // Strategy 2: CLI fallback with circuit breaker + concurrency limit (#140)
+  // Strategy 1: WebSocket RPC (fast — <500ms for most calls)
+  // Skip for chat.send with attachments (large payloads) — CLI handles those via file
   const paramsJson = JSON.stringify(params);
+  const isLargePayload = paramsJson.length > 50_000;
+
+  if (!isLargePayload) {
+    try {
+      const result = await wsRpc(method, params, Math.min(timeoutMs, 8000));
+      cliConsecutiveFailures = 0;
+      return result as T;
+    } catch {
+      // WS failed — fall through to CLI
+    }
+  }
+
+  // Strategy 2: CLI fallback with circuit breaker + concurrency limit (#140)
 
   // If params are large (e.g. base64 image attachments), save images to
   // disk and replace base64 content with file paths to avoid E2BIG.
