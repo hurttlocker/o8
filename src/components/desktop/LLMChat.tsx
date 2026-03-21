@@ -91,6 +91,7 @@ export interface LLMMessage {
   thinkingSteps?: ThinkingStep[];
   thinkingDurationMs?: number;
   isError?: boolean; // error messages — excluded from API calls
+  recalledFacts?: number; // Cortex memory facts recalled for this message
 }
 
 interface ModelOption {
@@ -722,6 +723,24 @@ function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFork, onA
               fontFamily: 'ui-monospace, monospace',
             }}>
               ${message.costUsd.toFixed(4)}
+            </span>
+          )}
+          {/* Memory indicator */}
+          {message.recalledFacts != null && message.recalledFacts > 0 && (
+            <span
+              title={`${message.recalledFacts} memor${message.recalledFacts === 1 ? 'y' : 'ies'} recalled from Cortex`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                fontSize: 10,
+                color: '#8b5cf6',
+                marginRight: 4,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              <Brain size={10} />
+              {message.recalledFacts}
             </span>
           )}
 
@@ -1707,6 +1726,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
       const thinkingSteps: ThinkingStep[] = [];
       const thinkingStartTime = Date.now();
       let isThinking = false;
+      let recalledFacts = 0;
       setActiveToolCalls([]);
       setActiveThinking(null);
 
@@ -1807,6 +1827,17 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
                 const toolStep = [...thinkingSteps].reverse().find(s => s.status === 'active' && s.type !== 'thinking');
                 if (toolStep) toolStep.status = 'complete';
                 setActiveThinking({ steps: [...thinkingSteps], thinking: thinkingText });
+              } else if (parsed.type === 'memory_recall') {
+                recalledFacts = parsed.factCount ?? 0;
+                // Add a thinking step for memory recall
+                if (recalledFacts > 0) {
+                  thinkingSteps.push({
+                    type: 'search',
+                    label: `Recalled ${recalledFacts} memor${recalledFacts === 1 ? 'y' : 'ies'} from Cortex`,
+                    status: 'complete',
+                  });
+                  setActiveThinking({ steps: [...thinkingSteps], thinking: thinkingText });
+                }
               } else if (parsed.type === 'approval_required') {
                 setPendingApproval({
                   name: parsed.name,
@@ -1862,6 +1893,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
         thinking: thinkingText || undefined,
         thinkingSteps: thinkingSteps.length > 0 ? thinkingSteps.map(s => ({ ...s, status: 'complete' as const })) : undefined,
         thinkingDurationMs: thinkingSteps.length > 0 || thinkingText ? Date.now() - thinkingStartTime : undefined,
+        recalledFacts: recalledFacts > 0 ? recalledFacts : undefined,
       };
       setMessages((prev) => [...prev, assistantMsg]);
       setStreamContent('');
