@@ -16,6 +16,10 @@ import { execSync } from 'node:child_process';
 const MAX_RECALL_TOKENS = 800; // ~3200 chars at 4 chars/token
 const MAX_RECALL_RESULTS = 7;
 const MIN_CONFIDENCE = 0.3;
+const MIN_SCORE = 0.4; // Below this, results are too noisy to include
+
+// Cortex binary path for fact queries
+const CORTEX_BIN = process.env.CORTEX_BINARY || `${process.env.HOME || '/Users/marquisehurtt'}/bin/cortex`;
 
 interface RecallResult {
   text: string;       // Formatted memory block for system prompt
@@ -23,11 +27,100 @@ interface RecallResult {
   queryMs: number;    // How long the search took
 }
 
+interface CortexFact {
+  ID: number;
+  Subject: string;
+  Predicate: string;
+  Object: string;
+  FactType: string;
+  Confidence: number;
+  State: string;
+}
+
+/**
+ * Fetch structured facts by IDs from Cortex.
+ * Returns clean Subject/Predicate/Object triples.
+ */
+async function fetchFacts(factIds: number[]): Promise<CortexFact[]> {
+  if (factIds.length === 0) return [];
+
+  try {
+    // Batch query: "id=X OR id=Y OR id=Z"
+    const where = factIds.slice(0, 20).map(id => `id=${id}`).join(' OR ');
+    const raw = execSync(`${CORTEX_BIN} query --where "${where}" --json 2>/dev/null`, {
+      encoding: 'utf-8',
+      timeout: 5000,
+    }).trim();
+
+    if (!raw) return [];
+    const results = JSON.parse(raw);
+    return results
+      .map((r: { fact: CortexFact }) => r.fact)
+      .filter((f: CortexFact) => f.State === 'active' && f.Confidence >= MIN_CONFIDENCE);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Format a fact triple into a clean, concise string for LLM consumption.
+ * Avoids verbose prose — just the signal.
+ */
+function formatFact(f: CortexFact): string {
+  const subj = f.Subject.trim();
+  const pred = f.Predicate.trim();
+  const obj = f.Object.trim();
+
+  // Skip facts that are too vague
+  if (obj.length < 5 || subj.length < 2) return '';
+
+  // Clean up common noise patterns
+  const cleanObj = obj
+    .replace(/\s+/g, ' ')
+    .replace(/^["']|["']$/g, '')  // strip quotes
+    .trim();
+
+  if (cleanObj.length > 200) return `${subj}: ${cleanObj.slice(0, 200)}…`;
+
+  // Natural formatting based on predicate type
+  switch (pred) {
+    case 'is':
+    case 'are':
+      return `${subj} is ${cleanObj}`;
+    case 'has':
+    case 'have':
+      return `${subj} has ${cleanObj}`;
+    case 'uses':
+    case 'used':
+      return `${subj} uses ${cleanObj}`;
+    case 'prefers':
+      return `${subj} prefers ${cleanObj}`;
+    case 'located_at':
+    case 'location':
+      return `${subj} is at ${cleanObj}`;
+    case 'value':
+    case 'status':
+      return `${subj}: ${cleanObj}`;
+    default:
+      // For compound predicates, try natural phrasing
+      if (pred.includes('_')) {
+        return `${subj} ${pred.replace(/_/g, ' ')} ${cleanObj}`;
+      }
+      return `${subj} ${pred} ${cleanObj}`;
+  }
+}
+
 /**
  * Search Cortex for memories relevant to the user's message.
- * Returns a formatted text block ready for system prompt injection.
+ * Returns a clean, LLM-optimized context block.
  *
- * Returns null if Cortex is unavailable or no relevant facts found.
+ * Strategy:
+ * 1. Search memories by query (BM25/hybrid/semantic)
+ * 2. Collect fact_ids from top results
+ * 3. Fetch structured facts (Subject/Predicate/Object triples)
+ * 4. Format as concise bullets, deduplicated, within token budget
+ *
+ * Falls back to snippet-based recall if no structured facts available.
  */
 export async function recallMemories(userMessage: string): Promise<RecallResult | null> {
   const start = Date.now();
@@ -40,12 +133,11 @@ export async function recallMemories(userMessage: string): Promise<RecallResult 
 
     if (!results || results.length === 0) return null;
 
-    // Filter by minimum confidence and deduplicate by content
+    // Filter by minimum score and deduplicate
     const seen = new Set<string>();
     const filtered = results.filter(r => {
-      if (r.score < MIN_CONFIDENCE) return false;
-      // Deduplicate by first 100 chars of content
-      const key = r.content.slice(0, 100);
+      if (r.score < MIN_SCORE) return false;
+      const key = r.content.slice(0, 80);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -53,40 +145,72 @@ export async function recallMemories(userMessage: string): Promise<RecallResult 
 
     if (filtered.length === 0) return null;
 
-    // Format as concise memory block — use snippet (shorter) or first ~300 chars of content
+    // Collect all fact_ids from search results
+    const allFactIds = filtered.flatMap(r => r.fact_ids || []);
+
+    // Strategy: prefer structured facts, fall back to snippets
     const lines: string[] = [];
     let charCount = 0;
+    const usedFacts = new Set<string>(); // dedup by content
 
-    for (const fact of filtered) {
-      // Prefer snippet (shorter, more relevant extract), fall back to content
-      let text = (fact.snippet || fact.content || '').trim();
+    // ── Primary: structured fact triples ──
+    if (allFactIds.length > 0) {
+      const facts = await fetchFacts(allFactIds);
 
-      // Strip HTML tags, source metadata, confidence markers
-      text = text
-        .replace(/<[^>]+>/g, ' ')         // strip HTML tags
-        .replace(/&[a-z]+;/gi, ' ')       // strip HTML entities
-        .replace(/\[source:.*?\]/gi, '')
-        .replace(/\(confidence:.*?\)/gi, '')
-        .replace(/\s+/g, ' ')             // normalize whitespace
-        .trim();
+      // Sort by confidence (highest first)
+      facts.sort((a, b) => b.Confidence - a.Confidence);
 
-      // Truncate individual facts to 300 chars
-      if (text.length > 300) text = text.slice(0, 300) + '…';
+      for (const fact of facts) {
+        const line = formatFact(fact);
+        if (!line || line.length < 10) continue;
 
-      if (!text || text.length < 10) continue;
+        // Dedup by normalized content
+        const key = line.toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
+        if (usedFacts.has(key)) continue;
+        usedFacts.add(key);
 
-      // Respect token budget (~4 chars per token)
-      if (charCount + text.length > MAX_RECALL_TOKENS * 4) break;
+        // Token budget check
+        if (charCount + line.length > MAX_RECALL_TOKENS * 4) break;
 
-      lines.push(`- ${text}`);
-      charCount += text.length + 4; // +4 for "- " and newline
+        lines.push(`- ${line}`);
+        charCount += line.length + 4;
+      }
+    }
+
+    // ── Fallback: clean snippets (if no structured facts or budget remains) ──
+    if (lines.length < 3 && charCount < MAX_RECALL_TOKENS * 3) {
+      for (const result of filtered) {
+        let text = (result.snippet || '').trim();
+
+        // Clean aggressively for LLM consumption
+        text = text
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&[a-z]+;/gi, ' ')
+          .replace(/\[source:.*?\]/gi, '')
+          .replace(/\(confidence:.*?\)/gi, '')
+          .replace(/^\.{3}/, '')           // strip leading ellipsis
+          .replace(/\.{3}$/, '')           // strip trailing ellipsis
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (text.length > 200) text = text.slice(0, 200) + '…';
+        if (!text || text.length < 15) continue;
+
+        // Dedup against structured facts
+        const key = text.toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
+        if (usedFacts.has(key)) continue;
+        usedFacts.add(key);
+
+        if (charCount + text.length > MAX_RECALL_TOKENS * 4) break;
+
+        lines.push(`- ${text}`);
+        charCount += text.length + 4;
+      }
     }
 
     if (lines.length === 0) return null;
 
-    const text = `## Memory (from Cortex)
-The following facts were recalled from persistent memory. Use them as context — do not repeat them verbatim unless asked.
-
+    const text = `## Recalled Context
 ${lines.join('\n')}`;
 
     return {
