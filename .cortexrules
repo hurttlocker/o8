@@ -1,0 +1,49 @@
+# Cortex IDE — Project Rules
+
+## Stack
+- Next.js 16 + React 19, App Router (`src/app/`)
+- TypeScript strict mode
+- Tauri v2 desktop shell (Rust sidecar)
+- SQLite via Drizzle ORM (better-sqlite3, WAL mode)
+- No Tailwind — all styles are **inline React styles**
+- No `ai` SDK — direct fetch to our own `/api/v2/proxy/llm` route
+
+## Styling Rules
+- **Inline styles only** — no CSS classes, no Tailwind, no CSS modules
+- Use **longhand properties** (not shorthand): `paddingTop`, `paddingLeft` — not `padding: "8px 16px"`
+- React 19 warns on mixed shorthand/longhand — always use longhand
+- Colors: glass/frost theme — `rgba()` backgrounds, `backdrop-filter: blur()`
+- Brand: clear glass, super light blue + bright red accents
+- Green for additions, blue for deletions (not traditional red)
+- Diffs: dark background `rgba(15,23,42,0.95)`, monospace font
+- Touch targets: 44px minimum (Apple HIG)
+- Border radius: 14px for cards, 8px for buttons, 12px for containers
+
+## Architecture
+- Three agent runtimes: OpenClaw, Codex, Claude Code — always build for all three
+- `CortexClient` pattern: `LocalCortexClient` (exec), `CloudCortexClient` (HTTPS), `HybridCortexClient`
+- API routes: all use `force-dynamic`, live in `src/app/api/v2/`
+- Auth: JWT (jose, HS256, 30d), reads Bearer token OR httpOnly cookie
+- Tools require approval via SSE `approval_required` event for mutations
+
+## File Conventions
+- Components: `src/components/desktop/` (desktop) or `src/components/mobile/` (mobile)
+- Desktop chat and mobile chat are **completely separate codebases** — no shared components
+- API routes: `src/app/api/v2/<feature>/route.ts`
+- Libs: `src/lib/<domain>/` (e.g., `src/lib/llm/`, `src/lib/cortex/`, `src/lib/github/`)
+- No barrel exports unless explicitly needed
+
+## Code Style
+- Markdown rendering only (no raw HTML injection)
+- Mermaid: always `startOnLoad: false`
+- Sanitize tab IDs: replace non-alphanumeric with `_` (path traversal prevention)
+- Strip images/data URIs from persisted chat history
+- Error handling: never throw in API routes — return structured errors
+- Console logging: `[feature-name]` prefix (e.g., `[memory-recall]`, `[compaction]`)
+
+## Git / Deployment
+- Stay on `main` branch — no feature branches (rapid iteration mode)
+- Commit messages: `feat:`, `fix:`, `refactor:`, `perf:`, `chore:`
+- Never push to master
+- Dev server: `http://localhost:3001`
+- WebSocket: port 3002
