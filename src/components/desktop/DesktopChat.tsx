@@ -2640,6 +2640,19 @@ export function DesktopChat({
         setDiffOpen={setDiffOpen}
       />
 
+      {!wsConnected && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+          padding: '6px 12px',
+          background: 'rgba(245, 158, 11, 0.06)',
+          borderBottom: '1px solid rgba(245, 158, 11, 0.12)',
+          fontSize: 11, color: '#d97706', fontWeight: 500,
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#d97706', animation: 'reviewingBreathe 2s ease-in-out infinite' }} />
+          Reconnecting to gateway…
+        </div>
+      )}
+
       <DesktopTranscriptPane
         loading={loading}
         transcript={transcript}
