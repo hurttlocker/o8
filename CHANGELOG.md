@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `af7c99c` feat: Blocklist guard for public changelog + AI provider.md rule
 - `6407c9f` fix: Harden public changelog
 - `37afd4a` chore: add workflow_dispatch trigger to sync-changelog
 
