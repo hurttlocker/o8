@@ -26,6 +26,47 @@ import { SettingsPage } from '@/components/desktop/SettingsPage';
 import { AnalyticsPage } from '@/components/desktop/AnalyticsPage';
 import { ThoughtsCard } from '@/components/desktop/ThoughtsCard';
 import { SetupWizard, type DetectionResult } from '@/components/desktop/SetupWizard';
+
+/** Normalize the flat API response into the shape SetupWizard expects. */
+function normalizeDetection(raw: Record<string, unknown>): DetectionResult {
+  const toolsArray = (raw.tools ?? []) as Array<{ id: string; detected: boolean; version?: string; path?: string; details?: Record<string, unknown> }>;
+  const findTool = (id: string) => toolsArray.find(t => t.id === id);
+
+  const mkTool = (id: string) => {
+    const t = findTool(id);
+    return {
+      detected: t?.detected ?? false,
+      version: t?.version,
+      path: t?.path,
+      ...(t?.details ?? {}),
+    };
+  };
+
+  // Build apiKeys array from the api-keys tool details
+  const apiKeysTool = findTool('api-keys');
+  const providers = ((apiKeysTool?.details?.providers ?? []) as string[]);
+  const apiKeys = providers.map(p => ({ provider: p, configured: true }));
+
+  return {
+    tools: {
+      openclaw: { ...mkTool('openclaw'), agentCount: (findTool('openclaw')?.details?.agentCount as number) ?? 0 },
+      codex: { ...mkTool('codex'), threads: (findTool('codex')?.details?.threads as number) ?? 0 },
+      claudeCode: { ...mkTool('claude-code'), recentSessions: (findTool('claude-code')?.details?.recentSessions as number) ?? 0 },
+      gemini: mkTool('gemini'),
+      cortex: { ...mkTool('cortex'), facts: (findTool('cortex')?.details?.facts as number) ?? 0, memories: (findTool('cortex')?.details?.memories as number) ?? 0 },
+      ollama: { ...mkTool('ollama'), hasEmbeddingModel: (findTool('ollama')?.details?.hasEmbeddingModel as boolean) ?? false },
+    } as DetectionResult['tools'],
+    apiKeys,
+    hasAnything: Boolean(raw.hasAnything),
+    hasAgentSurface: Boolean(raw.hasAgentSurface),
+    hasCliAgent: Boolean(raw.hasCliAgent),
+    hasApiKey: Boolean(raw.hasApiKey),
+    hasMemory: Boolean(raw.hasMemory),
+    hasEmbeddings: Boolean(raw.hasEmbeddings),
+    recommendedPath: String(raw.recommendedPath ?? 'full-wizard'),
+    summary: String(raw.summary ?? ''),
+  };
+}
 import { LocalhostPreviewTabs } from '@/components/desktop/LocalhostPreviewTabs';
 import { TileContainer, type TileContentRegistry } from '@/components/desktop/TileContainer';
 import type { DesktopChatInjectionPayload } from '@/lib/chat/injection';
@@ -106,7 +147,9 @@ function DashboardInner() {
         if (config.completedAt) return; // Already completed setup
         const detectRes = await fetch('/api/setup/detect');
         if (!detectRes.ok) return;
-        const detection = await detectRes.json() as DetectionResult;
+        const rawDetection = await detectRes.json() as Record<string, unknown>;
+        // Normalize: API returns tools as array, wizard expects named object + apiKeys array
+        const detection = normalizeDetection(rawDetection);
         setSetupDetection(detection);
         setSetupWizardOpen(true);
       } catch { /* silent — don't block dashboard */ }
