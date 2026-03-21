@@ -187,6 +187,8 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
   const barRef = useRef<HTMLDivElement>(null);
   const [hoverX, setHoverX] = useState<number | null>(null);
   const [hoverMin, setHoverMin] = useState<number | null>(null);
+  const [hoverClientX, setHoverClientX] = useState<number | null>(null);
+  const [hoverBarTop, setHoverBarTop] = useState<number>(0);
 
   // totalSpan = end time of last segment (for time display)
   const totalSpan = useMemo(() => {
@@ -511,12 +513,15 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     setHoverX(x);
     setHoverMin(min);
     setHoveredSegIdx(foundIdx);
+    setHoverClientX(e.clientX);
+    setHoverBarTop(rect.top);
   }, [totalRendered, totalSpan, segmentRanges, segments]);
 
   const handleBarMouseLeave = useCallback(() => {
     setHoverX(null);
     setHoverMin(null);
     setHoveredSegIdx(null);
+    setHoverClientX(null);
   }, []);
 
   if (loading || totalRendered === 0) return null;
@@ -610,27 +615,28 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                 zIndex: 5,
                 boxShadow: `0 0 6px ${lineColor}40`,
               }} />
-              {/* Top badge — time */}
-              <div style={{
-                position: 'absolute',
-                left: hoverX,
-                bottom: '100%',
-                transform: 'translateX(-50%)',
-                marginBottom: 8,
-                padding: '3px 8px',
-                borderRadius: 6,
-                background: 'var(--t-text)',
-                color: 'var(--t-panel)',
-                fontSize: 10,
-                fontWeight: 600,
-                whiteSpace: 'nowrap',
-                pointerEvents: 'none',
-                zIndex: 9500,
-                letterSpacing: '0.02em',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              }}>
-                {formatTime(hoverMin)}
-              </div>
+              {/* Top badge — time (fixed positioning to escape stacking context) */}
+              {hoverClientX !== null && (
+                <div style={{
+                  position: 'fixed',
+                  left: hoverClientX,
+                  top: hoverBarTop - 28,
+                  transform: 'translateX(-50%)',
+                  padding: '3px 8px',
+                  borderRadius: 6,
+                  background: 'var(--t-text)',
+                  color: 'var(--t-panel)',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  pointerEvents: 'none',
+                  zIndex: 99999,
+                  letterSpacing: '0.02em',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                }}>
+                  {formatTime(hoverMin)}
+                </div>
+              )}
               {/* Bottom badge — segment kind + duration + agent */}
               {seg && (
                 <div style={{
