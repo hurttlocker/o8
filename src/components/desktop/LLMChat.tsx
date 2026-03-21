@@ -46,6 +46,7 @@ import {
   PanelLeftClose,
   MessageSquare,
   ArrowUp,
+  ArrowDown,
   Plus,
 } from 'lucide-react';
 import { renderLLMMarkdown } from './LLMMarkdown';
@@ -1249,6 +1250,8 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
   } | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
+  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
+  const [showTypingIndicator, setShowTypingIndicator] = useState(false);
   const [historyItems, setHistoryItems] = useState<{
     tabId: string; title: string; preview: string; messageCount: number;
     model: string; savedAt: string; modifiedAt: string; starred: boolean;
@@ -1402,12 +1405,24 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [messages, model.id, tabId, modelResolved]);
 
-  // Auto-scroll on new messages
+  // Auto-scroll on new messages (smooth, respects user scroll position)
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (scrollRef.current && !isUserScrolledUp) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }
-  }, [messages, streamContent]);
+  }, [messages, streamContent, isUserScrolledUp]);
+
+  // Track user scroll position
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      setIsUserScrolledUp(distFromBottom > 100);
+    };
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Auto-focus input
   useEffect(() => {
@@ -1616,6 +1631,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
 
     // Start streaming
     setIsStreaming(true);
+    setShowTypingIndicator(true);
     setStreamContent('');
     const controller = new AbortController();
     abortRef.current = controller;
@@ -1707,6 +1723,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
             try {
               const parsed = JSON.parse(data);
               if (parsed.type === 'thinking') {
+                if (showTypingIndicator) setShowTypingIndicator(false);
                 thinkingText += parsed.text;
                 if (!isThinking) {
                   isThinking = true;
@@ -1743,12 +1760,14 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
                   thinkingSteps.forEach(s => { if (s.status === 'active') s.status = 'complete'; });
                   setActiveThinking({ steps: [...thinkingSteps], thinking: thinkingText });
                 }
+                if (showTypingIndicator) setShowTypingIndicator(false);
                 fullContent += parsed.text;
                 setStreamContent(fullContent);
               } else if (parsed.type === 'usage') {
                 tokens = { input: parsed.inputTokens, output: parsed.outputTokens };
                 costUsd = parsed.costUsd;
               } else if (parsed.type === 'tool_call') {
+                if (showTypingIndicator) setShowTypingIndicator(false);
                 const existing = toolCalls.find(t => t.name === parsed.name);
                 if (existing) {
                   existing.status = parsed.status;
@@ -1881,6 +1900,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
       setStreamContent('');
     } finally {
       setIsStreaming(false);
+      setShowTypingIndicator(false);
       abortRef.current = null;
     }
   }, [input, isStreaming, messages, model, streamContent]);
@@ -2365,7 +2385,11 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
                 color: '#0f172a',
                 letterSpacing: '-0.02em',
               }}>
-                What can I help you build?
+                {(() => {
+                  const h = new Date().getHours();
+                  const greeting = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+                  return `${greeting}. What can I help you build?`;
+                })()}
               </div>
               <div style={{
                 fontSize: 14,
@@ -2440,8 +2464,37 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
 
         {/* Messages */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 720, marginLeft: 'auto', marginRight: 'auto' }}>
-          {messages.map((msg, i) => (
-            <MessageBubble
+          {messages.map((msg, i) => {
+            // Time separator — show when gap > 5 minutes between messages
+            const prevMsg = i > 0 ? messages[i - 1] : null;
+            const showTimeSep = prevMsg && (msg.timestamp - prevMsg.timestamp > 5 * 60 * 1000);
+            const timeLabel = showTimeSep ? new Date(msg.timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : null;
+
+            return (
+              <div key={msg.id} style={{ animation: 'llmFadeIn 250ms ease-out' }}>
+                {/* Time separator */}
+                {showTimeSep && (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    marginTop: 16,
+                    marginBottom: 16,
+                  }}>
+                    <div style={{ flex: 1, height: 1, background: '#f1f5f9' }} />
+                    <span style={{
+                      fontSize: 11,
+                      color: '#cbd5e1',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      fontWeight: 500,
+                      flexShrink: 0,
+                    }}>
+                      {timeLabel}
+                    </span>
+                    <div style={{ flex: 1, height: 1, background: '#f1f5f9' }} />
+                  </div>
+                )}
+                <MessageBubble
               key={msg.id}
               message={msg}
               isLast={i === messages.length - 1 && !isStreaming}
@@ -2507,7 +2560,32 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
               onOpenInCanvas={onOpenInCanvas}
               onRunInTerminal={onRunInTerminal}
             />
-          ))}
+              </div>
+            );
+          })}
+
+          {/* Typing indicator — before first content arrives */}
+          {showTypingIndicator && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              paddingTop: 12,
+              paddingBottom: 8,
+              paddingLeft: 4,
+              animation: 'llmFadeIn 200ms ease-out',
+            }}>
+              {[0, 1, 2].map(i => (
+                <div key={i} style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: '#cbd5e1',
+                  animation: `llmDot 1.4s ease-in-out ${i * 0.2}s infinite`,
+                }} />
+              ))}
+            </div>
+          )}
 
           {/* Streaming response */}
           {/* Follow-up suggestions */}
@@ -2799,6 +2877,50 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
               Deny
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Floating scroll-to-bottom pill */}
+      {isUserScrolledUp && messages.length > 0 && (
+        <div style={{
+          position: 'absolute',
+          bottom: 100,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 50,
+          animation: 'llmFadeIn 150ms ease-out',
+        }}>
+          <button
+            type="button"
+            onClick={() => {
+              scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+              setIsUserScrolledUp(false);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              paddingTop: 6,
+              paddingBottom: 6,
+              paddingLeft: 12,
+              paddingRight: 12,
+              background: 'white',
+              border: '1px solid #e2e8f0',
+              borderRadius: 20,
+              boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+              cursor: 'pointer',
+              fontSize: 12,
+              fontWeight: 500,
+              color: '#64748b',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+              transition: 'all 150ms',
+            }}
+            onMouseEnter={(e) => { (e.currentTarget).style.background = '#f8fafc'; (e.currentTarget).style.borderColor = '#94a3b8'; }}
+            onMouseLeave={(e) => { (e.currentTarget).style.background = 'white'; (e.currentTarget).style.borderColor = '#e2e8f0'; }}
+          >
+            <ArrowDown size={13} />
+            New messages
+          </button>
         </div>
       )}
 
