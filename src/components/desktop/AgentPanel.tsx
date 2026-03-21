@@ -2954,6 +2954,7 @@ export const AgentPanel = memo(function AgentPanel({
   const [inventoryLoading, setInventoryLoading] = useState(true);
   const [gatewayReachable, setGatewayReachable] = useState(false);
   const [gatewayWarming, setGatewayWarming] = useState(false);
+  const [fleetMeta, setFleetMeta] = useState<Record<string, unknown> | null>(null);
   const [events, setEvents] = useState<EventEntry[]>([]);
   const [commits, setCommits] = useState<{ hash: string; message: string; age: string }[]>([]);
   const [issues, setIssues] = useState<GHIssue[]>([]);
@@ -3025,6 +3026,7 @@ export const AgentPanel = memo(function AgentPanel({
           newAgents = data.agents ?? [];
           const freshEvents: EventEntry[] = data.events ?? [];
           setEvents(prev => arraysMatchBy(prev, freshEvents, eventFp) ? prev : freshEvents);
+          setFleetMeta(data.meta ?? null);
           setGatewayReachable(data.meta?.gatewayReachable ?? false);
           setGatewayWarming(data.meta?.gatewayFreshness === 'warming');
         }
@@ -3418,6 +3420,19 @@ export const AgentPanel = memo(function AgentPanel({
         scrollbarWidth: 'thin',
         scrollbarColor: 'rgba(0,0,0,0.1) transparent',
       } as React.CSSProperties}>
+        {fleetMeta?.mode === 'stale' && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '8px 14px', margin: '0 0 8px',
+            borderRadius: 8,
+            background: 'rgba(245, 158, 11, 0.08)',
+            border: '1px solid rgba(245, 158, 11, 0.15)',
+            fontSize: 11, color: '#d97706', fontWeight: 500,
+          }}>
+            <span style={{ fontSize: 14 }}>⏳</span>
+            Showing cached data — gateway reconnecting…
+          </div>
+        )}
         {inventoryLoading ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4 }}>
             {[0, 1, 2].map((index) => (

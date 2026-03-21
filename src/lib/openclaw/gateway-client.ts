@@ -31,8 +31,8 @@ const REST_STATUS_TIMEOUT_MS = 3_000;
 const CLI_STATUS_TIMEOUT_MS = 30_000;
 const CLI_COLD_START_WAIT_MS = 500;
 const CLI_FRESH_MAX_AGE_MS = 5_000;
-const CLI_STATUS_FAILURE_BASE_BACKOFF_MS = 5_000;
-const CLI_STATUS_FAILURE_MAX_BACKOFF_MS = 60_000;
+const CLI_BACKOFF_BASE_MS = 5_000;
+const CLI_BACKOFF_MAX_MS = 120_000;
 const CLI_STATUS_ERROR_LOG_COOLDOWN_MS = 60_000;
 let loggedStatusCompatibilityNote = false;
 
@@ -171,6 +171,7 @@ let gatewayWarmupScheduled = false;
 let cliStatusFailureCount = 0;
 let cliStatusRetryAfter = 0;
 let cliStatusLastErrorLogAt = 0;
+let cliBackoffMs = CLI_BACKOFF_BASE_MS;
 
 async function runCliStatusSnapshot(timeoutMs: number): Promise<Record<string, unknown>> {
   try {
@@ -208,6 +209,8 @@ export function invalidateGatewayStatusCache() {
   refreshPromise = null;
   cliStatusFailureCount = 0;
   cliStatusRetryAfter = 0;
+  cliBackoffMs = CLI_BACKOFF_BASE_MS;
+  ensureCliRefreshLoop();
 }
 
 export function prewarmGatewayStatusCache() {
@@ -244,24 +247,23 @@ async function refreshCliCache(timeoutMs = CLI_STATUS_TIMEOUT_MS, force = false)
       }
       cliStatusFailureCount = 0;
       cliStatusRetryAfter = 0;
+      cliBackoffMs = CLI_BACKOFF_BASE_MS;
     } catch (err) {
       cliStatusFailureCount += 1;
-      const backoffMs = Math.min(
-        CLI_STATUS_FAILURE_BASE_BACKOFF_MS * (2 ** Math.max(0, cliStatusFailureCount - 1)),
-        CLI_STATUS_FAILURE_MAX_BACKOFF_MS,
-      );
-      cliStatusRetryAfter = Date.now() + backoffMs;
+      cliBackoffMs = Math.min(cliBackoffMs * 2, CLI_BACKOFF_MAX_MS);
+      cliStatusRetryAfter = Date.now() + cliBackoffMs;
 
       const now = Date.now();
       if (now - cliStatusLastErrorLogAt >= CLI_STATUS_ERROR_LOG_COOLDOWN_MS || cliStatusFailureCount === 1) {
         const message = (err as Error).message?.slice(0, 120) ?? 'unknown CLI failure';
         console.warn(
-          `[gateway-client] CLI cache refresh failed (${cliStatusFailureCount}) — backing off for ${Math.round(backoffMs / 1000)}s: ${message}`
+          `[gateway-client] CLI cache refresh failed (${cliStatusFailureCount}) — backing off for ${Math.round(cliBackoffMs / 1000)}s: ${message}`
         );
         cliStatusLastErrorLogAt = now;
       }
     } finally {
       refreshPromise = null;
+      ensureCliRefreshLoop();
     }
   })();
 
@@ -269,15 +271,33 @@ async function refreshCliCache(timeoutMs = CLI_STATUS_TIMEOUT_MS, force = false)
 }
 
 // Background refresh loop
-let refreshInterval: ReturnType<typeof setInterval> | null = null;
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+let refreshTimerDelayMs: number | null = null;
+
 function ensureCliRefreshLoop() {
-  if (refreshInterval) return;
-  refreshInterval = setInterval(() => {
-    if (Date.now() < cliStatusRetryAfter) return;
-    if (statusCache && Date.now() - statusCache.ts < CACHE_TTL_MS) return;
+  if (refreshTimer && refreshTimerDelayMs === cliBackoffMs) return;
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+
+  refreshTimerDelayMs = cliBackoffMs;
+  refreshTimer = setTimeout(() => {
+    refreshTimer = null;
+    refreshTimerDelayMs = null;
+
+    if (Date.now() < cliStatusRetryAfter) {
+      ensureCliRefreshLoop();
+      return;
+    }
+    if (statusCache && Date.now() - statusCache.ts < CACHE_TTL_MS) {
+      ensureCliRefreshLoop();
+      return;
+    }
+
     void refreshCliCache();
-  }, CACHE_TTL_MS);
-  if (refreshInterval.unref) refreshInterval.unref();
+  }, cliBackoffMs);
+  if (refreshTimer.unref) refreshTimer.unref();
 }
 
 function wait(ms: number) {

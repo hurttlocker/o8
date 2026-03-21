@@ -80,7 +80,7 @@ export interface MobileReviewFileDetail {
 
 export interface MobileInboxSnapshot {
   generatedAt: string;
-  mode: 'live' | 'demo';
+  mode: 'live' | 'demo' | 'stale';
   sourceLabel: string;
   primarySessionKey?: string;
   note?: string;

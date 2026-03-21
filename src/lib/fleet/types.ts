@@ -245,7 +245,7 @@ export interface EventItem {
 }
 
 export interface FleetMeta {
-  mode: 'live' | 'demo';
+  mode: 'live' | 'demo' | 'stale';
   sourceLabel: string;
   gatewayLabel?: string;
   gatewayFreshness?: 'fresh' | 'stale' | 'warming';
@@ -254,6 +254,7 @@ export interface FleetMeta {
   primarySessionKey?: string;
   mirrorMode: 'current-session-first' | 'demo-only';
   note?: string;
+  staleReason?: string;
 }
 
 export interface FleetSnapshot {

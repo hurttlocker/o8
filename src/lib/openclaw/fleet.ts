@@ -304,6 +304,24 @@ function buildDemoFallback(reason: string): FleetSnapshot {
   };
 }
 
+let lastKnownGoodSnapshot: FleetSnapshot | null = null;
+
+function buildStaleFallback(reason: string, gatewayReachable?: boolean): FleetSnapshot | null {
+  if (!lastKnownGoodSnapshot) return null;
+
+  return {
+    ...lastKnownGoodSnapshot,
+    generatedAt: new Date().toISOString(),
+    meta: {
+      ...lastKnownGoodSnapshot.meta,
+      mode: 'stale',
+      gatewayFreshness: 'stale',
+      gatewayReachable: gatewayReachable ?? lastKnownGoodSnapshot.meta.gatewayReachable,
+      staleReason: reason,
+    },
+  };
+}
+
 const CLAUDE_CODE_ADDITIONS_TTL_MS = 15_000;
 
 function shortenHomePath(filePath: string): string {
@@ -487,7 +505,10 @@ export async function getOpenClawFleetSnapshot(
       .slice(0, 10);
 
     if (!recent.length) {
-      return buildDemoFallback('OpenClaw returned no recent mirrored sessions.');
+      return buildStaleFallback(
+        'OpenClaw returned no recent mirrored sessions.',
+        parsed.gateway?.reachable ?? false,
+      ) ?? buildDemoFallback('OpenClaw returned no recent mirrored sessions.');
     }
 
     const agentMeta = Object.fromEntries(
@@ -801,7 +822,7 @@ export async function getOpenClawFleetSnapshot(
     const browserArtifacts = buildBrowserArtifacts(enrichedOpenClawAgents);
     const allEvents = [...browserEvents, ...openClawEvents, ...ownedCodex.events, ...filteredDiscoveredEvents, ...claudeCodeSessions.events];
 
-    return {
+    const result: FleetSnapshot = {
       generatedAt: new Date().toISOString(),
       meta: {
         mode: 'live',
@@ -858,8 +879,11 @@ export async function getOpenClawFleetSnapshot(
         ...filteredDiscoveredArtifacts,
       ],
     };
+
+    lastKnownGoodSnapshot = result;
+    return result;
   } catch (error) {
     const reason = error instanceof Error ? error.message : 'Unknown bridge error';
-    return buildDemoFallback(reason);
+    return buildStaleFallback(reason, false) ?? buildDemoFallback(reason);
   }
 }
