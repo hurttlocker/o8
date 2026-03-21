@@ -25,6 +25,7 @@ import { IntentCanvas } from '@/components/desktop/IntentCanvas';
 import { SettingsPage } from '@/components/desktop/SettingsPage';
 import { AnalyticsPage } from '@/components/desktop/AnalyticsPage';
 import { ThoughtsCard } from '@/components/desktop/ThoughtsCard';
+import { SetupWizard, type DetectionResult } from '@/components/desktop/SetupWizard';
 import { LocalhostPreviewTabs } from '@/components/desktop/LocalhostPreviewTabs';
 import { TileContainer, type TileContentRegistry } from '@/components/desktop/TileContainer';
 import type { DesktopChatInjectionPayload } from '@/lib/chat/injection';
@@ -88,6 +89,40 @@ function DashboardInner() {
   const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const [tileLayoutHydrated, setTileLayoutHydrated] = useState(false);
+
+  // ── Setup wizard state ──
+  const [setupWizardOpen, setSetupWizardOpen] = useState(false);
+  const [setupDetection, setSetupDetection] = useState<DetectionResult | null>(null);
+  const setupCheckedRef = useRef(false);
+
+  useEffect(() => {
+    if (setupCheckedRef.current) return;
+    setupCheckedRef.current = true;
+    (async () => {
+      try {
+        const configRes = await fetch('/api/setup/config');
+        if (!configRes.ok) return;
+        const config = await configRes.json();
+        if (config.completedAt) return; // Already completed setup
+        const detectRes = await fetch('/api/setup/detect');
+        if (!detectRes.ok) return;
+        const detection = await detectRes.json() as DetectionResult;
+        setSetupDetection(detection);
+        setSetupWizardOpen(true);
+      } catch { /* silent — don't block dashboard */ }
+    })();
+  }, []);
+
+  const handleSetupComplete = useCallback(async () => {
+    setSetupWizardOpen(false);
+    try {
+      await fetch('/api/setup/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ completedAt: new Date().toISOString() }),
+      });
+    } catch { /* silent */ }
+  }, []);
 
   // Global repo state (shared between TitleBar and AgentPanel)
   const [globalRepo, setGlobalRepo] = useState<string | null>(null);
@@ -1166,6 +1201,11 @@ function DashboardInner() {
         agents={parsedAgents}
         draftInjection={thoughtsOpen ? thoughtsDraftInjection : null}
       />
+
+      {/* ── First Launch Setup Wizard ── */}
+      {setupWizardOpen && setupDetection && (
+        <SetupWizard detection={setupDetection} onComplete={handleSetupComplete} />
+      )}
     </div>
   );
 }
