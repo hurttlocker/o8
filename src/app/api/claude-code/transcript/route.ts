@@ -65,33 +65,48 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Find the most recently modified project dir that matches
     const projectDirs = await readdir(CLAUDE_PROJECTS_DIR).catch(() => []);
+    const sessionId = sessionKey.replace('claude-code:', '');
+    let targetFile: string | null = null;
 
-    // Find the session JSONL — check all project dirs for recent files
-    let bestFile: { path: string; mtime: number } | null = null;
-
-    for (const dir of projectDirs) {
-      const dirPath = path.join(CLAUDE_PROJECTS_DIR, dir);
-      try {
-        const files = await readdir(dirPath);
-        for (const file of files) {
-          if (!file.endsWith('.jsonl')) continue;
-          const filePath = path.join(dirPath, file);
-          const fileStat = await stat(filePath);
-          if (!bestFile || fileStat.mtimeMs > bestFile.mtime) {
-            bestFile = { path: filePath, mtime: fileStat.mtimeMs };
-          }
-        }
-      } catch { /* skip */ }
+    // Try to find the specific session JSONL by UUID first.
+    if (sessionId && !sessionId.startsWith('live-')) {
+      for (const dir of projectDirs) {
+        const candidate = path.join(CLAUDE_PROJECTS_DIR, dir, `${sessionId}.jsonl`);
+        try {
+          await stat(candidate);
+          targetFile = candidate;
+          break;
+        } catch { /* not in this dir */ }
+      }
     }
 
-    if (!bestFile) {
+    // Fallback: most recently modified JSONL (for live-PID sessions or unknown UUIDs).
+    if (!targetFile) {
+      let bestMtime = 0;
+      for (const dir of projectDirs) {
+        const dirPath = path.join(CLAUDE_PROJECTS_DIR, dir);
+        try {
+          const files = await readdir(dirPath);
+          for (const file of files) {
+            if (!file.endsWith('.jsonl')) continue;
+            const filePath = path.join(dirPath, file);
+            const fileStat = await stat(filePath);
+            if (fileStat.mtimeMs > bestMtime) {
+              bestMtime = fileStat.mtimeMs;
+              targetFile = filePath;
+            }
+          }
+        } catch { /* skip */ }
+      }
+    }
+
+    if (!targetFile) {
       return NextResponse.json({ transcript: [] });
     }
 
     // Read and parse the JSONL
-    const raw = await readFile(bestFile.path, 'utf-8');
+    const raw = await readFile(targetFile, 'utf-8');
     const lines = raw.trim().split('\n').filter(Boolean);
 
     const transcript: {

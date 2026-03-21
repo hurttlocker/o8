@@ -304,7 +304,7 @@ function buildDemoFallback(reason: string): FleetSnapshot {
   };
 }
 
-const CLAUDE_CODE_ADDITIONS_TTL_MS = 30_000;
+const CLAUDE_CODE_ADDITIONS_TTL_MS = 15_000;
 
 function shortenHomePath(filePath: string): string {
   const home = process.env.HOME ?? '/Users/unknown';
@@ -752,12 +752,12 @@ export async function getOpenClawFleetSnapshot(
     ]);
 
     const ownedThreadIds = new Set(ownedCodex.ownedThreadIds);
-    // Only show discovered codex sessions that have a live process (active PID)
-    // or are IDE-owned. Filter out stale SQLite session records.
-    // Then deduplicate: only keep the most recent running thread per workspace+branch
+    // Only show discovered codex sessions that are actively running or recently active
+    // enough to still be in review. Filter out stale SQLite session records.
+    // Then deduplicate: only keep the most recent running/reviewing thread per workspace+branch
     const runningDiscovered = codexDiscovery.agents.filter((agent) => {
       if (ownedThreadIds.has(agent.sessionId ?? '')) return false;
-      return agent.status === 'running';
+      return agent.status === 'running' || agent.status === 'reviewing';
     });
     // Deduplicate: one agent per workspace+branch (keep first = most recent,
     // since discovery sorts by updated_at desc)
@@ -788,8 +788,10 @@ export async function getOpenClawFleetSnapshot(
     // Keep owned Codex surfaces visible even between runs so resume/review stays truthful.
     const visibleOwnedAgents = ownedCodex.agents;
 
-    // Only include Claude Code sessions with a live process
-    const liveClaudeCodeAgents = claudeCodeSessions.agents.filter((agent) => agent.status === 'running');
+    // Only include Claude Code sessions that are actively running or recently active
+    const liveClaudeCodeAgents = claudeCodeSessions.agents.filter(
+      (agent) => agent.status === 'running' || agent.status === 'reviewing'
+    );
     const liveClaudeCodeSquads = liveClaudeCodeAgents.length > 0 ? claudeCodeSessions.squads : [];
 
     const allAgents = [...enrichedOpenClawAgents, ...visibleOwnedAgents, ...filteredDiscoveredAgents, ...liveClaudeCodeAgents];
@@ -813,6 +815,7 @@ export async function getOpenClawFleetSnapshot(
           ? `OpenClaw ${parsed.gateway?.self?.version ?? 'unknown'} • ${parsed.gateway?.mode ?? 'local'} gateway • ${parsed.gateway?.source ?? 'rest'} • ${parsed.gateway?.freshness ?? 'fresh'}`
           : 'Gateway unreachable',
         gatewayFreshness: parsed.gateway?.freshness ?? (parsed.gateway?.reachable ? 'fresh' : 'warming'),
+        gatewayReachable: parsed.gateway?.reachable ?? false,
         observablePending,
         primarySessionKey: primarySession.key,
         mirrorMode: 'current-session-first',

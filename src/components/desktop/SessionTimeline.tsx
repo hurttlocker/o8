@@ -625,7 +625,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                 fontWeight: 600,
                 whiteSpace: 'nowrap',
                 pointerEvents: 'none',
-                zIndex: 10,
+                zIndex: 9500,
                 letterSpacing: '0.02em',
                 boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               }}>

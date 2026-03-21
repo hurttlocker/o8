@@ -4,14 +4,16 @@
  * AnalyticsPage — Cost & Usage Dashboard
  *
  * Full-width workspace view showing spend, token usage,
- * and agent efficiency metrics. Accessible via NavRail Analytics tab.
+ * and agent efficiency metrics across all surfaces:
+ * OpenClaw Chat, Codex CLI, Claude Code, IDE LLM Chat.
  *
  * Layout:
- *   Hero metrics row → Hourly spend chart → Agent breakdown → Model breakdown → Top sessions
+ *   Hero metrics row → Hourly/Daily chart → Surface breakdown →
+ *   Agent breakdown → Model breakdown → Top sessions
  */
 
-import { memo, useCallback, useEffect, useState } from 'react';
-import { Activity, BarChart3, Clock, Cpu, DollarSign, TrendingUp, Zap } from 'lucide-react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { Activity, BarChart3, Clock, Cpu, DollarSign, Layers, TrendingUp, Zap } from 'lucide-react';
 
 interface Totals {
   cost: number;
@@ -19,7 +21,11 @@ interface Totals {
   inputTokens: number;
   outputTokens: number;
   cacheTokens: number;
+  cacheWriteTokens: number;
   sessions: number;
+  cacheHitRate: number;
+  avgCostPerMessage: number;
+  totalTokens: number;
 }
 
 interface HourBucket {
@@ -36,7 +42,7 @@ interface ModelBreakdown {
   sessions: number;
 }
 
-interface AgentBreakdown {
+interface BreakdownEntry {
   cost: number;
   messages: number;
   tokens: number;
@@ -54,7 +60,8 @@ interface TopSession {
 
 interface AnalyticsData {
   totals: Totals;
-  byAgent: Record<string, AgentBreakdown>;
+  byAgent: Record<string, BreakdownEntry>;
+  bySurface: Record<string, BreakdownEntry>;
   byModel: ModelBreakdown[];
   hourly: HourBucket[];
   topSessions: TopSession[];
@@ -78,14 +85,28 @@ const AGENT_COLORS: Record<string, string> = {
   Mister: '#111827',
   Niot: '#2563eb',
   Hawk: '#f59e0b',
+  'Codex CLI': '#10b981',
+  'Claude Code': '#7c3aed',
+  'IDE LLM Chat': '#ec4899',
+};
+
+const SURFACE_COLORS: Record<string, string> = {
+  'OpenClaw Chat': '#111827',
+  'Codex CLI': '#2563eb',
+  'Claude Code': '#f59e0b',
+  'IDE LLM Chat': '#7c3aed',
 };
 
 const MODEL_COLORS: Record<string, string> = {
   'claude-opus-4-6': '#7c3aed',
   'claude-sonnet-4': '#2563eb',
-  'claude-haiku-4-5': '#22c55e',
+  'claude-sonnet-4-5': '#3b82f6',
+  'claude-haiku-4-5': '#14b8a6',
+  'claude-haiku-3-5': '#22c55e',
   'gemini-3-pro-preview': '#f59e0b',
   'gemini-3-flash-preview': '#fb923c',
+  'codex': '#10b981',
+  'gpt-5': '#10b981',
   'delivery-mirror': '#6b7280',
 };
 
@@ -113,7 +134,7 @@ const MetricCard = memo(function MetricCard({
   return (
     <div style={{
       flex: 1,
-      minWidth: 160,
+      minWidth: 140,
       background: 'var(--t-panel)',
       border: '1px solid var(--t-divider-subtle)',
       borderRadius: 14,
@@ -138,7 +159,7 @@ const MetricCard = memo(function MetricCard({
         </span>
       </div>
       <div style={{
-        fontSize: 28, fontWeight: 700, color: 'var(--t-text)',
+        fontSize: 26, fontWeight: 700, color: 'var(--t-text)',
         letterSpacing: '-0.03em', fontFamily: '"SF Mono", ui-monospace, monospace',
         fontVariantNumeric: 'tabular-nums',
       }}>
@@ -153,13 +174,32 @@ const MetricCard = memo(function MetricCard({
   );
 });
 
-// ── Hourly Bar Chart (pure inline SVG) ──
-const HourlyChart = memo(function HourlyChart({ data }: { data: HourBucket[] }) {
-  if (data.length === 0) return null;
-  const maxCost = Math.max(...data.map(d => d.cost), 0.01);
-  const barWidth = Math.max(8, Math.min(24, 600 / data.length - 2));
+// ── Hourly/Daily Bar Chart (pure inline SVG) ──
+const SpendChart = memo(function SpendChart({ data }: { data: HourBucket[] }) {
+  // Aggregate to daily when more than 48 buckets
+  const chartData = useMemo(() => {
+    if (data.length <= 48) return data;
+    const dailyMap = new Map<string, HourBucket>();
+    for (const bucket of data) {
+      const day = bucket.hour.split(' ')[0] ?? bucket.hour;
+      const existing = dailyMap.get(day);
+      if (existing) {
+        existing.cost += bucket.cost;
+        existing.messages += bucket.messages;
+        existing.tokens += bucket.tokens;
+      } else {
+        dailyMap.set(day, { hour: day, cost: bucket.cost, messages: bucket.messages, tokens: bucket.tokens });
+      }
+    }
+    return Array.from(dailyMap.values()).sort((a, b) => a.hour.localeCompare(b.hour));
+  }, [data]);
+
+  if (chartData.length === 0) return null;
+  const maxCost = Math.max(...chartData.map(d => d.cost), 0.01);
+  const barWidth = Math.max(8, Math.min(28, 700 / chartData.length - 2));
   const chartHeight = 160;
-  const chartWidth = data.length * (barWidth + 2);
+  const chartWidth = chartData.length * (barWidth + 2);
+  const isDaily = data.length > 48;
 
   return (
     <div style={{
@@ -178,19 +218,18 @@ const HourlyChart = memo(function HourlyChart({ data }: { data: HourBucket[] }) 
             fontSize: 13, fontWeight: 700, color: 'var(--t-text)',
             letterSpacing: '-0.01em',
           }}>
-            Hourly Spend
+            {isDaily ? 'Daily Spend' : 'Hourly Spend'}
           </span>
         </div>
         <span style={{
           fontSize: 11, color: 'var(--t-text-faint)',
           fontFamily: '"SF Mono", ui-monospace, monospace',
         }}>
-          {data.length} hours
+          {chartData.length} {isDaily ? 'days' : 'hours'}
         </span>
       </div>
       <div style={{ overflowX: 'auto', scrollbarWidth: 'none' } as React.CSSProperties} className="hide-scrollbar">
         <svg width={Math.max(chartWidth, 300)} height={chartHeight + 24} viewBox={`0 0 ${Math.max(chartWidth, 300)} ${chartHeight + 24}`}>
-          {/* Grid lines */}
           {[0, 0.25, 0.5, 0.75, 1].map(pct => (
             <line
               key={pct}
@@ -199,10 +238,10 @@ const HourlyChart = memo(function HourlyChart({ data }: { data: HourBucket[] }) 
               stroke="var(--t-divider-subtle)" strokeWidth="1" strokeDasharray="4,4"
             />
           ))}
-          {/* Bars */}
-          {data.map((d, i) => {
+          {chartData.map((d, i) => {
             const h = (d.cost / maxCost) * chartHeight;
             const x = i * (barWidth + 2);
+            const labelInterval = Math.max(1, Math.floor(chartData.length / 8));
             return (
               <g key={i}>
                 <rect
@@ -212,17 +251,16 @@ const HourlyChart = memo(function HourlyChart({ data }: { data: HourBucket[] }) 
                   fill="#2563eb"
                   opacity={0.7}
                 >
-                  <title>{`${d.hour}\n${formatCost(d.cost)} · ${d.messages} msgs`}</title>
+                  <title>{`${d.hour}\n${formatCost(d.cost)} · ${d.messages} msgs · ${formatTokens(d.tokens)} tokens`}</title>
                 </rect>
-                {/* Hour label — show every 2-4 hours */}
-                {(i % Math.max(1, Math.floor(data.length / 8)) === 0) && (
+                {(i % labelInterval === 0) && (
                   <text
                     x={x + barWidth / 2} y={chartHeight + 16}
                     textAnchor="middle"
                     fontSize={9} fill="var(--t-text-faint)"
                     fontFamily='"SF Mono", ui-monospace, monospace'
                   >
-                    {d.hour.split(' ')[1] || d.hour.slice(-5)}
+                    {isDaily ? d.hour.slice(5) : (d.hour.split(' ')[1] || d.hour.slice(-5))}
                   </text>
                 )}
               </g>
@@ -234,15 +272,23 @@ const HourlyChart = memo(function HourlyChart({ data }: { data: HourBucket[] }) 
   );
 });
 
-// ── Agent Breakdown ──
-const AgentBreakdownCard = memo(function AgentBreakdownCard({
-  byAgent,
+// ── Breakdown Card (shared for Agent, Surface) ──
+const BreakdownCard = memo(function BreakdownCard({
+  title,
+  icon: Icon,
+  iconColor,
+  entries,
   totalCost,
+  colorMap,
 }: {
-  byAgent: Record<string, AgentBreakdown>;
+  title: string;
+  icon: typeof Cpu;
+  iconColor: string;
+  entries: Array<[string, BreakdownEntry]>;
   totalCost: number;
+  colorMap: Record<string, string>;
 }) {
-  const agents = Object.entries(byAgent).sort((a, b) => b[1].cost - a[1].cost);
+  if (entries.length === 0) return null;
 
   return (
     <div style={{
@@ -252,15 +298,18 @@ const AgentBreakdownCard = memo(function AgentBreakdownCard({
       padding: '16px 18px',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
-        <Cpu size={14} strokeWidth={2} color="#111827" />
+        <Icon size={14} strokeWidth={2} color={iconColor} />
         <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-          By Agent
+          {title}
         </span>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {agents.map(([name, data]) => {
+        {entries.map(([name, data]) => {
           const pct = totalCost > 0 ? (data.cost / totalCost) * 100 : 0;
-          const color = AGENT_COLORS[name] || '#9ca3af';
+          const tokenPct = entries.reduce((s, [, d]) => s + d.tokens, 0);
+          const tokPct = tokenPct > 0 ? (data.tokens / tokenPct) * 100 : 0;
+          const color = colorMap[name] || '#9ca3af';
+          const barPct = Math.max(pct, tokPct); // Use whichever is larger for bar visibility
           return (
             <div key={name}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -275,13 +324,12 @@ const AgentBreakdownCard = memo(function AgentBreakdownCard({
                   fontSize: 13, fontWeight: 700, color: 'var(--t-text)',
                   fontFamily: '"SF Mono", ui-monospace, monospace',
                 }}>
-                  {formatCost(data.cost)}
+                  {data.cost > 0 ? formatCost(data.cost) : formatTokens(data.tokens) + ' tok'}
                 </span>
               </div>
-              {/* Progress bar */}
               <div style={{ height: 6, borderRadius: 3, background: 'var(--t-bg-subtle)', overflow: 'hidden' }}>
                 <div style={{
-                  width: `${pct}%`,
+                  width: `${Math.max(barPct, 1)}%`,
                   height: '100%',
                   borderRadius: 3,
                   background: color,
@@ -296,9 +344,11 @@ const AgentBreakdownCard = memo(function AgentBreakdownCard({
                 <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
                   {formatTokens(data.tokens)} tokens
                 </span>
-                <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-                  {pct.toFixed(1)}%
-                </span>
+                {data.cost > 0 && (
+                  <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                    {pct.toFixed(1)}%
+                  </span>
+                )}
               </div>
             </div>
           );
@@ -352,7 +402,7 @@ const ModelBreakdownCard = memo(function ModelBreakdownCard({ byModel }: { byMod
                   fontSize: 12, fontWeight: 700, color: 'var(--t-text)',
                   fontFamily: '"SF Mono", ui-monospace, monospace',
                 }}>
-                  {formatCost(m.cost)}
+                  {m.cost > 0 ? formatCost(m.cost) : `${m.messages} calls`}
                 </span>
               </div>
             </div>
@@ -399,7 +449,7 @@ const TopSessionsCard = memo(function TopSessionsCard({ sessions }: { sessions: 
               background: s.active ? '#34c759' : (AGENT_COLORS[s.agent] || '#9ca3af'),
               boxShadow: s.active ? '0 0 6px rgba(52, 211, 153, 0.4)' : 'none',
             }} />
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text)', width: 56 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text)', width: 80 }}>
               {s.agent}
             </span>
             <span style={{
@@ -417,7 +467,7 @@ const TopSessionsCard = memo(function TopSessionsCard({ sessions }: { sessions: 
               fontFamily: '"SF Mono", ui-monospace, monospace',
               width: 70, textAlign: 'right',
             }}>
-              {formatCost(s.cost)}
+              {s.cost > 0 ? formatCost(s.cost) : `${s.messages}×`}
             </span>
           </div>
         ))}
@@ -461,6 +511,18 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
     const interval = setInterval(() => fetchData(selectedRange), 60_000);
     return () => clearInterval(interval);
   }, [selectedRange, fetchData]);
+
+  const agentEntries = useMemo(() => {
+    if (!data?.byAgent) return [];
+    return Object.entries(data.byAgent).sort((a, b) => b[1].cost - a[1].cost || b[1].tokens - a[1].tokens);
+  }, [data?.byAgent]);
+
+  const surfaceEntries = useMemo(() => {
+    if (!data?.bySurface) return [];
+    return Object.entries(data.bySurface)
+      .filter(([, d]) => d.messages > 0 || d.sessions > 0)
+      .sort((a, b) => b[1].cost - a[1].cost || b[1].tokens - a[1].tokens);
+  }, [data?.bySurface]);
 
   return (
     <div style={{
@@ -522,9 +584,18 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
         <div style={{ textAlign: 'center', color: 'var(--t-text-muted)', padding: 40 }}>
           Loading analytics…
         </div>
+      ) : data && data.totals.messages === 0 ? (
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          gap: 12, padding: '80px 32px', color: 'var(--t-text-faint)',
+        }}>
+          <BarChart3 size={40} strokeWidth={1.5} style={{ opacity: 0.3 }} />
+          <span style={{ fontSize: 15, fontWeight: 600 }}>No activity in this period</span>
+          <span style={{ fontSize: 12 }}>Try a wider time range or wait for agent activity.</span>
+        </div>
       ) : data ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 900 }}>
-          {/* Hero metrics row */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 960 }}>
+          {/* Hero metrics — row 1 */}
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             <MetricCard
               icon={DollarSign}
@@ -541,13 +612,6 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
               color="#2563eb"
             />
             <MetricCard
-              icon={TrendingUp}
-              label="Output Tokens"
-              value={formatTokens(data.totals.outputTokens)}
-              sub={`${formatTokens(data.totals.cacheTokens)} cache reads`}
-              color="#7c3aed"
-            />
-            <MetricCard
               icon={Clock}
               label="Cost/Hour"
               value={formatCost(data.totals.cost / Math.max(data.hourly.length, 1))}
@@ -556,13 +620,57 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
             />
           </div>
 
-          {/* Hourly chart */}
-          <HourlyChart data={data.hourly} />
+          {/* Hero metrics — row 2 */}
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <MetricCard
+              icon={TrendingUp}
+              label="Input Tokens"
+              value={formatTokens(data.totals.inputTokens)}
+              sub={`${formatTokens(data.totals.cacheWriteTokens)} cache writes`}
+              color="#ef4444"
+            />
+            <MetricCard
+              icon={TrendingUp}
+              label="Output Tokens"
+              value={formatTokens(data.totals.outputTokens)}
+              sub={`${formatTokens(data.totals.totalTokens)} total tokens`}
+              color="#7c3aed"
+            />
+            <MetricCard
+              icon={Activity}
+              label="Cache Hit Rate"
+              value={`${data.totals.cacheHitRate.toFixed(1)}%`}
+              sub={`${formatTokens(data.totals.cacheTokens)} cache reads saved`}
+              color="#22c55e"
+            />
+          </div>
+
+          {/* Spend chart */}
+          <SpendChart data={data.hourly} />
+
+          {/* Surface breakdown */}
+          {surfaceEntries.length > 0 && (
+            <BreakdownCard
+              title="By Surface"
+              icon={Layers}
+              iconColor="#2563eb"
+              entries={surfaceEntries}
+              totalCost={data.totals.cost}
+              colorMap={SURFACE_COLORS}
+            />
+          )}
 
           {/* Two-column: Agent + Model */}
           <div style={{ display: 'flex', gap: 12 }}>
             <div style={{ flex: 1 }}>
-              <AgentBreakdownCard byAgent={data.byAgent} totalCost={data.totals.cost} />
+              <BreakdownCard
+                title="By Agent"
+                icon={Cpu}
+                iconColor="#111827"
+                entries={agentEntries}
+                totalCost={data.totals.cost}
+                colorMap={AGENT_COLORS}
+              />
             </div>
             <div style={{ flex: 1 }}>
               <ModelBreakdownCard byModel={data.byModel} />
