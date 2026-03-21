@@ -19,7 +19,7 @@ import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
 import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
 import { recallMemories, extractAndStoreFacts } from '@/lib/llm/memory';
-import { toolsForAnthropic, toolsForOpenAI, toolsForGoogle, executeTool, APPROVAL_REQUIRED_TOOLS, type ToolResult } from '@/lib/llm/tools';
+import { toolsForAnthropic, toolsForOpenAI, toolsForGoogle, executeTool, APPROVAL_REQUIRED_TOOLS, classifyCommand, type ToolResult } from '@/lib/llm/tools';
 
 // ── Pricing (per 1M tokens) ──
 
@@ -499,15 +499,37 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
 
             for (const tc of toolCalls) {
               // Check if this tool requires user approval (skip if pre-approved)
-              if (APPROVAL_REQUIRED_TOOLS.has(tc.name) && !approvedTools.has(tc.name)) {
+              let needsApproval = APPROVAL_REQUIRED_TOOLS.has(tc.name) && !approvedTools.has(tc.name);
+
+              // Dynamic approval for terminal commands based on safety classification
+              if (tc.name === 'run_terminal_command' && !approvedTools.has('run_terminal_command')) {
+                const cmd = (tc.args.command as string) || '';
+                const classification = classifyCommand(cmd);
+                if (classification.safety === 'blocked') {
+                  // Blocked: send result directly back to model as a refusal
+                  enqueue(JSON.stringify({ type: 'tool_result', name: tc.name, status: 'blocked', preview: `Blocked: ${classification.reason}` }));
+                  messages.push(
+                    { role: 'assistant', content: `I'll run the command: ${cmd}` },
+                    { role: 'user', content: `Tool "run_terminal_command" was BLOCKED for safety: ${classification.reason}. Do not attempt this command again. Suggest a safe alternative.` }
+                  );
+                  continue;
+                }
+                needsApproval = classification.safety === 'needs_approval';
+              }
+
+              if (needsApproval) {
+                const cmd = tc.name === 'run_terminal_command' ? (tc.args.command as string) : '';
                 enqueue(JSON.stringify({
                   type: 'approval_required',
                   name: tc.name,
                   args: tc.args,
+                  editable: tc.name === 'run_terminal_command', // terminal commands can be edited
                   summary: tc.name === 'create_github_issue'
                     ? `Create issue: "${tc.args.title}" in ${tc.args.repo}`
                     : tc.name === 'create_pull_request'
                     ? `Create PR: "${tc.args.title}" on branch ${tc.args.branch}`
+                    : tc.name === 'run_terminal_command'
+                    ? `Run command: ${cmd}`
                     : `Execute ${tc.name}`,
                 }));
                 // Stop the loop — frontend will re-submit with approval
