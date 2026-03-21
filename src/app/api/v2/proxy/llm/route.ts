@@ -84,40 +84,50 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
     }),
-    buildBody: (model, messages) => ({
-      model,
-      max_tokens: 4096,
-      stream: true,
-      messages: messages
-        .filter(m => m.role !== 'system')
-        .map(m => {
-          // Check for inline images (data URIs in markdown syntax)
-          const imgRegex = /!\[([^\]]*)\]\((data:([^;]+);base64,([^)]+))\)/g;
-          const contentParts: Record<string, unknown>[] = [];
-          let lastIdx = 0;
-          let match: RegExpExecArray | null;
-          while ((match = imgRegex.exec(m.content))) {
-            const textBefore = m.content.slice(lastIdx, match.index).trim();
-            if (textBefore) contentParts.push({ type: 'text', text: textBefore });
-            contentParts.push({
-              type: 'image',
-              source: { type: 'base64', media_type: match[3], data: match[4] },
-            });
-            lastIdx = match.index + match[0].length;
-          }
-          const remaining = m.content.slice(lastIdx).trim();
-          if (remaining) contentParts.push({ type: 'text', text: remaining });
-          // Only use multipart if images found
-          if (contentParts.length > 1 || contentParts.some(p => p.type === 'image')) {
-            return { role: m.role, content: contentParts };
-          }
-          return { role: m.role, content: m.content };
-        }),
-      ...(messages.find(m => m.role === 'system')
-        ? { system: messages.find(m => m.role === 'system')!.content }
-        : {}),
-      tools: toolsForAnthropic(),
-    }),
+    buildBody: (model, messages) => {
+      // Detect if model supports extended thinking
+      const isThinkingModel = /opus|sonnet-4/.test(model);
+      const maxTokens = isThinkingModel ? 16384 : 4096;
+
+      return {
+        model,
+        max_tokens: maxTokens,
+        stream: true,
+        // Extended thinking — Anthropic requires explicit opt-in
+        ...(isThinkingModel ? {
+          thinking: { type: 'enabled', budget_tokens: 10000 },
+        } : {}),
+        messages: messages
+          .filter(m => m.role !== 'system')
+          .map(m => {
+            // Check for inline images (data URIs in markdown syntax)
+            const imgRegex = /!\[([^\]]*)\]\((data:([^;]+);base64,([^)]+))\)/g;
+            const contentParts: Record<string, unknown>[] = [];
+            let lastIdx = 0;
+            let match: RegExpExecArray | null;
+            while ((match = imgRegex.exec(m.content))) {
+              const textBefore = m.content.slice(lastIdx, match.index).trim();
+              if (textBefore) contentParts.push({ type: 'text', text: textBefore });
+              contentParts.push({
+                type: 'image',
+                source: { type: 'base64', media_type: match[3], data: match[4] },
+              });
+              lastIdx = match.index + match[0].length;
+            }
+            const remaining = m.content.slice(lastIdx).trim();
+            if (remaining) contentParts.push({ type: 'text', text: remaining });
+            // Only use multipart if images found
+            if (contentParts.length > 1 || contentParts.some(p => p.type === 'image')) {
+              return { role: m.role, content: contentParts };
+            }
+            return { role: m.role, content: m.content };
+          }),
+        ...(messages.find(m => m.role === 'system')
+          ? { system: messages.find(m => m.role === 'system')!.content }
+          : {}),
+        tools: toolsForAnthropic(),
+      };
+    },
     parseStream: (line) => {
       if (!line.startsWith('data: ')) return null;
       const data = line.slice(6).trim();
@@ -162,10 +172,18 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
       'Authorization': `Bearer ${apiKey}`,
       'content-type': 'application/json',
     }),
-    buildBody: (model, messages) => ({
+    buildBody: (model, messages) => {
+      // Detect reasoning models (o1, o3, o3-mini)
+      const isReasoningModel = /^o[1-9]|^o3/.test(model);
+
+      return {
       model,
       stream: true,
       stream_options: { include_usage: true },
+      // Reasoning models: set effort level
+      ...(isReasoningModel ? {
+        reasoning_effort: 'medium',
+      } : {}),
       messages: messages.map(m => {
         // Check for inline images (data URIs in markdown syntax)
         const imgRegex = /!\[([^\]]*)\]\((data:([^;]+);base64,[^)]+)\)/g;
@@ -187,7 +205,8 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
         return m;
       }),
       tools: toolsForOpenAI(),
-    }),
+    };
+    },
     parseStream: (line) => {
       if (!line.startsWith('data: ')) return null;
       const data = line.slice(6).trim();
@@ -196,6 +215,10 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
         const parsed = JSON.parse(data);
         if (parsed.choices?.[0]?.delta?.content) {
           return { type: 'content', text: parsed.choices[0].delta.content };
+        }
+        // OpenAI reasoning content (o1, o3 models)
+        if (parsed.choices?.[0]?.delta?.reasoning_content) {
+          return { type: 'thinking', text: parsed.choices[0].delta.reasoning_content };
         }
         // OpenAI tool calls
         const tc = parsed.choices?.[0]?.delta?.tool_calls?.[0];
@@ -254,6 +277,10 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
       ...(messages.find(m => m.role === 'system')
         ? { systemInstruction: { parts: [{ text: messages.find(m => m.role === 'system')!.content }] } }
         : {}),
+      // Enable thinking for Flash and Pro models
+      generationConfig: {
+        thinkingConfig: { includeThoughts: true },
+      },
       tools: toolsForGoogle(),
     }),
     parseStream: (line) => {
