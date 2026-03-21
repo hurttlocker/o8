@@ -76,6 +76,8 @@ type OwnedCodexSessionRecord = {
   reviewDispositionUpdatedAt?: string;
   activeRun?: OwnedCodexRunRecord;
   recentRuns: OwnedCodexRunRecord[];
+  autoRetry?: boolean;
+  retryCount?: number;
 };
 
 type OwnedCodexFleetAdditions = {
@@ -585,6 +587,30 @@ async function refreshOwnedSession(session: OwnedCodexSessionRecord) {
 
   if (dirty) {
     await saveOwnedSession(session);
+  }
+
+  // Auto-retry: if the latest run just failed and autoRetry is enabled, retry once after 5s
+  if (session.autoRetry && (session.retryCount ?? 0) < 1) {
+    const latestFailedRun = session.recentRuns.find((r) => r.outcome === 'failed');
+    if (latestFailedRun && !session.activeRun) {
+      const failAge = latestFailedRun.finishedAt
+        ? Date.now() - new Date(latestFailedRun.finishedAt).getTime()
+        : Infinity;
+      // Only auto-retry if failure is recent (within 60s) to avoid retrying stale failures
+      if (failAge < 60_000) {
+        session.retryCount = (session.retryCount ?? 0) + 1;
+        await saveOwnedSession(session);
+        console.log(`[owned-codex] Auto-retrying session ${session.surfaceId} after failure (attempt ${session.retryCount})`);
+        setTimeout(async () => {
+          try {
+            await spawnOwnedRun(session, session.latestPrompt, session.threadId ? 'resume' : 'launch');
+            invalidateOwnedCodexFleetCache();
+          } catch (err) {
+            console.error(`[owned-codex] Auto-retry failed for ${session.surfaceId}:`, err);
+          }
+        }, 5_000);
+      }
+    }
   }
 
   return session;

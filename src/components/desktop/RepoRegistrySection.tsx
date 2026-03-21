@@ -517,6 +517,7 @@ function RepoCard({
   const [prPreviewDetailLoading, setPrPreviewDetailLoading] = useState(false);
   const hoverOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prFetchStartedRef = useRef(false);
 
   useEffect(() => {
     setDraftSetup(repo.setup);
@@ -711,11 +712,16 @@ function RepoCard({
   const hasUnsavedChanges = JSON.stringify(draftSetup) !== JSON.stringify(repo.setup);
 
   useEffect(() => {
-    if (!hoveringHeader || !githubSlug || prPreviewLoaded || prPreviewLoading) return;
+    if (!hoveringHeader || !githubSlug || prPreviewLoaded || prFetchStartedRef.current) return;
+    prFetchStartedRef.current = true;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3_000);
+    const abortTimeoutId = setTimeout(() => controller.abort(), 3_000);
     let active = true;
-    setPrPreviewLoading(true);
+    // Delay showing loading indicator by 500ms — prevents flash-of-loading
+    // for fast responses and for repos with no open PRs
+    const loadingDelayId = setTimeout(() => {
+      if (active) setPrPreviewLoading(true);
+    }, 500);
     fetch(`/api/panel/prs?repo=${encodeURIComponent(githubSlug)}`, { signal: controller.signal })
       .then((response) => response.json())
       .then((data) => {
@@ -730,15 +736,17 @@ function RepoCard({
         }
       })
       .finally(() => {
-        clearTimeout(timeoutId);
+        clearTimeout(abortTimeoutId);
+        clearTimeout(loadingDelayId);
         if (active) setPrPreviewLoading(false);
       });
     return () => {
       active = false;
-      clearTimeout(timeoutId);
+      clearTimeout(abortTimeoutId);
+      clearTimeout(loadingDelayId);
       controller.abort();
     };
-  }, [githubSlug, hoveringHeader, prPreviewLoaded, prPreviewLoading]);
+  }, [githubSlug, hoveringHeader, prPreviewLoaded]);
 
   useEffect(() => {
     return () => {
