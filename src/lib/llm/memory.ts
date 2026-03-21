@@ -14,7 +14,8 @@ import { getCortexClient } from '@/lib/cortex/client';
 import { execSync } from 'node:child_process';
 
 const MAX_RECALL_TOKENS = 800; // ~3200 chars at 4 chars/token
-const MAX_RECALL_RESULTS = 7;
+const MAX_RECALL_RESULTS = 10;
+const MAX_FACTS = 10; // Hard cap on facts injected
 const MIN_CONFIDENCE = 0.3;
 const MIN_SCORE = 0.4; // Below this, results are too noisy to include
 
@@ -152,6 +153,7 @@ export async function recallMemories(userMessage: string): Promise<RecallResult 
     const lines: string[] = [];
     let charCount = 0;
     const usedFacts = new Set<string>(); // dedup by content
+    const factConfidences = new Map<string, number>(); // text → confidence
 
     // ── Primary: structured fact triples ──
     if (allFactIds.length > 0) {
@@ -161,6 +163,8 @@ export async function recallMemories(userMessage: string): Promise<RecallResult 
       facts.sort((a, b) => b.Confidence - a.Confidence);
 
       for (const fact of facts) {
+        if (lines.length >= MAX_FACTS) break;
+
         const line = formatFact(fact);
         if (!line || line.length < 10) continue;
 
@@ -173,6 +177,7 @@ export async function recallMemories(userMessage: string): Promise<RecallResult 
         if (charCount + line.length > MAX_RECALL_TOKENS * 4) break;
 
         lines.push(`- ${line}`);
+        factConfidences.set(line, fact.Confidence);
         charCount += line.length + 4;
       }
     }
@@ -204,18 +209,28 @@ export async function recallMemories(userMessage: string): Promise<RecallResult 
         if (charCount + text.length > MAX_RECALL_TOKENS * 4) break;
 
         lines.push(`- ${text}`);
+        // Use search score as proxy confidence for snippets (cap at 1.0)
+        factConfidences.set(text, Math.min(result.score, 1.0));
         charCount += text.length + 4;
       }
     }
 
     if (lines.length === 0) return null;
 
-    const text = `## Recalled Context
-${lines.join('\n')}`;
+    // Format as XML-structured block for clean LLM consumption
+    const factTags = lines.map(l => l.slice(2)); // strip "- " prefix
+    const text = '<cortex_memory>\n' +
+      factTags.map(f => {
+        // Find the confidence for this fact if we have it
+        const conf = factConfidences.get(f);
+        const attrs = conf !== undefined ? ` confidence="${conf.toFixed(2)}"` : '';
+        return `<fact${attrs}>${f}</fact>`;
+      }).join('\n') +
+      '\n</cortex_memory>';
 
     return {
       text,
-      factCount: lines.length,
+      factCount: factTags.length,
       queryMs: Date.now() - start,
     };
   } catch (err) {
