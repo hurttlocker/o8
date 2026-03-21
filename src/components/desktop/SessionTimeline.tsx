@@ -615,54 +615,37 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                 zIndex: 5,
                 boxShadow: `0 0 6px ${lineColor}40`,
               }} />
-              {/* Top badge — time (fixed positioning to escape stacking context) */}
-              {hoverClientX !== null && (
-                <div style={{
-                  position: 'fixed',
-                  left: hoverClientX,
-                  top: hoverBarTop - 28,
-                  transform: 'translateX(-50%)',
-                  padding: '3px 8px',
-                  borderRadius: 6,
-                  background: 'var(--t-text)',
-                  color: 'var(--t-panel)',
-                  fontSize: 10,
-                  fontWeight: 600,
-                  whiteSpace: 'nowrap',
-                  pointerEvents: 'none',
-                  zIndex: 99999,
-                  letterSpacing: '0.02em',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                }}>
-                  {formatTime(hoverMin)}
-                </div>
-              )}
-              {/* Bottom badge — segment kind + duration + agent */}
-              {seg && (
-                <div style={{
-                  position: 'absolute',
-                  left: hoverX,
-                  top: '100%',
-                  transform: 'translateX(-50%)',
-                  marginTop: 6,
-                  padding: '3px 8px',
-                  borderRadius: 6,
-                  background: badgeBg,
-                  color: seg.kind === 'thinking' ? '#1e3a5f' : '#fff',
-                  fontSize: 10,
-                  fontWeight: 600,
-                  whiteSpace: 'nowrap',
-                  pointerEvents: 'none',
-                  zIndex: 10,
-                  boxShadow: `0 2px 8px ${badgeBg}40`,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                }}>
-                  <span>{kindLabel}</span>
-                  <span style={{ opacity: 0.7, fontWeight: 500 }}>{durLabel}{agentLabel}</span>
-                </div>
-              )}
+              {/* Single bottom tooltip — time + segment info */}
+              <div style={{
+                position: 'absolute',
+                left: hoverX,
+                top: '100%',
+                transform: 'translateX(-50%)',
+                marginTop: 6,
+                padding: '4px 10px',
+                borderRadius: 8,
+                background: lineColor,
+                color: (seg?.kind === 'thinking') ? '#1e3a5f' : '#fff',
+                fontSize: 10,
+                fontWeight: 600,
+                whiteSpace: 'nowrap',
+                pointerEvents: 'none',
+                zIndex: 10,
+                boxShadow: `0 2px 10px ${lineColor}50`,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                letterSpacing: '0.01em',
+              }}>
+                <span>{formatTime(hoverMin)}</span>
+                {seg && (
+                  <>
+                    <span style={{ opacity: 0.5 }}>·</span>
+                    <span>{kindLabel}</span>
+                    <span style={{ opacity: 0.6, fontWeight: 500 }}>{durLabel}{agentLabel}</span>
+                  </>
+                )}
+              </div>
             </>
           );
         })()}
