@@ -105,6 +105,22 @@ export async function compactConversation(
   }
 
   // ── Pass 2: Smart compression — knows what Cortex already has ──
+  // Optionally include skeleton map so the compressor knows real codebase structure.
+  // Fetched via API (not direct import) because this module is bundled for the client
+  // and skeleton depends on better-sqlite3 which is Node-only.
+  let skeletonContext = '';
+  try {
+    const skeletonRes = await fetch('/api/panel/skeleton');
+    if (skeletonRes.ok) {
+      const skeletonData = await skeletonRes.json();
+      if (skeletonData.rendered?.text) {
+        skeletonContext = `\n## CODEBASE STRUCTURE (for reference — use to validate file paths and symbol names)\n${skeletonData.rendered.text}\n`;
+      }
+    }
+  } catch {
+    // Skeleton not available — continue without it
+  }
+
   const compactionPrompt = `You are compressing a developer's chat history for a coding IDE.
 
 ## CRITICAL RULES
@@ -132,7 +148,7 @@ Write a dense narrative summary in this structure:
 **Open Items:**
 - [unresolved questions, next steps the user mentioned]
 
-${knownFacts ? `\n## ALREADY KNOWN (Cortex has these — reference briefly, don't restate)\n${knownFacts}\n` : ''}`;
+${knownFacts ? `\n## ALREADY KNOWN (Cortex has these — reference briefly, don't restate)\n${knownFacts}\n` : ''}${skeletonContext}`;
 
   // Call proxy for the actual compression
   const res = await fetch('/api/v2/proxy/llm', {

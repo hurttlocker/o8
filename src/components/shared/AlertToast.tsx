@@ -3,14 +3,13 @@
 /**
  * AlertToast — desktop-only urgent alert toast.
  *
- * Slides in from top-right, auto-dismisses after 5s.
+ * Slides in from bottom-left (near NavRail bell), auto-dismisses after 5s.
  * Only fires for urgent alerts (approval, error, context-critical).
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, Gauge, ShieldCheck, X } from 'lucide-react';
 import type { Alert } from '@/lib/alerts/types';
-import { SEVERITY_COLOR } from '@/lib/alerts/types';
 
 const TOAST_DURATION = 5_000;
 const MAX_TOASTS = 3;
@@ -102,18 +101,17 @@ export const AlertToast = memo(function AlertToast({
     <div
       style={{
         position: 'fixed',
-        top: 16,
-        right: 16,
+        bottom: 16,
+        left: 72,
         zIndex: 10000,
         display: 'flex',
-        flexDirection: 'column',
+        flexDirection: 'column-reverse',
         gap: 8,
         pointerEvents: 'none',
       }}
     >
       {toasts.map(({ alert, exiting }) => {
         const Icon = ICON_MAP[alert.type] ?? AlertTriangle;
-        const color = SEVERITY_COLOR[alert.severity];
 
         return (
           <div
@@ -124,34 +122,34 @@ export const AlertToast = memo(function AlertToast({
               gap: 10,
               padding: '12px 14px',
               borderRadius: 14,
-              background: 'rgba(255, 255, 255, 0.97)',
-              backdropFilter: 'blur(40px) saturate(1.8)',
-              WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
+              background: 'linear-gradient(180deg, rgba(239, 246, 255, 0.82), rgba(191, 219, 254, 0.52))',
+              backdropFilter: 'blur(28px) saturate(1.7)',
+              WebkitBackdropFilter: 'blur(28px) saturate(1.7)',
+              border: '1px solid rgba(147, 197, 253, 0.22)',
               boxShadow:
-                '0 8px 30px rgba(15, 23, 42, 0.15), 0 1px 3px rgba(15, 23, 42, 0.08)',
+                '0 22px 56px rgba(29, 78, 216, 0.18), 0 8px 24px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255,255,255,0.45)',
               width: 320,
               pointerEvents: 'auto',
               cursor: 'pointer',
               opacity: exiting ? 0 : 1,
               transform: exiting
-                ? 'translateX(120%) scale(0.95)'
+                ? 'translateX(-120%) scale(0.95)'
                 : 'translateX(0) scale(1)',
               transition:
                 'opacity 300ms ease, transform 300ms cubic-bezier(0.32, 0.72, 0, 1)',
-              borderLeft: `3px solid ${color}`,
             }}
             onClick={() => {
               if (onAction) onAction(alert);
               dismissToast(alert.id);
             }}
           >
-            <Icon size={18} strokeWidth={2} style={{ color, flexShrink: 0 }} />
+            <Icon size={18} strokeWidth={2} style={{ color: '#2563eb', flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
                   fontSize: 13,
                   fontWeight: 600,
-                  color: '#111827',
+                  color: '#0f172a',
                   lineHeight: 1.3,
                 }}
               >
@@ -160,7 +158,7 @@ export const AlertToast = memo(function AlertToast({
               <div
                 style={{
                   fontSize: 12,
-                  color: '#8e8e93',
+                  color: '#475569',
                   lineHeight: 1.3,
                   marginTop: 2,
                   overflow: 'hidden',
@@ -186,8 +184,8 @@ export const AlertToast = memo(function AlertToast({
                 height: 22,
                 borderRadius: 11,
                 border: 'none',
-                background: 'rgba(0,0,0,0.05)',
-                color: '#c7c7cc',
+                background: 'rgba(37, 99, 235, 0.08)',
+                color: '#64748b',
                 cursor: 'pointer',
                 padding: 0,
                 flexShrink: 0,

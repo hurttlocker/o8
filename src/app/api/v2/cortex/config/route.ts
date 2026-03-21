@@ -25,6 +25,63 @@ function safeExec(cmd: string, timeoutMs = 8000): string {
   }
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getSectionBlock(configRaw: string, section: string): string {
+  const match = configRaw.match(new RegExp(`^${escapeRegExp(section)}:\\s*\\n((?:\\s{2}.*(?:\\n|$))*)`, 'm'));
+  return match ? match[1] : '';
+}
+
+function getBlockValue(block: string, key: string): string {
+  const match = block.match(new RegExp(`^\\s*${escapeRegExp(key)}:\\s*(.+)$`, 'm'));
+  return match ? match[1].trim() : '';
+}
+
+function getBooleanValue(block: string, key: string): boolean | undefined {
+  const value = getBlockValue(block, key).toLowerCase();
+  if (!value) return undefined;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return undefined;
+}
+
+function getNumberValue(block: string, key: string): number | undefined {
+  const raw = getBlockValue(block, key);
+  if (!raw) return undefined;
+  const value = Number(raw.replace(/^['"]|['"]$/g, ''));
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function upsertSectionValue(config: string, section: string, key: string, value: string | number | boolean): string {
+  const renderedValue = String(value);
+  const sectionRegex = new RegExp(`^(${escapeRegExp(section)}:\\s*\\n)((?:\\s{2}.*(?:\\n|$))*)`, 'm');
+  const match = sectionRegex.exec(config);
+
+  if (!match) {
+    const separator = config.trimEnd().length ? '\n\n' : '';
+    return `${config.trimEnd()}${separator}${section}:\n  ${key}: ${renderedValue}\n`;
+  }
+
+  const header = match[1];
+  const body = match[2] ?? '';
+  const keyRegex = new RegExp(`^(\\s{2}${escapeRegExp(key)}:\\s*).*$`, 'm');
+  let updatedBody = body;
+
+  if (keyRegex.test(body)) {
+    updatedBody = body.replace(keyRegex, `$1${renderedValue}`);
+  } else if (/^  source_boost:/m.test(body)) {
+    updatedBody = body.replace(/^  source_boost:/m, `  ${key}: ${renderedValue}\n  source_boost:`);
+  } else {
+    updatedBody = `${body}${body && !body.endsWith('\n') ? '\n' : ''}  ${key}: ${renderedValue}\n`;
+  }
+
+  const start = match.index;
+  const end = start + match[0].length;
+  return `${config.slice(0, start)}${header}${updatedBody}${config.slice(end)}`;
+}
+
 /** List locally available Ollama models */
 function getOllamaModels(): string[] {
   try {
@@ -32,7 +89,7 @@ function getOllamaModels(): string[] {
     if (!raw) return [];
     return raw
       .split('\n')
-      .slice(1) // skip header
+      .slice(1)
       .map(line => line.split(/\s+/)[0])
       .filter(Boolean);
   } catch {
@@ -42,49 +99,42 @@ function getOllamaModels(): string[] {
 
 export async function GET() {
   try {
-    // Read config file
     let configRaw = '';
     if (existsSync(CONFIG_PATH)) {
       configRaw = readFileSync(CONFIG_PATH, 'utf-8');
     }
 
-    // Parse YAML manually (simple key extraction — avoid adding yaml dep)
-    const getVal = (key: string): string => {
-      const match = configRaw.match(new RegExp(`^\\s*${key}:\\s*(.+)$`, 'm'));
-      return match ? match[1].trim() : '';
-    };
+    const llmBlock = getSectionBlock(configRaw, 'llm');
+    const searchBlock = getSectionBlock(configRaw, 'search');
+    const embedBlock = getSectionBlock(configRaw, 'embed');
 
-    // Extract config values — careful with nested YAML
-    const llmSection = configRaw.match(/^llm:\s*\n((?:\s{2}.+\n?)*)/m);
-    const llmBlock = llmSection ? llmSection[1] : '';
-    const llmProvider = llmBlock.match(/provider:\s*(.+)/)?.[1]?.trim() || '';
-    const llmApiKey = llmBlock.match(/api_key:\s*(.+)/)?.[1]?.trim() || '';
-    const enrichModel = llmBlock.match(/enrich_model:\s*(.+)/)?.[1]?.trim() || '';
-    const classifyModel = llmBlock.match(/classify_model:\s*(.+)/)?.[1]?.trim() || '';
-    const expandModel = llmBlock.match(/expand_model:\s*(.+)/)?.[1]?.trim() || '';
-    const embedLine = configRaw.match(/embed:\s*\n\s*provider:\s*(.+)/m);
-    const embedModel = embedLine ? embedLine[1].trim() : '';
+    const llmProvider = getBlockValue(llmBlock, 'provider');
+    const llmApiKey = getBlockValue(llmBlock, 'api_key');
+    const enrichModel = getBlockValue(llmBlock, 'enrich_model');
+    const classifyModel = getBlockValue(llmBlock, 'classify_model');
+    const expandModel = getBlockValue(llmBlock, 'expand_model');
+    const embedModel = getBlockValue(embedBlock, 'provider');
 
-    // Extract recall settings from search section
-    const searchSection = configRaw.match(/^search:\s*\n((?:\s{2}.+\n?)*)/m);
-    const searchBlock = searchSection ? searchSection[1] : '';
     const sourceBoostCount = (searchBlock.match(/- prefix:/g) || []).length;
+    const recallEnabled = getBooleanValue(searchBlock, 'recall_enabled');
+    const recallMaxResults = getNumberValue(searchBlock, 'recall_max_results');
+    const recallTokenBudget = getNumberValue(searchBlock, 'recall_token_budget');
+    const recallMinConfidence = getNumberValue(searchBlock, 'recall_min_confidence');
 
-    // Get stats
     const statsRaw = safeExec(`${CORTEX_BIN} stats --json 2>/dev/null`);
-    let stats = null;
-    try { stats = JSON.parse(statsRaw); } catch { /* ignore */ }
+    let stats: Record<string, unknown> | null = null;
+    try {
+      stats = JSON.parse(statsRaw) as Record<string, unknown>;
+    } catch {
+      stats = null;
+    }
 
-    // Get doctor output
     const doctorRaw = safeExec(`${CORTEX_BIN} doctor 2>&1`);
-
-    // Get ollama models
     const ollamaModels = getOllamaModels();
 
-    // Get embedding coverage
-    const memories = stats?.memories ?? 0;
+    const memories = typeof stats?.memories === 'number' ? stats.memories : 0;
     const doctorMatch = doctorRaw.match(/(\d+)\s+embedding/);
-    const embeddings = doctorMatch ? parseInt(doctorMatch[1]) : 0;
+    const embeddings = doctorMatch ? parseInt(doctorMatch[1], 10) : 0;
     const embedCoverage = memories > 0 ? (embeddings / memories * 100) : 0;
 
     return NextResponse.json({
@@ -99,16 +149,20 @@ export async function GET() {
         configPath: CONFIG_PATH,
         dbPath: join(CORTEX_HOME, 'cortex.db'),
         sourceBoostCount,
+        recallEnabled,
+        recallMaxResults,
+        recallTokenBudget,
+        recallMinConfidence,
       },
       stats: stats ? {
-        memories: stats.memories,
-        facts: stats.facts,
-        sources: stats.sources,
-        storageMb: stats.storage_bytes ? (stats.storage_bytes / 1024 / 1024).toFixed(1) : '0',
-        avgConfidence: stats.avg_confidence ? (stats.avg_confidence * 100).toFixed(1) : '0',
-        factsByType: stats.facts_by_type || {},
-        confidenceDistribution: stats.confidence_distribution || {},
-        growth: stats.growth || {},
+        memories: typeof stats.memories === 'number' ? stats.memories : 0,
+        facts: typeof stats.facts === 'number' ? stats.facts : 0,
+        sources: typeof stats.sources === 'number' ? stats.sources : 0,
+        storageMb: typeof stats.storage_bytes === 'number' ? (stats.storage_bytes / 1024 / 1024).toFixed(1) : '0',
+        avgConfidence: typeof stats.avg_confidence === 'number' ? (stats.avg_confidence * 100).toFixed(1) : '0',
+        factsByType: (stats.facts_by_type as Record<string, number>) || {},
+        confidenceDistribution: (stats.confidence_distribution as Record<string, number>) || {},
+        growth: (stats.growth as Record<string, number>) || {},
         embeddings,
         embedCoverage: embedCoverage.toFixed(1),
       } : null,
@@ -125,7 +179,18 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { embedModel, enrichModel, classifyModel, expandModel, llmProvider, llmApiKey } = body;
+    const {
+      embedModel,
+      enrichModel,
+      classifyModel,
+      expandModel,
+      llmProvider,
+      llmApiKey,
+      recallEnabled,
+      recallMaxResults,
+      recallTokenBudget,
+      recallMinConfidence,
+    } = body;
 
     if (!existsSync(CONFIG_PATH)) {
       return NextResponse.json({ error: 'Config file not found' }, { status: 404 });
@@ -133,52 +198,44 @@ export async function POST(req: Request) {
 
     let config = readFileSync(CONFIG_PATH, 'utf-8');
 
-    // Update embed provider
     if (embedModel !== undefined) {
-      config = config.replace(
-        /^(\s*embed:\s*\n\s*provider:\s*)(.+)$/m,
-        `$1${embedModel}`
-      );
+      config = upsertSectionValue(config, 'embed', 'provider', embedModel);
     }
 
-    // Update LLM provider
     if (llmProvider !== undefined) {
-      config = config.replace(
-        /^(llm:\s*\n\s*provider:\s*)(.+)$/m,
-        `$1${llmProvider}`
-      );
+      config = upsertSectionValue(config, 'llm', 'provider', llmProvider);
     }
 
-    // Update API key (only if a real value, not masked)
-    if (llmApiKey !== undefined && !llmApiKey.includes('•')) {
-      config = config.replace(
-        /^(\s*api_key:\s*)(.+)$/m,
-        `$1${llmApiKey}`
-      );
+    if (llmApiKey !== undefined && !String(llmApiKey).includes('•')) {
+      config = upsertSectionValue(config, 'llm', 'api_key', llmApiKey);
     }
 
-    // Update enrich model
     if (enrichModel !== undefined) {
-      config = config.replace(
-        /^(\s*enrich_model:\s*)(.+)$/m,
-        `$1${enrichModel}`
-      );
+      config = upsertSectionValue(config, 'llm', 'enrich_model', enrichModel);
     }
 
-    // Update classify model
     if (classifyModel !== undefined) {
-      config = config.replace(
-        /^(\s*classify_model:\s*)(.+)$/m,
-        `$1${classifyModel}`
-      );
+      config = upsertSectionValue(config, 'llm', 'classify_model', classifyModel);
     }
 
-    // Update expand model
     if (expandModel !== undefined) {
-      config = config.replace(
-        /^(\s*expand_model:\s*)(.+)$/m,
-        `$1${expandModel}`
-      );
+      config = upsertSectionValue(config, 'llm', 'expand_model', expandModel);
+    }
+
+    if (recallEnabled !== undefined) {
+      config = upsertSectionValue(config, 'search', 'recall_enabled', Boolean(recallEnabled));
+    }
+
+    if (recallMaxResults !== undefined) {
+      config = upsertSectionValue(config, 'search', 'recall_max_results', Number(recallMaxResults));
+    }
+
+    if (recallTokenBudget !== undefined) {
+      config = upsertSectionValue(config, 'search', 'recall_token_budget', Number(recallTokenBudget));
+    }
+
+    if (recallMinConfidence !== undefined) {
+      config = upsertSectionValue(config, 'search', 'recall_min_confidence', Number(recallMinConfidence));
     }
 
     writeFileSync(CONFIG_PATH, config, 'utf-8');

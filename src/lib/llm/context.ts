@@ -8,6 +8,7 @@
 import { execSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { getRenderedSkeletonCached } from '@/lib/skeleton';
 
 const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
 
@@ -72,8 +73,42 @@ function loadProjectRules(): { content: string; source: string } | null {
   return null;
 }
 
+/**
+ * Extract changed file paths from git status output to use as focus paths
+ * for the skeleton renderer.
+ */
+function extractChangedPaths(status: string): string[] {
+  return status
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
+      // git status --short format: "XY path" or "XY old -> new"
+      const parts = line.slice(3).trim().split(' -> ');
+      return parts[parts.length - 1];
+    })
+    .filter(Boolean);
+}
+
 export function buildSystemPrompt(ctx: WorkspaceContext): string {
   const rules = loadProjectRules();
+
+  // Try skeleton map first, fall back to crude file tree
+  const focusPaths = extractChangedPaths(ctx.status);
+  const skeleton = getRenderedSkeletonCached(REPO_ROOT, {
+    maxTokens: 3000,
+    focusPaths,
+  });
+
+  const structureSection = skeleton
+    ? `## Code Map (${skeleton.fileCount} files, ${skeleton.symbolCount} symbols)
+\`\`\`
+${skeleton.text}
+\`\`\``
+    : `## File Structure
+\`\`\`
+${ctx.fileTreeSummary}
+\`\`\``;
 
   return `You are an AI assistant integrated into Cortex IDE, a desktop coding environment.
 
@@ -91,10 +126,7 @@ ${ctx.status}
 ${ctx.recentCommits}
 \`\`\`
 
-## File Structure
-\`\`\`
-${ctx.fileTreeSummary}
-\`\`\`
+${structureSection}
 
 ## Guidelines
 - You have context about this workspace. Reference files and structure when relevant.

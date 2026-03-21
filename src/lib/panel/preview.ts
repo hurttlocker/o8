@@ -2,6 +2,14 @@ export const PREVIEW_PROXY_ROUTE = '/api/panel/proxy';
 export const PREVIEW_MESSAGE_SOURCE = 'cortex-preview';
 export const PREVIEW_HOST_MESSAGE_SOURCE = 'cortex-preview-host';
 
+export interface DetectedLocalhostPreview {
+  id: string;
+  tabId: string;
+  url: string;
+  port: number;
+  detectedAt: number;
+}
+
 export interface PreviewSelectionPayload {
   targetUrl: string;
   pageTitle: string;

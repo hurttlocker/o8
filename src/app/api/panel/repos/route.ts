@@ -9,6 +9,8 @@ import {
   updateRepo,
   validateRepo,
 } from '@/lib/repos/registry';
+import { triggerScan, triggerScanIfStale, startChangePolling, stopChangePolling } from '@/lib/skeleton/autoscan';
+import { clearRepo as clearSkeletonCache } from '@/lib/skeleton/store';
 import type {
   RepoRegistryDeleteBody,
   RepoRegistryPostBody,
@@ -50,6 +52,9 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: 'localPath is required.' }, { status: 400 });
         }
         const repo = await addRepo(body.localPath);
+        // Auto-scan skeleton for newly added repo + start change polling
+        triggerScan(repo.localPath);
+        startChangePolling(repo.localPath);
         return NextResponse.json({ repo }, { status: 201 });
       }
       case 'update': {
@@ -70,6 +75,8 @@ export async function POST(request: Request) {
           body.id,
           'lastOpenedAt' in body ? body.lastOpenedAt ?? undefined : undefined,
         );
+        // Rescan skeleton if stale when repo is opened
+        triggerScanIfStale(repo.localPath);
         return NextResponse.json({ repo });
       }
       default:
@@ -96,7 +103,18 @@ export async function DELETE(request: Request) {
   }
 
   try {
+    // Look up localPath before removal so we can clean up skeleton cache
+    const repos = await listRepos();
+    const toRemove = repos.find(r => r.id === body.id);
+
     await removeRepo(body.id);
+
+    // Clean up skeleton/chunk cache + stop polling for this repo
+    if (toRemove?.localPath) {
+      clearSkeletonCache(toRemove.localPath);
+      stopChangePolling(toRemove.localPath);
+    }
+
     return NextResponse.json({ ok: true, removedId: body.id });
   } catch (error) {
     return NextResponse.json(

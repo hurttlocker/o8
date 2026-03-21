@@ -18,18 +18,37 @@ import { AlertBell } from '@/components/shared/AlertBell';
 import { AlertTray } from '@/components/shared/AlertTray';
 import { AlertToast } from '@/components/shared/AlertToast';
 import { NavRail, type NavSection } from '@/components/desktop/NavRail';
-import { LiveOutput } from '@/components/desktop/LiveOutput';
+import { BottomTerminal, type BottomTerminalHandle } from '@/components/desktop/BottomTerminal';
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { IntentCanvas } from '@/components/desktop/IntentCanvas';
 import { SettingsPage } from '@/components/desktop/SettingsPage';
 import { AnalyticsPage } from '@/components/desktop/AnalyticsPage';
 import { ThoughtsCard } from '@/components/desktop/ThoughtsCard';
+import { LocalhostPreviewTabs } from '@/components/desktop/LocalhostPreviewTabs';
+import { TileContainer, type TileContentRegistry } from '@/components/desktop/TileContainer';
 import type { DesktopChatInjectionPayload } from '@/lib/chat/injection';
 import {
+  type DetectedLocalhostPreview,
   formatPreviewSelectionContext,
   type PreviewSelectionPayload,
 } from '@/lib/panel/preview';
+import {
+  closeTile,
+  createDefaultTileLayout,
+  createTileContent,
+  deserializeTileLayout,
+  findLeafByContentKind,
+  findTile,
+  getFirstLeaf,
+  replaceTileContent,
+  resizeTile,
+  serializeTileLayout,
+  splitTile,
+} from '@/lib/tiles/operations';
+import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
+
+const TILE_LAYOUT_STORAGE_KEY = 'cortex-ide:dashboard-tiles:v1';
 
 export default function DashboardPage() {
   return (
@@ -44,15 +63,17 @@ export default function DashboardPage() {
 }
 
 function DashboardInner() {
+  const initialTileLayout = useMemo(() => createDefaultTileLayout(), []);
+
   const [leftWidth, setLeftWidth] = useState(300);
   const [rightWidth, setRightWidth] = useState(420);
-  const [canvasHeight, setCanvasHeight] = useState(50); // percentage of center column
   const [activeSessionKey, setActiveSessionKey] = useState<string | undefined>();
   const [liveOutputCollapsed, setLiveOutputCollapsed] = useState(false);
   const [dashTermSession, setDashTermSession] = useState<string | null>(null);
   const termCreatedRef = useRef(false);
   const terminalRef = useRef<TerminalHandle>(null);
   const termWorkspaceRef = useRef<TerminalTabHandle>(null);
+  const bottomTermRef = useRef<BottomTerminalHandle>(null);
   const [agentsJson, setAgentsJson] = useState('[]');
   const [activeWorkspace, setActiveWorkspace] = useState<string | undefined>();
   const [showMemoryView, setShowMemoryView] = useState(false);
@@ -61,9 +82,12 @@ function DashboardInner() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [chatVisible, setChatVisible] = useState(true);
-  const [bottomPanelVisible, setBottomPanelVisible] = useState(true);
   const [thoughtsOpen, setThoughtsOpen] = useState(false);
-  const [wsStatus, setWsStatus] = useState<WsConnectionState>('disconnected');
+  const [wsStatus, setWsStatus] = useState<WsConnectionState>('connecting');
+  const [workspacePreviews, setWorkspacePreviews] = useState<DetectedLocalhostPreview[]>([]);
+  const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
+  const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
+  const [tileLayoutHydrated, setTileLayoutHydrated] = useState(false);
 
   // Global repo state (shared between TitleBar and AgentPanel)
   const [globalRepo, setGlobalRepo] = useState<string | null>(null);
@@ -126,26 +150,34 @@ function DashboardInner() {
   const [desktopDraftInjection, setDesktopDraftInjection] = useState<{ id: string; text: string } | null>(null);
   const [thoughtsDraftInjection, setThoughtsDraftInjection] = useState<{ id: string; text: string } | null>(null);
 
-  // Terminal WS hook — routes events to TerminalWorkspace (multi-tab)
+  // Terminal WS hook — routes events to TerminalWorkspace + BottomTerminal
   const terminalWsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
     onTerminalCreated: (sessionName: string) => {
       setDashTermSession(sessionName);
-      termWorkspaceRef.current?.onSessionCreated(sessionName);
+      // Route to BottomTerminal first — if it claims, skip TerminalWorkspace
+      const claimed = bottomTermRef.current?.onSessionCreated(sessionName);
+      if (!claimed) {
+        termWorkspaceRef.current?.onSessionCreated(sessionName);
+      }
     },
     onTerminalData: (sessionName: string, data: string) => {
       terminalRef.current?.writeToTerminal(data);
       termWorkspaceRef.current?.writeToTerminal(sessionName, data);
+      bottomTermRef.current?.writeToTerminal(sessionName, data);
     },
     onTerminalError: (sessionName: string, error: string) => {
       terminalRef.current?.setTermError(error);
       termWorkspaceRef.current?.setTermError(sessionName, error);
+      bottomTermRef.current?.setTermError(sessionName, error);
     },
     onTerminalExited: (sessionName: string, _exitCode: number) => {
       terminalRef.current?.setTermExited(true);
       termWorkspaceRef.current?.setTermExited(sessionName);
+      bottomTermRef.current?.setTermExited(sessionName);
     },
     onTerminalImage: (sessionName: string, imageB64: string, filename: string) => {
       termWorkspaceRef.current?.showImage(sessionName, imageB64, filename);
+      bottomTermRef.current?.showImage(sessionName, imageB64, filename);
     },
     onAgentLifecycle: (sessionName: string, state: string, exitCode?: number) => {
       setLifecycleEvents(prev => {
@@ -181,10 +213,16 @@ function DashboardInner() {
     updateAgents,
   } = useAlerts();
 
-  // ── Cmd+K to toggle Thoughts Card ──
+  // ── Cmd+J to toggle Thoughts Card ──
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      const target = e.target as HTMLElement | null;
+      const isEditable = Boolean(
+        target?.closest('input, textarea, [contenteditable="true"], [role="textbox"]'),
+      );
+      if (isEditable) return;
+
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') {
         e.preventDefault();
         setThoughtsOpen(v => !v);
       }
@@ -193,11 +231,241 @@ function DashboardInner() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // ── Tile layout persistence + helpers ──
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const restoreTimer = window.setTimeout(() => {
+      const restored = deserializeTileLayout(window.localStorage.getItem(TILE_LAYOUT_STORAGE_KEY));
+      const nextLayout = restored ?? createDefaultTileLayout();
+      setTileLayout(nextLayout);
+      setActiveTileId(getFirstLeaf(nextLayout.root).id);
+      setTileLayoutHydrated(true);
+    }, 0);
+
+    return () => window.clearTimeout(restoreTimer);
+  }, []);
+
+  useEffect(() => {
+    if (!tileLayoutHydrated || typeof window === 'undefined') return;
+    window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(tileLayout));
+  }, [tileLayout, tileLayoutHydrated]);
+
+  const bottomPanelVisible = useMemo(
+    () => Boolean(findLeafByContentKind(tileLayout.root, 'bottom-terminal')),
+    [tileLayout.root],
+  );
+  const hasThoughtsTile = useMemo(
+    () => Boolean(findLeafByContentKind(tileLayout.root, 'thoughts')),
+    [tileLayout.root],
+  );
+
+  const findInsertionTarget = useCallback((preferredKinds: TileContentKind[]): TileLeafNode => {
+    const activeTile = activeTileId ? findTile(tileLayout.root, activeTileId) : null;
+    if (activeTile?.type === 'leaf' && preferredKinds.includes(activeTile.content.kind)) {
+      return activeTile;
+    }
+    for (const kind of preferredKinds) {
+      const matchingLeaf = findLeafByContentKind(tileLayout.root, kind);
+      if (matchingLeaf) {
+        return matchingLeaf;
+      }
+    }
+    if (activeTile?.type === 'leaf') {
+      return activeTile;
+    }
+    return getFirstLeaf(tileLayout.root);
+  }, [activeTileId, tileLayout.root]);
+
+  const findWorkspaceTarget = useCallback((): TileLeafNode | null => {
+    const activeTile = activeTileId ? findTile(tileLayout.root, activeTileId) : null;
+    if (activeTile?.type === 'leaf' && activeTile.content.kind === 'workspace') {
+      return activeTile;
+    }
+    return findLeafByContentKind(tileLayout.root, 'workspace');
+  }, [activeTileId, tileLayout.root]);
+
+  const handleCloseTile = useCallback((tileId: string) => {
+    const result = closeTile(tileLayout.root, tileId);
+    if (!result.closed) {
+      return;
+    }
+    setTileLayout({
+      ...tileLayout,
+      root: result.root,
+    });
+    const nextActive = getFirstLeaf(result.root).id;
+    if (activeTileId === tileId || (activeTileId && !findTile(result.root, activeTileId))) {
+      setActiveTileId(nextActive);
+    }
+  }, [activeTileId, tileLayout]);
+
+  const handleResizeSplit = useCallback((splitId: string, ratio: number) => {
+    setTileLayout({
+      ...tileLayout,
+      root: resizeTile(tileLayout.root, splitId, ratio),
+    });
+  }, [tileLayout]);
+
+  const handleSplitTile = useCallback((tileId: string, direction: 'horizontal' | 'vertical') => {
+    const ratio = direction === 'vertical' ? 0.55 : 0.62;
+    const result = splitTile(tileLayout.root, tileId, direction, createTileContent('workspace'), ratio);
+    if (!result.newTileId) {
+      return;
+    }
+    setTileLayout({
+      ...tileLayout,
+      root: result.root,
+    });
+    setActiveTileId(result.newTileId);
+  }, [tileLayout]);
+
+  const ensureTileKind = useCallback((
+    kind: TileContentKind,
+    options?: {
+      direction?: 'horizontal' | 'vertical';
+      preferredKinds?: TileContentKind[];
+      ratio?: number;
+      selectedPreviewId?: string | null;
+    },
+  ) => {
+    const existingLeaf = findLeafByContentKind(tileLayout.root, kind);
+    if (existingLeaf) {
+      if (kind === 'preview' && options?.selectedPreviewId && existingLeaf.content.kind === 'preview') {
+        setTileLayout({
+          ...tileLayout,
+          root: replaceTileContent(tileLayout.root, existingLeaf.id, {
+            kind: 'preview',
+            selectedPreviewId: options.selectedPreviewId,
+          }),
+        });
+      }
+      setActiveTileId(existingLeaf.id);
+      return existingLeaf.id;
+    }
+
+    const workspaceTarget = findWorkspaceTarget();
+    if (workspaceTarget) {
+      const nextContent = kind === 'preview'
+        ? {
+          kind: 'preview' as const,
+          selectedPreviewId: options?.selectedPreviewId ?? workspacePreviews[0]?.id ?? null,
+        }
+        : createTileContent(kind);
+      setTileLayout({
+        ...tileLayout,
+        root: replaceTileContent(tileLayout.root, workspaceTarget.id, nextContent),
+      });
+      setActiveTileId(workspaceTarget.id);
+      return workspaceTarget.id;
+    }
+
+    const targetLeaf = findInsertionTarget(options?.preferredKinds ?? ['terminal']);
+    const nextContent = kind === 'preview'
+      ? {
+        kind: 'preview' as const,
+        selectedPreviewId: options?.selectedPreviewId ?? workspacePreviews[0]?.id ?? null,
+      }
+      : createTileContent(kind);
+    const result = splitTile(
+      tileLayout.root,
+      targetLeaf.id,
+      options?.direction ?? 'horizontal',
+      nextContent,
+      options?.ratio ?? 0.6,
+    );
+
+    if (!result.newTileId) {
+      return null;
+    }
+
+    setTileLayout({
+      ...tileLayout,
+      root: result.root,
+    });
+    setActiveTileId(result.newTileId);
+    return result.newTileId;
+  }, [findInsertionTarget, findWorkspaceTarget, tileLayout, workspacePreviews]);
+
+  const toggleBottomTerminalTile = useCallback(() => {
+    const existingLeaf = findLeafByContentKind(tileLayout.root, 'bottom-terminal');
+    if (existingLeaf) {
+      handleCloseTile(existingLeaf.id);
+      return;
+    }
+    ensureTileKind('bottom-terminal', {
+      direction: 'horizontal',
+      preferredKinds: ['terminal', 'canvas', 'preview'],
+      ratio: 0.68,
+    });
+  }, [ensureTileKind, handleCloseTile, tileLayout.root]);
+
+  const handlePreviewDetected = useCallback((preview: DetectedLocalhostPreview) => {
+    setWorkspacePreviews((current) => {
+      if (current.some((existing) => existing.port === preview.port)) {
+        return current;
+      }
+      return [...current, preview];
+    });
+    ensureTileKind('preview', {
+      direction: 'vertical',
+      preferredKinds: ['terminal', 'canvas'],
+      ratio: 0.56,
+      selectedPreviewId: preview.id,
+    });
+  }, [ensureTileKind]);
+
+  const handleSelectPreviewTile = useCallback((tileId: string, previewId: string) => {
+    const currentTile = findTile(tileLayout.root, tileId);
+    if (currentTile?.type !== 'leaf' || currentTile.content.kind !== 'preview') {
+      return;
+    }
+    setTileLayout({
+      ...tileLayout,
+      root: replaceTileContent(tileLayout.root, tileId, {
+        kind: 'preview',
+        selectedPreviewId: previewId,
+      }),
+    });
+  }, [tileLayout]);
+
+  const handleClosePreviewTileItem = useCallback((tileId: string, previewId: string) => {
+    const preview = workspacePreviews.find((entry) => entry.id === previewId);
+    if (!preview) {
+      return;
+    }
+
+    const remainingPreviews = workspacePreviews.filter((entry) => entry.id !== previewId);
+    setWorkspacePreviews(remainingPreviews);
+    termWorkspaceRef.current?.clearDetectedPreview(preview.port);
+
+    const currentTile = findTile(tileLayout.root, tileId);
+    if (currentTile?.type !== 'leaf' || currentTile.content.kind !== 'preview') {
+      return;
+    }
+
+    const nextSelectedPreviewId = currentTile.content.selectedPreviewId === previewId
+      ? remainingPreviews[0]?.id ?? null
+      : currentTile.content.selectedPreviewId ?? null;
+
+    setTileLayout({
+      ...tileLayout,
+      root: replaceTileContent(tileLayout.root, tileId, {
+        kind: 'preview',
+        selectedPreviewId: nextSelectedPreviewId,
+      }),
+    });
+  }, [tileLayout, workspacePreviews]);
+
   // ── Canvas tab state ──
   const [canvasTabs, setCanvasTabs] = useState<CanvasTab[]>([]);
   const [activeCanvasTabId, setActiveCanvasTabId] = useState<string | null>(null);
 
   const openCanvasTab = useCallback((tab: CanvasTab) => {
+    ensureTileKind('canvas', {
+      direction: 'horizontal',
+      preferredKinds: ['terminal', 'preview'],
+      ratio: 0.62,
+    });
     console.log('[Canvas] openCanvasTab called:', tab.kind, tab.id);
     setCanvasTabs((prev) => {
       const existing = prev.find((t) => t.id === tab.id);
@@ -209,7 +477,7 @@ function DashboardInner() {
       return [...prev, tab];
     });
     setActiveCanvasTabId(tab.id);
-  }, []);
+  }, [ensureTileKind]);
 
   const closeCanvasTab = useCallback((tabId: string) => {
     setCanvasTabs((prev) => {
@@ -304,9 +572,13 @@ function DashboardInner() {
       setThoughtsDraftInjection(nextInjection);
       return;
     }
+    if (hasThoughtsTile) {
+      setThoughtsDraftInjection(nextInjection);
+      return;
+    }
     setChatVisible(true);
     setDesktopDraftInjection(nextInjection);
-  }, [thoughtsOpen]);
+  }, [hasThoughtsTile, thoughtsOpen]);
 
   // ── Feed agent data to alert engine + search ──
   const handleAgentsUpdate = useCallback((agents: unknown[]) => {
@@ -315,6 +587,26 @@ function DashboardInner() {
     updateAgents(agents as import('@/lib/fleet/types').AgentSummary[]);
     setAgentsJson(JSON.stringify(agents));
   }, [updateAgents]);
+
+  // ── Run command in bottom terminal ──
+  const handleRunInTerminal = useCallback((command: string) => {
+    ensureTileKind('bottom-terminal', {
+      direction: 'horizontal',
+      preferredKinds: ['terminal', 'canvas', 'preview'],
+      ratio: 0.68,
+    });
+    // Send to BottomTerminal's session if ready, otherwise wait for it
+    const session = bottomTermRef.current?.getSession();
+    if (session) {
+      sendTerminalInput(session, command + '\n');
+    } else {
+      // Terminal not ready yet — retry after a short delay
+      setTimeout(() => {
+        const s = bottomTermRef.current?.getSession();
+        if (s) sendTerminalInput(s, command + '\n');
+      }, 1500);
+    }
+  }, [ensureTileKind, sendTerminalInput]);
 
   // ── Alert action: navigate to agent session ──
   const handleAlertAction = useCallback((alert: import('@/lib/alerts/types').Alert) => {
@@ -392,28 +684,6 @@ function DashboardInner() {
     document.addEventListener('mouseup', onUp);
   }, [leftWidth]);
 
-  // ── Canvas vertical drag handle ──
-  const centerRef = useRef<HTMLDivElement>(null);
-  const startCanvasDrag = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startH = canvasHeight;
-    const onMove = (ev: MouseEvent) => {
-      if (!centerRef.current) return;
-      const rect = centerRef.current.getBoundingClientRect();
-      const totalH = rect.height;
-      const deltaY = startY - ev.clientY; // dragging up = bigger canvas
-      const deltaPct = (deltaY / totalH) * 100;
-      setCanvasHeight(Math.min(Math.max(startH + deltaPct, 20), 80));
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  }, [canvasHeight]);
-
   // ── Right drag handle ──
   const startRightDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -429,6 +699,169 @@ function DashboardInner() {
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
   }, [rightWidth]);
+
+  const parsedAgents = useMemo(
+    () => JSON.parse(agentsJson) as Parameters<typeof ThoughtsCard>[0]['agents'],
+    [agentsJson],
+  );
+
+  const tileRegistry = useMemo<TileContentRegistry>(() => ({
+    workspace: {
+      label: 'Workspace',
+      description: 'Empty workspace pane that will pick up the next canvas, preview, or terminal panel you open.',
+      render: ({ active }) => (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flex: 1,
+          minWidth: 0,
+          minHeight: 0,
+          background: 'linear-gradient(180deg, rgba(6,10,18,0.98) 0%, rgba(12,18,30,0.98) 100%)',
+          color: '#e2e8f0',
+        }}>
+          <div style={{
+            width: 48,
+            height: 48,
+            borderRadius: 16,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: 'rgba(148,163,184,0.08)',
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: active ? 'rgba(96,165,250,0.26)' : 'rgba(148,163,184,0.12)',
+            marginBottom: 14,
+          }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
+            </svg>
+          </div>
+          <div style={{
+            fontSize: 14,
+            fontWeight: 700,
+            letterSpacing: '-0.02em',
+            marginBottom: 6,
+          }}>
+            Empty workspace
+          </div>
+          <div style={{
+            maxWidth: 320,
+            textAlign: 'center',
+            fontSize: 12,
+            lineHeight: 1.6,
+            color: 'rgba(226,232,240,0.72)',
+          }}>
+            Split first, then open a preview, issue, or bottom terminal. Cortex will route it into the active workspace pane automatically.
+          </div>
+        </div>
+      ),
+    },
+    terminal: {
+      label: 'Terminal Workspace',
+      description: 'Multi-tab terminal and chat workspace for active sessions.',
+      singleton: true,
+      render: () => (
+        <TerminalWorkspace
+          ref={termWorkspaceRef}
+          sendTerminalCreate={sendTerminalCreate}
+          sendTerminalAttach={sendTerminalAttach}
+          sendTerminalInput={sendTerminalInput}
+          sendTerminalResize={sendTerminalResize}
+          sendTerminalDetach={sendTerminalDetach}
+          termWsConnected={termWsConnected}
+          onPreviewDetected={handlePreviewDetected}
+          onPreviewSelection={handlePreviewSelection}
+          showPreviewPane={false}
+        />
+      ),
+    },
+    preview: {
+      label: 'Preview',
+      description: 'Tabbed localhost previews detected from the workspace terminal.',
+      singleton: true,
+      render: ({ content, tileId }) => (
+        <LocalhostPreviewTabs
+          previews={workspacePreviews}
+          selectedPreviewId={content.kind === 'preview' ? content.selectedPreviewId ?? null : null}
+          onSelectPreview={(previewId) => handleSelectPreviewTile(tileId, previewId)}
+          onClosePreview={(previewId) => handleClosePreviewTileItem(tileId, previewId)}
+          onElementSelect={handlePreviewSelection}
+        />
+      ),
+    },
+    canvas: {
+      label: 'Canvas',
+      description: 'Issues, diffs, transcripts, files, deploys, and timeline tabs.',
+      singleton: true,
+      render: () => (
+        <Canvas
+          tabs={canvasTabs}
+          activeTabId={activeCanvasTabId}
+          onSelectTab={setActiveCanvasTabId}
+          onCloseTab={closeCanvasTab}
+          onInjectChatContext={handleDesktopChatInjection}
+          onSelectCommit={handleSelectCommit}
+        />
+      ),
+    },
+    thoughts: {
+      label: 'Thoughts',
+      description: 'Docked command surface for tasks, approvals, and fast agent chat.',
+      singleton: true,
+      render: ({ tileId }) => (
+        <ThoughtsCard
+          open
+          docked
+          onClose={() => handleCloseTile(tileId)}
+          agents={parsedAgents}
+          draftInjection={!thoughtsOpen ? thoughtsDraftInjection : null}
+        />
+      ),
+    },
+    'bottom-terminal': {
+      label: 'Bottom Terminal',
+      description: 'Single focused terminal with a CLI picker for quick command execution.',
+      singleton: true,
+      render: ({ tileId }) => (
+        <BottomTerminal
+          ref={bottomTermRef}
+          sendTerminalCreate={sendTerminalCreate}
+          sendTerminalAttach={sendTerminalAttach}
+          sendTerminalInput={sendTerminalInput}
+          sendTerminalResize={sendTerminalResize}
+          sendTerminalDetach={sendTerminalDetach}
+          sendAgentKill={sendAgentKill}
+          termWsConnected={termWsConnected}
+          onClose={() => handleCloseTile(tileId)}
+        />
+      ),
+    },
+  }), [
+    activeCanvasTabId,
+    canvasTabs,
+    closeCanvasTab,
+    handleClosePreviewTileItem,
+    handleCloseTile,
+    handleDesktopChatInjection,
+    handlePreviewDetected,
+    handlePreviewSelection,
+    handleSelectCommit,
+    handleSelectPreviewTile,
+    parsedAgents,
+    sendAgentKill,
+    sendTerminalAttach,
+    sendTerminalCreate,
+    sendTerminalDetach,
+    sendTerminalInput,
+    sendTerminalResize,
+    termWsConnected,
+    thoughtsDraftInjection,
+    thoughtsOpen,
+    workspacePreviews,
+  ]);
 
   return (
     <div style={{
@@ -450,13 +883,9 @@ function DashboardInner() {
         sidebarVisible={sidebarVisible}
         onToggleSidebar={() => setSidebarVisible(v => !v)}
         bottomPanelVisible={bottomPanelVisible}
-        onToggleBottomPanel={() => setBottomPanelVisible(v => !v)}
+        onToggleBottomPanel={toggleBottomTerminalTile}
         chatVisible={chatVisible}
         onToggleChat={() => setChatVisible(v => !v)}
-        onSettingsClick={() => {
-          setActiveNavSection('settings');
-          setShowMemoryView(false);
-        }}
         wsStatus={wsStatus}
         renderSearch={(onClose) => (
           <UniversalSearch
@@ -491,7 +920,6 @@ function DashboardInner() {
           label: 'Session Replay',
           resourceId: 'session',
         });
-        setBottomPanelVisible(true);
       }} />
 
       {/* ── Main Layout (horizontal) ── */}
@@ -508,6 +936,13 @@ function DashboardInner() {
           setActiveNavSection(section);
           if (section === 'memory') setShowMemoryView(true);
           else setShowMemoryView(false);
+          if (section === 'terminal') {
+            ensureTileKind('bottom-terminal', {
+              direction: 'horizontal',
+              preferredKinds: ['terminal', 'canvas', 'preview'],
+              ratio: 0.68,
+            });
+          }
         }}
         alertCount={unreadCount}
         onAlertClick={() => setAlertTrayOpen(!alertTrayOpen)}
@@ -515,12 +950,27 @@ function DashboardInner() {
         thoughtsOpen={thoughtsOpen}
         onThoughtsToggle={() => setThoughtsOpen(v => !v)}
         onPortPreview={(port, url, repo) => {
-          openCanvasTab({
-            id: `preview-${port}`,
-            kind: 'preview',
-            label: `Preview :${port}`,
-            resourceId: url,
-            meta: { port: String(port), ...(repo ? { repo } : {}) },
+          const previewId = `preview-${port}`;
+          setWorkspacePreviews((current) => {
+            if (current.some((preview) => preview.id === previewId)) {
+              return current;
+            }
+            return [
+              ...current,
+              {
+                id: previewId,
+                tabId: '',
+                url,
+                port,
+                detectedAt: Date.now(),
+              },
+            ];
+          });
+          ensureTileKind('preview', {
+            direction: 'vertical',
+            preferredKinds: ['terminal', 'canvas'],
+            ratio: 0.56,
+            selectedPreviewId: previewId,
           });
         }}
       />}
@@ -576,36 +1026,33 @@ function DashboardInner() {
         }} />
       </div>}
 
-      {/* ── Center: Memory View OR Workspace (top) + Canvas (bottom) ── */}
-      <div ref={centerRef} style={{
+      {/* ── Center: Workspace Surface ── */}
+      <div style={{
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
         position: 'relative',
+        minWidth: 0,
       }}>
-        {/* Full-screen Intent Canvas */}
         {activeNavSection === 'intent' && !showMemoryView && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <IntentCanvas />
           </div>
         )}
 
-        {/* Full-screen Settings */}
         {activeNavSection === 'settings' && !showMemoryView && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <SettingsPage />
           </div>
         )}
 
-        {/* Full-screen Analytics */}
         {activeNavSection === 'analytics' && !showMemoryView && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <AnalyticsPage />
           </div>
         )}
 
-        {/* Full-screen Memory View */}
         {showMemoryView && (
           <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
             <button
@@ -639,77 +1086,17 @@ function DashboardInner() {
           </div>
         )}
 
-        {/* Terminal-first workspace — always mounted to preserve tabs, hidden when other sections active */}
-        <div style={{
-          flex: 1,
-          display: (!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && activeNavSection !== 'analytics') ? 'flex' : 'none',
-          flexDirection: 'column',
-          minHeight: 0,
-        }}>
-          <TerminalWorkspace
-            ref={termWorkspaceRef}
-            sendTerminalCreate={sendTerminalCreate}
-            sendTerminalAttach={sendTerminalAttach}
-            sendTerminalInput={sendTerminalInput}
-            sendTerminalResize={sendTerminalResize}
-            sendTerminalDetach={sendTerminalDetach}
-            termWsConnected={termWsConnected}
-            onPreviewSelection={handlePreviewSelection}
+        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (
+          <TileContainer
+            layout={tileLayout}
+            activeTileId={activeTileId}
+            registry={tileRegistry}
+            onActivateTile={setActiveTileId}
+            onCloseTile={handleCloseTile}
+            onResizeSplit={handleResizeSplit}
+            onSplitTile={handleSplitTile}
           />
-        </div>
-
-        {/* Canvas — only when tabs open, overlays below terminal */}
-        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && canvasTabs.length > 0 && bottomPanelVisible && (
-          <div style={{ flex: `0 0 ${canvasHeight}%`, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <Canvas
-              tabs={canvasTabs}
-              activeTabId={activeCanvasTabId}
-              onSelectTab={setActiveCanvasTabId}
-              onCloseTab={closeCanvasTab}
-              onInjectChatContext={handleDesktopChatInjection}
-              onSelectCommit={handleSelectCommit}
-            />
-          </div>
         )}
-
-        {/* REMOVED: Old workspace placeholder + terminal band + canvas layout */}
-        {false && <div style={{
-          flex: canvasTabs.length > 0 ? `0 0 ${100 - canvasHeight}%` : 1,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          background: 'var(--t-bg-gradient)',
-        }}>
-          <div style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}>
-            {!canvasTabs.length ? (
-              <div style={{ textAlign: 'center', maxWidth: 480 }}>
-                <div style={{ fontSize: 48, marginBottom: 16, opacity: 0.12, color: 'var(--t-workspace-icon)' }}>◇</div>
-                <h1 style={{
-                  fontSize: 24,
-                  fontWeight: 700,
-                  letterSpacing: '-0.03em',
-                  marginBottom: 8,
-                  color: 'var(--t-text)',
-                }}>
-                  Workspace
-                </h1>
-                <p style={{
-                  fontSize: 14,
-                  color: 'var(--t-text-muted)',
-                  lineHeight: 1.5,
-                  letterSpacing: '-0.01em',
-                }}>
-                  Search files, explore code, and view diffs.
-                </p>
-              </div>
-            ) : null}
-          </div>
-        </div>}
       </div>
 
       {/* ── Right drag handle ── */}
@@ -763,11 +1150,12 @@ function DashboardInner() {
               resourceId: code,
             });
           }}
+          onRunInTerminal={handleRunInTerminal}
           onWsStatusChange={setWsStatus}
         />
       </div>}
 
-      {/* ── Alert Toast (desktop only — urgent alerts slide in top-right) ── */}
+      {/* ── Alert Toast (desktop only — urgent alerts slide in bottom-left near bell) ── */}
       <AlertToast alerts={activeAlerts} onAction={handleAlertAction} />
       </div>{/* end main layout */}
 
@@ -775,8 +1163,8 @@ function DashboardInner() {
       <ThoughtsCard
         open={thoughtsOpen}
         onClose={() => setThoughtsOpen(false)}
-        agents={JSON.parse(agentsJson)}
-        draftInjection={thoughtsDraftInjection}
+        agents={parsedAgents}
+        draftInjection={thoughtsOpen ? thoughtsDraftInjection : null}
       />
     </div>
   );

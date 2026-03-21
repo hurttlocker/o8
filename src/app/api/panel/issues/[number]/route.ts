@@ -25,7 +25,7 @@ export async function GET(
       'issue', 'view',
       String(issueNumber),
       '--repo', REPO,
-      '--json', 'number,title,body,state,labels,author,createdAt,comments,url',
+      '--json', 'number,title,body,state,labels,author,assignees,createdAt,comments,url',
     ], { timeout: 15_000, maxBuffer: 4 * 1024 * 1024 });
 
     const raw = JSON.parse(stdout || '{}');
@@ -40,6 +40,9 @@ export async function GET(
         color: l.color,
       })),
       author: raw.author?.login ?? 'unknown',
+      assignees: (raw.assignees ?? [])
+        .map((assignee: { login?: string | null }) => assignee.login ?? '')
+        .filter(Boolean),
       createdAt: raw.createdAt ?? '',
       comments: Array.isArray(raw.comments) ? raw.comments.length : (raw.comments ?? 0),
       url: raw.url ?? '',

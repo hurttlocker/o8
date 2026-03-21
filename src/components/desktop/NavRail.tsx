@@ -187,6 +187,7 @@ function UtilButton({
   onClick,
   badge,
   active,
+  tint,
 }: {
   icon: LucideIcon;
   label: string;
@@ -194,7 +195,9 @@ function UtilButton({
   onClick?: () => void;
   badge?: number;
   active?: boolean;
+  tint?: string;
 }) {
+  const activeColor = tint ?? '#2563eb';
   return (
     <button
       type="button"
@@ -208,8 +211,8 @@ function UtilButton({
         padding: '10px 12px',
         borderRadius: 12,
         border: 'none',
-        background: active ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
-        color: active ? '#2563eb' : 'var(--t-text-secondary)',
+        background: active ? (tint ? `${tint}14` : 'rgba(37, 99, 235, 0.08)') : 'transparent',
+        color: active ? activeColor : (tint ?? 'var(--t-text-secondary)'),
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
         transition: 'background 150ms ease',
@@ -231,7 +234,7 @@ function UtilButton({
             width: 16,
             height: 16,
             borderRadius: 8,
-            background: '#ef4444',
+            background: '#2563eb',
             color: '#fff',
             fontSize: 9,
             fontWeight: 700,
@@ -494,6 +497,7 @@ export function NavRail({
           label="Settings"
           expanded={expanded}
           onClick={() => onSectionChange('settings')}
+          tint="#ef4444"
         />
       </div>
     </motion.nav>

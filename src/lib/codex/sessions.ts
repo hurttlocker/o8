@@ -17,7 +17,7 @@ const CODEX_STATE_DB = path.join(CODEX_HOME, 'state_5.sqlite');
 const CODEX_SESSIONS_ROOT = path.join(CODEX_HOME, 'sessions');
 const CODEX_SOURCE_LABEL = 'Local Codex discovery';
 const RECENT_WINDOW_MS = 6 * 60 * 60_000;
-const CODEX_DISCOVERED_FLEET_TTL_MS = 30_000;
+const CODEX_DISCOVERED_FLEET_TTL_MS = 15_000;
 
 type CodexThreadRow = {
   id: string;
