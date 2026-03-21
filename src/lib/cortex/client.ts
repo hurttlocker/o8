@@ -158,11 +158,31 @@ class LocalCortexClient implements CortexClient {
   }
 
   async store(text: string, source?: string): Promise<{ ok: boolean; memoryId?: number }> {
-    const args = ['store', text];
-    if (source) args.push('--source', source);
-    const result = await this.run<{ ok?: boolean; memory_id?: number }>(args);
-    this.invalidateCache('stats', 'health');
-    return { ok: result !== null, memoryId: result?.memory_id };
+    // Cortex has no `store` command — it's import-first.
+    // Write text to a temp file and import it with --extract.
+    const { writeFileSync, mkdirSync, unlinkSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const os = await import('node:os');
+
+    const tmpDir = join(os.tmpdir(), 'cortex-chat-extract');
+    mkdirSync(tmpDir, { recursive: true });
+
+    const filename = source
+      ? `${source.replace(/[^a-zA-Z0-9-_]/g, '_')}.md`
+      : `chat-${Date.now()}.md`;
+    const tmpFile = join(tmpDir, filename);
+
+    writeFileSync(tmpFile, text, 'utf-8');
+
+    try {
+      const result = await this.run<{ imported?: number; memory_id?: number }>(
+        ['import', tmpFile, '--extract']
+      );
+      this.invalidateCache('stats', 'health');
+      return { ok: result !== null, memoryId: result?.memory_id };
+    } finally {
+      try { unlinkSync(tmpFile); } catch { /* ignore cleanup errors */ }
+    }
   }
 
   async stats(): Promise<CortexStats | null> {
