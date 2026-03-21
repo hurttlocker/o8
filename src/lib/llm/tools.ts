@@ -115,13 +115,115 @@ export const TOOLS: ToolDef[] = [
       required: ['repo', 'branch', 'title', 'body'],
     },
   },
+  {
+    name: 'run_terminal_command',
+    description: 'Execute a shell command in the workspace and return the output. Safe read-only commands run automatically. Write/mutation commands REQUIRE USER APPROVAL. Dangerous commands are blocked. Use for running tests, checking git status, building, installing packages, or any CLI task.',
+    parameters: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: 'Shell command to execute (e.g. "npm run test", "git status", "ls -la src/")' },
+        cwd: { type: 'string', description: 'Optional: working directory relative to repo root (default: repo root)' },
+      },
+      required: ['command'],
+    },
+  },
 ];
 
-// Tools that require user approval before execution
+// Tools that ALWAYS require user approval before execution
 export const APPROVAL_REQUIRED_TOOLS = new Set([
   'create_github_issue',
   'create_pull_request',
+  // run_terminal_command uses dynamic approval — see classifyCommand()
 ]);
+
+// ── Terminal Command Safety Tiers ──
+
+// 🟢 Auto-run: read-only commands that can never cause damage
+const SAFE_COMMANDS = new Set([
+  'ls', 'cat', 'head', 'tail', 'wc', 'echo', 'pwd', 'which', 'whoami',
+  'find', 'grep', 'rg', 'ag', 'tree', 'file', 'stat', 'du', 'df',
+  'git status', 'git log', 'git diff', 'git branch', 'git remote',
+  'git show', 'git stash list', 'git tag',
+  'node -v', 'node --version', 'npm list', 'npm ls', 'npm --version',
+  'npx tsc --noEmit', 'npx tsc --version',
+  'go version', 'go test', 'python3 --version', 'rustc --version',
+  'cortex stats', 'cortex doctor', 'cortex health', 'cortex search',
+  'gh issue list', 'gh pr list', 'gh repo view',
+  'date', 'uptime', 'hostname', 'env',
+]);
+
+// 🟡 Needs approval: mutation commands
+const MUTATION_PREFIXES = [
+  'npm install', 'npm run', 'npm ci', 'npm update', 'npm uninstall',
+  'npx', 'yarn', 'pnpm',
+  'git add', 'git commit', 'git push', 'git pull', 'git merge',
+  'git checkout', 'git switch', 'git rebase', 'git reset', 'git stash',
+  'go build', 'go install', 'go mod',
+  'mkdir', 'touch', 'cp', 'mv', 'ln',
+  'pip install', 'pip3 install',
+  'cargo build', 'cargo install',
+  'make', 'cmake',
+  'docker', 'kubectl',
+  'cortex import', 'cortex store', 'cortex embed', 'cortex cleanup',
+  'cortex lifecycle', 'cortex optimize', 'cortex reimport',
+  'gh issue create', 'gh pr create', 'gh pr merge',
+];
+
+// 🔴 Blocked: dangerous commands that should never run from chat
+const BLOCKED_PATTERNS = [
+  /\brm\s+(-[a-z]*r|-[a-z]*f|--recursive|--force)/i,  // rm -rf, rm -r, rm -f
+  /\bsudo\b/,
+  /\bchmod\s+777\b/,
+  /\bchown\b/,
+  /\bdd\s+if=/,
+  /\bmkfs\b/,
+  /\bformat\b/,
+  />\s*\/dev\//,                     // redirect to device files
+  /\bcurl\b.*\|\s*(sh|bash|zsh)/,   // curl pipe to shell
+  /\bwget\b.*\|\s*(sh|bash|zsh)/,
+  /\beval\b/,
+  /\bexec\b/,
+  /;.*\brm\b/,                      // chained rm
+  /&&.*\brm\b/,                     // chained rm
+  /\|\s*\brm\b/,                    // piped rm
+  /\bkill\s+-9\b/,
+  /\bshutdown\b/,
+  /\breboot\b/,
+  /\bnohup\b.*&/,                   // background persistent processes
+  />\s*~\//,                         // overwrite home directory files
+];
+
+export type CommandSafety = 'safe' | 'needs_approval' | 'blocked';
+
+export function classifyCommand(command: string): { safety: CommandSafety; reason: string } {
+  const trimmed = command.trim();
+
+  // Check blocked patterns first
+  for (const pattern of BLOCKED_PATTERNS) {
+    if (pattern.test(trimmed)) {
+      return { safety: 'blocked', reason: `Blocked: matches dangerous pattern ${pattern.source}` };
+    }
+  }
+
+  // Check safe commands (exact match on the base command)
+  const baseCmd = trimmed.split(/\s+/).slice(0, 3).join(' '); // "git status", "npm list"
+  const baseCmdTwo = trimmed.split(/\s+/).slice(0, 2).join(' ');
+  const baseCmdOne = trimmed.split(/\s+/)[0];
+
+  if (SAFE_COMMANDS.has(baseCmd) || SAFE_COMMANDS.has(baseCmdTwo) || SAFE_COMMANDS.has(baseCmdOne)) {
+    return { safety: 'safe', reason: 'Read-only command' };
+  }
+
+  // Check mutation prefixes
+  for (const prefix of MUTATION_PREFIXES) {
+    if (trimmed.startsWith(prefix)) {
+      return { safety: 'needs_approval', reason: `Mutation: ${prefix}` };
+    }
+  }
+
+  // Default: anything unknown needs approval
+  return { safety: 'needs_approval', reason: 'Unknown command — requires approval' };
+}
 
 // ── Tool Execution ──
 
@@ -139,7 +241,75 @@ export async function executeTool(name: string, args: Record<string, unknown>): 
     case 'create_github_issue': return await createGithubIssue(args as Parameters<typeof createGithubIssue>[0]);
     case 'read_github_issue_or_pr': return await readGithubIssueOrPr(args as Parameters<typeof readGithubIssueOrPr>[0]);
     case 'create_pull_request': return await createPullRequest(args as Parameters<typeof createPullRequest>[0]);
+    case 'run_terminal_command': return runTerminalCommand(args.command as string, args.cwd as string | undefined);
     default: return { content: `Unknown tool: ${name}` };
+  }
+}
+
+const MAX_OUTPUT = 10_000; // 10KB output cap for LLM
+const COMMAND_TIMEOUT = 30_000; // 30s timeout
+
+function runTerminalCommand(command: string, cwd?: string): ToolResult {
+  const classification = classifyCommand(command);
+
+  if (classification.safety === 'blocked') {
+    return { content: `🔴 Command blocked: ${classification.reason}\n\nThis command is not allowed to run from the chat for safety reasons.` };
+  }
+
+  // Resolve working directory
+  let workDir = REPO_ROOT;
+  if (cwd) {
+    const resolved = join(REPO_ROOT, cwd);
+    const rel = relative(REPO_ROOT, resolved);
+    if (rel.startsWith('..') || rel.startsWith('/')) {
+      return { content: 'Error: Working directory must be within the repository' };
+    }
+    workDir = resolved;
+  }
+
+  try {
+    const output = execSync(command, {
+      encoding: 'utf-8',
+      timeout: COMMAND_TIMEOUT,
+      cwd: workDir,
+      maxBuffer: 1024 * 1024, // 1MB buffer
+      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' }, // no ANSI
+      shell: '/bin/zsh',
+    });
+
+    let result = output.trim();
+
+    // Truncate if too long
+    if (result.length > MAX_OUTPUT) {
+      const truncated = result.slice(0, MAX_OUTPUT);
+      result = truncated + `\n\n... (output truncated — ${result.length.toLocaleString()} chars total, showing first ${MAX_OUTPUT.toLocaleString()})`;
+    }
+
+    return {
+      content: result || '(command completed with no output)',
+      sources: [{ title: `$ ${command}`, path: cwd || '.' }],
+    };
+  } catch (err) {
+    // execSync throws on non-zero exit code — capture both stdout and stderr
+    const execErr = err as { stdout?: string; stderr?: string; status?: number; message?: string };
+    const stdout = (execErr.stdout || '').trim();
+    const stderr = (execErr.stderr || '').trim();
+    const status = execErr.status ?? 1;
+
+    let output = '';
+    if (stdout) output += stdout;
+    if (stderr) output += (output ? '\n\n' : '') + `STDERR:\n${stderr}`;
+    if (!output) output = execErr.message || 'Command failed with no output';
+
+    // Truncate
+    if (output.length > MAX_OUTPUT) {
+      output = output.slice(0, MAX_OUTPUT) + '\n... (truncated)';
+    }
+
+    return {
+      content: `Exit code ${status}:\n${output}`,
+      sources: [{ title: `$ ${command} (exit ${status})`, path: cwd || '.' }],
+    };
   }
 }
 

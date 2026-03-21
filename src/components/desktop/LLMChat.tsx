@@ -1136,6 +1136,7 @@ const SLASH_COMMANDS = [
   { command: '/fix', label: 'Fix this', description: 'Debug and fix an issue', icon: '🔧', prefix: 'Debug and fix this issue: ' },
   { command: '/issue', label: 'Create issue', description: 'File a GitHub issue from chat context', icon: '📋', prefix: 'Create a GitHub issue for: ' },
   { command: '/pr', label: 'Create PR', description: 'Open a pull request from current changes', icon: '🔀', prefix: 'Create a pull request with these changes: ' },
+  { command: '/run', label: 'Run command', description: 'Execute a terminal command in the workspace', icon: '⚡', prefix: 'Run this terminal command: ' },
 ];
 
 // ── Follow-up question generation ──
@@ -1266,7 +1267,9 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
     name: string;
     args: Record<string, unknown>;
     summary: string;
+    editable?: boolean;
   } | null>(null);
+  const [editedCommand, setEditedCommand] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historySearch, setHistorySearch] = useState('');
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
@@ -1839,11 +1842,16 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
                   setActiveThinking({ steps: [...thinkingSteps], thinking: thinkingText });
                 }
               } else if (parsed.type === 'approval_required') {
+                const isTerminal = parsed.name === 'run_terminal_command';
                 setPendingApproval({
                   name: parsed.name,
                   args: parsed.args,
                   summary: parsed.summary,
+                  editable: parsed.editable ?? isTerminal,
                 });
+                if (isTerminal) {
+                  setEditedCommand(String(parsed.args?.command || ''));
+                }
               } else if (parsed.type === 'sources') {
                 sources.push(...(parsed.sources ?? []));
               } else if (parsed.type === 'error') {
@@ -2797,49 +2805,102 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <span style={{ fontSize: 14 }}>
-              {pendingApproval.name === 'create_github_issue' ? '📋' : '🔀'}
+              {pendingApproval.name === 'run_terminal_command' ? '⚡' : pendingApproval.name === 'create_github_issue' ? '📋' : '🔀'}
             </span>
             <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>
-              Approval Required
+              {pendingApproval.name === 'run_terminal_command' ? 'Run Command?' : 'Approval Required'}
             </span>
+            {pendingApproval.name === 'run_terminal_command' && (
+              <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 400 }}>You can edit before running</span>
+            )}
           </div>
-          <div style={{ fontSize: 12, color: '#475569', marginBottom: 10, lineHeight: 1.5 }}>
-            {pendingApproval.summary}
-          </div>
-          {/* Show details */}
-          {pendingApproval.args && (
-            <div style={{
-              background: 'rgba(255,255,255,0.6)',
-              borderRadius: 8,
-              paddingTop: 8,
-              paddingBottom: 8,
-              paddingLeft: 10,
-              paddingRight: 10,
-              marginBottom: 10,
-              fontSize: 11,
-              fontFamily: 'ui-monospace, monospace',
-              color: '#334155',
-              maxHeight: 80,
-              overflowY: 'auto',
-            }}>
-              {pendingApproval.name === 'create_github_issue' && (
-                <>
-                  <div><strong>Repo:</strong> {String(pendingApproval.args.repo)}</div>
-                  <div><strong>Title:</strong> {String(pendingApproval.args.title)}</div>
-                  {pendingApproval.args.labels && (
-                    <div><strong>Labels:</strong> {(pendingApproval.args.labels as string[]).join(', ')}</div>
-                  )}
-                </>
-              )}
-              {pendingApproval.name === 'create_pull_request' && (
-                <>
-                  <div><strong>Repo:</strong> {String(pendingApproval.args.repo)}</div>
-                  <div><strong>Branch:</strong> {String(pendingApproval.args.branch)}</div>
-                  <div><strong>Title:</strong> {String(pendingApproval.args.title)}</div>
-                  <div><strong>Base:</strong> {String(pendingApproval.args.baseBranch || 'main')}</div>
-                </>
-              )}
+          {/* Terminal command — editable input */}
+          {pendingApproval.name === 'run_terminal_command' ? (
+            <div style={{ marginBottom: 10 }}>
+              <input
+                type="text"
+                value={editedCommand}
+                onChange={(e) => setEditedCommand(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && editedCommand.trim()) {
+                    // Approve with potentially edited command
+                    setApprovedToolsSet(prev => new Set([...prev, 'run_terminal_command']));
+                    setPendingApproval(null);
+                    const lastUserMsg = messages.filter(m => m.role === 'user').pop();
+                    if (lastUserMsg) {
+                      setInput(lastUserMsg.content);
+                      setTimeout(() => {
+                        const sendBtn = document.querySelector('[data-send-btn]') as HTMLButtonElement;
+                        if (sendBtn) sendBtn.click();
+                      }, 100);
+                    }
+                  } else if (e.key === 'Escape') {
+                    setPendingApproval(null);
+                  }
+                }}
+                autoFocus
+                style={{
+                  width: '100%',
+                  paddingTop: 10,
+                  paddingBottom: 10,
+                  paddingLeft: 12,
+                  paddingRight: 12,
+                  borderRadius: 8,
+                  border: '1px solid rgba(59,130,246,0.3)',
+                  background: 'rgba(255,255,255,0.8)',
+                  color: '#0f172a',
+                  fontSize: 13,
+                  fontFamily: 'ui-monospace, SFMono-Regular, monospace',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+              {pendingApproval.args.cwd ? (
+                <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 4 }}>
+                  Working directory: {String(pendingApproval.args.cwd)}
+                </div>
+              ) : null}
             </div>
+          ) : (
+            <>
+              <div style={{ fontSize: 12, color: '#475569', marginBottom: 10, lineHeight: 1.5 }}>
+                {pendingApproval.summary}
+              </div>
+              {pendingApproval.args && (
+                <div style={{
+                  background: 'rgba(255,255,255,0.6)',
+                  borderRadius: 8,
+                  paddingTop: 8,
+                  paddingBottom: 8,
+                  paddingLeft: 10,
+                  paddingRight: 10,
+                  marginBottom: 10,
+                  fontSize: 11,
+                  fontFamily: 'ui-monospace, monospace',
+                  color: '#334155',
+                  maxHeight: 80,
+                  overflowY: 'auto',
+                }}>
+                  {pendingApproval.name === 'create_github_issue' && (
+                    <>
+                      <div><strong>Repo:</strong> {String(pendingApproval.args.repo)}</div>
+                      <div><strong>Title:</strong> {String(pendingApproval.args.title)}</div>
+                      {pendingApproval.args.labels && (
+                        <div><strong>Labels:</strong> {(pendingApproval.args.labels as string[]).join(', ')}</div>
+                      )}
+                    </>
+                  )}
+                  {pendingApproval.name === 'create_pull_request' && (
+                    <>
+                      <div><strong>Repo:</strong> {String(pendingApproval.args.repo)}</div>
+                      <div><strong>Branch:</strong> {String(pendingApproval.args.branch)}</div>
+                      <div><strong>Title:</strong> {String(pendingApproval.args.title)}</div>
+                      <div><strong>Base:</strong> {String(pendingApproval.args.baseBranch || 'main')}</div>
+                    </>
+                  )}
+                </div>
+              )}
+            </>
           )}
           <div style={{ display: 'flex', gap: 8 }}>
             <button
