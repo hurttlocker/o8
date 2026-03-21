@@ -2036,9 +2036,13 @@ interface CortexConfig {
   embedModel: string;
   enrichModel: string;
   classifyModel: string;
+  expandModel: string;
   llmProvider: string;
+  llmApiKey: string;
+  llmApiKeySet: boolean;
   configPath: string;
   dbPath: string;
+  sourceBoostCount: number;
 }
 
 interface CortexStats {
@@ -2084,6 +2088,9 @@ function CortexMemoryTab() {
   const [doctorSummary, setDoctorSummary] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveNote, setSaveNote] = useState('');
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [showApiKey, setShowApiKey] = useState(false);
+  const [actionRunning, setActionRunning] = useState<string | null>(null);
 
   const loadConfig = useCallback(async () => {
     try {
@@ -2255,6 +2262,160 @@ function CortexMemoryTab() {
         </div>
       )}
 
+      {/* LLM Provider + API Key */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', marginBottom: 4 }}>
+          LLM Provider
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)', margin: '0 0 16px', lineHeight: '1.4' }}>
+          Cortex uses an LLM for fact extraction, enrichment, and classification. Configure your provider and API key.
+        </p>
+
+        {/* Provider selector */}
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--t-text, #0f172a)', marginBottom: 6 }}>
+            Provider
+          </label>
+          <select
+            value={config?.llmProvider || ''}
+            onChange={(e) => void saveConfig({ llmProvider: e.target.value })}
+            disabled={saving}
+            style={{
+              width: '100%',
+              paddingTop: 10,
+              paddingBottom: 10,
+              paddingLeft: 12,
+              paddingRight: 12,
+              borderRadius: 10,
+              border: '1px solid var(--t-border, #e2e8f0)',
+              background: 'var(--t-bg, white)',
+              color: 'var(--t-text, #0f172a)',
+              fontSize: 13,
+              outline: 'none',
+            }}
+          >
+            <option value="">— Select provider —</option>
+            <option value="openrouter">OpenRouter (recommended — access all models)</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="openai">OpenAI</option>
+            <option value="google">Google AI</option>
+            <option value="ollama">Ollama (local, no key needed)</option>
+          </select>
+        </div>
+
+        {/* API Key */}
+        {config?.llmProvider && config.llmProvider !== 'ollama' && (
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--t-text, #0f172a)', marginBottom: 6 }}>
+              API Key
+              {config.llmApiKeySet && (
+                <span style={{
+                  marginLeft: 8,
+                  fontSize: 10,
+                  paddingTop: 2,
+                  paddingBottom: 2,
+                  paddingLeft: 6,
+                  paddingRight: 6,
+                  borderRadius: 4,
+                  background: 'rgba(52,211,153,0.1)',
+                  color: '#10b981',
+                }}>
+                  ✓ Configured
+                </span>
+              )}
+            </label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                type={showApiKey ? 'text' : 'password'}
+                value={apiKeyInput || (showApiKey ? '' : config.llmApiKey)}
+                onChange={(e) => setApiKeyInput(e.target.value)}
+                placeholder={config.llmApiKeySet ? 'Enter new key to replace' : `Enter ${config.llmProvider} API key`}
+                style={{
+                  flex: 1,
+                  paddingTop: 10,
+                  paddingBottom: 10,
+                  paddingLeft: 12,
+                  paddingRight: 12,
+                  borderRadius: 10,
+                  border: '1px solid var(--t-border, #e2e8f0)',
+                  background: 'var(--t-bg, white)',
+                  color: 'var(--t-text, #0f172a)',
+                  fontSize: 13,
+                  fontFamily: 'ui-monospace, monospace',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowApiKey(!showApiKey)}
+                style={{
+                  paddingTop: 8,
+                  paddingBottom: 8,
+                  paddingLeft: 12,
+                  paddingRight: 12,
+                  borderRadius: 10,
+                  border: '1px solid var(--t-border, #e2e8f0)',
+                  background: 'var(--t-bg, white)',
+                  color: 'var(--t-text-muted, #94a3b8)',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                {showApiKey ? 'Hide' : 'Show'}
+              </button>
+              {apiKeyInput && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void saveConfig({ llmApiKey: apiKeyInput });
+                    setApiKeyInput('');
+                  }}
+                  disabled={saving}
+                  style={{
+                    paddingTop: 8,
+                    paddingBottom: 8,
+                    paddingLeft: 16,
+                    paddingRight: 16,
+                    borderRadius: 10,
+                    border: 'none',
+                    background: '#3b82f6',
+                    color: 'white',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Save
+                </button>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)', marginTop: 6 }}>
+              {config.llmProvider === 'openrouter' && (
+                <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6', textDecoration: 'none' }}>
+                  Get an OpenRouter API key →
+                </a>
+              )}
+              {config.llmProvider === 'anthropic' && (
+                <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6', textDecoration: 'none' }}>
+                  Get an Anthropic API key →
+                </a>
+              )}
+              {config.llmProvider === 'openai' && (
+                <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6', textDecoration: 'none' }}>
+                  Get an OpenAI API key →
+                </a>
+              )}
+              {config.llmProvider === 'google' && (
+                <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6', textDecoration: 'none' }}>
+                  Get a Google AI API key →
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Configuration Section */}
       <div style={{ marginBottom: 32 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', marginBottom: 16 }}>
@@ -2406,6 +2567,189 @@ function CortexMemoryTab() {
             <StatCard label="Facts (24h)" value={`+${stats.growth.facts_24h || 0}`} />
             <StatCard label="Facts (7d)" value={`+${stats.growth.facts_7d || 0}`} />
           </div>
+        </div>
+      )}
+
+      {/* Quick Actions */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', marginBottom: 4 }}>
+          Maintenance
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)', margin: '0 0 12px', lineHeight: '1.4' }}>
+          Run maintenance tasks to keep your memory healthy and search quality high.
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {[
+            { id: 'cleanup', label: 'Cleanup', desc: 'Remove garbage memories and headless facts', cmd: 'cleanup' },
+            { id: 'lifecycle', label: 'Lifecycle', desc: 'Apply decay, promote, and conflict resolution policies', cmd: 'lifecycle run' },
+            { id: 'conflicts', label: 'Find Conflicts', desc: 'Detect contradictory facts', cmd: 'conflicts --limit 10' },
+            { id: 'optimize', label: 'Optimize DB', desc: 'VACUUM and ANALYZE the database', cmd: 'optimize' },
+          ].map(action => (
+            <button
+              key={action.id}
+              type="button"
+              title={action.desc}
+              disabled={actionRunning !== null}
+              onClick={async () => {
+                setActionRunning(action.id);
+                try {
+                  const res = await fetch('/api/v2/cortex/action', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command: action.cmd }),
+                  });
+                  if (res.ok) {
+                    setSaveNote(`${action.label} complete`);
+                    setTimeout(() => setSaveNote(''), 3000);
+                    void loadConfig();
+                  }
+                } catch { /* ignore */ }
+                setActionRunning(null);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                paddingTop: 8,
+                paddingBottom: 8,
+                paddingLeft: 14,
+                paddingRight: 14,
+                borderRadius: 10,
+                border: '1px solid var(--t-border, #e2e8f0)',
+                background: actionRunning === action.id ? 'var(--t-bg-card, #f8fafc)' : 'var(--t-bg, white)',
+                color: 'var(--t-text, #0f172a)',
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: actionRunning ? 'wait' : 'pointer',
+                transition: 'all 150ms',
+                opacity: actionRunning && actionRunning !== action.id ? 0.5 : 1,
+              }}
+            >
+              {actionRunning === action.id ? '⏳' : '▸'} {action.label}
+            </button>
+          ))}
+        </div>
+        {saveNote && (
+          <div style={{ fontSize: 12, color: '#10b981', marginTop: 8, fontWeight: 500 }}>
+            ✓ {saveNote}
+          </div>
+        )}
+      </div>
+
+      {/* Chat Memory Settings */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', marginBottom: 4 }}>
+          Chat Memory
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)', margin: '0 0 12px', lineHeight: '1.4' }}>
+          When enabled, the LLM chat searches Cortex for relevant memories before each message and injects them as context.
+          The model remembers decisions, preferences, and project details across conversations.
+        </p>
+        <div style={{
+          paddingTop: 16,
+          paddingBottom: 16,
+          paddingLeft: 16,
+          paddingRight: 16,
+          borderRadius: 12,
+          border: '1px solid var(--t-border, #e2e8f0)',
+          background: 'var(--t-bg-card, #f8fafc)',
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text, #0f172a)' }}>Memory Recall</div>
+                <div style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)' }}>Search Cortex before each LLM request</div>
+              </div>
+              <div style={{
+                width: 36,
+                height: 20,
+                borderRadius: 10,
+                background: '#3b82f6',
+                position: 'relative',
+                cursor: 'pointer',
+              }}>
+                <div style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: '50%',
+                  background: 'white',
+                  position: 'absolute',
+                  top: 2,
+                  right: 2,
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                  transition: 'all 150ms',
+                }} />
+              </div>
+            </div>
+            <div style={{ height: 1, background: 'var(--t-border, #e2e8f0)' }} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text, #0f172a)' }}>Max Results</div>
+                <div style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)' }}>Top N facts injected per request</div>
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', fontFamily: 'ui-monospace, monospace' }}>7</span>
+            </div>
+            <div style={{ height: 1, background: 'var(--t-border, #e2e8f0)' }} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text, #0f172a)' }}>Token Budget</div>
+                <div style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)' }}>Max tokens used for memory context</div>
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', fontFamily: 'ui-monospace, monospace' }}>800</span>
+            </div>
+            <div style={{ height: 1, background: 'var(--t-border, #e2e8f0)' }} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text, #0f172a)' }}>Min Confidence</div>
+                <div style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)' }}>Facts below this score are excluded</div>
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', fontFamily: 'ui-monospace, monospace' }}>0.3</span>
+            </div>
+            {config?.sourceBoostCount != null && config.sourceBoostCount > 0 && (
+              <>
+                <div style={{ height: 1, background: 'var(--t-border, #e2e8f0)' }} />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text, #0f172a)' }}>Source Boost Rules</div>
+                    <div style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)' }}>Custom source weighting configured</div>
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', fontFamily: 'ui-monospace, monospace' }}>{config.sourceBoostCount}</span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Getting Started / Setup Guide */}
+      {(!stats || !config?.llmApiKeySet) && (
+        <div style={{
+          marginBottom: 32,
+          paddingTop: 20,
+          paddingBottom: 20,
+          paddingLeft: 20,
+          paddingRight: 20,
+          borderRadius: 12,
+          border: '1px dashed var(--t-border, #e2e8f0)',
+          background: 'rgba(59,130,246,0.02)',
+        }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', marginBottom: 8 }}>
+            Getting Started
+          </div>
+          <ol style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: 'var(--t-text-muted, #94a3b8)', lineHeight: '1.8' }}>
+            <li style={{ color: config?.llmApiKeySet ? '#10b981' : undefined }}>
+              {config?.llmApiKeySet ? '✓' : '→'} Configure an LLM provider and API key above
+            </li>
+            <li style={{ color: config?.embedModel ? '#10b981' : undefined }}>
+              {config?.embedModel ? '✓' : '→'} Install Ollama and pull an embedding model: <code style={{ fontSize: 11, background: 'var(--t-bg-card, #f1f5f9)', paddingTop: 1, paddingBottom: 1, paddingLeft: 4, paddingRight: 4, borderRadius: 3 }}>ollama pull nomic-embed-text</code>
+            </li>
+            <li>
+              → Import your first memories: <code style={{ fontSize: 11, background: 'var(--t-bg-card, #f1f5f9)', paddingTop: 1, paddingBottom: 1, paddingLeft: 4, paddingRight: 4, borderRadius: 3 }}>cortex import ~/notes --extract</code>
+            </li>
+            <li>
+              → Chat with memory — Cortex automatically recalls relevant facts
+            </li>
+          </ol>
         </div>
       )}
     </div>
