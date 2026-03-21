@@ -6,6 +6,10 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `7961482` chore: Stage remaining changes
+- `7008e51` fix: Timeline hover
+- `f4be827` fix: Timeline hover badge uses fixed positioning to render above TitleBar
+- `0ef0b44` feat: Production polish
 - `af7c99c` feat: Blocklist guard for public changelog + AI provider.md rule
 - `6407c9f` fix: Harden public changelog
 - `37afd4a` chore: add workflow_dispatch trigger to sync-changelog
