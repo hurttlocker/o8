@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `57c08ba` feat: Graceful degradation when gateway unreachable
 - `1aa6159` fix: Hover card delay + agent error recovery with retry
 - `7961482` chore: Stage remaining changes
 - `7008e51` fix: Timeline hover
