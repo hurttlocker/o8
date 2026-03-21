@@ -54,14 +54,21 @@ export async function GET() {
       return match ? match[1].trim() : '';
     };
 
-    // Extract config values
-    const llmProvider = getVal('provider');
-    const embedProvider = getVal('provider') || '';
-    // More precise extraction for nested keys
+    // Extract config values — careful with nested YAML
+    const llmSection = configRaw.match(/^llm:\s*\n((?:\s{2}.+\n?)*)/m);
+    const llmBlock = llmSection ? llmSection[1] : '';
+    const llmProvider = llmBlock.match(/provider:\s*(.+)/)?.[1]?.trim() || '';
+    const llmApiKey = llmBlock.match(/api_key:\s*(.+)/)?.[1]?.trim() || '';
+    const enrichModel = llmBlock.match(/enrich_model:\s*(.+)/)?.[1]?.trim() || '';
+    const classifyModel = llmBlock.match(/classify_model:\s*(.+)/)?.[1]?.trim() || '';
+    const expandModel = llmBlock.match(/expand_model:\s*(.+)/)?.[1]?.trim() || '';
     const embedLine = configRaw.match(/embed:\s*\n\s*provider:\s*(.+)/m);
     const embedModel = embedLine ? embedLine[1].trim() : '';
-    const enrichModel = getVal('enrich_model');
-    const classifyModel = getVal('classify_model');
+
+    // Extract recall settings from search section
+    const searchSection = configRaw.match(/^search:\s*\n((?:\s{2}.+\n?)*)/m);
+    const searchBlock = searchSection ? searchSection[1] : '';
+    const sourceBoostCount = (searchBlock.match(/- prefix:/g) || []).length;
 
     // Get stats
     const statsRaw = safeExec(`${CORTEX_BIN} stats --json 2>/dev/null`);
@@ -85,9 +92,13 @@ export async function GET() {
         embedModel,
         enrichModel,
         classifyModel,
+        expandModel,
         llmProvider,
+        llmApiKey: llmApiKey ? `${llmApiKey.slice(0, 8)}${'•'.repeat(Math.max(0, llmApiKey.length - 12))}${llmApiKey.slice(-4)}` : '',
+        llmApiKeySet: llmApiKey.length > 0,
         configPath: CONFIG_PATH,
         dbPath: join(CORTEX_HOME, 'cortex.db'),
+        sourceBoostCount,
       },
       stats: stats ? {
         memories: stats.memories,
@@ -114,7 +125,7 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { embedModel, enrichModel, classifyModel } = body;
+    const { embedModel, enrichModel, classifyModel, expandModel, llmProvider, llmApiKey } = body;
 
     if (!existsSync(CONFIG_PATH)) {
       return NextResponse.json({ error: 'Config file not found' }, { status: 404 });
@@ -127,6 +138,22 @@ export async function POST(req: Request) {
       config = config.replace(
         /^(\s*embed:\s*\n\s*provider:\s*)(.+)$/m,
         `$1${embedModel}`
+      );
+    }
+
+    // Update LLM provider
+    if (llmProvider !== undefined) {
+      config = config.replace(
+        /^(llm:\s*\n\s*provider:\s*)(.+)$/m,
+        `$1${llmProvider}`
+      );
+    }
+
+    // Update API key (only if a real value, not masked)
+    if (llmApiKey !== undefined && !llmApiKey.includes('•')) {
+      config = config.replace(
+        /^(\s*api_key:\s*)(.+)$/m,
+        `$1${llmApiKey}`
       );
     }
 
@@ -143,6 +170,14 @@ export async function POST(req: Request) {
       config = config.replace(
         /^(\s*classify_model:\s*)(.+)$/m,
         `$1${classifyModel}`
+      );
+    }
+
+    // Update expand model
+    if (expandModel !== undefined) {
+      config = config.replace(
+        /^(\s*expand_model:\s*)(.+)$/m,
+        `$1${expandModel}`
       );
     }
 
