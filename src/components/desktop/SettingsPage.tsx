@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Image from 'next/image';
+import packageJson from '../../../package.json';
 import { useTheme } from '@/lib/theme/context';
 import { formatModelLabel } from '@/lib/format';
 
@@ -43,6 +44,44 @@ interface GitHubDeviceFlowState {
 type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
 type SettingsTab = 'connectors' | 'agents' | 'api-keys' | 'memory' | 'appearance' | 'about';
+
+interface OpenClawGatewayStatus {
+  connected: boolean;
+  gatewayUrl: string;
+  version: string;
+  agentCount?: number;
+  platform?: string;
+  nodeVersion?: string;
+  mode?: string;
+  uptime?: string | null;
+}
+
+function normalizeVersion(value?: string | null, fallback = '—') {
+  if (!value) return fallback;
+  const trimmed = String(value).replace(/^cortex\s+/i, '').trim();
+  if (!trimmed || trimmed === 'unknown') return fallback;
+  return trimmed.startsWith('v') ? trimmed : `v${trimmed}`;
+}
+
+async function fetchOpenClawGatewayStatus(): Promise<OpenClawGatewayStatus | null> {
+  try {
+    const res = await fetch('/api/panel/status');
+    if (!res.ok) throw new Error('Failed to fetch OpenClaw status');
+    const data = await res.json();
+    return {
+      connected: Boolean(data.connected),
+      gatewayUrl: data.gatewayUrl || '127.0.0.1:18789',
+      version: data.version || 'unknown',
+      agentCount: data.agentCount ?? 0,
+      platform: data.platform || '',
+      nodeVersion: data.nodeVersion || '',
+      mode: data.mode || 'local',
+      uptime: data.uptime || null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 // ── SVG Icons ──
 
@@ -948,19 +987,252 @@ function GitHubTab({
   return modernView;
 }
 
-// ── Placeholder Tabs ──
+// ── About / Connection Cards ──
 
-function PlaceholderTab({ title, description }: { title: string; description: string }) {
+function OpenClawConnectionCard() {
+  const [status, setStatus] = useState<OpenClawGatewayStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      const next = await fetchOpenClawGatewayStatus();
+      if (!active) return;
+      setStatus(next);
+      setLoading(false);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const connected = status?.connected ?? false;
+  const gatewayUrl = status?.gatewayUrl || '127.0.0.1:18789';
+  const modeLabel = status?.mode === 'tailscale' ? 'Tailscale' : 'Local';
+  const statusLabel = connected ? 'Connected' : 'Disconnected';
+
   return (
     <div style={{
       background: 'var(--t-panel)',
       borderRadius: 14,
-      padding: 32,
       border: '1px solid var(--t-panel-border)',
-      textAlign: 'center',
+      boxShadow: 'var(--t-panel-shadow)',
+      padding: 18,
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 14,
     }}>
-      <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)', margin: '0 0 6px' }}>{title}</h3>
-      <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: 0 }}>{description}</p>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{
+          width: 42,
+          height: 42,
+          borderRadius: 12,
+          display: 'grid',
+          placeItems: 'center',
+          background: connected ? 'rgba(34, 197, 94, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+          fontSize: 20,
+          flexShrink: 0,
+        }}>
+          🦞
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)' }}>OpenClaw Gateway</span>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '3px 8px',
+              borderRadius: 999,
+              background: connected ? 'rgba(34, 197, 94, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+              color: connected ? '#166534' : '#b91c1c',
+              fontSize: 11,
+              fontWeight: 700,
+            }}>
+              <span style={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: connected ? '#22c55e' : '#ef4444',
+                boxShadow: connected ? '0 0 10px rgba(34, 197, 94, 0.35)' : 'none',
+              }} />
+              {statusLabel}
+            </span>
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 4, lineHeight: 1.45 }}>
+            {loading
+              ? 'Checking gateway connection…'
+              : connected
+                ? `Version ${normalizeVersion(status?.version, 'unknown')} · ${modeLabel} mode`
+                : 'Gateway not reachable. Run `openclaw gateway start`.'}
+          </div>
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Loading OpenClaw gateway details…</div>
+      ) : connected ? (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+          gap: 12,
+        }}>
+          {[
+            { label: 'Version', value: normalizeVersion(status?.version) },
+            { label: 'Mode', value: modeLabel },
+            { label: 'Gateway URL', value: gatewayUrl },
+            { label: 'Uptime', value: status?.uptime || 'active' },
+          ].map((item) => (
+            <div key={item.label} style={{
+              padding: 12,
+              borderRadius: 10,
+              background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
+              border: '1px solid var(--t-panel-border)',
+            }}>
+              <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginBottom: 4 }}>{item.label}</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}>{item.value}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{
+          padding: 12,
+          borderRadius: 10,
+          background: 'rgba(239, 68, 68, 0.04)',
+          border: '1px solid rgba(239, 68, 68, 0.12)',
+          color: 'var(--t-text-secondary)',
+          fontSize: 12,
+          lineHeight: 1.5,
+        }}>
+          Gateway not reachable. Run <code style={{ fontSize: 11, background: 'rgba(15, 23, 42, 0.06)', padding: '2px 5px', borderRadius: 4 }}>openclaw gateway start</code>.
+          <div style={{ marginTop: 8, color: 'var(--t-text-muted)' }}>Expected endpoint: {gatewayUrl}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AboutTab() {
+  const [gatewayStatus, setGatewayStatus] = useState<OpenClawGatewayStatus | null>(null);
+  const [cortexVersion, setCortexVersion] = useState('');
+  const [platform] = useState(() => {
+    if (typeof navigator !== 'undefined' && navigator.platform) return navigator.platform;
+    return '—';
+  });
+
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      const [gatewayResult, cortexResult] = await Promise.allSettled([
+        fetchOpenClawGatewayStatus(),
+        fetch('/api/v2/cortex/config'),
+      ]);
+
+      if (!active) return;
+
+      if (gatewayResult.status === 'fulfilled') {
+        setGatewayStatus(gatewayResult.value);
+      }
+
+      if (cortexResult.status === 'fulfilled' && cortexResult.value.ok) {
+        try {
+          const data = await cortexResult.value.json();
+          if (active) {
+            setCortexVersion(data.version || '');
+          }
+        } catch {
+          // noop
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const systemInfo = [
+    { label: 'Platform', value: platform !== '—' ? platform : gatewayStatus?.platform || '—' },
+    { label: 'Node.js', value: gatewayStatus?.nodeVersion ? normalizeVersion(gatewayStatus.nodeVersion) : '—' },
+    { label: 'OpenClaw', value: gatewayStatus?.connected ? normalizeVersion(gatewayStatus.version) : 'Not connected' },
+    { label: 'Cortex Memory', value: cortexVersion ? normalizeVersion(cortexVersion) : '—' },
+  ];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 760 }}>
+      <div style={{
+        background: 'var(--t-panel)',
+        borderRadius: 14,
+        border: '1px solid var(--t-panel-border)',
+        boxShadow: 'var(--t-panel-shadow)',
+        padding: 24,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+          <h3 style={{ fontSize: 22, fontWeight: 700, color: 'var(--t-text)', margin: 0 }}>Cortex IDE</h3>
+          <span style={{
+            fontSize: 11,
+            fontWeight: 700,
+            padding: '4px 9px',
+            borderRadius: 999,
+            background: 'rgba(37, 99, 235, 0.08)',
+            color: '#2563eb',
+          }}>
+            {normalizeVersion(packageJson.version)}
+          </span>
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--t-text-secondary)', margin: '0 0 18px', lineHeight: 1.5 }}>
+          Built with Next.js + Tauri · Powered by Cortex Memory
+        </p>
+
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+          gap: 12,
+        }}>
+          {systemInfo.map((item) => (
+            <div key={item.label} style={{
+              padding: 14,
+              borderRadius: 12,
+              background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
+              border: '1px solid var(--t-panel-border)',
+            }}>
+              <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginBottom: 6 }}>{item.label}</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--t-text)' }}>{item.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{
+        background: 'var(--t-panel)',
+        borderRadius: 14,
+        border: '1px solid var(--t-panel-border)',
+        boxShadow: 'var(--t-panel-shadow)',
+        padding: 24,
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', marginBottom: 6 }}>Links</div>
+        <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: '0 0 14px', lineHeight: 1.5 }}>
+          Links will be added before production release.
+        </p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+          {['GitHub', 'Documentation', 'Discord Community'].map((label) => (
+            <span key={label} style={{
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid var(--t-panel-border)',
+              background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
+              color: 'var(--t-text-secondary)',
+              fontSize: 12,
+              fontWeight: 600,
+            }}>
+              {label}
+            </span>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -2043,6 +2315,10 @@ interface CortexConfig {
   configPath: string;
   dbPath: string;
   sourceBoostCount: number;
+  recallEnabled?: boolean;
+  recallMaxResults?: number;
+  recallTokenBudget?: number;
+  recallMinConfidence?: number;
 }
 
 interface CortexStats {
@@ -2139,6 +2415,11 @@ function CortexMemoryTab() {
       </div>
     );
   }
+
+  const recallEnabled = config?.recallEnabled ?? true;
+  const recallMaxResults = config?.recallMaxResults ?? 7;
+  const recallTokenBudget = config?.recallTokenBudget ?? 800;
+  const recallMinConfidence = config?.recallMinConfidence ?? 0.3;
 
   return (
     <div style={{
@@ -2660,14 +2941,26 @@ function CortexMemoryTab() {
                 <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text, #0f172a)' }}>Memory Recall</div>
                 <div style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)' }}>Search Cortex before each LLM request</div>
               </div>
-              <div style={{
-                width: 36,
-                height: 20,
-                borderRadius: 10,
-                background: '#3b82f6',
-                position: 'relative',
-                cursor: 'pointer',
-              }}>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => {
+                  setConfig(prev => prev ? { ...prev, recallEnabled: !recallEnabled } : prev);
+                  void saveConfig({ recallEnabled: !recallEnabled });
+                }}
+                aria-pressed={recallEnabled}
+                style={{
+                  width: 36,
+                  height: 20,
+                  borderRadius: 10,
+                  border: 'none',
+                  background: recallEnabled ? '#3b82f6' : '#cbd5e1',
+                  position: 'relative',
+                  cursor: saving ? 'default' : 'pointer',
+                  transition: 'background 150ms',
+                  opacity: saving ? 0.7 : 1,
+                }}
+              >
                 <div style={{
                   width: 16,
                   height: 16,
@@ -2675,11 +2968,11 @@ function CortexMemoryTab() {
                   background: 'white',
                   position: 'absolute',
                   top: 2,
-                  right: 2,
+                  left: recallEnabled ? 18 : 2,
                   boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                  transition: 'all 150ms',
+                  transition: 'left 150ms',
                 }} />
-              </div>
+              </button>
             </div>
             <div style={{ height: 1, background: 'var(--t-border, #e2e8f0)' }} />
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -2687,7 +2980,7 @@ function CortexMemoryTab() {
                 <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text, #0f172a)' }}>Max Results</div>
                 <div style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)' }}>Top N facts injected per request</div>
               </div>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', fontFamily: 'ui-monospace, monospace' }}>7</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', fontFamily: 'ui-monospace, monospace' }}>{recallMaxResults}</span>
             </div>
             <div style={{ height: 1, background: 'var(--t-border, #e2e8f0)' }} />
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -2695,7 +2988,7 @@ function CortexMemoryTab() {
                 <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text, #0f172a)' }}>Token Budget</div>
                 <div style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)' }}>Max tokens used for memory context</div>
               </div>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', fontFamily: 'ui-monospace, monospace' }}>800</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', fontFamily: 'ui-monospace, monospace' }}>{recallTokenBudget}</span>
             </div>
             <div style={{ height: 1, background: 'var(--t-border, #e2e8f0)' }} />
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -2703,7 +2996,7 @@ function CortexMemoryTab() {
                 <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text, #0f172a)' }}>Min Confidence</div>
                 <div style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)' }}>Facts below this score are excluded</div>
               </div>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', fontFamily: 'ui-monospace, monospace' }}>0.3</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', fontFamily: 'ui-monospace, monospace' }}>{recallMinConfidence}</span>
             </div>
             {config?.sourceBoostCount != null && config.sourceBoostCount > 0 && (
               <>
@@ -3091,22 +3384,25 @@ export function SettingsPage() {
       {/* Right content — full width */}
       <div style={{ flex: 1, minWidth: 0 }}>
         {activeTab === 'connectors' && (
-          <GitHubTab
-            accounts={accounts}
-            repos={repos}
-            loading={loading}
-            actionBusy={actionBusy}
-            actionNote={actionNote}
-            onRefresh={() => { void loadGitHubStatus(true); }}
-            onSwitchAccount={(user) => { void runGitHubAction('switch', { user }); }}
-            onDisconnect={(user) => { void runGitHubAction('logout', { user }); }}
-            onLoginWithToken={(token) => { void runGitHubAction('login_token', { token }); }}
-            deviceFlowEnabled={deviceFlowEnabled}
-            deviceFlow={deviceFlow}
-            onStartDeviceFlow={() => { void startDeviceFlow(); }}
-            onPollDeviceFlow={(flowId) => { void pollDeviceFlow(flowId); }}
-            onCancelDeviceFlow={(flowId) => { void cancelDeviceFlow(flowId); }}
-          />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            <OpenClawConnectionCard />
+            <GitHubTab
+              accounts={accounts}
+              repos={repos}
+              loading={loading}
+              actionBusy={actionBusy}
+              actionNote={actionNote}
+              onRefresh={() => { void loadGitHubStatus(true); }}
+              onSwitchAccount={(user) => { void runGitHubAction('switch', { user }); }}
+              onDisconnect={(user) => { void runGitHubAction('logout', { user }); }}
+              onLoginWithToken={(token) => { void runGitHubAction('login_token', { token }); }}
+              deviceFlowEnabled={deviceFlowEnabled}
+              deviceFlow={deviceFlow}
+              onStartDeviceFlow={() => { void startDeviceFlow(); }}
+              onPollDeviceFlow={(flowId) => { void pollDeviceFlow(flowId); }}
+              onCancelDeviceFlow={(flowId) => { void cancelDeviceFlow(flowId); }}
+            />
+          </div>
         )}
         {activeTab === 'api-keys' && (
           <APIKeysTab />
@@ -3121,7 +3417,7 @@ export function SettingsPage() {
           <AppearanceTab />
         )}
         {activeTab === 'about' && (
-          <PlaceholderTab title="About Cortex IDE" description="Version 0.0.1 · Built with Next.js + Tauri · Powered by Cortex" />
+          <AboutTab />
         )}
       </div>
     </div>
