@@ -42,7 +42,7 @@ interface GitHubDeviceFlowState {
 
 type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
-type SettingsTab = 'connectors' | 'agents' | 'api-keys' | 'appearance' | 'about';
+type SettingsTab = 'connectors' | 'agents' | 'api-keys' | 'memory' | 'appearance' | 'about';
 
 // ── SVG Icons ──
 
@@ -111,6 +111,22 @@ function InfoIcon() {
       <circle cx="12" cy="12" r="10"/>
       <line x1="12" y1="16" x2="12" y2="12"/>
       <line x1="12" y1="8" x2="12.01" y2="8"/>
+    </svg>
+  );
+}
+
+function BrainIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/>
+      <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/>
+      <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/>
+      <path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/>
+      <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/>
+      <path d="M3.477 10.896a4 4 0 0 1 .585-.396"/>
+      <path d="M19.938 10.5a4 4 0 0 1 .585.396"/>
+      <path d="M6 18a4 4 0 0 1-1.967-.516"/>
+      <path d="M19.967 17.484A4 4 0 0 1 18 18"/>
     </svg>
   );
 }
@@ -2014,6 +2030,388 @@ function APIKeysTab() {
   );
 }
 
+// ── Cortex Memory Tab ──
+
+interface CortexConfig {
+  embedModel: string;
+  enrichModel: string;
+  classifyModel: string;
+  llmProvider: string;
+  configPath: string;
+  dbPath: string;
+}
+
+interface CortexStats {
+  memories: number;
+  facts: number;
+  sources: number;
+  storageMb: string;
+  avgConfidence: string;
+  embeddings: number;
+  embedCoverage: string;
+  factsByType: Record<string, number>;
+  confidenceDistribution: Record<string, number>;
+  growth: Record<string, number>;
+}
+
+function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+  return (
+    <div style={{
+      paddingTop: 16,
+      paddingBottom: 16,
+      paddingLeft: 16,
+      paddingRight: 16,
+      background: 'var(--t-bg-card, #f8fafc)',
+      borderRadius: 12,
+      border: '1px solid var(--t-border, #e2e8f0)',
+    }}>
+      <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--t-text, #0f172a)', letterSpacing: '-0.02em' }}>
+        {typeof value === 'number' ? value.toLocaleString() : value}
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--t-text-muted, #94a3b8)', marginTop: 2 }}>{label}</div>
+      {sub && <div style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)', marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function CortexMemoryTab() {
+  const [loading, setLoading] = useState(true);
+  const [config, setConfig] = useState<CortexConfig | null>(null);
+  const [stats, setStats] = useState<CortexStats | null>(null);
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+  const [version, setVersion] = useState('');
+  const [healthy, setHealthy] = useState(false);
+  const [doctorSummary, setDoctorSummary] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveNote, setSaveNote] = useState('');
+
+  const loadConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v2/cortex/config');
+      if (!res.ok) throw new Error('Failed to fetch');
+      const data = await res.json();
+      setConfig(data.config || null);
+      setStats(data.stats || null);
+      setOllamaModels(data.ollamaModels || []);
+      setVersion(data.version || 'unknown');
+      setHealthy(data.healthy ?? false);
+      setDoctorSummary(data.doctorSummary || '');
+    } catch {
+      setConfig(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void loadConfig(); }, [loadConfig]);
+
+  const saveConfig = useCallback(async (updates: Partial<CortexConfig>) => {
+    setSaving(true);
+    setSaveNote('');
+    try {
+      const res = await fetch('/api/v2/cortex/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) throw new Error('Save failed');
+      setSaveNote('Saved');
+      setTimeout(() => setSaveNote(''), 2000);
+      void loadConfig();
+    } catch {
+      setSaveNote('Error saving');
+    } finally {
+      setSaving(false);
+    }
+  }, [loadConfig]);
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--t-text-muted, #94a3b8)' }}>
+        Loading Cortex configuration…
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      paddingTop: 32,
+      paddingBottom: 32,
+      paddingLeft: 40,
+      paddingRight: 40,
+      maxWidth: 680,
+      fontFamily: '-apple-system, system-ui, sans-serif',
+    }}>
+      {/* Header */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--t-text, #0f172a)', margin: 0 }}>
+            Cortex Memory
+          </h2>
+          <span style={{
+            fontSize: 11,
+            paddingTop: 2,
+            paddingBottom: 2,
+            paddingLeft: 8,
+            paddingRight: 8,
+            borderRadius: 6,
+            background: healthy ? 'rgba(52,211,153,0.1)' : 'rgba(239,68,68,0.1)',
+            color: healthy ? '#10b981' : '#ef4444',
+            fontWeight: 600,
+          }}>
+            {healthy ? '● Healthy' : '● Unhealthy'}
+          </span>
+          {version && (
+            <span style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)' }}>v{version.replace('cortex ', '')}</span>
+          )}
+        </div>
+        <p style={{ fontSize: 13, color: 'var(--t-text-muted, #94a3b8)', margin: 0, lineHeight: '1.5' }}>
+          Persistent memory engine with hybrid search, fact extraction, and confidence decay.
+          {doctorSummary && ` ${doctorSummary}`}
+        </p>
+      </div>
+
+      {/* Stats Grid */}
+      {stats && (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: 12,
+          marginBottom: 32,
+        }}>
+          <StatCard label="Memories" value={stats.memories} />
+          <StatCard label="Facts" value={stats.facts} sub={`${stats.sources} sources`} />
+          <StatCard label="Storage" value={`${stats.storageMb} MB`} />
+          <StatCard
+            label="Embeddings"
+            value={`${stats.embedCoverage}%`}
+            sub={`${stats.embeddings.toLocaleString()} / ${stats.memories.toLocaleString()}`}
+          />
+        </div>
+      )}
+
+      {/* Confidence Distribution */}
+      {stats?.confidenceDistribution && (
+        <div style={{ marginBottom: 32 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', marginBottom: 12 }}>
+            Confidence Distribution
+          </div>
+          <div style={{ display: 'flex', gap: 2, height: 8, borderRadius: 4, overflow: 'hidden' }}>
+            {(() => {
+              const dist = stats.confidenceDistribution;
+              const total = (dist.high || 0) + (dist.medium || 0) + (dist.low || 0);
+              if (total === 0) return null;
+              return (
+                <>
+                  <div style={{ flex: (dist.high || 0) / total, background: '#10b981', borderRadius: '4px 0 0 4px' }} title={`High: ${dist.high}`} />
+                  <div style={{ flex: (dist.medium || 0) / total, background: '#f59e0b' }} title={`Medium: ${dist.medium}`} />
+                  <div style={{ flex: (dist.low || 0) / total, background: '#ef4444', borderRadius: '0 4px 4px 0' }} title={`Low: ${dist.low}`} />
+                </>
+              );
+            })()}
+          </div>
+          <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
+            {[
+              { label: 'High', color: '#10b981', count: stats.confidenceDistribution.high },
+              { label: 'Medium', color: '#f59e0b', count: stats.confidenceDistribution.medium },
+              { label: 'Low', color: '#ef4444', count: stats.confidenceDistribution.low },
+            ].map(b => (
+              <div key={b.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: b.color }} />
+                <span style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)' }}>
+                  {b.label}: {(b.count || 0).toLocaleString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Fact Types */}
+      {stats?.factsByType && Object.keys(stats.factsByType).length > 0 && (
+        <div style={{ marginBottom: 32 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', marginBottom: 12 }}>
+            Fact Types
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {Object.entries(stats.factsByType)
+              .sort((a, b) => b[1] - a[1])
+              .map(([type, count]) => (
+                <span key={type} style={{
+                  fontSize: 12,
+                  paddingTop: 4,
+                  paddingBottom: 4,
+                  paddingLeft: 10,
+                  paddingRight: 10,
+                  borderRadius: 8,
+                  background: 'var(--t-bg-card, #f8fafc)',
+                  border: '1px solid var(--t-border, #e2e8f0)',
+                  color: 'var(--t-text, #0f172a)',
+                }}>
+                  {type} <span style={{ color: 'var(--t-text-muted, #94a3b8)', fontWeight: 600 }}>{count.toLocaleString()}</span>
+                </span>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {/* Configuration Section */}
+      <div style={{ marginBottom: 32 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', marginBottom: 16 }}>
+          Models
+        </div>
+
+        {/* Embedding Model */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--t-text, #0f172a)', marginBottom: 6 }}>
+            Embedding Model
+          </label>
+          <p style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)', margin: '0 0 6px', lineHeight: '1.4' }}>
+            Local Ollama model for semantic search embeddings. Requires Ollama running.
+          </p>
+          <select
+            value={config?.embedModel || ''}
+            onChange={(e) => void saveConfig({ embedModel: e.target.value })}
+            disabled={saving}
+            style={{
+              width: '100%',
+              paddingTop: 10,
+              paddingBottom: 10,
+              paddingLeft: 12,
+              paddingRight: 12,
+              borderRadius: 10,
+              border: '1px solid var(--t-border, #e2e8f0)',
+              background: 'var(--t-bg, white)',
+              color: 'var(--t-text, #0f172a)',
+              fontSize: 13,
+              fontFamily: 'ui-monospace, monospace',
+              outline: 'none',
+            }}
+          >
+            <option value="">— Not configured —</option>
+            {/* Common embedding models */}
+            <option value="ollama/nomic-embed-text">ollama/nomic-embed-text (recommended)</option>
+            <option value="ollama/mxbai-embed-large">ollama/mxbai-embed-large</option>
+            <option value="ollama/all-minilm">ollama/all-minilm</option>
+            <option value="ollama/snowflake-arctic-embed">ollama/snowflake-arctic-embed</option>
+            {/* Show any installed Ollama models that aren't already listed */}
+            {ollamaModels
+              .filter(m => !['nomic-embed-text', 'mxbai-embed-large', 'all-minilm', 'snowflake-arctic-embed'].some(k => m.includes(k)))
+              .map(m => (
+                <option key={m} value={`ollama/${m}`}>ollama/{m} (installed)</option>
+              ))
+            }
+          </select>
+        </div>
+
+        {/* Enrichment Model — for fact extraction (Phase B) */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--t-text, #0f172a)', marginBottom: 6 }}>
+            Enrichment Model
+          </label>
+          <p style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)', margin: '0 0 6px', lineHeight: '1.4' }}>
+            LLM used for fact extraction and enrichment during imports. Runs through your configured LLM provider.
+          </p>
+          <input
+            type="text"
+            value={config?.enrichModel || ''}
+            onChange={(e) => setConfig(prev => prev ? { ...prev, enrichModel: e.target.value } : prev)}
+            onBlur={(e) => void saveConfig({ enrichModel: e.target.value })}
+            placeholder="e.g. openrouter/x-ai/grok-4.1-fast"
+            disabled={saving}
+            style={{
+              width: '100%',
+              paddingTop: 10,
+              paddingBottom: 10,
+              paddingLeft: 12,
+              paddingRight: 12,
+              borderRadius: 10,
+              border: '1px solid var(--t-border, #e2e8f0)',
+              background: 'var(--t-bg, white)',
+              color: 'var(--t-text, #0f172a)',
+              fontSize: 13,
+              fontFamily: 'ui-monospace, monospace',
+              outline: 'none',
+              boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        {/* Classification Model */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 500, color: 'var(--t-text, #0f172a)', marginBottom: 6 }}>
+            Classification Model
+          </label>
+          <p style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)', margin: '0 0 6px', lineHeight: '1.4' }}>
+            LLM used for reclassifying fact types. Cheaper model recommended.
+          </p>
+          <input
+            type="text"
+            value={config?.classifyModel || ''}
+            onChange={(e) => setConfig(prev => prev ? { ...prev, classifyModel: e.target.value } : prev)}
+            onBlur={(e) => void saveConfig({ classifyModel: e.target.value })}
+            placeholder="e.g. openrouter/deepseek/deepseek-v3.2"
+            disabled={saving}
+            style={{
+              width: '100%',
+              paddingTop: 10,
+              paddingBottom: 10,
+              paddingLeft: 12,
+              paddingRight: 12,
+              borderRadius: 10,
+              border: '1px solid var(--t-border, #e2e8f0)',
+              background: 'var(--t-bg, white)',
+              color: 'var(--t-text, #0f172a)',
+              fontSize: 13,
+              fontFamily: 'ui-monospace, monospace',
+              outline: 'none',
+              boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        {saveNote && (
+          <div style={{
+            fontSize: 12,
+            color: saveNote === 'Saved' ? '#10b981' : '#ef4444',
+            marginTop: 8,
+          }}>
+            {saveNote}
+          </div>
+        )}
+      </div>
+
+      {/* Paths */}
+      {config && (
+        <div style={{ marginBottom: 32 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', marginBottom: 12 }}>
+            Paths
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--t-text-muted, #94a3b8)', lineHeight: '1.8' }}>
+            <div><span style={{ fontWeight: 500, color: 'var(--t-text, #0f172a)' }}>Config:</span> {config.configPath}</div>
+            <div><span style={{ fontWeight: 500, color: 'var(--t-text, #0f172a)' }}>Database:</span> {config.dbPath}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Growth (24h / 7d) */}
+      {stats?.growth && (
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)', marginBottom: 12 }}>
+            Growth
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <StatCard label="Memories (24h)" value={`+${stats.growth.memories_24h || 0}`} />
+            <StatCard label="Memories (7d)" value={`+${stats.growth.memories_7d || 0}`} />
+            <StatCard label="Facts (24h)" value={`+${stats.growth.facts_24h || 0}`} />
+            <StatCard label="Facts (7d)" value={`+${stats.growth.facts_7d || 0}`} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AppearanceTab() {
   const { themeId, setTheme, themes: themeList } = useTheme();
   const [fleetMode, setFleetMode] = useState<'smart' | 'all'>(() => {
@@ -2341,6 +2739,7 @@ export function SettingsPage() {
         <TabButton label="Connectors" icon={<PlugIcon />} active={activeTab === 'connectors'} onClick={() => setActiveTab('connectors')} />
         <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
         <TabButton label="Agents" icon={<UsersIcon />} active={activeTab === 'agents'} onClick={() => setActiveTab('agents')} />
+        <TabButton label="Memory" icon={<BrainIcon />} active={activeTab === 'memory'} onClick={() => setActiveTab('memory')} />
         <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
         <TabButton label="About" icon={<InfoIcon />} active={activeTab === 'about'} onClick={() => setActiveTab('about')} />
       </div>
@@ -2370,6 +2769,9 @@ export function SettingsPage() {
         )}
         {activeTab === 'agents' && (
           <AgentsTab />
+        )}
+        {activeTab === 'memory' && (
+          <CortexMemoryTab />
         )}
         {activeTab === 'appearance' && (
           <AppearanceTab />
