@@ -18,7 +18,7 @@ import { NextRequest } from 'next/server';
 import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
 import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
-import { recallMemories } from '@/lib/llm/memory';
+import { recallMemories, extractAndStoreFacts } from '@/lib/llm/memory';
 import { toolsForAnthropic, toolsForOpenAI, toolsForGoogle, executeTool, APPROVAL_REQUIRED_TOOLS, type ToolResult } from '@/lib/llm/tools';
 
 // ── Pricing (per 1M tokens) ──
@@ -412,6 +412,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     // Stream the response with tool call support
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    let fullResponseText = '';
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
@@ -452,6 +453,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
               if (parsed.type === 'thinking') {
                 enqueue(JSON.stringify({ type: 'thinking', text: parsed.text }));
               } else if (parsed.type === 'content') {
+                fullResponseText += parsed.text;
                 enqueue(JSON.stringify({ type: 'content', text: parsed.text }));
               } else if (parsed.type === 'usage') {
                 totalInputTokens += parsed.inputTokens;
@@ -593,6 +595,19 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
             } catch (e) {
               console.error('[proxy/llm] Failed to log usage:', e);
             }
+          }
+          // Phase B: Background fact extraction (fire-and-forget)
+          if (lastUserMsg?.content && fullResponseText.length > 50) {
+            const tabIdHeader = request.headers.get('x-tab-id') || undefined;
+            extractAndStoreFacts(lastUserMsg.content, fullResponseText, tabIdHeader)
+              .then(result => {
+                if (result && result.factsStored > 0) {
+                  console.log(`[memory-extract] Phase B: ${result.factsStored} new facts stored in ${result.durationMs}ms`);
+                }
+              })
+              .catch(err => {
+                console.error('[memory-extract] Phase B failed:', err);
+              });
           }
         } catch (err) {
           try {
