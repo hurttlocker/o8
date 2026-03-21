@@ -1690,7 +1690,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
         try {
           res = await fetch('/api/v2/proxy/llm', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'x-tab-id': tabId },
             body: reqBody,
             signal: controller.signal,
           });
