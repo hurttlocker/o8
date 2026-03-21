@@ -12,7 +12,7 @@ const GATEWAY_PORT = process.env.OPENCLAW_GATEWAY_PORT || '18789';
 // ── Result types ──
 
 interface UniversalResult {
-  kind: 'conversation' | 'agent' | 'memory' | 'issue' | 'file';
+  kind: 'conversation' | 'agent' | 'memory' | 'issue' | 'file' | 'symbol';
   title: string;
   detail: string;
   /** Navigation target */
@@ -38,6 +38,29 @@ function execQuiet(cmd: string, opts?: { cwd?: string; timeout?: number }): stri
     }).trim();
   } catch {
     return '';
+  }
+}
+
+// ── Symbol search (skeleton map) ──
+
+function searchSymbolsProvider(query: string, workspace?: string): UniversalResult[] {
+  try {
+    // Dynamic import to avoid breaking if skeleton module isn't available
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { searchSymbols } = require('@/lib/skeleton') as typeof import('@/lib/skeleton');
+    const root = workspace
+      ? (workspace.startsWith('~') ? workspace.replace('~', HOME) : workspace)
+      : DEFAULT_ROOT;
+    const results = searchSymbols(root, query, 8);
+    return results.map(r => ({
+      kind: 'symbol' as const,
+      title: `${r.symbol.exported ? 'export ' : ''}${r.symbol.kind} ${r.symbol.name}`,
+      detail: `${r.filePath}:${r.symbol.line}`,
+      target: { filePath: r.filePath, line: r.symbol.line },
+      score: r.score * 0.85,
+    }));
+  } catch {
+    return [];
   }
 }
 
@@ -213,7 +236,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get('q')?.trim();
   const workspace = searchParams.get('workspace') ?? undefined;
-  const categories = searchParams.get('categories')?.split(',') ?? ['conversation', 'memory', 'issue', 'file'];
+  const categories = searchParams.get('categories')?.split(',') ?? ['conversation', 'memory', 'issue', 'file', 'symbol'];
 
   if (!query || query.length < 2) {
     return NextResponse.json({ results: [], query: query ?? '', categories });
@@ -227,6 +250,7 @@ export async function GET(request: Request) {
       categories.includes('memory') ? Promise.resolve(searchMemory(query)) : Promise.resolve([]),
       categories.includes('issue') ? Promise.resolve(searchIssues(query)) : Promise.resolve([]),
       categories.includes('file') ? Promise.resolve(searchFiles(query, workspace)) : Promise.resolve([]),
+      categories.includes('symbol') ? Promise.resolve(searchSymbolsProvider(query, workspace)) : Promise.resolve([]),
     ]);
 
     const allResults: UniversalResult[] = [];

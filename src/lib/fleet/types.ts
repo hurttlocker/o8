@@ -249,6 +249,7 @@ export interface FleetMeta {
   sourceLabel: string;
   gatewayLabel?: string;
   gatewayFreshness?: 'fresh' | 'stale' | 'warming';
+  gatewayReachable?: boolean;
   observablePending?: boolean;
   primarySessionKey?: string;
   mirrorMode: 'current-session-first' | 'demo-only';

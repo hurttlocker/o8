@@ -1,6 +1,6 @@
 import type { FleetSnapshot } from '@/lib/fleet/types';
 import { getOpenClawFleetSnapshot } from '@/lib/openclaw/fleet';
-const RUNTIME_INVENTORY_TTL_MS = 35_000;
+const RUNTIME_INVENTORY_TTL_MS = 15_000;
 const runtimeInventoryCache = new Map<'smart' | 'all', { snapshot: FleetSnapshot; cachedAt: number }>();
 const runtimeInventoryInflight = new Map<'smart' | 'all', { generation: number; promise: Promise<FleetSnapshot> }>();
 let runtimeInventoryGeneration = 0;

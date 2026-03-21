@@ -437,6 +437,7 @@ const InspectorSidebar = memo(function InspectorSidebar({
   onSettleOptimisticMutation,
   fleetSourceLabel,
   primarySessionKey,
+  isHydrated,
 }: {
   selectedAgent: FleetSnapshot['agents'][number];
   selectedSquadName?: string;
@@ -459,7 +460,14 @@ const InspectorSidebar = memo(function InspectorSidebar({
   ) => void;
   fleetSourceLabel: string;
   primarySessionKey?: string;
+  isHydrated: boolean;
 }) {
+  const attachedBrowserTimeLabel = attachedBrowser?.attachedAt
+    ? (!isHydrated
+      ? attachedBrowser.attachedAt.slice(11, 16) || 'unknown'
+      : new Date(attachedBrowser.attachedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }))
+    : 'unknown';
+
   return (
     <aside className="surface-card inspector-column">
       <div className="section-head">
@@ -608,7 +616,7 @@ const InspectorSidebar = memo(function InspectorSidebar({
             </div>
             <div>
               <span>Attached at</span>
-              <strong>{new Date(attachedBrowser.attachedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</strong>
+              <strong>{attachedBrowserTimeLabel}</strong>
             </div>
           </div>
           <div className="event-stack top-gap">
@@ -753,6 +761,7 @@ export function CommandCenterShell({
   const [selectedExternalBrowserId, setSelectedExternalBrowserId] = useState('');
   const [browserAttachState, setBrowserAttachState] = useState<'idle' | 'attaching'>('idle');
   const [browserAttachNote, setBrowserAttachNote] = useState<string | null>(null);
+  const [isHydrated, setIsHydrated] = useState(false);
   const pendingRealtimeMutations = Object.values(realtimeState.mutations).filter((mutation) => !mutation.settledAt);
   const bootstrapRefreshNeeded = initialSnapshot.meta.mode !== 'live'
     || initialSnapshot.meta.gatewayFreshness !== 'fresh'
@@ -771,6 +780,10 @@ export function CommandCenterShell({
     isConnected: realtimeConnected,
     connectionState: realtimeConnectionState,
   } = useSharedDesktopWs(undefined, realtimeCallbacks);
+
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   useEffect(() => {
     realtimeStore.setTransport(
@@ -919,7 +932,7 @@ export function CommandCenterShell({
   );
 
   const desktopInfo =
-    typeof window !== 'undefined'
+    isHydrated && typeof window !== 'undefined'
       ? (window as Window & {
           cortexDesktop?: { isDesktop: boolean; platform: string; version: string };
         }).cortexDesktop
@@ -1379,6 +1392,7 @@ export function CommandCenterShell({
             onSettleOptimisticMutation={settleOptimisticMutation}
             fleetSourceLabel={fleet.meta.sourceLabel}
             primarySessionKey={fleet.meta.primarySessionKey}
+            isHydrated={isHydrated}
           />
         ) : null}
       </main>

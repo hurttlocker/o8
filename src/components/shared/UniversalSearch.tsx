@@ -124,13 +124,13 @@ export const UniversalSearch = memo(function UniversalSearch({
   const containerRef = useRef<HTMLDivElement>(null);
   const isMobile = variant === 'mobile';
 
-  // Auto-focus on mount for mobile (it's inside the menu)
+  // Auto-focus on mount when the surface opens
   useEffect(() => {
-    if (isMobile) {
-      // Small delay to let sheet animate in
-      const t = setTimeout(() => inputRef.current?.focus(), 300);
-      return () => clearTimeout(t);
-    }
+    const t = setTimeout(() => {
+      inputRef.current?.focus();
+      if (!isMobile) setFocused(true);
+    }, isMobile ? 300 : 0);
+    return () => clearTimeout(t);
   }, [isMobile]);
 
   // Debounced search
@@ -231,13 +231,14 @@ export const UniversalSearch = memo(function UniversalSearch({
     return () => document.removeEventListener('mousedown', handleClick);
   }, [isMobile]);
 
-  // ⌘K shortcut (desktop only)
+  // Keep ⌘K focused on the active desktop search surface once it is open.
   useEffect(() => {
     if (isMobile) return;
     function handleGlobalKey(e: KeyboardEvent) {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         inputRef.current?.focus();
+        setFocused(true);
       }
     }
     document.addEventListener('keydown', handleGlobalKey);

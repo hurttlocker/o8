@@ -66,19 +66,9 @@ function IconMessageSquare({ size = 16 }: { size?: number }) {
   );
 }
 
-function IconSettings({ size = 18 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  );
-}
-
 // ── Types ──
 
 interface TitleBarProps {
-  onSettingsClick?: () => void;
   renderSearch?: (onClose: () => void) => React.ReactNode;
   globalRepo?: string | null;
   globalRepoBranch?: string;
@@ -169,7 +159,6 @@ function TitleBarSep() {
 // ── Main Component ──
 
 export function TitleBar({
-  onSettingsClick,
   renderSearch,
   globalRepo,
   globalRepoBranch = 'main',
@@ -182,7 +171,7 @@ export function TitleBar({
   onToggleBottomPanel,
   chatVisible = true,
   onToggleChat,
-  wsStatus = 'disconnected',
+  wsStatus = 'connecting',
 }: TitleBarProps) {
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
@@ -222,9 +211,9 @@ export function TitleBar({
   // ⌘K keyboard shortcut
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        setSearchExpanded(prev => !prev);
+        setSearchExpanded(true);
       }
       if (e.key === 'Escape' && searchExpanded) {
         setSearchExpanded(false);
@@ -669,16 +658,6 @@ export function TitleBar({
           active={chatVisible}
         />
 
-        <TitleBarSep />
-
-        {/* Settings — red */}
-        <TitleBarButton
-          icon={<IconSettings />}
-          label="Settings"
-          onClick={onSettingsClick}
-          color="#ef4444"
-          hoverBg="rgba(239, 68, 68, 0.08)"
-        />
       </div>
 
       {/* Backdrop — closes search when clicking outside */}

@@ -56,10 +56,35 @@ export async function GET(request: Request) {
       '--repo', repo,
       '--state', 'open',
       '--limit', '15',
-      '--json', 'number,title,labels,state',
+      '--json', 'number,title,labels,state,author,assignees,comments,body,createdAt',
     ], { timeout: 15_000 });
 
-    const issues = JSON.parse(stdout || '[]');
+    const issues = (JSON.parse(stdout || '[]') as Array<{
+      number?: number;
+      title?: string;
+      labels?: Array<{ name: string; color: string }>;
+      state?: string;
+      author?: { login?: string | null } | null;
+      assignees?: Array<{ login?: string | null }>;
+      comments?: number | unknown[];
+      body?: string;
+      createdAt?: string;
+    }>).map((issue) => ({
+      number: issue.number ?? 0,
+      title: issue.title ?? '',
+      labels: (issue.labels ?? []).map((label) => ({
+        name: label.name,
+        color: label.color,
+      })),
+      state: issue.state ?? 'OPEN',
+      author: issue.author?.login ? { login: issue.author.login } : null,
+      assignees: (issue.assignees ?? [])
+        .map((assignee) => assignee.login ? { login: assignee.login } : null)
+        .filter(Boolean),
+      comments: Array.isArray(issue.comments) ? issue.comments.length : (issue.comments ?? 0),
+      body: issue.body ?? '',
+      createdAt: issue.createdAt ?? '',
+    }));
     setCached(cacheKey, issues);
     return NextResponse.json({ issues, repo });
   } catch {

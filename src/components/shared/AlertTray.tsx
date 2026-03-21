@@ -71,7 +71,7 @@ const AlertCard = memo(function AlertCard({
         gap: 10,
         padding: '12px 14px',
         borderRadius: 12,
-        background: alert.read ? 'transparent' : 'rgba(0, 122, 255, 0.04)',
+        background: alert.read ? 'transparent' : 'rgba(37, 99, 235, 0.06)',
         transition: 'background 200ms ease',
         cursor: 'pointer',
         position: 'relative',
@@ -106,7 +106,7 @@ const AlertCard = memo(function AlertCard({
             style={{
               fontSize: 13,
               fontWeight: alert.read ? 500 : 600,
-              color: '#111827',
+              color: '#0f172a',
               lineHeight: 1.3,
               flex: 1,
             }}
@@ -299,18 +299,19 @@ export const AlertTray = memo(function AlertTray({
       ref={trayRef}
       style={{
         position: 'absolute',
-        top: 'calc(100% + 8px)',
-        right: 0,
+        bottom: 'calc(100% + 8px)',
+        left: 0,
         width: 360,
         maxHeight: 480,
-        borderRadius: 14,
-        background: 'rgba(255, 255, 255, 0.96)',
-        backdropFilter: 'blur(40px) saturate(1.8)',
-        WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
+        borderRadius: 18,
+        background: 'linear-gradient(180deg, rgba(239, 246, 255, 0.82), rgba(191, 219, 254, 0.52))',
+        backdropFilter: 'blur(28px) saturate(1.7)',
+        WebkitBackdropFilter: 'blur(28px) saturate(1.7)',
+        border: '1px solid rgba(147, 197, 253, 0.22)',
         boxShadow:
-          '0 20px 60px rgba(15, 23, 42, 0.18), 0 1px 3px rgba(15, 23, 42, 0.08)',
+          '0 22px 56px rgba(29, 78, 216, 0.18), 0 8px 24px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255,255,255,0.45)',
         opacity: open ? 1 : 0,
-        transform: open ? 'translateY(0) scale(1)' : 'translateY(-8px) scale(0.97)',
+        transform: open ? 'translateY(0) scale(1)' : 'translateY(8px) scale(0.97)',
         pointerEvents: open ? 'auto' : 'none',
         transition:
           'opacity 220ms cubic-bezier(0.32, 0.72, 0, 1), transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
@@ -341,11 +342,11 @@ function renderHeader(
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '14px 16px 10px',
-        borderBottom: '1px solid rgba(15, 23, 42, 0.06)',
+        borderBottom: '1px solid rgba(147, 197, 253, 0.2)',
         flexShrink: 0,
       }}
     >
-      <span style={{ fontSize: 15, fontWeight: 600, color: '#111827' }}>
+      <span style={{ fontSize: 15, fontWeight: 600, color: '#0f172a' }}>
         Alerts{alerts.length > 0 ? ` (${alerts.length})` : ''}
       </span>
       <div style={{ display: 'flex', gap: 8 }}>
@@ -395,8 +396,8 @@ function renderHeader(
             height: 28,
             borderRadius: 14,
             border: 'none',
-            background: 'rgba(0,0,0,0.05)',
-            color: '#8e8e93',
+            background: 'rgba(37, 99, 235, 0.08)',
+            color: '#64748b',
             cursor: 'pointer',
             padding: 0,
           }}

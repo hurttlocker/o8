@@ -7,6 +7,7 @@ import { ChatBubble } from './ChatBubble';
 import LLMChat from './LLMChat';
 import { saveTabState, loadTabState, checkAliveSessions, type PersistedTabState } from '@/lib/terminal/tab-state';
 import {
+  type DetectedLocalhostPreview,
   PREVIEW_HOST_MESSAGE_SOURCE,
   PREVIEW_MESSAGE_SOURCE,
   type PreviewSelectionPayload,
@@ -36,14 +37,7 @@ export interface ChatMessage {
   timestamp: number;
 }
 
-/** Detected localhost dev server from terminal output */
-interface LocalhostPreview {
-  id: string;
-  tabId: string;
-  url: string;
-  port: number;
-  detectedAt: number;
-}
+type LocalhostPreview = DetectedLocalhostPreview;
 
 /** Strip ANSI escape sequences from terminal output for URL detection */
 const ANSI_RE = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[^[]/g;
@@ -61,6 +55,7 @@ export interface TerminalTabHandle {
   setTermError: (sessionName: string, error: string) => void;
   setTermExited: (sessionName: string) => void;
   onSessionCreated: (sessionName: string) => void;
+  clearDetectedPreview: (port: number) => void;
 }
 
 interface TerminalWorkspaceProps {
@@ -70,7 +65,9 @@ interface TerminalWorkspaceProps {
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalDetach: (sessionName: string) => void;
   termWsConnected: boolean;
+  onPreviewDetected?: (preview: DetectedLocalhostPreview) => void;
   onPreviewSelection?: (selection: PreviewSelectionPayload) => void;
+  showPreviewPane?: boolean;
 }
 
 const CLI_AGENTS = [
@@ -2002,7 +1999,9 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
       sendTerminalResize,
       sendTerminalDetach,
       termWsConnected,
+      onPreviewDetected,
       onPreviewSelection,
+      showPreviewPane = true,
     },
     ref,
   ) {
@@ -2051,7 +2050,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
       }
     }, [tabs, activeTabId, persistTabs]);
 
-    // Restore tabs on WS connect (or create default shell tab)
+    // Restore tabs on WS connect, but always land on the primary chat surface first.
     useEffect(() => {
       if (!termWsConnected || restoredRef.current) return;
       restoredRef.current = true;
@@ -2132,10 +2131,24 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
             }
           }
 
-          setTabs(restoredTabs);
-          // Set active tab — try to match saved, otherwise first tab
-          const activeMatch = restoredTabs.find(t => t.id === saved.activeTabId);
-          setActiveTabId(activeMatch?.id ?? restoredTabs[0]?.id ?? '');
+          const restoredChat = restoredTabs.find((tab) => tab.kind === 'llm-chat');
+          if (restoredChat) {
+            setTabs(restoredTabs);
+            setActiveTabId(restoredChat.id);
+          } else {
+            tabCountRef.current += 1;
+            const now = Date.now();
+            const defaultChat: TerminalTab = {
+              id: `llm-${tabCountRef.current}`,
+              label: 'Chat',
+              kind: 'llm-chat',
+              tmuxSession: null,
+              createdAt: now,
+              lastActivity: now,
+            };
+            setTabs([defaultChat, ...restoredTabs]);
+            setActiveTabId(defaultChat.id);
+          }
 
           // Create new sessions for terminal tabs that need them (not chat/llm-chat)
           const deadTerminalTabs = restoredTabs.filter(t => t.kind === 'terminal' && t.tmuxSession === null);
@@ -2245,6 +2258,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
               detectedAt: now,
             };
             console.log(`[terminal] Adding preview:`, newPreview);
+            onPreviewDetected?.(newPreview);
             setPreviews(prev => {
               if (prev.some(p => p.port === port)) return prev;
               const updated = [...prev, newPreview];
@@ -2267,7 +2281,11 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
         panelRefs.current.get(sessionName)?.setExited();
       },
       onSessionCreated: handleSessionCreated,
-    }), [handleSessionCreated]);
+      clearDetectedPreview: (port: number) => {
+        detectedPortsRef.current.delete(port);
+        setPreviews((prev) => prev.filter((preview) => preview.port !== port));
+      },
+    }), [handleSessionCreated, onPreviewDetected]);
 
     // Auto-register a folder so it shows in the picker next time
     const handleRegisterRepo = useCallback((localPath: string) => {
@@ -2438,7 +2456,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
       document.addEventListener('mouseup', onUp);
     }, []);
 
-    const hasPreviews = previews.length > 0;
+    const hasPreviews = showPreviewPane && previews.length > 0;
 
     return (
       <div ref={containerDivRef} style={{

@@ -50,6 +50,7 @@ import { getBrowserInventorySnapshot, getBrowserProvider } from './lib/browser/i
 import { getCommandCenterSnapshotWithOptions } from './lib/command-center/snapshot';
 import { getMobileInboxSnapshot } from './lib/mobile/openclaw';
 import { getSessionTranscript } from './lib/openclaw/chat';
+import { prewarmGatewayStatusCache } from './lib/openclaw/gateway-client';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import type {
   RealtimeBatchMessage,
@@ -2074,6 +2075,7 @@ if (reviewPollTimer.unref) reviewPollTimer.unref();
 
 // Start everything
 connectGateway();
+prewarmGatewayStatusCache();
 startPollingLoops();
 startBrowserDiscoveryRealtimeLoop();
 startAttachedBrowserRefreshLoop();
