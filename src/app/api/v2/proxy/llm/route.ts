@@ -18,6 +18,7 @@ import { NextRequest } from 'next/server';
 import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
 import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
+import { recallMemories } from '@/lib/llm/memory';
 import { toolsForAnthropic, toolsForOpenAI, toolsForGoogle, executeTool, APPROVAL_REQUIRED_TOOLS, type ToolResult } from '@/lib/llm/tools';
 
 // ── Pricing (per 1M tokens) ──
@@ -331,7 +332,24 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
 
   // Inject workspace context as system prompt (Phase 1)
   const wsContext = getWorkspaceContext();
-  const systemPrompt = buildSystemPrompt(wsContext);
+  let systemPrompt = buildSystemPrompt(wsContext);
+
+  // Phase A: Cortex memory recall — search for relevant facts based on user's message
+  let recallInfo: { factCount: number; queryMs: number } | null = null;
+  const lastUserMsg = [...rawMessages].reverse().find(m => m.role === 'user');
+  if (lastUserMsg?.content) {
+    try {
+      const recall = await recallMemories(lastUserMsg.content);
+      if (recall && recall.factCount > 0) {
+        systemPrompt += `\n\n${recall.text}`;
+        recallInfo = { factCount: recall.factCount, queryMs: recall.queryMs };
+        console.log(`[memory-recall] ${recall.factCount} facts recalled in ${recall.queryMs}ms`);
+      }
+    } catch (err) {
+      console.error('[memory-recall] Failed:', err);
+    }
+  }
+
   const hasSystem = rawMessages.some(m => m.role === 'system');
   const messages: Message[] = hasSystem
     ? rawMessages
@@ -399,6 +417,11 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     const stream = new ReadableStream({
       async start(controller) {
         const enqueue = (data: string) => controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+
+        // Send memory recall indicator if facts were found
+        if (recallInfo) {
+          enqueue(JSON.stringify({ type: 'memory_recall', factCount: recallInfo.factCount, queryMs: recallInfo.queryMs }));
+        }
 
         // Helper: read a stream and process events
         async function processStream(response: globalThis.Response): Promise<{
