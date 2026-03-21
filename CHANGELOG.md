@@ -1,0 +1,686 @@
+# Changelog
+
+Development activity for Rainwater IDE.
+
+---
+
+## 2026-03-21
+
+- `6407c9f` fix: Harden public changelog
+- `37afd4a` chore: add workflow_dispatch trigger to sync-changelog
+
+## 2026-03-20
+
+- `51cb0bb` feat: Chain-of-thought wired for all three providers
+- `248dbb6` feat: context-aware recursive compaction — three-pass smart compression
+- `8dacbba` fix: CompactionNode — glass blue, minimal, Apple-level design
+- `3a510e6` feat: project rules
+- `3514bbf` feat: Chat compaction
+- `7facb08` fix: Phase B extraction
+- `2d4afae` fix: Security hardening
+- `8c34b8b` fix: Tool loop
+- `cf171d8` feat: File system tools
+- `698ce99` feat: Terminal command tool with three-tier safety + editable approval
+- `5ab2645` fix: Security hardening
+- `2e69153` feat: Chat-optimized recall — structured facts over raw chunks
+- `84e3417` feat: Phase B
+- `d5eea79` feat: Memory settings
+- `18bead7` feat: Memory settings tab — configure models, view stats
+- `44cb6d5` feat: Memory recall — Phase A
+- `79724fc` fix: GitHub shows as connected in Settings
+- `fa565a2` feat: Steve Jobs polish — 5 UX refinements for LLM chat
+- `a64eaa2` fix: Deduplicate tool steps + sources, strip tool narration
+- `1b7beee` fix: Model picker dropdown escapes input container via portal
+- `e80809b` fix: Model picker opens upward + minimal style
+- `740c2ef` feat: Unified input container — model picker moves to bottom toolbar
+- `2e13ab6` fix: Security hardening
+- `ca0cf09` fix: Security hardening
+- `494e420` fix: Error messages no longer poison chat history
+- `2a2fb2b` fix: Auto-retry on Load failed (dev server HMR transient errors)
+- `4554694` feat: GitHub tools for LLM chat
+- `40a9b69` feat: Syntax highlighting, thinking text style, citation hover cards
+- `f6e81b5` feat: Chat history sidebar — search, star, open in new tab
+- `1d14d78` fix: Apply to File now has file search + Run in Terminal wired
+- `8aa2868` feat: Streaming code highlights, keyboard shortcuts, conversation forking
+- `b0e064f` feat: Inline citations, slash commands, Run in Terminal
+- `09e2f7b` feat: Code block actions — Apply to File + Open in Canvas
+- `49515e0` feat: Chain of Thought — collapsible reasoning visualization
+- `c1a749f` feat: Smart follow-ups + beautiful empty state onboarding
+- `6350e48` feat: Phase 3 — Tool use with live indicators + sources
+- `87387fa` feat: Edge TTS voice playback with animated player
+- `e8f6b5e` feat: AI provider Desktop-style message action bar + proxy logging
+- `3af4c3d` feat: Chat persistence + mermaid error isolation
+- `b6f2fcb` feat: Full image support
+- `f01c07b` fix: Mermaid fallback shows raw code on parse error + system prompt hint
+- `9a2ef51` feat: Rich markdown renderer for LLM Chat
+- `ebc5898` feat: LLM Chat Phase 1+2 — workspace context + @file attachment
+- `654b36e` feat: Add all latest AI provider models (3.1 Pro, 3 Pro, 3 Flash)
+- `a620cd8` fix: Auto-select model by configuration, fix AI provider model IDs + SSE parsing
+- `0cfc29e` fix: Default to Chat tab + persist tabs across nav switches
+- `dba630f` feat: configuration settings tab
+- `a2571da` feat: LLM Token Relay — provider proxy with metering
+- `73cd178` feat: LLM Chat v1 — standalone model access panel
+- `9ca1dc6` refactor: Rename dropdown — Chat / CLI Terminal / CLI Session
+- `829b2ac` fix: Security hardening
+- `b63efa9` fix: Worktrees 401, gateway REST flakiness, ports performance
+- `c49bfe1` fix: Guard mobile sync route against empty/truncated request bodies
+- `73112b2` feat: GitHub OAuth sign-in — user auth for monetization
+- `520a352` fix: Header pill no longer shifts right on agent switch
+- `305e857` feat: User database schema — foundation for monetization
+- `cfc3a8d` fix: Header pill jitter — hysteresis + GPU-only transitions
+- `68b59ac` perf: Kill scroll jitter — remove per-frame CSS recalculation
+- `7b675e6` feat: client abstraction — Local/Cloud/Hybrid
+- `bba32e5` fix: Thinner cross-agent pill + audit fixes
+- `c844b85` feat: Tier 2+3 intelligence layer
+
+## 2026-03-19
+
+- `5701631` feat: Repo switcher for Issues & PRs + deeper chat history
+- `d25c498` feat: Issues & PRs combined page + collapsible agents + deploy
+- `52db245` feat: Issues + Deploy Status + CI on mobile — monitoring & deciding
+- `efbef08` fix: clean mobile surface and repo lint debt
+- `f06fd43` fix: Message actions (Play/Stop/Copy/Retry) work on iOS mobile
+- `3d978be` fix: MemoryPage unique key prop
+- `4ba2f2e` feat: land realtime control plane and shell-first render path
+- `26afd0c` feat: Memory page
+- `7f3fcea` fix: Message tap-to-reveal works on iOS Safari
+- `6bbcb2f` fix: Virtual list height estimation — reduce message overlap
+- `2cda7b7` Revert "fix: Pill stays centered on tap + dropdown screen-centered"
+- `00518fb` fix: Pill stays centered on tap + dropdown screen-centered
+- `5af71cc` fix: New messages ↓ pill moved up — clears compose input
+- `3f8ada1` fix: Compact pill perfectly screen-centered — ignores hamburger offset
+- `bfc4812` fix: Compact TopBar pill hugs Dynamic Island — moved up 8px
+- `7c4d05b` fix: RuntimeBar hides when scrolled up — only shows at bottom
+- `1ffeb85` fix: Photos full width + above message text (Telegram style)
+- `918461e` fix: TopBar moved up — 2px below safe area (was 8px)
+- `fe3517a` fix: Telegram-style photo grid
+- `4ce4c01` feat: Tap-to-reveal message actions + Telegram-style photo grids
+- `5b80637` fix: Dark mode ACTUALLY works — body gradient override + dual selectors
+- `995f6ba` fix: Restore frost gradient + fix dark mode coverage
+- `02e87ba` fix: Notification banners — minimal single-line pills, pushed down
+- `d5f9fba` feat: Dark mode
+- `7b7d56d` fix: Compact notification banners — smaller, better spaced
+- `f6fd593` feat: Tier 1 UX
+- `144a5f5` feat: Smooth crossfade animation between expanded header and compact pill
+- `debea9e` fix: Hamburger NEVER disappears + Agents page matches Activity layout
+- `67f62ef` fix: TopBar (hamburger) never disappears — always visible on scroll
+- `2c8cddf` fix: Fleet → Agents in nav + FleetView layout for phone
+- `522d2f4` fix: Menu pills ACTUALLY tappable — remove document touchstart listener
+- `d216819` fix: Menu pills tappable on iOS
+- `d1e5e14` fix: Menu pills tappable — separate fixed layers instead of nested
+- `3f52f4e` revert: Back to simple white gradient — no backdrop-filter
+- `34f32ae` fix: Telegram-style frosted status bar — blur behind, crisp in front
+- `0771743` fix: Frost gradient behind TopBar — pill and hamburger fully visible
+- `11618d0` fix: Status bar frost — taller, 6-stop gradient, no hard line
+- `dd56f7e` fix: Menu pills tappable + frosty status bar with solid clock area
+- `c27c972` feat: Hide RuntimeBar when keyboard is up — clean compose
+- `31071bd` remove: Brain button from mobile compose row
+- `6c61a50` fix: RuntimeBar below compose input — inside bottom dock after compose shell
+- `524b27d` fix: RuntimeBar visible below compose + softer top frost gradient
+- `703cbf6` fix: RuntimeBar in scroll content (not fixed) + no background
+- `18e7056` feat: Auto-grow input + RuntimeBar at true bottom + frosted status bar
+- `1ac71b6` feat: Compaction indicator on mobile chat — matches desktop ThoughtsCard
+- `30fba2f` fix: Portal frost overlay to document.body — escapes TopBar transform
+- `d78e09e` fix: Menu overlay escapes stacking context — full-screen frost works on iOS
+- `1c92460` polish: 2.5s notifications + swipe-up dismiss + frosted menu backdrop
+- `3ee088d` fix: Center collapsed pill + Activity page mobile layout audit
+- `b72dbb2` style: Blue glass pill + blue glass notifications + faster dismiss
+- `45175e5` feat: Header collapse-to-pill + repo/branch/diff in bottom footer
+- `797df06` feat: Costs page
+- `e728c1d` feat: Settings + PR Reviews in Activity + panel status APIs
+- `21413a2` feat: Notifications + PR Review from mobile
+- `f7c7f5f` feat: Activity Feed + Launch-to-chat + Fleet → Agents rename
+- `97ac88b` fix: Fleet/Costs views now fully replace chat — hide all chat UI
+- `e80ca9c` feat: Launch Agent — fire agents from mobile
+- `de47c49` feat: Fleet View — Apple-level agent dashboard for mobile
+- `f8d23b3` fix: Floating blue glass pills — no panel, no backdrop overlay
+- `6f2586a` fix: Blue glass hamburger + dropdown drops DOWN from button
+- `2b174e5` fix: Hamburger back to LEFT side of header, inline in first column
+- `2ea031c` fix: Remove duplicate connection dot — live dot already in title area
+- `603c187` fix: Mobile header layout + glass scroll-to-bottom pill
+- `ec02c8a` feat: Glass slash commands on mobile — frosted popover matching desktop
+- `90e6be6` feat: Mobile nav → top-right hamburger dropdown + Thinking X-ray on mobile
+- `8c5b1e9` feat: Speed Dial navigation — floating menu like Mister Copy Trade
+- `77f0dc0` feat: Thinking X-ray — live window into agent reasoning
+- `394a56a` fix: Subtle scroll-to-bottom pill
+- `aadb623` feat: ThoughtsCard Apple pass
+- `4fff21a` fix: Slash menu drops DOWN, attach button visible, Opus thinking = high
+
+## 2026-03-18
+
+- `bb31b56` feat: Slash commands + glass attach popover in workspace chat
+- `e3bfe46` feat: Chat V2 pass 2 — model/thinking, search, media button
+- `7c85af6` feat: Chat V2 — Conductor-quality message rendering
+- `6d94a35` fix: Collapsed NavRail ports
+- `0378ff5` fix: Agent name as primary identifier, not raw conversation text
+- `8478ec0` feat: Conductor-style compact agent cards + always-visible running agents
+- `e6fb735` feat: Add agent runtime + OpenCode to Open In dropdown
+- `0b7d315` fix: More frosted dropdowns — 75% white opacity (was 55%)
+- `2340ed7` fix: Frost dropdowns + revert Live to just a dot
+- `3180564` fix: Move Live indicator to left of Open button in TitleBar
+- `a6326d5` feat: Open In button
+- `e4e0f1b` fix: More distortion on repo dropdown — 120px blur, 2.8 saturate, 12% opacity
+- `193f158` fix: Repo dropdown z-index above timeline + super glass
+- `408e264` fix: Move repo picker to TitleBar — glass pill left of search
+- `d5e87cb` fix: Move Global Repo Bar above ACTIVITY — between timeline and content
+- `a9ee654` feat: Global Repo Context Bar — first-class repo selector above tabs
+- `1306a49` fix: Workspace Chat
+- `7506475` feat: Workspace Chat V1 — full chat tabs alongside terminals
+- `40dd8d1` ci: Add PR Review Bot — posts comments + inline reviews
+- `45128ef` ci: Add GitHub Actions — typecheck, lint, build
+- `511de9f` feat: Dedicated Checks tab on PR viewer — Conductor-style CI status
+- `4094d3a` fix: Files tab
+- `cbaafa8` feat: Files tab — Changes filter dropdown
+- `dba6c6f` feat: Close remaining workspace gaps
+- `7f3e7cd` feat: Branch switching from panel — git checkout with dirty check
+- `8742abf` feat: Running indicator on collapsed repo card
+- `b1ee78c` feat: Dev server launch from repo card — one-click Run/Stop
+- `f26ed10` feat: Port preview pane — in-IDE iframe via proxy
+- `5d1fba5` feat: Agent ↔ Branch association — bidirectional linking
+- `91d57d8` feat: First-class ports in NavRail — auto-detect + grouped display
+- `a0f2f76` refactor: Remove 'New workspace'
+- `73caa0d` feat: Branch management — create, delete, cleanup
+- `2181b75` feat: Optional worktree launch + stale branch detection (,)
+- `e431c0a` feat: Expandable repo cards — branch list with worktree indicators
+- `ad609f3` feat: Colored file icons + repo-aware file tree
+- `7a6ce08` fix: Review banner disappears after merge
+- `8377074` test: demo PR for merge banner
+- `8a4eaa8` feat: PR Review opens in canvas + remove Issues/PRs/CI tabs
+- `629cc42` feat: Repo-scoped Activity
+- `0079035` fix: Repo picker scrollable + dynamic from registered repos
+- `f69959e` feat: Repo-aware Activity feed — selector, agent-scoped, PR merge banner
+- `0c3133a` feat: Activity feed
+- `0704618` feat: Unified Activity Feed — Apple-grade timeline with GitHub data
+- `fc2406e` style: Compact repo cards — Conductor-style collapsible rows
+- `c37416f` fix: agent runtime mobile send
+- `3a342b6` fix: agent runtime mobile transcript
+- `9e0e002` fix: Import runtime barrel so agent runtime adapter is actually registered
+- `e317616` fix: Use --continue instead of --resume for agent runtime mobile send
+- `79dc422` fix: agent runtime mobile
+- `6bf60c8` fix: agent runtime mobile
+- `d4b39d6` fix: Wire mobile send + history for agent runtime and discovered agent runtime sessions
+- `9c726d5` feat: Show all main agent surfaces + smart cron collapsing + fleet display setting
+- `096f11e` feat: Pin main agents + collapse cron sessions into single card per agent
+- `935e9ea` feat: Stall detection for launched agents — 5min silence triggers warning
+
+## 2026-03-17
+
+- `fd5b95b` feat: Proxy localhost previews to strip frame-busting headers
+- `dc767c4` feat: Agent lifecycle
+- `660d992` fix: Allow localhost iframes in Safari/native shell — add frame-src CSP
+- `df0aa11` debug: Add preview state logging to diagnose render issue
+- `a71069b` fix: Chat scroll chain + localhost detection debug logging
+- `3a1e0b9` fix: Chat scrolling + localhost detection reliability
+- `fcdaea6` fix: Ignore IDE's own ports (3000, 3002) in localhost detection
+- `298a0b6` fix: Suppress localhost detection for 5s after connect — ignore old scrollback
+- `5db75c9` safety: Kill all stale terminal sessions on WS server startup
+- `339de2c` fix: Drag handle requires click, iframe can't steal mouse during resize
+- `0ef0cb9` fix: Tab bar stays with terminal + draggable resize handle for preview
+- `5fafe69` fix: Strip ANSI escape codes before localhost URL detection
+- `4ed8d0d` feat: Live localhost preview
+- `11a9a00` fix: Brand-accurate CLI agent dot colors
+- `34dbbbc` feat: Live activity dots + elapsed time on terminal tabs
+- `0778301` feat: Terminal tab persistence — tabs survive app restarts
+- `796e105` feat: Inline images rendered as HTML — bypass xterm IIP entirely
+- `0408b4f` fix: Add width/height/preserveAspectRatio to IIP — image was 1px tall
+- `4ebb687` fix: Build IIP escape sequence client-side + write as bytes
+- `d3a325b` fix: Broadcast terminal image to browser clients, not API sender
+- `c77d971` feat: Inline image rendering
+- `733de72` fix: Enable terminal passthrough for inline images — allow-passthrough on
+- `0adbabb` feat: Inline image rendering in terminal — Sixel + iTerm2 IIP support
+- `a499fb4` fix: UTF-8 terminal rendering — decode base64 as bytes, not Latin-1
+- `f6dd6ce` fix: CLI commands sent via terminal send-keys — no more truncated commands
+- `8c6f52d` fix: Open folder uses native Finder dialog via server-side osascript
+- `c4c521b` feat: Auto-register folders opened via picker — shows as Recent next time
+- `42e26b4` ci: Auto-sync changelog to public repo on push
+- `c3b0f1f` feat: Native folder picker
+- `83d8063` feat: Open folder picker — launch CLI agents in any directory
+- `389abf2` fix: Enable allowProposedApi for xterm Unicode11 addon
+- `73b2185` fix: Unicode rendering (addon-unicode11) + always show repo picker for CLI agents
+- `457ff44` feat: Two-step CLI picker with repo selection ( foundation)
+- `6b4bc3b` style: Remove tab bar bottom border — no sizer line between tabs and terminal
+- `39b3fa5` fix: Terminal starts in ~ with clean screen, no artifacts
+- `c7f5930` feat: Terminal polish
+- `89dad92` fix: Proper tab icons, hide terminal status bar, fix CLI launch timing
+- `6383c56` style: Remove timeline time labels + top margin — hover shows time on demand
+- `b4fb37e` style: White terminal theme + 20px top margin for timeline labels
+- `a8ed6a3` feat: Terminal-first workspace
+- `f1bcb1a` fix: Terminal shows 'no sessions'
+- `51be49f` fix: Terminal not visible — WS events missing data wrapper
+- `88ed5a3` fix: Terminal always visible in center column when connected
+- `8b85aa1` fix: Security hardening
+- `0cb3ea9` fix: Terminal terminal session lifecycle
+- `18741a2` feat: Live review file-change push via WS — repos + worktrees
+- `90bd325` feat: Mobile terminal surface — xterm.js on mobile + Terminal/Chat lane
+- `128957d` feat: Terminal infrastructure
+- `71ad144` feat: Launch modal UI
+- `e24244b` feat: Universal launch pipeline
+- `f6c89fd` feat: Repo registry polish
+- `3500bd4` fix: Analytics page hidden behind workspace/chat panels
+- `6a67da7` feat: Analytics page — cost dashboard with real data
+- `7a17612` feat: Agents section collapsible — same pattern as Activity
+- `9df7f9b` feat: Activity as collapsible dropdown above agent cards
+- `b2e730d` fix: Issues panel
+- `5f3eef1` feat: Issue assignment panel + ThoughtsCard z-index fix
+- `adc41e6` fix: stabilize ws server backpressure cleanup
+- `6c049e4` feat: Active session pulse on timeline drill-down cards
+- `e1a3c5c` fix: Agent display names in timeline + cost API accepts key or name
+- `1a6d421` feat: Session cost tracking — real token usage + spend per session
+- `b101847` feat: Connected session panel with live SVG bezier connector
+- `3cd8feb` style: Maximum glass — modal at 18% opacity, blur 80px
+- `24986e4` style: More glass — drill-down modal transparency pass
+- `9bc30ce` feat: Timeline drill-down — double-click for per-agent breakdown
+- `5c43c1d` feat: Clickable PR diff on agent cards — opens PR viewer in Canvas
+- `8af78e2` fix: Audit cleanup — diff poll 30s→120s when WS connected
+- `66aadf1` fix: native shell dev starts WS server automatically
+- `63963ed` feat: WS-driven AgentPanel + TitleBar status dot + full dedup (-6)
+- `29a6e3b` fix: Clean up WS wiring — dedup, imports, state
+- `670bee1` perf: Wire WS for diff stats + remove redundant polls
+
+## 2026-03-16
+
+- `f2f84d6` feat: Wire WebSocket to desktop chat — real-time streaming
+- `9aa8301` fix: Agent card glow actually visible for running agents
+- `c81120e` feat: agent runtime agents show their active repo's diff
+- `a94ef4d` fix: Collapsed live output drops to bottom line
+- `b1631ba` fix: Live output resizable via drag handle when canvas tabs closed
+- `816c9f8` fix: Stop diff pop-in/out + correct diff numbers
+- `43e2b39` feat: Live Diffs for all 3 runtimes + UX fixes
+- `e648662` feat: Live Diffs — beautiful real-time code change viewer
+- `f1cc1f1` fix: Drag handle always visible when live output is open
+- `bd33101` fix: Live output sits directly on top of canvas tabs + works for all runtimes
+- `5d3075c` feat: Live Agent Output panel + agent card pulse
+- `41b92cb` fix: Diff stats inline with context ring + reset on push
+- `7a8948c` fix: Diff stats for agent runtime agents + remove timeline bars
+- `94c2615` feat: Real diff stats on main + real timeline activity bars
+- `0fbccc8` feat: Real context % for agent runtime sessions + diff stats
+- `0622226` feat: Wire real workspace data — PR status + diff stats on agent cards
+- `9b39ce2` fix: Deduplicate agent runtime sessions — one per workspace+branch
+- `156e9d4` fix: Instant session removal on kill + agent runtime kill support
+- `5454961` feat: agent runtime sidebar chat
+- `21d7aa7` fix: Add --verbose flag required by stream-json output format
+- `ce6ea21` feat: agent runtime transcript — read session JSONL into sidebar
+- `500483f` docs: Add AI provider.md — dossier for agent runtime CLI sessions
+- `e84f342` fix: agent runtime labels in picker + runtime tags for disambiguation
+- `3fbfd2c` feat: Smart naming on collapsed card dots too
+- `893de1a` feat: Better naming in agent cards
+- `8c5291f` fix: agent runtime sessions appear in sidebar picker + correct agent name
+- `7e177ec` feat: agent runtime sidebar chat — send messages via CLI print mode
+- `20117bf` fix: Hide scrollbar on agent panel — invisible scroll
+- `1ef4cde` fix: Make entire AgentPanel scrollable
+- `9f46b81` fix: Force scroll on agent cards — overflowY: scroll + calc max
+- `c4aaf3e` fix: Agent panel scrolling — use 50vh + minHeight: 0
+- `5e8b8ad` revert: Restore full-size agent cards — undo pill experiment
+- `3b2e97e` fix: agent runtime CWD detection — add -a flag to lsof
+- `fef1a67` feat: agent runtime synthetic sessions for unmatched live processes
+- `8a67d35` feat: agent runtime sessions appear in fleet with live PID detection
+- `97ae246` fix: Agent panel sizes to content, no dead space
+- `374c8f8` fix: Scrollable agent panel for large fleets
+- `67ed582` fix: Hide agent runtime Owned sessions without live PID
+- `a96d82b` fix: Only show agent runtime terminals with live PIDs in fleet
+- `b579ca7` feat: Status-grouped agent cards + Apple design polish
+- `c108cf6` fix: Kill button actually works
+- `662ead4` feat: Full-size agent cards with everything visible
+- `ce5ca7c` fix: Remove Memory tab from AgentPanel — NavRail handles it
+- `b8a0a8b` fix: Unknown workspace → agent runtime grouping
+- `d587921` fix: Desktop chat append-only merge + kill terminals from Settings
+- `bd0d053` fix: Workspace-style agent cards in expanded view
+- `d6b4ac3` feat: Show heartbeat intervals on agent cards (read-only)
+- `6634243` feat: Agents tab in Settings — fleet dashboard with model editing
+- `5572534` feat: Merge WorkspacesPanel into AgentPanel — unified view
+- `e267c66` fix: Desktop chat no longer force-scrolls to bottom on poll
+- `03f6a92` fix: Remove AlertBell from left sidebar
+- `b304536` fix: Remove awaiting_review from WorkspacesPanel
+- `f857ea1` feat: WorkspacesPanel — status-grouped workspace cards
+- `ae1aeef` feat: Cmd+K keyboard shortcut to toggle Thoughts Card
+- `231ecf0` feat: Context-aware suggestions in Thoughts Card
+- `103d076` fix: Replace emojis with colored dots in agent picker
+- `508b34b` feat: Agent picker in Task chat — route to any agent
+- `4d921c1` feat: Approval routing in Thoughts Card + test simulation
+- `6a37bb0` fix: Task chat polling — timestamp + seen-set detection
+- `2fb1b18` fix: Task chat response polling — text field + cache bypass
+- `f4764d6` fix: Wire Task chat send to agent runtime gateway
+- `c5baa97` feat: Task mode — mini chat inside Thoughts Card
+- `2cef4fc` feat: Thoughts Card — Issue vs Task modes + resize fix
+- `ff5e6d1` feat: Thoughts Card — resize handles + agent connection
+- `33c8bbb` fix: Thoughts Card — more glass + enhance button
+- `818e1a6` feat: Thoughts Card — floating glass command surface
+- `9ca490e` fix: Settings page
+- `00802a9` feat: Settings page with GitHub connection status
+- `7b5a14a` feat: Intent Canvas V0 — Fleet Command Center in workspace
+- `feeac14` fix: Timeline hover alignment — match flex layout exactly
+- `d63833c` fix: Timeline hover
+- `7728910` fix: Timeline coding dominance — coding wins over thinking in merges
+- `bfcf3fa` fix: Timeline errors overclassified — tighten error detection + merge
+- `fd14df0` fix: Timeline 3-pass segment merge — eliminate 1-min flicker
+- `a4fcd38` fix: Timeline classifier
+- `d15555d` fix: Timeline tooltip z-index + wire to real session JSONL data
+- `6da96c2` feat: SessionTimeline Phase 1 — hover scrubber + real data API
+- `01ace93` feat: Timeline Expanded View — full session replay in Canvas
+- `be68f49` style: SessionTimeline colors — royal blue coding, light blue thinking
+- `bf8c66e` feat: SessionTimeline V0 — agent activity replay bar
+- `85632e1` fix: Add native shell window drag permission to capabilities
+- `2ce071b` fix: TitleBar drag — use native shell startDragging() API
+- `cc6cb91` fix: TitleBar whitespace is now a window drag region
+- `d871dc2` fix: TitleBar
+- `b9e4f6d` feat: TitleBar window controls — sidebar/back/fwd/bottom/chat/settings
+- `5aacaf7` fix: native shell devUrl → /dashboard route
+- `283573b` fix: Settings gear
+- `0146ded` feat: TitleBar search is now live UniversalSearch + red settings gear
+- `0c0e631` feat: TitleBar
+- `ef1604e` fix: NavRail logo
+- `f5263e8` feat: Desktop NavRail
+- `3b55922` polish: Apple Design Pass on Session Info Sheet — 7 refinements
+- `158d061` fix: Model pill not tappable — pointer-events was none in CSS
+- `16a2b8c` feat: Session Info Sheet
+- `5f0570e` fix: Desktop search 'unavailable' — agent inventory overflowed URL length
+- `a2bd82b` fix: Rules of Hooks
+- `ca157ad` fix: Root cause hydration
+- `d1f1562` fix: Hydration mismatch — defer alert components to client mount
+- `e54a7db` feat: Universal search
+- `df7367b` feat: Proactive alert system — engine, context, bell, tray, toast
+- `8ff96e4` fix: chat scroll jumping
+- `718659e` fix: compute context pressure from totalTokens/contextTokens
+- `f2c8972` fix: token usage stuck at 100% — gateway doesn't report remainingTokens
+- `c0a1b84` fix: SW now network-first for JS chunks — no more stale cache
+- `6271885` chore: bump SW cache for image send fix
+- `edc3b4b` fix: save image attachments to disk before CLI send — eliminates E2BIG
+- `a03fa08` fix: bump SW cache version to force fresh JS on mobile
+- `f18fd4b` fix: JSX parse error in MediaLightbox — use line comment not block comment
+- `0138415` fix: stop random scroll jumps on mobile chat
+- `ccecf8b` fix: broken images + E2BIG on image send from mobile
+- `4419a11` feat: REST API resilience
+
+## 2026-03-15
+
+- `b63f3ef` perf: gateway REST API client — 23ms vs 38s CLI cold-start
+- `56f9f97` fix: Mobile chat
+- `24b49d7` fix: Hamburger menu no longer clipped on mobile
+- `75750bb` fix: Mobile chat no longer auto-scrolls to bottom
+- `18c90fc` feat: Heat map top-down view + fix fly-in stale closure
+- `3588b28` fix: Search fly-in now works — stale closure + search API rewrite
+- `377f27c` feat: Search dropdown with grouped clickable results
+- `8c13028` fix: Move 'Back to Workspace' button to bottom — was overlapping search bar
+- `e4d52e5` feat: Knowledge Graph v3 — double-click fly-in + search fact nodes
+- `a775573` remove: Fireflies — too busy, distracting from data
+- `418ef8f` feat: Knowledge Graph v2.3 — zoom-aware labels + ambient fireflies
+- `ffc54c5` feat: Knowledge Graph v2.2 — depth fog + all labels + text polish
+- `b6b6dbc` feat: Knowledge Graph v2.1 — bar gradients + floor reflections
+- `8be40cd` feat: Knowledge Graph v2
+- `059b44f` feat: Auto-refresh Knowledge Graph stats every 60s
+- `3fcf250` fix: Show real active fact count in Knowledge Graph — not inflated total
+- `2d45dca` feat: Replace lava lamp with Interactive 3D Knowledge Graph Explorer
+- `48c367e` feat: Memory lava lamp v2
+- `1d59bee` fix: Memory lava lamp loading deadlock — canvas now always mounts
+- `c302f89` fix: Memory visualization fills entire center column
+- `32f6756` fix: Memory tab auto-opens canvas on click — no double-click needed
+- `3fc40b5` fix: Memory lava lamp
+- `3f48793` feat: Memory Lava Lamp — living particle visualization
+- `3600e7c` fix: Disable auto-scroll on both mobile and desktop chat
+- `3fbbf87` feat: Image rendering in mobile chat + click-to-expand lightbox
+- `c9c9bf2` fix: Images render inline in desktop chat + click-to-expand lightbox
+- `4b0d8e0` feat: Image rendering in chat + click-to-expand lightbox
+- `638a8a7` feat: Typing indicator — animated dots while agent is thinking
+- `f47ed9f` feat: Deployment Status (Vercel) + Git Log + Image Preview complete
+- `2dc08c3` feat: Git Log viewer + Image/Asset preview
+- `ef3c82b` feat: Issue Creator with AI enhancement (AI provider)
+- `67a5f5b` feat: Global workspace search + PR review comments with diff context
+- `72e05c7` feat: CI tab in agent panel
+- `7ef90f9` feat: Changed file highlighting, clickable files, CI button
+- `a188763` feat: README viewer, CI/GitHub Actions, file diff preview
+- `8dc375a` feat: Stop button + project-scoped data + no auto-transcript popup
+- `b3e9d0e` feat: Project-scoped Issues, PRs, and Files — data follows workspace
+- `5d9591d` feat: PR Review tab + canvas viewer — full GitHub PR detail inline
+- `3af091a` feat: Commit detail viewer — click any commit in Activity tab
+- `1605dd8` fix: Rename 'Main' workspace group to 'agent runtime'
+- `0b30593` feat: Agent panel groups by workspace — matches chat session picker
+- `19b82c0` feat: Show all agents including agent runtime/agent runtime in agent panel
+- `352b261` feat: Issue detail full-width + diff opens in canvas tab
+- `f4eb58a` fix: Disable native shell native drag-drop so web events pass through
+- `ac13ffe` feat: Drag-and-drop + paste + click-to-attach files in desktop chat
+- `86d5fba` feat: Vertical drag handle for canvas — resize workspace/canvas split
+- `b1f54ef` fix: Canvas issue viewer — correct API endpoint + response shape
+- `7adb9cb` fix: Eliminate flicker
+- `508f852` feat: Contextual Canvas — bottom-half tabbed workspace
+- `f2e5eb8` fix: Optimistic messages persist — no more vanishing on poll
+- `d8544db` fix: Match desktop send sound to mobile — same 1800→600Hz click
+- `94219f6` fix: Send sound + faster message delivery
+- `deab2ce` fix: Auto-refresh all panel data — issues, commits, files
+- `b4b2d9a` feat: Click agent surface → switches chat to that session
+- `c1135d5` feat: Agent cards v2
+- `a644094` fix: Add titlebar spacer
+- `653a182` feat: Proper markdown rendering in issue modal
+- `ab157be` feat: Light theme + clickable issues with glass modal
+- `e65be2d` feat: Three-column layout — Agent Panel | Workspace | Chat
+- `6ab4621` feat: Agent Command Center
+- `e71d2ed` feat: Glass diff modal
+- `e4690cb` feat: Draggable compose bar — resize input height by dragging up
+- `1b05a3f` fix: Enhance prompt button — field name mismatch (text → prompt)
+- `11b4bcb` fix: Mermaid modal — real glass transparency
+- `d445bd6` fix: Mermaid modal opens at 400% zoom, expand doesn't trigger TTS
+- `2c697aa` feat: Glass modal for Mermaid diagrams — expand, zoom, pan
+- `beedb8a` feat: Mermaid diagrams on mobile — same Rainwater frost theme
+- `4c7a378` fix: Security hardening
+- `8c5f5a5` fix: Security hardening
+- `8c1f6b5` feat: Styled CodeBlock + Mermaid diagram viewer
+- `69cbc84` fix: Blue highlight shows for both Play button and point-to-play
+- `ac9a168` chore: Remove dead edge-ws.ts (browser WebSocket replaced by server-side API)
+- `5864659` fix: CSS shorthand/longhand conflict in MessageActions
+- `276067e` feat: Transport controls — message actions morph during playback
+- `d9cc354` fix: Point-to-play blue indicators — guard against stop→play race
+- `ff10555` fix: Security hardening
+- `0c91779` feat: Point-to-Play
+- `7ade178` fix: TTS uses server-side edge-tts — browser WebSocket blocked by DRM
+- `53f7939` fix: Allow Edge TTS WebSocket in native shell CSP
+- `428b2eb` fix: Edge TTS WebSocket — Mister's voice now works
+- `53d3bb0` fix: Message action icons visible + added to mobile
+- `f0c24f6` feat: TTS Engine + Message Action Bar — Play/Copy/Retry on every message
+- `072f040` fix: Desktop tables — match mobile's styled tables exactly
+- `30b8365` polish: Apple-quality header pill + runtime bar below compose
+- `f45c8e7` fix: Desktop chat header
+- `1f63a5c` fix: Remove app-level nav bar — chat takes full height
+- `b9dd2aa` fix: List items invisible
+- `1338f05` feat: Desktop chat header — exact mobile TopBar clone
+- `19d3e1e` fix: Session picker dropdown
+- `9ea420b` fix: Desktop chat
+- `7ab4253` fix: Desktop chat second pass — match mobile exactly
+- `9322abd` fix: Desktop chat second pass — match mobile exactly
+- `575541b` feat: Desktop chat sidebar — mobile-identical chat on Dashboard v1
+- `9560da7` feat: Dashboard v1
+- `5908cda` fix: hamburger clipped on mobile — hide scrollbar + use 100dvw
+- `e973003` style: reduce chat text size from ~17px to 15px
+- `2b53d21` feat: wire Rainwater v1.2.5 fixes — fact_ids, stale flags, real graph
+- `0622201` fix: scroll-to-bottom with virtualizer + polling restart loop
+- `a6bfb25` feat: grouped squad picker with expand/collapse
+- `4b7698b` feat: native shell v2 desktop shell
+- `200de26` fix: squad picker clipped by TopBar overflow:hidden
+- `9af1036` feat: squad picker dropdown on TopBar title tap
+- `f3f86cf` fix: correct Rainwater CLI syntax for supersede, stale, and cache
+- `7fa1d0f` fix: spacing between menu items and Rainwater card in controls sheet
+- `358781f` fix: dedup recall results via trigram similarity
+- `3b4075f` fix: move Brain recall to compose action row
+- `7071e8f` theme: icy-blue-glass + Lucide icons across all Rainwater surfaces
+- `2c52822` fix: native shell readiness — 9 audit fixes
+- `3ef5fb6` polish: Apple design pass — remaining 4 surfaces
+- `51c7125` polish: Apple design pass on all Memory surfaces
+- `e31ca63` feat: wire Memory surfaces into shell
+- `6f2b969` feat: Memory Integration — all 8 issues (-)
+
+## 2026-03-14
+
+- `fff8838` feat: Phase 2
+- `ab28f12` fix: worktree audit
+- `2464fc0` docs: Memory integration spec
+- `f41508c` feat: worktree isolation Phase 1
+- `c773f3d` feat: universal runtime adapter contract + agent runtime integration
+- `cc36cca` fix: final 3 points
+- `96c4f59` fix: final 7 points
+- `cb8a222` fix: audit fourth pass
+- `d2825ec` fix: audit third pass
+- `b2792dc` refactor: extract hooks
+- `671c6a8` fix: code blocks
+- `58091a6` feat: code block rendering — fenced code + tool output cards
+- `14ab9b8` fix: audit second pass
+- `ae4290f` feat: native markdown table rendering — beautiful HTML tables in chat view
+- `717ff62` fix: second pass
+- `af6455b` feat: unified WebSocket — real-time push replaces SSE + polling
+- `47336b3` chore: use Memory icon for app icon and PWA icons
+- `6078ff6` feat: PWA
+- `ae4baf2` feat: virtual scrolling for transcript — DOM bloat eliminated
+- `3a44c75` chore: remove dead polling imports and legacy inbox fallback
+- `0143de0` feat: consolidated sync API — 5 requests → 1
+- `e4d9e64` refactor: monolith split
+- `c13bb8e` refactor: break monolith pass 1
+- `95b06c7` feat: prompt enhancement
+- `44be2e6` fix: approval cards
+- `4f75ec4` polish: approval buttons
+- `cffa471` feat: approval primitive
+- `532eb94` polish: tighten cost dashboard
+- `5f938be` fix: token usage card
+- `3c47ff9` polish: cost dashboard Apple pass
+- `a28dbb3` feat: cost dashboard
+- `9360ccb` feat: wire json-render Renderer into mobile shell
+- `ac850ea` feat: json-render integration
+- `04965e5` feat: agent runtime chat parity
+- `f03b1be` fix: Safari cache busting
+- `4a282df` feat: seamless agent runtime chat
+- `3386a3c` fix: clean agent runtime squad
+- `a98b935` fix: owned agent runtime sessions visible in squad
+- `2cfbf88` feat: auto-switch to launched agent runtime session
+- `9d8aa6b` feat: clean agent runtime chat view
+- `ea09b71` feat: discovered agent runtime session transcript
+- `07f0dcd` feat: live process fallback
+- `77152ea` fix: remove branch-based dedup
+- `dc2d174` fix: sort sessions by recency before branch dedup
+- `286f339` feat: mobile agent runtime launch
+- `a2f41ba` fix: discovered agent runtime steer
+
+## 2026-03-13
+
+- `b02cc2c` fix: discovered agent runtime always visible (user-opened), owned agent runtime filtered when stale (IDE-opened)
+- `ce3a5ef` feat: unified chat for agent runtime sessions
+- `6d9cf06` feat: show all agent runtime sessions in squad (no stale filter), dedupe by branch, show branch in pills
+- `db22e9d` fix: include discovered agent runtime sessions in mobile inbox, not just owned
+- `1c034f7` fix: stale session filter
+- `57b2d10` fix: agent pill spacing
+- `3c9dbfd` refactor: Steve Jobs squad pass
+- `59dd747` feat: project-grouped squad rail
+- `c9d769c` fix: streaming preview
+- `0e617d9` fix: streaming preview
+- `e3abcb8` feat: native streaming
+- `3c4237c` fix: hydration mismatch
+- `044fd73` fix: full diff
+- `1a357ce` fix: prevent flex compression of diff lines
+- `431aca9` fix: remove touch-action:none blocking diff scroll, body lock is sufficient
+- `80e8e75` fix: 13px fixed font size (no iOS scaling), word-break, compact line borders
+- `a8ad716` fix: body scroll lock when diff open, remove content-visibility crushing lines, flex layout for scroll
+- `4962c5a` fix: readable diff text
+- `181e3dd` fix: full-screen diff overlay (no bleed-through), stronger colors, proper padding
+- `b8ea7a0` fix: stronger diff colors, opaque overlay, taller sheet, wider gutter, fix content containment
+- `2766c24` feat: commit summary card in diff view (zero AI
+- `5530d1a` polish: smarter tool headlines (exec/process/browser/cron context), filter stale sessions (>4h idle)
+- `d9c52ef` fix: handle agent runtime toolCall format (camelCase), skip toolResult messages
+- `3a295ce` feat: observable agents
+- `53bde19` feat: squad cards
+- `5efa10b` perf: diff view
+- `d6e646b` perf: review-file 10s cache + only poll when diff open, tighter idle behavior
+- `f27d88b` perf: request dedup, 8s inbox cache, 5s transcript cache, round usedPercent, suppress hydration
+- `a01e6c9` fix: respect scroll position
+- `d6f0f4a` perf: adaptive polling (20s idle, pause on hidden tab, resume on focus), CSS containment, layout isolation
+- `f9c82c3` perf: diff-and-patch transcript + snapshot — eliminate flash on idle polls
+- `4384eb8` perf: skeleton loading, lazy images, send click, API caching (3s transcript, 5s inbox)
+- `2e4a62f` fix: hydration
+- `8731f59` perf: smooth scroll, message fade-in, optimistic user messages, image caching, typing bubble animation
+- `9887ba6` design: red send button + red typing dots — matches hamburger accent
+- `cd1e6de` fix: typing indicator tracks assistant messages only — stops clearing on user echo
+- `b7003e3` fix: context always visible in bottom bar — calm/watch/high/critical states
+- `373028d` fix: dedicated typing bubble
+- `858a369` fix: inline style red hamburger — bypass Safari CSS cache
+- `001f38c` fix: solid red hamburger button with white lines
+- `77380d8` fix: solid red context pressure pill, frost on bottom bar, thinking pulse on status pill, revert hamburger
+- `c9cf14f` design: solid red menu button, context pressure in bottom bar, doc tab apple redesign
+- `9487889` fix: persistent typing indicator, numbered session names, red menu button, doc thumb on last assistant msg
+- `2d1c4dd` fix: typing indicator only on steer, 1.25s header reveal, remove header context rail, compaction card, clean branch bar
+- `1e30be5` design: full mobile UX pass
+- `2715fee` design: apple-grade controls sheet + sticky diff files survive compaction
+- `5ee55a1` fix: strip diff prefixes, cache file list for speed, sort PR files by churn
+- `b4ae629` design: apple-grade diff polish
+- `b8f322e` polish: redesign header, context rail with progress bar, tighter diff pill
+- `b4865d8` fix: inline send button styles — bypass all CSS caching
+- `599cef1` fix: add viewport meta for mobile, kill horizontal scroll
+- `e389bc7` fix: solid opaque send button — no more ghost transparency
+- `32af4a4` fix: optimistic send
+- `b4f4324` fix: enter-to-send on both textareas, clearer disabled button state
+- `e9b6614` fix: prevent iOS Safari blur-tap race on send buttons
+- `2f8e207` fix: restructure mister compose
+- `034410b` fix: flexbox compose row for reliable send button, auto-clear action notes, frost runtime bar
+- `700f05a` fix: send button visibility on narrow phones, runtime bar readability
+- `df8da6d` fix: tighten mobile copy, scroll-to-bottom for queued turns, queued-state dock awareness
+
+## 2026-03-12
+
+- `00c14db` feat: surface queued agent runtime turns and clearer mobile send actions
+- `f7f54ff` feat: add quick thread switching for mobile agent runtime lane
+- `b632459` feat: make owned agent runtime mobile lane feel conversational
+- `7bf408e` feat: allow owned agent runtime interrupt on mobile
+- `e480039` feat: preload owned mobile diff context on focus
+- `48fa0fd` fix: make owned mobile review state feel immediate
+- `c740a25` feat: extend owned agent runtime review and resume on mobile
+- `8bc26ca` fix: align owned review command evidence with terminal outcome
+- `b42b018` feat: make owned review packets actionable
+- `4a316a5` feat: add owned agent runtime review packets
+- `6de7309` feat: surface owned agent runtime watch lane on mobile
+- `e1a47bb` feat: harden owned agent runtime lifecycle and tail views
+- `dc22116` feat: add owned agent runtime launch and resume lane
+- `6b7ffee` feat: add runtime action ownership seam
+- `fdc24f5` feat: promote runtime inventory and agent runtime activity detection
+- `7217d07` feat: surface local agent runtime runtime discovery in desktop shell
+- `03e0d51` docs: add chat-first front-door doctrine and runtime surface plan
+- `b1650ee` feat: harden mobile operator chrome and review cockpit
+- `c580d58` refactor: compress mobile inbox hierarchy
+- `6a3cdd2` feat: add panel and terminal shells to mobile queue
+- `447fe58` fix: keep mobile review drilldown live after push
+- `ffd2e4a` feat: add mobile per-file review drilldown
+- `46ac43e` fix: strengthen mobile glass hero treatment
+- `add6a8e` feat: deepen mobile review lane and glass styling
+- `8ca65c3` feat: align desktop repo truth with live review state
+- `2e94bb3` feat: wire direct mobile actions and history
+
+## 2026-03-11
+
+- `bbe5dab` feat: add mobile control inbox foundation
+- `e63edc8` feat: wire live agent runtime bridge and workflow review
+- `868b012` feat: add native desktop shell wrapper and guardrail surfaces
+- `8a8b077` feat: bootstrap command center shell and runtime contracts
+- `acc1180` chore: sync docs/remodex-integration-plan.md
+- `f8dbef9` chore: sync docs/roadmap.md
+- `a7ced1f` chore: sync docs/v1-build-plan.md
+- `81500ac` chore: sync docs/issue-map.md
+- `9f0cff5` chore: sync README.md
+- `013acd3` chore: sync docs/v1-build-plan.md
+- `8b18125` chore: sync docs/v0-product-spec.md
+- `cce66de` chore: sync docs/system-architecture.md
+- `3221b1b` chore: sync docs/roadmap.md
+- `09234fa` chore: sync docs/research/x-thread-notes.md
+- `1ff12b4` chore: sync docs/remodex-integration-plan.md
+- `9407497` chore: sync docs/mobile-strategy.md
+- `72516f9` chore: sync docs/issue-map.md
+- `98dedc4` chore: sync docs/company-thesis.md
+- `aeb10a8` chore: sync assets/mockups/2026-03-11-17-00-hoberman-try-3.png
+- `922f9b8` chore: sync assets/mockups/2026-03-11-16-59-hoberman-try-2.png
+- `13664e6` chore: sync assets/mockups/2026-03-11-16-58-hoberman-try-1.png
+- `b13a9ee` chore: sync assets/mockups/2026-03-11-16-45-agent-command-center-ide.png
+- `4267058` chore: sync README.md
+- `0c8c8b2` chore: sync .gitignore
+- `493e79b` chore: add docs/v0-product-spec.md
+- `284da65` chore: add docs/system-architecture.md
+- `d9a1d35` chore: add docs/research/x-thread-notes.md
+- `0ec2ada` chore: add docs/mobile-strategy.md
+- `1697d91` chore: add docs/company-thesis.md
+- `227f2e2` chore: add assets/mockups/2026-03-11-17-00-hoberman-try-3.png
+- `6e8cd5d` chore: add assets/mockups/2026-03-11-16-59-hoberman-try-2.png
+- `fd70239` chore: add assets/mockups/2026-03-11-16-58-hoberman-try-1.png
+- `6f0d6cc` chore: add assets/mockups/2026-03-11-16-45-agent-command-center-ide.png
+- `2ef3163` chore: add README.md
+- `8c88cbd` chore: add .gitignore
+- `709a998` docs: bootstrap Rainwater repo
