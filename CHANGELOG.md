@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `7097222` feat: Setup detection + config API for first-launch wizard
 - `57c08ba` feat: Graceful degradation when gateway unreachable
 - `1aa6159` fix: Hover card delay + agent error recovery with retry
 - `7961482` chore: Stage remaining changes
