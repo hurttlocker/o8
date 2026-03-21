@@ -621,10 +621,11 @@ const AgentCard = memo(function AgentCard({
                 gap: 8,
                 padding: '8px 10px',
                 borderRadius: 8,
-                background: isRunning ? 'rgba(34,197,94,0.04)' : 'transparent',
-                border: isRunning ? '1px solid rgba(34,197,94,0.12)' : '1px solid transparent',
+                background: isRunning ? 'rgba(34,197,94,0.04)' : isReviewing ? 'rgba(167,139,250,0.04)' : 'transparent',
+                border: isRunning ? '1px solid rgba(34,197,94,0.12)' : isReviewing ? '1px solid rgba(167,139,250,0.12)' : '1px solid transparent',
                 cursor: agent.sessionKey ? 'pointer' : 'default',
                 transition: 'all 150ms ease',
+                animation: isRunning ? 'agentCardPulse 3s ease-in-out infinite' : 'none',
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = isRunning ? 'rgba(34,197,94,0.08)' : 'rgba(0,0,0,0.02)';
@@ -2990,6 +2991,8 @@ export const AgentPanel = memo(function AgentPanel({
           newAgents = data.agents ?? [];
           const freshEvents: EventEntry[] = data.events ?? [];
           setEvents(prev => arraysMatchBy(prev, freshEvents, eventFp) ? prev : freshEvents);
+          setGatewayReachable(data.meta?.gatewayReachable ?? false);
+          setGatewayWarming(data.meta?.gatewayFreshness === 'warming');
         }
 
         // Parse workspace data
@@ -3406,7 +3409,9 @@ export const AgentPanel = memo(function AgentPanel({
             ))}
           </div>
         ) : workspaceGroups.length === 0 ? (
-          <div style={{ fontSize: 13, color: 'var(--t-text-muted)', padding: '8px 2px' }}>No agents found.</div>
+          <div style={{ fontSize: 13, color: gatewayReachable && gatewayWarming ? '#2563eb' : 'var(--t-text-muted)', padding: '8px 2px' }}>
+            {gatewayReachable && gatewayWarming ? 'OpenClaw connected, loading agents\u2026' : 'No agents found.'}
+          </div>
         ) : (
           workspaceGroups.map((group) => (
             <AgentCard
