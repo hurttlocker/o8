@@ -1,28 +1,43 @@
-# Cortex IDE — Claude Code Dossier
+# CLAUDE.md
 
-> You are working on **Cortex IDE** — a Next.js + Tauri desktop app that serves as a command center for managing AI agent fleets. Think: "CEO dashboard for AI engineering teams."
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Vision (One Sentence)
-"Cortex IDE should feel like being a CEO who can run their entire engineering team from the back of an Uber."
+## What Is This
+
+Cortex IDE is a Next.js 16 + Tauri v2 desktop app — a command center for managing AI agent fleets. Think "CEO dashboard for AI engineering teams." It runs three agent runtimes (OpenClaw, Codex, Claude Code) through a universal adapter interface, with separate desktop and mobile surfaces.
+
+## Commands
+
+```bash
+# Development
+npm run dev              # Next.js dev server → http://localhost:3001
+npm run dev:ws           # WebSocket server → ws://localhost:3002
+npm run desktop:dev      # Both together (kills stale ports, concurrently)
+cargo tauri dev          # Tauri native shell (from src-tauri/)
+
+# Verification (run before every commit)
+npx tsc --noEmit         # or: npm run typecheck
+
+# Build
+npm run build            # Next.js production build
+cargo tauri build        # Native macOS app (from src-tauri/)
+
+# Lint
+npm run lint             # ESLint (flat config, next core-web-vitals + TS)
+
+# Performance
+npm run measure:render   # Bootstrap render speed measurement
+```
 
 ## Design Philosophy
+
 **Steve Jobs lens.** Every pixel matters. Density with restraint. Progressive disclosure. If Apple wouldn't ship it, neither do we.
 
-**Karpathy lens (Software 3.0).** This is a control plane, not an editor. Intent over instruction. Observable agents. Human oversight as a feature, not a bottleneck.
-
-**No emojis anywhere** — Lucide icons only across all surfaces.
-
-## Tech Stack
-- **Next.js 16** + **React 19** + **TypeScript**
-- **Tauri v2** for native desktop shell (macOS)
-- **Inline styles everywhere** — CSS classes are unreliable on iOS Safari, so the entire project uses inline `style` props. This is intentional and permanent.
-- **framer-motion** for animations (spring curves: `stiffness: 400, damping: 30`)
-- Dev server: `npm run dev` → `http://localhost:3001`
-- Tauri dev: `cd src-tauri && cargo tauri dev`
+**Karpathy lens (Software 3.0).** Control plane, not an editor. Intent over instruction. Observable agents. Human oversight as a feature, not a bottleneck.
 
 ## Architecture
 
-### Layout (Desktop Dashboard — `src/app/dashboard/page.tsx`)
+### Desktop Layout (`src/app/dashboard/page.tsx`)
 ```
 ┌─────────────────────────────────────────────────┐
 │ TitleBar (44px, drag region, traffic lights)     │
@@ -35,112 +50,123 @@
 └──────┴──────────────────────┴───────────────────┘
 ```
 
-### Key Files (read these first)
-| File | Lines | What it does |
-|------|-------|-------------|
-| `src/app/dashboard/page.tsx` | ~592 | Main layout orchestrator. All panels toggled here. |
-| `src/components/desktop/AgentPanel.tsx` | ~1916 | **THE BIG ONE.** Agent fleet view, repo-grouped cards, status groups (In Progress/Idle/Done), activity feed, issues, PRs, files, CI, deploys. |
-| `src/components/desktop/DesktopChat.tsx` | ~1948 | Chat panel with message rendering, send, markdown. |
-| `src/components/desktop/Canvas.tsx` | ~2760 | Bottom workspace: issue viewer, transcript viewer, file viewer, timeline. |
-| `src/components/desktop/ThoughtsCard.tsx` | ~1525 | Floating glass overlay — mini chat with agents, approvals, agent picker. z-index 9999. |
-| `src/components/desktop/NavRail.tsx` | ~354 | Left sidebar nav, framer-motion collapse/expand. |
-| `src/components/desktop/TitleBar.tsx` | ~390 | macOS-style title bar with inline SVG icons (Lucide doesn't render in Tauri). |
-| `src/components/desktop/SessionTimeline.tsx` | ~457 | Day-level timeline showing coding/thinking/testing/idle segments. |
-| `src/components/desktop/IntentCanvas.tsx` | ~379 | Fleet Command Center — 3 agent lanes + handoffs + task queue. |
-| `src/components/desktop/SettingsPage.tsx` | ~973 | Settings with tabbed sidebar (GitHub, Agents, Appearance, About). |
+### Runtime Adapter System (`src/lib/runtimes/`)
 
-### Mobile Surface (separate from desktop)
-| File | What |
-|------|------|
-| `src/components/mobile/mobile-remote-shell.tsx` | Mobile shell (~400 lines) |
-| `src/components/mobile/hooks/` | 5 hooks: state, polling, scroll, streaming, actions |
-| `src/components/mobile/controller*.ts` | Controller barrel + 3 domain files |
+Universal `AgentRuntime` interface (`types.ts`) with capability-gated discovery. UI never talks to a specific runtime directly — always routes through the registry (`registry.ts`).
 
-### API Routes (`src/app/api/`)
-- `/api/mobile/inbox` — Agent sessions list
-- `/api/mobile/history` — Session transcript
-- `/api/mobile/cortex/*` — Cortex memory (recall, health, resolve, context, graph)
-- `/api/panel/timeline` — Day timeline (CLI + JSONL based)
-- `/api/panel/issues` — GitHub issues
-- `/api/panel/prs` — GitHub PRs
-- `/api/panel/universal-search` — 5-provider search
-- `/api/panel/approvals` — Approval cards
-- `/api/panel/github-status` — GitHub connection check
+Three adapters: `openclaw.ts`, `codex.ts`, `claude-code.ts`. All share capabilities: discover, readTranscript, launch, resume, interrupt, reviewDiffs. Codex distinguishes "owned" (IDE-spawned, full control) vs "discovered" (user terminal, read-only) sessions.
+
+`discoverAllSessions()` runs all adapters in parallel via `Promise.allSettled`. `routeAction()` dispatches resume/interrupt to the correct runtime.
+
+### WebSocket Server (`src/ws-server.ts`)
+
+Separate process on port 3002 (proxied via Next.js rewrite at `/ws`). Multiplexes real-time data for mobile clients.
+
+Channel semantics matter:
+- **LOSSY** channels (`chat` deltas, `terminal` data, `pong`): intermediate messages dropped under backpressure
+- **DURABLE** channels (`inbox`, `history`, `review`, `conflicts`): queued, with safety-net polling fallback (8–10s)
+
+Backpressure: 64KB buffer limit, max 32 queued messages, 50ms flush interval.
+
+Architecture: `Mobile ←WS:3002→ ws-server ←WS:18789→ OpenClaw Gateway` + HTTP to Next.js API
+
+### Desktop vs Mobile
+
+These are **completely separate codebases** by design. No shared components. Mobile (`src/components/mobile/`) is a remote control surface, not a scaled-down desktop. Desktop (`src/components/desktop/`) is the full dashboard.
+
+### Database (`src/lib/db/`)
+
+SQLite via better-sqlite3 + Drizzle ORM. Data dir: `~/.cortex-ide/` (override: `CORTEX_IDE_DATA_DIR`). WAL mode, normal sync, FK constraints on.
+
+Schema has 8 tables: users, api_keys (AES-256-GCM encrypted), usage_logs, subscriptions (Stripe), sessions (JWT), teams, team_members, waitlist.
+
+### Theming (`src/lib/theme/`)
+
+CSS variable system with 60+ tokens per theme. Two themes: "light" and "chocolate". `ThemeProvider` applies vars to `<html>` root, persists to localStorage (`cortex-theme` key). Components reference `var(--t-*)` tokens inside inline styles.
 
 ### Cortex Memory Integration
-- Client: `src/lib/cortex/client.ts` — CLI wrapper for `~/bin/cortex` binary
-- Types: `src/lib/cortex/types.ts`
-- 6 UI components: FactCard, RecallPanel, MemoryContext, CortexStatus, MemoryHealth, GraphExplorer
 
-### Runtime Adapters (`src/lib/runtimes/`)
-Universal `AgentRuntime` interface with registry pattern:
-- `openclaw.ts` — OpenClaw agent adapter
-- `codex.ts` — Codex terminal sessions
-- `claude-code.ts` — Claude Code CLI sessions
+`src/lib/cortex/client.ts` wraps the `~/bin/cortex` CLI binary. Three client variants: `LocalCortexClient` (exec), `CloudCortexClient` (HTTPS), `HybridCortexClient`.
+
+### Key Files (largest, most active)
+
+| File | What it does |
+|------|-------------|
+| `src/app/dashboard/page.tsx` | Main layout orchestrator. All panels toggled here. |
+| `src/components/desktop/AgentPanel.tsx` | Agent fleet view: repo-grouped cards, status groups, activity feed, issues, PRs, CI, deploys. |
+| `src/components/desktop/DesktopChat.tsx` | Chat panel with message rendering, send, markdown. |
+| `src/components/desktop/Canvas.tsx` | Bottom workspace: issue viewer, transcript viewer, file viewer, timeline. |
+| `src/components/desktop/ThoughtsCard.tsx` | Floating glass overlay — mini chat, approvals, agent picker. z-index 9999. |
+| `src/ws-server.ts` | WebSocket multiplexer for mobile real-time data. |
+
+### API Routes (`src/app/api/`)
+
+All routes use `force-dynamic`. 14+ feature domains, 100+ route files. Key families:
+- `/api/panel/*` — Desktop panel data (repos, commits, PRs, issues, CI, deploys, terminals, search)
+- `/api/mobile/*` — Mobile inbox, history, Cortex memory
+- `/api/command-center/*` — Fleet snapshot, bootstrap
+- `/api/claude-code/*`, `/api/codex/*`, `/api/openclaw/*` — Per-runtime endpoints
+
+### Library Domains (`src/lib/`)
+
+32 feature domains. Key ones: `runtimes` (adapter registry), `openclaw` (gateway client), `codex` (session management), `cortex` (memory), `db` (Drizzle schema), `theme` (CSS vars), `realtime` (WS event types), `auth` (JWT + GitHub OAuth), `terminal` (PTY/tmux), `fleet` (agent state types).
+
+## Critical Rules
+
+### NEVER
+- **Never use CSS classes** — inline styles only (`style={{ }}` props). iOS Safari reliability issue. This is permanent.
+- **Never use emoji** — Lucide icons only across all surfaces
+- **Never use Material Design patterns** — no borderLeft accents, no MD elevation
+- **Never use Lucide React components in Tauri webview** — use raw `<svg>` elements (they render as empty boxes in Tauri)
+- **Never put early `return null` before hooks** — all hooks must run in same order every render
+- **Never use CSS shorthand** — use `paddingTop`/`paddingLeft`, not `padding: "8px 16px"` (React 19 warns on mixed shorthand/longhand)
+- **Never throw in API routes** — return structured error responses
+- **Never use `ai` SDK** — direct fetch to `/api/v2/proxy/llm` route
+
+### ALWAYS
+- **`npx tsc --noEmit` before every commit**
+- **Apple HIG**: 44px touch targets, 14px card radii, spring curves
+- **`as React.CSSProperties`** when using vendor-prefixed or non-standard CSS props
+- **Build for all three runtimes** — OpenClaw, Codex, Claude Code. Never commit to one provider.
+- **Console logging prefix**: `[feature-name]` (e.g., `[memory-recall]`, `[compaction]`)
+- **Commit prefix**: `feat:`, `fix:`, `refactor:`, `perf:`, `chore:`
+- **Public changelog safety**: Commit messages are synced (sanitized) to the public repo `hurttlocker/Rainwater`. When introducing a new internal codename, framework, or tool name, add it to BOTH the sed filter AND the blocklist in `.github/workflows/sync-changelog.yml`. The blocklist will fail the workflow if anything leaks.
 
 ## Design Constants
+
 ```
 Colors:
-  --blue: #2563eb       (accent)
-  --red: #ef4444        (brand, send button, settings gear)
-  --bg: #f5f7fb         (light theme background)
-  --panel: rgba(255,255,255,0.82)
-  --text: #111827
-  --muted: #5b6475
-
-  Status dots: running=#22c55e, idle=#9ca3af
+  accent: #2563eb (blue)         brand: #ef4444 (red)
+  bg: #f5f7fb                    panel: rgba(255,255,255,0.82)
+  text: #111827                  muted: #5b6475
+  Status: running=#22c55e, idle=#9ca3af
   Timeline: coding=#2563eb, thinking=#93c5fd, testing=#f59e0b, error=#ef4444
-  Agent dots: Mister=#111827, Niot=#2563eb, Hawk=#f59e0b
 
-Radii: 14px cards, 12px buttons, 10px pills, 8px tags
-Touch: 44px minimum targets (Apple HIG)
-Spring: cubic-bezier(0.32, 0.72, 0, 1)
+Radii: 14px cards, 12px buttons/containers, 10px pills, 8px tags
+Touch: 44px minimum targets
+Spring: stiffness 400, damping 30 (framer-motion)
 Letter spacing: -0.01em body, -0.02em headings, -0.03em hero
 Font: system-ui, SF Mono/Menlo for monospace
 ```
 
-## Critical Rules
+## Environment Variables
 
-### NEVER DO
-- **Never use CSS classes** — inline styles only (iOS Safari reliability)
-- **Never use emoji** — Lucide icons only
-- **Never use Material Design patterns** — no borderLeft accents, no MD elevation
-- **Never push to main without building first** — `npx tsc --noEmit` before every commit
-- **Never use Lucide React components in Tauri webview** — use raw `<svg>` elements (they render as empty boxes)
-- **Never put early `return null` before hooks** — Rules of Hooks: all hooks must run in same order every render
-
-### ALWAYS DO
-- **Apple HIG enforcement**: 44px touch targets, 14px card radii, spring curves
-- **Inline styles on everything**: `style={{ }}` props, not className
-- **`as React.CSSProperties`** when using vendor-prefixed or non-standard CSS props
-- **Test with `npx tsc --noEmit`** before committing
-- **Keep the Steve Jobs eye**: density, restraint, progressive disclosure, "would Apple ship this?"
-
-## Current State of AgentPanel (most active file)
-The AgentPanel groups agents by repo/workspace:
-- **Repo groups**: "Cortex IDE", "OpenClaw", "Spear", etc.
-- **Status sections** inside each group: In Progress (blue), Idle (gray), Done (green)
-- **Agent naming**: OpenClaw agents → actual name (Mister/Niot/Hawk). Repo agents → editor name (Codex/Claude Code)
-- **Scrolling**: Whole panel scrolls with hidden scrollbar
-- **Adaptive sizing**: Panel hugs content, grows naturally
-
-## Workflow Reference
-See `docs/canonical-workflow.md` for the full product workflow.
+- `GITHUB_OAUTH_CLIENT_ID` — GitHub device flow OAuth
+- `GEMINI_API_KEY` / `GOOGLE_AI_API_KEY` — AI provider keys
+- `CORTEX_IDE_DATA_DIR` — Custom data dir (default: `~/.cortex-ide`)
+- `WS_TOKEN` — WebSocket auth token
+- `WS_PORT` — WebSocket port (default: 3002)
 
 ## Git Practices
-- All work on `main` branch (no feature branches for rapid iteration)
-- Small, focused commits with descriptive messages
-- `git push origin main` after each commit
-- Test before commit: `npx tsc --noEmit`
 
-## What Needs Work (Open Issues)
-- **#99** — Real-time WebSocket streaming (p1)
-- **#100** — Issue → Agent assignment (p1)
-- **#109** — Outbound alert delivery (p1)
-- **#110** — Desktop chat send shell escaping (p0)
-- **#113–#115** — Session Timeline phases 2–4
-- **#116** — GitHub Connection settings wiring
-- Intent Canvas wired to real data (currently mock)
-- AgentPanel wired to real workspace/repo data (mock + real coexist)
-- Terminal/Analytics nav sections not yet wired
-- Settings stubs (Agents, Appearance, About tabs) need implementation
+- All work on `main` branch (no feature branches — rapid iteration mode)
+- `npx tsc --noEmit` before every commit
+- `git push origin main` after each commit
+
+## Documentation
+
+`docs/` contains 26 files covering architecture, strategy, and design decisions. Key ones:
+- `docs/canonical-workflow.md` — Full product workflow
+- `docs/system-architecture.md` — Mermaid diagram of the full system
+- `docs/runtime-adapter-contract.md` — AgentRuntime interface evolution
+- `docs/performance-architecture-principles.md` — Render speed, bootstrap, streaming
