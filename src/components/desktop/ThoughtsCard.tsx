@@ -168,6 +168,7 @@ interface ThoughtsCardProps {
   onClose: () => void;
   agents?: FleetAgent[];
   draftInjection?: { id: string; text: string } | null;
+  docked?: boolean;
 }
 
 interface AgentTarget {
@@ -244,7 +245,7 @@ function generateSuggestions(agents: FleetAgent[]): ContextSuggestion[] {
   return suggestions.slice(0, 3); // max 3 suggestions
 }
 
-export function ThoughtsCard({ open, onClose, agents = [], draftInjection }: ThoughtsCardProps) {
+export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docked = false }: ThoughtsCardProps) {
   const [mode, setMode] = useState<ThoughtMode>('pick');
   const [input, setInput] = useState('');
   const [preEnhanceInput, setPreEnhanceInput] = useState<string | null>(null);
@@ -277,6 +278,7 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection }: Tho
 
   // Center on first open
   useEffect(() => {
+    if (docked) return;
     if (open && !initialized) {
       setPosition({
         x: Math.max(100, Math.round(window.innerWidth / 2 - 200)),
@@ -285,7 +287,7 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection }: Tho
       setInitialized(true);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
-  }, [open, initialized]);
+  }, [docked, open, initialized]);
 
   // Focus input when un-minimized or mode changes
   useEffect(() => {
@@ -293,6 +295,20 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection }: Tho
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [open, minimized, mode]);
+
+  useEffect(() => {
+    if (!open || docked) return;
+
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [docked, onClose, open]);
 
   useEffect(() => {
     if (!open || !draftInjection?.id) return;
@@ -661,7 +677,7 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection }: Tho
     }
   }, [preEnhanceInput]);
 
-  if (!open) return null;
+  if (!open && !docked) return null;
 
   const isActive = workflow.step !== 'idle';
   const currentStepIdx = stepIndex(workflow.step);
@@ -685,40 +701,42 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection }: Tho
       <div
         ref={cardRef}
         style={{
-          position: 'fixed',
-          left: position.x,
-          top: position.y,
-          width: minimized ? 220 : size.w,
-          height: minimized ? 'auto' : (size.h > 0 ? size.h : 'auto'),
-          zIndex: 10001,
-          borderRadius: minimized ? 12 : 18,
+          position: docked ? 'relative' : 'fixed',
+          left: docked ? undefined : position.x,
+          top: docked ? undefined : position.y,
+          width: docked ? '100%' : (minimized ? 220 : size.w),
+          height: docked ? '100%' : (minimized ? 'auto' : (size.h > 0 ? size.h : 'auto')),
+          zIndex: docked ? 1 : 10001,
+          borderRadius: docked ? 14 : (minimized ? 12 : 18),
           background: 'var(--t-panel-translucent)',
           backdropFilter: 'blur(50px) saturate(180%)',
           WebkitBackdropFilter: 'blur(50px) saturate(180%)',
           border: '1px solid var(--t-panel-border)',
-          boxShadow: 'var(--t-panel-shadow)',
-          overflow: 'visible',
+          boxShadow: docked ? 'none' : 'var(--t-panel-shadow)',
+          overflow: docked ? 'hidden' : 'visible',
           display: 'flex',
           flexDirection: 'column',
+          flex: docked ? 1 : undefined,
+          minHeight: 0,
           transition: 'border-radius 250ms',
           fontFamily: '-apple-system, system-ui, BlinkMacSystemFont, sans-serif',
         }}
       >
         {/* ── Header — drag handle ── */}
         <div
-          onMouseDown={handleDragStart}
+          onMouseDown={docked ? undefined : handleDragStart}
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: 8,
             padding: minimized ? '8px 12px' : '10px 14px',
-            cursor: 'grab',
+            cursor: docked ? 'default' : 'grab',
             userSelect: 'none',
             borderBottom: minimized ? 'none' : '1px solid var(--t-divider-subtle)',
             flexShrink: 0,
           }}
         >
-          <GripIcon />
+          {!docked && <GripIcon />}
           <span style={{
             fontSize: 12, fontWeight: 700, color: 'var(--t-text)',
             letterSpacing: '-0.01em', flex: 1,
@@ -781,18 +799,22 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection }: Tho
               New
             </button>
           )}
-          <button type="button" onClick={() => setMinimized(v => !v)} style={{
-            background: 'none', border: 'none', cursor: 'pointer', padding: 4,
-            color: 'var(--t-text-muted)', display: 'flex', borderRadius: 6,
-          }}>
-            <MinimizeIcon />
-          </button>
-          <button type="button" onClick={onClose} style={{
-            background: 'none', border: 'none', cursor: 'pointer', padding: 4,
-            color: 'var(--t-text-muted)', display: 'flex', borderRadius: 6,
-          }}>
-            <XIcon />
-          </button>
+          {!docked && (
+            <>
+              <button type="button" onClick={() => setMinimized(v => !v)} style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+                color: 'var(--t-text-muted)', display: 'flex', borderRadius: 6,
+              }}>
+                <MinimizeIcon />
+              </button>
+              <button type="button" onClick={onClose} style={{
+                background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+                color: 'var(--t-text-muted)', display: 'flex', borderRadius: 6,
+              }}>
+                <XIcon />
+              </button>
+            </>
+          )}
         </div>
 
         {/* ── Body ── */}
@@ -802,7 +824,7 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection }: Tho
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            borderRadius: '0 0 18px 18px',
+            borderRadius: docked ? '0 0 14px 14px' : '0 0 18px 18px',
           }}>
 
             {/* ── APPROVAL CARDS — float above everything ── */}
@@ -1557,7 +1579,7 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection }: Tho
         )}
 
         {/* ── Resize handles ── */}
-        {!minimized && (
+        {!minimized && !docked && (
           <>
             <div onMouseDown={handleResizeStart('e')} style={{
               position: 'absolute', top: 20, right: -3, bottom: 20, width: 6,

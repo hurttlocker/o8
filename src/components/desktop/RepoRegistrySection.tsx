@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- registry section retains dormant callbacks during workspace tooling rollout */
 
 import { createPortal } from 'react-dom';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -11,6 +11,7 @@ import {
   ExternalLink,
   FolderOpen,
   GitBranch,
+  GitPullRequest,
   MoreHorizontal,
   Play,
   Plus,
@@ -20,6 +21,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { BlueGlassActionButton, BlueGlassHoverCard, BlueGlassMetricPill, BlueGlassSparklineLane } from './BlueGlassHoverCard';
 import type {
   RepoRegistryEntry,
   RepoSetupConfig,
@@ -95,6 +97,19 @@ function githubUrlFromRemote(remoteUrl: string | null) {
   if (httpsMatch?.[1]) return `https://github.com/${httpsMatch[1]}`;
 
   return null;
+}
+
+function githubSlugFromRemote(remoteUrl: string | null) {
+  if (!remoteUrl) return null;
+
+  const httpsMatch = remoteUrl.match(/github\.com[/:]([^/]+\/[^/.]+)(?:\.git)?$/i);
+  if (httpsMatch?.[1]) return httpsMatch[1];
+
+  return null;
+}
+
+function pointWithinRect(rect: DOMRect, x: number, y: number) {
+  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
 function defaultWorkspaceName(repoName: string) {
@@ -393,6 +408,41 @@ interface BranchInfo {
   diskSize?: string;
 }
 
+interface RepoPreviewPullRequest {
+  number: number;
+  title: string;
+  state: string;
+  author: { login: string };
+  headRefName: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  createdAt: string;
+  url?: string;
+  reviewDecision?: string;
+  statusCheckRollup?: Array<{ name?: string | null; conclusion?: string | null; status?: string | null }>;
+}
+
+interface RepoPreviewPullRequestDetail {
+  mergeable: boolean;
+  checksStatus: 'success' | 'failure' | 'pending' | 'unknown';
+  reviewDecision: string | null;
+  files: Array<{ path: string; status: string; additions: number; deletions: number }>;
+}
+
+function mergeRiskLabel(detail: RepoPreviewPullRequestDetail | null): {
+  label: string;
+  color: string;
+} {
+  if (!detail) return { label: 'warming', color: '#64748b' };
+  if (!detail.mergeable) return { label: 'conflicts', color: '#dc2626' };
+  if (detail.checksStatus === 'failure') return { label: 'ci red', color: '#dc2626' };
+  if (detail.checksStatus === 'pending') return { label: 'checks pending', color: '#d97706' };
+  if (detail.reviewDecision === 'CHANGES_REQUESTED') return { label: 'changes requested', color: '#dc2626' };
+  if (detail.reviewDecision === 'REVIEW_REQUIRED') return { label: 'review pending', color: '#2563eb' };
+  return { label: 'merge ready', color: '#16a34a' };
+}
+
 function RepoCard({
   repo,
   workspaceNotice,
@@ -400,6 +450,7 @@ function RepoCard({
   onOpenGitHub,
   onRemove,
   onSaveSetup,
+  onSelectPR,
   onSelectBranch,
   agentsByBranch,
   activePorts,
@@ -410,6 +461,7 @@ function RepoCard({
   onOpenGitHub: (repo: RepoRegistryEntry) => void;
   onRemove: (repo: RepoRegistryEntry) => void;
   onSaveSetup: (repoId: string, setup: RepoSetupConfig) => Promise<void>;
+  onSelectPR?: (prNumber: number, repo?: string) => void;
   onSelectBranch?: (branch: string, repoPath: string) => void;
   agentsByBranch?: Map<string, BranchAgent[]>;
   activePorts?: number[];
@@ -456,6 +508,15 @@ function RepoCard({
   const [devServerPort, setDevServerPort] = useState<number | null>(null);
   const [devLogsOpen, setDevLogsOpen] = useState(false);
   const [devLogs, setDevLogs] = useState('');
+  const [hoveringHeader, setHoveringHeader] = useState(false);
+  const [hoverPreviewRect, setHoverPreviewRect] = useState<DOMRect | null>(null);
+  const [prPreviewLoading, setPrPreviewLoading] = useState(false);
+  const [prPreview, setPrPreview] = useState<RepoPreviewPullRequest[]>([]);
+  const [prPreviewLoaded, setPrPreviewLoaded] = useState(false);
+  const [prPreviewDetail, setPrPreviewDetail] = useState<RepoPreviewPullRequestDetail | null>(null);
+  const [prPreviewDetailLoading, setPrPreviewDetailLoading] = useState(false);
+  const hoverOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setDraftSetup(repo.setup);
@@ -646,7 +707,114 @@ function RepoCard({
   }, [newBranchName, newBranchWorktree, repo.localPath, repo.defaultBranch, refreshBranches]);
 
   const githubUrl = useMemo(() => githubUrlFromRemote(repo.remoteUrl), [repo.remoteUrl]);
+  const githubSlug = useMemo(() => githubSlugFromRemote(repo.remoteUrl), [repo.remoteUrl]);
   const hasUnsavedChanges = JSON.stringify(draftSetup) !== JSON.stringify(repo.setup);
+
+  useEffect(() => {
+    if (!hoveringHeader || !githubSlug || prPreviewLoaded || prPreviewLoading) return;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3_000);
+    let active = true;
+    setPrPreviewLoading(true);
+    fetch(`/api/panel/prs?repo=${encodeURIComponent(githubSlug)}`, { signal: controller.signal })
+      .then((response) => response.json())
+      .then((data) => {
+        if (!active) return;
+        setPrPreview((data.prs ?? []).filter((pr: RepoPreviewPullRequest) => pr.state === 'OPEN'));
+        setPrPreviewLoaded(true);
+      })
+      .catch(() => {
+        if (active) {
+          setPrPreview([]);
+          setPrPreviewLoaded(true);
+        }
+      })
+      .finally(() => {
+        clearTimeout(timeoutId);
+        if (active) setPrPreviewLoading(false);
+      });
+    return () => {
+      active = false;
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [githubSlug, hoveringHeader, prPreviewLoaded, prPreviewLoading]);
+
+  useEffect(() => {
+    return () => {
+      if (hoverOpenTimerRef.current) clearTimeout(hoverOpenTimerRef.current);
+      if (hoverCloseTimerRef.current) clearTimeout(hoverCloseTimerRef.current);
+    };
+  }, []);
+
+  const schedulePreviewHover = useCallback((element: HTMLDivElement, clientX: number, clientY: number) => {
+    const rect = element.getBoundingClientRect();
+    if (!pointWithinRect(rect, clientX, clientY)) return;
+
+    if (hoverCloseTimerRef.current) {
+      clearTimeout(hoverCloseTimerRef.current);
+      hoverCloseTimerRef.current = null;
+    }
+    if (hoverOpenTimerRef.current) clearTimeout(hoverOpenTimerRef.current);
+    hoverOpenTimerRef.current = setTimeout(() => {
+      setHoverPreviewRect(rect);
+      setHoveringHeader(true);
+      hoverOpenTimerRef.current = null;
+    }, 120);
+  }, []);
+
+  const closePreviewHover = useCallback(() => {
+    if (hoverOpenTimerRef.current) {
+      clearTimeout(hoverOpenTimerRef.current);
+      hoverOpenTimerRef.current = null;
+    }
+    if (hoverCloseTimerRef.current) clearTimeout(hoverCloseTimerRef.current);
+    hoverCloseTimerRef.current = setTimeout(() => {
+      setHoveringHeader(false);
+      setHoverPreviewRect(null);
+    }, 140);
+  }, []);
+
+  const previewCheckCounts = useMemo(() => {
+    const checks = prPreview[0]?.statusCheckRollup ?? [];
+    return {
+      passed: checks.filter((check) => check.conclusion?.toLowerCase() === 'success').length,
+      failed: checks.filter((check) => check.conclusion?.toLowerCase() === 'failure').length,
+      pending: checks.filter((check) => !check.conclusion || check.status?.toLowerCase() !== 'completed').length,
+    };
+  }, [prPreview]);
+  const previewFailingChecks = useMemo(
+    () => (prPreview[0]?.statusCheckRollup ?? [])
+      .filter((check) => check.conclusion?.toLowerCase() === 'failure')
+      .map((check) => check.name || 'Unknown check')
+      .slice(0, 3),
+    [prPreview],
+  );
+  const mergeRisk = useMemo(() => mergeRiskLabel(prPreviewDetail), [prPreviewDetail]);
+
+  useEffect(() => {
+    if (!githubSlug || !prPreview[0]?.number || prPreviewDetail || prPreviewDetailLoading) return;
+    let active = true;
+    setPrPreviewDetailLoading(true);
+    fetch(`/api/panel/pr?repo=${encodeURIComponent(githubSlug)}&number=${prPreview[0].number}`)
+      .then((response) => response.json())
+      .then((detail) => {
+        if (!active || detail?.error) return;
+        setPrPreviewDetail({
+          mergeable: Boolean(detail.mergeable),
+          checksStatus: detail.checksStatus ?? 'unknown',
+          reviewDecision: detail.reviewDecision ?? null,
+          files: detail.files ?? [],
+        });
+      })
+      .catch(() => {
+        if (active) setPrPreviewDetail(null);
+      })
+      .finally(() => {
+        if (active) setPrPreviewDetailLoading(false);
+      });
+    return () => { active = false; };
+  }, [githubSlug, prPreview, prPreviewDetail, prPreviewDetailLoading]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
@@ -668,7 +836,7 @@ function RepoCard({
   }, []);
 
   return (
-    <div style={{ borderBottom: '1px solid var(--t-divider-subtle)' }}>
+    <div style={{ borderBottom: '1px solid var(--t-divider-subtle)', position: 'relative' }}>
       {/* Compact header row — Conductor style */}
       <div
         style={{
@@ -679,6 +847,8 @@ function RepoCard({
           cursor: 'pointer',
         }}
         onClick={() => setExpanded((v) => !v)}
+        onMouseEnter={(event) => schedulePreviewHover(event.currentTarget as HTMLDivElement, event.clientX, event.clientY)}
+        onMouseLeave={closePreviewHover}
       >
         <span style={{ color: 'var(--t-text-muted)', flexShrink: 0, display: 'flex' }}>
           {expanded ? <ChevronDown size={14} strokeWidth={2} /> : <ChevronRight size={14} strokeWidth={2} />}
@@ -723,6 +893,53 @@ function RepoCard({
             </span>
           </span>
         ) : null}
+        {prPreview.length > 0 ? (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '2px 8px',
+              borderRadius: 999,
+              background: 'linear-gradient(180deg, rgba(239,246,255,0.92), rgba(191,219,254,0.58))',
+              border: '1px solid rgba(96, 165, 250, 0.22)',
+              boxShadow: '0 8px 20px rgba(37,99,235,0.12)',
+              flexShrink: 0,
+            }}
+          >
+            <GitPullRequest size={10} strokeWidth={2.2} color="#2563eb" />
+            <span
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: '#1d4ed8',
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+              }}
+            >
+              PR #{prPreview[0].number}
+            </span>
+          </span>
+        ) : null}
+        {prPreview.length > 0 ? (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '2px 8px',
+              borderRadius: 999,
+              background: `${mergeRisk.color}14`,
+              border: `1px solid ${mergeRisk.color}28`,
+              color: mergeRisk.color,
+              fontSize: 10,
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              flexShrink: 0,
+            }}
+          >
+            {mergeRisk.label}
+          </span>
+        ) : null}
         <span
           style={{
             display: 'inline-flex',
@@ -762,6 +979,136 @@ function RepoCard({
           <MoreHorizontal size={14} strokeWidth={2} />
         </button>
       </div>
+
+      {hoveringHeader && (prPreviewLoading || prPreview.length > 0) ? (
+        <BlueGlassHoverCard
+          eyebrow="Open Pull Request"
+          title={prPreviewLoading ? `Checking ${repo.name}…` : `PR #${prPreview[0].number} • ${prPreview[0].title}`}
+          subtitle={prPreviewLoading
+            ? 'Looking for active merge work on this repo.'
+            : `${prPreview[0].author.login} wants to merge ${prPreview[0].headRefName} into ${repo.defaultBranch}.`}
+          anchorRect={hoverPreviewRect}
+          interactive
+          onMouseEnter={() => {
+            if (hoverCloseTimerRef.current) {
+              clearTimeout(hoverCloseTimerRef.current);
+              hoverCloseTimerRef.current = null;
+            }
+          }}
+          onMouseLeave={closePreviewHover}
+          footer={prPreviewLoading ? null : (
+            <>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <BlueGlassMetricPill label="Review" value={prPreview[0].reviewDecision || 'pending'} color="#1d4ed8" />
+                <BlueGlassMetricPill
+                  label="Files"
+                  value={String(prPreview[0].changedFiles)}
+                  color="rgba(15,23,42,0.78)"
+                />
+                <BlueGlassMetricPill label="Risk" value={mergeRisk.label} color={mergeRisk.color} />
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                {onSelectPR ? (
+                  <BlueGlassActionButton
+                    icon={<GitPullRequest size={12} strokeWidth={2} />}
+                    label="Review"
+                    onClick={() => onSelectPR(prPreview[0].number, githubSlug ?? undefined)}
+                  />
+                ) : null}
+                {prPreview[0].url ? (
+                  <BlueGlassActionButton
+                    icon={<ExternalLink size={12} strokeWidth={2} />}
+                    label="Open PR"
+                    onClick={() => window.open(prPreview[0].url, '_blank', 'noopener,noreferrer')}
+                  />
+                ) : null}
+              </div>
+            </>
+          )}
+        >
+          {!prPreviewLoading ? (
+            <>
+              <BlueGlassSparklineLane
+                segments={[
+                  { label: 'Pass', value: previewCheckCounts.passed, color: '#22c55e' },
+                  { label: 'Fail', value: previewCheckCounts.failed, color: '#ef4444' },
+                  { label: 'Pending', value: previewCheckCounts.pending, color: '#f59e0b' },
+                ]}
+              />
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  fontSize: 11,
+                  color: 'rgba(15, 23, 42, 0.7)',
+                }}
+              >
+                <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>{prPreview[0].headRefName}</span>
+                <span>{formatRelativeTime(prPreview[0].createdAt)}</span>
+              </div>
+              {previewFailingChecks.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#dc2626' }}>
+                    Top failing checks
+                  </div>
+                  {previewFailingChecks.map((check) => (
+                    <div
+                      key={check}
+                      style={{
+                        fontSize: 11,
+                        lineHeight: 1.45,
+                        color: 'rgba(15, 23, 42, 0.76)',
+                        padding: '6px 8px',
+                        borderRadius: 10,
+                        background: 'rgba(255,255,255,0.28)',
+                      }}
+                    >
+                      {check}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {prPreviewDetail?.files?.length ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#1d4ed8' }}>
+                    Changed files
+                  </div>
+                  {prPreviewDetail.files.slice(0, 3).map((file) => (
+                    <div
+                      key={file.path}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        padding: '6px 8px',
+                        borderRadius: 10,
+                        background: 'rgba(255,255,255,0.28)',
+                        fontSize: 11,
+                      }}
+                    >
+                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgba(15,23,42,0.78)' }}>
+                        {file.path}
+                      </span>
+                      <span style={{ color: '#16a34a', fontWeight: 700 }}>+{file.additions}</span>
+                      <span style={{ color: '#dc2626', fontWeight: 700 }}>-{file.deletions}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {prPreview.length > 1 ? (
+                <div style={{ fontSize: 11, color: 'rgba(15, 23, 42, 0.62)' }}>
+                  {prPreview.length - 1} more open PR{prPreview.length - 1 === 1 ? '' : 's'} on this repo.
+                </div>
+              ) : null}
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8' }}>
+                Next move: review the merge path before you steer more work into this repo.
+              </div>
+            </>
+          ) : null}
+        </BlueGlassHoverCard>
+      ) : null}
 
       {/* Overflow menu dropdown */}
       {menuOpen ? (
@@ -1851,9 +2198,11 @@ function RepoCard({
 
 export function RepoRegistrySection({
   onSelectSession,
+  onSelectPR,
   onLaunchComplete,
 }: {
   onSelectSession?: (sessionKey: string) => void;
+  onSelectPR?: (prNumber: number, repo?: string) => void;
   onLaunchComplete?: () => void;
 } = {}) {
   const [repos, setRepos] = useState<RepoRegistryEntry[]>([]);
@@ -2279,7 +2628,15 @@ export function RepoRegistrySection({
               fontFamily: '"SF Mono", ui-monospace, monospace',
             }}
           >
-            {repos.length}
+            {loading ? (
+              <span style={{
+                display: 'inline-flex',
+                width: 16,
+                height: 10,
+                borderRadius: 999,
+                background: 'linear-gradient(90deg, rgba(148,163,184,0.14), rgba(148,163,184,0.28), rgba(148,163,184,0.14))',
+              }} />
+            ) : repos.length}
           </span>
           <span
             style={{
@@ -2311,7 +2668,28 @@ export function RepoRegistrySection({
           {/* Compact repo list — no top button, Add is at bottom */}
 
           {loading ? (
-            <div style={{ fontSize: 13, color: 'var(--t-text-muted)', padding: '8px 2px' }}>Loading repositories…</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4 }}>
+              {[0, 1, 2].map((index) => (
+                <div
+                  key={index}
+                  style={{
+                    borderRadius: 14,
+                    border: '1px solid var(--t-panel-border)',
+                    background: 'rgba(255, 255, 255, 0.74)',
+                    backdropFilter: 'blur(20px)',
+                    WebkitBackdropFilter: 'blur(20px)',
+                    boxShadow: 'var(--t-panel-shadow)',
+                    padding: '12px 12px 10px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 8,
+                  }}
+                >
+                  <div style={{ width: `${58 + index * 12}%`, height: 12, borderRadius: 999, background: 'rgba(148,163,184,0.18)' }} />
+                  <div style={{ width: `${42 + index * 10}%`, height: 10, borderRadius: 999, background: 'rgba(148,163,184,0.12)' }} />
+                </div>
+              ))}
+            </div>
           ) : null}
 
           {loadError ? (
@@ -2378,6 +2756,7 @@ export function RepoRegistrySection({
                 onOpenGitHub={handleOpenGitHub}
                 onRemove={setRemoveTarget}
                 onSaveSetup={handleSaveSetup}
+                onSelectPR={onSelectPR}
                 onSelectBranch={(branch, repoPath) => {
                   // Future: switch conversation context to agent on this branch
                   // For now: could trigger file tree refresh for this branch

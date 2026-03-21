@@ -2,8 +2,8 @@
  * Gateway client — fetches agent/session data from the OpenClaw gateway.
  *
  * Strategy (resilient to OpenClaw version changes):
- *   1. Try HTTP REST API first (/api/v1/status) — <50ms, available on OC 2026.3.14+
- *   2. Fall back to CLI cache (`openclaw status --json`) for older versions
+ *   1. Use the official Gateway health/session-history HTTP endpoints when available
+ *   2. Use the official CLI status command for sessions/agents
  *
  * This ensures Cortex IDE works on ANY version of OpenClaw.
  */
@@ -27,11 +27,14 @@ interface GatewayConfig {
 let cachedConfig: GatewayConfig | null = null;
 let configLoadedAt = 0;
 const CONFIG_MAX_AGE_MS = 30_000; // Re-read config every 30s (catches token changes, restarts)
-const REST_STATUS_TIMEOUT_MS = 3_000; // Bumped from 1.5s — cold connections need headroom
-const REST_RPC_TIMEOUT_MS = 10_000;
-const CLI_STATUS_TIMEOUT_MS = 20_000;
-const CLI_COLD_START_WAIT_MS = 2_500;
+const REST_STATUS_TIMEOUT_MS = 3_000;
+const CLI_STATUS_TIMEOUT_MS = 30_000;
+const CLI_COLD_START_WAIT_MS = 500;
 const CLI_FRESH_MAX_AGE_MS = 5_000;
+const CLI_STATUS_FAILURE_BASE_BACKOFF_MS = 5_000;
+const CLI_STATUS_FAILURE_MAX_BACKOFF_MS = 60_000;
+const CLI_STATUS_ERROR_LOG_COOLDOWN_MS = 60_000;
+let loggedStatusCompatibilityNote = false;
 
 // ── CLI circuit breaker + concurrency limiter (#140) ──
 
@@ -71,9 +74,9 @@ function loadConfig(): GatewayConfig {
 
 // ── REST API (primary — fast path) ──
 
-async function fetchRestApi<T>(endpoint: string, params?: Record<string, string>): Promise<T | null> {
+async function fetchGatewayHttpJson<T>(pathname: string, params?: Record<string, string>): Promise<T | null> {
   const attempt = async (config: GatewayConfig): Promise<Response | null> => {
-    const url = new URL(`http://127.0.0.1:${config.port}/api/v1/${endpoint}`);
+    const url = new URL(`http://127.0.0.1:${config.port}${pathname}`);
     if (params) {
       for (const [k, v] of Object.entries(params)) {
         url.searchParams.set(k, v);
@@ -114,45 +117,38 @@ async function fetchRestApi<T>(endpoint: string, params?: Record<string, string>
   }
 }
 
-// ── REST API POST (for RPC methods — #138) ──
-
-async function postRestApi<T>(
-  endpoint: string,
-  body: Record<string, unknown>,
-  timeoutMs = REST_RPC_TIMEOUT_MS,
-): Promise<T | null> {
-  const config = loadConfig();
-  const url = `http://127.0.0.1:${config.port}/api/v1/${endpoint}`;
-
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(config.token ? { Authorization: `Bearer ${config.token}` } : {}),
-      },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeout);
-
-    if (!res.ok) return null;
-    return (await res.json()) as T;
-  } catch {
-    return null;
+async function fetchGatewayReadiness() {
+  const ready = await fetchGatewayHttpJson<{ ready?: boolean; failing?: string[] }>('/readyz');
+  if (ready && typeof ready.ready === 'boolean') {
+    return { ok: ready.ready, failing: ready.failing ?? [] };
   }
+
+  const live = await fetchGatewayHttpJson<{ ok?: boolean; status?: string }>('/healthz');
+  if (live && (live.ok === true || live.status === 'live')) {
+    return { ok: true, failing: [] as string[] };
+  }
+
+  return null;
 }
 
-/** Map RPC method names to REST API endpoints. */
-const RPC_REST_ENDPOINTS: Record<string, string> = {
-  'chat.history': 'chat/history',
-  'chat.send': 'chat/send',
-  'chat.abort': 'chat/abort',
-};
+async function fetchGatewaySessionHistory(
+  sessionKey: string,
+  limit: number,
+): Promise<{ sessionKey: string; sessionId?: string; messages?: Array<Record<string, unknown>> } | null> {
+  const payload = await fetchGatewayHttpJson<{
+    sessionKey?: string;
+    items?: Array<Record<string, unknown>>;
+    messages?: Array<Record<string, unknown>>;
+  }>(`/sessions/${encodeURIComponent(sessionKey)}/history`, {
+    limit: String(limit),
+  });
+
+  if (!payload) return null;
+  return {
+    sessionKey: payload.sessionKey ?? sessionKey,
+    messages: payload.items ?? payload.messages ?? [],
+  };
+}
 
 // ── CLI fallback (slow path — 30-40s on modest hardware) ──
 
@@ -169,22 +165,19 @@ function extractJsonPayload(raw: string): string {
 type CachedStatus = { data: Record<string, unknown>; ts: number };
 let statusCache: CachedStatus | null = null;
 let refreshPromise: Promise<void> | null = null;
-const CACHE_TTL_MS = 30_000;
+const CACHE_TTL_MS = 15_000;
 let statusGeneration = 0;
+let gatewayWarmupScheduled = false;
+let cliStatusFailureCount = 0;
+let cliStatusRetryAfter = 0;
+let cliStatusLastErrorLogAt = 0;
 
-export function invalidateGatewayStatusCache() {
-  statusGeneration += 1;
-  statusCache = null;
-  refreshPromise = null;
-}
-
-async function refreshCliCache(timeoutMs = CLI_STATUS_TIMEOUT_MS, force = false): Promise<void> {
-  if (!force && refreshPromise) return refreshPromise;
-
-  const generation = statusGeneration;
-  refreshPromise = (async () => {
-    try {
-      const { stdout } = await execFileAsync('openclaw', ['status', '--json'], {
+async function runCliStatusSnapshot(timeoutMs: number): Promise<Record<string, unknown>> {
+  try {
+    const { stdout } = await execFileAsync(
+      'openclaw',
+      ['gateway', 'call', 'status', '--json'],
+      {
         cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || '/Users/marquisehurtt',
         maxBuffer: 4 * 1024 * 1024,
         timeout: timeoutMs,
@@ -192,13 +185,81 @@ async function refreshCliCache(timeoutMs = CLI_STATUS_TIMEOUT_MS, force = false)
           ...process.env,
           PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
         },
-      });
-      const parsed = JSON.parse(extractJsonPayload(stdout));
+      },
+    );
+    return JSON.parse(extractJsonPayload(stdout)) as Record<string, unknown>;
+  } catch {
+    const { stdout } = await execFileAsync('openclaw', ['status', '--json'], {
+      cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || '/Users/marquisehurtt',
+      maxBuffer: 4 * 1024 * 1024,
+      timeout: timeoutMs,
+      env: {
+        ...process.env,
+        PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+      },
+    });
+    return JSON.parse(extractJsonPayload(stdout)) as Record<string, unknown>;
+  }
+}
+
+export function invalidateGatewayStatusCache() {
+  statusGeneration += 1;
+  statusCache = null;
+  refreshPromise = null;
+  cliStatusFailureCount = 0;
+  cliStatusRetryAfter = 0;
+}
+
+export function prewarmGatewayStatusCache() {
+  ensureCliRefreshLoop();
+  void fetchGatewayReadiness().catch(() => null);
+  if (!statusCache && !refreshPromise && Date.now() >= cliStatusRetryAfter) {
+    void refreshCliCache(CLI_STATUS_TIMEOUT_MS).catch(() => null);
+  }
+}
+
+function scheduleGatewayStatusWarmup() {
+  if (gatewayWarmupScheduled) return;
+  gatewayWarmupScheduled = true;
+  const timer = setTimeout(() => {
+    prewarmGatewayStatusCache();
+  }, 0);
+  if ('unref' in timer && typeof timer.unref === 'function') {
+    timer.unref();
+  }
+}
+
+async function refreshCliCache(timeoutMs = CLI_STATUS_TIMEOUT_MS, force = false): Promise<void> {
+  if (!force && Date.now() < cliStatusRetryAfter) {
+    return;
+  }
+  if (!force && refreshPromise) return refreshPromise;
+
+  const generation = statusGeneration;
+  refreshPromise = (async () => {
+    try {
+      const parsed = await runCliStatusSnapshot(timeoutMs);
       if (generation === statusGeneration) {
         statusCache = { data: parsed, ts: Date.now() };
       }
+      cliStatusFailureCount = 0;
+      cliStatusRetryAfter = 0;
     } catch (err) {
-      console.error('[gateway-client] CLI cache refresh failed:', (err as Error).message?.slice(0, 80));
+      cliStatusFailureCount += 1;
+      const backoffMs = Math.min(
+        CLI_STATUS_FAILURE_BASE_BACKOFF_MS * (2 ** Math.max(0, cliStatusFailureCount - 1)),
+        CLI_STATUS_FAILURE_MAX_BACKOFF_MS,
+      );
+      cliStatusRetryAfter = Date.now() + backoffMs;
+
+      const now = Date.now();
+      if (now - cliStatusLastErrorLogAt >= CLI_STATUS_ERROR_LOG_COOLDOWN_MS || cliStatusFailureCount === 1) {
+        const message = (err as Error).message?.slice(0, 120) ?? 'unknown CLI failure';
+        console.warn(
+          `[gateway-client] CLI cache refresh failed (${cliStatusFailureCount}) — backing off for ${Math.round(backoffMs / 1000)}s: ${message}`
+        );
+        cliStatusLastErrorLogAt = now;
+      }
     } finally {
       refreshPromise = null;
     }
@@ -212,6 +273,7 @@ let refreshInterval: ReturnType<typeof setInterval> | null = null;
 function ensureCliRefreshLoop() {
   if (refreshInterval) return;
   refreshInterval = setInterval(() => {
+    if (Date.now() < cliStatusRetryAfter) return;
     if (statusCache && Date.now() - statusCache.ts < CACHE_TTL_MS) return;
     void refreshCliCache();
   }, CACHE_TTL_MS);
@@ -226,6 +288,8 @@ function wait(ms: number) {
     }
   });
 }
+
+scheduleGatewayStatusWarmup();
 
 // ── Public API ──
 
@@ -243,27 +307,15 @@ export async function getGatewayStatus(options?: {
 }> {
   const fresh = options?.fresh ?? false;
   const maxAgeMs = options?.maxAgeMs ?? (fresh ? CLI_FRESH_MAX_AGE_MS : CACHE_TTL_MS);
-  // Strategy 1: REST API (fast path)
-  const restResult = await fetchRestApi<{
-    ts: number;
-    sessions: { count?: number; sessions?: Array<Record<string, unknown>> };
-    agents: { agents?: Array<Record<string, unknown>> };
-  }>('status', { activeMinutes: '10080' });
-
-  if (restResult?.sessions) {
-    return {
-      gateway: { reachable: true, freshness: 'fresh', source: 'rest' },
-      sessions: { recent: restResult.sessions.sessions ?? [] },
-      agents: { agents: restResult.agents?.agents ?? [] },
-    };
+  const readiness = await fetchGatewayReadiness();
+  if (!readiness && !loggedStatusCompatibilityNote) {
+    loggedStatusCompatibilityNote = true;
+    console.warn(
+      '[gateway-client] OpenClaw does not expose the old /api/v1/status route. ' +
+      'Using official /readyz + CLI status compatibility mode instead.'
+    );
   }
 
-  // Strategy 2: CLI cache (slow fallback)
-  console.warn(
-    '[gateway-client] ⚠️ REST API unavailable — falling back to CLI cache (30-40s).\n' +
-    '  Fix: run ~/cortex-ide/scripts/rest-api-patch.sh\n' +
-    '  PR: https://github.com/openclaw/openclaw/pull/47863'
-  );
   ensureCliRefreshLoop();
 
   if (fresh) {
@@ -279,25 +331,31 @@ export async function getGatewayStatus(options?: {
     // Report freshness honestly based on actual data age, not request type
     const cliFreshness = ageMs <= CLI_FRESH_MAX_AGE_MS ? 'fresh' : 'stale';
     return {
-      gateway: { reachable: true, freshness: cliFreshness, source: 'cli' },
+      gateway: { reachable: readiness?.ok ?? true, freshness: cliFreshness, source: 'cli' },
       sessions: { recent: sessions?.recent ?? [] },
       agents: { agents: agents?.agents ?? [] },
     };
   } else if (statusCache) {
     const ageMs = Date.now() - statusCache.ts;
-    if (ageMs >= CACHE_TTL_MS) {
+    if (ageMs >= CACHE_TTL_MS && Date.now() >= cliStatusRetryAfter) {
       void refreshCliCache();
     }
   } else {
-    void refreshCliCache();
-    await Promise.race([
-      refreshPromise ?? Promise.resolve(),
-      wait(CLI_COLD_START_WAIT_MS),
-    ]);
+    if (Date.now() >= cliStatusRetryAfter) {
+      void refreshCliCache();
+      await Promise.race([
+        refreshPromise ?? Promise.resolve(),
+        wait(CLI_COLD_START_WAIT_MS),
+      ]);
+    }
   }
 
   if (!statusCache) {
-    throw new Error('Gateway status unavailable — REST is down and CLI cache is still warming.');
+    return {
+      gateway: { reachable: readiness?.ok ?? false, freshness: 'warming', source: 'cli' },
+      sessions: { recent: [] },
+      agents: { agents: [] },
+    };
   }
 
   const data = statusCache.data as Record<string, unknown>;
@@ -305,7 +363,7 @@ export async function getGatewayStatus(options?: {
   const agents = data.agents as { agents?: Array<Record<string, unknown>> } | undefined;
   const freshness = Date.now() - statusCache.ts <= CLI_FRESH_MAX_AGE_MS ? 'fresh' : 'stale';
   return {
-    gateway: { reachable: true, freshness, source: 'cli' },
+    gateway: { reachable: readiness?.ok ?? true, freshness, source: 'cli' },
     sessions: { recent: sessions?.recent ?? [] },
     agents: { agents: agents?.agents ?? [] },
   };
@@ -367,14 +425,15 @@ export async function gatewayRpc<T>(
   params: Record<string, unknown> = {},
   timeoutMs = 15_000,
 ): Promise<T> {
-  // Strategy 1: REST API fast path (#138)
-  const restEndpoint = RPC_REST_ENDPOINTS[method];
-  if (restEndpoint) {
-    const restResult = await postRestApi<T>(restEndpoint, params, Math.min(timeoutMs, REST_RPC_TIMEOUT_MS));
-    if (restResult !== null) {
-      // REST success resets CLI circuit breaker
-      cliConsecutiveFailures = 0;
-      return restResult;
+  if (method === 'chat.history') {
+    const sessionKey = typeof params.sessionKey === 'string' ? params.sessionKey : '';
+    const limit = typeof params.limit === 'number' ? params.limit : 24;
+    if (sessionKey) {
+      const restResult = await fetchGatewaySessionHistory(sessionKey, limit);
+      if (restResult !== null) {
+        cliConsecutiveFailures = 0;
+        return restResult as T;
+      }
     }
   }
 
