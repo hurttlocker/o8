@@ -76,6 +76,50 @@ jobs:
             echo "- \`$hash\` $msg"
           done >> /tmp/CHANGELOG.md
 
+      - name: Validate — blocklist check
+        run: |
+          # ── Blocklist: terms that must NEVER appear in the public changelog ──
+          # Add new internal codenames here when they're introduced.
+          BLOCKLIST=(
+            Cortex
+            OpenClaw
+            NemoClaw
+            PicoClaw
+            Codex
+            Tauri
+            Drizzle
+            better-sqlite
+            tmux
+            Anthropic
+            Claude
+            Gemini
+            GPT-4
+            GPT-5
+            BYOK
+            "API key"
+            "API keys"
+            cortexrules
+            CortexClient
+            ".cortex"
+          )
+
+          LEAKED=""
+          for term in "${BLOCKLIST[@]}"; do
+            if grep -qi "$term" /tmp/CHANGELOG.md; then
+              LEAKED="$LEAKED\n  - '$term'"
+            fi
+          done
+
+          if [ -n "$LEAKED" ]; then
+            echo "::error::BLOCKED — internal terms found in public changelog:$LEAKED"
+            echo ""
+            echo "Fix: add a sed rule in the 'Generate changelog' step to strip these terms."
+            echo "Then re-run this workflow."
+            exit 1
+          fi
+
+          echo "Blocklist check passed — changelog is clean."
+
       - name: Generate stats
         run: |
           echo "# Development Stats" > /tmp/STATS.md
