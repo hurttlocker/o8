@@ -2825,17 +2825,9 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
                 onChange={(e) => setEditedCommand(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && editedCommand.trim()) {
-                    // Approve with potentially edited command
-                    setApprovedToolsSet(prev => new Set([...prev, 'run_terminal_command']));
-                    setPendingApproval(null);
-                    const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-                    if (lastUserMsg) {
-                      setInput(lastUserMsg.content);
-                      setTimeout(() => {
-                        const sendBtn = document.querySelector('[data-send-btn]') as HTMLButtonElement;
-                        if (sendBtn) sendBtn.click();
-                      }, 100);
-                    }
+                    // Trigger the main Approve button click
+                    const approveBtn = document.querySelector('[data-approve-btn]') as HTMLButtonElement;
+                    if (approveBtn) approveBtn.click();
                   } else if (e.key === 'Escape') {
                     setPendingApproval(null);
                   }
@@ -2980,19 +2972,133 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
           <div style={{ display: 'flex', gap: 8 }}>
             <button
               type="button"
+              data-approve-btn="true"
               onClick={() => {
-                setApprovedToolsSet(prev => new Set([...prev, pendingApproval.name]));
+                const toolName = pendingApproval.name;
+                const editedArgs = toolName === 'run_terminal_command' && editedCommand
+                  ? { ...pendingApproval.args, command: editedCommand }
+                  : pendingApproval.args;
                 setPendingApproval(null);
-                // Re-send the last message with approval
+
+                // Build updated approval set synchronously
+                const newApprovedTools = new Set([...approvedToolsSet, toolName]);
+                setApprovedToolsSet(newApprovedTools);
+
+                // Re-send directly via fetch — don't duplicate the user message
                 const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-                if (lastUserMsg) {
-                  setInput(lastUserMsg.content);
-                  // Auto-send after state updates
-                  setTimeout(() => {
-                    const sendBtn = document.querySelector('[data-send-btn]') as HTMLButtonElement;
-                    if (sendBtn) sendBtn.click();
-                  }, 100);
-                }
+                if (!lastUserMsg) return;
+
+                setIsStreaming(true);
+                setShowTypingIndicator(true);
+                setStreamContent('');
+                const ctrl = new AbortController();
+                abortRef.current = ctrl;
+
+                // Get clean message history (same filtering as handleSend)
+                const cleanMsgs = messages
+                  .filter(m => !m.isError && !m.content.startsWith('Error: ') && !m.content.startsWith('Action cancelled:') && m.content.trim())
+                  .map(m => ({ role: m.role, content: m.content }));
+                const recentMsgs = cleanMsgs.length > 40 ? cleanMsgs.slice(-40) : cleanMsgs;
+
+                // Fire the request with approvals baked in
+                fetch('/api/v2/proxy/llm', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', 'x-tab-id': tabId },
+                  body: JSON.stringify({
+                    model: model.id,
+                    provider: model.provider,
+                    messages: recentMsgs,
+                    approvedTools: [...newApprovedTools],
+                  }),
+                  signal: ctrl.signal,
+                }).then(async (res) => {
+                  if (!res.ok || !res.body) {
+                    setIsStreaming(false);
+                    setShowTypingIndicator(false);
+                    return;
+                  }
+                  const reader = res.body.getReader();
+                  const decoder = new TextDecoder();
+                  let sseBuffer = '';
+                  let accumulated = '';
+
+                  while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    sseBuffer += decoder.decode(value, { stream: true });
+                    const sseLines = sseBuffer.split('\n');
+                    sseBuffer = sseLines.pop() ?? '';
+
+                    for (const sseLine of sseLines) {
+                      if (!sseLine.startsWith('data: ')) continue;
+                      const data = sseLine.slice(6);
+                      if (data === '[DONE]') continue;
+
+                      try {
+                        const parsed = JSON.parse(data);
+                        if (parsed.type === 'content' && parsed.text) {
+                          accumulated += parsed.text;
+                          setStreamContent(accumulated);
+                          setShowTypingIndicator(false);
+                        } else if (parsed.type === 'tool_call') {
+                          setActiveThinking(prev => {
+                            const steps = prev?.steps ?? [];
+                            const existing = steps.find(s => s.label === parsed.name);
+                            if (existing) return prev;
+                            return {
+                              steps: [...steps, { type: 'tool' as const, label: parsed.name, tool: parsed.name, file: (parsed.args?.path as string) || '', status: parsed.status || 'running' }],
+                              thinking: prev?.thinking ?? '',
+                            };
+                          });
+                        } else if (parsed.type === 'tool_result') {
+                          // tool completed
+                        } else if (parsed.type === 'approval_required') {
+                          // Another approval needed (chained tools)
+                          const isTerminal = parsed.name === 'run_terminal_command';
+                          setPendingApproval({
+                            name: parsed.name,
+                            args: parsed.args,
+                            summary: parsed.summary,
+                            editable: parsed.editable ?? isTerminal,
+                            diff: parsed.diff,
+                          });
+                          if (isTerminal) setEditedCommand(String(parsed.args?.command || ''));
+                        } else if (parsed.type === 'sources') {
+                          // Handle sources — will be picked up on finalize
+                        } else if (parsed.type === 'usage') {
+                          // Usage tracking
+                        }
+                      } catch { /* skip malformed SSE */ }
+                    }
+                  }
+
+                  // Finalize the assistant message
+                  if (accumulated) {
+                    setMessages(prev => {
+                      // Find the last assistant message (streaming placeholder) and replace
+                      const last = prev[prev.length - 1];
+                      if (last && last.role === 'assistant' && last.id?.startsWith('stream-')) {
+                        return [...prev.slice(0, -1), { ...last, content: accumulated }];
+                      }
+                      // Or append new assistant message
+                      return [...prev, {
+                        id: `asst-${Date.now()}`,
+                        role: 'assistant' as const,
+                        content: accumulated,
+                        timestamp: Date.now(),
+                      }];
+                    });
+                  }
+
+                  setStreamContent('');
+                  setIsStreaming(false);
+                  setShowTypingIndicator(false);
+                  setActiveThinking(null);
+                }).catch(() => {
+                  setIsStreaming(false);
+                  setShowTypingIndicator(false);
+                });
               }}
               style={{
                 paddingTop: 7,

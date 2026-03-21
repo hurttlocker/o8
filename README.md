@@ -27,6 +27,7 @@ Do **not** begin as a full VS Code fork.
 - **Cortex** = memory and continuity substrate
 - **OpenClaw / ACP runtimes** = execution substrate
 - **Git / GitHub / worktrees / terminals** = software delivery substrate
+- **Autonomous Tools** = native file, terminal, and github integration
 - **Cortex IDE** = operator surface that makes all of it legible and steerable
 
 ### Front-door rule
