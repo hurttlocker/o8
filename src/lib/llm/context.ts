@@ -6,8 +6,19 @@
  */
 
 import { execSync } from 'node:child_process';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+
+// Project rules files — checked in priority order, first found wins
+const RULES_FILES = [
+  '.cortexrules',
+  '.cortex/rules.md',
+  '.cursorrules',
+  '.clinerules',
+  'AGENTS.md',
+];
 
 interface WorkspaceContext {
   repoName: string;
@@ -39,7 +50,31 @@ export function getWorkspaceContext(): WorkspaceContext {
   return { repoName, branch, status, recentCommits, fileTreeSummary };
 }
 
+/**
+ * Load project rules from .cortexrules, .cursorrules, etc.
+ * First file found wins. Max 4KB to prevent context bloat.
+ */
+function loadProjectRules(): { content: string; source: string } | null {
+  for (const filename of RULES_FILES) {
+    const filepath = join(REPO_ROOT, filename);
+    if (existsSync(filepath)) {
+      try {
+        let content = readFileSync(filepath, 'utf-8').trim();
+        if (content.length > 4096) {
+          content = content.slice(0, 4096) + '\n... (truncated — max 4KB)';
+        }
+        return { content, source: filename };
+      } catch {
+        continue;
+      }
+    }
+  }
+  return null;
+}
+
 export function buildSystemPrompt(ctx: WorkspaceContext): string {
+  const rules = loadProjectRules();
+
   return `You are an AI assistant integrated into Cortex IDE, a desktop coding environment.
 
 ## Current Workspace
@@ -68,5 +103,8 @@ ${ctx.fileTreeSummary}
 - When the user asks about code, reference the file tree to guide them.
 - Format code blocks with language tags for syntax highlighting.
 - When generating Mermaid diagrams, use simple syntax: short node IDs (A, B, C), avoid special characters in labels, use \`graph TD\` or \`flowchart TD\` for flow charts. Keep labels short and wrap in square brackets like \`A[Label]\`. Avoid pipes in labels.
-- When you use information from tool results (search_web, read_file, search_code), cite your sources inline using numbered references like [1], [2], etc. The source cards will be shown separately — just use the numbers in your text to reference them.`;
+- When you use information from tool results (search_web, read_file, search_code), cite your sources inline using numbered references like [1], [2], etc. The source cards will be shown separately — just use the numbers in your text to reference them.${rules ? `
+
+## Project Rules (from ${rules.source})
+${rules.content}` : ''}`;
 }
