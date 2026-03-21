@@ -88,9 +88,10 @@ interface BubbleProps {
   agentName: string;
   isNew?: boolean;
   onOpenMermaid?: (code: string) => void;
+  onRunInTerminal?: (command: string) => void;
 }
 
-const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, onOpenMermaid }: BubbleProps) {
+const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, onOpenMermaid, onRunInTerminal }: BubbleProps) {
   const isUser = entry.role === 'user';
   const hasText = Boolean(entry.text.trim());
   const hasMedia = Boolean(entry.media?.length);
@@ -105,8 +106,8 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
   })();
 
   const mdBlocks = useMemo(
-    () => hasText ? renderMarkdownBlocks(entry.text, onOpenMermaid) : [],
-    [entry.text, hasText, onOpenMermaid],
+    () => hasText ? renderMarkdownBlocks(entry.text, onOpenMermaid, onRunInTerminal) : [],
+    [entry.text, hasText, onOpenMermaid, onRunInTerminal],
   );
 
   const [activeBlock, setActiveBlock] = useState<number | null>(null);
@@ -263,7 +264,7 @@ interface RenderedBlock {
   rawText: string;
 }
 
-function renderMarkdownBlocks(text: string, onOpenMermaid?: (code: string) => void): RenderedBlock[] {
+function renderMarkdownBlocks(text: string, onOpenMermaid?: (code: string) => void, onRunInTerminal?: (command: string) => void): RenderedBlock[] {
   const lines = text.split('\n');
   const blocks: RenderedBlock[] = [];
   let i = 0;
@@ -283,7 +284,7 @@ function renderMarkdownBlocks(text: string, onOpenMermaid?: (code: string) => vo
       const raw = codeLines.join('\n');
       blocks.push({
         rawText: lang?.toLowerCase() === 'mermaid' ? 'diagram' : raw,
-        element: <CodeBlock key={`code-${i}`} code={raw} language={lang || undefined} onOpenMermaid={onOpenMermaid} />,
+        element: <CodeBlock key={`code-${i}`} code={raw} language={lang || undefined} onOpenMermaid={onOpenMermaid} onRunInTerminal={onRunInTerminal} />,
       });
       continue;
     }
@@ -639,16 +640,26 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
           aria-label="Switch session"
           aria-expanded={pickerOpen}
         >
-          <span
-            style={{
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              backgroundColor: connectionDotColor,
-              flexShrink: 0,
-              boxShadow: connectionDotColor === '#34c759' ? '0 0 8px rgba(52, 199, 89, 0.5)' : 'none',
-            }}
-          />
+          <span style={{ position: 'relative', width: 10, height: 10, flexShrink: 0 }}>
+            {connectionDotColor === '#ff9f0a' && (
+              <span style={{
+                position: 'absolute', inset: 0, borderRadius: '50%',
+                background: '#a78bfa',
+                animation: 'reviewingRing 2s cubic-bezier(0.4, 0, 0.2, 1) infinite',
+              }} />
+            )}
+            <span style={{
+              position: 'relative', display: 'block',
+              width: 10, height: 10, borderRadius: '50%',
+              backgroundColor: connectionDotColor === '#ff9f0a' ? undefined : connectionDotColor,
+              background: connectionDotColor === '#ff9f0a' ? 'linear-gradient(135deg, #f59e0b, #a78bfa)' : connectionDotColor,
+              boxShadow: connectionDotColor === '#34c759' ? '0 0 8px rgba(52, 199, 89, 0.5)'
+                : connectionDotColor === '#2563eb' ? '0 0 8px rgba(37, 99, 235, 0.5)'
+                : connectionDotColor === '#ff9f0a' ? '0 0 8px rgba(167, 139, 250, 0.5)'
+                : 'none',
+              animation: connectionDotColor === '#ff9f0a' ? 'reviewingBreathe 2.4s ease-in-out infinite' : 'none',
+            }} />
+          </span>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{
               fontSize: 14,
@@ -686,37 +697,37 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
           />
         </button>
 
-        <div
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 8px)',
-            left: '-12px',
-            right: '-12px',
-            zIndex: 100,
-            borderRadius: '14px',
-            background: 'var(--t-panel)',
-            backdropFilter: 'blur(40px) saturate(1.8)',
-            WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-            boxShadow: '0 20px 60px rgba(15, 23, 42, 0.18), 0 1px 3px rgba(15, 23, 42, 0.08)',
-            padding: '8px',
-            maxHeight: '60vh',
-            overflowY: 'auto',
-            WebkitOverflowScrolling: 'touch',
-            opacity: pickerOpen ? 1 : 0,
-            transform: pickerOpen ? 'translateY(0) scale(1)' : 'translateY(-8px) scale(0.97)',
-            pointerEvents: pickerOpen ? 'auto' : 'none',
-            transition: 'opacity 220ms cubic-bezier(0.32, 0.72, 0, 1), transform 220ms cubic-bezier(0.32, 0.72, 0, 1)',
-          }}
-        >
-          {projectGroups.map((group, gi) => {
+        {pickerOpen ? (
+          <div
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 8px)',
+              left: '-12px',
+              right: '-12px',
+              zIndex: 100,
+              borderRadius: '14px',
+              background: 'var(--t-panel)',
+              backdropFilter: 'blur(40px) saturate(1.8)',
+              WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
+              boxShadow: '0 20px 60px rgba(15, 23, 42, 0.18), 0 1px 3px rgba(15, 23, 42, 0.08)',
+              padding: '8px',
+              maxHeight: '60vh',
+              overflowY: 'auto',
+              WebkitOverflowScrolling: 'touch',
+            }}
+          >
+            {projectGroups.map((group, gi) => {
             const isExpanded = expandedGroup === group.workspace;
             const isSingle = group.sessions.length === 1;
             const containsSelected = group.sessions.some((s) => s.id === selectedSession?.id);
-            const dotColor = group.hasRunning
-              ? '#34c759'
-              : group.bestContextPct >= 75
-                ? '#ff9f0a'
-                : '#8e8e93';
+            const isGroupMainOpenClaw = group.sessions.some((s) => s.runtime === 'openclaw' && s.sessionKey === 'agent:main:main');
+            const dotColor = isGroupMainOpenClaw
+              ? '#2563eb'
+              : group.hasRunning
+                ? '#34c759'
+                : group.bestContextPct >= 75
+                  ? '#ff9f0a'
+                  : '#8e8e93';
 
             return (
               <div key={group.workspace}>
@@ -747,14 +758,30 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                     minHeight: '44px',
                   }}
                 >
-                  <span style={{
-                    width: '8px',
-                    height: '8px',
-                    borderRadius: '50%',
-                    backgroundColor: dotColor,
-                    flexShrink: 0,
-                    boxShadow: group.hasRunning ? `0 0 6px ${dotColor}` : 'none',
-                  }} />
+                  {(() => {
+                    const isGroupReviewing = !isGroupMainOpenClaw && !group.hasRunning && group.sessions.some((s) => s.status === 'reviewing');
+                    return (
+                      <span style={{ position: 'relative', width: '8px', height: '8px', flexShrink: 0 }}>
+                        {isGroupReviewing && (
+                          <span style={{
+                            position: 'absolute', inset: 0, borderRadius: '50%',
+                            background: '#a78bfa',
+                            animation: 'reviewingRing 2s cubic-bezier(0.4, 0, 0.2, 1) infinite',
+                          }} />
+                        )}
+                        <span style={{
+                          position: 'relative', display: 'block',
+                          width: '8px', height: '8px', borderRadius: '50%',
+                          background: isGroupReviewing ? 'linear-gradient(135deg, #f59e0b, #a78bfa)' : dotColor,
+                          flexShrink: 0,
+                          boxShadow: isGroupMainOpenClaw ? `0 0 6px ${dotColor}`
+                            : isGroupReviewing ? '0 0 6px rgba(167, 139, 250, 0.5)'
+                            : group.hasRunning ? `0 0 6px ${dotColor}` : 'none',
+                          animation: isGroupReviewing ? 'reviewingBreathe 2.4s ease-in-out infinite' : 'none',
+                        }} />
+                      </span>
+                    );
+                  })()}
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{
                       fontSize: '14px',
@@ -802,7 +829,9 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                       const isActive = session.id === selectedSession?.id;
                       const isRunning = session.status === 'running' || session.status === 'reviewing';
                       const sessionPercent = Math.round(session.context?.usedPercent ?? 0);
-                      const sDotColor = isRunning ? '#34c759' : sessionPercent >= 75 ? '#ff9f0a' : '#8e8e93';
+                      const isSessionMainOpenClaw = session.runtime === 'openclaw' && session.sessionKey === 'agent:main:main';
+                      const isSessionReviewing = !isSessionMainOpenClaw && !isRunning && session.status === 'reviewing';
+                      const sDotColor = isSessionMainOpenClaw ? '#2563eb' : isRunning ? '#34c759' : isSessionReviewing ? '#a78bfa' : sessionPercent >= 75 ? '#ff9f0a' : '#8e8e93';
                       const rawName = session.name ?? session.sessionKey ?? session.id;
                       const runtimeTag = session.runtime === 'claude-code' ? ' · Claude Code'
                         : session.runtime === 'codex' ? ' · Codex'
@@ -836,14 +865,22 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                             minHeight: '44px',
                           }}
                         >
-                          <span style={{
-                            width: '6px',
-                            height: '6px',
-                            borderRadius: '50%',
-                            backgroundColor: sDotColor,
-                            flexShrink: 0,
-                            boxShadow: isRunning ? `0 0 5px ${sDotColor}` : 'none',
-                          }} />
+                          <span style={{ position: 'relative', width: '6px', height: '6px', flexShrink: 0 }}>
+                            {isSessionReviewing && (
+                              <span style={{
+                                position: 'absolute', inset: 0, borderRadius: '50%',
+                                background: '#a78bfa',
+                                animation: 'reviewingRing 2s cubic-bezier(0.4, 0, 0.2, 1) infinite',
+                              }} />
+                            )}
+                            <span style={{
+                              position: 'relative', display: 'block',
+                              width: '6px', height: '6px', borderRadius: '50%',
+                              background: isSessionReviewing ? 'linear-gradient(135deg, #f59e0b, #a78bfa)' : sDotColor,
+                              boxShadow: isRunning ? `0 0 5px ${sDotColor}` : isSessionReviewing ? '0 0 5px rgba(167, 139, 250, 0.4)' : 'none',
+                              animation: isSessionReviewing ? 'reviewingBreathe 2.4s ease-in-out infinite' : 'none',
+                            }} />
+                          </span>
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <div style={{
                               fontSize: '13px',
@@ -888,8 +925,9 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                 ) : null}
               </div>
             );
-          })}
-        </div>
+            })}
+          </div>
+        ) : null}
       </div>
 
       <button
@@ -929,6 +967,7 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   transcript,
   currentAgentName,
   onOpenMermaid,
+  onRunInTerminal,
   streamingText,
   agentRunning,
   scrollRef,
@@ -941,6 +980,7 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   transcript: MobileTranscriptEntry[];
   currentAgentName: string;
   onOpenMermaid?: (code: string) => void;
+  onRunInTerminal?: (command: string) => void;
   streamingText: string;
   agentRunning: boolean;
   scrollRef: React.RefObject<HTMLDivElement | null>;
@@ -983,6 +1023,7 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
                 agentName={currentAgentName}
                 isNew={isNew}
                 onOpenMermaid={onOpenMermaid}
+                onRunInTerminal={onRunInTerminal}
               />
             );
           })
@@ -1676,12 +1717,14 @@ export function DesktopChat({
   draftInjection,
   onOpenDiff,
   onOpenMermaid,
+  onRunInTerminal,
   onWsStatusChange,
 }: {
   externalSessionKey?: string;
   draftInjection?: { id: string; text: string } | null;
   onOpenDiff?: () => void;
   onOpenMermaid?: (code: string) => void;
+  onRunInTerminal?: (command: string) => void;
   onWsStatusChange?: (status: 'connected' | 'connecting' | 'reconnecting' | 'disconnected') => void;
 } = {}) {
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot | null>(null);
@@ -1857,11 +1900,14 @@ export function DesktopChat({
     return 'Session';
   }, [selectedSession]);
 
-  const connectionDotColor = selectedSession?.status === 'running'
-    ? '#34c759'
-    : selectedSession?.status === 'reviewing'
-      ? '#ff9f0a'
-      : '#8e8e93';
+  const isMainOpenClaw = selectedSession?.runtime === 'openclaw' && selectedSession?.sessionKey === 'agent:main:main';
+  const connectionDotColor = isMainOpenClaw
+    ? '#2563eb'
+    : selectedSession?.status === 'running'
+      ? '#34c759'
+      : selectedSession?.status === 'reviewing'
+        ? '#ff9f0a'
+        : '#8e8e93';
 
   const currentAgentName = selectedSession ? getAgentName(selectedSession) : 'Mister';
 
@@ -1896,11 +1942,14 @@ export function DesktopChat({
     if (!key) return;
     const requestId = ++transcriptRequestRef.current;
     try {
-      // Route to Claude Code transcript API for claude-code sessions
+      // Route local runtimes to runtime-specific transcript APIs.
       const isCC = key.startsWith('claude-code:');
+      const isCodex = key.startsWith('codex:');
       const url = isCC
         ? `/api/claude-code/transcript?sessionKey=${encodeURIComponent(key)}&limit=50`
-        : `/api/mobile/history?sessionKey=${encodeURIComponent(key)}&limit=50`;
+        : isCodex
+          ? `/api/codex/transcript?sessionKey=${encodeURIComponent(key)}&limit=50`
+          : `/api/mobile/history?sessionKey=${encodeURIComponent(key)}&limit=50`;
       const res = await fetch(url);
       if (!res.ok) return;
       const data = await res.json();
@@ -2428,11 +2477,26 @@ export function DesktopChat({
     const session = sessions.find(s => s.id === sessionId);
     if (session) {
       setSelectedKey(session.sessionKey);
-      // Reset session refs when switching
-      if (session.runtime !== 'claude-code') claudeSessionIdRef.current = undefined;
-      if (session.runtime !== 'codex') codexThreadIdRef.current = undefined;
     }
   }, [sessions]);
+
+  useEffect(() => {
+    const session = sessions.find(s => s.sessionKey === selectedKey);
+
+    // Reset session refs when switching
+    claudeSessionIdRef.current = undefined;
+    codexThreadIdRef.current = undefined;
+
+    if (!session) return;
+
+    // Initialize refs from discovered session data so first send resumes correctly
+    if (session.runtime === 'claude-code' && session.sessionKey.startsWith('claude-code:')) {
+      claudeSessionIdRef.current = session.sessionKey.replace('claude-code:', '');
+    }
+    if (session.runtime === 'codex' && session.sessionKey.startsWith('codex:')) {
+      codexThreadIdRef.current = session.sessionKey.replace('codex:', '');
+    }
+  }, [sessions, selectedKey]);
 
   // ── Init ──
   useEffect(() => { void fetchSessions(); }, [fetchSessions]);
@@ -2581,6 +2645,7 @@ export function DesktopChat({
         transcript={transcript}
         currentAgentName={currentAgentName}
         onOpenMermaid={onOpenMermaid}
+        onRunInTerminal={onRunInTerminal}
         streamingText={streamingText}
         agentRunning={agentRunning}
         scrollRef={scrollRef}
@@ -2650,6 +2715,16 @@ export function DesktopChat({
         chatSendDisabled={chatSendDisabled}
       />
       {diffOpen ? <DiffModal onClose={() => setDiffOpen(false)} /> : null}
+      <style>{`
+        @keyframes reviewingBreathe {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.25); opacity: 0.7; }
+        }
+        @keyframes reviewingRing {
+          0% { transform: scale(1); opacity: 0.6; }
+          100% { transform: scale(2.8); opacity: 0; }
+        }
+      `}</style>
     </div>
   );
 }
