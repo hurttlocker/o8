@@ -406,6 +406,7 @@ const AgentCard = memo(function AgentCard({
   onSelectSession,
   onSelectPR,
   onAgentKill,
+  onRetry,
   lifecycleEvents,
 }: {
   group: WorkspaceGroup;
@@ -414,6 +415,7 @@ const AgentCard = memo(function AgentCard({
   onSelectSession?: (sessionKey: string) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
   onAgentKill?: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
+  onRetry?: (agent: AgentDetail) => void;
   lifecycleEvents?: Map<string, { state: string; exitCode?: number; ts: number }>;
 }) {
   const model = group.primaryModel;
@@ -724,8 +726,40 @@ const AgentCard = memo(function AgentCard({
                 </div>
               </div>
 
-              {/* Right: diff stats */}
-              {diff && (diff.add > 0 || diff.del > 0) ? (
+              {/* Right: diff stats or failed-state actions */}
+              {isFailed ? (
+                <div style={{ display: 'flex', gap: 4, flexShrink: 0, marginTop: 1 }}>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRetry?.(agent);
+                    }}
+                    style={{
+                      padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.2)',
+                      background: 'rgba(239,68,68,0.06)', color: '#ef4444',
+                      fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                      fontFamily: 'inherit', lineHeight: '14px',
+                    }}
+                  >
+                    Retry
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      // Dismiss: kill agent so it re-appears as idle on next fetch
+                      if (agent.tmuxSession) onAgentKill?.(agent.tmuxSession, 'SIGTERM');
+                    }}
+                    style={{
+                      padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(0,0,0,0.06)',
+                      background: 'rgba(0,0,0,0.03)', color: 'var(--t-text-muted)',
+                      fontSize: 10, fontWeight: 600, cursor: 'pointer',
+                      fontFamily: 'inherit', lineHeight: '14px',
+                    }}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              ) : diff && (diff.add > 0 || diff.del > 0) ? (
                 <span
                   onClick={pr ? (e) => { e.stopPropagation(); onSelectPR?.(pr.number, group.repo); } : undefined}
                   style={{
@@ -3422,6 +3456,17 @@ export const AgentPanel = memo(function AgentPanel({
               onSelectSession={onSelectSession}
               onSelectPR={onSelectPR}
               onAgentKill={onAgentKill}
+              onRetry={(agent) => {
+                fetch('/api/runtime/launch', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    runtime: agent.model?.toLowerCase().includes('codex') ? 'codex' : 'claude-code',
+                    prompt: agent.currentTask || 'Resume previous work',
+                    cwd: agent.workspace,
+                  }),
+                }).then(() => { setTimeout(() => fetchNowRef.current(), 2000); }).catch(() => {});
+              }}
               lifecycleEvents={lifecycleEvents}
             />
           ))

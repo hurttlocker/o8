@@ -226,6 +226,7 @@ interface SessionMeta {
   cwd?: string;
   gitBranch?: string;
   contextUsedPercent?: number;
+  hasErrorInTail?: boolean;
 }
 
 async function discoverProjectSessions(projectDirName: string): Promise<SessionMeta[]> {
@@ -293,6 +294,22 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
         } catch { /* skip */ }
       }
 
+      // Check tail for error/crash indicators (last 10 lines)
+      let hasErrorInTail = false;
+      const errorTailLines = lines.slice(-10);
+      for (const el of errorTailLines) {
+        try {
+          const ep = JSON.parse(el) as ClaudeCodeMessage;
+          if (ep.type === 'system' && typeof ep.message?.content === 'string') {
+            const lower = ep.message.content.toLowerCase();
+            if (lower.includes('error') || lower.includes('crash') || lower.includes('fatal') || lower.includes('oom') || lower.includes('killed')) {
+              hasErrorInTail = true;
+              break;
+            }
+          }
+        } catch { /* skip */ }
+      }
+
       sessions.push({
         sessionId,
         projectDir,
@@ -303,6 +320,7 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
         cwd: cwd ?? projectPath,
         gitBranch,
         contextUsedPercent,
+        hasErrorInTail,
       });
     } catch { /* skip unreadable files */ }
   }
@@ -357,6 +375,12 @@ function inferSessionStatus(meta: SessionMeta, liveProcesses: LiveClaudeProcess[
   // Check if a live claude process matches this session's CWD
   const hasLiveProcess = liveProcesses.some((p) => p.cwd && meta.cwd && p.cwd.startsWith(meta.cwd));
   if (hasLiveProcess) return 'running';
+
+  // If the JSONL tail contains error/crash indicators, mark as failed
+  if (meta.hasErrorInTail) {
+    const ageMs = Date.now() - meta.lastModified.getTime();
+    if (ageMs < 30 * 60_000) return 'failed'; // Failed within last 30 min
+  }
 
   // Recent activity = reviewing, older = idle
   const ageMs = Date.now() - meta.lastModified.getTime();
