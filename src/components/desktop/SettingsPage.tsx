@@ -2154,9 +2154,23 @@ export function SettingsPage() {
       const res = await fetch('/api/panel/github-status');
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
-      setAccounts(data.accounts || []);
-      setRepos(data.repos || []);
-      setDeviceFlowEnabled(Boolean(data.deviceFlowEnabled));
+      // API returns { authenticated, username, repos } — map to accounts array
+      if (data.authenticated && data.username) {
+        setAccounts([{
+          login: data.username,
+          name: data.username,
+          avatarUrl: `https://github.com/${data.username}.png`,
+          active: true,
+          scopes: ['repo', 'read:org'],
+          protocol: 'https',
+        }]);
+      } else if (data.accounts) {
+        setAccounts(data.accounts);
+      } else {
+        setAccounts([]);
+      }
+      setRepos(data.repos ? (Array.isArray(data.repos) ? data.repos : []) : []);
+      setDeviceFlowEnabled(Boolean(data.deviceFlowEnabled ?? true));
     } catch {
       setActionNote('Unable to refresh GitHub status right now.');
     } finally {
