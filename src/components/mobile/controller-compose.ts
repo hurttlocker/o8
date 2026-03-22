@@ -192,6 +192,8 @@ interface SteerSubmitArgs {
   setSurfaceNote: Dispatch<SetStateAction<string | null>>;
   setActionNoteBySession: Dispatch<SetStateAction<Record<string, string | null>>>;
   setSelectedId: Dispatch<SetStateAction<string>>;
+  setSelectedSessionKeyHint: Dispatch<SetStateAction<string>>;
+  setSelectedSessionFallback: Dispatch<SetStateAction<MobileInboxSnapshot['sessions'][number] | null>>;
   runAction: (payload: MobileActionRequest) => Promise<MobileActionResponse | undefined>;
   refreshInbox: () => Promise<MobileInboxSnapshot>;
   loadHistory: (sessionKey: string, force?: boolean) => Promise<unknown>;
@@ -215,6 +217,8 @@ export async function submitSteerTurn({
   setSurfaceNote,
   setActionNoteBySession,
   setSelectedId,
+  setSelectedSessionKeyHint,
+  setSelectedSessionFallback,
   runAction,
   refreshInbox,
   loadHistory,
@@ -312,6 +316,8 @@ export async function submitSteerTurn({
       if (existingOwned) {
         await runAction({ action: 'resume' as MobileActionRequest['action'], sessionKey: existingOwned.sessionKey, message });
         setSelectedId(existingOwned.id);
+        setSelectedSessionKeyHint(existingOwned.sessionKey);
+        setSelectedSessionFallback(existingOwned);
         setSurfaceNote('Resuming Codex session…');
         scheduleHistoryRefreshBurst(existingOwned.sessionKey, loadHistory);
       } else {
@@ -323,6 +329,8 @@ export async function submitSteerTurn({
           const newSession = freshInbox.sessions.find((session) => session.sessionKey === launchResult.sessionKey);
           if (newSession) {
             setSelectedId(newSession.id);
+            setSelectedSessionKeyHint(newSession.sessionKey);
+            setSelectedSessionFallback(newSession);
             await loadHistory(launchResult.sessionKey, true).catch(() => undefined);
           }
         } else {

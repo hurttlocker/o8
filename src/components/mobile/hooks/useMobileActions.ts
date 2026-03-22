@@ -86,7 +86,7 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
     selectedReviewPacket, reviewPacketBySession, reviewFileByPath,
     selectedReviewFilePath, draftBySession, actionStateBySession,
     draftAttachmentsBySession, enhancing, preEnhanceDraft,
-    setSelectedId, setActiveView, setSurfaceNote,
+    setSelectedId, setSelectedSessionKeyHint, setSelectedSessionFallback, setActiveView, setSurfaceNote,
     setDraftBySession, setActionStateBySession, setActionNoteBySession,
     setDraftAttachmentsBySession, setPendingOwnedTurnBySession,
     setRealtimeMutationsById, setPendingMutationIdBySession,
@@ -200,13 +200,15 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
       setSurfaceNote,
       setActionNoteBySession,
       setSelectedId,
+      setSelectedSessionKeyHint,
+      setSelectedSessionFallback,
       runAction,
       refreshInbox,
       loadHistory,
       playSendClick,
       relaySlashCommand,
     });
-  }, [actionStateBySession, snapshot, draftBySession, draftAttachmentsBySession, state.historyBySession, lastAssistantCountRef, setWaitingForResponse, setHistoryBySession, setDraftBySession, setDraftAttachmentsBySession, setPreEnhanceDraft, setSurfaceNote, setActionNoteBySession, setSelectedId, runAction, refreshInbox, loadHistory, relaySlashCommand]);
+  }, [actionStateBySession, snapshot, draftBySession, draftAttachmentsBySession, state.historyBySession, lastAssistantCountRef, setWaitingForResponse, setHistoryBySession, setDraftBySession, setDraftAttachmentsBySession, setPreEnhanceDraft, setSurfaceNote, setActionNoteBySession, setSelectedId, setSelectedSessionKeyHint, setSelectedSessionFallback, runAction, refreshInbox, loadHistory, relaySlashCommand]);
 
   const handleOwnedResumeSubmit = useCallback(async (sessionKey: string) => {
     await submitOwnedResumeTurn({
@@ -269,10 +271,10 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
 
   const handleSessionFocus = useCallback((sessionId: string) => {
     focusSessionSurface({
-      sessionId, snapshot, compactLine, setSelectedId, setActiveView, setControlsOpen, setDiffOpen,
+      sessionId, snapshot, compactLine, setSelectedId, setSelectedSessionKeyHint, setSelectedSessionFallback, setActiveView, setControlsOpen, setDiffOpen,
       setSurfaceNote, setSelectedReviewFilePath, loadHistory, loadOwnedReviewPacket, loadReviewFile,
     });
-  }, [snapshot, setSelectedId, setActiveView, setControlsOpen, setDiffOpen, setSurfaceNote, setSelectedReviewFilePath, loadHistory, loadOwnedReviewPacket, loadReviewFile]);
+  }, [snapshot, setSelectedId, setSelectedSessionKeyHint, setSelectedSessionFallback, setActiveView, setControlsOpen, setDiffOpen, setSurfaceNote, setSelectedReviewFilePath, loadHistory, loadOwnedReviewPacket, loadReviewFile]);
 
   const handleStopActiveRun = useCallback(async () => {
     const canInterruptOwnedCodex = Boolean(isOwnedCodexSession && state.selectedSession?.runtimeSurface?.capabilities.interrupt);

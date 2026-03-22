@@ -223,6 +223,8 @@ interface FocusSessionArgs {
   snapshot: MobileInboxSnapshot;
   compactLine: CompactLine;
   setSelectedId: Dispatch<SetStateAction<string>>;
+  setSelectedSessionKeyHint: Dispatch<SetStateAction<string>>;
+  setSelectedSessionFallback: Dispatch<SetStateAction<MobileInboxSnapshot['sessions'][number] | null>>;
   setActiveView: (view: 'chat') => void;
   setControlsOpen: Dispatch<SetStateAction<boolean>>;
   setDiffOpen: Dispatch<SetStateAction<boolean>>;
@@ -238,6 +240,8 @@ export function focusSessionSurface({
   snapshot,
   compactLine,
   setSelectedId,
+  setSelectedSessionKeyHint,
+  setSelectedSessionFallback,
   setActiveView,
   setControlsOpen,
   setDiffOpen,
@@ -251,13 +255,15 @@ export function focusSessionSurface({
   if (!nextSession?.sessionKey) return;
 
   setSelectedId(sessionId);
+  setSelectedSessionKeyHint(nextSession.sessionKey);
+  setSelectedSessionFallback(nextSession);
   setActiveView('chat');
   setControlsOpen(false);
   setDiffOpen(false);
   setSurfaceNote(`Focused ${compactLine(nextSession.name, 'the selected session', 40)}.`);
 
   void (async () => {
-    await loadHistory(nextSession.sessionKey).catch(() => undefined);
+    await loadHistory(nextSession.sessionKey, true).catch(() => undefined);
     if (!nextSession.sessionKey.startsWith('codex-owned:')) return;
     const packet = await loadOwnedReviewPacket(nextSession.sessionKey).catch(() => null);
     const nextPath = packet?.changedFiles[0]?.path;

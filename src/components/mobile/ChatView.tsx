@@ -279,7 +279,11 @@ export function ChatView({
   const toggleExpanded = useCallback((id: string) => {
     setExpandedMessageId((prev) => prev === id ? null : id);
   }, []);
-  const prevEntryCountRef = useRef(transcriptEntries.length);
+  const latestVisibleEntryRef = useRef<{ sessionKey?: string; entryId: string | null }>({
+    sessionKey: selectedSession?.sessionKey,
+    entryId: transcriptEntries[transcriptEntries.length - 1]?.id ?? null,
+  });
+  const initialScrollSessionRef = useRef<string | null>(null);
 
   // Track which messages are "new" (not yet seen) via state, avoiding
   // render-time ref access (#195). The effect computes the new set and
@@ -382,17 +386,14 @@ export function ChatView({
   }, [selectedSession?.sessionKey, transcriptIds, virtualizer]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // No auto-scroll — user controls position via "new messages" button.
-  // Only scroll to bottom on initial load (first non-zero entry set).
-  const initialScrollDone = useRef(false);
   /* eslint-disable react-hooks/set-state-in-effect -- local badge state depends on transcript append events */
   useEffect(() => {
-    if (initialScrollDone.current || transcriptEntries.length === 0) return;
-    initialScrollDone.current = true;
-    requestAnimationFrame(() => {
-      window.scrollTo({ top: document.documentElement.scrollHeight });
-    });
-  }, [transcriptEntries.length]);
+    if (!selectedSession?.sessionKey || transcriptEntries.length === 0) return;
+    if (initialScrollSessionRef.current === selectedSession.sessionKey) return;
+    initialScrollSessionRef.current = selectedSession.sessionKey;
+    setHasNewMessages(false);
+    requestAnimationFrame(() => onScrollToLatestMessage(true));
+  }, [selectedSession?.sessionKey, transcriptEntries.length, onScrollToLatestMessage]);
 
   // Track scroll position to determine stick-to-bottom + new message pill
   useEffect(() => {
@@ -406,17 +407,37 @@ export function ChatView({
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Detect new assistant messages while scrolled up
+  // Keep the newest turn in view after a send/response cycle, but preserve
+  // manual scroll control when the user intentionally browses older history.
   useEffect(() => {
-    const prevCount = prevEntryCountRef.current;
-    prevEntryCountRef.current = transcriptEntries.length;
-    if (transcriptEntries.length > prevCount && !stickToBottomRef.current) {
-      const newEntries = transcriptEntries.slice(prevCount);
-      if (newEntries.some((e) => e.role === 'assistant')) {
+    const latestEntry = transcriptEntries[transcriptEntries.length - 1] ?? null;
+    const previous = latestVisibleEntryRef.current;
+    const sessionChanged = previous.sessionKey !== selectedSession?.sessionKey;
+
+    if (!latestEntry) {
+      latestVisibleEntryRef.current = {
+        sessionKey: selectedSession?.sessionKey,
+        entryId: null,
+      };
+      return;
+    }
+
+    const latestChanged = previous.entryId !== latestEntry.id;
+    if (!sessionChanged && latestChanged) {
+      const shouldForceScroll = waitingForResponse || latestEntry.id.startsWith('optimistic-');
+      if (shouldForceScroll || stickToBottomRef.current) {
+        setHasNewMessages(false);
+        requestAnimationFrame(() => onScrollToLatestMessage(shouldForceScroll));
+      } else if (latestEntry.role === 'assistant') {
         setHasNewMessages(true);
       }
     }
-  }, [transcriptEntries]);
+
+    latestVisibleEntryRef.current = {
+      sessionKey: selectedSession?.sessionKey,
+      entryId: latestEntry.id,
+    };
+  }, [selectedSession?.sessionKey, transcriptEntries, waitingForResponse, onScrollToLatestMessage]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const hasEntries = transcriptEntries.length > 0;

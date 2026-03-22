@@ -119,7 +119,7 @@ function MobileRemoteShellInner({
   const { wsConnected, wsConnectionState, sendTerminalAttach, sendTerminalInput } = useMobileStreaming(state);
 
   // ── Data fetching + polling ──
-  const { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, stickyReviewFiles, linkedOwnedKey } = useMobilePolling(state, wsConnected);
+  const { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, stickyReviewFiles } = useMobilePolling(state, wsConnected);
 
   // ── Action handlers ──
   const actions = useMobileActions(state, { wsConnected, refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, sendTerminalAttach, sendTerminalInput });
@@ -248,18 +248,16 @@ function MobileRemoteShellInner({
   useEffect(() => {
     setSelectedId((currentId) => {
       if (currentId && snapshot.sessions.some((session) => session.id === currentId)) return currentId;
-      return pickCurrentSession(snapshot)?.id ?? '';
+      if (state.selectedSessionKeyHint) {
+        const matchingSession = snapshot.sessions.find((session) => session.sessionKey === state.selectedSessionKeyHint);
+        if (matchingSession) return matchingSession.id;
+      }
+      return currentId || (pickCurrentSession(snapshot)?.id ?? '');
     });
-  }, [snapshot, setSelectedId]);
+  }, [snapshot, setSelectedId, state.selectedSessionKeyHint]);
 
-  const effectiveHistoryKey = linkedOwnedKey && historyBySession[linkedOwnedKey]?.length ? linkedOwnedKey : selectedSessionKey;
-  const discoveredEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
-  const ownedEntries = linkedOwnedKey ? historyBySession[linkedOwnedKey] ?? [] : [];
-  const mergedEntries = linkedOwnedKey && ownedEntries.length > 0
-    ? [...discoveredEntries, ...ownedEntries]
-    : discoveredEntries;
-  const transcriptEntries = mergedEntries;
-  const transcriptGroups = effectiveHistoryKey ? historyGroupsBySession[effectiveHistoryKey] ?? [] : [];
+  const transcriptEntries = selectedSessionKey ? historyBySession[selectedSessionKey] ?? [] : [];
+  const transcriptGroups = selectedSessionKey ? historyGroupsBySession[selectedSessionKey] ?? [] : [];
   const transcriptLoading = selectedSessionKey ? historyLoading[selectedSessionKey] ?? false : false;
   const transcriptError = selectedSessionKey ? historyError[selectedSessionKey] ?? null : null;
   const transcriptDraft = selectedSessionKey ? draftBySession[selectedSessionKey] ?? '' : '';
@@ -329,10 +327,6 @@ function MobileRemoteShellInner({
     check();
     return () => window.removeEventListener('scroll', check);
   }, []);
-  // Dock hides during scroll — but via CSS transition, not per-frame recalc
-  // Only toggle 0/1 — the CSS transition handles interpolation
-  const dockMotionProgress = !isComposerPrimed && isScrolling ? 1 : 0;
-  const dockFadeProgress = dockMotionProgress;
   const ownedAvailability = selectedSession?.runtimeSurface?.lifecycle?.availability;
   const ownedReviewDisposition = selectedReviewPacket?.reviewDisposition;
   const ownedQueuedTurn = Boolean(pendingOwnedTurn) || transcriptActionState === 'steering';
