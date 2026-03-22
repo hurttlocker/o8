@@ -62,10 +62,8 @@ import { useMobilePolling } from './mobile/hooks/useMobilePolling';
 import { useMobileScroll } from './mobile/hooks/useMobileScroll';
 import { useMobileStreaming } from './mobile/hooks/useMobileStreaming';
 import { useMobileActions } from './mobile/hooks/useMobileActions';
-import { NotificationBanner, useNotifications } from './mobile/NotificationBanner';
 import { ProactiveSurface, useProactiveItems } from './mobile/ProactiveSurface';
 import { CrossAgentPill } from './mobile/CrossAgentPill';
-import { initSounds, playAgentComplete, playApprovalNeeded } from '@/lib/mobile/sounds';
 
 export function MobileRemoteShell(props: MobileRemoteShellProps) {
   return (
@@ -195,8 +193,6 @@ function MobileRemoteShellInner({
   const [prReviewOpen, setPrReviewOpen] = useState(false);
   const [prReviewNumber, setPrReviewNumber] = useState<number | null>(null);
   const [prReviewRepo, setPrReviewRepo] = useState('');
-  const { notifications, dismiss: dismissNotification } = useNotifications(snapshot);
-
   // Proactive surface — context-aware cards at top of chat
   const openPR = useCallback((repo: string, prNumber: number) => {
     setPrReviewRepo(repo);
@@ -208,18 +204,6 @@ function MobileRemoteShellInner({
   // Cross-agent awareness
   const runningAgentCount = useMemo(() => snapshot.sessions.filter(s => s.status === 'running').length, [snapshot.sessions]);
   const totalAgentCount = snapshot.sessions.length;
-
-  // Sound effects on notifications
-  useEffect(() => { initSounds(); }, []);
-  const prevNotifCount = useRef(notifications.length);
-  useEffect(() => {
-    if (notifications.length > prevNotifCount.current) {
-      const latest = notifications[0];
-      if (latest?.type === 'agent_complete') playAgentComplete();
-      else if (latest?.type === 'approval') playApprovalNeeded();
-    }
-    prevNotifCount.current = notifications.length;
-  }, [notifications]);
 
   // ── Swipe right from left edge to go back to chat ──
   useSwipeBack(
@@ -809,20 +793,6 @@ function MobileRemoteShellInner({
         sessionAge={selectedSession?.lastEventAt ? formatSessionAge(selectedSession.lastEventAt) : undefined}
         onCopyKey={actions.handleCopySelectedSessionKey}
         onExpandMedia={(media) => { setSessionInfoOpen(false); setExpandedMedia(media); }}
-      />
-      {/* Notification banners — iOS-style toast from top */}
-      <NotificationBanner
-        notifications={notifications}
-        onDismiss={dismissNotification}
-        onTap={(n) => {
-          dismissNotification(n.id);
-          if (n.sessionKey) {
-            actions.handleSessionFocus(n.sessionKey);
-            setActiveView('squad');
-          } else {
-            setActiveView('activity');
-          }
-        }}
       />
       {/* SpeedDial now lives in TopBar — no more FAB */}
       <PRReviewSheet

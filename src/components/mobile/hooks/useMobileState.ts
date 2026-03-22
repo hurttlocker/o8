@@ -21,6 +21,8 @@ export interface MobileStateInit {
   initialOwnedReviewPacket?: RuntimeReviewPacket | null;
 }
 
+const MOBILE_SELECTED_SESSION_KEY_STORAGE = 'cortex.mobile.selected-session-key';
+
 export function useMobileState(init: MobileStateInit) {
   const { initialSnapshot, initialTranscript, initialReviewFile, initialOwnedReviewPacket } = init;
   const initialSession = pickCurrentSession(initialSnapshot);
@@ -163,6 +165,25 @@ export function useMobileState(init: MobileStateInit) {
   const isOwnedCodexSession = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'owned';
   const selectedReviewPacket = selectedSessionKey && isOwnedCodexSession ? reviewPacketBySession[selectedSessionKey] ?? null : null;
   const selectedReviewPacketError = selectedSessionKey && isOwnedCodexSession ? reviewPacketErrorBySession[selectedSessionKey] ?? null : null;
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const savedSessionKey = window.localStorage.getItem(MOBILE_SELECTED_SESSION_KEY_STORAGE)?.trim();
+    if (!savedSessionKey || savedSessionKey === selectedSessionKeyHint) return;
+    setSelectedSessionKeyHint(savedSessionKey);
+    const matchingSession = snapshot.sessions.find((session) => session.sessionKey === savedSessionKey);
+    if (!matchingSession) return;
+    setSelectedId(matchingSession.id);
+    setSelectedSessionFallback(matchingSession);
+  // Intentionally one-time restore: later session churn should not re-run storage hydration.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!selectedSessionKeyHint) return;
+    window.localStorage.setItem(MOBILE_SELECTED_SESSION_KEY_STORAGE, selectedSessionKeyHint);
+  }, [selectedSessionKeyHint]);
 
   return {
     // Core state + setters
