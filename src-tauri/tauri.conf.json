@@ -49,5 +49,12 @@
       "minimumSystemVersion": "10.15"
     }
   },
-  "plugins": {}
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/hurttlocker/cortex-ide/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg2NTIxQTI4MjkyODVGQTcKUldTblh5Z3BLQnBTaHI4VWFFM1VMVG1ZTU0wOExQQmRiYlZyZUJ3UExSUWVyRFpvcFNKQkZ4Uy8K"
+    }
+  }
 }
