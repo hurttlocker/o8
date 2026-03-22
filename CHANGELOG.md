@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-22
 
+- `daaf6dd` fix: native shell build — prebuild exports shell redirect to out/
 - `a4ba5f3` fix: Wire download buttons to GitHub releases page
 - `610d71a` feat: In-app update banner + landing page + version sync
 - `ef2e00d` docs: add Rainwater retrieval planner plan
