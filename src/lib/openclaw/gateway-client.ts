@@ -274,12 +274,16 @@ async function wsRpc(
 async function runStatusSnapshot(): Promise<Record<string, unknown>> {
   // Primary: WebSocket RPC (fast — <500ms)
   try {
-    const [statusResult, sessionsResult] = await Promise.all([
-      wsRpc('status', { activeMinutes: 60 }),
-      wsRpc('sessions.list', { activeMinutes: 60, limit: 50 }),
-    ]);
-
+    // Use wide time window to catch all active sessions
+    const sessionsResult = await wsRpc('sessions.list', { activeMinutes: 10080, limit: 50 });
     const sessions = (sessionsResult.sessions ?? []) as Array<Record<string, unknown>>;
+
+    // Also fetch status for heartbeat/agent config
+    let statusResult: Record<string, unknown> = {};
+    try {
+      statusResult = await wsRpc('status', { activeMinutes: 10080 });
+    } catch { /* status is optional — sessions are what matter */ }
+
     const agents = (statusResult.heartbeat as Record<string, unknown>)?.agents as Array<Record<string, unknown>> | undefined;
 
     return {
