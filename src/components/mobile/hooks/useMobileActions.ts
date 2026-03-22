@@ -103,6 +103,14 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
       ?? (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : `mutation-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+    console.info('[mobile] runAction', {
+      action: payload.action,
+      sessionKey: payload.sessionKey,
+      clientMutationId,
+      cwd: payload.cwd,
+      hasMessage: Boolean(payload.message?.trim()),
+      attachmentCount: payload.attachments?.length ?? 0,
+    });
     if (payload.sessionKey) {
       pendingMutationIdBySessionRef.current = {
         ...pendingMutationIdBySessionRef.current,
@@ -186,6 +194,12 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
 
   const handleSteerSubmit = useCallback(async (sessionKey: string) => {
     const transcriptEntries = state.historyBySession[sessionKey] ?? [];
+    console.info('[mobile] submit steer turn', {
+      selectedSessionId: state.selectedSession?.id ?? null,
+      selectedSessionKey,
+      requestedSessionKey: sessionKey,
+      transcriptEntries: transcriptEntries.length,
+    });
     await submitSteerTurn({
       sessionKey,
       actionStateBySession,
@@ -210,7 +224,7 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
       playSendClick,
       relaySlashCommand,
     });
-  }, [actionStateBySession, snapshot, draftBySession, draftAttachmentsBySession, state.historyBySession, lastAssistantCountRef, setWaitingForResponse, setHistoryBySession, setDraftBySession, setDraftAttachmentsBySession, setPreEnhanceDraft, setSurfaceNote, setActionNoteBySession, setSelectedId, setSelectedSessionKeyHint, setSelectedSessionFallback, runAction, refreshInbox, loadHistory, relaySlashCommand]);
+  }, [actionStateBySession, snapshot, draftBySession, draftAttachmentsBySession, state.historyBySession, state.selectedSession?.id, selectedSessionKey, lastAssistantCountRef, setWaitingForResponse, setHistoryBySession, setDraftBySession, setDraftAttachmentsBySession, setPreEnhanceDraft, setSurfaceNote, setActionNoteBySession, setSelectedId, setSelectedSessionKeyHint, setSelectedSessionFallback, runAction, refreshInbox, loadHistory, relaySlashCommand]);
 
   const handleOwnedResumeSubmit = useCallback(async (sessionKey: string) => {
     await submitOwnedResumeTurn({
