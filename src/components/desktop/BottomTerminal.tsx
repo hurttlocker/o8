@@ -26,17 +26,19 @@ type CliAgent = (typeof CLI_AGENTS)[number];
 // ── Types ──
 
 export interface BottomTerminalHandle {
-  onSessionCreated: (sessionName: string) => boolean;
+  onSessionCreated: (sessionName: string, requestId?: string) => boolean;
   writeToTerminal: (sessionName: string, data: string) => void;
   showImage: (sessionName: string, imageB64: string, filename: string) => void;
   setTermError: (sessionName: string, error: string) => void;
   setTermExited: (sessionName: string) => void;
   /** Returns the current tmux session name, or null if not connected */
   getSession: () => string | null;
+  /** Ensure a terminal exists, then run the command inside it. */
+  runCommand: (command: string) => void;
 }
 
 export interface BottomTerminalProps {
-  sendTerminalCreate: (cols: number, rows: number) => void;
+  sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
@@ -352,6 +354,8 @@ export const BottomTerminal = forwardRef<BottomTerminalHandle, BottomTerminalPro
     const [addMenuOpen, setAddMenuOpen] = useState(false);
     const pendingTabIdsRef = useRef<string[]>([]);
     const pendingAgentsRef = useRef<Map<string, CliAgent['id']>>(new Map());
+    const pendingRequestRef = useRef<Map<string, string>>(new Map());
+    const pendingCommandsRef = useRef<Map<string, string>>(new Map());
     const tabCountRef = useRef(0);
     const tabsRef = useRef<BottomTerminalTab[]>([]);
     const xtermRefs = useRef<Map<string, XtermPanelHandle>>(new Map());
@@ -359,7 +363,7 @@ export const BottomTerminal = forwardRef<BottomTerminalHandle, BottomTerminalPro
 
     useEffect(() => { tabsRef.current = tabs; }, [tabs]);
 
-    const createBottomTab = useCallback((agent: CliAgent) => {
+    const createBottomTab = useCallback((agent: CliAgent, initialCommand?: string) => {
       tabCountRef.current += 1;
       const now = Date.now();
       const nextTab: BottomTerminalTab = {
@@ -370,11 +374,17 @@ export const BottomTerminal = forwardRef<BottomTerminalHandle, BottomTerminalPro
         createdAt: now,
         lastActivity: now,
       };
+      const requestId = `bottom-${nextTab.id}-${now}`;
       pendingAgentsRef.current.set(nextTab.id, agent.id);
       pendingTabIdsRef.current.push(nextTab.id);
+      pendingRequestRef.current.set(requestId, nextTab.id);
+      const commandParts = [agent.command, initialCommand].filter(Boolean);
+      if (commandParts.length > 0) {
+        pendingCommandsRef.current.set(nextTab.id, commandParts.join(' && '));
+      }
       setTabs((prev) => [...prev, nextTab]);
       setActiveTabId(nextTab.id);
-      sendTerminalCreate(120, 30);
+      sendTerminalCreate(120, 30, requestId);
     }, [sendTerminalCreate]);
 
     // Close add menu on outside click
@@ -397,10 +407,14 @@ export const BottomTerminal = forwardRef<BottomTerminalHandle, BottomTerminalPro
 
     // Imperative handle for dashboard event routing
     useImperativeHandle(ref, () => ({
-      onSessionCreated: (sessionName: string) => {
-        const nextTabId = pendingTabIdsRef.current.shift();
+      onSessionCreated: (sessionName: string, requestId?: string) => {
+        const matchedTabId = requestId ? pendingRequestRef.current.get(requestId) : undefined;
+        const nextTabId = matchedTabId ?? pendingTabIdsRef.current.shift();
         if (!nextTabId) return false;
-        const agentId = pendingAgentsRef.current.get(nextTabId) ?? 'shell';
+        if (requestId) {
+          pendingRequestRef.current.delete(requestId);
+          pendingTabIdsRef.current = pendingTabIdsRef.current.filter((entry) => entry !== nextTabId);
+        }
         pendingAgentsRef.current.delete(nextTabId);
 
         setTabs((prev) => prev.map((entry) => (
@@ -409,15 +423,17 @@ export const BottomTerminal = forwardRef<BottomTerminalHandle, BottomTerminalPro
             : entry
         )));
 
-        const agent = CLI_AGENTS.find((entry) => entry.id === agentId) ?? CLI_AGENTS[0];
-        if (agent.command) {
+        const pendingCommand = pendingCommandsRef.current.get(nextTabId);
+        pendingCommandsRef.current.delete(nextTabId);
+
+        if (pendingCommand) {
           fetch('/api/panel/terminal-exec', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionName, command: agent.command }),
+            body: JSON.stringify({ sessionName, command: pendingCommand }),
           }).catch(() => {
             // Fallback: send via WS input
-            setTimeout(() => sendTerminalInput(sessionName, agent.command + '\n'), 2000);
+            setTimeout(() => sendTerminalInput(sessionName, pendingCommand + '\n'), 2000);
           });
         }
         return true;
@@ -440,7 +456,30 @@ export const BottomTerminal = forwardRef<BottomTerminalHandle, BottomTerminalPro
         xtermRefs.current.get(sessionName)?.setExited();
       },
       getSession: () => tabsRef.current.find((entry) => entry.id === activeTabId)?.tmuxSession ?? null,
-    }), [activeTabId, sendTerminalInput]);
+      runCommand: (command: string) => {
+        const activeTab = tabsRef.current.find((entry) => entry.id === activeTabId);
+        if (activeTab?.tmuxSession) {
+          sendTerminalInput(activeTab.tmuxSession, command + '\n');
+          return;
+        }
+
+        const existingShell = tabsRef.current.find((entry) => entry.agentId === 'shell' && entry.tmuxSession);
+        if (existingShell?.tmuxSession) {
+          setActiveTabId(existingShell.id);
+          sendTerminalInput(existingShell.tmuxSession, command + '\n');
+          return;
+        }
+
+        const pendingShell = tabsRef.current.find((entry) => entry.agentId === 'shell' && !entry.tmuxSession);
+        if (pendingShell) {
+          pendingCommandsRef.current.set(pendingShell.id, command);
+          setActiveTabId(pendingShell.id);
+          return;
+        }
+
+        createBottomTab(CLI_AGENTS[0], command);
+      },
+    }), [activeTabId, createBottomTab, sendTerminalInput]);
 
     const handleCreateTab = useCallback((agent: CliAgent) => {
       setAddMenuOpen(false);
@@ -457,6 +496,10 @@ export const BottomTerminal = forwardRef<BottomTerminalHandle, BottomTerminalPro
       } else {
         pendingTabIdsRef.current = pendingTabIdsRef.current.filter((entry) => entry !== tabId);
         pendingAgentsRef.current.delete(tabId);
+        pendingCommandsRef.current.delete(tabId);
+        for (const [requestId, pendingTabId] of pendingRequestRef.current) {
+          if (pendingTabId === tabId) pendingRequestRef.current.delete(requestId);
+        }
       }
 
       const remaining = tabsRef.current.filter((entry) => entry.id !== tabId);
