@@ -72,7 +72,6 @@ function playSendClick() {
 
 export function useMobileActions(state: MobileState, deps: ActionDeps) {
   const {
-    wsConnected,
     refreshInbox,
     loadHistory,
     loadOwnedReviewPacket,
@@ -129,7 +128,10 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
         payload: { ...payload, clientMutationId },
         setActionStateBySession,
         setActionNoteBySession,
-        realtimeEnabled: wsConnected,
+        // Mobile should reconcile truth through HTTP even when WS reports
+        // connected, because mobile browser WS delivery is less reliable
+        // than desktop and we can't let chat targeting depend on it.
+        realtimeEnabled: false,
         refreshInbox,
         loadHistory,
         loadOwnedReviewPacket,
@@ -166,7 +168,7 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
       }
       throw error;
     }
-  }, [pendingMutationIdBySessionRef, setPendingMutationIdBySession, setRealtimeMutationsById, setActionStateBySession, setActionNoteBySession, wsConnected, refreshInbox, loadHistory, loadOwnedReviewPacket]);
+  }, [pendingMutationIdBySessionRef, setPendingMutationIdBySession, setRealtimeMutationsById, setActionStateBySession, setActionNoteBySession, refreshInbox, loadHistory, loadOwnedReviewPacket]);
 
   const relaySlashCommand = useCallback(async (sessionKey: string, commandText: string) => {
     const session = snapshot.sessions.find((item) => item.sessionKey === sessionKey);
