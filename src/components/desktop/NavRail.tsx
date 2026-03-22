@@ -9,7 +9,7 @@
  * Glass frosted background matching the Cortex IDE design system.
  */
 
-import { useState, useEffect, createContext, useContext, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, createContext, useContext, useCallback, cloneElement, isValidElement, type ReactNode, type ReactElement } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Box,
@@ -41,7 +41,7 @@ interface NavRailProps {
   onSectionChange: (section: NavSection) => void;
   alertCount?: number;
   onAlertClick?: () => void;
-  alertTray?: ReactNode;
+  alertTray?: ReactElement<{ desktopAnchorEl?: HTMLElement | null }> | null;
   onSearchClick?: () => void;
   thoughtsOpen?: boolean;
   onThoughtsToggle?: () => void;
@@ -417,6 +417,10 @@ export function NavRail({
   onPortPreview,
 }: NavRailProps) {
   const [expanded, setExpanded] = useState(false);
+  const [alertAnchorEl, setAlertAnchorEl] = useState<HTMLDivElement | null>(null);
+  const alertTrayNode = alertTray && isValidElement(alertTray)
+    ? cloneElement(alertTray, { desktopAnchorEl: alertAnchorEl })
+    : alertTray;
 
   return (
     <motion.nav
@@ -490,7 +494,7 @@ export function NavRail({
           onClick={onThoughtsToggle}
           active={thoughtsOpen}
         />
-        <div style={{ position: 'relative' }}>
+        <div ref={setAlertAnchorEl} style={{ position: 'relative' }}>
           <UtilButton
             icon={Bell}
             label="Alerts"
@@ -498,7 +502,7 @@ export function NavRail({
             onClick={onAlertClick}
             badge={alertCount}
           />
-          {alertTray}
+          {alertTrayNode}
         </div>
         <UtilButton
           icon={Settings}

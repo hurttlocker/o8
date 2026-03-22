@@ -7,7 +7,8 @@
  * Mobile: full-screen sheet (slides up from bottom).
  */
 
-import { memo, useEffect, useRef } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
   Bell,
@@ -43,6 +44,12 @@ interface AlertTrayProps {
   onDismissAll: () => void;
   onAction?: (alert: Alert) => void;
   variant: 'mobile' | 'desktop';
+  desktopAnchorEl?: HTMLElement | null;
+}
+
+interface DesktopTrayPosition {
+  left: number;
+  bottom: number;
 }
 
 const AlertCard = memo(function AlertCard({
@@ -210,15 +217,52 @@ export const AlertTray = memo(function AlertTray({
   onDismissAll,
   onAction,
   variant,
+  desktopAnchorEl,
 }: AlertTrayProps) {
   const trayRef = useRef<HTMLDivElement>(null);
+  const [desktopPosition, setDesktopPosition] = useState<DesktopTrayPosition | null>(null);
+
+  useEffect(() => {
+    if (variant !== 'desktop' || !desktopAnchorEl) return;
+
+    let frameId = 0;
+    const measure = () => {
+      const rect = desktopAnchorEl.getBoundingClientRect();
+      if (rect) {
+        const viewportWidth = window.innerWidth;
+        const trayWidth = 360;
+        const margin = 16;
+        const left = Math.max(margin, Math.min(rect.left, viewportWidth - trayWidth - margin));
+        const bottom = Math.max(margin, window.innerHeight - rect.top + 8);
+
+        setDesktopPosition((prev) => (
+          prev && Math.abs(prev.left - left) < 1 && Math.abs(prev.bottom - bottom) < 1
+            ? prev
+            : { left, bottom }
+        ));
+      }
+
+      if (open) {
+        frameId = window.requestAnimationFrame(measure);
+      }
+    };
+
+    measure();
+    return () => {
+      if (frameId) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, [desktopAnchorEl, open, variant]);
 
   // Close on outside click (desktop only)
   useEffect(() => {
     if (!open || variant !== 'desktop') return;
     const handler = (e: MouseEvent) => {
-      const boundary = trayRef.current?.parentElement ?? trayRef.current;
-      if (boundary && !boundary.contains(e.target as Node)) {
+      const target = e.target as Node;
+      const clickedTray = Boolean(trayRef.current?.contains(target));
+      const clickedAnchor = Boolean(desktopAnchorEl?.contains(target));
+      if (!clickedTray && !clickedAnchor) {
         onClose();
       }
     };
@@ -230,7 +274,7 @@ export const AlertTray = memo(function AlertTray({
       clearTimeout(timer);
       document.removeEventListener('mousedown', handler);
     };
-  }, [open, variant, onClose]);
+  }, [desktopAnchorEl, onClose, open, variant]);
 
   // ESC to close
   useEffect(() => {
@@ -295,13 +339,15 @@ export const AlertTray = memo(function AlertTray({
   }
 
   // Desktop dropdown
-  return (
+  if (typeof document === 'undefined' || !desktopPosition) return null;
+
+  return createPortal(
     <div
       ref={trayRef}
       style={{
-        position: 'absolute',
-        bottom: 'calc(100% + 8px)',
-        left: 0,
+        position: 'fixed',
+        left: desktopPosition.left,
+        bottom: desktopPosition.bottom,
         width: 360,
         maxHeight: 480,
         borderRadius: 18,
@@ -319,12 +365,13 @@ export const AlertTray = memo(function AlertTray({
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        zIndex: 200,
+        zIndex: 10020,
       }}
     >
       {renderHeader(alerts, onMarkAllRead, onDismissAll, onClose)}
       {renderBody(alerts, hasAlerts, onMarkRead, onDismiss, onAction)}
-    </div>
+    </div>,
+    document.body,
   );
 });
 
