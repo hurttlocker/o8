@@ -223,7 +223,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
           if (eventType === 'update' && data) {
             const sk = data.sessionKey as string;
             const entries = data.entries as Array<Record<string, unknown>>;
-            if (sk && entries?.length > 0) dispatch('onHistoryUpdate', sk, entries);
+            if (sk && entries?.length > 0) dispatch('onHistoryUpdate', sk, entries, Boolean(data.replace));
           }
           break;
         case 'chat':
