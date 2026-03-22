@@ -47,7 +47,7 @@ function getWsUrl(): string {
 
 interface SharedWsCommands {
   switchSession: (sessionKey: string) => void;
-  sendTerminalCreate: (cols: number, rows: number) => void;
+  sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
@@ -149,8 +149,8 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
     wsSend({ type: 'switch-session', sessionKey: key });
   }, [wsSend]);
 
-  const sendTerminalCreate = useCallback((cols: number, rows: number) => {
-    wsSend({ type: 'terminal-create', cols, rows });
+  const sendTerminalCreate = useCallback((cols: number, rows: number, requestId?: string) => {
+    wsSend({ type: 'terminal-create', cols, rows, requestId });
   }, [wsSend]);
 
   const sendTerminalAttach = useCallback((sessionName: string, cols: number, rows: number) => {
@@ -239,7 +239,7 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
           if (data) dispatch('onReviewUpdate', { event: eventType, ...data });
           break;
         case 'terminal':
-          if (eventType === 'created' && data) dispatch('onTerminalCreated', data.sessionName as string);
+          if (eventType === 'created' && data) dispatch('onTerminalCreated', data.sessionName as string, data.requestId as string | undefined);
           else if (eventType === 'data' && data) dispatch('onTerminalData', data.sessionName as string, data.data as string);
           else if (eventType === 'attached' && data) dispatch('onTerminalAttached', data.sessionName as string);
           else if (eventType === 'exited' && data) dispatch('onTerminalExited', data.sessionName as string, (data.exitCode as number) ?? 0);
@@ -344,7 +344,7 @@ interface UseSharedDesktopWsResult {
   connectionState: WsConnectionState;
   isConnected: boolean;
   switchSession: (sessionKey: string) => void;
-  sendTerminalCreate: (cols: number, rows: number) => void;
+  sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;

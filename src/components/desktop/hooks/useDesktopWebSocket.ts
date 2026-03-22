@@ -25,7 +25,7 @@ export interface DesktopWsCallbacks {
   onHistoryUpdate?: (sessionKey: string, entries: Array<Record<string, unknown>>) => void;
   onReviewUpdate?: (data: Record<string, unknown>) => void;
   // Terminal channel
-  onTerminalCreated?: (sessionName: string) => void;
+  onTerminalCreated?: (sessionName: string, requestId?: string) => void;
   onTerminalData?: (sessionName: string, data: string) => void;
   onTerminalAttached?: (sessionName: string) => void;
   onTerminalExited?: (sessionName: string, exitCode: number) => void;
@@ -39,7 +39,7 @@ interface UseDesktopWebSocketResult {
   connectionState: WsConnectionState;
   isConnected: boolean;
   switchSession: (sessionKey: string) => void;
-  sendTerminalCreate: (cols: number, rows: number) => void;
+  sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
@@ -123,9 +123,9 @@ export function useDesktopWebSocket(
   }, [syncRealtimeSubscriptions]);
 
   // Terminal commands
-  const sendTerminalCreate = useCallback((cols: number, rows: number) => {
+  const sendTerminalCreate = useCallback((cols: number, rows: number, requestId?: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'terminal-create', cols, rows }));
+      wsRef.current.send(JSON.stringify({ type: 'terminal-create', cols, rows, requestId }));
     }
   }, []);
 
@@ -222,7 +222,7 @@ export function useDesktopWebSocket(
 
         case 'terminal':
           if (eventType === 'created' && data) {
-            cbRef.current.onTerminalCreated?.(data.sessionName as string);
+            cbRef.current.onTerminalCreated?.(data.sessionName as string, data.requestId as string | undefined);
           } else if (eventType === 'data' && data) {
             cbRef.current.onTerminalData?.(data.sessionName as string, data.data as string);
           } else if (eventType === 'attached' && data) {

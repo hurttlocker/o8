@@ -1301,12 +1301,14 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
 
   const cols = typeof msg.cols === 'number' ? msg.cols : 120;
   const rows = typeof msg.rows === 'number' ? msg.rows : 30;
+  const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
 
-  // Reuse an existing unattached dashboard tmux session if one exists
+  // Only opportunistically reuse orphaned dashboard shells for non-targeted creates.
+  // Explicit request IDs should always receive a fresh tmux session so ownership is deterministic.
   const existing = findExistingDashSession();
-  if (existing && !terminalAttachments.has(existing)) {
+  if (!requestId && existing && !terminalAttachments.has(existing)) {
     console.log(`[ws-server] Reusing existing tmux session: ${existing}`);
-    sendTerminal(client, 'created', { sessionName: existing });
+    sendTerminal(client, 'created', { sessionName: existing, requestId });
     handleTerminalAttach(client, { sessionName: existing, cols, rows });
     return;
   }
@@ -1322,7 +1324,7 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
     );
     console.log(`[ws-server] Created tmux session: ${sessionName}`);
 
-    sendTerminal(client, 'created', { sessionName });
+    sendTerminal(client, 'created', { sessionName, requestId });
     handleTerminalAttach(client, { sessionName, cols, rows });
   } catch (err) {
     const error = err instanceof Error ? err.message : String(err);

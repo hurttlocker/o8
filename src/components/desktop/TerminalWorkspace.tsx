@@ -54,12 +54,12 @@ export interface TerminalTabHandle {
   showImage: (sessionName: string, imageB64: string, filename: string) => void;
   setTermError: (sessionName: string, error: string) => void;
   setTermExited: (sessionName: string) => void;
-  onSessionCreated: (sessionName: string) => void;
+  onSessionCreated: (sessionName: string, requestId?: string) => boolean;
   clearDetectedPreview: (port: number) => void;
 }
 
 interface TerminalWorkspaceProps {
-  sendTerminalCreate: (cols: number, rows: number) => void;
+  sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
@@ -2012,6 +2012,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
     const panelRefs = useRef<Map<string, XtermPanelHandle>>(new Map());
     const tabCountRef = useRef(0);
     const pendingCliCommands = useRef<Map<string, string>>(new Map()); // tabId → command to run after session created
+    const pendingRequestRef = useRef<Map<string, string>>(new Map()); // requestId → tabId
     const initialCreatedRef = useRef(false);
     const restoredRef = useRef(false);
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2041,6 +2042,15 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
         saveTabState(persisted);
       }, 500);
     }, []);
+
+    const requestTerminalForTab = useCallback((tabId: string, command?: string) => {
+      const requestId = `workspace-${tabId}-${Date.now()}`;
+      pendingRequestRef.current.set(requestId, tabId);
+      if (command) {
+        pendingCliCommands.current.set(tabId, command);
+      }
+      sendTerminalCreate(120, 30, requestId);
+    }, [sendTerminalCreate]);
 
     // Save whenever tabs or active tab changes
     useEffect(() => {
@@ -2153,8 +2163,8 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           // Create new sessions for terminal tabs that need them (not chat/llm-chat)
           const deadTerminalTabs = restoredTabs.filter(t => t.kind === 'terminal' && t.tmuxSession === null);
           for (const deadTab of deadTerminalTabs) {
-            void deadTab;
-            sendTerminalCreate(120, 30);
+            const restoreCommand = deadTab.repo?.localPath ? `cd ${deadTab.repo.localPath}` : undefined;
+            requestTerminalForTab(deadTab.id, restoreCommand);
           }
         } else {
           // No saved state — create default LLM Chat tab
@@ -2172,7 +2182,7 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           setActiveTabId(defaultChat.id);
         }
       })();
-    }, [termWsConnected, sendTerminalCreate, sendTerminalAttach]);
+    }, [requestTerminalForTab, termWsConnected, sendTerminalAttach]);
 
     // Reset restored flag when WS disconnects
     useEffect(() => {
@@ -2183,22 +2193,20 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
     }, [termWsConnected]);
 
     // Called when WS server confirms a new tmux session was created
-    const handleSessionCreated = useCallback((sessionName: string) => {
+    const handleSessionCreated = useCallback((sessionName: string, requestId?: string) => {
+      const directTabId = requestId ? pendingRequestRef.current.get(requestId) : undefined;
+      if (requestId) pendingRequestRef.current.delete(requestId);
+
+      let claimed = false;
       setTabs(prev => {
-        // Check if there's a tab waiting for a session (tmuxSession === null)
-        const pendingIdx = prev.findIndex(t => t.tmuxSession === null);
+        const pendingIdx = directTabId
+          ? prev.findIndex(t => t.id === directTabId && t.kind === 'terminal' && t.tmuxSession === null)
+          : prev.findIndex(t => t.kind === 'terminal' && t.tmuxSession === null);
         if (pendingIdx >= 0) {
           const updated = [...prev];
           const tab = updated[pendingIdx];
           updated[pendingIdx] = { ...tab, tmuxSession: sessionName };
-          // If this is a restored tab with a repo, cd into it
-          if (tab.repo?.localPath) {
-            fetch('/api/panel/terminal-exec', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ sessionName, command: `cd ${tab.repo.localPath}` }),
-            }).catch(() => {});
-          }
+          claimed = true;
           return updated;
         }
         // No pending tab — this is the initial auto-created session
@@ -2213,9 +2221,11 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
           createdAt: now,
           lastActivity: now,
         };
+        claimed = true;
         return [...prev, newTab];
       });
       setActiveTabId(prev => prev || `tab-${tabCountRef.current}`);
+      return claimed;
     }, []);
 
     // Route terminal events to the correct tab's XtermPanel
@@ -2325,8 +2335,8 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
 
       setTabs(prev => [...prev, newTab]);
       setActiveTabId(tabId);
-      sendTerminalCreate(120, 30);
-    }, [sendTerminalCreate]);
+      requestTerminalForTab(tabId, pendingCliCommands.current.get(tabId));
+    }, [requestTerminalForTab]);
 
     const handleNewChatTab = useCallback((runtime: 'codex' | 'claude-code' | 'openclaw', repo?: RegisteredRepo) => {
       tabCountRef.current += 1;
@@ -2386,6 +2396,10 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
         if (tab.tmuxSession) {
           sendTerminalDetach(tab.tmuxSession);
           panelRefs.current.delete(tab.tmuxSession);
+        }
+        pendingCliCommands.current.delete(tabId);
+        for (const [requestId, pendingTabId] of pendingRequestRef.current) {
+          if (pendingTabId === tabId) pendingRequestRef.current.delete(requestId);
         }
         const remaining = prev.filter(t => t.id !== tabId);
         // If closing active tab, switch to adjacent
@@ -2570,15 +2584,28 @@ export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspace
                     if (shellTab?.tmuxSession) {
                       sendTerminalInput(shellTab.tmuxSession, command + '\n');
                     } else {
-                      // No terminal tab — create one first
-                      sendTerminalCreate(120, 30);
-                      // Wait for it to be ready, then send
-                      setTimeout(() => {
-                        const newShell = tabs.find(t => t.kind === 'terminal' && t.tmuxSession);
-                        if (newShell?.tmuxSession) {
-                          sendTerminalInput(newShell.tmuxSession, command + '\n');
-                        }
-                      }, 1500);
+                      const pendingShell = tabs.find(t => t.kind === 'terminal' && !t.tmuxSession);
+                      if (pendingShell) {
+                        pendingCliCommands.current.set(pendingShell.id, command);
+                        setActiveTabId(pendingShell.id);
+                        return;
+                      }
+
+                      tabCountRef.current += 1;
+                      const tabId = `tab-${tabCountRef.current}`;
+                      const now = Date.now();
+                      const newTab: TerminalTab = {
+                        id: tabId,
+                        label: 'Terminal',
+                        kind: 'terminal',
+                        tmuxSession: null,
+                        cliAgent: 'shell',
+                        createdAt: now,
+                        lastActivity: now,
+                      };
+                      setTabs(prev => [...prev, newTab]);
+                      setActiveTabId(tabId);
+                      requestTerminalForTab(tabId, command);
                     }
                   }}
                 />
