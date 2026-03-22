@@ -6,6 +6,14 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-22
 
+- `610d71a` feat: In-app update banner + landing page + version sync
+- `ef2e00d` docs: add Rainwater retrieval planner plan
+- `68bd5e7` docs: add Rainwater locomo benchmark
+- `36806eb` docs: add gstack audit
+- `5fd82ee` docs: add clawmark vs Memory audit
+- `d160434` docs: add honcho memory audit
+- `e3573d8` docs: add page-agent audit
+- `727783b` docs: add superpowers and gstack workflow audit
 - `7291c9e` fix: Pass sessionKey explicitly from ComposeBar to avoid stale closure
 - `b723524` fix: Infer runtime from session key prefix when snapshot misses
 - `0e74640` fix: Mobile agent runtime chat routes to CLI directly, not agent runtime gateway
