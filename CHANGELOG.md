@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `a80239f` fix: portal desktop alerts tray
 - `c1af442` feat: Codebase seeding engine — solve cold start for new users
 - `9eab4de` fix: wire desktop alerts tray
 - `78c8fc8` feat: Unified chat send route + type fixes
