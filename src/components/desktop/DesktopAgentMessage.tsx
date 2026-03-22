@@ -133,6 +133,12 @@ function toolLabel(tool: MobileTranscriptToolCall) {
   return tool.name;
 }
 
+function toolStatusLabel(status: MobileTranscriptToolCall['status']) {
+  if (status === 'calling') return 'Queued';
+  if (status === 'running') return 'Running';
+  return 'Done';
+}
+
 function ToolIcon({ tool }: { tool: MobileTranscriptToolCall }) {
   const name = tool.name.toLowerCase();
   if (name === 'exec' || name === 'exec_command' || name === 'write_stdin') {
@@ -221,13 +227,23 @@ export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscrip
               gap: 4,
               fontSize: 10,
               fontWeight: 700,
-              color: '#10b981',
+              color: tool.status === 'done' || !tool.status ? '#10b981' : '#2563eb',
               textTransform: 'uppercase',
               letterSpacing: '0.04em',
               flexShrink: 0,
             }}>
-              <Check size={12} strokeWidth={2.3} />
-              Done
+              {tool.status === 'done' || !tool.status ? (
+                <Check size={12} strokeWidth={2.3} />
+              ) : (
+                <span style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: '#2563eb',
+                  opacity: 0.85,
+                }} />
+              )}
+              {toolStatusLabel(tool.status)}
             </span>
           </div>
           <div

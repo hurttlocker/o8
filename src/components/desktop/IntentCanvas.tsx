@@ -90,6 +90,34 @@ interface ProviderStatus {
   configured: boolean;
 }
 
+interface RepoIssueListItem {
+  number: number;
+  title: string;
+  body: string;
+  labels: Array<{ name: string; color: string }>;
+  state: string;
+  createdAt: string;
+  comments: number;
+}
+
+interface RepoIssueDetail {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  labels: Array<{ name: string; color: string }>;
+  author: string;
+  assignees: string[];
+  createdAt: string;
+  comments: number;
+  url: string;
+}
+
+interface IntentCanvasProps {
+  repoSlug?: string | null;
+  repoBranch?: string | null;
+}
+
 const BOARD_WIDTH = 1320;
 const BOARD_HEIGHT = 640;
 const SOURCE_SIZE = { width: 152, height: 82 };
@@ -370,6 +398,110 @@ function extractJsonBlock(raw: string) {
   return unwrapped.slice(firstBrace, lastBrace + 1);
 }
 
+function buildPromptFromIssue(issue: RepoIssueDetail) {
+  return `Map issue #${issue.number} (${issue.title}) into three possible implementation routes with tasks and PR outputs.`;
+}
+
+function buildSeedRoutes(issue: RepoIssueDetail): RoutePlan[] {
+  return [
+    {
+      id: 'safe-patch',
+      title: 'Safe patch',
+      summary: compact(`Patch the narrowest path behind ${issue.title} and add a guardrail test first.`, 132, 'Patch the smallest safe path first.'),
+      confidence: 88,
+      speed: 66,
+      risk: 18,
+      vibe: 'safe',
+      recommendation: 'Best first move if the issue is user-facing and we need a trustworthy fix quickly.',
+      tasks: [
+        { id: 'safe-task-1', title: 'Reproduce the exact break', detail: 'Pin the failing state transition and identify the smallest correct guard.' },
+        { id: 'safe-task-2', title: 'Patch the hot path', detail: 'Change the minimal branch of code that owns the bug instead of broad rewrites.' },
+        { id: 'safe-task-3', title: 'Add regression proof', detail: 'Lock the fix with a test or deterministic verification path.' },
+      ],
+      prs: [
+        { id: 'safe-pr-1', title: `fix: address #${issue.number} safely`, detail: 'Smallest fix + regression coverage' },
+      ],
+      relatedIssues: [
+        { id: 'safe-related-1', title: `#${issue.number} core issue` },
+        { id: 'safe-related-2', title: issue.labels[0] ? `${issue.labels[0].name} scope` : 'Adjacent regression risk' },
+      ],
+    },
+    {
+      id: 'fast-ship',
+      title: 'Fast ship',
+      summary: compact(`Stabilize the user-visible edge around ${issue.title} first, then circle back for cleanup.`, 132, 'Hotfix production behavior before cleanup.'),
+      confidence: 76,
+      speed: 91,
+      risk: 36,
+      vibe: 'fast',
+      recommendation: 'Best if the issue is hurting users now and a reversible hotfix is acceptable.',
+      tasks: [
+        { id: 'fast-task-1', title: 'Bypass the bad edge', detail: 'Route around the unreliable path or reduce the blast radius immediately.' },
+        { id: 'fast-task-2', title: 'Add a visible fallback', detail: 'Make degraded state obvious instead of silently failing.' },
+        { id: 'fast-task-3', title: 'Schedule follow-up cleanup', detail: 'Capture the deeper work as explicit debt instead of hiding it.' },
+      ],
+      prs: [
+        { id: 'fast-pr-1', title: `hotfix: stabilize #${issue.number}`, detail: 'Ops-first patch for the user-visible problem' },
+        { id: 'fast-pr-2', title: `ui: add fallback for #${issue.number}`, detail: 'Trust-preserving messaging around the hot edge' },
+      ],
+      relatedIssues: [
+        { id: 'fast-related-1', title: issue.labels[1] ? issue.labels[1].name : 'Follow-up cleanup' },
+        { id: 'fast-related-2', title: 'Monitoring / regression watch' },
+      ],
+    },
+    {
+      id: 'system-fix',
+      title: 'System fix',
+      summary: compact(`Turn ${issue.title} into a structural cleanup so this class of bug stops recurring.`, 132, 'Solve the whole class of issue instead of the symptom.'),
+      confidence: 82,
+      speed: 42,
+      risk: 44,
+      vibe: 'creative',
+      recommendation: 'Best if this issue exposes weak architecture and we want a durable foundation instead of another patch train.',
+      tasks: [
+        { id: 'system-task-1', title: 'Model the root cause', detail: 'Define the architectural rule that is currently implicit or violated.' },
+        { id: 'system-task-2', title: 'Refactor the owning layer', detail: 'Move the responsibility into a clearer long-term boundary.' },
+        { id: 'system-task-3', title: 'Backfill migration + checks', detail: 'Protect old flows while introducing the stronger model.' },
+      ],
+      prs: [
+        { id: 'system-pr-1', title: `refactor: remove class behind #${issue.number}`, detail: 'Structural fix in the owning layer' },
+        { id: 'system-pr-2', title: `test: add architecture checks for #${issue.number}`, detail: 'Prevent recurrence with stronger invariants' },
+      ],
+      relatedIssues: [
+        { id: 'system-related-1', title: issue.labels[2] ? issue.labels[2].name : 'Architecture debt' },
+        { id: 'system-related-2', title: 'Adjacent surfaces touched by the same state model' },
+      ],
+    },
+  ];
+}
+
+function buildBoardFromIssue(issue: RepoIssueDetail, repoSlug?: string | null, repoBranch?: string | null): IntentBoard {
+  const repoLabel = repoSlug ?? 'Current repo';
+  const summarySource = issue.body.trim() || issue.title;
+  return {
+    title: `#${issue.number} — ${compact(issue.title, 68, issue.title)}`,
+    summary: compact(summarySource.replace(/\s+/g, ' '), 240, issue.title),
+    sources: [
+      { id: 'issue-source-1', title: 'GitHub issue', detail: compact(issue.title, 84, issue.title), icon: 'bug' },
+      { id: 'issue-source-2', title: 'Issue body', detail: compact(summarySource.replace(/\s+/g, ' '), 88, issue.title), icon: 'logs' },
+      { id: 'issue-source-3', title: 'Repo context', detail: compact(`${repoLabel}${repoBranch ? ` • ${repoBranch}` : ''}`, 88, repoLabel), icon: 'related' },
+      { id: 'issue-source-4', title: 'Issue signals', detail: compact(`${issue.comments} comments • ${issue.labels.slice(0, 3).map((label) => label.name).join(' • ') || issue.state.toLowerCase()}`, 88, issue.state), icon: 'test' },
+    ],
+    routes: buildSeedRoutes(issue),
+    merge: {
+      title: repoBranch || 'main branch',
+      detail: `Selected route should return a PR for ${repoLabel} with explicit review proof for issue #${issue.number}.`,
+    },
+    notes: `Grounded in ${repoLabel}. Use the selected GitHub issue as the problem statement, then compare route safety, speed, and long-term architecture tradeoffs before launching runtime agents.`,
+    nextQuestions: [
+      `What is the safest v1 path for #${issue.number}?`,
+      `What should we intentionally defer if we hotfix #${issue.number}?`,
+      `Which adjacent issue is most likely to widen scope here?`,
+    ],
+    updatedAt: Date.now(),
+  };
+}
+
 function boardContextForModel(board: IntentBoard) {
   return JSON.stringify({
     title: board.title,
@@ -565,11 +697,18 @@ function ModelSelect({
   );
 }
 
-export function IntentCanvas() {
+export function IntentCanvas({ repoSlug, repoBranch }: IntentCanvasProps) {
   const boardRef = useRef<HTMLDivElement | null>(null);
   const boardViewportRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const dragStateRef = useRef<{
+    id: string;
+    startX: number;
+    startY: number;
+    origin: Point;
+  } | null>(null);
   const dragStartRef = useRef<Record<string, Point>>({});
+  const boardScaleRef = useRef(1);
   const [board, setBoard] = useState<IntentBoard>(INITIAL_BOARD);
   const [positions, setPositions] = useState<Record<string, Point>>(() => buildRoutePositions(INITIAL_BOARD.routes));
   const [selectedRouteId, setSelectedRouteId] = useState(INITIAL_BOARD.routes[0].id);
@@ -583,6 +722,13 @@ export function IntentCanvas() {
   const [model, setModel] = useState<ModelOption>(MODELS[0]);
   const [modelResolved, setModelResolved] = useState(false);
   const [boardScale, setBoardScale] = useState(1);
+  const [issues, setIssues] = useState<RepoIssueListItem[]>([]);
+  const [issuesLoading, setIssuesLoading] = useState(false);
+  const [issueRefreshNonce, setIssueRefreshNonce] = useState(0);
+  const [selectedIssueNumber, setSelectedIssueNumber] = useState<number | null>(null);
+  const [selectedIssue, setSelectedIssue] = useState<RepoIssueDetail | null>(null);
+  const [issueDetailLoading, setIssueDetailLoading] = useState(false);
+  const [issueError, setIssueError] = useState<string | null>(null);
 
   useEffect(() => {
     if (modelResolved) return;
@@ -617,6 +763,10 @@ export function IntentCanvas() {
   }, [board.routes, selectedRouteId]);
 
   useEffect(() => {
+    boardScaleRef.current = boardScale;
+  }, [boardScale]);
+
+  useEffect(() => {
     const node = boardViewportRef.current;
     if (!node) return;
 
@@ -631,6 +781,143 @@ export function IntentCanvas() {
     const observer = new ResizeObserver(measure);
     observer.observe(node);
     return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!repoSlug) {
+      setIssues([]);
+      setSelectedIssueNumber(null);
+      setSelectedIssue(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIssuesLoading(true);
+    setIssueError(null);
+
+    fetch(`/api/panel/issues?repo=${encodeURIComponent(repoSlug)}`)
+      .then((response) => response.json())
+      .then((data) => {
+        if (cancelled) return;
+        const nextIssues = (data.issues ?? []) as RepoIssueListItem[];
+        setIssues(nextIssues);
+        setSelectedIssueNumber((current) => {
+          if (current && nextIssues.some((issue) => issue.number === current)) {
+            return current;
+          }
+          return nextIssues[0]?.number ?? null;
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setIssues([]);
+        setSelectedIssueNumber(null);
+        setIssueError('Unable to load GitHub issues for this repo.');
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIssuesLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [issueRefreshNonce, repoSlug]);
+
+  useEffect(() => {
+    if (!repoSlug || !selectedIssueNumber) {
+      setSelectedIssue(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIssueDetailLoading(true);
+    setIssueError(null);
+
+    fetch(`/api/panel/issues/${selectedIssueNumber}?repo=${encodeURIComponent(repoSlug)}`)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error('Issue not found');
+        }
+        return response.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        setSelectedIssue((data.issue ?? null) as RepoIssueDetail | null);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSelectedIssue(null);
+        setIssueError('Unable to load issue detail.');
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIssueDetailLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [repoSlug, selectedIssueNumber]);
+
+  const seedBoard = useMemo(
+    () => selectedIssue ? buildBoardFromIssue(selectedIssue, repoSlug, repoBranch) : INITIAL_BOARD,
+    [repoBranch, repoSlug, selectedIssue],
+  );
+
+  const promptSuggestions = useMemo(() => {
+    if (!selectedIssue) return PROMPT_SUGGESTIONS;
+    return [
+      buildPromptFromIssue(selectedIssue),
+      `What is the safest v1 path for issue #${selectedIssue.number} in ${repoSlug ?? 'this repo'}?`,
+      `What can we defer if we hotfix issue #${selectedIssue.number} first?`,
+      `What deeper system fix does issue #${selectedIssue.number} point to?`,
+    ];
+  }, [repoSlug, selectedIssue]);
+
+  useEffect(() => {
+    if (!selectedIssue) return;
+    setBoard(seedBoard);
+    setPositions(buildRoutePositions(seedBoard.routes));
+    setSelectedRouteId(seedBoard.routes[0]?.id ?? '');
+    setPrompt(buildPromptFromIssue(selectedIssue));
+    setStreamPreview('');
+    setRawOutput('');
+    setError(null);
+    setHistory([]);
+    setConversation([]);
+  }, [seedBoard, selectedIssue]);
+
+  useEffect(() => {
+    const handleMove = (event: PointerEvent) => {
+      const drag = dragStateRef.current;
+      if (!drag) return;
+      const scale = boardScaleRef.current || 1;
+      const dx = (event.clientX - drag.startX) / scale;
+      const dy = (event.clientY - drag.startY) / scale;
+      setPositions((current) => ({
+        ...current,
+        [drag.id]: {
+          x: clamp(drag.origin.x + dx, ROUTE_X_MIN, ROUTE_X_MAX),
+          y: clamp(drag.origin.y + dy, ROUTE_Y_MIN, ROUTE_Y_MAX),
+        },
+      }));
+    };
+
+    const handleEnd = () => {
+      dragStateRef.current = null;
+    };
+
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleEnd);
+    window.addEventListener('pointercancel', handleEnd);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleEnd);
+      window.removeEventListener('pointercancel', handleEnd);
+    };
   }, []);
 
   const selectedRoute = useMemo(
@@ -667,16 +954,16 @@ export function IntentCanvas() {
   const prCenters = prPositions.map((position) => center(position, PR_SIZE));
 
   const handleReset = useCallback(() => {
-    setBoard(INITIAL_BOARD);
-    setPositions(buildRoutePositions(INITIAL_BOARD.routes));
-    setSelectedRouteId(INITIAL_BOARD.routes[0].id);
-    setPrompt(PROMPT_SUGGESTIONS[0]);
+    setBoard(seedBoard);
+    setPositions(buildRoutePositions(seedBoard.routes));
+    setSelectedRouteId(seedBoard.routes[0]?.id ?? '');
+    setPrompt(selectedIssue ? buildPromptFromIssue(selectedIssue) : promptSuggestions[0] ?? '');
     setStreamPreview('');
     setRawOutput('');
     setError(null);
     setHistory([]);
     setConversation([]);
-  }, []);
+  }, [promptSuggestions, seedBoard, selectedIssue]);
 
   const handleGenerate = useCallback(async () => {
     const nextPrompt = prompt.trim();
@@ -688,6 +975,22 @@ export function IntentCanvas() {
     setRawOutput('');
 
     try {
+      const repoContext = [
+        repoSlug ? `Repository: ${repoSlug}` : null,
+        repoBranch ? `Branch: ${repoBranch}` : null,
+        selectedIssue ? [
+          `Selected GitHub issue #${selectedIssue.number}: ${selectedIssue.title}`,
+          `State: ${selectedIssue.state}`,
+          selectedIssue.labels.length ? `Labels: ${selectedIssue.labels.map((label) => label.name).join(', ')}` : null,
+          `Comments: ${selectedIssue.comments}`,
+          `Author: ${selectedIssue.author}`,
+          selectedIssue.body ? `Issue body:\n${selectedIssue.body.slice(0, 2400)}` : null,
+        ].filter(Boolean).join('\n') : null,
+        issues.length > 0
+          ? `Nearby open issues: ${issues.slice(0, 8).map((issue) => `#${issue.number} ${issue.title}`).join(' • ')}`
+          : null,
+      ].filter(Boolean).join('\n\n');
+
       const response = await fetch('/api/v2/proxy/llm', {
         method: 'POST',
         headers: {
@@ -700,6 +1003,7 @@ export function IntentCanvas() {
           disableTools: true,
           messages: [
             { role: 'system', content: INTENT_BOARD_SYSTEM_PROMPT },
+            ...(repoContext ? [{ role: 'system', content: repoContext }] : []),
             ...(conversation.length > 0
               ? [
                   {
@@ -788,16 +1092,17 @@ export function IntentCanvas() {
     } finally {
       setIsGenerating(false);
     }
-  }, [board, conversation, isGenerating, model.id, model.provider, prompt]);
+  }, [board, conversation, isGenerating, issues, model.id, model.provider, prompt, repoBranch, repoSlug, selectedIssue]);
 
   const boardTags = useMemo(
     () => [
-      { label: 'sources', value: `${board.sources.length}` },
+      { label: 'repo', value: repoSlug?.split('/')[1] ?? 'freeform' },
+      { label: 'issue', value: selectedIssue ? `#${selectedIssue.number}` : 'none' },
       { label: 'routes', value: `${board.routes.length}` },
       { label: 'tasks', value: `${selectedRoute.tasks.length}` },
       { label: 'updated', value: new Date(board.updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) },
     ],
-    [board.routes.length, board.sources.length, board.updatedAt, selectedRoute.tasks.length],
+    [board.routes.length, board.updatedAt, repoSlug, selectedIssue, selectedRoute.tasks.length],
   );
 
   return (

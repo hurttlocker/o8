@@ -35,6 +35,7 @@ import type {
   MobileInboxSnapshot,
   MobileTranscriptEntry,
   MobileTranscriptMedia,
+  MobileTranscriptToolCall,
 } from '@/lib/mobile/types';
 import type { ProjectGroup } from '@/components/mobile/types';
 import { buildProjectGroups } from '@/components/mobile/utils';
@@ -48,6 +49,11 @@ import { autocompleteSlashCommand, buildSlashTerminalInput, getSlashCommandSugge
 // ── Types ──
 
 type SessionSummary = MobileInboxSnapshot['sessions'][number];
+type TranscriptGroup = {
+  id: string;
+  kind: 'user' | 'agent' | 'system';
+  entries: MobileTranscriptEntry[];
+};
 
 // ── Helpers ──
 
@@ -79,6 +85,10 @@ function mediaHref(path: string): string {
 
 function isImageMedia(item: MobileTranscriptMedia): boolean {
   return item.kind !== 'pdf' && item.kind !== 'file';
+}
+
+function isCompactionEntry(entry: MobileTranscriptEntry): boolean {
+  return entry.role === 'system' && entry.text.toLowerCase().includes('compaction');
 }
 
 type RuntimeEventSummary = {
@@ -130,6 +140,92 @@ function parseRuntimeEventSummary(text: string): RuntimeEventSummary | null {
     source,
     changedFiles,
   };
+}
+
+function groupTranscriptTurns(transcript: MobileTranscriptEntry[]): TranscriptGroup[] {
+  const groups: TranscriptGroup[] = [];
+  let pendingAgentGroup: TranscriptGroup | null = null;
+
+  const flushAgentGroup = () => {
+    if (!pendingAgentGroup) return;
+    groups.push(pendingAgentGroup);
+    pendingAgentGroup = null;
+  };
+
+  for (const entry of transcript) {
+    if (entry.role === 'user') {
+      flushAgentGroup();
+      groups.push({ id: entry.id, kind: 'user', entries: [entry] });
+      continue;
+    }
+
+    if (isCompactionEntry(entry)) {
+      flushAgentGroup();
+      groups.push({ id: entry.id, kind: 'system', entries: [entry] });
+      continue;
+    }
+
+    if (!pendingAgentGroup) {
+      pendingAgentGroup = {
+        id: `turn-${entry.id}`,
+        kind: 'agent',
+        entries: [entry],
+      };
+      continue;
+    }
+
+    pendingAgentGroup.entries.push(entry);
+  }
+
+  flushAgentGroup();
+  return groups;
+}
+
+function activityToLiveToolCall(activity?: SessionSummary['activity']): MobileTranscriptToolCall | null {
+  if (!activity?.toolName) return null;
+  const args: Record<string, unknown> = {};
+  if (activity.filePath) args.path = activity.filePath;
+  if (!activity.filePath && activity.headline) args.summary = activity.headline;
+  return {
+    name: activity.toolName,
+    args,
+    status: 'running',
+  };
+}
+
+function lastTurnToolCalls(transcript: MobileTranscriptEntry[]): MobileTranscriptToolCall[] {
+  let lastUserIndex = -1;
+  for (let i = transcript.length - 1; i >= 0; i--) {
+    if (transcript[i].role === 'user') {
+      lastUserIndex = i;
+      break;
+    }
+  }
+
+  const segment = lastUserIndex >= 0 ? transcript.slice(lastUserIndex + 1) : transcript;
+  return segment.flatMap((entry) => (entry.toolCalls ?? []).map((tool) => ({
+    ...tool,
+    status: tool.status ?? 'done',
+  })));
+}
+
+function advanceToolStack(
+  previous: MobileTranscriptToolCall[],
+  toolName: string,
+): MobileTranscriptToolCall[] {
+  const settled = previous.map((tool) => (
+    tool.status === 'running' || tool.status === 'calling'
+      ? { ...tool, status: 'done' as const }
+      : tool
+  ));
+
+  return [
+    ...settled,
+    {
+      name: toolName,
+      status: 'running',
+    },
+  ];
 }
 
 // ── Memoized Message Bubble ──
@@ -1164,6 +1260,7 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   streamingText,
   agentRunning,
   activityHeadline,
+  liveToolCalls = [],
   scrollRef,
   handleScroll,
   showScrollPill,
@@ -1178,12 +1275,15 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   streamingText: string;
   agentRunning: boolean;
   activityHeadline?: string;
+  liveToolCalls?: MobileTranscriptToolCall[];
   scrollRef: React.RefObject<HTMLDivElement | null>;
   handleScroll: () => void;
   showScrollPill: boolean;
   scrollToBottom: (force?: boolean) => void;
   getIsNewEntry: (entryId: string) => boolean;
 }) {
+  const groupedTranscript = useMemo(() => groupTranscriptTurns(transcript), [transcript]);
+
   return (
     <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div
@@ -1208,18 +1308,83 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
             No transcript visible yet — waiting for activity.
           </div>
         ) : (
-          transcript.map((entry, i) => {
-            const isNew = getIsNewEntry(entry.id);
+          groupedTranscript.map((group) => {
+            if (group.kind !== 'agent') {
+              return group.entries.map((entry) => {
+                const entryIndex = transcript.findIndex((candidate) => candidate.id === entry.id);
+                const isNew = getIsNewEntry(entry.id);
+                return (
+                  <Bubble
+                    key={entry.id}
+                    entry={entry}
+                    previousEntry={entryIndex > 0 ? transcript[entryIndex - 1] : null}
+                    agentName={currentAgentName}
+                    isNew={isNew}
+                    onOpenMermaid={onOpenMermaid}
+                    onRunInTerminal={onRunInTerminal}
+                  />
+                );
+              });
+            }
+
+            const showGroupLabel = group.entries.length > 1
+              || group.entries.some((entry) => entry.role === 'system' || entry.toolCalls?.length);
+
             return (
-              <Bubble
-                key={entry.id}
-                entry={entry}
-                previousEntry={i > 0 ? transcript[i - 1] : null}
-                agentName={currentAgentName}
-                isNew={isNew}
-                onOpenMermaid={onOpenMermaid}
-                onRunInTerminal={onRunInTerminal}
-              />
+              <div
+                key={group.id}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  marginTop: 2,
+                }}
+              >
+                {showGroupLabel ? (
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    alignSelf: 'flex-start',
+                    padding: '4px 9px',
+                    borderRadius: 999,
+                    background: 'rgba(37, 99, 235, 0.06)',
+                    color: '#2563eb',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}>
+                    {currentAgentName}
+                    <span style={{ color: 'rgba(37, 99, 235, 0.5)' }}>•</span>
+                    {group.entries.length} update{group.entries.length !== 1 ? 's' : ''}
+                  </div>
+                ) : null}
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                  paddingLeft: showGroupLabel ? 10 : 0,
+                  marginLeft: showGroupLabel ? 4 : 0,
+                  borderLeft: showGroupLabel ? '2px solid rgba(37, 99, 235, 0.10)' : 'none',
+                }}>
+                  {group.entries.map((entry) => {
+                    const entryIndex = transcript.findIndex((candidate) => candidate.id === entry.id);
+                    const isNew = getIsNewEntry(entry.id);
+                    return (
+                      <Bubble
+                        key={entry.id}
+                        entry={entry}
+                        previousEntry={entryIndex > 0 ? transcript[entryIndex - 1] : null}
+                        agentName={currentAgentName}
+                        isNew={isNew}
+                        onOpenMermaid={onOpenMermaid}
+                        onRunInTerminal={onRunInTerminal}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
             );
           })
         )}
@@ -1323,6 +1488,11 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
                     {activityHeadline}
                   </div>
                 </div>
+              </div>
+            ) : null}
+            {liveToolCalls.length > 0 ? (
+              <div style={{ maxWidth: '92%' }}>
+                <DesktopToolCallStack toolCalls={liveToolCalls} />
               </div>
             ) : null}
             <div style={{
@@ -1990,6 +2160,7 @@ export function DesktopChat({
   const [agentRunning, setAgentRunning] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [streamingText, setStreamingText] = useState('');
+  const [activeToolCalls, setActiveToolCalls] = useState<MobileTranscriptToolCall[]>([]);
   // wsConnected is derived from the WS hook below
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -2002,6 +2173,7 @@ export function DesktopChat({
   const codexThreadIdRef = useRef<string | undefined>(undefined);
   const selectedKeyRef = useRef('');
   const transcriptRequestRef = useRef(0);
+  const liveToolCallsRef = useRef<MobileTranscriptToolCall[]>([]);
 
   const selectedSession = useMemo(
     () => sessions.find(s => s.sessionKey === selectedKey),
@@ -2030,6 +2202,9 @@ export function DesktopChat({
       streamingTextRef.current = '';
       setStreamingText('');
       setSending(false);
+      const settled = liveToolCallsRef.current.map((tool) => ({ ...tool, status: 'done' as const }));
+      liveToolCallsRef.current = settled;
+      setActiveToolCalls(settled);
       // Inject final message — poll and history push will reconcile
       if (text) {
         setTranscript(prev => {
@@ -2049,6 +2224,8 @@ export function DesktopChat({
       streamingTextRef.current = '';
       setStreamingText('');
       setSending(false);
+      liveToolCallsRef.current = [];
+      setActiveToolCalls([]);
     },
     onInboxUpdate: (data: Record<string, unknown>) => {
       const inbox = data as unknown as MobileInboxSnapshot;
@@ -2161,6 +2338,15 @@ export function DesktopChat({
     if (headline.toLowerCase().startsWith('responded')) return undefined;
     return headline;
   }, [selectedSession?.activity?.headline]);
+  const liveToolCalls = useMemo(() => {
+    if (activeToolCalls.length > 0) return activeToolCalls;
+
+    const transcriptCalls = lastTurnToolCalls(transcript);
+    if (agentRunning && transcriptCalls.length > 0) return transcriptCalls;
+
+    const activityTool = activityToLiveToolCall(selectedSession?.activity);
+    return activityTool ? [activityTool] : [];
+  }, [activeToolCalls, agentRunning, selectedSession?.activity, transcript]);
 
   const scrollToBottom = useCallback((force = false) => {
     if (!scrollRef.current) return;
@@ -2383,6 +2569,8 @@ export function DesktopChat({
     };
     setTranscript(prev => [...prev, assistantEntry]);
     setAgentRunning(true);
+    liveToolCallsRef.current = [];
+    setActiveToolCalls([]);
 
     try {
       const res = await fetch('/api/claude-code/send', {
@@ -2435,15 +2623,22 @@ export function DesktopChat({
             }
 
             if (event.type === 'tool' && event.name) {
-              // Show tool usage inline
-              const toolLine = `\n🔧 *${event.name}*\n`;
-              accumulated += toolLine;
+              const nextTools = advanceToolStack(liveToolCallsRef.current, event.name);
+              liveToolCallsRef.current = nextTools;
+              setActiveToolCalls(nextTools);
               setTranscript(prev => prev.map(e =>
-                e.id === assistantId ? { ...e, text: accumulated } : e
+                e.id === assistantId ? { ...e, text: accumulated, toolCalls: nextTools } : e
               ));
             }
 
             if (event.type === 'done' || event.type === 'close') {
+              const settledTools = liveToolCallsRef.current.map((tool) => ({ ...tool, status: 'done' as const }));
+              if (settledTools.length > 0) {
+                liveToolCallsRef.current = settledTools;
+                setTranscript(prev => prev.map(e =>
+                  e.id === assistantId ? { ...e, toolCalls: settledTools } : e
+                ));
+              }
               if (event.sessionId) {
                 claudeSessionIdRef.current = event.sessionId;
               }
@@ -2471,6 +2666,8 @@ export function DesktopChat({
       ));
     } finally {
       setAgentRunning(false);
+      liveToolCallsRef.current = [];
+      setActiveToolCalls([]);
     }
   }, [sessions, selectedKey, scrollToBottom]);
 
@@ -2487,6 +2684,8 @@ export function DesktopChat({
     };
     setTranscript(prev => [...prev, assistantEntry]);
     setAgentRunning(true);
+    liveToolCallsRef.current = [];
+    setActiveToolCalls([]);
 
     try {
       const res = await fetch('/api/codex/send', {
@@ -2542,15 +2741,26 @@ export function DesktopChat({
             }
 
             if (event.type === 'tool' && event.name) {
-              const toolLine = `\n🔧 *${event.name}*\n`;
-              accumulated += toolLine;
+              const nextTools = advanceToolStack(liveToolCallsRef.current, event.name);
+              liveToolCallsRef.current = nextTools;
+              setActiveToolCalls(nextTools);
               setTranscript(prev => prev.map(e =>
-                e.id === assistantId ? { ...e, text: accumulated } : e
+                e.id === assistantId ? { ...e, text: accumulated, toolCalls: nextTools } : e
               ));
             }
 
             if ((event.type === 'done' || event.type === 'close') && event.threadId) {
               codexThreadIdRef.current = event.threadId;
+            }
+
+            if (event.type === 'done' || event.type === 'close') {
+              const settledTools = liveToolCallsRef.current.map((tool) => ({ ...tool, status: 'done' as const }));
+              if (settledTools.length > 0) {
+                liveToolCallsRef.current = settledTools;
+                setTranscript(prev => prev.map(e =>
+                  e.id === assistantId ? { ...e, toolCalls: settledTools } : e
+                ));
+              }
             }
 
             if (event.type === 'error' && event.text) {
@@ -2568,6 +2778,8 @@ export function DesktopChat({
       ));
     } finally {
       setAgentRunning(false);
+      liveToolCallsRef.current = [];
+      setActiveToolCalls([]);
     }
   }, [sessions, selectedKey, scrollToBottom]);
 
@@ -2579,6 +2791,8 @@ export function DesktopChat({
     setDraft('');
     setPendingFiles([]);
     setSending(true);
+    liveToolCallsRef.current = [];
+    setActiveToolCalls([]);
     playSendSound();
 
     const optimisticText = files.length > 0
@@ -2668,6 +2882,12 @@ export function DesktopChat({
     }
   }, [transcript]);
 
+  useEffect(() => {
+    if (agentRunning || streamingText) return;
+    liveToolCallsRef.current = [];
+    setActiveToolCalls([]);
+  }, [agentRunning, streamingText]);
+
   // ── Diff stats (WS-driven + safety-net) ──
   // WS pushes diff-stats on git changes; this poll is the safety-net
   useEffect(() => {
@@ -2756,6 +2976,8 @@ export function DesktopChat({
     if (selectedKey) {
       setLoading(true);
       setTranscript([]);
+      liveToolCallsRef.current = [];
+      setActiveToolCalls([]);
       seenIdsRef.current.clear();
       void fetchTranscript(selectedKey);
     }
@@ -2913,6 +3135,7 @@ export function DesktopChat({
         streamingText={streamingText}
         agentRunning={agentRunning}
         activityHeadline={liveActivityHeadline}
+        liveToolCalls={liveToolCalls}
         scrollRef={scrollRef}
         handleScroll={handleScroll}
         showScrollPill={showScrollPill}
