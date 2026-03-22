@@ -20,6 +20,13 @@ export {
   getContextInjection,
 } from './client';
 
+export {
+  seedFromCodebase,
+  seedFromGitHistory,
+  seedFromText,
+  checkSeedingNeeded,
+} from './seed';
+
 export type {
   CortexFact,
   CortexSearchResult,
