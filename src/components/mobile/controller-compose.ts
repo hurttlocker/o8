@@ -180,6 +180,7 @@ interface SteerSubmitArgs {
   sessionKey: string;
   actionStateBySession: Record<string, ActionState>;
   snapshot: MobileInboxSnapshot;
+  selectedSession?: MobileInboxSnapshot['sessions'][number];
   draftBySession: Record<string, string>;
   draftAttachmentsBySession: Record<string, DraftAttachment[]>;
   transcriptEntries: MobileTranscriptEntry[];
@@ -191,11 +192,7 @@ interface SteerSubmitArgs {
   setPreEnhanceDraft: Dispatch<SetStateAction<string | null>>;
   setSurfaceNote: Dispatch<SetStateAction<string | null>>;
   setActionNoteBySession: Dispatch<SetStateAction<Record<string, string | null>>>;
-  setSelectedId: Dispatch<SetStateAction<string>>;
-  setSelectedSessionKeyHint: Dispatch<SetStateAction<string>>;
-  setSelectedSessionFallback: Dispatch<SetStateAction<MobileInboxSnapshot['sessions'][number] | null>>;
   runAction: (payload: MobileActionRequest) => Promise<MobileActionResponse | undefined>;
-  refreshInbox: () => Promise<MobileInboxSnapshot>;
   loadHistory: (sessionKey: string, force?: boolean) => Promise<unknown>;
   playSendClick: () => void;
   relaySlashCommand: (sessionKey: string, commandText: string) => Promise<boolean>;
@@ -205,6 +202,7 @@ export async function submitSteerTurn({
   sessionKey,
   actionStateBySession,
   snapshot,
+  selectedSession,
   draftBySession,
   draftAttachmentsBySession,
   transcriptEntries,
@@ -216,18 +214,15 @@ export async function submitSteerTurn({
   setPreEnhanceDraft,
   setSurfaceNote,
   setActionNoteBySession,
-  setSelectedId,
-  setSelectedSessionKeyHint,
-  setSelectedSessionFallback,
   runAction,
-  refreshInbox,
   loadHistory,
   playSendClick,
   relaySlashCommand,
 }: SteerSubmitArgs) {
   if (actionStateBySession[sessionKey] === 'steering') return;
 
-  const targetSession = snapshot.sessions.find((session) => session.sessionKey === sessionKey);
+  const targetSession = snapshot.sessions.find((session) => session.sessionKey === sessionKey)
+    ?? (selectedSession?.sessionKey === sessionKey ? selectedSession : undefined);
   const isDiscoveredCodex = targetSession?.runtime === 'codex' && targetSession?.runtimeSurface?.ownership === 'discovered';
   const isOwnedCodex = targetSession?.runtime === 'codex' && targetSession?.runtimeSurface?.ownership === 'owned';
   const isClaudeCode = targetSession?.runtime === 'claude-code';
@@ -296,48 +291,9 @@ export async function submitSteerTurn({
 
   try {
     if (isDiscoveredCodex) {
-      // For discovered (running) Codex sessions, send directly via exec resume.
-      // The backend uses `codex exec resume <thread-id> <prompt>` to inject
-      // the message into the existing conversation.
-      if (targetSession?.status === 'running') {
-        await runAction({ action: 'resume' as MobileActionRequest['action'], sessionKey, message });
-        setSurfaceNote('Sent to Codex…');
-        scheduleHistoryRefreshBurst(sessionKey, loadHistory);
-      } else {
-      // Only launch a new session if the discovered session is NOT running
-      const cwd = targetSession?.runtimeSurface?.cwd ?? targetSession?.workspace ?? '';
-      const existingOwned = snapshot.sessions.find((session) =>
-        session.runtime === 'codex'
-        && session.runtimeSurface?.ownership === 'owned'
-        && (session.runtimeSurface?.cwd === cwd || session.workspace === cwd)
-        && session.runtimeSurface?.lifecycle?.availability === 'ready-for-resume',
-      );
-
-      if (existingOwned) {
-        await runAction({ action: 'resume' as MobileActionRequest['action'], sessionKey: existingOwned.sessionKey, message });
-        setSelectedId(existingOwned.id);
-        setSelectedSessionKeyHint(existingOwned.sessionKey);
-        setSelectedSessionFallback(existingOwned);
-        setSurfaceNote('Resuming Codex session…');
-        scheduleHistoryRefreshBurst(existingOwned.sessionKey, loadHistory);
-      } else {
-        const launchResult = await runAction({ action: 'launch' as MobileActionRequest['action'], sessionKey, message, cwd });
-        if (launchResult?.ok && launchResult.sessionKey && launchResult.sessionKey !== sessionKey) {
-          setSurfaceNote('Codex launched — switching to session…');
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          const freshInbox = await refreshInbox();
-          const newSession = freshInbox.sessions.find((session) => session.sessionKey === launchResult.sessionKey);
-          if (newSession) {
-            setSelectedId(newSession.id);
-            setSelectedSessionKeyHint(newSession.sessionKey);
-            setSelectedSessionFallback(newSession);
-            await loadHistory(launchResult.sessionKey, true).catch(() => undefined);
-          }
-        } else {
-          setSurfaceNote('Codex session launched.');
-        }
-      }
-      } // close outer else (non-running discovered codex)
+      await runAction({ action: 'steer', sessionKey, message });
+      setSurfaceNote('Sent to Codex…');
+      scheduleHistoryRefreshBurst(sessionKey, loadHistory);
     } else if (isOwnedCodex || isClaudeCode) {
       await runAction({ action: 'resume' as MobileActionRequest['action'], sessionKey, message });
       setSurfaceNote(isClaudeCode ? 'Sent to Claude Code…' : 'Sent to Codex…');

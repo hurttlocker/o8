@@ -235,6 +235,7 @@ function MobileRemoteShellInner({
       if (state.selectedSessionKeyHint) {
         const matchingSession = snapshot.sessions.find((session) => session.sessionKey === state.selectedSessionKeyHint);
         if (matchingSession) return matchingSession.id;
+        return currentId;
       }
       return currentId || (pickCurrentSession(snapshot)?.id ?? '');
     });

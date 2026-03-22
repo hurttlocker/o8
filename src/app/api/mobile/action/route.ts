@@ -242,35 +242,45 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Route 3: Discovered Codex sessions — use codex runtime adapter
+      // Route 3: Discovered Codex sessions — route through the same steer lane
+      // used by the runtime action contract so stale mobile clients still
+      // target the mirrored backend session instead of spawning local CLI work.
       if (sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-discovered:')) {
-        const codexRuntime = getRuntime('codex');
-        if (!codexRuntime?.resume) {
-          return NextResponse.json(
-            { ok: false, action, sessionKey, status: 'unavailable', note: 'Codex runtime not available.' },
-            { status: 501, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-          );
-        }
-        const result = await codexRuntime.resume(sessionKey, message ?? '');
+        const result = await performRuntimeAction({
+          action: 'steer',
+          surfaceId: sessionKey,
+          clientMutationId,
+          message,
+        });
         if (result.ok) {
           invalidateMutationCaches();
         }
-        console.info('[mobile/action] codex resume result', {
+        console.info('[mobile/action] discovered codex resume result', {
           sessionKey,
           clientMutationId,
           ok: result.ok,
-          note: result.note,
+          status: result.status,
+          runId: result.runId ?? null,
         });
         await publishMobileMutation(clientMutationId, {
           action,
           sessionKey,
           runtime: 'codex',
-          status: result.ok ? 'queued' : 'failed',
+          status: result.ok ? (result.status === 'queued' ? 'queued' : 'completed') : 'failed',
           note: result.note,
         });
         return NextResponse.json(
-          { ok: result.ok, action, sessionKey, clientMutationId, status: result.ok ? 'sent' : 'error', note: result.note },
-          { status: result.ok ? 200 : 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+          {
+            ok: result.ok,
+            action,
+            sessionKey,
+            clientMutationId,
+            status: result.status,
+            note: result.note,
+            runId: result.runId,
+            aborted: result.aborted,
+          },
+          { status: result.status === 'unavailable' ? 501 : 200, headers: { 'Cache-Control': 'no-store, max-age=0' } },
         );
       }
 
