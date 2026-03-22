@@ -149,15 +149,18 @@ export function useMobileState(init: MobileStateInit) {
 
   // ── Derived ──
   const selectedSessionFromSnapshot = useMemo(
-    () => snapshot.sessions.find((session) => session.id === selectedId)
-      ?? snapshot.sessions.find((session) => session.sessionKey === selectedSessionKeyHint)
+    () => snapshot.sessions.find((session) => session.sessionKey === selectedSessionKeyHint)
+      ?? snapshot.sessions.find((session) => session.id === selectedId)
       ?? null,
     [selectedId, selectedSessionKeyHint, snapshot],
   );
+  const hasPinnedSelection = Boolean(selectedSessionKeyHint || selectedId || selectedSessionFallback?.sessionKey);
   const selectedSession = selectedSessionFromSnapshot
-    ?? (snapshot.sessions.length === 0 ? (selectedSessionFallback ?? undefined) : pickCurrentSession(snapshot));
+    ?? (hasPinnedSelection ? (selectedSessionFallback ?? undefined) : pickCurrentSession(snapshot));
   const selectedSessionKey = selectedSessionFromSnapshot?.sessionKey
-    ?? (snapshot.sessions.length === 0 ? selectedSessionFallback?.sessionKey : pickCurrentSession(snapshot)?.sessionKey);
+    ?? (hasPinnedSelection
+      ? selectedSessionKeyHint || selectedSessionFallback?.sessionKey
+      : pickCurrentSession(snapshot)?.sessionKey);
   const isOpenClawSession = selectedSession?.runtime === 'openclaw';
   const isChatSession = isOpenClawSession || selectedSession?.runtime === 'codex' || selectedSession?.runtime === 'claude-code';
   const isOwnedCodexSession = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'owned';
@@ -177,6 +180,8 @@ export function useMobileState(init: MobileStateInit) {
     const matchingSession = snapshot.sessions.find((session) => session.sessionKey === savedSessionKey);
     if (!matchingSession) {
       console.info('[mobile] stored session not present in initial snapshot', { savedSessionKey });
+      setSelectedId('');
+      setSelectedSessionFallback(null);
       return;
     }
     setSelectedId(matchingSession.id);
@@ -215,16 +220,15 @@ export function useMobileState(init: MobileStateInit) {
   }, [selectedId, selectedSessionFallback, selectedSessionFromSnapshot, selectedSessionKeyHint]);
 
   useEffect(() => {
-    if (!snapshot.sessions.length || !selectedSessionFallback || selectedSessionFromSnapshot) return;
-    console.info('[mobile] dropping stale selected session fallback', {
-      staleId: selectedSessionFallback.id,
-      staleSessionKey: selectedSessionFallback.sessionKey,
+    if (!selectedSessionFallback || selectedSessionFromSnapshot) return;
+    console.info('[mobile] selected session missing from latest snapshot; retaining pinned target', {
+      missingId: selectedSessionFallback.id,
+      missingSessionKey: selectedSessionFallback.sessionKey,
       selectedId,
       selectedSessionKeyHint,
-      replacementSessionKey: pickCurrentSession(snapshot)?.sessionKey ?? null,
+      availableSessionKeys: snapshot.sessions.map((session) => session.sessionKey),
     });
-    setSelectedSessionFallback(null);
-  }, [selectedId, selectedSessionFallback, selectedSessionFromSnapshot, selectedSessionKeyHint, snapshot]);
+  }, [selectedId, selectedSessionFallback, selectedSessionFromSnapshot, selectedSessionKeyHint, snapshot.sessions]);
 
   return {
     // Core state + setters

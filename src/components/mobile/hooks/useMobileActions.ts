@@ -196,7 +196,7 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
     const transcriptEntries = state.historyBySession[sessionKey] ?? [];
     console.info('[mobile] submit steer turn', {
       selectedSessionId: state.selectedSession?.id ?? null,
-      selectedSessionKey,
+      selectedSessionKey: state.selectedSession?.sessionKey ?? selectedSessionKey ?? null,
       requestedSessionKey: sessionKey,
       transcriptEntries: transcriptEntries.length,
     });
@@ -204,6 +204,7 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
       sessionKey,
       actionStateBySession,
       snapshot,
+      selectedSession: state.selectedSession,
       draftBySession,
       draftAttachmentsBySession,
       transcriptEntries,
@@ -215,16 +216,12 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
       setPreEnhanceDraft,
       setSurfaceNote,
       setActionNoteBySession,
-      setSelectedId,
-      setSelectedSessionKeyHint,
-      setSelectedSessionFallback,
       runAction,
-      refreshInbox,
       loadHistory,
       playSendClick,
       relaySlashCommand,
     });
-  }, [actionStateBySession, snapshot, draftBySession, draftAttachmentsBySession, state.historyBySession, state.selectedSession?.id, selectedSessionKey, lastAssistantCountRef, setWaitingForResponse, setHistoryBySession, setDraftBySession, setDraftAttachmentsBySession, setPreEnhanceDraft, setSurfaceNote, setActionNoteBySession, setSelectedId, setSelectedSessionKeyHint, setSelectedSessionFallback, runAction, refreshInbox, loadHistory, relaySlashCommand]);
+  }, [actionStateBySession, snapshot, draftBySession, draftAttachmentsBySession, state.historyBySession, state.selectedSession, selectedSessionKey, lastAssistantCountRef, setWaitingForResponse, setHistoryBySession, setDraftBySession, setDraftAttachmentsBySession, setPreEnhanceDraft, setSurfaceNote, setActionNoteBySession, runAction, loadHistory, relaySlashCommand]);
 
   const handleOwnedResumeSubmit = useCallback(async (sessionKey: string) => {
     await submitOwnedResumeTurn({
