@@ -273,6 +273,7 @@ async function wsRpc(
 async function runStatusSnapshot(): Promise<Record<string, unknown>> {
   // Primary: WebSocket RPC (fast — <500ms)
   try {
+    console.log('[gateway-client] Attempting WS RPC for sessions.list...');
     // Use wide time window to catch all active sessions
     const sessionsResult = await wsRpc('sessions.list', { activeMinutes: 10080, limit: 50 });
     const sessions = (sessionsResult.sessions ?? []) as Array<Record<string, unknown>>;
@@ -285,11 +286,14 @@ async function runStatusSnapshot(): Promise<Record<string, unknown>> {
 
     const agents = (statusResult.heartbeat as Record<string, unknown>)?.agents as Array<Record<string, unknown>> | undefined;
 
+    console.log(`[gateway-client] WS RPC SUCCESS — ${sessions.length} sessions found`);
+    // IMPORTANT: spread statusResult FIRST so our sessions/gateway/agents keys win
+    // (statusResult may have its own empty sessions object from the 'status' RPC)
     return {
+      ...statusResult,
       gateway: { reachable: true },
       sessions: { sessions, recent: sessions },
       agents: { agents: agents ?? [] },
-      ...statusResult,
     };
   } catch (err) {
     const message = (err as Error).message?.slice(0, 200) ?? 'unknown';
