@@ -20,7 +20,6 @@ import {
   BarChart3,
   Bell,
   Search,
-  Zap,
   Lightbulb,
   Cable,
   type LucideIcon,
@@ -30,7 +29,6 @@ import {
 
 export type NavSection =
   | 'agents'
-  | 'intent'
   | 'terminal'
   | 'memory'
   | 'analytics'
@@ -61,7 +59,6 @@ const EXPANDED_WIDTH = 200;
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'agents', label: 'Agents', icon: Users },
-  { id: 'intent', label: 'Intent', icon: Zap },
   { id: 'terminal', label: 'Terminal', icon: Terminal },
   { id: 'memory', label: 'Memory', icon: Brain },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
