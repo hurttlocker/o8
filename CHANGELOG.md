@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-22
 
+- `0e74640` fix: Mobile agent runtime chat routes to CLI directly, not agent runtime gateway
 - `3884e59` fix: keep mobile sends pinned to selected session
 - `efb33ce` fix: harden mobile chat session targeting
 - `129199d` fix: force mobile chat refresh after send
