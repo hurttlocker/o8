@@ -17,7 +17,8 @@
     "desktop:dev": "npm run predev:cleanup && concurrently -k -s first \"npm run dev\" \"npm run dev:ws\"",
     "tauri:dev": "cargo tauri dev",
     "tauri:build": "cargo tauri build",
-    "postinstall": "npx node-gyp rebuild --directory=node_modules/node-pty 2>/dev/null || true"
+    "postinstall": "npx node-gyp rebuild --directory=node_modules/node-pty 2>/dev/null || true",
+    "tauri:prebuild": "next build && node scripts/tauri-export.mjs"
   },
   "dependencies": {
     "@json-render/core": "^0.14.0",
