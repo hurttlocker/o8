@@ -182,7 +182,6 @@ export function computePollingTier(args: {
   actionStateBySession: Record<string, ActionState>;
   waitingForResponse: boolean;
 }): PollingTier {
-  if (args.wsConnected) return 'ws-safety';
   const sk = args.selectedSessionKey;
   const isOwned = sk?.startsWith('codex-owned:');
   const ownedActive = isOwned && (
@@ -192,6 +191,14 @@ export function computePollingTier(args: {
   );
   if (ownedActive) return 'owned-active';
   if (isOwned) return 'owned-idle';
+  const isCliRuntime = args.selectedSession?.runtime === 'codex' || args.selectedSession?.runtime === 'claude-code';
+  const cliActive = isCliRuntime && (
+    args.selectedSession?.status === 'running'
+    || args.selectedSession?.status === 'reviewing'
+    || args.waitingForResponse
+  );
+  if (cliActive) return 'active';
+  if (args.wsConnected) return 'ws-safety';
   const isActive = args.selectedSession?.status === 'running' || args.waitingForResponse;
   return isActive ? 'active' : 'idle';
 }
