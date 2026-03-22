@@ -349,11 +349,12 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     );
   }
 
-  const { model, provider, messages: rawMessages, approvedTools: approvedToolsList } = body as {
+  const { model, provider, messages: rawMessages, approvedTools: approvedToolsList, disableTools } = body as {
     model: string;
     provider: Provider;
     messages: Message[];
     approvedTools?: string[];
+    disableTools?: boolean;
   };
   const approvedTools = new Set(approvedToolsList ?? []);
 
@@ -419,7 +420,10 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   }
 
   const headers = config.buildHeaders(apiKey);
-  const upstreamBody = config.buildBody(model, messages);
+  const upstreamBody = config.buildBody(model, messages) as Record<string, unknown>;
+  if (disableTools) {
+    delete upstreamBody.tools;
+  }
 
   try {
     const upstream = await fetch(url, {
@@ -564,8 +568,8 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
                   const lineCount = content.split('\n').length;
                   // Check if file exists for before/after diff
                   try {
-                    const { readFileSync, existsSync } = require('node:fs');
-                    const { join } = require('node:path');
+                    const { readFileSync, existsSync } = await import('node:fs');
+                    const { join } = await import('node:path');
                     const repoRoot = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
                     const fullPath = join(repoRoot, filePath);
                     if (existsSync(fullPath)) {
