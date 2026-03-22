@@ -597,7 +597,7 @@ export default function CortexLanding() {
           Zero config. One binary. Local-first forever.
         </p>
         <div style={{ ...s.ctaRow, marginTop: 32 }}>
-          <a href="#" style={{ ...s.ctaPrimary, padding: "16px 40px", fontSize: 16, color: palette.whiteChocolate }}>
+          <a href="https://github.com/hurttlocker/cortex-ide/releases/latest" target="_blank" rel="noreferrer" style={{ ...s.ctaPrimary, padding: "16px 40px", fontSize: 16, color: palette.whiteChocolate }}>
             ⬇ Download for macOS
           </a>
         </div>
