@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import WebSocket from 'ws';
 
 const execFileAsync = promisify(execFile);
 
@@ -160,8 +161,6 @@ function extractJsonPayload(raw: string): string {
 
 // ── WebSocket RPC (fast path — <500ms) ──
 
-import WebSocket from 'ws';
-
 /**
  * Opens a short-lived WebSocket to the gateway, authenticates via
  * challenge-response, sends an RPC request, and returns the result.
@@ -293,8 +292,11 @@ async function runStatusSnapshot(): Promise<Record<string, unknown>> {
       ...statusResult,
     };
   } catch (err) {
-    const message = (err as Error).message?.slice(0, 100) ?? 'unknown';
-    console.warn(`[gateway-client] WS RPC failed, trying CLI fallback: ${message}`);
+    const message = (err as Error).message?.slice(0, 200) ?? 'unknown';
+    console.error(`[gateway-client] WS RPC failed (will try CLI fallback): ${message}`);
+    if (err instanceof Error && err.stack) {
+      console.error(`[gateway-client] Stack: ${err.stack.split('\n').slice(0, 3).join(' | ')}`);
+    }
   }
 
   // Fallback: CLI (may hang but try with tight timeout)
@@ -470,11 +472,18 @@ export async function getGatewayStatus(options?: {
   ensureCliRefreshLoop();
 
   if (fresh) {
-    // Force a new CLI refresh — don't piggyback a pre-mutation inflight request
-    await refreshCliCache(CLI_STATUS_TIMEOUT_MS, true);
+    // Force a fresh snapshot — WS RPC first, CLI fallback
+    try {
+      const snapshot = await runStatusSnapshot();
+      statusCache = { data: snapshot, ts: Date.now() };
+      cliStatusFailureCount = 0;
+      cliBackoffMs = CLI_BACKOFF_BASE_MS;
+    } catch {
+      // WS + CLI both failed
+    }
     const ageMs = statusCache ? Date.now() - statusCache.ts : Infinity;
     if (!statusCache || ageMs > maxAgeMs) {
-      throw new Error('Gateway status unavailable — REST is down and a fresh CLI snapshot could not be obtained.');
+      throw new Error('Gateway status unavailable — both WS RPC and CLI failed.');
     }
     const data = statusCache.data as Record<string, unknown>;
     const sessions = data.sessions as { recent?: Array<Record<string, unknown>> } | undefined;
@@ -492,12 +501,15 @@ export async function getGatewayStatus(options?: {
       void refreshCliCache();
     }
   } else {
-    if (Date.now() >= cliStatusRetryAfter) {
-      void refreshCliCache();
-      await Promise.race([
-        refreshPromise ?? Promise.resolve(),
-        wait(CLI_COLD_START_WAIT_MS),
-      ]);
+    // No cache — cold start. Call runStatusSnapshot directly (tries WS RPC first, <500ms).
+    try {
+      const snapshot = await runStatusSnapshot();
+      statusCache = { data: snapshot, ts: Date.now() };
+      cliStatusFailureCount = 0;
+      cliStatusRetryAfter = 0;
+      cliBackoffMs = CLI_BACKOFF_BASE_MS;
+    } catch (err) {
+      console.error('[gateway-client] Cold start snapshot failed:', (err as Error).message?.slice(0, 150));
     }
   }
 
