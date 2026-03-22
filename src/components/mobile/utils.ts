@@ -745,6 +745,47 @@ export function agentDisplayName(session: SessionSummary): string {
   return name.split(/[\s·•/]/)[0] || 'Agent';
 }
 
+export function sessionRuntimePid(session: SessionSummary): string | null {
+  const sourceLabel = session.runtimeSurface?.sourceLabel ?? '';
+  const match = sourceLabel.match(/\b(?:live|active) pid\s+(\d+)/i);
+  return match?.[1] ?? null;
+}
+
+export function mobileSessionSecondaryLabel(session: SessionSummary): string {
+  const branchShort = session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '') ?? '';
+  const pid = sessionRuntimePid(session);
+
+  if (session.runtime === 'codex') {
+    const ownership = session.runtimeSurface?.ownership ?? '';
+    const availability = session.runtimeSurface?.lifecycle?.availability ?? '';
+    if (ownership === 'discovered' && pid) return `live pid ${pid}`;
+    if (ownership === 'owned' && pid) return `owned pid ${pid}`;
+    if (ownership === 'owned' && availability === 'ready-for-resume') return 'resume ready';
+    if (ownership === 'owned' && availability === 'running') return 'owned live';
+    return branchShort || session.status;
+  }
+
+  if (session.runtime === 'claude-code') {
+    return pid ? `pid ${pid}` : branchShort || session.status;
+  }
+
+  return session.activity?.headline ?? (branchShort || session.status);
+}
+
+function projectSessionPriority(session: SessionSummary, selectedSession?: SessionSummary): number {
+  if (session.id === selectedSession?.id) return 1000;
+  if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'discovered' && session.status === 'running') return 960;
+  if (session.runtime === 'claude-code' && session.status === 'running') return 940;
+  if (session.isCurrentSession) return 920;
+  if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned' && session.status === 'running') return 900;
+  if (session.status === 'running') return 860;
+  if (session.status === 'reviewing') return 820;
+  if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') return 780;
+  if (session.status === 'waiting') return 740;
+  if (session.status === 'failed') return 700;
+  return 500;
+}
+
 export function projectDisplayName(workspace: string, sessions: SessionSummary[]): string {
   if (workspace.includes('workspace-ace')) return 'Niot';
   if (workspace.includes('workspace-hawk')) return 'Hawk';
@@ -794,18 +835,26 @@ export function buildProjectGroups(
     }
 
     if (session.runtime === 'codex') {
-      const sourceLabel = session.runtimeSurface?.sourceLabel ?? '';
+      const sourceLabel = (session.runtimeSurface?.sourceLabel ?? '').toLowerCase();
       const ownership = session.runtimeSurface?.ownership ?? '';
       if (ownership === 'discovered') {
-        return sourceLabel.includes('live pid');
+        return session.status === 'running'
+          || session.status === 'reviewing'
+          || sourceLabel.includes('live pid');
       }
       if (ownership === 'owned') {
-        if (sourceLabel.includes('active pid')) return true;
-        const minsMatch = ageText.match(/^(\d+)m/);
-        const recentMins = minsMatch ? parseInt(minsMatch[1], 10) : 999;
-        return ageText === 'just now' || recentMins < 60;
+        return session.status === 'running'
+          || session.status === 'reviewing'
+          || session.status === 'waiting'
+          || session.status === 'failed'
+          || sourceLabel.includes('active pid')
+          || sourceLabel.includes('ready for resume')
+          || sourceLabel.includes('last finished');
       }
-      return false;
+      return session.status === 'running'
+        || session.status === 'reviewing'
+        || session.status === 'waiting'
+        || session.status === 'failed';
     }
 
     if (isStale) return false;
@@ -825,13 +874,19 @@ export function buildProjectGroups(
 
   const groups: ProjectGroup[] = [];
   for (const [workspace, rawSessions] of groupMap) {
-    const sessions: SessionSummary[] = [];
+    const dedupedSessions: SessionSummary[] = [];
     const seenIds = new Set<string>();
     for (const session of rawSessions) {
       if (seenIds.has(session.id)) continue;
       seenIds.add(session.id);
-      sessions.push(session);
+      dedupedSessions.push(session);
     }
+    const originalOrder = new Map(dedupedSessions.map((session, index) => [session.id, index]));
+    const sessions = [...dedupedSessions].sort((left, right) => {
+      const priorityDiff = projectSessionPriority(right, selectedSession) - projectSessionPriority(left, selectedSession);
+      if (priorityDiff !== 0) return priorityDiff;
+      return (originalOrder.get(left.id) ?? 0) - (originalOrder.get(right.id) ?? 0);
+    });
 
     const hasRunning = sessions.some((session) => session.status === 'running' || session.status === 'reviewing');
     const bestContextPct = Math.max(...sessions.map((session) => session.context?.usedPercent ?? 0));

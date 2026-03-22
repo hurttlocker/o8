@@ -1,7 +1,7 @@
 import { memo, useMemo } from 'react';
 import { ChevronRight } from 'lucide-react';
 import type { SquadRailProps } from './types';
-import { buildProjectGroups } from './utils';
+import { buildProjectGroups, mobileSessionSecondaryLabel } from './utils';
 
 export const SquadRail = memo(function SquadRail({
   snapshot,
@@ -66,10 +66,7 @@ export const SquadRail = memo(function SquadRail({
                   const sessionPercent = Math.round(session.context?.usedPercent ?? 0);
                   const sessionTone = sessionPercent >= 85 ? 'critical' : sessionPercent >= 75 ? 'high' : sessionPercent >= 65 ? 'watch' : 'calm';
                   const name = agentDisplayName(session);
-                  const branchShort = session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '') ?? '';
-                  const statusLabel = session.runtime === 'codex' && branchShort
-                    ? branchShort
-                    : (session.activity?.headline ?? session.status);
+                  const statusLabel = mobileSessionSecondaryLabel(session);
                   return (
                     <button
                       key={session.id}
