@@ -236,12 +236,12 @@ function DashboardInner() {
 
   // Terminal WS hook — routes events to TerminalWorkspace + BottomTerminal
   const terminalWsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
-    onTerminalCreated: (sessionName: string) => {
+    onTerminalCreated: (sessionName: string, requestId?: string) => {
       setDashTermSession(sessionName);
       // Route to BottomTerminal first — if it claims, skip TerminalWorkspace
-      const claimed = bottomTermRef.current?.onSessionCreated(sessionName);
+      const claimed = bottomTermRef.current?.onSessionCreated(sessionName, requestId);
       if (!claimed) {
-        termWorkspaceRef.current?.onSessionCreated(sessionName);
+        termWorkspaceRef.current?.onSessionCreated(sessionName, requestId);
       }
     },
     onTerminalData: (sessionName: string, data: string) => {
@@ -677,18 +677,8 @@ function DashboardInner() {
       preferredKinds: ['terminal', 'canvas', 'preview'],
       ratio: 0.68,
     });
-    // Send to BottomTerminal's session if ready, otherwise wait for it
-    const session = bottomTermRef.current?.getSession();
-    if (session) {
-      sendTerminalInput(session, command + '\n');
-    } else {
-      // Terminal not ready yet — retry after a short delay
-      setTimeout(() => {
-        const s = bottomTermRef.current?.getSession();
-        if (s) sendTerminalInput(s, command + '\n');
-      }, 1500);
-    }
-  }, [ensureTileKind, sendTerminalInput]);
+    bottomTermRef.current?.runCommand(command);
+  }, [ensureTileKind]);
 
   // ── Alert action: navigate to agent session ──
   const handleAlertAction = useCallback((alert: import('@/lib/alerts/types').Alert) => {
