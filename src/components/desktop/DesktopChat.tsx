@@ -115,6 +115,7 @@ type GroupSourceCard = {
   details: string[];
   tone: GroupChipTone;
   links?: Array<{ label: string; href: string }>;
+  canOpenDiff?: boolean;
 };
 
 function extractRuntimeField(text: string, label: string): string | undefined {
@@ -341,6 +342,7 @@ function buildGroupSourceCards(entries: MobileTranscriptEntry[]): GroupSourceCar
       summary: details.length > 0 ? `${details.length} path${details.length !== 1 ? 's' : ''}` : `${fileTools.length} file step${fileTools.length !== 1 ? 's' : ''}`,
       details,
       tone: 'emerald',
+      canOpenDiff: true,
     });
   }
 
@@ -412,6 +414,7 @@ function buildGroupSourceCards(entries: MobileTranscriptEntry[]): GroupSourceCar
       summary: runtimeEvents.length > 1 ? `${runtimeEvents.length} queued updates` : 'sub-agent delivery',
       details,
       tone: 'slate',
+      canOpenDiff: details.length > 0,
     });
   }
 
@@ -1652,6 +1655,7 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   agentRunning,
   activityHeadline,
   liveToolCalls = [],
+  onOpenDiff,
   scrollRef,
   handleScroll,
   showScrollPill,
@@ -1667,6 +1671,7 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   agentRunning: boolean;
   activityHeadline?: string;
   liveToolCalls?: MobileTranscriptToolCall[];
+  onOpenDiff?: () => void;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   handleScroll: () => void;
   showScrollPill: boolean;
@@ -1743,6 +1748,7 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
                 getIsNewEntry={getIsNewEntry}
                 onOpenMermaid={onOpenMermaid}
                 onRunInTerminal={onRunInTerminal}
+                onOpenDiff={onOpenDiff}
               />
             );
           })
@@ -1814,6 +1820,7 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
   getIsNewEntry,
   onOpenMermaid,
   onRunInTerminal,
+  onOpenDiff,
 }: {
   group: TranscriptGroup;
   previousGroup: TranscriptGroup | null;
@@ -1822,6 +1829,7 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
   getIsNewEntry: (entryId: string) => boolean;
   onOpenMermaid?: (code: string) => void;
   onRunInTerminal?: (command: string) => void;
+  onOpenDiff?: () => void;
 }) {
   const [expandedSourceId, setExpandedSourceId] = useState<string | null>(null);
   const previousTs = previousGroup ? groupTimestamp(previousGroup.entries) : undefined;
@@ -2034,6 +2042,34 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
                           </a>
                         ))}
                       </div>
+                    </div>
+                  ) : null}
+                  {sourceCards.find((card) => card.id === expandedSourceId)?.canOpenDiff && onOpenDiff ? (
+                    <div style={{
+                      display: 'flex',
+                      justifyContent: 'flex-start',
+                      marginBottom: (sourceCards.find((card) => card.id === expandedSourceId)?.details ?? []).length > 0 ? 10 : 0,
+                    }}>
+                      <button
+                        type="button"
+                        onClick={onOpenDiff}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '7px 10px',
+                          borderRadius: 10,
+                          border: '1px solid rgba(37, 99, 235, 0.14)',
+                          background: 'rgba(37, 99, 235, 0.06)',
+                          color: '#2563eb',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <SlidersHorizontal size={12} strokeWidth={2} />
+                        Open diff sheet
+                      </button>
                     </div>
                   ) : null}
                   {(sourceCards.find((card) => card.id === expandedSourceId)?.details ?? []).length > 0 ? (
@@ -3776,6 +3812,7 @@ export function DesktopChat({
         agentRunning={agentRunning}
         activityHeadline={liveActivityHeadline}
         liveToolCalls={liveToolCalls}
+        onOpenDiff={onOpenDiff ? onOpenDiff : () => setDiffOpen(true)}
         scrollRef={scrollRef}
         handleScroll={handleScroll}
         showScrollPill={showScrollPill}
