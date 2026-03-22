@@ -22,7 +22,7 @@ export interface DesktopWsCallbacks {
   onChatDone?: (text: string, runId: string) => void;
   onChatError?: (error: string) => void;
   onInboxUpdate?: (inbox: Record<string, unknown>) => void;
-  onHistoryUpdate?: (sessionKey: string, entries: Array<Record<string, unknown>>) => void;
+  onHistoryUpdate?: (sessionKey: string, entries: Array<Record<string, unknown>>, replace?: boolean) => void;
   onReviewUpdate?: (data: Record<string, unknown>) => void;
   // Terminal channel
   onTerminalCreated?: (sessionName: string, requestId?: string) => void;
@@ -199,7 +199,7 @@ export function useDesktopWebSocket(
             const sk = data.sessionKey as string;
             const entries = data.entries as Array<Record<string, unknown>>;
             if (sk && entries?.length > 0) {
-              cbRef.current.onHistoryUpdate?.(sk, entries);
+              cbRef.current.onHistoryUpdate?.(sk, entries, Boolean(data.replace));
             }
           }
           break;
