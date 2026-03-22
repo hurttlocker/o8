@@ -455,8 +455,8 @@ export async function getGatewayStatus(options?: {
   fresh?: boolean;
   maxAgeMs?: number;
 }): Promise<{
-  gateway: { reachable: boolean; freshness: 'fresh' | 'stale' | 'warming'; source: 'rest' | 'cli' };
-  sessions: { recent: Array<Record<string, unknown>> };
+  gateway: { reachable: boolean; freshness: 'fresh' | 'stale' | 'warming'; source: 'rest' | 'cli' | 'ws' };
+  sessions: { recent: Array<Record<string, unknown>>; sessions?: Array<Record<string, unknown>> };
   agents: { agents: Array<Record<string, unknown>> };
 }> {
   const fresh = options?.fresh ?? false;
