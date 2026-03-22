@@ -217,7 +217,8 @@ export const AlertTray = memo(function AlertTray({
   useEffect(() => {
     if (!open || variant !== 'desktop') return;
     const handler = (e: MouseEvent) => {
-      if (trayRef.current && !trayRef.current.contains(e.target as Node)) {
+      const boundary = trayRef.current?.parentElement ?? trayRef.current;
+      if (boundary && !boundary.contains(e.target as Node)) {
         onClose();
       }
     };

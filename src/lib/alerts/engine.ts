@@ -3,33 +3,12 @@
  *
  * Piggybacks on existing polling data (AgentSummary[]).
  * No new API calls, no side effects. Returns Alert[] for the provider to diff & merge.
+ * Keep this high-signal only: surface explicit problems, not speculative noise.
  */
 
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { Alert, AlertType } from './types';
 import { TYPE_SEVERITY } from './types';
-
-// ── Thresholds ──
-const STUCK_MINUTES = 15;
-const CONTEXT_WARN_PCT = 70;
-const CONTEXT_CRITICAL_PCT = 85;
-// Heartbeat intervals (minutes) — if no update in 2× interval, consider offline
-const DEFAULT_HEARTBEAT_INTERVAL = 120; // 2h fallback
-
-/** Parse "Xm ago" / "Xh ago" / "Xd ago" into minutes. Returns Infinity if unparseable. */
-function parseAgeMinutes(ageStr: string | undefined): number {
-  if (!ageStr) return Infinity;
-  if (ageStr.trim().toLowerCase() === 'just now') return 0;
-  const m = ageStr.match(/(\d+)\s*(m|min|h|hr|d|day|s|sec)/i);
-  if (!m) return Infinity;
-  const val = parseInt(m[1], 10);
-  const unit = m[2].toLowerCase();
-  if (unit.startsWith('s')) return val / 60;
-  if (unit.startsWith('m')) return val;
-  if (unit.startsWith('h')) return val * 60;
-  if (unit.startsWith('d')) return val * 1440;
-  return Infinity;
-}
 
 function makeId(type: AlertType, agentId: string): string {
   return `${type}:${agentId}`;
@@ -67,10 +46,7 @@ export function detectAlerts(agents: AgentSummary[]): Alert[] {
   const alerts: Alert[] = [];
 
   for (const agent of agents) {
-    const ageMinutes = parseAgeMinutes(agent.lastEventAt);
-    const ctxPct = agent.context?.usedPercent ?? 0;
-
-    // ── Approval needed ──
+    // Only surface explicit approval gates.
     if (agent.approvalStatus === 'pending') {
       alerts.push(
         makeAlert('approval', agent, `${agent.name} needs approval`, 'Waiting for human review', {
@@ -80,70 +56,24 @@ export function detectAlerts(agents: AgentSummary[]): Alert[] {
       );
     }
 
-    // ── Agent stuck (running but no activity) ──
-    if (
-      agent.status === 'running' &&
-      ageMinutes < Infinity &&
-      ageMinutes >= STUCK_MINUTES &&
-      agent.approvalStatus !== 'pending' // don't double-alert
-    ) {
+    // Surface only concrete failures or blocked runs, not inferred "stuck" states.
+    if (agent.status === 'failed' || agent.status === 'blocked') {
+      const title = agent.status === 'blocked'
+        ? `${agent.name} is blocked`
+        : `${agent.name} hit an error`;
       alerts.push(
         makeAlert(
-          'stuck',
+          'error',
           agent,
-          `${agent.name} may be stuck`,
-          `No activity for ${Math.round(ageMinutes)} minutes`,
-          { actionable: true, actionLabel: 'Open' },
+          title,
+          agent.currentTask || 'Review the latest runtime output',
+          {
+            actionable: true,
+            actionLabel: 'Open',
+          },
         ),
       );
     }
-
-    // ── Agent errored ──
-    if (agent.status === 'failed') {
-      alerts.push(
-        makeAlert('error', agent, `${agent.name} hit an error`, agent.currentTask || 'Unknown task', {
-          actionable: true,
-          actionLabel: 'View',
-        }),
-      );
-    }
-
-    // ── Context pressure ──
-    if (ctxPct >= CONTEXT_CRITICAL_PCT) {
-      alerts.push(
-        makeAlert(
-          'context-critical',
-          agent,
-          `${agent.name} context critical`,
-          `${Math.round(ctxPct)}% used — compaction needed`,
-          { actionable: true, actionLabel: 'Open' },
-        ),
-      );
-    } else if (ctxPct >= CONTEXT_WARN_PCT) {
-      alerts.push(
-        makeAlert(
-          'context-warn',
-          agent,
-          `${agent.name} context pressure`,
-          `${Math.round(ctxPct)}% used`,
-        ),
-      );
-    }
-
-    // ── Agent offline (missed heartbeat) ──
-    if (
-      agent.status === 'idle' &&
-      ageMinutes >= DEFAULT_HEARTBEAT_INTERVAL * 2 &&
-      ageMinutes < Infinity
-    ) {
-      alerts.push(
-        makeAlert('offline', agent, `${agent.name} offline`, `Last seen ${agent.lastEventAt}`),
-      );
-    }
-
-    // ── Task completed ──
-    // Detected by transition: we check if status is 'idle' with very recent activity
-    // This is best handled by diffing previous state — will be wired in the context provider
   }
 
   return alerts;

@@ -14,7 +14,6 @@ import { UniversalSearch } from '@/components/shared/UniversalSearch';
 import { GraphExplorer3D } from '@/components/desktop/GraphExplorer3D';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { ThemeProvider } from '@/lib/theme/context';
-import { AlertBell } from '@/components/shared/AlertBell';
 import { AlertTray } from '@/components/shared/AlertTray';
 import { AlertToast } from '@/components/shared/AlertToast';
 import { NavRail, type NavSection } from '@/components/desktop/NavRail';
@@ -282,8 +281,6 @@ function DashboardInner() {
   const {
     alerts: activeAlerts,
     unreadCount,
-    urgentCount,
-    hasUnread,
     markRead,
     markAllRead,
     dismiss,
@@ -1024,6 +1021,19 @@ function DashboardInner() {
         }}
         alertCount={unreadCount}
         onAlertClick={() => setAlertTrayOpen(!alertTrayOpen)}
+        alertTray={(
+          <AlertTray
+            alerts={activeAlerts}
+            open={alertTrayOpen}
+            onClose={() => setAlertTrayOpen(false)}
+            onMarkRead={markRead}
+            onMarkAllRead={markAllRead}
+            onDismiss={dismiss}
+            onDismissAll={dismissAll}
+            onAction={handleAlertAction}
+            variant="desktop"
+          />
+        )}
         onSearchClick={() => setSearchOpen(true)}
         thoughtsOpen={thoughtsOpen}
         onThoughtsToggle={() => setThoughtsOpen(v => !v)}
