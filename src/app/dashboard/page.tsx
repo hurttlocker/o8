@@ -1230,6 +1230,7 @@ function DashboardInner() {
               resourceId: code,
             });
           }}
+          onOpenFile={handleSelectFile}
           onRunInTerminal={handleRunInTerminal}
           onWsStatusChange={setWsStatus}
         />
