@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `c4e1384` docs: Add critical gateway-client rules to AI provider.md
 - `e8f76d1` fix: Remove debug logs, fix source label to 'ws', reduce log spam
 - `c415f70` fix: Spread statusResult BEFORE sessions to prevent key clobber
 - `cfb974a` fix: getGatewayStatus calls WS RPC directly on cold start + fresh requests
