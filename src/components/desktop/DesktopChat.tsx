@@ -221,6 +221,17 @@ function groupTimestamp(entries: MobileTranscriptEntry[]): number | undefined {
   return entries.find((entry) => typeof entry.timestamp === 'number')?.timestamp;
 }
 
+function relativeTimeLabel(timestamp: number): string {
+  const diffMs = Math.max(0, Date.now() - timestamp);
+  const minutes = Math.floor(diffMs / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
+}
+
 function summarizeAgentGroup(entries: MobileTranscriptEntry[]): {
   chips: GroupChip[];
   separatorLabel?: string;
@@ -2483,6 +2494,14 @@ const SidebarApprovalCard = memo(function SidebarApprovalCard({
                   {approval.agent} • {approval.title}
                 </span>
                 <span style={{
+                  fontSize: 10,
+                  color: '#94a3b8',
+                  fontWeight: 700,
+                  letterSpacing: '0.02em',
+                }}>
+                  {relativeTimeLabel(approval.createdAt)}
+                </span>
+                <span style={{
                   display: 'inline-flex',
                   alignItems: 'center',
                   padding: '3px 8px',
@@ -2542,10 +2561,19 @@ const SidebarApprovalCard = memo(function SidebarApprovalCard({
                     fontSize: 12,
                     fontWeight: 800,
                     cursor: 'pointer',
-                    opacity: resolvingId === approval.id ? 0.55 : 1,
-                    transition: 'transform 160ms ease, box-shadow 160ms ease',
-                    boxShadow: '0 10px 18px rgba(22, 163, 74, 0.18)',
-                  }}
+                  opacity: resolvingId === approval.id ? 0.55 : 1,
+                  transition: 'transform 160ms ease, box-shadow 160ms ease',
+                  boxShadow: '0 10px 18px rgba(22, 163, 74, 0.18)',
+                }}
+                onMouseEnter={(e) => {
+                  if (resolvingId === approval.id) return;
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = '0 14px 22px rgba(22, 163, 74, 0.24)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = '0 10px 18px rgba(22, 163, 74, 0.18)';
+                }}
                 >
                   {resolvingId === approval.id ? 'Working…' : 'Approve'}
                 </button>
@@ -2564,6 +2592,16 @@ const SidebarApprovalCard = memo(function SidebarApprovalCard({
                     fontWeight: 800,
                     cursor: 'pointer',
                     opacity: resolvingId === approval.id ? 0.55 : 1,
+                    transition: 'transform 160ms ease, background 160ms ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (resolvingId === approval.id) return;
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                    e.currentTarget.style.background = 'rgba(239, 68, 68, 0.10)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.background = 'rgba(239, 68, 68, 0.06)';
                   }}
                 >
                   Reject
