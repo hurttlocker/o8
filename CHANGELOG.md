@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `6e79944` feat: unify desktop thoughts and sidebar chat rendering
 - `a80239f` fix: portal desktop alerts tray
 - `c1af442` feat: Codebase seeding engine — solve cold start for new users
 - `9eab4de` fix: wire desktop alerts tray
