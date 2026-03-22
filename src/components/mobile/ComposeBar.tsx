@@ -211,7 +211,7 @@ export const ComposeBar = memo(function ComposeBar({
                 }
                 if (event.key === 'Enter' && !event.shiftKey && sessionKey && draft.trim()) {
                   event.preventDefault();
-                  void handlers.onSend();
+                  void handlers.onSend(sessionKey);
                 }
               }}
               onFocus={() => handlers.onFocusChange(true)}
@@ -319,7 +319,7 @@ export const ComposeBar = memo(function ComposeBar({
                   if (!sessionKey) {
                     return;
                   }
-                  void handlers.onSend();
+                  void handlers.onSend(sessionKey);
                 }}
                 aria-label={`Send message to ${session ? agentDisplayName(session) : 'Mister'}`}
               >
@@ -362,7 +362,7 @@ export const ComposeBar = memo(function ComposeBar({
                 }
                 if (event.key === 'Enter' && !event.shiftKey && sessionKey && draft.trim()) {
                   event.preventDefault();
-                  void handlers.onOwnedResume();
+                  void handlers.onOwnedResume(sessionKey);
                 }
               }}
               onFocus={() => handlers.onFocusChange(true)}
@@ -460,7 +460,7 @@ export const ComposeBar = memo(function ComposeBar({
                   if (!sessionKey) {
                     return;
                   }
-                  void handlers.onOwnedResume();
+                  void handlers.onOwnedResume(sessionKey);
                 }}
                 aria-label="Send next turn to owned Codex"
               >
