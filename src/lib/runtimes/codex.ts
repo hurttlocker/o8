@@ -15,7 +15,7 @@ import type {
   LaunchOptions,
 } from './types';
 import { getCodexDiscoveredFleetAdditions, getCodexRuntimeTail } from '@/lib/codex/sessions';
-import { steerOpenClawSession } from '@/lib/openclaw/chat';
+
 import {
   launchOwnedCodexSession,
   continueOwnedCodexSession,
@@ -143,18 +143,23 @@ export const codexRuntime: AgentRuntime = {
       return { ok: true, note: result.note, sessionKey };
     }
 
+    // Discovered Codex sessions: resume directly via CLI
+    const threadId = sessionKey.replace(/^codex:/, '').replace(/^codex-discovered:/, '');
     try {
-      await steerOpenClawSession(sessionKey, message, []);
-      return {
-        ok: true,
-        note: 'Sent.',
-        sessionKey,
-      };
+      const { execFileSync } = await import('node:child_process');
+      const os = await import('node:os');
+      const path = await import('node:path');
+      const codexBin = path.join(os.homedir(), '.npm-global', 'bin', 'codex');
+      execFileSync(codexBin, ['exec', 'resume', threadId, message, '--json', '--dangerously-bypass-approvals-and-sandbox'], {
+        cwd: process.env.HOME || os.homedir(),
+        timeout: 120_000,
+        maxBuffer: 10 * 1024 * 1024,
+        env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+        encoding: 'utf-8',
+      });
+      return { ok: true, note: 'Sent to Codex.', sessionKey };
     } catch (err) {
-      return {
-        ok: false,
-        note: err instanceof Error ? err.message : String(err),
-      };
+      return { ok: false, note: err instanceof Error ? err.message : String(err) };
     }
   },
 
