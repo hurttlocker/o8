@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-22
 
+- `26d7ca1` fix: keep mobile agent runtime session selection stable
 - `be094a2` fix: restore mobile agent runtime live session routing
 - `3866ea4` feat: native shell updater + GitHub Actions release workflow
 - `37a3cf9` refactor: tighten default agent card density
