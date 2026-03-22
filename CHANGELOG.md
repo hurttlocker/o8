@@ -4,6 +4,10 @@ Development activity for Rainwater IDE.
 
 ---
 
+## 2026-03-22
+
+- `6bf077e` fix: dedupe desktop transcript history updates
+
 ## 2026-03-21
 
 - `207d23b` fix: restore sidebar runtime capabilities wiring
