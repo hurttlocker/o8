@@ -15,6 +15,7 @@ import type {
   LaunchOptions,
 } from './types';
 import { getCodexDiscoveredFleetAdditions, getCodexRuntimeTail } from '@/lib/codex/sessions';
+import { steerOpenClawSession } from '@/lib/openclaw/chat';
 import {
   launchOwnedCodexSession,
   continueOwnedCodexSession,
@@ -23,9 +24,6 @@ import {
   getOwnedCodexRuntimeTail,
   getOwnedCodexReviewPacket,
 } from '@/lib/codex/owned';
-import { isTmuxAvailable, tmuxSessionName, createTmuxSession } from '@/lib/terminal/tmux';
-import { spawn } from 'child_process';
-import { queryCodexThreads } from '@/lib/codex/sessions';
 
 const capabilities: RuntimeCapabilities = {
   discover: true,
@@ -145,56 +143,17 @@ export const codexRuntime: AgentRuntime = {
       return { ok: true, note: result.note, sessionKey };
     }
 
-    // Discovered sessions: use `codex exec resume <thread-id> <prompt>`
-    const threadId = sessionKey.replace('codex:', '');
-
-    // Look up CWD from Codex state DB
-    let cwd: string | undefined;
     try {
-      const threads = await queryCodexThreads(20);
-      const match = threads.find((t) => t.id === threadId);
-      if (match) cwd = match.cwd;
-    } catch { /* fallback to home */ }
-
-    const cliArgs = [
-      'exec', 'resume',
-      threadId,
-      message,
-      '--dangerously-bypass-approvals-and-sandbox',
-      '--json',
-    ];
-    const spawnCwd = cwd ?? process.env.HOME ?? '/tmp';
-
-    try {
-      if (await isTmuxAvailable()) {
-        const tmuxName = tmuxSessionName('codex', threadId);
-        const result = await createTmuxSession(tmuxName, 'codex', cliArgs, spawnCwd);
-        if (result.ok) {
-          return {
-            ok: true,
-            note: `Message sent to Codex session via exec resume.`,
-            sessionKey,
-          };
-        }
-      }
-
-      // Fallback: detached spawn
-      const child = spawn('codex', cliArgs, {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        detached: true,
-        cwd: spawnCwd,
-      });
-      child.unref();
-
+      await steerOpenClawSession(sessionKey, message, []);
       return {
         ok: true,
-        note: 'Message sent to Codex session (detached).',
+        note: 'Sent.',
         sessionKey,
       };
     } catch (err) {
       return {
         ok: false,
-        note: `Failed to resume Codex session: ${err instanceof Error ? err.message : String(err)}`,
+        note: err instanceof Error ? err.message : String(err),
       };
     }
   },
