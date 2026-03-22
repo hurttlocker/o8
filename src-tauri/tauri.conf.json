@@ -7,7 +7,7 @@
     "frontendDist": "../out",
     "devUrl": "http://localhost:3001/dashboard",
     "beforeDevCommand": "npm run desktop:dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "npm run tauri:prebuild"
   },
   "app": {
     "windows": [
