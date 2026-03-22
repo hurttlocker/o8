@@ -501,8 +501,9 @@ export async function getOpenClawFleetSnapshot(
     };
     const agentConfigModels = readOpenClawAgentConfigModels();
 
-    const recent = (parsed.sessions?.recent ?? parsed.sessions?.sessions ?? [] as OpenClawRecentSession[])
-      .filter((session: OpenClawRecentSession) => !isDuplicateRunSurface(session.key))
+    const sessionsObj = parsed.sessions as { recent?: OpenClawRecentSession[]; sessions?: OpenClawRecentSession[] } | undefined;
+    const recent = (sessionsObj?.recent ?? sessionsObj?.sessions ?? ([] as OpenClawRecentSession[]))
+      .filter((session) => !isDuplicateRunSurface(session.key))
       .slice(0, 10);
 
     if (!recent.length) {
