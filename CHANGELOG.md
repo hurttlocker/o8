@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-22
 
+- `37a3cf9` refactor: tighten default agent card density
 - `6bf077e` fix: dedupe desktop transcript history updates
 
 ## 2026-03-21
