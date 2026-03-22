@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `e39bfc6` fix: TS blockers + Rainwater action route hardening
 - `0bbef26` feat: Conflict Resolution UI in Memory settings tab
 - `7acca95` feat: polish desktop sidebar runtime chat
 - `05d0442` feat: add intent board v1
