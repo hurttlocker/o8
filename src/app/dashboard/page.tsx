@@ -42,12 +42,20 @@ function normalizeDetection(raw: Record<string, unknown>): DetectionResult {
 
   // Build apiKeys array from the api-keys tool details
   const apiKeysTool = findTool('api-keys');
-  const providers = ((apiKeysTool?.details?.providers ?? []) as string[]);
-  const apiKeys = providers.map(p => ({ provider: p, configured: true }));
+  const rawProviders = (apiKeysTool?.details?.providers ?? []) as Array<string | { provider: string; configured: boolean }>;
+  const apiKeys = rawProviders.map(p => {
+    if (typeof p === 'string') return { provider: p, configured: true };
+    return { provider: p.provider, configured: p.configured };
+  });
 
   return {
     tools: {
-      openclaw: { ...mkTool('openclaw'), agentCount: (findTool('openclaw')?.details?.agentCount as number) ?? 0 },
+      openclaw: {
+        ...mkTool('openclaw'),
+        // Config exists with version/agents = detected, even if HTTP probe was slow
+        detected: (findTool('openclaw')?.detected) || Boolean(findTool('openclaw')?.version) || Boolean(findTool('openclaw')?.details?.configFound),
+        agentCount: (findTool('openclaw')?.details?.agentCount as number) ?? 0,
+      },
       codex: { ...mkTool('codex'), threads: (findTool('codex')?.details?.threads as number) ?? 0 },
       claudeCode: { ...mkTool('claude-code'), recentSessions: (findTool('claude-code')?.details?.recentSessions as number) ?? 0 },
       gemini: mkTool('gemini'),
