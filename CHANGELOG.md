@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `cfb974a` fix: getGatewayStatus calls WS RPC directly on cold start + fresh requests
 - `87f68c6` fix: Widen session query window to 7 days, sequential WS RPC calls
 - `a523c66` fix: Normalize detection API response for SetupWizard type contract
 - `3714eb1` perf: WebSocket RPC replaces CLI fallback — agents load in <500ms
