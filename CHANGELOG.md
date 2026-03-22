@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-22
 
+- `7291c9e` fix: Pass sessionKey explicitly from ComposeBar to avoid stale closure
 - `b723524` fix: Infer runtime from session key prefix when snapshot misses
 - `0e74640` fix: Mobile agent runtime chat routes to CLI directly, not agent runtime gateway
 - `3884e59` fix: keep mobile sends pinned to selected session
