@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `d98a2ae` feat: add sidebar runtime capability layer
 - `21532da` fix: stabilize terminal session routing
 - `9eaeb61` feat: refine sidebar approval polish
 - `50541b1` feat: polish sidebar approvals and file actions
