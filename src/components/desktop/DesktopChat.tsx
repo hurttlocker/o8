@@ -114,6 +114,7 @@ type GroupSourceCard = {
   summary: string;
   details: string[];
   tone: GroupChipTone;
+  links?: Array<{ label: string; href: string }>;
 };
 
 function extractRuntimeField(text: string, label: string): string | undefined {
@@ -259,6 +260,50 @@ function uniqueStrings(values: Array<string | undefined>): string[] {
   return result;
 }
 
+function normalizeHttpUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return undefined;
+}
+
+function extractLinksFromText(text: string): Array<{ label: string; href: string }> {
+  const links: Array<{ label: string; href: string }> = [];
+  const seen = new Set<string>();
+
+  for (const match of text.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g)) {
+    const href = normalizeHttpUrl(match[2]);
+    if (!href || seen.has(href)) continue;
+    seen.add(href);
+    links.push({ label: match[1].trim() || href, href });
+  }
+
+  for (const match of text.matchAll(/(^|[\s(])(https?:\/\/[^\s)]+)(?=$|[\s),])/g)) {
+    const href = normalizeHttpUrl(match[2]);
+    if (!href || seen.has(href)) continue;
+    seen.add(href);
+    links.push({ label: href.replace(/^https?:\/\//, ''), href });
+  }
+
+  return links;
+}
+
+function uniqueLinks(values: Array<{ label: string; href: string }>): Array<{ label: string; href: string }> {
+  const seen = new Set<string>();
+  const result: Array<{ label: string; href: string }> = [];
+  for (const value of values) {
+    const href = normalizeHttpUrl(value.href);
+    if (!href || seen.has(href)) continue;
+    seen.add(href);
+    result.push({
+      label: value.label.trim() || href.replace(/^https?:\/\//, ''),
+      href,
+    });
+  }
+  return result;
+}
+
 function buildGroupSourceCards(entries: MobileTranscriptEntry[]): GroupSourceCard[] {
   const toolCalls = entries.flatMap((entry) => entry.toolCalls ?? []);
   const runtimeEvents = entries
@@ -301,6 +346,13 @@ function buildGroupSourceCards(entries: MobileTranscriptEntry[]): GroupSourceCar
 
   const webTools = toolCalls.filter((tool) => formatToolCategory(tool.name) === 'web' && tool.name.toLowerCase() !== 'browser');
   if (webTools.length > 0) {
+    const textLinks = uniqueLinks(entries.flatMap((entry) => extractLinksFromText(entry.text))).slice(0, 8);
+    const toolLinks = uniqueLinks(webTools.flatMap((tool) => {
+      const url = normalizeHttpUrl(firstRuntimeValue(tool.args?.url, tool.args?.href));
+      if (!url) return [];
+      return [{ label: url.replace(/^https?:\/\//, ''), href: url }];
+    }));
+    const links = uniqueLinks([...textLinks, ...toolLinks]).slice(0, 8);
     const details = uniqueStrings(webTools.map((tool) => firstRuntimeValue(
       tool.args?.query,
       tool.args?.url,
@@ -310,14 +362,24 @@ function buildGroupSourceCards(entries: MobileTranscriptEntry[]): GroupSourceCar
     cards.push({
       id: 'web',
       label: 'Web',
-      summary: details.length > 0 ? `${details.length} lookup${details.length !== 1 ? 's' : ''}` : `${webTools.length} web step${webTools.length !== 1 ? 's' : ''}`,
+      summary: links.length > 0
+        ? `${links.length} source${links.length !== 1 ? 's' : ''}`
+        : details.length > 0
+          ? `${details.length} lookup${details.length !== 1 ? 's' : ''}`
+          : `${webTools.length} web step${webTools.length !== 1 ? 's' : ''}`,
       details,
       tone: 'amber',
+      links,
     });
   }
 
   const browserTools = toolCalls.filter((tool) => tool.name.toLowerCase() === 'browser');
   if (browserTools.length > 0) {
+    const links = uniqueLinks(browserTools.flatMap((tool) => {
+      const url = normalizeHttpUrl(firstRuntimeValue(tool.args?.url, tool.args?.href, tool.args?.currentUrl));
+      if (!url) return [];
+      return [{ label: url.replace(/^https?:\/\//, ''), href: url }];
+    })).slice(0, 8);
     const details = uniqueStrings(browserTools.map((tool) => {
       const action = firstRuntimeValue(tool.args?.action, tool.args?.kind, tool.args?.operation);
       const url = firstRuntimeValue(tool.args?.url, tool.args?.href, tool.args?.currentUrl);
@@ -327,9 +389,14 @@ function buildGroupSourceCards(entries: MobileTranscriptEntry[]): GroupSourceCar
     cards.push({
       id: 'browser',
       label: 'Browser',
-      summary: details.length > 0 ? `${details.length} observed action${details.length !== 1 ? 's' : ''}` : `${browserTools.length} browser step${browserTools.length !== 1 ? 's' : ''}`,
+      summary: links.length > 0
+        ? `${links.length} page${links.length !== 1 ? 's' : ''}`
+        : details.length > 0
+          ? `${details.length} observed action${details.length !== 1 ? 's' : ''}`
+          : `${browserTools.length} browser step${browserTools.length !== 1 ? 's' : ''}`,
       details,
       tone: 'blue',
+      links,
     });
   }
 
@@ -2024,6 +2091,52 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
                   border: '1px solid rgba(226, 232, 240, 0.95)',
                   boxShadow: '0 10px 24px rgba(15, 23, 42, 0.05)',
                 }}>
+                  {(sourceCards.find((card) => card.id === expandedSourceId)?.links ?? []).length > 0 ? (
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 6,
+                      marginBottom: (sourceCards.find((card) => card.id === expandedSourceId)?.details ?? []).length > 0 ? 10 : 0,
+                    }}>
+                      <div style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: '#64748b',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                      }}>
+                        Sources
+                      </div>
+                      <div style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6,
+                      }}>
+                        {(sourceCards.find((card) => card.id === expandedSourceId)?.links ?? []).map((link) => (
+                          <a
+                            key={link.href}
+                            href={link.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                              display: 'block',
+                              padding: '8px 10px',
+                              borderRadius: 10,
+                              background: 'rgba(248,250,252,0.92)',
+                              border: '1px solid rgba(226, 232, 240, 0.95)',
+                              color: '#2563eb',
+                              textDecoration: 'none',
+                              fontSize: 11,
+                              lineHeight: 1.4,
+                              wordBreak: 'break-word',
+                            }}
+                          >
+                            {link.label}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                   {(sourceCards.find((card) => card.id === expandedSourceId)?.details ?? []).length > 0 ? (
                     <div style={{
                       display: 'flex',
