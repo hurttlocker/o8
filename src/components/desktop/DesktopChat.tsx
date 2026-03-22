@@ -1673,7 +1673,22 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   scrollToBottom: (force?: boolean) => void;
   getIsNewEntry: (entryId: string) => boolean;
 }) {
-  const groupedTranscript = useMemo(() => groupTranscriptTurns(transcript), [transcript]);
+  const activeTranscriptEntry = useMemo(() => {
+    if (!agentRunning) return null;
+    const last = transcript[transcript.length - 1];
+    if (!last || last.role !== 'assistant') return null;
+    if (!last.id.startsWith('claude-') && !last.id.startsWith('codex-')) return null;
+    return last;
+  }, [agentRunning, transcript]);
+
+  const visibleTranscript = useMemo(
+    () => activeTranscriptEntry ? transcript.filter((entry) => entry.id !== activeTranscriptEntry.id) : transcript,
+    [activeTranscriptEntry, transcript],
+  );
+
+  const groupedTranscript = useMemo(() => groupTranscriptTurns(visibleTranscript), [visibleTranscript]);
+  const activeTurnText = streamingText || activeTranscriptEntry?.text || '';
+  const showActiveTurn = Boolean(agentRunning || activeTurnText || liveToolCalls.length > 0);
 
   return (
     <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -1694,7 +1709,7 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
             <div className="remodex-skeleton-bubble remodex-skeleton-assistant remodex-skeleton-wide" />
             <div className="remodex-skeleton-bubble remodex-skeleton-user remodex-skeleton-short" />
           </div>
-        ) : transcript.length === 0 ? (
+        ) : visibleTranscript.length === 0 && !showActiveTurn ? (
           <div className="remodex-loading-card">
             No transcript visible yet — waiting for activity.
           </div>
@@ -1733,138 +1748,22 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
           })
         )}
 
-        {streamingText && (
+        {showActiveTurn && (
           <div style={{
             display: 'flex',
-            alignItems: 'flex-start',
-            gap: 8,
-            paddingTop: 8,
-            paddingRight: 16,
-            paddingBottom: 4,
-            paddingLeft: 16,
-          }}>
-            <div style={{
-              maxWidth: '85%',
-              paddingTop: 10,
-              paddingRight: 16,
-              paddingBottom: 10,
-              paddingLeft: 16,
-              borderRadius: 18,
-              background: 'var(--t-panel-translucent)',
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
-              border: '1px solid var(--t-divider-subtle)',
-              fontSize: 14,
-              lineHeight: 1.5,
-              color: 'var(--t-text)',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}>
-              {streamingText}
-              <span style={{
-                display: 'inline-block',
-                width: 6, height: 14,
-                background: 'var(--t-text)',
-                opacity: 0.4,
-                marginLeft: 2,
-                animation: 'blink 1s step-end infinite',
-                verticalAlign: 'text-bottom',
-              }} />
-            </div>
-          </div>
-        )}
-
-        {agentRunning && !streamingText && (
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-start',
-            gap: 8,
             paddingTop: 8,
             paddingRight: 16,
             paddingBottom: 12,
             paddingLeft: 16,
           }}>
-            {activityHeadline ? (
-              <div style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                maxWidth: '92%',
-                padding: '8px 12px',
-                borderRadius: 14,
-                background: 'rgba(255,255,255,0.78)',
-                backdropFilter: 'blur(14px) saturate(1.5)',
-                WebkitBackdropFilter: 'blur(14px) saturate(1.5)',
-                border: '1px solid rgba(37, 99, 235, 0.10)',
-                boxShadow: '0 10px 24px rgba(15, 23, 42, 0.05)',
-              }}>
-                <span style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 22,
-                  height: 22,
-                  borderRadius: 8,
-                  background: 'rgba(37, 99, 235, 0.10)',
-                  color: '#2563eb',
-                  flexShrink: 0,
-                }}>
-                  <Brain size={13} strokeWidth={2.2} />
-                </span>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: '#2563eb',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                  }}>
-                    Live Activity
-                  </div>
-                  <div style={{
-                    marginTop: 1,
-                    fontSize: 12,
-                    color: 'var(--t-text)',
-                    lineHeight: 1.45,
-                    wordBreak: 'break-word',
-                  }}>
-                    {activityHeadline}
-                  </div>
-                </div>
-              </div>
-            ) : null}
-            {liveToolCalls.length > 0 ? (
-              <div style={{ maxWidth: '92%' }}>
-                <DesktopToolCallStack toolCalls={liveToolCalls} />
-              </div>
-            ) : null}
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              paddingTop: 10,
-              paddingRight: 16,
-              paddingBottom: 10,
-              paddingLeft: 16,
-              borderRadius: 18,
-              background: 'var(--t-panel-translucent)',
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
-              border: '1px solid var(--t-divider-subtle)',
-            }}>
-              <span className="remodex-typing-dot" style={{ animationDelay: '0ms' }} />
-              <span className="remodex-typing-dot" style={{ animationDelay: '150ms' }} />
-              <span className="remodex-typing-dot" style={{ animationDelay: '300ms' }} />
-              <span style={{
-                fontSize: 11,
-                color: 'var(--t-text-muted)',
-                marginLeft: 6,
-                fontWeight: 500,
-              }}>
-                {currentAgentName || 'Agent'} is thinking…
-              </span>
-            </div>
+            <ActiveTurnCard
+              agentName={currentAgentName}
+              text={activeTurnText}
+              activityHeadline={activityHeadline}
+              liveToolCalls={liveToolCalls}
+              onOpenMermaid={onOpenMermaid}
+              onRunInTerminal={onRunInTerminal}
+            />
           </div>
         )}
       </div>
@@ -2192,6 +2091,114 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
           );
         })}
       </div>
+    </div>
+  );
+});
+
+const ActiveTurnCard = memo(function ActiveTurnCard({
+  agentName,
+  text,
+  activityHeadline,
+  liveToolCalls,
+  onOpenMermaid,
+  onRunInTerminal,
+}: {
+  agentName: string;
+  text: string;
+  activityHeadline?: string;
+  liveToolCalls: MobileTranscriptToolCall[];
+  onOpenMermaid?: (code: string) => void;
+  onRunInTerminal?: (command: string) => void;
+}) {
+  const mdBlocks = useMemo(
+    () => text.trim() ? renderMarkdownBlocks(text, onOpenMermaid, onRunInTerminal) : [],
+    [text, onOpenMermaid, onRunInTerminal],
+  );
+
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+      maxWidth: '92%',
+      padding: '12px 14px',
+      borderRadius: 18,
+      background: 'linear-gradient(180deg, rgba(255,255,255,0.88), rgba(248,250,252,0.82))',
+      border: '1px solid rgba(37, 99, 235, 0.10)',
+      boxShadow: '0 16px 34px rgba(15, 23, 42, 0.06)',
+    }}>
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: 8,
+      }}>
+        <span style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '4px 9px',
+          borderRadius: 999,
+          background: 'rgba(37, 99, 235, 0.08)',
+          color: '#2563eb',
+          fontSize: 10,
+          fontWeight: 700,
+          textTransform: 'uppercase',
+          letterSpacing: '0.04em',
+        }}>
+          {agentName}
+          <span style={{ color: 'rgba(37, 99, 235, 0.45)' }}>•</span>
+          active turn
+        </span>
+        {activityHeadline ? (
+          <span style={{
+            fontSize: 11,
+            color: '#475569',
+            fontWeight: 600,
+            lineHeight: 1.4,
+          }}>
+            {activityHeadline}
+          </span>
+        ) : null}
+      </div>
+
+      {liveToolCalls.length > 0 ? (
+        <DesktopToolCallStack toolCalls={liveToolCalls} />
+      ) : null}
+
+      {mdBlocks.length > 0 ? (
+        <div className="remodex-rich-text">
+          {mdBlocks.map((block, index) => (
+            <div key={`active-${index}`}>
+              {block.element}
+            </div>
+          ))}
+          <span style={{
+            display: 'inline-block',
+            width: 6,
+            height: 14,
+            background: 'var(--t-text)',
+            opacity: 0.35,
+            marginLeft: 2,
+            animation: 'blink 1s step-end infinite',
+            verticalAlign: 'text-bottom',
+          }} />
+        </div>
+      ) : (
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          color: 'var(--t-text-secondary)',
+          fontSize: 12,
+          fontWeight: 500,
+        }}>
+          <span className="remodex-typing-dot" style={{ animationDelay: '0ms' }} />
+          <span className="remodex-typing-dot" style={{ animationDelay: '150ms' }} />
+          <span className="remodex-typing-dot" style={{ animationDelay: '300ms' }} />
+          <span>{agentName} is thinking…</span>
+        </div>
+      )}
     </div>
   );
 });
