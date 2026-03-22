@@ -20,7 +20,6 @@ import { NavRail, type NavSection } from '@/components/desktop/NavRail';
 import { BottomTerminal, type BottomTerminalHandle } from '@/components/desktop/BottomTerminal';
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
-import { IntentCanvas } from '@/components/desktop/IntentCanvas';
 import { SettingsPage } from '@/components/desktop/SettingsPage';
 import { AnalyticsPage } from '@/components/desktop/AnalyticsPage';
 import { ThoughtsCard } from '@/components/desktop/ThoughtsCard';
@@ -1123,12 +1122,6 @@ function DashboardInner() {
         position: 'relative',
         minWidth: 0,
       }}>
-        {activeNavSection === 'intent' && !showMemoryView && (
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            <IntentCanvas />
-          </div>
-        )}
-
         {activeNavSection === 'settings' && !showMemoryView && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <SettingsPage />
@@ -1174,7 +1167,7 @@ function DashboardInner() {
           </div>
         )}
 
-        {!showMemoryView && activeNavSection !== 'intent' && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (
+        {!showMemoryView && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (
           <TileContainer
             layout={tileLayout}
             activeTileId={activeTileId}
