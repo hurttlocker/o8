@@ -300,8 +300,8 @@ export function useWebSocket({
 
         case 'history':
           if (eventType === 'update' && data) {
-            const { sessionKey, entries } = data as { sessionKey: string; entries: MobileTranscriptEntry[] };
-            mergeHistoryEntries(sessionKey, entries);
+            const { sessionKey, entries, replace } = data as { sessionKey: string; entries: MobileTranscriptEntry[]; replace?: boolean };
+            mergeHistoryEntries(sessionKey, entries, Boolean(replace));
           }
           break;
 

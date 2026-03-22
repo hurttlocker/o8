@@ -161,6 +161,19 @@ export async function enhancePromptDraft({
   }
 }
 
+function scheduleHistoryRefreshBurst(
+  sessionKey: string,
+  loadHistory: (sessionKey: string, force?: boolean) => Promise<unknown>,
+) {
+  void loadHistory(sessionKey, true).catch(() => undefined);
+  if (typeof window === 'undefined') return;
+  for (const delay of [1200, 3000]) {
+    window.setTimeout(() => {
+      void loadHistory(sessionKey, true).catch(() => undefined);
+    }, delay);
+  }
+}
+
 // ── Steer (send message) ──
 
 interface SteerSubmitArgs {
@@ -285,6 +298,7 @@ export async function submitSteerTurn({
       if (targetSession?.status === 'running') {
         await runAction({ action: 'resume' as MobileActionRequest['action'], sessionKey, message });
         setSurfaceNote('Sent to Codex…');
+        scheduleHistoryRefreshBurst(sessionKey, loadHistory);
       } else {
       // Only launch a new session if the discovered session is NOT running
       const cwd = targetSession?.runtimeSurface?.cwd ?? targetSession?.workspace ?? '';
@@ -299,7 +313,7 @@ export async function submitSteerTurn({
         await runAction({ action: 'resume' as MobileActionRequest['action'], sessionKey: existingOwned.sessionKey, message });
         setSelectedId(existingOwned.id);
         setSurfaceNote('Resuming Codex session…');
-        await loadHistory(existingOwned.sessionKey, true).catch(() => undefined);
+        scheduleHistoryRefreshBurst(existingOwned.sessionKey, loadHistory);
       } else {
         const launchResult = await runAction({ action: 'launch' as MobileActionRequest['action'], sessionKey, message, cwd });
         if (launchResult?.ok && launchResult.sessionKey && launchResult.sessionKey !== sessionKey) {
@@ -319,6 +333,7 @@ export async function submitSteerTurn({
     } else if (isOwnedCodex || isClaudeCode) {
       await runAction({ action: 'resume' as MobileActionRequest['action'], sessionKey, message });
       setSurfaceNote(isClaudeCode ? 'Sent to Claude Code…' : 'Sent to Codex…');
+      scheduleHistoryRefreshBurst(sessionKey, loadHistory);
     } else {
       await runAction({
         action: 'steer',

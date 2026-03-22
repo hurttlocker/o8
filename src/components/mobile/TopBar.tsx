@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { TopBarProps } from './types';
-import { buildProjectGroups } from './utils';
+import { buildProjectGroups, mobileSessionSecondaryLabel } from './utils';
 import { SpeedDialButton } from './SpeedDial';
 
 export const TopBar = memo(function TopBar({
@@ -57,7 +57,6 @@ export const TopBar = memo(function TopBar({
     : wsConnectionState === 'connecting'
       ? '#ff9f0a'
       : '#ff3b30';
-  const hasRunningAgents = snapshot.sessions.some(s => s.status === 'running');
 
   const activeTitle = compactLine(
     isOwnedCodexSession
@@ -334,10 +333,8 @@ export const TopBar = memo(function TopBar({
                       const sessionPercent = Math.round(session.context?.usedPercent ?? 0);
                       const sDotColor = isRunning ? '#34c759' : sessionPercent >= 75 ? '#ff9f0a' : '#8e8e93';
                       const name = session.name ?? session.sessionKey ?? session.id;
-                      const subtitle = session.currentTask
-                        ?? session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '')
-                        ?? session.sessionKey
-                        ?? '';
+                      const identity = mobileSessionSecondaryLabel(session);
+                      const subtitle = [identity, session.currentTask].filter(Boolean).join(' • ');
 
                       return (
                         <button

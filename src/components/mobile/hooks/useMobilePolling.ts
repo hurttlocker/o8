@@ -31,7 +31,8 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
     selectedReviewFilePath, setSelectedReviewFilePath,
     setRefreshError,
     pendingOwnedTurnBySession, actionStateBySession,
-    waitingForResponse, diffOpen,
+    waitingForResponse, setWaitingForResponse, diffOpen,
+    lastAssistantCountRef,
     documentVisibleRef,
   } = state;
 
@@ -260,6 +261,14 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
     });
     return () => cancelIdle(id);
   }, [selectedSessionKey, snapshot.sessions, historyBySession, historyLoading, loadHistory]);
+
+  useEffect(() => {
+    if (!selectedSessionKey || !waitingForResponse) return;
+    const assistantCount = (historyBySession[selectedSessionKey] ?? []).filter((entry) => entry.role === 'assistant').length;
+    if (assistantCount > lastAssistantCountRef.current) {
+      setWaitingForResponse(false);
+    }
+  }, [selectedSessionKey, waitingForResponse, historyBySession, lastAssistantCountRef, setWaitingForResponse]);
 
   return {
     refreshInbox,
