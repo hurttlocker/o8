@@ -242,46 +242,75 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Route 3: Discovered Codex sessions — route through the same steer lane
-      // used by the runtime action contract so stale mobile clients still
-      // target the mirrored backend session instead of spawning local CLI work.
+      // Route 3: Discovered Codex sessions — send directly to Codex CLI
+      // NOT through OpenClaw gateway (discovered sessions aren't gateway sessions)
       if (sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-discovered:')) {
-        const result = await performRuntimeAction({
-          action: 'steer',
-          surfaceId: sessionKey,
-          clientMutationId,
-          message,
-        });
-        if (result.ok) {
+        const threadId = sessionKey.replace(/^codex:/, '').replace(/^codex-discovered:/, '');
+        try {
+          const { execFileSync } = await import('node:child_process');
+          const os = await import('node:os');
+          const path = await import('node:path');
+          const codexBin = path.join(os.homedir(), '.npm-global', 'bin', 'codex');
+          
+          // Use codex exec resume <threadId> <message> — same as desktop /api/codex/send
+          const args = ['exec', 'resume', threadId, message ?? '', '--json', '--dangerously-bypass-approvals-and-sandbox'];
+          const stdout = execFileSync(codexBin, args, {
+            cwd: process.env.HOME || os.homedir(),
+            timeout: 120_000,
+            maxBuffer: 10 * 1024 * 1024,
+            env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+            encoding: 'utf-8',
+          });
+
+          // Parse last turn.completed for usage
+          const lines = stdout.split('\n').filter(Boolean);
+          let responseText = '';
+          for (const line of lines) {
+            try {
+              const event = JSON.parse(line) as Record<string, unknown>;
+              if (event.type === 'item.completed') {
+                const item = event.item as { type?: string; text?: string } | undefined;
+                if (item?.type === 'agent_message' && item.text) {
+                  responseText += item.text;
+                }
+              }
+            } catch { /* skip non-JSON */ }
+          }
+
           invalidateMutationCaches();
-        }
-        console.info('[mobile/action] discovered codex resume result', {
-          sessionKey,
-          clientMutationId,
-          ok: result.ok,
-          status: result.status,
-          runId: result.runId ?? null,
-        });
-        await publishMobileMutation(clientMutationId, {
-          action,
-          sessionKey,
-          runtime: 'codex',
-          status: result.ok ? (result.status === 'queued' ? 'queued' : 'completed') : 'failed',
-          note: result.note,
-        });
-        return NextResponse.json(
-          {
-            ok: result.ok,
+          console.info('[mobile/action] discovered codex CLI resume', {
+            sessionKey,
+            threadId,
+            responseLength: responseText.length,
+          });
+
+          await publishMobileMutation(clientMutationId, {
             action,
             sessionKey,
-            clientMutationId,
-            status: result.status,
-            note: result.note,
-            runId: result.runId,
-            aborted: result.aborted,
-          },
-          { status: result.status === 'unavailable' ? 501 : 200, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-        );
+            runtime: 'codex',
+            status: 'completed',
+            note: responseText ? 'Codex responded.' : 'Sent to Codex.',
+          });
+
+          return NextResponse.json(
+            { ok: true, action, sessionKey, clientMutationId, status: 'completed', note: 'Sent to Codex.' },
+            { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+          );
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message.slice(0, 200) : 'Unknown error';
+          console.error('[mobile/action] discovered codex CLI resume failed:', errMsg);
+          await publishMobileMutation(clientMutationId, {
+            action,
+            sessionKey,
+            runtime: 'codex',
+            status: 'failed',
+            note: `Codex CLI error: ${errMsg}`,
+          });
+          return NextResponse.json(
+            { ok: false, action, sessionKey, clientMutationId, status: 'error', note: errMsg },
+            { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+          );
+        }
       }
 
       // Route 4: Unknown session type
