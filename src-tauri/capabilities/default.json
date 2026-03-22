@@ -12,6 +12,7 @@
     "process:default",
     "notification:default",
     "store:default",
-    "log:default"
+    "log:default",
+    "updater:default"
   ]
 }
