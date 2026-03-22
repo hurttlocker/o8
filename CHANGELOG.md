@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `e8f76d1` fix: Remove debug logs, fix source label to 'ws', reduce log spam
 - `c415f70` fix: Spread statusResult BEFORE sessions to prevent key clobber
 - `cfb974a` fix: getGatewayStatus calls WS RPC directly on cold start + fresh requests
 - `87f68c6` fix: Widen session query window to 7 days, sequential WS RPC calls
