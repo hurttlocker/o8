@@ -114,6 +114,8 @@ All routes use `force-dynamic`. 14+ feature domains, 100+ route files. Key famil
 ## Critical Rules
 
 ### NEVER
+- **Never use the OpenClaw CLI for status/session queries** — `openclaw status --json` and `openclaw gateway call status --json` hang indefinitely on some configurations. Use WebSocket RPC via `wsRpc()` in `src/lib/openclaw/gateway-client.ts` instead. The gateway WebSocket (`ws://127.0.0.1:{port}`) with challenge-response auth returns sessions in <500ms. CLI is kept ONLY as a last-resort fallback with a 10s timeout.
+- **Never spread `...statusResult` AFTER session data in `runStatusSnapshot()`** — the `status` RPC response has its own `sessions` key that will clobber real session data from `sessions.list`. Always spread it BEFORE so our keys win.
 - **Never use CSS classes** — inline styles only (`style={{ }}` props). iOS Safari reliability issue. This is permanent.
 - **Never use emoji** — Lucide icons only across all surfaces
 - **Never use Material Design patterns** — no borderLeft accents, no MD elevation
@@ -124,6 +126,8 @@ All routes use `force-dynamic`. 14+ feature domains, 100+ route files. Key famil
 - **Never use `ai` SDK** — direct fetch to `/api/v2/proxy/llm` route
 
 ### ALWAYS
+- **Gateway communication goes through WebSocket RPC** — `wsRpc()` in `gateway-client.ts` is the primary path. It opens a short-lived WS, does challenge-response auth (client ID must be `'gateway-client'`), sends the RPC, returns the result. This replaced the CLI fallback that was hanging indefinitely.
+- **`getGatewayStatus()` must call `runStatusSnapshot()` directly** on cold start — never rely on the background refresh loop for initial data. The background loop is only for cache refreshes.
 - **`npx tsc --noEmit` before every commit**
 - **Apple HIG**: 44px touch targets, 14px card radii, spring curves
 - **`as React.CSSProperties`** when using vendor-prefixed or non-standard CSS props
