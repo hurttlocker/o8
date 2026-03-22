@@ -108,6 +108,14 @@ type GroupChip = {
   tone: GroupChipTone;
 };
 
+type GroupSourceCard = {
+  id: string;
+  label: string;
+  summary: string;
+  details: string[];
+  tone: GroupChipTone;
+};
+
 function extractRuntimeField(text: string, label: string): string | undefined {
   const match = text.match(new RegExp(`^${label}:\\s*(.+)$`, 'mi'));
   return match?.[1]?.trim() || undefined;
@@ -122,6 +130,15 @@ function extractRuntimeAction(text: string): string | undefined {
     .filter(Boolean)
     .slice(0, 2)
     .join(' ');
+}
+
+function firstRuntimeValue(...values: unknown[]): string | undefined {
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
 }
 
 function parseRuntimeEventSummary(text: string): RuntimeEventSummary | null {
@@ -228,6 +245,110 @@ function summarizeAgentGroup(entries: MobileTranscriptEntry[]): {
     separatorLabel,
     timeLabel: groupTimeLabel(entries),
   };
+}
+
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (!value) continue;
+    if (seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
+
+function buildGroupSourceCards(entries: MobileTranscriptEntry[]): GroupSourceCard[] {
+  const toolCalls = entries.flatMap((entry) => entry.toolCalls ?? []);
+  const runtimeEvents = entries
+    .map((entry) => parseRuntimeEventSummary(entry.text))
+    .filter(Boolean) as RuntimeEventSummary[];
+
+  const cards: GroupSourceCard[] = [];
+
+  const cortexTools = toolCalls.filter((tool) => formatToolCategory(tool.name) === 'cortex');
+  if (cortexTools.length > 0) {
+    const details = uniqueStrings(cortexTools.map((tool) => firstRuntimeValue(
+      tool.args?.query,
+      tool.args?.summary,
+      tool.args?.path,
+    ))).slice(0, 6);
+    cards.push({
+      id: 'cortex',
+      label: 'Cortex',
+      summary: details.length > 0 ? `${details.length} recalled signal${details.length !== 1 ? 's' : ''}` : `${cortexTools.length} memory step${cortexTools.length !== 1 ? 's' : ''}`,
+      details,
+      tone: 'purple',
+    });
+  }
+
+  const fileTools = toolCalls.filter((tool) => formatToolCategory(tool.name) === 'file');
+  if (fileTools.length > 0) {
+    const details = uniqueStrings(fileTools.map((tool) => firstRuntimeValue(
+      tool.args?.file_path,
+      tool.args?.path,
+      tool.args?.summary,
+    ))).slice(0, 8);
+    cards.push({
+      id: 'files',
+      label: 'Files',
+      summary: details.length > 0 ? `${details.length} path${details.length !== 1 ? 's' : ''}` : `${fileTools.length} file step${fileTools.length !== 1 ? 's' : ''}`,
+      details,
+      tone: 'emerald',
+    });
+  }
+
+  const webTools = toolCalls.filter((tool) => formatToolCategory(tool.name) === 'web' && tool.name.toLowerCase() !== 'browser');
+  if (webTools.length > 0) {
+    const details = uniqueStrings(webTools.map((tool) => firstRuntimeValue(
+      tool.args?.query,
+      tool.args?.url,
+      tool.args?.href,
+      tool.args?.summary,
+    ))).slice(0, 6);
+    cards.push({
+      id: 'web',
+      label: 'Web',
+      summary: details.length > 0 ? `${details.length} lookup${details.length !== 1 ? 's' : ''}` : `${webTools.length} web step${webTools.length !== 1 ? 's' : ''}`,
+      details,
+      tone: 'amber',
+    });
+  }
+
+  const browserTools = toolCalls.filter((tool) => tool.name.toLowerCase() === 'browser');
+  if (browserTools.length > 0) {
+    const details = uniqueStrings(browserTools.map((tool) => {
+      const action = firstRuntimeValue(tool.args?.action, tool.args?.kind, tool.args?.operation);
+      const url = firstRuntimeValue(tool.args?.url, tool.args?.href, tool.args?.currentUrl);
+      if (action && url) return `${action} • ${url}`;
+      return action ?? url ?? firstRuntimeValue(tool.args?.summary);
+    })).slice(0, 6);
+    cards.push({
+      id: 'browser',
+      label: 'Browser',
+      summary: details.length > 0 ? `${details.length} observed action${details.length !== 1 ? 's' : ''}` : `${browserTools.length} browser step${browserTools.length !== 1 ? 's' : ''}`,
+      details,
+      tone: 'blue',
+    });
+  }
+
+  if (runtimeEvents.length > 0) {
+    const details = uniqueStrings(runtimeEvents.flatMap((event) => [
+      event.task,
+      event.action,
+      ...(event.changedFiles ?? []),
+    ])).slice(0, 8);
+    cards.push({
+      id: 'handoff',
+      label: 'Handoff',
+      summary: runtimeEvents.length > 1 ? `${runtimeEvents.length} queued updates` : 'sub-agent delivery',
+      details,
+      tone: 'slate',
+    });
+  }
+
+  return cards.slice(0, 4);
 }
 
 function chipStyles(tone: GroupChipTone): React.CSSProperties {
@@ -1530,127 +1651,17 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
               });
             }
 
-            const previousGroup = groupIndex > 0 ? groupedTranscript[groupIndex - 1] : null;
-            const previousTs = previousGroup ? groupTimestamp(previousGroup.entries) : undefined;
-            const currentTs = groupTimestamp(group.entries);
-            const showTimeSeparator = Boolean(
-              previousTs && currentTs && Math.abs(currentTs - previousTs) >= 8 * 60 * 1000,
-            );
-            const showGroupLabel = group.entries.length > 1
-              || group.entries.some((entry) => entry.role === 'system' || entry.toolCalls?.length);
-            const groupSummary = summarizeAgentGroup(group.entries);
-
             return (
-              <div
+              <AgentTurnGroup
                 key={group.id}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 8,
-                  marginTop: 2,
-                }}
-              >
-                {showTimeSeparator || groupSummary.separatorLabel ? (
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    marginTop: 8,
-                    marginBottom: 2,
-                  }}>
-                    <div style={{ flex: 1, height: 1, background: 'rgba(148, 163, 184, 0.16)' }} />
-                    <span style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: '#94a3b8',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.05em',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {groupSummary.separatorLabel ?? groupSummary.timeLabel ?? 'run'}
-                    </span>
-                    <div style={{ flex: 1, height: 1, background: 'rgba(148, 163, 184, 0.16)' }} />
-                  </div>
-                ) : null}
-                {showGroupLabel ? (
-                  <div style={{
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    alignItems: 'center',
-                    gap: 6,
-                    alignSelf: 'flex-start',
-                    padding: '4px 0',
-                  }}>
-                    <span style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '4px 9px',
-                      borderRadius: 999,
-                      background: 'rgba(37, 99, 235, 0.06)',
-                      color: '#2563eb',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.04em',
-                    }}>
-                      {currentAgentName}
-                      <span style={{ color: 'rgba(37, 99, 235, 0.5)' }}>•</span>
-                      {group.entries.length} update{group.entries.length !== 1 ? 's' : ''}
-                    </span>
-                    {groupSummary.timeLabel ? (
-                      <span style={{
-                        fontSize: 10,
-                        color: '#94a3b8',
-                        fontWeight: 600,
-                      }}>
-                        {groupSummary.timeLabel}
-                      </span>
-                    ) : null}
-                    {groupSummary.chips.map((chip) => (
-                      <span
-                        key={`${group.id}-${chip.label}`}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          padding: '4px 8px',
-                          borderRadius: 999,
-                          fontSize: 10,
-                          fontWeight: 700,
-                          letterSpacing: '0.02em',
-                          ...chipStyles(chip.tone),
-                        }}
-                      >
-                        {chip.label}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-                <div style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 10,
-                  paddingLeft: showGroupLabel ? 10 : 0,
-                  marginLeft: showGroupLabel ? 4 : 0,
-                  borderLeft: showGroupLabel ? '2px solid rgba(37, 99, 235, 0.10)' : 'none',
-                }}>
-                  {group.entries.map((entry) => {
-                    const entryIndex = transcript.findIndex((candidate) => candidate.id === entry.id);
-                    const isNew = getIsNewEntry(entry.id);
-                    return (
-                      <Bubble
-                        key={entry.id}
-                        entry={entry}
-                        previousEntry={entryIndex > 0 ? transcript[entryIndex - 1] : null}
-                        agentName={currentAgentName}
-                        isNew={isNew}
-                        onOpenMermaid={onOpenMermaid}
-                        onRunInTerminal={onRunInTerminal}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
+                group={group}
+                previousGroup={groupIndex > 0 ? groupedTranscript[groupIndex - 1] : null}
+                transcript={transcript}
+                currentAgentName={currentAgentName}
+                getIsNewEntry={getIsNewEntry}
+                onOpenMermaid={onOpenMermaid}
+                onRunInTerminal={onRunInTerminal}
+              />
             );
           })
         )}
@@ -1825,6 +1836,249 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
           </button>
         </div>
       )}
+    </div>
+  );
+});
+
+const AgentTurnGroup = memo(function AgentTurnGroup({
+  group,
+  previousGroup,
+  transcript,
+  currentAgentName,
+  getIsNewEntry,
+  onOpenMermaid,
+  onRunInTerminal,
+}: {
+  group: TranscriptGroup;
+  previousGroup: TranscriptGroup | null;
+  transcript: MobileTranscriptEntry[];
+  currentAgentName: string;
+  getIsNewEntry: (entryId: string) => boolean;
+  onOpenMermaid?: (code: string) => void;
+  onRunInTerminal?: (command: string) => void;
+}) {
+  const [expandedSourceId, setExpandedSourceId] = useState<string | null>(null);
+  const previousTs = previousGroup ? groupTimestamp(previousGroup.entries) : undefined;
+  const currentTs = groupTimestamp(group.entries);
+  const showTimeSeparator = Boolean(
+    previousTs && currentTs && Math.abs(currentTs - previousTs) >= 8 * 60 * 1000,
+  );
+  const showGroupLabel = group.entries.length > 1
+    || group.entries.some((entry) => entry.role === 'system' || entry.toolCalls?.length);
+  const groupSummary = useMemo(() => summarizeAgentGroup(group.entries), [group.entries]);
+  const sourceCards = useMemo(() => buildGroupSourceCards(group.entries), [group.entries]);
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        marginTop: 2,
+      }}
+    >
+      {showTimeSeparator || groupSummary.separatorLabel ? (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          marginTop: 8,
+          marginBottom: 2,
+        }}>
+          <div style={{ flex: 1, height: 1, background: 'rgba(148, 163, 184, 0.16)' }} />
+          <span style={{
+            fontSize: 10,
+            fontWeight: 700,
+            color: '#94a3b8',
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            whiteSpace: 'nowrap',
+          }}>
+            {groupSummary.separatorLabel ?? groupSummary.timeLabel ?? 'run'}
+          </span>
+          <div style={{ flex: 1, height: 1, background: 'rgba(148, 163, 184, 0.16)' }} />
+        </div>
+      ) : null}
+
+      {showGroupLabel ? (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          alignSelf: 'stretch',
+        }}>
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: 6,
+            alignSelf: 'flex-start',
+            padding: '4px 0',
+          }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '4px 9px',
+              borderRadius: 999,
+              background: 'rgba(37, 99, 235, 0.06)',
+              color: '#2563eb',
+              fontSize: 10,
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+            }}>
+              {currentAgentName}
+              <span style={{ color: 'rgba(37, 99, 235, 0.5)' }}>•</span>
+              {group.entries.length} update{group.entries.length !== 1 ? 's' : ''}
+            </span>
+            {groupSummary.timeLabel ? (
+              <span style={{
+                fontSize: 10,
+                color: '#94a3b8',
+                fontWeight: 600,
+              }}>
+                {groupSummary.timeLabel}
+              </span>
+            ) : null}
+            {groupSummary.chips.map((chip) => (
+              <span
+                key={`${group.id}-${chip.label}`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '4px 8px',
+                  borderRadius: 999,
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: '0.02em',
+                  ...chipStyles(chip.tone),
+                }}
+              >
+                {chip.label}
+              </span>
+            ))}
+          </div>
+
+          {sourceCards.length > 0 ? (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              maxWidth: '92%',
+            }}>
+              <div style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: 8,
+              }}>
+                {sourceCards.map((card) => (
+                  <button
+                    key={`${group.id}-${card.id}`}
+                    type="button"
+                    onClick={() => setExpandedSourceId((current) => current === card.id ? null : card.id)}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'flex-start',
+                      gap: 2,
+                      minWidth: 120,
+                      padding: '9px 10px',
+                      borderRadius: 12,
+                      border: '1px solid rgba(226, 232, 240, 0.95)',
+                      background: expandedSourceId === card.id ? 'rgba(255,255,255,0.94)' : 'rgba(248,250,252,0.82)',
+                      boxShadow: expandedSourceId === card.id ? '0 10px 24px rgba(15, 23, 42, 0.06)' : 'none',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      padding: '3px 7px',
+                      borderRadius: 999,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      letterSpacing: '0.02em',
+                      ...chipStyles(card.tone),
+                    }}>
+                      {card.label}
+                    </span>
+                    <span style={{
+                      fontSize: 11,
+                      color: '#334155',
+                      fontWeight: 600,
+                      lineHeight: 1.35,
+                    }}>
+                      {card.summary}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {expandedSourceId ? (
+                <div style={{
+                  padding: '10px 12px',
+                  borderRadius: 12,
+                  background: 'rgba(255,255,255,0.88)',
+                  border: '1px solid rgba(226, 232, 240, 0.95)',
+                  boxShadow: '0 10px 24px rgba(15, 23, 42, 0.05)',
+                }}>
+                  {(sourceCards.find((card) => card.id === expandedSourceId)?.details ?? []).length > 0 ? (
+                    <div style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 4,
+                    }}>
+                      {(sourceCards.find((card) => card.id === expandedSourceId)?.details ?? []).map((detail) => (
+                        <div
+                          key={detail}
+                          style={{
+                            fontSize: 11,
+                            color: '#475569',
+                            lineHeight: 1.45,
+                            wordBreak: 'break-word',
+                            fontFamily: detail.includes('/') ? '"SF Mono", ui-monospace, monospace' : 'inherit',
+                          }}
+                        >
+                          {detail}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 11, color: '#64748b' }}>No additional detail available.</div>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+        paddingLeft: showGroupLabel ? 10 : 0,
+        marginLeft: showGroupLabel ? 4 : 0,
+        borderLeft: showGroupLabel ? '2px solid rgba(37, 99, 235, 0.10)' : 'none',
+      }}>
+        {group.entries.map((entry) => {
+          const entryIndex = transcript.findIndex((candidate) => candidate.id === entry.id);
+          const isNew = getIsNewEntry(entry.id);
+          return (
+            <Bubble
+              key={entry.id}
+              entry={entry}
+              previousEntry={entryIndex > 0 ? transcript[entryIndex - 1] : null}
+              agentName={currentAgentName}
+              isNew={isNew}
+              onOpenMermaid={onOpenMermaid}
+              onRunInTerminal={onRunInTerminal}
+            />
+          );
+        })}
+      </div>
     </div>
   );
 });
