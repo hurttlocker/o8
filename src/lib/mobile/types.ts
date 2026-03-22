@@ -99,11 +99,18 @@ export interface MobileTranscriptMedia {
   mimeType?: string;
 }
 
+export interface MobileTranscriptToolCall {
+  name: string;
+  args?: Record<string, unknown>;
+  status?: 'calling' | 'running' | 'done';
+}
+
 export interface MobileTranscriptEntry {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;
   media?: MobileTranscriptMedia[];
+  toolCalls?: MobileTranscriptToolCall[];
   timestamp?: number;
   timestampLabel?: string;
 }

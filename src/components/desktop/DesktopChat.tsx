@@ -39,6 +39,7 @@ import type {
 import type { ProjectGroup } from '@/components/mobile/types';
 import { buildProjectGroups } from '@/components/mobile/utils';
 import { CodeBlock } from './CodeBlock';
+import { DesktopToolCallStack } from './DesktopAgentMessage';
 import { DiffModal } from './DiffModal';
 import { MessageActions } from './MessageActions';
 import { ttsEngine } from '@/lib/tts/engine';
@@ -95,6 +96,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
   const isUser = entry.role === 'user';
   const hasText = Boolean(entry.text.trim());
   const hasMedia = Boolean(entry.media?.length);
+  const hasToolCalls = Boolean(entry.toolCalls?.length);
   const isSlashCommand = isSlashCommandText(entry.text);
   const speakerChanged = !previousEntry || previousEntry.role !== entry.role;
   const showTimestamp = (() => {
@@ -247,6 +249,11 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
               </div>
             ) : null
           )}
+        </div>
+      ) : null}
+      {hasToolCalls ? (
+        <div style={{ marginTop: hasText || hasMedia ? 12 : 0 }}>
+          <DesktopToolCallStack toolCalls={entry.toolCalls ?? []} />
         </div>
       ) : null}
       {entry.role === 'assistant' && hasText ? (
