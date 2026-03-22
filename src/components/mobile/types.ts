@@ -107,8 +107,8 @@ export interface ChatViewProps {
 }
 
 export interface ComposeBarHandlers {
-  onSend: () => void | Promise<void>;
-  onOwnedResume: () => void | Promise<void>;
+  onSend: (sessionKey?: string) => void | Promise<void>;
+  onOwnedResume: (sessionKey?: string) => void | Promise<void>;
   onEnhance: () => void | Promise<void>;
   onUndoEnhance: () => void;
   onAttach: () => void;

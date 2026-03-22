@@ -337,27 +337,50 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
     void handleSurfaceRefresh();
   }, [selectedReviewFilePath, loadReviewFile, handleSurfaceRefresh]);
 
+  // Accept an optional explicit sessionKey override. ComposeBar passes its own
+  // sessionKey prop to avoid stale closure captures from snapshot races.
   const withSelectedSession = useCallback(<Args extends unknown[]>(fn: (sessionKey: string, ...args: Args) => void | Promise<void>) =>
-    (...args: Args): void | Promise<void> => (selectedSessionKey ? fn(selectedSessionKey, ...args) : undefined),
+    (explicitKey?: string, ...args: Args): void | Promise<void> => {
+      const key = (typeof explicitKey === 'string' && explicitKey) ? explicitKey : selectedSessionKey;
+      if (!key) return undefined;
+      console.info('[mobile] withSelectedSession', { explicitKey: explicitKey ?? null, selectedSessionKey, resolved: key });
+      return fn(key, ...args);
+    },
   [selectedSessionKey]);
 
   const ownedReviewDisposition = selectedReviewPacket?.reviewDisposition;
 
   const composeBarHandlers = {
-    onSend: withSelectedSession(handleSteerSubmit),
-    onOwnedResume: withSelectedSession(handleOwnedResumeSubmit),
+    // onSend/onOwnedResume accept an explicit sessionKey from ComposeBar
+    // to avoid stale closure from snapshot refresh races.
+    onSend: (explicitKey?: string) => {
+      const key = explicitKey || selectedSessionKey;
+      if (key) return handleSteerSubmit(key);
+    },
+    onOwnedResume: (explicitKey?: string) => {
+      const key = explicitKey || selectedSessionKey;
+      if (key) return handleOwnedResumeSubmit(key);
+    },
     onEnhance: handleEnhancePrompt,
     onUndoEnhance: handleUndoEnhance,
     onAttach: () => fileInputRef.current?.click(),
     onAttachFiles: handleAttachmentSelection,
-    onRemoveAttachment: withSelectedSession(removeDraftAttachment),
+    onRemoveAttachment: (attachmentId: string) => {
+      if (selectedSessionKey) removeDraftAttachment(selectedSessionKey, attachmentId);
+    },
     onRefresh: handleSurfaceRefresh,
     onStop: handleStopActiveRun,
     onInterrupt: handleStopActiveRun,
     onOpenDiff: openDiffViewer,
-    onLoadCorrectionDraft: withSelectedSession(handleLoadOwnedCorrectionDraft),
-    onToggleOwnedReviewDisposition: withSelectedSession((sessionKey) => handleOwnedReviewDisposition(ownedReviewDisposition === 'resolved' ? 'watch' : 'resolve', sessionKey)),
-    onDraftChange: withSelectedSession((sessionKey, value: string) => setDraftBySession((current) => ({ ...current, [sessionKey]: value }))),
+    onLoadCorrectionDraft: () => {
+      if (selectedSessionKey) handleLoadOwnedCorrectionDraft(selectedSessionKey);
+    },
+    onToggleOwnedReviewDisposition: () => {
+      if (selectedSessionKey) handleOwnedReviewDisposition(ownedReviewDisposition === 'resolved' ? 'watch' : 'resolve', selectedSessionKey);
+    },
+    onDraftChange: (value: string) => {
+      if (selectedSessionKey) setDraftBySession((current) => ({ ...current, [selectedSessionKey]: value }));
+    },
     onFocusChange: setComposeFocused,
   };
 

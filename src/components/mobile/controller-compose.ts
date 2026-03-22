@@ -219,7 +219,16 @@ export async function submitSteerTurn({
   playSendClick,
   relaySlashCommand,
 }: SteerSubmitArgs) {
-  if (actionStateBySession[sessionKey] === 'steering') return;
+  console.info('[mobile] submitSteerTurn called', {
+    sessionKey,
+    actionState: actionStateBySession[sessionKey] ?? 'idle',
+    hasDraft: Boolean(draftBySession[sessionKey]?.trim()),
+    hasSelectedSession: Boolean(selectedSession),
+  });
+  if (actionStateBySession[sessionKey] === 'steering') {
+    console.warn('[mobile] submitSteerTurn BLOCKED — actionState stuck on steering');
+    return;
+  }
 
   const targetSession = snapshot.sessions.find((session) => session.sessionKey === sessionKey)
     ?? (selectedSession?.sessionKey === sessionKey ? selectedSession : undefined);
@@ -388,7 +397,15 @@ export async function submitOwnedResumeTurn({
   playSendClick,
   relaySlashCommand,
 }: OwnedResumeArgs) {
-  if (actionStateBySession[sessionKey] === 'steering') return;
+  console.info('[mobile] submitOwnedResumeTurn called', {
+    sessionKey,
+    actionState: actionStateBySession[sessionKey] ?? 'idle',
+    hasDraft: Boolean(draftBySession[sessionKey]?.trim()),
+  });
+  if (actionStateBySession[sessionKey] === 'steering') {
+    console.warn('[mobile] submitOwnedResumeTurn BLOCKED — actionState stuck on steering');
+    return;
+  }
 
   const message = draftBySession[sessionKey]?.trim();
   if (!message) {
