@@ -9,7 +9,7 @@
  * Glass frosted background matching the Cortex IDE design system.
  */
 
-import { useState, useEffect, createContext, useContext, useCallback } from 'react';
+import { useState, useEffect, createContext, useContext, useCallback, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Box,
@@ -41,6 +41,7 @@ interface NavRailProps {
   onSectionChange: (section: NavSection) => void;
   alertCount?: number;
   onAlertClick?: () => void;
+  alertTray?: ReactNode;
   onSearchClick?: () => void;
   thoughtsOpen?: boolean;
   onThoughtsToggle?: () => void;
@@ -409,6 +410,7 @@ export function NavRail({
   onSectionChange,
   alertCount = 0,
   onAlertClick,
+  alertTray,
   onSearchClick,
   thoughtsOpen,
   onThoughtsToggle,
@@ -435,7 +437,10 @@ export function NavRail({
         backdropFilter: 'blur(20px) saturate(1.4)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
         borderRight: '1px solid var(--t-divider)',
-        overflow: 'hidden',
+        position: 'relative',
+        zIndex: 40,
+        overflowX: 'visible',
+        overflowY: 'hidden',
         boxSizing: 'border-box',
       }}
     >
@@ -474,7 +479,7 @@ export function NavRail({
       </div>
 
       {/* Bottom — Ports + Thoughts + Alerts + Settings */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, position: 'relative' }}>
         {/* Ports footer — pinned above utils */}
         <PortsFooter expanded={expanded} onPortPreview={onPortPreview} />
 
@@ -485,13 +490,16 @@ export function NavRail({
           onClick={onThoughtsToggle}
           active={thoughtsOpen}
         />
-        <UtilButton
-          icon={Bell}
-          label="Alerts"
-          expanded={expanded}
-          onClick={onAlertClick}
-          badge={alertCount}
-        />
+        <div style={{ position: 'relative' }}>
+          <UtilButton
+            icon={Bell}
+            label="Alerts"
+            expanded={expanded}
+            onClick={onAlertClick}
+            badge={alertCount}
+          />
+          {alertTray}
+        </div>
         <UtilButton
           icon={Settings}
           label="Settings"
