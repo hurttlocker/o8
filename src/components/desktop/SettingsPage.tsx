@@ -2334,6 +2334,127 @@ interface CortexStats {
   growth: Record<string, number>;
 }
 
+interface ConflictFact {
+  id: number;
+  subject: string;
+  predicate: string;
+  object: string;
+  confidence: number;
+  source: string;
+  lastSeen?: string;
+  factType?: string;
+}
+
+interface ConflictPair {
+  factA: ConflictFact;
+  factB: ConflictFact;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readConflictString(record: Record<string, unknown>, keys: string[], fallback = ''): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return fallback;
+}
+
+function readConflictNumber(record: Record<string, unknown>, keys: string[], fallback = 0): number {
+  for (const key of keys) {
+    const value = record[key];
+    const parsed = typeof value === 'number'
+      ? value
+      : typeof value === 'string'
+        ? Number(value)
+        : NaN;
+
+    if (Number.isFinite(parsed)) return parsed;
+  }
+
+  return fallback;
+}
+
+function normalizeNestedConflictFact(value: unknown): ConflictFact | null {
+  const record = asRecord(value);
+  if (!record) return null;
+
+  const id = readConflictNumber(record, ['ID', 'id']);
+  const subject = readConflictString(record, ['Subject', 'subject']);
+  const predicate = readConflictString(record, ['Predicate', 'predicate']);
+  const object = readConflictString(record, ['Object', 'object']);
+
+  if (!id || !subject || !predicate || !object) return null;
+
+  return {
+    id,
+    subject,
+    predicate,
+    object,
+    confidence: readConflictNumber(record, ['Confidence', 'confidence'], 0),
+    source: readConflictString(record, ['Source', 'source', 'SourceQuote', 'sourceQuote'], 'unknown'),
+    lastSeen: readConflictString(record, ['LastReinforced', 'lastSeen', 'last_seen', 'CreatedAt', 'created_at']) || undefined,
+    factType: readConflictString(record, ['FactType', 'factType', 'fact_type']) || undefined,
+  };
+}
+
+function normalizeFlatConflictFact(record: Record<string, unknown>, prefix: 'fact_a' | 'fact_b'): ConflictFact | null {
+  const id = readConflictNumber(record, [`${prefix}_id`, `${prefix}Id`]);
+  const subject = readConflictString(record, [`${prefix}_subject`, `${prefix}Subject`]);
+  const predicate = readConflictString(record, [`${prefix}_predicate`, `${prefix}Predicate`]);
+  const object = readConflictString(record, [`${prefix}_object`, `${prefix}Object`]);
+
+  if (!id || !subject || !predicate || !object) return null;
+
+  return {
+    id,
+    subject,
+    predicate,
+    object,
+    confidence: readConflictNumber(record, [`${prefix}_confidence`, `${prefix}Confidence`], 0),
+    source: readConflictString(record, [`${prefix}_source`, `${prefix}_source_quote`, `${prefix}Source`, `${prefix}SourceQuote`], 'unknown'),
+    lastSeen: readConflictString(record, [`${prefix}_last_seen`, `${prefix}_last_reinforced`, `${prefix}LastSeen`, `${prefix}LastReinforced`, `${prefix}_created_at`]) || undefined,
+    factType: readConflictString(record, [`${prefix}_fact_type`, `${prefix}FactType`]) || undefined,
+  };
+}
+
+function parseConflictPairs(result: unknown): ConflictPair[] {
+  if (!Array.isArray(result)) return [];
+
+  return result.flatMap((entry): ConflictPair[] => {
+    const record = asRecord(entry);
+    if (!record) return [];
+
+    const factA =
+      normalizeNestedConflictFact(record['fact1']) ??
+      normalizeNestedConflictFact(record['factA']) ??
+      normalizeFlatConflictFact(record, 'fact_a');
+
+    const factB =
+      normalizeNestedConflictFact(record['fact2']) ??
+      normalizeNestedConflictFact(record['factB']) ??
+      normalizeFlatConflictFact(record, 'fact_b');
+
+    return factA && factB ? [{ factA, factB }] : [];
+  });
+}
+
+function formatConflictDate(value?: string) {
+  if (!value) return '—';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
 function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div style={{
@@ -2367,6 +2488,12 @@ function CortexMemoryTab() {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
   const [actionRunning, setActionRunning] = useState<string | null>(null);
+  const [conflicts, setConflicts] = useState<ConflictPair[]>([]);
+  const [conflictsLoading, setConflictsLoading] = useState(false);
+  const [resolving, setResolving] = useState<number | null>(null);
+  const [conflictsChecked, setConflictsChecked] = useState(false);
+  const [conflictError, setConflictError] = useState('');
+  const [conflictToast, setConflictToast] = useState('');
 
   const loadConfig = useCallback(async () => {
     try {
@@ -2405,6 +2532,79 @@ function CortexMemoryTab() {
       setSaveNote('Error saving');
     } finally {
       setSaving(false);
+    }
+  }, [loadConfig]);
+
+  useEffect(() => {
+    if (!conflictToast) return;
+    const timeout = setTimeout(() => setConflictToast(''), 2200);
+    return () => clearTimeout(timeout);
+  }, [conflictToast]);
+
+  const checkConflicts = useCallback(async () => {
+    setConflictsChecked(true);
+    setConflictsLoading(true);
+    setConflictError('');
+
+    try {
+      const params = new URLSearchParams({ command: 'conflicts --json --limit 20' });
+      const res = await fetch(`/api/v2/cortex/action?${params.toString()}`, {
+        method: 'GET',
+        cache: 'no-store',
+      });
+      const data = await res.json().catch(() => ({} as { ok?: boolean; result?: unknown; error?: string }));
+
+      if (!res.ok || data.ok === false) {
+        throw new Error(data.error || 'Unable to load conflicts');
+      }
+
+      setConflicts(parseConflictPairs(data.result));
+    } catch (err) {
+      setConflicts([]);
+      setConflictError(err instanceof Error ? err.message : 'Unable to load conflicts');
+    } finally {
+      setConflictsLoading(false);
+    }
+  }, []);
+
+  const resolveConflict = useCallback(async (keepId: number, dropId: number) => {
+    setResolving(keepId);
+    setConflictError('');
+
+    try {
+      const keepRes = await fetch('/api/v2/cortex/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: `fact keep ${keepId}` }),
+      });
+      const keepData = await keepRes.json().catch(() => ({} as { ok?: boolean; error?: string }));
+      if (!keepRes.ok || keepData.ok === false) {
+        throw new Error(keepData.error || 'Failed to keep fact');
+      }
+
+      const dropRes = await fetch('/api/v2/cortex/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: `fact drop ${dropId}` }),
+      });
+      const dropData = await dropRes.json().catch(() => ({} as { ok?: boolean; error?: string }));
+      if (!dropRes.ok || dropData.ok === false) {
+        throw new Error(dropData.error || 'Failed to drop fact');
+      }
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 220));
+      setConflicts((current) => current.filter((pair) => (
+        pair.factA.id !== keepId
+        && pair.factB.id !== keepId
+        && pair.factA.id !== dropId
+        && pair.factB.id !== dropId
+      )));
+      setConflictToast('✓ Resolved');
+      void loadConfig();
+    } catch (err) {
+      setConflictError(err instanceof Error ? err.message : 'Unable to resolve conflict');
+    } finally {
+      setResolving(null);
     }
   }, [loadConfig]);
 
@@ -2913,6 +3113,258 @@ function CortexMemoryTab() {
         {saveNote && (
           <div style={{ fontSize: 12, color: '#10b981', marginTop: 8, fontWeight: 500 }}>
             ✓ {saveNote}
+          </div>
+        )}
+      </div>
+
+      {/* Conflicts */}
+      <div style={{ marginBottom: 32, position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text, #0f172a)' }}>
+              Conflicts
+            </div>
+            {conflictsChecked && (
+              <span style={{
+                fontSize: 11,
+                fontWeight: 700,
+                paddingTop: 2,
+                paddingBottom: 2,
+                paddingLeft: 8,
+                paddingRight: 8,
+                borderRadius: 999,
+                background: conflicts.length > 0 ? 'rgba(239,68,68,0.08)' : 'rgba(34,197,94,0.08)',
+                color: conflicts.length > 0 ? '#dc2626' : '#16a34a',
+              }}>
+                {conflicts.length}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => void checkConflicts()}
+            disabled={conflictsLoading || resolving !== null}
+            style={{
+              paddingTop: 8,
+              paddingBottom: 8,
+              paddingLeft: 14,
+              paddingRight: 14,
+              borderRadius: 10,
+              border: '1px solid var(--t-border, #e2e8f0)',
+              background: 'var(--t-bg, white)',
+              color: 'var(--t-text, #0f172a)',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: conflictsLoading || resolving !== null ? 'wait' : 'pointer',
+              opacity: conflictsLoading || resolving !== null ? 0.7 : 1,
+            }}
+          >
+            {conflictsLoading ? 'Checking…' : 'Check Conflicts'}
+          </button>
+        </div>
+        <p style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)', margin: '0 0 12px', lineHeight: '1.4' }}>
+          Review contradictory facts and decide which version Cortex should keep.
+        </p>
+
+        {conflictError && (
+          <div style={{
+            fontSize: 12,
+            color: '#dc2626',
+            marginBottom: 12,
+            paddingTop: 10,
+            paddingBottom: 10,
+            paddingLeft: 12,
+            paddingRight: 12,
+            borderRadius: 10,
+            border: '1px solid rgba(239,68,68,0.12)',
+            background: 'rgba(239,68,68,0.04)',
+          }}>
+            {conflictError}
+          </div>
+        )}
+
+        {!conflictsChecked && !conflictsLoading && (
+          <div style={{
+            paddingTop: 14,
+            paddingBottom: 14,
+            paddingLeft: 16,
+            paddingRight: 16,
+            borderRadius: 12,
+            border: '1px dashed var(--t-border, #e2e8f0)',
+            background: 'rgba(148,163,184,0.03)',
+            color: 'var(--t-text-muted, #94a3b8)',
+            fontSize: 12,
+          }}>
+            Run a fresh scan to inspect up to 20 contradictory fact pairs.
+          </div>
+        )}
+
+        {conflictsLoading && (
+          <div style={{
+            paddingTop: 16,
+            paddingBottom: 16,
+            paddingLeft: 16,
+            paddingRight: 16,
+            borderRadius: 12,
+            border: '1px solid var(--t-border, #e2e8f0)',
+            background: 'var(--t-bg-card, #f8fafc)',
+            color: 'var(--t-text-muted, #94a3b8)',
+            fontSize: 12,
+          }}>
+            Scanning Cortex for contradictory facts…
+          </div>
+        )}
+
+        {conflictsChecked && !conflictsLoading && conflicts.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--t-text-muted)' }}>
+            <span style={{ fontSize: 13 }}>No conflicts found — your knowledge base is consistent ✓</span>
+          </div>
+        )}
+
+        {conflictsChecked && !conflictsLoading && conflicts.length > 0 && (
+          <div>
+            {conflicts.map((pair) => {
+              const pairKey = `${pair.factA.id}-${pair.factB.id}`;
+              const pairResolving = resolving === pair.factA.id || resolving === pair.factB.id;
+              const subject = pair.factA.subject || pair.factB.subject;
+              const predicate = pair.factA.predicate || pair.factB.predicate;
+
+              return (
+                <div
+                  key={pairKey}
+                  style={{
+                    padding: 16,
+                    borderRadius: 12,
+                    border: '1px solid var(--t-border, #e2e8f0)',
+                    background: 'var(--t-bg-card, #f8fafc)',
+                    marginBottom: 12,
+                    opacity: pairResolving ? 0 : 1,
+                    transform: pairResolving ? 'translateY(-8px) scale(0.98)' : 'translateY(0) scale(1)',
+                    transition: 'opacity 180ms ease, transform 180ms ease',
+                    pointerEvents: pairResolving ? 'none' : 'auto',
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)', marginBottom: 12 }}>
+                    <span style={{ color: '#2563eb' }}>{subject}</span>
+                    <span style={{ color: 'var(--t-text-muted)', margin: '0 6px' }}>→</span>
+                    <span>{predicate}</span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    {[
+                      { fact: pair.factA, other: pair.factB, side: 'A' },
+                      { fact: pair.factB, other: pair.factA, side: 'B' },
+                    ].map(({ fact, other, side }) => {
+                      const keepBusy = resolving === fact.id;
+                      const otherBusy = resolving === other.id;
+
+                      return (
+                        <div
+                          key={`${pairKey}-${side}`}
+                          style={{
+                            padding: 12,
+                            borderRadius: 10,
+                            border: '1px solid var(--t-border, #e2e8f0)',
+                            background: 'var(--t-bg, white)',
+                          }}
+                        >
+                          <div style={{
+                            fontSize: 10,
+                            fontWeight: 700,
+                            letterSpacing: '0.04em',
+                            textTransform: 'uppercase',
+                            color: 'var(--t-text-muted, #94a3b8)',
+                            marginBottom: 8,
+                          }}>
+                            Fact {side}
+                          </div>
+                          <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text, #0f172a)', marginBottom: 8, lineHeight: '1.45' }}>
+                            &quot;{fact.object}&quot;
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--t-text-muted, #94a3b8)', display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                            <span>Confidence: {(fact.confidence * 100).toFixed(0)}%</span>
+                            <span>·</span>
+                            <span>Source: {fact.source}</span>
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--t-text-muted, #94a3b8)', display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                            <span>Last seen: {formatConflictDate(fact.lastSeen)}</span>
+                            <span>·</span>
+                            <span>ID: {fact.id}</span>
+                            {fact.factType ? (
+                              <>
+                                <span>·</span>
+                                <span>Type: {fact.factType}</span>
+                              </>
+                            ) : null}
+                          </div>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button
+                              type="button"
+                              onClick={() => void resolveConflict(fact.id, other.id)}
+                              disabled={resolving !== null}
+                              style={{
+                                flex: 1,
+                                padding: '6px 0',
+                                borderRadius: 8,
+                                border: '1px solid rgba(34,197,94,0.3)',
+                                background: 'rgba(34,197,94,0.06)',
+                                color: '#16a34a',
+                                fontSize: 11,
+                                fontWeight: 600,
+                                cursor: resolving !== null ? 'wait' : 'pointer',
+                                opacity: resolving !== null ? 0.7 : 1,
+                              }}
+                            >
+                              {keepBusy ? 'Resolving…' : 'Keep this'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void resolveConflict(other.id, fact.id)}
+                              disabled={resolving !== null}
+                              style={{
+                                padding: '6px 10px',
+                                borderRadius: 8,
+                                border: '1px solid rgba(239,68,68,0.2)',
+                                background: 'transparent',
+                                color: '#dc2626',
+                                fontSize: 11,
+                                fontWeight: 500,
+                                cursor: resolving !== null ? 'wait' : 'pointer',
+                                opacity: resolving !== null ? 0.7 : 1,
+                              }}
+                            >
+                              {otherBusy ? 'Keeping other…' : 'Drop'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {conflictToast && (
+          <div style={{
+            position: 'fixed',
+            right: 24,
+            bottom: 24,
+            paddingTop: 10,
+            paddingBottom: 10,
+            paddingLeft: 14,
+            paddingRight: 14,
+            borderRadius: 12,
+            border: '1px solid rgba(34,197,94,0.18)',
+            background: 'rgba(15,23,42,0.94)',
+            color: '#dcfce7',
+            fontSize: 12,
+            fontWeight: 600,
+            boxShadow: '0 18px 40px rgba(15,23,42,0.18)',
+            zIndex: 40,
+          }}>
+            {conflictToast}
           </div>
         )}
       </div>
