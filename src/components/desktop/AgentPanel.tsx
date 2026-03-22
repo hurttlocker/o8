@@ -248,6 +248,20 @@ function ctxColor(pct: number) {
   return '#22c55e';
 }
 
+function agentCardSurfaceLabel(agent: AgentDetail, repo: string): string {
+  const surface = (agent.surfaceLabel || agent.name || 'Agent').replace(/\s*\(.*\)/, '').trim();
+  const firstSurfaceWord = surface.split(/\s+/)[0] || 'Agent';
+  const nameLower = (agent.name || '').toLowerCase();
+  const modelLower = (agent.model || '').toLowerCase();
+
+  if (repo === 'openclaw') return firstSurfaceWord;
+  if (nameLower.includes('codex') || modelLower.includes('codex')) return 'Codex';
+  if (nameLower.includes('claude')) return 'Claude';
+  if (nameLower.includes('telegram')) return 'Telegram';
+  if (nameLower.includes('discord')) return 'Discord';
+  return firstSurfaceWord;
+}
+
 // formatModelLabel imported from @/lib/format
 
 /** Smart model attribution for expanded agent cards */
@@ -418,17 +432,117 @@ const AgentCard = memo(function AgentCard({
   onRetry?: (agent: AgentDetail) => void;
   lifecycleEvents?: Map<string, { state: string; exitCode?: number; ts: number }>;
 }) {
+  const isCompact = !expanded;
   const model = group.primaryModel;
   const ctx = group.bestContextPct > 0 ? { usedPercent: group.bestContextPct } : null;
+  const activeAgents = group.agents.filter((agent) => (
+    agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy'
+  ));
+  const reviewingAgents = group.agents.filter((agent) => agent.workspaceStatus === 'in_review' || agent.status === 'reviewing');
+  const blockedAgents = group.agents.filter((agent) => (
+    agent.lifecycleState === 'failed'
+    || agent.lifecycleState === 'killed'
+    || agent.status === 'error'
+    || agent.status === 'unhealthy'
+  ));
+  const primaryAgent = activeAgents[0]
+    ?? reviewingAgents[0]
+    ?? group.agents.find((agent) => agent.currentTask?.trim())
+    ?? group.agents[0]
+    ?? null;
+  const primaryPr = primaryAgent?.pr ?? group.agents.find((agent) => agent.pr)?.pr ?? null;
+  const branchLabel = primaryAgent?.branch && !primaryAgent.branch.startsWith('surface/')
+    ? primaryAgent.branch
+    : group.agents.find((agent) => agent.branch && !agent.branch.startsWith('surface/'))?.branch ?? null;
+  const diffSource = primaryPr
+    ? { additions: primaryPr.additions, deletions: primaryPr.deletions, changedFiles: primaryPr.changedFiles }
+    : primaryAgent?.localDiff
+      ?? group.agents.find((agent) => (
+        agent.localDiff && ((agent.localDiff.additions ?? 0) > 0 || (agent.localDiff.deletions ?? 0) > 0)
+      ))?.localDiff
+      ?? null;
+  const focusLine = primaryAgent?.currentTask?.trim()
+    || primaryPr?.title
+    || branchLabel
+    || (activeAgents.length > 0
+      ? `${activeAgents.length} active ${activeAgents.length === 1 ? 'agent' : 'agents'} in this workspace`
+      : `${group.agents.length} connected ${group.agents.length === 1 ? 'surface' : 'surfaces'}`);
+  const chipTone = blockedAgents.length > 0
+    ? '#ef4444'
+    : reviewingAgents.length > 0
+      ? '#7c3aed'
+      : activeAgents.length > 0
+        ? '#16a34a'
+        : '#64748b';
+  const statusLabel = blockedAgents.length > 0
+    ? `${blockedAgents.length} blocked`
+    : reviewingAgents.length > 0
+      ? `${reviewingAgents.length} in review`
+      : activeAgents.length > 0
+        ? `${activeAgents.length} active`
+        : `${group.agents.length} idle`;
+  const metricLabel = ctx ? 'Context' : activeAgents.length > 0 ? 'Active' : 'Agents';
+  const metricValue = ctx ? `${ctx.usedPercent}%` : String(activeAgents.length > 0 ? activeAgents.length : group.agents.length);
+  const metricTone = ctx ? ctxColor(ctx.usedPercent) : chipTone;
+  const surfaceCounts = new Map<string, number>();
+  for (const agent of group.agents) {
+    const label = agentCardSurfaceLabel(agent, group.repo);
+    surfaceCounts.set(label, (surfaceCounts.get(label) ?? 0) + 1);
+  }
+  const surfaceChips = Array.from(surfaceCounts.entries())
+    .map(([label, count]) => count > 1 ? `${label} ×${count}` : label)
+    .slice(0, 2);
+  const overflowSurfaceCount = Math.max(0, surfaceCounts.size - surfaceChips.length);
+  const hasDiffDelta = Boolean(diffSource && (diffSource.additions > 0 || diffSource.deletions > 0));
+  const compactSurfaceChip = surfaceChips[0] ?? null;
+  const compactMetaKind = primaryPr
+    ? 'pr'
+    : branchLabel
+      ? 'branch'
+      : hasDiffDelta
+        ? 'diff'
+        : compactSurfaceChip
+          ? 'surface'
+          : group.totalAlerts > 0
+            ? 'alert'
+            : null;
+  const cardBackground = expanded
+    ? 'linear-gradient(180deg, rgba(255,255,255,0.97), rgba(244,248,255,0.93))'
+    : group.hasRunning
+      ? 'linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,251,255,0.91))'
+      : 'linear-gradient(180deg, rgba(255,255,255,0.93), rgba(248,250,252,0.90))';
+  const cardBorder = expanded
+    ? '1px solid rgba(37, 99, 235, 0.16)'
+    : '1px solid rgba(148, 163, 184, 0.16)';
+  const iconTint = group.hasRunning ? 'rgba(37, 99, 235, 0.10)' : 'rgba(15, 23, 42, 0.05)';
+  const headerPadding = expanded ? '13px 14px 12px' : '10px 11px 9px';
+  const iconBoxSize = expanded ? 36 : 30;
+  const iconRadius = expanded ? 12 : 10;
+  const iconSize = expanded ? 16 : 14;
+  const contentGap = expanded ? 8 : 5;
+  const titleSize = expanded ? 13 : 12;
+  const modelBadgeFontSize = expanded ? 10 : 9;
+  const modelBadgePadding = expanded ? '3px 8px' : '2px 6px';
+  const summaryFontSize = expanded ? 12 : 11;
+  const summaryLineHeight = expanded ? '16px' : '14px';
+  const summaryClamp = expanded ? 2 : 1;
+  const chipGap = expanded ? 6 : 5;
+  const chipPadding = expanded ? '4px 8px' : '3px 7px';
+  const chipFontSize = expanded ? 10 : 9;
+  const metricMinWidth = expanded ? 58 : 48;
+  const metricPadding = expanded ? '6px 8px 7px' : '5px 7px 6px';
+  const metricValueFontSize = expanded ? 15 : 13;
 
   return (
     <div style={{
-      background: 'rgba(255, 255, 255, 0.7)',
-      border: expanded ? '1px solid rgba(37, 99, 235, 0.15)' : '1px solid var(--t-panel-border)',
-      borderRadius: 14,
+      background: cardBackground,
+      border: cardBorder,
+      borderRadius: expanded ? 18 : 16,
       backdropFilter: 'blur(20px)',
       WebkitBackdropFilter: 'blur(20px)',
-      boxShadow: expanded ? '0 2px 8px rgba(37,99,235,0.06)' : 'var(--t-panel-shadow)',
+      boxShadow: expanded
+        ? '0 16px 32px rgba(15, 23, 42, 0.07)'
+        : '0 8px 18px rgba(15, 23, 42, 0.045)',
       transition: 'all 200ms ease',
       overflow: 'hidden',
     }}>
@@ -437,119 +551,355 @@ const AgentCard = memo(function AgentCard({
         onClick={onToggle}
         style={{
           display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '12px 14px',
+          alignItems: 'stretch',
+          gap: isCompact ? 10 : 12,
+          padding: headerPadding,
           cursor: 'pointer',
         }}
       >
-        {/* GitHub icon */}
-        <div style={{ color: 'var(--t-text-secondary)', flexShrink: 0 }}>
-          <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor" style={{ display: 'block' }}>
-            <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
-          </svg>
+        <div style={{
+          width: iconBoxSize,
+          height: iconBoxSize,
+          borderRadius: iconRadius,
+          background: iconTint,
+          border: '1px solid rgba(148, 163, 184, 0.10)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: group.repo === 'openclaw' ? '#2563eb' : 'var(--t-text-secondary)',
+          flexShrink: 0,
+          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.75)',
+        }}>
+          {group.repo === 'openclaw' ? (
+            <Monitor size={iconSize} strokeWidth={2} />
+          ) : (
+            <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="currentColor" style={{ display: 'block' }}>
+              <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+            </svg>
+          )}
         </div>
 
-        {/* Repo name + agent count */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: contentGap }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: isCompact ? 6 : 8, minWidth: 0 }}>
             <span style={{
-              fontSize: 13, fontWeight: 700, color: 'var(--t-text-strong)',
+              fontSize: titleSize,
+              fontWeight: 700,
+              color: 'var(--t-text-strong)',
               letterSpacing: '-0.01em',
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
             }}>{group.displayName}</span>
-            {model && (
+            {model && formatModelLabel(model) && (
               <span style={{
-                fontSize: 10,
-                fontWeight: 600,
-                color: 'var(--t-text-muted)',
-                padding: '2px 6px',
+                fontSize: modelBadgeFontSize,
+                fontWeight: 700,
+                color: '#64748b',
+                padding: modelBadgePadding,
                 borderRadius: 999,
-                background: 'var(--t-divider-subtle)',
-                maxWidth: 150,
+                background: 'rgba(148, 163, 184, 0.10)',
+                border: '1px solid rgba(148, 163, 184, 0.12)',
+                maxWidth: isCompact ? 104 : 140,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
+                flexShrink: 0,
               }}>
                 {formatModelLabel(model)}
               </span>
             )}
           </div>
-          {/* Agent dots row — shows who's on this repo */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
-            {group.agents.filter(a => !a.id.includes('cron')).slice(0, 4).map(agent => {
-              const isRunning = agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy';
-              const agentColor = isRunning ? '#22c55e' : '#9ca3af';
-              const isOC = group.repo === 'openclaw';
-              const nLow = (agent.name || '').toLowerCase();
-              const mLow = (agent.model || '').toLowerCase();
-              const dotLabel = isOC
-                ? (agent.surfaceLabel || agent.name).replace(/\s*\(.*\)/, '').split(' ')[0]
-                : nLow.includes('codex') || mLow.includes('codex') ? 'Codex'
-                : nLow.includes('claude') ? 'Claude Code'
-                : (agent.surfaceLabel || agent.name).replace(/\s*\(.*\)/, '').split(' ')[0];
-              return (
-                <div key={agent.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{
-                    width: 7, height: 7, borderRadius: '50%',
-                    background: agentColor, display: 'block',
-                    boxShadow: isRunning ? `0 0 6px ${agentColor}` : 'none',
-                  }} />
-                  <span style={{
-                    fontSize: 11, fontWeight: 600,
-                    color: isRunning ? 'var(--t-text)' : 'var(--t-text-muted)',
-                  }}>
-                    {dotLabel}
-                  </span>
-                </div>
-              );
-            })}
+          <div style={{
+            fontSize: summaryFontSize,
+            lineHeight: summaryLineHeight,
+            color: 'var(--t-text-secondary)',
+            fontWeight: 520,
+            letterSpacing: '-0.01em',
+            display: '-webkit-box',
+            WebkitLineClamp: summaryClamp,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden',
+          }}>
+            {focusLine}
+          </div>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: chipGap,
+            flexWrap: isCompact ? 'nowrap' : 'wrap',
+            overflow: 'hidden',
+            minWidth: 0,
+          }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: chipPadding,
+              borderRadius: 999,
+              background: `${chipTone}12`,
+              color: chipTone,
+              border: `1px solid ${chipTone}20`,
+              fontSize: chipFontSize,
+              fontWeight: 700,
+              letterSpacing: '0.01em',
+              flexShrink: 0,
+            }}>
+              <span style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: chipTone,
+                boxShadow: activeAgents.length > 0 ? `0 0 10px ${chipTone}66` : 'none',
+              }} />
+              {statusLabel}
+            </span>
+            {expanded && primaryPr ? (
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectPR?.(primaryPr.number, group.repo);
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: chipPadding,
+                  borderRadius: 999,
+                  background: 'rgba(37, 99, 235, 0.08)',
+                  color: '#2563eb',
+                  fontSize: chipFontSize,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                PR #{primaryPr.number}
+              </span>
+            ) : expanded && branchLabel ? (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                maxWidth: 112,
+                padding: chipPadding,
+                borderRadius: 999,
+                background: 'rgba(15, 23, 42, 0.05)',
+                color: '#475569',
+                fontSize: chipFontSize,
+                fontWeight: 700,
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}>
+                {branchLabel}
+              </span>
+            ) : null}
+            {expanded && hasDiffDelta ? (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: chipPadding,
+                borderRadius: 999,
+                background: 'rgba(15, 23, 42, 0.04)',
+                color: '#475569',
+                fontSize: chipFontSize,
+                fontWeight: 700,
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                flexShrink: 0,
+              }}>
+                <span style={{ color: '#16a34a' }}>+{diffSource?.additions.toLocaleString()}</span>
+                <span style={{ color: '#ef4444' }}>-{diffSource?.deletions.toLocaleString()}</span>
+              </span>
+            ) : null}
+            {expanded ? surfaceChips.map((label) => (
+              <span
+                key={label}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: chipPadding,
+                  borderRadius: 999,
+                  background: 'rgba(255,255,255,0.72)',
+                  border: '1px solid rgba(148, 163, 184, 0.12)',
+                  color: '#64748b',
+                  fontSize: chipFontSize,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {label}
+              </span>
+            )) : compactMetaKind === 'pr' && primaryPr ? (
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectPR?.(primaryPr.number, group.repo);
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: chipPadding,
+                  borderRadius: 999,
+                  background: 'rgba(37, 99, 235, 0.08)',
+                  color: '#2563eb',
+                  fontSize: chipFontSize,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                }}
+              >
+                PR #{primaryPr.number}
+              </span>
+            ) : compactMetaKind === 'branch' && branchLabel ? (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                maxWidth: 92,
+                padding: chipPadding,
+                borderRadius: 999,
+                background: 'rgba(15, 23, 42, 0.05)',
+                color: '#475569',
+                fontSize: chipFontSize,
+                fontWeight: 700,
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                flexShrink: 0,
+              }}>
+                {branchLabel}
+              </span>
+            ) : compactMetaKind === 'diff' && hasDiffDelta ? (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                padding: chipPadding,
+                borderRadius: 999,
+                background: 'rgba(15, 23, 42, 0.04)',
+                color: '#475569',
+                fontSize: chipFontSize,
+                fontWeight: 700,
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                flexShrink: 0,
+              }}>
+                <span style={{ color: '#16a34a' }}>+{diffSource?.additions.toLocaleString()}</span>
+                <span style={{ color: '#ef4444' }}>-{diffSource?.deletions.toLocaleString()}</span>
+              </span>
+            ) : compactMetaKind === 'surface' && compactSurfaceChip ? (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: chipPadding,
+                borderRadius: 999,
+                background: 'rgba(255,255,255,0.72)',
+                border: '1px solid rgba(148, 163, 184, 0.12)',
+                color: '#64748b',
+                fontSize: chipFontSize,
+                fontWeight: 700,
+                flexShrink: 0,
+              }}>
+                {compactSurfaceChip}
+              </span>
+            ) : compactMetaKind === 'alert' && group.totalAlerts > 0 ? (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: chipPadding,
+                borderRadius: 999,
+                background: 'rgba(239, 68, 68, 0.08)',
+                color: '#dc2626',
+                fontSize: chipFontSize,
+                fontWeight: 700,
+                flexShrink: 0,
+              }}>
+                <AlertCircle size={10} strokeWidth={2} />
+                {group.totalAlerts}
+              </span>
+            ) : null}
+            {expanded && overflowSurfaceCount > 0 ? (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: chipPadding,
+                borderRadius: 999,
+                background: 'rgba(255,255,255,0.72)',
+                border: '1px solid rgba(148, 163, 184, 0.12)',
+                color: '#64748b',
+                fontSize: chipFontSize,
+                fontWeight: 700,
+                flexShrink: 0,
+              }}>
+                +{overflowSurfaceCount}
+              </span>
+            ) : null}
+            {expanded && group.totalAlerts > 0 && (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: chipPadding,
+                borderRadius: 999,
+                background: 'rgba(239, 68, 68, 0.08)',
+                color: '#dc2626',
+                fontSize: chipFontSize,
+                fontWeight: 700,
+                flexShrink: 0,
+              }}>
+                <AlertCircle size={11} strokeWidth={2} />
+                {group.totalAlerts}
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Context + chevron */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          {ctx && (
-            <span style={{
-              fontSize: 10, fontWeight: 600,
-              color: ctxColor(ctx.usedPercent),
-              fontFamily: 'SF Mono, Menlo, monospace',
-            }}>
-              {ctx.usedPercent}%
-            </span>
-          )}
-          {group.totalAlerts > 0 && (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          justifyContent: 'space-between',
+          gap: isCompact ? 8 : 10,
+          flexShrink: 0,
+        }}>
+          <div style={{
+            minWidth: metricMinWidth,
+            padding: metricPadding,
+            borderRadius: expanded ? 14 : 12,
+            background: ctx ? `${metricTone}10` : 'rgba(15, 23, 42, 0.04)',
+            border: `1px solid ${ctx ? `${metricTone}20` : 'rgba(148, 163, 184, 0.12)'}`,
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.7)',
+            textAlign: 'right',
+          }}>
             <div style={{
-              display: 'flex', alignItems: 'center', gap: 3,
-              fontSize: 11, fontWeight: 600, color: '#ef4444',
+              fontSize: isCompact ? 7 : 8,
+              fontWeight: 700,
+              color: 'var(--t-text-faint)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              marginBottom: isCompact ? 2 : 3,
             }}>
-              <AlertCircle size={13} strokeWidth={2} />
-              {group.totalAlerts}
+              {metricLabel}
             </div>
-          )}
+            <div style={{
+              fontSize: metricValueFontSize,
+              lineHeight: 1,
+              fontWeight: 800,
+              color: metricTone,
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+              letterSpacing: '-0.03em',
+            }}>
+              {metricValue}
+            </div>
+          </div>
           {expanded
             ? <ChevronDown size={14} strokeWidth={2} style={{ color: 'var(--t-text-muted)' }} />
             : <ChevronRight size={14} strokeWidth={2} style={{ color: 'var(--t-text-faint)' }} />
           }
         </div>
       </div>
-
-      {/* Context bar */}
-      {ctx && (
-        <div style={{ padding: '0 14px 8px' }}>
-          <div style={{
-            height: 3, borderRadius: 2,
-            background: 'var(--t-divider-subtle)', overflow: 'hidden',
-          }}>
-            <div style={{
-              height: '100%',
-              width: `${Math.min(ctx.usedPercent, 100)}%`,
-              borderRadius: 2,
-              background: ctxColor(ctx.usedPercent),
-              transition: 'width 300ms ease',
-            }} />
-          </div>
-        </div>
-      )}
 
       {/* Expanded: status-grouped agent cards */}
       {expanded && (() => {
@@ -3416,7 +3766,7 @@ export const AgentPanel = memo(function AgentPanel({
         paddingLeft: 14,
         display: 'flex',
         flexDirection: 'column',
-        gap: 8,
+        gap: 6,
         scrollbarWidth: 'thin',
         scrollbarColor: 'rgba(0,0,0,0.1) transparent',
       } as React.CSSProperties}>
