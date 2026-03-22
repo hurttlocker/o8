@@ -1,5 +1,4 @@
 'use client';
-/* eslint-disable react-hooks/exhaustive-deps -- card callbacks intentionally capture the current target agent snapshot */
 
 /**
  * ThoughtsCard — Floating glass command surface.
@@ -10,7 +9,9 @@
  *         Does NOT touch the main chat panel — independent channel.
  */
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { DesktopAgentMessage } from './DesktopAgentMessage';
+import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 
 // ── Types ──
 
@@ -24,13 +25,6 @@ interface WorkflowState {
   agent?: string;
   plan?: string;
   summary?: string;
-}
-
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
 }
 
 interface PendingApproval {
@@ -184,6 +178,51 @@ const AGENTS: AgentTarget[] = [
   { key: 'agent:hawk:main', name: 'Hawk', emoji: '', color: '#f59e0b' },
 ];
 
+function entrySignature(entry: MobileTranscriptEntry) {
+  return JSON.stringify({
+    role: entry.role,
+    text: entry.text,
+    media: (entry.media ?? []).map((item) => `${item.kind}:${item.path}`),
+    toolCalls: (entry.toolCalls ?? []).map((tool) => ({
+      name: tool.name,
+      args: tool.args,
+      status: tool.status,
+    })),
+    timestamp: entry.timestamp,
+    timestampLabel: entry.timestampLabel,
+  });
+}
+
+function isRenderableThoughtEntry(entry: MobileTranscriptEntry) {
+  return Boolean(
+    entry.text.trim()
+    || entry.media?.length
+    || entry.toolCalls?.length,
+  );
+}
+
+function mergeTranscriptEntries(
+  existing: MobileTranscriptEntry[],
+  incoming: MobileTranscriptEntry[],
+) {
+  if (incoming.length === 0) return existing;
+
+  const next = [...existing];
+  const indexById = new Map(next.map((entry, index) => [entry.id, index]));
+
+  for (const entry of incoming) {
+    const existingIndex = indexById.get(entry.id);
+    if (existingIndex == null) {
+      indexById.set(entry.id, next.length);
+      next.push(entry);
+      continue;
+    }
+    next[existingIndex] = entry;
+  }
+
+  return next;
+}
+
 function generateSuggestions(agents: FleetAgent[]): ContextSuggestion[] {
   const suggestions: ContextSuggestion[] = [];
   const agentMap = new Map(AGENTS.map(a => [a.name.toLowerCase(), a]));
@@ -255,16 +294,18 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [workflow, setWorkflow] = useState<WorkflowState>({ step: 'idle' });
   const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [size, setSize] = useState({ w: 400, h: 0 });
+  const [size, setSize] = useState({ w: 460, h: 0 });
   const [initialized, setInitialized] = useState(false);
 
   // Task chat state
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatMessages, setChatMessages] = useState<MobileTranscriptEntry[]>([]);
   const [waitingForReply, setWaitingForReply] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<number | null>(null);
+  const pollDelayRef = useRef<number | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const sendTimestampRef = useRef<number>(0);
-  const seenAssistantIdsRef = useRef<Set<string>>(new Set());
+  const seenServerEntriesRef = useRef<Map<string, string>>(new Map());
+  const responseSeenRef = useRef(false);
+  const idlePollsRef = useRef(0);
 
   // Approval state
   const [approvals, setApprovals] = useState<PendingApproval[]>([]);
@@ -335,7 +376,8 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
   // Cleanup polling on unmount
   useEffect(() => {
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      if (pollRef.current !== null) window.clearInterval(pollRef.current);
+      if (pollDelayRef.current !== null) window.clearTimeout(pollDelayRef.current);
     };
   }, []);
 
@@ -457,70 +499,99 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
 
   // ── Poll for agent response ──
 
-  const startPolling = useCallback(() => {
-    if (pollRef.current) clearInterval(pollRef.current);
-    let attempts = 0;
-    const maxAttempts = 40; // 40 × 3s = 2 min max
+  const clearPolling = useCallback(() => {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (pollDelayRef.current !== null) {
+      window.clearTimeout(pollDelayRef.current);
+      pollDelayRef.current = null;
+    }
+  }, []);
 
-    // 3s initial delay — give the agent time to start processing
-    const timer = setTimeout(() => {
-      pollRef.current = setInterval(async () => {
-        attempts++;
-        if (attempts > maxAttempts) {
-          if (pollRef.current) clearInterval(pollRef.current);
-          setWaitingForReply(false);
+  const captureServerSnapshot = useCallback(async (sessionKey: string) => {
+    try {
+      const res = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=16&fresh=1`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const entries = (data.transcript ?? data.entries ?? []) as MobileTranscriptEntry[];
+      const nextSeen = new Map<string, string>();
+      for (const entry of entries) {
+        nextSeen.set(entry.id, entrySignature(entry));
+      }
+      seenServerEntriesRef.current = nextSeen;
+    } catch {
+      // silent
+    }
+  }, []);
+
+  const startPolling = useCallback(() => {
+    clearPolling();
+    responseSeenRef.current = false;
+    idlePollsRef.current = 0;
+
+    let attempts = 0;
+    const maxAttempts = 45;
+
+    const poll = async () => {
+      attempts++;
+      if (attempts > maxAttempts) {
+        clearPolling();
+        setWaitingForReply(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(
+          `/api/mobile/history?sessionKey=${encodeURIComponent(targetAgent.key)}&limit=20&fresh=1`,
+        );
+        if (!res.ok) return;
+
+        const data = await res.json();
+        const entries = (data.transcript ?? data.entries ?? []) as MobileTranscriptEntry[];
+        const nextSeen = new Map(seenServerEntriesRef.current);
+        const incoming: MobileTranscriptEntry[] = [];
+
+        for (const entry of entries) {
+          const signature = entrySignature(entry);
+          const previousSignature = nextSeen.get(entry.id);
+          nextSeen.set(entry.id, signature);
+
+          if (previousSignature === signature) continue;
+          if (entry.role === 'user') continue;
+          if (!isRenderableThoughtEntry(entry)) continue;
+          incoming.push(entry);
+        }
+
+        seenServerEntriesRef.current = nextSeen;
+
+        if (incoming.length > 0) {
+          responseSeenRef.current = true;
+          idlePollsRef.current = 0;
+          setChatMessages((prev) => mergeTranscriptEntries(prev, incoming));
           return;
         }
 
-        try {
-          const res = await fetch(
-            `/api/mobile/history?sessionKey=${encodeURIComponent(targetAgent.key)}&limit=8&fresh=1`
-          );
-          if (!res.ok) return;
-          const data = await res.json();
-          const entries = data.transcript || data.entries || [];
-
-          // Find assistant messages NEWER than our send timestamp
-          for (let i = entries.length - 1; i >= 0; i--) {
-            const entry = entries[i];
-            const entryText = (entry.text || entry.content || '').trim();
-            const entryTs = entry.timestamp || 0;
-            const entryId = entry.id || `a-${entryTs}-${i}`;
-
-            if (
-              entry.role === 'assistant' &&
-              entryText &&
-              entryText.length > 5 &&
-              entryTs > sendTimestampRef.current &&
-              !seenAssistantIdsRef.current.has(entryId)
-            ) {
-              // Skip tool-header-only messages
-              if (entryText.startsWith('🔧')) continue;
-
-              seenAssistantIdsRef.current.add(entryId);
-              setChatMessages(prev => [
-                ...prev,
-                {
-                  id: entryId,
-                  role: 'assistant',
-                  content: entryText,
-                  timestamp: Date.now(),
-                },
-              ]);
-              setWaitingForReply(false);
-              if (pollRef.current) clearInterval(pollRef.current);
-              return;
-            }
+        if (responseSeenRef.current) {
+          idlePollsRef.current += 1;
+          if (idlePollsRef.current >= 2) {
+            clearPolling();
+            setWaitingForReply(false);
           }
-        } catch {
-          // silent retry
         }
-      }, 3000);
-    }, 3000);
+      } catch {
+        // silent retry
+      }
+    };
 
-    // Store cleanup ref
-    pollRef.current = timer as unknown as ReturnType<typeof setInterval>;
-  }, []);
+    pollDelayRef.current = window.setTimeout(() => {
+      void poll();
+      pollRef.current = window.setInterval(() => {
+        void poll();
+      }, 2200);
+    }, 900);
+  }, [clearPolling, targetAgent.key]);
 
   // ── Issue mode: submit thought ──
 
@@ -565,7 +636,7 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
         plan: 'Connection error. Make sure the OpenClaw gateway is running.',
       }));
     }
-  }, [input]);
+  }, [input, targetAgent.key]);
 
   // ── Task mode: send chat message ──
 
@@ -575,34 +646,20 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
     setInput('');
 
     // Add user message to chat
-    const userMsg: ChatMessage = {
-      id: `u-${Date.now()}`,
+    const userMsg: MobileTranscriptEntry = {
+      id: `local-user-${Date.now()}`,
       role: 'user',
-      content: msg,
+      text: msg,
       timestamp: Date.now(),
+      timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
     setChatMessages(prev => [...prev, userMsg]);
     setWaitingForReply(true);
 
     try {
-      // Snapshot ALL current assistant message IDs so we only detect genuinely new ones
-      const snapRes = await fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(targetAgent.key)}&limit=8&fresh=1`);
-      if (snapRes.ok) {
-        const data = await snapRes.json();
-        const entries = data.transcript || data.entries || [];
-        for (const entry of entries) {
-          if (entry.role === 'assistant') {
-            const entryId = entry.id || `a-${entry.timestamp || 0}`;
-            seenAssistantIdsRef.current.add(entryId);
-          }
-        }
-      }
+      await captureServerSnapshot(targetAgent.key);
 
-      // Record send timestamp — only accept responses AFTER this
-      sendTimestampRef.current = Date.now();
-
-      // Send via the action API
-      await fetch('/api/mobile/action', {
+      const response = await fetch('/api/mobile/action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -612,21 +669,25 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
         }),
       });
 
-      // Start polling for the response
+      if (!response.ok) {
+        throw new Error('Send failed');
+      }
+
       startPolling();
     } catch {
       setChatMessages(prev => [
         ...prev,
         {
-          id: `err-${Date.now()}`,
-          role: 'assistant',
-          content: 'Connection error. Make sure the OpenClaw gateway is running.',
+          id: `local-error-${Date.now()}`,
+          role: 'system',
+          text: 'Connection error. Make sure the OpenClaw gateway is running.',
           timestamp: Date.now(),
+          timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
       setWaitingForReply(false);
     }
-  }, [input, waitingForReply, startPolling]);
+  }, [captureServerSnapshot, input, startPolling, targetAgent.key, waitingForReply]);
 
   const handleApprove = useCallback(() => {
     setWorkflow(prev => ({ ...prev, step: 'executing' }));
@@ -642,12 +703,13 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
     setWaitingForReply(false);
     setTargetAgent(AGENTS[0]);
     setAgentPickerOpen(false);
-    if (pollRef.current) clearInterval(pollRef.current);
-    sendTimestampRef.current = 0;
-    seenAssistantIdsRef.current.clear();
+    clearPolling();
+    seenServerEntriesRef.current.clear();
+    responseSeenRef.current = false;
+    idlePollsRef.current = 0;
     setSize(prev => ({ ...prev, h: 0 }));
     setTimeout(() => inputRef.current?.focus(), 50);
-  }, []);
+  }, [clearPolling]);
 
   const handleEnhance = useCallback(async () => {
     if (!input.trim() || enhancing) return;
@@ -677,12 +739,20 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
     }
   }, [preEnhanceInput]);
 
-  if (!open && !docked) return null;
-
   const isActive = workflow.step !== 'idle';
   const currentStepIdx = stepIndex(workflow.step);
   const inTaskChat = mode === 'task';
   const suggestions = generateSuggestions(agents);
+  const targetAgentState = useMemo(
+    () => agents.find((agent) => agent.sessionKey === targetAgent.key || agent.name?.toLowerCase() === targetAgent.name.toLowerCase()),
+    [agents, targetAgent.key, targetAgent.name],
+  );
+  const targetAgentModel = targetAgentState?.model ?? 'OpenClaw';
+  const targetAgentContext = targetAgentState?.context?.usedPercent;
+  const targetAgentTask = targetAgentState?.activity?.headline ?? targetAgentState?.currentTask;
+  const hasAssistantActivity = chatMessages.some((message) => message.role !== 'user');
+
+  if (!open && !docked) return null;
 
   // ── Render ──
 
@@ -691,6 +761,14 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+        @keyframes llmFadeIn {
+          from { opacity: 0; transform: translateY(6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes llmDot {
+          0%, 80%, 100% { transform: scale(0.7); opacity: 0.45; }
+          40% { transform: scale(1); opacity: 1; }
+        }
         @keyframes compactionProgress {
           0% { width: 10%; }
           50% { width: 70%; }
@@ -1260,24 +1338,88 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
                 <div style={{
                   flex: 1,
                   overflowY: 'auto',
-                  padding: '8px 14px',
+                  padding: '12px 14px 10px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 8,
+                  gap: 12,
+                  background: 'linear-gradient(180deg, rgba(255,255,255,0.18), rgba(248,250,252,0.06))',
                 }}>
                   {/* Empty state */}
                   {chatMessages.length === 0 && !waitingForReply && (
                     <div style={{
-                      display: 'flex', flexDirection: 'column', alignItems: 'center',
-                      justifyContent: 'center', flex: 1, gap: 6, padding: '20px 0',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flex: 1,
+                      gap: 12,
+                      padding: '20px 0',
                     }}>
-                      <div style={{ fontSize: 11, color: 'var(--t-text-muted)', textAlign: 'center', lineHeight: 1.5 }}>
-                        Quick chat with your main agent.<br/>
-                        The main chat panel stays untouched.
+                      <div style={{
+                        width: '100%',
+                        maxWidth: 320,
+                        padding: '16px 18px',
+                        borderRadius: 18,
+                        background: 'linear-gradient(180deg, rgba(255,255,255,0.72), rgba(248,250,252,0.52))',
+                        border: '1px solid rgba(226, 232, 240, 0.95)',
+                        boxShadow: '0 18px 40px rgba(15, 23, 42, 0.08)',
+                        textAlign: 'left',
+                      }}>
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          marginBottom: 10,
+                        }}>
+                          <span style={{
+                            width: 10,
+                            height: 10,
+                            borderRadius: '50%',
+                            background: targetAgent.color,
+                            boxShadow: `0 0 0 4px ${targetAgent.color}18`,
+                          }} />
+                          <span style={{
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: '#0f172a',
+                            letterSpacing: '-0.01em',
+                          }}>
+                            {targetAgent.name}
+                          </span>
+                          <span style={{
+                            marginLeft: 'auto',
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: '#64748b',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.05em',
+                          }}>
+                            Task Chat
+                          </span>
+                        </div>
+                        <div style={{
+                          fontSize: 12,
+                          color: '#475569',
+                          lineHeight: 1.6,
+                          marginBottom: 10,
+                        }}>
+                          Same desktop renderer quality as the Gemini chat: code blocks, mermaid, files, and agent tool activity all land here.
+                        </div>
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 6,
+                          fontSize: 11,
+                          color: '#64748b',
+                        }}>
+                          <div>Rich responses render inline instead of plain text dumps.</div>
+                          <div>Tool calls show as structured cards, not raw JSON blobs.</div>
+                          <div>The thoughts workflow and side panel behavior stay untouched.</div>
+                        </div>
                       </div>
                       <button type="button" onClick={() => setMode('pick')} style={{
                         background: 'none', border: 'none', cursor: 'pointer',
-                        fontSize: 10, color: 'var(--t-text-muted)', fontWeight: 500, marginTop: 4,
+                        fontSize: 11, color: 'var(--t-text-muted)', fontWeight: 600,
                       }}>
                         ← back to picker
                       </button>
@@ -1285,85 +1427,31 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
                   )}
 
                   {/* Messages */}
-                  {chatMessages.map((msg) => {
-                    const isUser = msg.role === 'user';
-                    const isCompacting = !isUser && msg.content.toLowerCase().includes('compaction');
-                    return (
-                      <div
-                        key={msg.id}
-                        style={{
-                          alignSelf: isUser ? 'flex-end' : 'flex-start',
-                          maxWidth: '85%',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 3,
-                        }}
-                      >
-                        <div style={{
-                          padding: '8px 12px',
-                          borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
-                          background: isUser
-                            ? 'rgba(37, 99, 235, 0.12)'
-                            : 'var(--t-panel-translucent)',
-                          border: isUser
-                            ? '1px solid rgba(37, 99, 235, 0.15)'
-                            : '1px solid var(--t-divider)',
-                          fontSize: 12,
-                          color: 'var(--t-text)',
-                          lineHeight: 1.5,
-                          letterSpacing: '-0.01em',
-                          whiteSpace: 'pre-wrap',
-                          wordBreak: 'break-word',
-                        }}>
-                          {msg.content}
-                        </div>
-                        <span style={{
-                          fontSize: 9, color: 'var(--t-text-faint)',
-                          paddingLeft: 4, paddingRight: 4,
-                          alignSelf: isUser ? 'flex-end' : 'flex-start',
-                        }}>
-                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                        {/* Compaction indicator */}
-                        {isCompacting && (
-                          <div style={{
-                            display: 'flex', alignItems: 'center', gap: 6,
-                            padding: '6px 10px',
-                            borderRadius: 8,
-                            background: 'rgba(245, 158, 11, 0.06)',
-                            border: '1px solid rgba(245, 158, 11, 0.12)',
-                            alignSelf: 'flex-start',
-                          }}>
-                            <div style={{
-                              width: 14, height: 14, borderRadius: '50%',
-                              border: '2px solid rgba(245, 158, 11, 0.3)',
-                              borderTopColor: '#f59e0b',
-                              animation: 'spin 1s linear infinite',
-                            }} />
-                            <span style={{
-                              fontSize: 10, fontWeight: 600, color: '#f59e0b',
-                            }}>
-                              Compacting context…
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                  {chatMessages.map((msg, index) => (
+                    <DesktopAgentMessage
+                      key={msg.id}
+                      entry={msg}
+                      isLast={index === chatMessages.length - 1 && !waitingForReply}
+                    />
+                  ))}
 
                   {/* Compaction banner — when agent is actively compacting */}
                   {waitingForReply && chatMessages.length > 0 &&
-                    chatMessages[chatMessages.length - 1]?.content?.toLowerCase().includes('compact') && (
+                    chatMessages[chatMessages.length - 1]?.text?.toLowerCase().includes('compact') && (
                     <div style={{
-                      padding: '10px 12px',
-                      borderRadius: 10,
-                      background: 'rgba(245, 158, 11, 0.06)',
-                      border: '1px solid rgba(245, 158, 11, 0.15)',
-                      display: 'flex', flexDirection: 'column', gap: 6,
+                      padding: '12px 14px',
+                      borderRadius: 14,
+                      background: 'linear-gradient(180deg, rgba(254, 249, 195, 0.72), rgba(254, 240, 138, 0.22))',
+                      border: '1px solid rgba(245, 158, 11, 0.18)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 7,
+                      boxShadow: '0 12px 30px rgba(245, 158, 11, 0.08)',
                     }}>
                       <div style={{
                         display: 'flex', alignItems: 'center', gap: 6,
-                        fontSize: 11, fontWeight: 700, color: '#f59e0b',
+                        fontSize: 11, fontWeight: 800, color: '#b45309',
+                        textTransform: 'uppercase', letterSpacing: '0.04em',
                       }}>
                         <div style={{
                           width: 14, height: 14, borderRadius: '50%',
@@ -1374,7 +1462,7 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
                         Compaction in progress
                       </div>
                       <div style={{
-                        fontSize: 10, color: 'var(--t-text-secondary)', lineHeight: 1.4,
+                        fontSize: 11, color: '#92400e', lineHeight: 1.5,
                       }}>
                         Context is being compressed. Messages sent now will be queued and delivered after compaction completes.
                       </div>
@@ -1396,22 +1484,41 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
 
                   {/* Typing indicator */}
                   {waitingForReply && !(chatMessages.length > 0 &&
-                    chatMessages[chatMessages.length - 1]?.content?.toLowerCase().includes('compact')) && (
+                    chatMessages[chatMessages.length - 1]?.text?.toLowerCase().includes('compact')) && (
                     <div style={{
                       alignSelf: 'flex-start',
-                      padding: '8px 14px',
-                      borderRadius: '14px 14px 14px 4px',
-                      background: 'var(--t-panel-translucent)',
-                      border: '1px solid var(--t-divider)',
-                      display: 'flex', gap: 4, alignItems: 'center',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '10px 14px',
+                      borderRadius: 16,
+                      background: 'rgba(255, 255, 255, 0.72)',
+                      border: '1px solid rgba(226, 232, 240, 0.95)',
+                      boxShadow: '0 12px 26px rgba(15, 23, 42, 0.06)',
                     }}>
+                      <span style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: targetAgent.color,
+                        boxShadow: `0 0 0 4px ${targetAgent.color}14`,
+                        flexShrink: 0,
+                      }} />
                       {[0, 1, 2].map((i) => (
                         <div key={i} style={{
                           width: 5, height: 5, borderRadius: '50%',
-                          background: 'var(--t-text-muted)',
-                          animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+                          background: '#64748b',
+                          animation: `llmDot 1.2s ease-in-out ${i * 0.18}s infinite`,
                         }} />
                       ))}
+                      <span style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        color: '#475569',
+                        letterSpacing: '-0.01em',
+                      }}>
+                        {targetAgent.name} is thinking…
+                      </span>
                     </div>
                   )}
 
@@ -1420,101 +1527,171 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
 
                 {/* Compose bar with agent picker */}
                 <div style={{
-                  padding: '8px 12px 12px',
+                  padding: '10px 12px 12px',
                   borderTop: '1px solid var(--t-divider-subtle)',
                   flexShrink: 0,
+                  background: 'linear-gradient(180deg, rgba(255,255,255,0.20), rgba(248,250,252,0.08))',
                 }}>
                   {/* Agent picker row */}
-                  <div style={{ position: 'relative', marginBottom: 6 }}>
-                    <button
-                      type="button"
-                      onClick={() => setAgentPickerOpen(v => !v)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 5,
-                        padding: '4px 8px', borderRadius: 8,
-                        border: '1px solid var(--t-divider)',
-                        background: 'var(--t-panel-translucent)',
-                        cursor: 'pointer', fontSize: 11, fontWeight: 600,
-                        color: targetAgent.color, letterSpacing: '-0.01em',
-                        transition: 'background 120ms',
-                      }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-panel-hover)'; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-panel-translucent)'; }}
-                    >
-                      <span style={{
-                        width: 8, height: 8, borderRadius: '50%',
-                        background: targetAgent.color, display: 'block', flexShrink: 0,
-                      }} />
-                      {targetAgent.name}
-                      <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                        strokeWidth="2.5" strokeLinecap="round" style={{
-                          display: 'block', transition: 'transform 200ms',
-                          transform: agentPickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                        }}>
-                        <polyline points="6 9 12 15 18 9"/>
-                      </svg>
-                    </button>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    marginBottom: 8,
+                  }}>
+                    <div style={{ position: 'relative' }}>
+                      <button
+                        type="button"
+                        onClick={() => setAgentPickerOpen(v => !v)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '6px 10px',
+                          borderRadius: 10,
+                          border: '1px solid rgba(226, 232, 240, 0.95)',
+                          background: 'rgba(255,255,255,0.72)',
+                          boxShadow: '0 10px 24px rgba(15, 23, 42, 0.04)',
+                          cursor: 'pointer',
+                          fontSize: 11,
+                          fontWeight: 700,
+                          color: targetAgent.color,
+                          letterSpacing: '-0.01em',
+                          transition: 'background 120ms',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = '#ffffff'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.72)'; }}
+                      >
+                        <span style={{
+                          width: 8, height: 8, borderRadius: '50%',
+                          background: targetAgent.color, display: 'block', flexShrink: 0,
+                        }} />
+                        {targetAgent.name}
+                        <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                          strokeWidth="2.5" strokeLinecap="round" style={{
+                            display: 'block', transition: 'transform 200ms',
+                            transform: agentPickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                          }}>
+                          <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                      </button>
 
-                    {/* Dropdown */}
-                    {agentPickerOpen && (
-                      <div style={{
-                        position: 'absolute', bottom: '100%', left: 0,
-                        marginBottom: 4, minWidth: 160,
-                        borderRadius: 12, padding: 4,
-                        background: 'var(--t-panel-translucent)',
-                        backdropFilter: 'blur(40px) saturate(180%)',
-                        WebkitBackdropFilter: 'blur(40px) saturate(180%)',
-                        border: '1px solid var(--t-panel-border)',
-                        boxShadow: 'var(--t-panel-shadow)',
-                        zIndex: 10,
+                      {/* Dropdown */}
+                      {agentPickerOpen && (
+                        <div style={{
+                          position: 'absolute', bottom: '100%', left: 0,
+                          marginBottom: 6, minWidth: 184,
+                          borderRadius: 14, padding: 4,
+                          background: 'rgba(255,255,255,0.92)',
+                          backdropFilter: 'blur(28px) saturate(180%)',
+                          WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+                          border: '1px solid rgba(226, 232, 240, 0.95)',
+                          boxShadow: '0 18px 40px rgba(15, 23, 42, 0.12)',
+                          zIndex: 10,
+                        }}>
+                          {AGENTS.map((agent) => (
+                            <button
+                              key={agent.key}
+                              type="button"
+                              onClick={() => {
+                                setTargetAgent(agent);
+                                setAgentPickerOpen(false);
+                                setChatMessages([]);
+                                setWaitingForReply(false);
+                                clearPolling();
+                                seenServerEntriesRef.current.clear();
+                                responseSeenRef.current = false;
+                                idlePollsRef.current = 0;
+                              }}
+                              style={{
+                                width: '100%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 8,
+                                padding: '8px 10px',
+                                borderRadius: 10,
+                                border: 'none',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                background: targetAgent.key === agent.key ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                                transition: 'background 100ms',
+                              }}
+                              onMouseEnter={(e) => {
+                                if (targetAgent.key !== agent.key) e.currentTarget.style.background = 'rgba(248, 250, 252, 0.98)';
+                              }}
+                              onMouseLeave={(e) => {
+                                if (targetAgent.key !== agent.key) e.currentTarget.style.background = 'transparent';
+                              }}
+                            >
+                              <span style={{
+                                width: 8, height: 8, borderRadius: '50%',
+                                background: agent.color, display: 'block', flexShrink: 0,
+                              }} />
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: agent.color }}>{agent.name}</div>
+                                <div style={{ fontSize: 9, color: 'var(--t-text-muted)', fontFamily: 'SF Mono, Menlo, monospace' }}>
+                                  {agent.key}
+                                </div>
+                              </div>
+                              {targetAgent.key === agent.key && (
+                                <div style={{ color: '#2563eb' }}>
+                                  <CheckIcon />
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{
+                      minWidth: 0,
+                      flex: 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      flexWrap: 'wrap',
+                    }}>
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        padding: '4px 8px',
+                        borderRadius: 999,
+                        background: 'rgba(255,255,255,0.66)',
+                        border: '1px solid rgba(226, 232, 240, 0.95)',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: '#475569',
+                        letterSpacing: '0.03em',
+                        textTransform: 'uppercase',
                       }}>
-                        {AGENTS.map((agent) => (
-                          <button
-                            key={agent.key}
-                            type="button"
-                            onClick={() => {
-                              setTargetAgent(agent);
-                              setAgentPickerOpen(false);
-                              // Clear chat when switching agents
-                              setChatMessages([]);
-                              setWaitingForReply(false);
-                              if (pollRef.current) clearInterval(pollRef.current);
-                              sendTimestampRef.current = 0;
-                              seenAssistantIdsRef.current.clear();
-                            }}
-                            style={{
-                              width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-                              padding: '7px 10px', borderRadius: 8,
-                              border: 'none', cursor: 'pointer', textAlign: 'left',
-                              background: targetAgent.key === agent.key ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
-                              transition: 'background 100ms',
-                            }}
-                            onMouseEnter={(e) => {
-                              if (targetAgent.key !== agent.key) e.currentTarget.style.background = 'var(--t-hover)';
-                            }}
-                            onMouseLeave={(e) => {
-                              if (targetAgent.key !== agent.key) e.currentTarget.style.background = 'transparent';
-                            }}
-                          >
-                            <span style={{
-                              width: 8, height: 8, borderRadius: '50%',
-                              background: agent.color, display: 'block', flexShrink: 0,
-                            }} />
-                            <div>
-                              <div style={{ fontSize: 12, fontWeight: 600, color: agent.color }}>{agent.name}</div>
-                              <div style={{ fontSize: 9, color: 'var(--t-text-muted)', fontFamily: 'SF Mono, Menlo, monospace' }}>
-                                {agent.key}
-                              </div>
-                            </div>
-                            {targetAgent.key === agent.key && (
-                              <div style={{ marginLeft: 'auto', color: '#2563eb' }}>
-                                <CheckIcon />
-                              </div>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                        {targetAgentModel}
+                      </span>
+                      {typeof targetAgentContext === 'number' ? (
+                        <span style={{
+                          fontSize: 10,
+                          color: targetAgentContext > 85 ? '#b45309' : '#64748b',
+                          fontWeight: 700,
+                          letterSpacing: '-0.01em',
+                        }}>
+                          {Math.round(targetAgentContext)}% ctx
+                        </span>
+                      ) : null}
+                      {targetAgentTask ? (
+                        <span style={{
+                          minWidth: 0,
+                          flex: 1,
+                          fontSize: 10,
+                          color: 'var(--t-text-muted)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {targetAgentTask}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
 
                   <div style={{ position: 'relative' }}>
@@ -1527,7 +1704,7 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
                         if (e.key === 'ArrowUp' && !input.trim()) {
                           e.preventDefault();
                           const lastUserMsg = [...chatMessages].reverse().find(m => m.role === 'user');
-                          if (lastUserMsg) setInput(lastUserMsg.content);
+                          if (lastUserMsg) setInput(lastUserMsg.text);
                           return;
                         }
                         if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleTaskSend(); }
@@ -1536,11 +1713,12 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
                       disabled={waitingForReply}
                       rows={1}
                       style={{
-                        width: '100%', minHeight: 36, maxHeight: 80,
-                        padding: '8px 76px 8px 12px', borderRadius: 12,
-                        border: '1px solid var(--t-input-border)',
-                        background: waitingForReply ? 'var(--t-hover)' : 'var(--t-input-bg)',
-                        fontSize: 12, color: 'var(--t-text)', resize: 'none',
+                        width: '100%', minHeight: 44, maxHeight: 120,
+                        padding: '11px 84px 11px 14px', borderRadius: 14,
+                        border: '1px solid rgba(226, 232, 240, 0.95)',
+                        background: waitingForReply ? 'rgba(248,250,252,0.92)' : 'rgba(255,255,255,0.82)',
+                        boxShadow: '0 14px 30px rgba(15, 23, 42, 0.06)',
+                        fontSize: 13, color: 'var(--t-text)', resize: 'none',
                         outline: 'none', fontFamily: 'inherit', lineHeight: 1.4,
                         boxSizing: 'border-box',
                         opacity: waitingForReply ? 0.5 : 1,
@@ -1558,9 +1736,9 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
                   </div>
                   {/* Footer: model + context */}
                   <div style={{
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    paddingTop: 4, paddingLeft: 2,
-                    fontSize: 9, color: 'var(--t-text-faint)',
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    paddingTop: 6, paddingLeft: 2,
+                    fontSize: 10, color: 'var(--t-text-faint)',
                   }}>
                     <span style={{
                       width: 5, height: 5, borderRadius: '50%',
@@ -1568,9 +1746,13 @@ export function ThoughtsCard({ open, onClose, agents = [], draftInjection, docke
                     }} />
                     <span style={{ fontWeight: 600 }}>{targetAgent.name}</span>
                     <span>·</span>
-                    <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-                      claude-opus-4-6
-                    </span>
+                    <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>{targetAgentModel}</span>
+                    {hasAssistantActivity ? (
+                      <>
+                        <span>·</span>
+                        <span>{chatMessages.length} messages</span>
+                      </>
+                    ) : null}
                   </div>
                 </div>
               </>
