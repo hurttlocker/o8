@@ -19,7 +19,6 @@ import {
   Brain,
   BarChart3,
   Bell,
-  Search,
   Lightbulb,
   Cable,
   type LucideIcon,
@@ -40,7 +39,6 @@ interface NavRailProps {
   alertCount?: number;
   onAlertClick?: () => void;
   alertTray?: ReactElement<{ desktopAnchorEl?: HTMLElement | null }> | null;
-  onSearchClick?: () => void;
   thoughtsOpen?: boolean;
   onThoughtsToggle?: () => void;
   onPortPreview?: (port: number, url: string, repo?: string) => void;
@@ -408,7 +406,6 @@ export function NavRail({
   alertCount = 0,
   onAlertClick,
   alertTray,
-  onSearchClick,
   thoughtsOpen,
   onThoughtsToggle,
   onPortPreview,
@@ -451,14 +448,6 @@ export function NavRail({
         <div style={{ padding: '4px 12px 12px', marginBottom: 4 }}>
           <CortexLogo expanded={expanded} />
         </div>
-
-        {/* Search */}
-        <UtilButton
-          icon={Search}
-          label="Search"
-          expanded={expanded}
-          onClick={onSearchClick}
-        />
 
         {/* Separator */}
         <div style={{

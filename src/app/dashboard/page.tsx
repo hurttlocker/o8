@@ -1033,7 +1033,6 @@ function DashboardInner() {
             variant="desktop"
           />
         )}
-        onSearchClick={() => setSearchOpen(true)}
         thoughtsOpen={thoughtsOpen}
         onThoughtsToggle={() => setThoughtsOpen(v => !v)}
         onPortPreview={(port, url, repo) => {
