@@ -98,11 +98,30 @@ type RuntimeEventSummary = {
   task?: string;
   source?: string;
   changedFiles?: string[];
+  action?: string;
+  rawPreviewLines?: string[];
+};
+
+type GroupChipTone = 'blue' | 'purple' | 'amber' | 'emerald' | 'slate';
+type GroupChip = {
+  label: string;
+  tone: GroupChipTone;
 };
 
 function extractRuntimeField(text: string, label: string): string | undefined {
   const match = text.match(new RegExp(`^${label}:\\s*(.+)$`, 'mi'));
   return match?.[1]?.trim() || undefined;
+}
+
+function extractRuntimeAction(text: string): string | undefined {
+  const match = text.match(/Action:\s*\n([\s\S]+)$/i);
+  if (!match?.[1]) return undefined;
+  return match[1]
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 2)
+    .join(' ');
 }
 
 function parseRuntimeEventSummary(text: string): RuntimeEventSummary | null {
@@ -124,6 +143,12 @@ function parseRuntimeEventSummary(text: string): RuntimeEventSummary | null {
     .filter((line) => /^(M|A|D|\?\?)\s+/.test(line))
     .map((line) => line.replace(/^(M|A|D|\?\?)\s+/, ''))
     .slice(0, 4);
+  const rawPreviewLines = rawResult
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !/^index\s/i.test(line))
+    .slice(0, 8);
 
   let summary = 'A sub-agent finished work and queued a handoff into this session.';
   if (/timed out/i.test(status ?? '')) {
@@ -139,7 +164,86 @@ function parseRuntimeEventSummary(text: string): RuntimeEventSummary | null {
     task,
     source,
     changedFiles,
+    action: extractRuntimeAction(text),
+    rawPreviewLines,
   };
+}
+
+function formatToolCategory(name: string) {
+  const normalized = name.toLowerCase();
+  if (normalized.includes('cortex') || normalized.includes('memory')) return 'cortex';
+  if (normalized.includes('read') || normalized.includes('write') || normalized.includes('edit') || normalized === 'ls' || normalized.includes('list_files') || normalized.includes('glob')) return 'file';
+  if (normalized.includes('web') || normalized.includes('browser') || normalized.includes('fetch')) return 'web';
+  return 'tool';
+}
+
+function groupTimeLabel(entries: MobileTranscriptEntry[]): string | undefined {
+  const labeled = entries.map((entry) => entry.timestampLabel).filter(Boolean) as string[];
+  if (labeled.length === 0) return undefined;
+  const first = labeled[0];
+  const last = labeled[labeled.length - 1];
+  return first === last ? first : `${first} → ${last}`;
+}
+
+function groupTimestamp(entries: MobileTranscriptEntry[]): number | undefined {
+  return entries.find((entry) => typeof entry.timestamp === 'number')?.timestamp;
+}
+
+function summarizeAgentGroup(entries: MobileTranscriptEntry[]): {
+  chips: GroupChip[];
+  separatorLabel?: string;
+  timeLabel?: string;
+} {
+  const allToolCalls = entries.flatMap((entry) => entry.toolCalls ?? []);
+  const runtimeEvents = entries
+    .map((entry) => parseRuntimeEventSummary(entry.text))
+    .filter(Boolean) as RuntimeEventSummary[];
+
+  const chips: GroupChip[] = [];
+  if (runtimeEvents.length > 0) {
+    chips.push({ label: 'sub-agent', tone: 'blue' });
+  }
+
+  const categories = new Set(allToolCalls.map((tool) => formatToolCategory(tool.name)));
+  const fileOps = allToolCalls.filter((tool) => formatToolCategory(tool.name) === 'file').length;
+  const cortexOps = allToolCalls.filter((tool) => formatToolCategory(tool.name) === 'cortex').length;
+  const webOps = allToolCalls.filter((tool) => formatToolCategory(tool.name) === 'web').length;
+  const changedFiles = runtimeEvents.reduce((sum, event) => sum + (event.changedFiles?.length ?? 0), 0);
+
+  if (cortexOps > 0) chips.push({ label: 'used Cortex', tone: 'purple' });
+  if (webOps > 0) chips.push({ label: webOps > 1 ? `${webOps} web steps` : 'web step', tone: 'amber' });
+  if (fileOps > 0) chips.push({ label: fileOps > 1 ? `${fileOps} file steps` : 'file step', tone: 'emerald' });
+  if (changedFiles > 0) chips.push({ label: `${changedFiles} changed`, tone: 'slate' });
+  if (allToolCalls.length > 0 && chips.every((chip) => chip.label !== `${allToolCalls.length} tools`)) {
+    chips.push({ label: allToolCalls.length > 1 ? `${allToolCalls.length} tools` : '1 tool', tone: 'slate' });
+  }
+
+  let separatorLabel: string | undefined;
+  if (entries.length >= 4 || categories.size >= 2 || runtimeEvents.length > 0) {
+    separatorLabel = runtimeEvents.length > 0 ? 'handoff run' : 'multi-step run';
+  }
+
+  return {
+    chips: chips.slice(0, 4),
+    separatorLabel,
+    timeLabel: groupTimeLabel(entries),
+  };
+}
+
+function chipStyles(tone: GroupChipTone): React.CSSProperties {
+  if (tone === 'blue') {
+    return { background: 'rgba(37, 99, 235, 0.08)', color: '#2563eb' };
+  }
+  if (tone === 'purple') {
+    return { background: 'rgba(139, 92, 246, 0.10)', color: '#7c3aed' };
+  }
+  if (tone === 'amber') {
+    return { background: 'rgba(245, 158, 11, 0.10)', color: '#b45309' };
+  }
+  if (tone === 'emerald') {
+    return { background: 'rgba(16, 185, 129, 0.10)', color: '#047857' };
+  }
+  return { background: 'rgba(15, 23, 42, 0.06)', color: '#475569' };
 }
 
 function groupTranscriptTurns(transcript: MobileTranscriptEntry[]): TranscriptGroup[] {
@@ -261,6 +365,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
   );
 
   const [activeBlock, setActiveBlock] = useState<number | null>(null);
+  const [handoffExpanded, setHandoffExpanded] = useState(false);
   const playingRef = useRef(false);
 
   useEffect(() => {
@@ -354,6 +459,19 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
             flexWrap: 'wrap',
             gap: 6,
           }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '3px 8px',
+              borderRadius: 999,
+              background: 'rgba(37, 99, 235, 0.10)',
+              color: '#2563eb',
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.02em',
+            }}>
+              sub-agent
+            </span>
             {runtimeEvent.status ? (
               <span style={{
                 display: 'inline-flex',
@@ -402,33 +520,118 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
                 {runtimeEvent.changedFiles.length} file{runtimeEvent.changedFiles.length !== 1 ? 's' : ''}
               </span>
             ) : null}
+            {(runtimeEvent.action || runtimeEvent.rawPreviewLines?.length || runtimeEvent.changedFiles?.length) ? (
+              <button
+                type="button"
+                onClick={() => setHandoffExpanded((value) => !value)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '3px 8px',
+                  borderRadius: 999,
+                  border: '1px solid rgba(148, 163, 184, 0.16)',
+                  background: handoffExpanded ? 'rgba(148, 163, 184, 0.10)' : 'rgba(255,255,255,0.72)',
+                  color: '#475569',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: '0.02em',
+                  cursor: 'pointer',
+                }}
+              >
+                {handoffExpanded ? 'Hide details' : 'View details'}
+              </button>
+            ) : null}
           </div>
 
-          {runtimeEvent.changedFiles?.length ? (
+          {handoffExpanded && (runtimeEvent.action || runtimeEvent.rawPreviewLines?.length || runtimeEvent.changedFiles?.length) ? (
             <div style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: 4,
+              gap: 8,
               padding: '10px 12px',
               borderRadius: 12,
               background: 'rgba(248, 250, 252, 0.98)',
               border: '1px solid rgba(226, 232, 240, 0.95)',
             }}>
-              {runtimeEvent.changedFiles.map((filePath) => (
-                <div
-                  key={filePath}
-                  style={{
+              {runtimeEvent.action ? (
+                <div>
+                  <div style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: '#64748b',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                    marginBottom: 4,
+                  }}>
+                    Delivery
+                  </div>
+                  <div style={{
                     fontSize: 11,
                     color: 'var(--t-text-secondary)',
-                    fontFamily: '"SF Mono", ui-monospace, monospace',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {filePath}
+                    lineHeight: 1.5,
+                  }}>
+                    {runtimeEvent.action}
+                  </div>
                 </div>
-              ))}
+              ) : null}
+
+              {runtimeEvent.changedFiles?.length ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: '#64748b',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}>
+                    Changed Files
+                  </div>
+                  {runtimeEvent.changedFiles.map((filePath) => (
+                    <div
+                      key={filePath}
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--t-text-secondary)',
+                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {filePath}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {runtimeEvent.rawPreviewLines?.length ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: '#64748b',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}>
+                    Payload Preview
+                  </div>
+                  <div style={{
+                    padding: '8px 10px',
+                    borderRadius: 10,
+                    background: 'rgba(255,255,255,0.84)',
+                    border: '1px solid rgba(226, 232, 240, 0.95)',
+                    fontSize: 11,
+                    lineHeight: 1.5,
+                    color: '#334155',
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}>
+                    {runtimeEvent.rawPreviewLines.join('\n')}
+                  </div>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -1308,7 +1511,7 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
             No transcript visible yet — waiting for activity.
           </div>
         ) : (
-          groupedTranscript.map((group) => {
+          groupedTranscript.map((group, groupIndex) => {
             if (group.kind !== 'agent') {
               return group.entries.map((entry) => {
                 const entryIndex = transcript.findIndex((candidate) => candidate.id === entry.id);
@@ -1327,8 +1530,15 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
               });
             }
 
+            const previousGroup = groupIndex > 0 ? groupedTranscript[groupIndex - 1] : null;
+            const previousTs = previousGroup ? groupTimestamp(previousGroup.entries) : undefined;
+            const currentTs = groupTimestamp(group.entries);
+            const showTimeSeparator = Boolean(
+              previousTs && currentTs && Math.abs(currentTs - previousTs) >= 8 * 60 * 1000,
+            );
             const showGroupLabel = group.entries.length > 1
               || group.entries.some((entry) => entry.role === 'system' || entry.toolCalls?.length);
+            const groupSummary = summarizeAgentGroup(group.entries);
 
             return (
               <div
@@ -1340,24 +1550,80 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
                   marginTop: 2,
                 }}
               >
+                {showTimeSeparator || groupSummary.separatorLabel ? (
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    marginTop: 8,
+                    marginBottom: 2,
+                  }}>
+                    <div style={{ flex: 1, height: 1, background: 'rgba(148, 163, 184, 0.16)' }} />
+                    <span style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: '#94a3b8',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                      whiteSpace: 'nowrap',
+                    }}>
+                      {groupSummary.separatorLabel ?? groupSummary.timeLabel ?? 'run'}
+                    </span>
+                    <div style={{ flex: 1, height: 1, background: 'rgba(148, 163, 184, 0.16)' }} />
+                  </div>
+                ) : null}
                 {showGroupLabel ? (
                   <div style={{
-                    display: 'inline-flex',
+                    display: 'flex',
+                    flexWrap: 'wrap',
                     alignItems: 'center',
                     gap: 6,
                     alignSelf: 'flex-start',
-                    padding: '4px 9px',
-                    borderRadius: 999,
-                    background: 'rgba(37, 99, 235, 0.06)',
-                    color: '#2563eb',
-                    fontSize: 10,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
+                    padding: '4px 0',
                   }}>
-                    {currentAgentName}
-                    <span style={{ color: 'rgba(37, 99, 235, 0.5)' }}>•</span>
-                    {group.entries.length} update{group.entries.length !== 1 ? 's' : ''}
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '4px 9px',
+                      borderRadius: 999,
+                      background: 'rgba(37, 99, 235, 0.06)',
+                      color: '#2563eb',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.04em',
+                    }}>
+                      {currentAgentName}
+                      <span style={{ color: 'rgba(37, 99, 235, 0.5)' }}>•</span>
+                      {group.entries.length} update{group.entries.length !== 1 ? 's' : ''}
+                    </span>
+                    {groupSummary.timeLabel ? (
+                      <span style={{
+                        fontSize: 10,
+                        color: '#94a3b8',
+                        fontWeight: 600,
+                      }}>
+                        {groupSummary.timeLabel}
+                      </span>
+                    ) : null}
+                    {groupSummary.chips.map((chip) => (
+                      <span
+                        key={`${group.id}-${chip.label}`}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '4px 8px',
+                          borderRadius: 999,
+                          fontSize: 10,
+                          fontWeight: 700,
+                          letterSpacing: '0.02em',
+                          ...chipStyles(chip.tone),
+                        }}
+                      >
+                        {chip.label}
+                      </span>
+                    ))}
                   </div>
                 ) : null}
                 <div style={{
