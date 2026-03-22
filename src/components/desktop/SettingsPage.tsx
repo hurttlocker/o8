@@ -1233,6 +1233,70 @@ function AboutTab() {
           ))}
         </div>
       </div>
+
+      {/* Dev Tools — not shipped to production */}
+      <div style={{
+        background: 'var(--t-panel)',
+        borderRadius: 14,
+        border: '1px dashed rgba(239, 68, 68, 0.3)',
+        padding: 24,
+      }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', marginBottom: 4 }}>Dev Tools</div>
+        <p style={{ fontSize: 11, color: 'var(--t-text-muted)', margin: '0 0 14px' }}>Internal testing — will not ship to users.</p>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <button
+            type="button"
+            onClick={async () => {
+              await fetch('/api/setup/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ setupComplete: false, completedAt: null }),
+              });
+              window.location.href = '/dashboard';
+            }}
+            style={{
+              padding: '8px 14px', borderRadius: 10,
+              border: '1px solid rgba(37, 99, 235, 0.3)',
+              background: 'rgba(37, 99, 235, 0.06)',
+              color: '#2563eb', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            ▸ Run Setup Wizard
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              const res = await fetch('/api/setup/detect');
+              const data = await res.json();
+              alert(JSON.stringify(data, null, 2));
+            }}
+            style={{
+              padding: '8px 14px', borderRadius: 10,
+              border: '1px solid var(--t-panel-border)',
+              background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
+              color: 'var(--t-text)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
+            }}
+          >
+            ▸ View Detection
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              const res = await fetch('/api/cortex/seed/status');
+              const data = await res.json();
+              alert(JSON.stringify(data, null, 2));
+            }}
+            style={{
+              padding: '8px 14px', borderRadius: 10,
+              border: '1px solid var(--t-panel-border)',
+              background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
+              color: 'var(--t-text)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
+            }}
+          >
+            ▸ Seed Status
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
