@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `78c8fc8` feat: Unified chat send route + type fixes
 - `c4e1384` docs: Add critical gateway-client rules to AI provider.md
 - `e8f76d1` fix: Remove debug logs, fix source label to 'ws', reduce log spam
 - `c415f70` fix: Spread statusResult BEFORE sessions to prevent key clobber
