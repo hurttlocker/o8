@@ -24,6 +24,7 @@ import {
   Brain,
   ChevronDown,
   ChevronRight,
+  FolderOpen,
   Loader2,
   Plus,
   RefreshCw,
@@ -303,6 +304,14 @@ function uniqueLinks(values: Array<{ label: string; href: string }>): Array<{ la
     });
   }
   return result;
+}
+
+function looksLikeWorkspaceFile(detail: string): boolean {
+  if (!detail) return false;
+  if (/^https?:\/\//i.test(detail)) return false;
+  if (detail.includes(' • ')) return false;
+  if (detail.startsWith('stdin:')) return false;
+  return detail.includes('/') || /\.[a-z0-9]{1,8}$/i.test(detail);
 }
 
 function buildGroupSourceCards(entries: MobileTranscriptEntry[]): GroupSourceCard[] {
@@ -1656,6 +1665,8 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   activityHeadline,
   liveToolCalls = [],
   onOpenDiff,
+  onOpenFile,
+  currentWorkspace,
   scrollRef,
   handleScroll,
   showScrollPill,
@@ -1672,6 +1683,8 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   activityHeadline?: string;
   liveToolCalls?: MobileTranscriptToolCall[];
   onOpenDiff?: () => void;
+  onOpenFile?: (filePath: string, workspace?: string) => void;
+  currentWorkspace?: string;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   handleScroll: () => void;
   showScrollPill: boolean;
@@ -1749,6 +1762,8 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
                 onOpenMermaid={onOpenMermaid}
                 onRunInTerminal={onRunInTerminal}
                 onOpenDiff={onOpenDiff}
+                onOpenFile={onOpenFile}
+                currentWorkspace={currentWorkspace}
               />
             );
           })
@@ -1821,6 +1836,8 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
   onOpenMermaid,
   onRunInTerminal,
   onOpenDiff,
+  onOpenFile,
+  currentWorkspace,
 }: {
   group: TranscriptGroup;
   previousGroup: TranscriptGroup | null;
@@ -1830,6 +1847,8 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
   onOpenMermaid?: (code: string) => void;
   onRunInTerminal?: (command: string) => void;
   onOpenDiff?: () => void;
+  onOpenFile?: (filePath: string, workspace?: string) => void;
+  currentWorkspace?: string;
 }) {
   const [expandedSourceId, setExpandedSourceId] = useState<string | null>(null);
   const previousTs = previousGroup ? groupTimestamp(previousGroup.entries) : undefined;
@@ -1841,6 +1860,11 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
     || group.entries.some((entry) => entry.role === 'system' || entry.toolCalls?.length);
   const groupSummary = useMemo(() => summarizeAgentGroup(group.entries), [group.entries]);
   const sourceCards = useMemo(() => buildGroupSourceCards(group.entries), [group.entries]);
+  const expandedCard = sourceCards.find((card) => card.id === expandedSourceId) ?? null;
+  const fileDetails = useMemo(
+    () => (expandedCard?.details ?? []).filter(looksLikeWorkspaceFile).slice(0, 8),
+    [expandedCard],
+  );
 
   return (
     <div
@@ -1962,8 +1986,20 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
                       border: '1px solid rgba(226, 232, 240, 0.95)',
                       background: expandedSourceId === card.id ? 'rgba(255,255,255,0.94)' : 'rgba(248,250,252,0.82)',
                       boxShadow: expandedSourceId === card.id ? '0 10px 24px rgba(15, 23, 42, 0.06)' : 'none',
+                      transition: 'transform 180ms ease, box-shadow 180ms ease, background 180ms ease, border-color 180ms ease',
                       cursor: 'pointer',
                       textAlign: 'left',
+                      animation: 'sidebarSourceCardIn 220ms ease-out',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = 'translateY(-1px)';
+                      e.currentTarget.style.boxShadow = '0 14px 28px rgba(15, 23, 42, 0.08)';
+                      e.currentTarget.style.background = 'rgba(255,255,255,0.94)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = 'translateY(0)';
+                      e.currentTarget.style.boxShadow = expandedSourceId === card.id ? '0 10px 24px rgba(15, 23, 42, 0.06)' : 'none';
+                      e.currentTarget.style.background = expandedSourceId === card.id ? 'rgba(255,255,255,0.94)' : 'rgba(248,250,252,0.82)';
                     }}
                   >
                     <span style={{
@@ -1997,13 +2033,14 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
                   background: 'rgba(255,255,255,0.88)',
                   border: '1px solid rgba(226, 232, 240, 0.95)',
                   boxShadow: '0 10px 24px rgba(15, 23, 42, 0.05)',
+                  animation: 'sidebarSourceExpand 180ms ease-out',
                 }}>
-                  {(sourceCards.find((card) => card.id === expandedSourceId)?.links ?? []).length > 0 ? (
+                  {(expandedCard?.links ?? []).length > 0 ? (
                     <div style={{
                       display: 'flex',
                       flexDirection: 'column',
                       gap: 6,
-                      marginBottom: (sourceCards.find((card) => card.id === expandedSourceId)?.details ?? []).length > 0 ? 10 : 0,
+                      marginBottom: (expandedCard?.details ?? []).length > 0 ? 10 : 0,
                     }}>
                       <div style={{
                         fontSize: 10,
@@ -2019,7 +2056,7 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
                         flexDirection: 'column',
                         gap: 6,
                       }}>
-                        {(sourceCards.find((card) => card.id === expandedSourceId)?.links ?? []).map((link) => (
+                        {(expandedCard?.links ?? []).map((link) => (
                           <a
                             key={link.href}
                             href={link.href}
@@ -2044,42 +2081,102 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
                       </div>
                     </div>
                   ) : null}
-                  {sourceCards.find((card) => card.id === expandedSourceId)?.canOpenDiff && onOpenDiff ? (
+                  {(expandedCard?.canOpenDiff && onOpenDiff) || (fileDetails.length > 0 && onOpenFile) ? (
                     <div style={{
                       display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: 8,
                       justifyContent: 'flex-start',
-                      marginBottom: (sourceCards.find((card) => card.id === expandedSourceId)?.details ?? []).length > 0 ? 10 : 0,
+                      marginBottom: (expandedCard?.details ?? []).length > 0 ? 10 : 0,
                     }}>
-                      <button
-                        type="button"
-                        onClick={onOpenDiff}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          padding: '7px 10px',
-                          borderRadius: 10,
-                          border: '1px solid rgba(37, 99, 235, 0.14)',
-                          background: 'rgba(37, 99, 235, 0.06)',
-                          color: '#2563eb',
-                          fontSize: 11,
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <SlidersHorizontal size={12} strokeWidth={2} />
-                        Open diff sheet
-                      </button>
+                      {expandedCard?.canOpenDiff && onOpenDiff ? (
+                        <button
+                          type="button"
+                          onClick={onOpenDiff}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            padding: '7px 10px',
+                            borderRadius: 10,
+                            border: '1px solid rgba(37, 99, 235, 0.14)',
+                            background: 'rgba(37, 99, 235, 0.06)',
+                            color: '#2563eb',
+                            fontSize: 11,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            transition: 'transform 160ms ease, box-shadow 160ms ease',
+                          }}
+                        >
+                          <SlidersHorizontal size={12} strokeWidth={2} />
+                          Open diff sheet
+                        </button>
+                      ) : null}
+                      {fileDetails.length > 0 && onOpenFile ? (
+                        <button
+                          type="button"
+                          onClick={() => onOpenFile(fileDetails[0], currentWorkspace)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6,
+                            padding: '7px 10px',
+                            borderRadius: 10,
+                            border: '1px solid rgba(16, 185, 129, 0.16)',
+                            background: 'rgba(16, 185, 129, 0.08)',
+                            color: '#047857',
+                            fontSize: 11,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          <FolderOpen size={12} strokeWidth={2} />
+                          Open file
+                        </button>
+                      ) : null}
                     </div>
                   ) : null}
-                  {(sourceCards.find((card) => card.id === expandedSourceId)?.details ?? []).length > 0 ? (
+                  {(expandedCard?.details ?? []).length > 0 ? (
                     <div style={{
                       display: 'flex',
                       flexDirection: 'column',
                       gap: 4,
                     }}>
-                      {(sourceCards.find((card) => card.id === expandedSourceId)?.details ?? []).map((detail) => (
-                        <div
+                      {(expandedCard?.details ?? []).map((detail) => {
+                        const isFile = looksLikeWorkspaceFile(detail);
+                        if (isFile && onOpenFile) {
+                          return (
+                            <button
+                              key={detail}
+                              type="button"
+                              onClick={() => onOpenFile(detail, currentWorkspace)}
+                              style={{
+                                display: 'block',
+                                width: '100%',
+                                padding: '7px 8px',
+                                borderRadius: 9,
+                                border: '1px solid rgba(226, 232, 240, 0.95)',
+                                background: 'rgba(248,250,252,0.78)',
+                                textAlign: 'left',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontSize: 11,
+                                  color: '#2563eb',
+                                  lineHeight: 1.45,
+                                  wordBreak: 'break-word',
+                                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                                }}
+                              >
+                                {detail}
+                              </div>
+                            </button>
+                          );
+                        }
+                        return (
+                          <div
                           key={detail}
                           style={{
                             fontSize: 11,
@@ -2091,7 +2188,8 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
                         >
                           {detail}
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <div style={{ fontSize: 11, color: '#64748b' }}>No additional detail available.</div>
@@ -2162,6 +2260,8 @@ const ActiveTurnCard = memo(function ActiveTurnCard({
       background: 'linear-gradient(180deg, rgba(255,255,255,0.88), rgba(248,250,252,0.82))',
       border: '1px solid rgba(37, 99, 235, 0.10)',
       boxShadow: '0 16px 34px rgba(15, 23, 42, 0.06)',
+      animation: 'sidebarActiveTurnIn 220ms ease-out',
+      transition: 'box-shadow 180ms ease, border-color 180ms ease, transform 180ms ease',
     }}>
       <div style={{
         display: 'flex',
@@ -2807,6 +2907,7 @@ export function DesktopChat({
   externalSessionKey,
   draftInjection,
   onOpenDiff,
+  onOpenFile,
   onOpenMermaid,
   onRunInTerminal,
   onWsStatusChange,
@@ -2814,6 +2915,7 @@ export function DesktopChat({
   externalSessionKey?: string;
   draftInjection?: { id: string; text: string } | null;
   onOpenDiff?: () => void;
+  onOpenFile?: (filePath: string, workspace?: string) => void;
   onOpenMermaid?: (code: string) => void;
   onRunInTerminal?: (command: string) => void;
   onWsStatusChange?: (status: 'connected' | 'connecting' | 'reconnecting' | 'disconnected') => void;
@@ -3813,6 +3915,8 @@ export function DesktopChat({
         activityHeadline={liveActivityHeadline}
         liveToolCalls={liveToolCalls}
         onOpenDiff={onOpenDiff ? onOpenDiff : () => setDiffOpen(true)}
+        onOpenFile={onOpenFile}
+        currentWorkspace={selectedSession?.workspace}
         scrollRef={scrollRef}
         handleScroll={handleScroll}
         showScrollPill={showScrollPill}
@@ -3881,6 +3985,18 @@ export function DesktopChat({
       />
       {diffOpen ? <DiffModal onClose={() => setDiffOpen(false)} /> : null}
       <style>{`
+        @keyframes sidebarActiveTurnIn {
+          from { opacity: 0; transform: translateY(8px) scale(0.985); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes sidebarSourceCardIn {
+          from { opacity: 0; transform: translateY(6px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes sidebarSourceExpand {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
         @keyframes reviewingBreathe {
           0%, 100% { transform: scale(1); opacity: 1; }
           50% { transform: scale(1.25); opacity: 0.7; }
