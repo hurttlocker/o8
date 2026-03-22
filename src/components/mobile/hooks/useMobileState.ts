@@ -23,10 +23,13 @@ export interface MobileStateInit {
 
 export function useMobileState(init: MobileStateInit) {
   const { initialSnapshot, initialTranscript, initialReviewFile, initialOwnedReviewPacket } = init;
+  const initialSession = pickCurrentSession(initialSnapshot);
 
   // ── Core state ──
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot>(initialSnapshot);
-  const [selectedId, setSelectedId] = useState(() => pickCurrentSession(initialSnapshot)?.id ?? '');
+  const [selectedId, setSelectedId] = useState(() => initialSession?.id ?? '');
+  const [selectedSessionKeyHint, setSelectedSessionKeyHint] = useState(() => initialSession?.sessionKey ?? '');
+  const [selectedSessionFallback, setSelectedSessionFallback] = useState<MobileInboxSnapshot['sessions'][number] | null>(() => initialSession ?? null);
   const [activeView, setActiveView] = useState<'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'memory' | 'issues'>('squad');
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [surfaceNote, setSurfaceNote] = useState<string | null>(null);
@@ -143,11 +146,18 @@ export function useMobileState(init: MobileStateInit) {
   }, []);
 
   // ── Derived ──
-  const selectedSession = useMemo(
-    () => snapshot.sessions.find((session) => session.id === selectedId) ?? pickCurrentSession(snapshot),
-    [selectedId, snapshot],
+  const selectedSessionFromSnapshot = useMemo(
+    () => snapshot.sessions.find((session) => session.id === selectedId)
+      ?? snapshot.sessions.find((session) => session.sessionKey === selectedSessionKeyHint)
+      ?? null,
+    [selectedId, selectedSessionKeyHint, snapshot],
   );
-  const selectedSessionKey = selectedSession?.sessionKey;
+  const selectedSession = selectedSessionFromSnapshot
+    ?? selectedSessionFallback
+    ?? pickCurrentSession(snapshot);
+  const selectedSessionKey = selectedSessionFromSnapshot?.sessionKey
+    ?? selectedSessionFallback?.sessionKey
+    ?? pickCurrentSession(snapshot)?.sessionKey;
   const isOpenClawSession = selectedSession?.runtime === 'openclaw';
   const isChatSession = isOpenClawSession || selectedSession?.runtime === 'codex' || selectedSession?.runtime === 'claude-code';
   const isOwnedCodexSession = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'owned';
@@ -158,6 +168,8 @@ export function useMobileState(init: MobileStateInit) {
     // Core state + setters
     snapshot, setSnapshot,
     selectedId, setSelectedId,
+    selectedSessionKeyHint, setSelectedSessionKeyHint,
+    selectedSessionFallback, setSelectedSessionFallback,
     activeView, setActiveView,
     refreshError, setRefreshError,
     surfaceNote, setSurfaceNote,
