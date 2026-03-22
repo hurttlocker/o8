@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `17d3b2b` fix: Setup wizard
 - `7f4399c` feat: polish sidebar file actions
 - `95baadd` dev: Add Dev Tools section to About tab — wizard, detection, seed status
 - `40d53b5` feat: add sidebar source actions
