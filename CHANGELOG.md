@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `9eaeb61` feat: refine sidebar approval polish
 - `50541b1` feat: polish sidebar approvals and file actions
 - `17d3b2b` fix: Setup wizard
 - `7f4399c` feat: polish sidebar file actions
