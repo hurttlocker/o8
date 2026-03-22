@@ -501,11 +501,7 @@ export async function getOpenClawFleetSnapshot(
     };
     const agentConfigModels = readOpenClawAgentConfigModels();
 
-    // Debug: log what getGatewayStatus actually returned
-    const rawSessions = parsed.sessions?.recent ?? parsed.sessions?.sessions ?? [];
-    console.log(`[fleet] getGatewayStatus returned: gateway.reachable=${parsed.gateway?.reachable}, gateway.freshness=${parsed.gateway?.freshness}, gateway.source=${parsed.gateway?.source}, sessions.recent=${(parsed.sessions?.recent ?? []).length}, sessions.sessions=${(parsed.sessions as unknown as { sessions?: unknown[] })?.sessions?.length ?? 0}, rawSessions=${rawSessions.length}`);
-
-    const recent = rawSessions
+    const recent = (parsed.sessions?.recent ?? parsed.sessions?.sessions ?? [] as OpenClawRecentSession[])
       .filter((session: OpenClawRecentSession) => !isDuplicateRunSurface(session.key))
       .slice(0, 10);
 
