@@ -491,8 +491,7 @@ function MobileRemoteShellInner({
               snapshot={snapshot}
               onBack={() => setActiveView('squad')}
               onSessionSelect={(sessionId) => {
-                setSelectedId(sessionId);
-                setActiveView('chat');
+                actions.handleSessionFocus(sessionId);
               }}
               compactLine={compactLine}
             />

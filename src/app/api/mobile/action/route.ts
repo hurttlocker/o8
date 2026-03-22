@@ -11,6 +11,11 @@ import { getRuntime } from '@/lib/runtimes/registry';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+function previewMessage(message?: string) {
+  if (!message) return '';
+  return message.trim().replace(/\s+/g, ' ').slice(0, 160);
+}
+
 function invalidateMutationCaches() {
   invalidateCommandCenterSnapshotCaches();
   invalidateInboxCache();
@@ -58,6 +63,15 @@ export async function POST(request: NextRequest) {
 
   try {
     const isOwnedCodex = sessionKey.startsWith('codex-owned:');
+    console.info('[mobile/action] request', {
+      action,
+      sessionKey,
+      clientMutationId,
+      cwd: payload?.cwd,
+      hasMessage: Boolean(payload?.message?.trim()),
+      attachmentCount: payload?.attachments?.length ?? 0,
+      messagePreview: previewMessage(payload?.message),
+    });
 
     // ── Send message to an OpenClaw agent session ──
     if (action === 'send') {
@@ -87,6 +101,7 @@ export async function POST(request: NextRequest) {
           status: 'queued',
           note: response.note,
         });
+        console.info('[mobile/action] send queued', { sessionKey, clientMutationId, runId: response.runId ?? null });
         return NextResponse.json(response, {
           headers: { 'Cache-Control': 'no-store, max-age=0' },
         });
@@ -99,6 +114,7 @@ export async function POST(request: NextRequest) {
           status: 'failed',
           note,
         });
+        console.warn('[mobile/action] send failed', { sessionKey, clientMutationId, note });
         return NextResponse.json(
           { ok: false, action: 'send', sessionKey, clientMutationId, status: 'error', note },
           { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
@@ -127,6 +143,13 @@ export async function POST(request: NextRequest) {
       if (result.ok) {
         invalidateMutationCaches();
       }
+      console.info('[mobile/action] launch result', {
+        requestedSessionKey: sessionKey,
+        resolvedSessionKey: response.sessionKey,
+        clientMutationId,
+        ok: result.ok,
+        status: result.status,
+      });
       await publishMobileMutation(clientMutationId, {
         action,
         sessionKey: response.sessionKey,
@@ -166,6 +189,13 @@ export async function POST(request: NextRequest) {
         if (result.ok) {
           invalidateMutationCaches();
         }
+        console.info('[mobile/action] owned resume result', {
+          sessionKey,
+          clientMutationId,
+          ok: result.ok,
+          status: result.status,
+          runId: result.runId ?? null,
+        });
         await publishMobileMutation(clientMutationId, {
           action,
           sessionKey,
@@ -193,6 +223,12 @@ export async function POST(request: NextRequest) {
         if (result.ok) {
           invalidateMutationCaches();
         }
+        console.info('[mobile/action] claude-code resume result', {
+          sessionKey,
+          clientMutationId,
+          ok: result.ok,
+          note: result.note,
+        });
         await publishMobileMutation(clientMutationId, {
           action,
           sessionKey,
@@ -219,6 +255,12 @@ export async function POST(request: NextRequest) {
         if (result.ok) {
           invalidateMutationCaches();
         }
+        console.info('[mobile/action] codex resume result', {
+          sessionKey,
+          clientMutationId,
+          ok: result.ok,
+          note: result.note,
+        });
         await publishMobileMutation(clientMutationId, {
           action,
           sessionKey,
@@ -327,6 +369,14 @@ export async function POST(request: NextRequest) {
     if (result.ok) {
       invalidateMutationCaches();
     }
+    console.info('[mobile/action] runtime action result', {
+      action,
+      sessionKey,
+      clientMutationId,
+      ok: result.ok,
+      status: result.status,
+      runId: result.runId ?? null,
+    });
     await publishMobileMutation(clientMutationId, {
       action,
       sessionKey,
@@ -342,6 +392,12 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    console.error('[mobile/action] request failed', {
+      action,
+      sessionKey,
+      clientMutationId,
+      error: error instanceof Error ? error.message : String(error),
+    });
     await publishMobileMutation(clientMutationId, {
       action,
       sessionKey,

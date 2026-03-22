@@ -254,7 +254,13 @@ export function focusSessionSurface({
   const nextSession = snapshot.sessions.find((session) => session.id === sessionId || session.sessionKey === sessionId);
   if (!nextSession?.sessionKey) return;
 
-  setSelectedId(sessionId);
+  console.info('[mobile] focusing session', {
+    requestedSessionRef: sessionId,
+    resolvedId: nextSession.id,
+    resolvedSessionKey: nextSession.sessionKey,
+  });
+
+  setSelectedId(nextSession.id);
   setSelectedSessionKeyHint(nextSession.sessionKey);
   setSelectedSessionFallback(nextSession);
   setActiveView('chat');

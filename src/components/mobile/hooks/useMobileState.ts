@@ -155,11 +155,9 @@ export function useMobileState(init: MobileStateInit) {
     [selectedId, selectedSessionKeyHint, snapshot],
   );
   const selectedSession = selectedSessionFromSnapshot
-    ?? selectedSessionFallback
-    ?? pickCurrentSession(snapshot);
+    ?? (snapshot.sessions.length === 0 ? (selectedSessionFallback ?? undefined) : pickCurrentSession(snapshot));
   const selectedSessionKey = selectedSessionFromSnapshot?.sessionKey
-    ?? selectedSessionFallback?.sessionKey
-    ?? pickCurrentSession(snapshot)?.sessionKey;
+    ?? (snapshot.sessions.length === 0 ? selectedSessionFallback?.sessionKey : pickCurrentSession(snapshot)?.sessionKey);
   const isOpenClawSession = selectedSession?.runtime === 'openclaw';
   const isChatSession = isOpenClawSession || selectedSession?.runtime === 'codex' || selectedSession?.runtime === 'claude-code';
   const isOwnedCodexSession = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'owned';
@@ -170,9 +168,17 @@ export function useMobileState(init: MobileStateInit) {
     if (typeof window === 'undefined') return;
     const savedSessionKey = window.localStorage.getItem(MOBILE_SELECTED_SESSION_KEY_STORAGE)?.trim();
     if (!savedSessionKey || savedSessionKey === selectedSessionKeyHint) return;
+    console.info('[mobile] restoring session from storage', {
+      savedSessionKey,
+      selectedSessionKeyHint,
+      availableSessionKeys: snapshot.sessions.map((session) => session.sessionKey),
+    });
     setSelectedSessionKeyHint(savedSessionKey);
     const matchingSession = snapshot.sessions.find((session) => session.sessionKey === savedSessionKey);
-    if (!matchingSession) return;
+    if (!matchingSession) {
+      console.info('[mobile] stored session not present in initial snapshot', { savedSessionKey });
+      return;
+    }
     setSelectedId(matchingSession.id);
     setSelectedSessionFallback(matchingSession);
   // Intentionally one-time restore: later session churn should not re-run storage hydration.
@@ -184,6 +190,41 @@ export function useMobileState(init: MobileStateInit) {
     if (!selectedSessionKeyHint) return;
     window.localStorage.setItem(MOBILE_SELECTED_SESSION_KEY_STORAGE, selectedSessionKeyHint);
   }, [selectedSessionKeyHint]);
+
+  useEffect(() => {
+    if (!selectedSessionFromSnapshot) return;
+
+    if (selectedId !== selectedSessionFromSnapshot.id) {
+      setSelectedId(selectedSessionFromSnapshot.id);
+    }
+    if (selectedSessionKeyHint !== selectedSessionFromSnapshot.sessionKey) {
+      console.info('[mobile] canonicalizing selected session', {
+        selectedId,
+        selectedSessionKeyHint,
+        nextId: selectedSessionFromSnapshot.id,
+        nextSessionKey: selectedSessionFromSnapshot.sessionKey,
+      });
+      setSelectedSessionKeyHint(selectedSessionFromSnapshot.sessionKey);
+    }
+    if (
+      selectedSessionFallback?.id !== selectedSessionFromSnapshot.id
+      || selectedSessionFallback?.sessionKey !== selectedSessionFromSnapshot.sessionKey
+    ) {
+      setSelectedSessionFallback(selectedSessionFromSnapshot);
+    }
+  }, [selectedId, selectedSessionFallback, selectedSessionFromSnapshot, selectedSessionKeyHint]);
+
+  useEffect(() => {
+    if (!snapshot.sessions.length || !selectedSessionFallback || selectedSessionFromSnapshot) return;
+    console.info('[mobile] dropping stale selected session fallback', {
+      staleId: selectedSessionFallback.id,
+      staleSessionKey: selectedSessionFallback.sessionKey,
+      selectedId,
+      selectedSessionKeyHint,
+      replacementSessionKey: pickCurrentSession(snapshot)?.sessionKey ?? null,
+    });
+    setSelectedSessionFallback(null);
+  }, [selectedId, selectedSessionFallback, selectedSessionFromSnapshot, selectedSessionKeyHint, snapshot]);
 
   return {
     // Core state + setters
