@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `7acca95` feat: polish desktop sidebar runtime chat
 - `05d0442` feat: add intent board v1
 - `6e79944` feat: unify desktop thoughts and sidebar chat rendering
 - `a80239f` fix: portal desktop alerts tray
