@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-22
 
+- `129199d` fix: force mobile chat refresh after send
 - `0a2f63e` fix: persist mobile chat selection across reloads
 - `605bfaf` fix: stabilize mobile chat session targeting
 - `26d7ca1` fix: keep mobile agent runtime session selection stable
