@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { basename, extname } from 'node:path';
 import type { BrowserSurfaceSummary } from '@/lib/browser/types';
-import type { MobileTranscriptMedia } from '@/lib/mobile/types';
+import type { MobileTranscriptMedia, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import type { AgentActivity } from '@/lib/fleet/types';
 
 export interface SessionTranscriptEntry {
@@ -9,6 +9,7 @@ export interface SessionTranscriptEntry {
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;
   media?: MobileTranscriptMedia[];
+  toolCalls?: MobileTranscriptToolCall[];
   timestamp?: number;
   timestampLabel?: string;
 }
@@ -333,6 +334,13 @@ export async function getSessionTranscript(sessionKey: string, limit = 12, fresh
       const sourceRole = normalizeRole(message.role);
       const { text, media } = extractVisiblePayload(message.content);
       const cleanedText = sanitizeVisibleText(text);
+      const toolCalls = sourceRole === 'assistant'
+        ? extractToolCallsFromContent(message.content).map((toolCall) => ({
+            name: toolCall.name,
+            args: toolCall.args,
+            status: 'done' as const,
+          }))
+        : [];
 
       if (sourceRole === 'tool') {
         if (!media.length) {
@@ -353,7 +361,7 @@ export async function getSessionTranscript(sessionKey: string, limit = 12, fresh
         } as SessionTranscriptEntry;
       }
 
-      if (!cleanedText && !media.length) {
+      if (!cleanedText && !media.length && !toolCalls.length) {
         return null;
       }
 
@@ -370,6 +378,7 @@ export async function getSessionTranscript(sessionKey: string, limit = 12, fresh
         role: sourceRole,
         text: cleanedText,
         media,
+        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
         timestamp: message.timestamp,
         timestampLabel: formatTimestampLabel(message.timestamp),
       } as SessionTranscriptEntry;
