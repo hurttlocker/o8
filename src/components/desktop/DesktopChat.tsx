@@ -1349,6 +1349,7 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   onOpenDiff,
   onOpenFile,
   currentWorkspace,
+  runtimeCapabilities,
   approvals,
   resolvingApprovalId,
   onResolveApproval,
