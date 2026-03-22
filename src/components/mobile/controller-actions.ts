@@ -251,7 +251,7 @@ export function focusSessionSurface({
   loadOwnedReviewPacket,
   loadReviewFile,
 }: FocusSessionArgs) {
-  const nextSession = snapshot.sessions.find((session) => session.id === sessionId);
+  const nextSession = snapshot.sessions.find((session) => session.id === sessionId || session.sessionKey === sessionId);
   if (!nextSession?.sessionKey) return;
 
   setSelectedId(sessionId);
