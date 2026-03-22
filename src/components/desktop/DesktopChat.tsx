@@ -214,6 +214,72 @@ function advanceToolStack(
   return normalizeAdvanceSidebarToolStack(previous, toolName);
 }
 
+function transcriptEntrySignature(entry: MobileTranscriptEntry) {
+  return JSON.stringify({
+    role: entry.role,
+    text: entry.text,
+    media: (entry.media ?? []).map((item) => `${item.kind}:${item.path}`),
+    toolCalls: (entry.toolCalls ?? []).map((tool) => ({
+      name: tool.name,
+      args: tool.args,
+      status: tool.status,
+    })),
+    timestamp: entry.timestamp,
+    timestampLabel: entry.timestampLabel,
+  });
+}
+
+function dedupeTranscriptEntries(entries: MobileTranscriptEntry[]): MobileTranscriptEntry[] {
+  if (entries.length < 2) return entries;
+
+  const next: MobileTranscriptEntry[] = [];
+  const indexById = new Map<string, number>();
+  let changed = false;
+
+  for (const entry of entries) {
+    const existingIndex = indexById.get(entry.id);
+    if (existingIndex == null) {
+      indexById.set(entry.id, next.length);
+      next.push(entry);
+      continue;
+    }
+    next[existingIndex] = entry;
+    changed = true;
+  }
+
+  return changed ? next : entries;
+}
+
+function mergeTranscriptEntries(
+  existing: MobileTranscriptEntry[],
+  incoming: MobileTranscriptEntry[],
+): MobileTranscriptEntry[] {
+  if (incoming.length === 0) return existing;
+
+  const next = [...existing];
+  const indexById = new Map(next.map((entry, index) => [entry.id, index]));
+  let changed = false;
+
+  for (const entry of incoming) {
+    const existingIndex = indexById.get(entry.id);
+    if (existingIndex == null) {
+      indexById.set(entry.id, next.length);
+      next.push(entry);
+      changed = true;
+      continue;
+    }
+
+    if (transcriptEntrySignature(next[existingIndex]) === transcriptEntrySignature(entry)) {
+      continue;
+    }
+
+    next[existingIndex] = entry;
+    changed = true;
+  }
+
+  return changed ? next : existing;
+}
+
 // ── Memoized Message Bubble ──
 
 interface BubbleProps {
@@ -1383,18 +1449,21 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
 }) {
   const supportsLiveText = runtimeCapabilities.supportsLiveText;
   const supportsToolEvents = runtimeCapabilities.supportsToolEvents;
+  const normalizedTranscript = useMemo(() => dedupeTranscriptEntries(transcript), [transcript]);
 
   const activeTranscriptEntry = useMemo(() => {
     if (!agentRunning || !supportsLiveText) return null;
-    const last = transcript[transcript.length - 1];
+    const last = normalizedTranscript[normalizedTranscript.length - 1];
     if (!last || last.role !== 'assistant') return null;
     if (!last.id.startsWith('claude-') && !last.id.startsWith('codex-')) return null;
     return last;
-  }, [agentRunning, supportsLiveText, transcript]);
+  }, [agentRunning, normalizedTranscript, supportsLiveText]);
 
   const visibleTranscript = useMemo(
-    () => activeTranscriptEntry ? transcript.filter((entry) => entry.id !== activeTranscriptEntry.id) : transcript,
-    [activeTranscriptEntry, transcript],
+    () => activeTranscriptEntry
+      ? normalizedTranscript.filter((entry) => entry.id !== activeTranscriptEntry.id)
+      : normalizedTranscript,
+    [activeTranscriptEntry, normalizedTranscript],
   );
 
   const groupedTranscript = useMemo(() => groupTranscriptTurns(visibleTranscript), [visibleTranscript]);
@@ -1432,13 +1501,13 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
           groupedTranscript.map((group, groupIndex) => {
             if (group.kind !== 'agent') {
               return group.entries.map((entry) => {
-                const entryIndex = transcript.findIndex((candidate) => candidate.id === entry.id);
+                const entryIndex = normalizedTranscript.findIndex((candidate) => candidate.id === entry.id);
                 const isNew = getIsNewEntry(entry.id);
                 return (
                   <Bubble
                     key={entry.id}
                     entry={entry}
-                    previousEntry={entryIndex > 0 ? transcript[entryIndex - 1] : null}
+                    previousEntry={entryIndex > 0 ? normalizedTranscript[entryIndex - 1] : null}
                     agentName={currentAgentName}
                     isNew={isNew}
                     onOpenMermaid={onOpenMermaid}
@@ -1453,7 +1522,7 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
                 key={group.id}
                 group={group}
                 previousGroup={groupIndex > 0 ? groupedTranscript[groupIndex - 1] : null}
-                transcript={transcript}
+                transcript={normalizedTranscript}
                 currentAgentName={currentAgentName}
                 getIsNewEntry={getIsNewEntry}
                 onOpenMermaid={onOpenMermaid}
@@ -2959,22 +3028,31 @@ export function DesktopChat({
         setSessions(inbox.sessions);
       }
     },
-    onHistoryUpdate: (sessionKey: string, entries: Array<Record<string, unknown>>) => {
+    onHistoryUpdate: (sessionKey: string, entries: Array<Record<string, unknown>>, replace = false) => {
       if (sessionKey === selectedKey) {
-        const newEntries = entries as unknown as MobileTranscriptEntry[];
+        const newEntries = dedupeTranscriptEntries(entries as unknown as MobileTranscriptEntry[]);
         setTranscript(prev => {
-          const existingIds = new Set(prev.map(e => e.id));
+          const normalizedPrev = dedupeTranscriptEntries(prev);
+          const existingIds = new Set(normalizedPrev.map(e => e.id));
           // Also dedup by text against ws:done entries
-          const existingTexts = new Set(prev.filter(e => e.id.startsWith('ws:')).map(e => e.text));
+          const existingTexts = new Set(normalizedPrev.filter(e => e.id.startsWith('ws:')).map(e => e.text));
+          if (replace) {
+            const serverTexts = new Set(newEntries.map((entry) => entry.text));
+            const pendingClientEntries = normalizedPrev.filter((entry) =>
+              (entry.id.startsWith('local-') || entry.id.startsWith('ws:'))
+              && !serverTexts.has(entry.text)
+            );
+            return dedupeTranscriptEntries([...newEntries, ...pendingClientEntries]);
+          }
           const genuinelyNew = newEntries.filter(e =>
             !existingIds.has(e.id) && !(e.role === 'assistant' && existingTexts.has(e.text))
           );
-          if (genuinelyNew.length === 0) return prev;
+          if (genuinelyNew.length === 0) return normalizedPrev;
           // Replace ws:done entries with server versions (better IDs)
-          const cleaned = prev.filter(p =>
+          const cleaned = normalizedPrev.filter(p =>
             !p.id.startsWith('ws:') || !genuinelyNew.some(n => n.role === 'assistant' && n.text === p.text)
           );
-          return [...cleaned, ...genuinelyNew];
+          return mergeTranscriptEntries(cleaned, genuinelyNew);
         });
       }
     },
@@ -3121,19 +3199,21 @@ export function DesktopChat({
       if (!res.ok) return;
       const data = await res.json();
       if (selectedKeyRef.current !== key || transcriptRequestRef.current !== requestId) return;
-      const serverEntries: MobileTranscriptEntry[] = data.transcript ?? data.entries ?? [];
+      const serverEntries = dedupeTranscriptEntries((data.transcript ?? data.entries ?? []) as MobileTranscriptEntry[]);
 
       // Append-only merge: never replace the full transcript (prevents old messages
       // from re-appearing after compaction). Only genuinely new entries get appended.
       let didChange = false;
       setTranscript(prev => {
-        const optimistic = prev.filter(m => m.id.startsWith('local-'));
-        let realPrev = prev.filter(m => !m.id.startsWith('local-'));
+        const normalizedPrev = dedupeTranscriptEntries(prev);
+        const optimistic = normalizedPrev.filter(m => m.id.startsWith('local-'));
+        let realPrev = normalizedPrev.filter(m => !m.id.startsWith('local-'));
 
         // First load — accept full transcript
         if (realPrev.length === 0) {
-          didChange = serverEntries.length > 0;
-          return optimistic.length > 0 ? [...serverEntries, ...optimistic] : serverEntries;
+          const initial = optimistic.length > 0 ? [...serverEntries, ...optimistic] : serverEntries;
+          didChange = initial.length > 0;
+          return dedupeTranscriptEntries(initial);
         }
 
         // Find where our last known message sits in the server response
@@ -3179,12 +3259,14 @@ export function DesktopChat({
         const pendingOptimistic = optimistic.filter(m => !serverTexts.has(m.text));
 
         if (newFromServer.length === 0 && pendingOptimistic.length === optimistic.length) {
-          return prev; // nothing changed
+          return normalizedPrev; // nothing changed
         }
 
         didChange = newFromServer.length > 0;
-        const merged = [...realPrev, ...newFromServer];
-        return pendingOptimistic.length > 0 ? [...merged, ...pendingOptimistic] : merged;
+        const merged = mergeTranscriptEntries(realPrev, newFromServer);
+        return pendingOptimistic.length > 0
+          ? dedupeTranscriptEntries([...merged, ...pendingOptimistic])
+          : merged;
       });
       setLoading(false);
       // Only scroll if user is already at bottom — never force-yank upward
