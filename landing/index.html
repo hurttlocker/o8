@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cortex IDE — Your Code Remembers</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+      background: #09090b;
+      color: #fafafa;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+    }
+    .hero {
+      text-align: center;
+      max-width: 640px;
+    }
+    .logo {
+      width: 80px;
+      height: 80px;
+      border-radius: 20px;
+      margin-bottom: 32px;
+      background: linear-gradient(135deg, #2563eb, #7c3aed);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 36px;
+      font-weight: 800;
+      color: white;
+    }
+    h1 {
+      font-size: 48px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-bottom: 16px;
+      background: linear-gradient(135deg, #fafafa 30%, #a1a1aa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .tagline {
+      font-size: 20px;
+      color: #a1a1aa;
+      line-height: 1.5;
+      margin-bottom: 40px;
+    }
+    .download-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .download-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 28px;
+      background: linear-gradient(135deg, #2563eb, #7c3aed);
+      color: white;
+      font-size: 16px;
+      font-weight: 600;
+      border-radius: 14px;
+      text-decoration: none;
+      transition: transform 120ms ease, box-shadow 120ms ease;
+      box-shadow: 0 4px 24px rgba(37, 99, 235, 0.3);
+    }
+    .download-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 32px rgba(37, 99, 235, 0.4);
+    }
+    .download-btn svg { width: 20px; height: 20px; }
+    .meta {
+      font-size: 13px;
+      color: #71717a;
+    }
+    .meta a { color: #a1a1aa; text-decoration: underline; }
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      max-width: 640px;
+      margin-top: 60px;
+      text-align: left;
+    }
+    .feature {
+      padding: 20px;
+      border-radius: 14px;
+      border: 1px solid #27272a;
+      background: #0a0a0c;
+    }
+    .feature h3 {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+    .feature p {
+      font-size: 13px;
+      color: #a1a1aa;
+      line-height: 1.5;
+    }
+    .version-badge {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 8px;
+      background: rgba(37, 99, 235, 0.1);
+      border: 1px solid rgba(37, 99, 235, 0.2);
+      color: #60a5fa;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 24px;
+    }
+  </style>
+  <script>
+    // Dynamically set download URL from latest GitHub release
+    async function loadRelease() {
+      try {
+        const res = await fetch('https://api.github.com/repos/hurttlocker/cortex-ide/releases/latest');
+        const data = await res.json();
+        const version = data.tag_name || 'v0.1.0';
+        const dmg = data.assets?.find(a => a.name.endsWith('.dmg'));
+
+        document.getElementById('version').textContent = version;
+        if (dmg) {
+          document.getElementById('download-link').href = dmg.browser_download_url;
+          document.getElementById('download-size').textContent = `${(dmg.size / 1024 / 1024).toFixed(1)} MB`;
+        }
+      } catch {
+        // Fallback: link to releases page
+        document.getElementById('download-link').href = 'https://github.com/hurttlocker/cortex-ide/releases/latest';
+      }
+    }
+    loadRelease();
+  </script>
+</head>
+<body>
+  <div class="hero">
+    <div class="logo">C</div>
+    <div class="version-badge" id="version">v0.1.0</div>
+    <h1>Cortex IDE</h1>
+    <p class="tagline">The IDE that remembers everything. Persistent memory, multi-agent coding, live diffs — your code has context now.</p>
+    <div class="download-section">
+      <a id="download-link" class="download-btn" href="https://github.com/hurttlocker/cortex-ide/releases/latest">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/><polyline points="7 11 12 16 17 11"/><line x1="12" y1="4" x2="12" y2="16"/>
+        </svg>
+        Download for macOS
+      </a>
+      <p class="meta">
+        macOS 10.15+ · Apple Silicon & Intel · <span id="download-size">~50 MB</span>
+        <br>
+        <a href="https://github.com/hurttlocker/cortex-ide/releases">All releases</a> ·
+        <a href="https://github.com/hurttlocker/cortex-ide">GitHub</a>
+      </p>
+    </div>
+  </div>
+
+  <div class="features">
+    <div class="feature">
+      <h3>🧠 Cortex Memory</h3>
+      <p>14K+ facts extracted and recalled automatically. Your IDE learns your codebase.</p>
+    </div>
+    <div class="feature">
+      <h3>🤖 Multi-Agent</h3>
+      <p>Codex, Claude Code, and OpenClaw agents in one dashboard. Monitor, steer, review.</p>
+    </div>
+    <div class="feature">
+      <h3>📊 Analytics</h3>
+      <p>Token usage, cost tracking, surface breakdowns. Know exactly what your agents do.</p>
+    </div>
+    <div class="feature">
+      <h3>🔄 Auto-Update</h3>
+      <p>New versions install in the background. You're always on the latest.</p>
+    </div>
+  </div>
+</body>
+</html>

@@ -13,6 +13,7 @@ import { Canvas, CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
 import { GraphExplorer3D } from '@/components/desktop/GraphExplorer3D';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
+import { UpdateBanner } from '@/components/desktop/UpdateBanner';
 import { ThemeProvider } from '@/lib/theme/context';
 import { AlertTray } from '@/components/shared/AlertTray';
 import { AlertToast } from '@/components/shared/AlertToast';
@@ -945,6 +946,9 @@ function DashboardInner() {
       fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif',
       overflow: 'hidden',
     }}>
+      {/* ── Update Banner ── */}
+      <UpdateBanner currentVersion="0.1.0" />
+
       {/* ── Title Bar ── */}
       <TitleBar
         globalRepo={globalRepo}
