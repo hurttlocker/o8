@@ -81,6 +81,57 @@ function isImageMedia(item: MobileTranscriptMedia): boolean {
   return item.kind !== 'pdf' && item.kind !== 'file';
 }
 
+type RuntimeEventSummary = {
+  title: string;
+  summary: string;
+  status?: string;
+  task?: string;
+  source?: string;
+  changedFiles?: string[];
+};
+
+function extractRuntimeField(text: string, label: string): string | undefined {
+  const match = text.match(new RegExp(`^${label}:\\s*(.+)$`, 'mi'));
+  return match?.[1]?.trim() || undefined;
+}
+
+function parseRuntimeEventSummary(text: string): RuntimeEventSummary | null {
+  const hasInternalMarkers = /runtime context \(internal\)|begin_untrusted_child_result|task completion event|ready for user delivery/i.test(text);
+  if (!hasInternalMarkers) return null;
+
+  const deliveredSpeakerMatch = text.match(/\n([A-Z][A-Z0-9 _-]{1,24})\n[\s\S]{24,}$/);
+  if (deliveredSpeakerMatch) {
+    return null;
+  }
+
+  const task = extractRuntimeField(text, 'task');
+  const status = extractRuntimeField(text, 'status');
+  const source = extractRuntimeField(text, 'source');
+  const rawResult = text.match(/<<<BEGIN_UNTRUSTED_CHILD_RESULT>>>([\s\S]*?)<<<END_UNTRUSTED_CHILD_RESULT>>>/i)?.[1] ?? '';
+  const changedFiles = rawResult
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => /^(M|A|D|\?\?)\s+/.test(line))
+    .map((line) => line.replace(/^(M|A|D|\?\?)\s+/, ''))
+    .slice(0, 4);
+
+  let summary = 'A sub-agent finished work and queued a handoff into this session.';
+  if (/timed out/i.test(status ?? '')) {
+    summary = 'A sub-agent timed out and left a handoff package for the current session to deliver.';
+  } else if (/completed subagent task/i.test(text)) {
+    summary = 'A sub-agent completed work and posted a runtime handoff into the main conversation.';
+  }
+
+  return {
+    title: task ? `Sub-agent handoff • ${task}` : 'Sub-agent handoff',
+    summary,
+    status,
+    task,
+    source,
+    changedFiles,
+  };
+}
+
 // ── Memoized Message Bubble ──
 
 interface BubbleProps {
@@ -98,6 +149,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
   const hasMedia = Boolean(entry.media?.length);
   const hasToolCalls = Boolean(entry.toolCalls?.length);
   const isSlashCommand = isSlashCommandText(entry.text);
+  const runtimeEvent = useMemo(() => parseRuntimeEventSummary(entry.text), [entry.text]);
   const speakerChanged = !previousEntry || previousEntry.role !== entry.role;
   const showTimestamp = (() => {
     if (!previousEntry?.timestampLabel || !entry.timestampLabel) return speakerChanged;
@@ -151,6 +203,140 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
         <span className="remodex-compaction-label">Context compacted</span>
         {showTimestamp ? <span className="remodex-compaction-time">{entry.timestampLabel ?? ''}</span> : null}
       </div>
+    );
+  }
+
+  if (!isUser && runtimeEvent) {
+    return (
+      <article className={`remodex-message-card remodex-message-card-assistant${isNew ? ' remodex-turn-new' : ''}`}>
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          padding: '2px 0',
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+          }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 28,
+              height: 28,
+              borderRadius: 10,
+              background: 'rgba(37, 99, 235, 0.10)',
+              color: '#2563eb',
+              flexShrink: 0,
+            }}>
+              <Sparkles size={15} strokeWidth={2.2} />
+            </span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: 'var(--t-text)',
+                letterSpacing: '-0.01em',
+              }}>
+                {runtimeEvent.title}
+              </div>
+              <div style={{
+                marginTop: 2,
+                fontSize: 11,
+                color: 'var(--t-text-secondary)',
+                lineHeight: 1.45,
+              }}>
+                {runtimeEvent.summary}
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 6,
+          }}>
+            {runtimeEvent.status ? (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '3px 8px',
+                borderRadius: 999,
+                background: runtimeEvent.status.toLowerCase().includes('timed')
+                  ? 'rgba(245, 158, 11, 0.10)'
+                  : 'rgba(37, 99, 235, 0.10)',
+                color: runtimeEvent.status.toLowerCase().includes('timed') ? '#b45309' : '#2563eb',
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+              }}>
+                {runtimeEvent.status}
+              </span>
+            ) : null}
+            {runtimeEvent.source ? (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '3px 8px',
+                borderRadius: 999,
+                background: 'rgba(148, 163, 184, 0.10)',
+                color: '#475569',
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.02em',
+              }}>
+                {runtimeEvent.source}
+              </span>
+            ) : null}
+            {runtimeEvent.changedFiles?.length ? (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '3px 8px',
+                borderRadius: 999,
+                background: 'rgba(15, 23, 42, 0.06)',
+                color: '#334155',
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.02em',
+              }}>
+                {runtimeEvent.changedFiles.length} file{runtimeEvent.changedFiles.length !== 1 ? 's' : ''}
+              </span>
+            ) : null}
+          </div>
+
+          {runtimeEvent.changedFiles?.length ? (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              padding: '10px 12px',
+              borderRadius: 12,
+              background: 'rgba(248, 250, 252, 0.98)',
+              border: '1px solid rgba(226, 232, 240, 0.95)',
+            }}>
+              {runtimeEvent.changedFiles.map((filePath) => (
+                <div
+                  key={filePath}
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--t-text-secondary)',
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {filePath}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </article>
     );
   }
 
@@ -977,6 +1163,7 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   onRunInTerminal,
   streamingText,
   agentRunning,
+  activityHeadline,
   scrollRef,
   handleScroll,
   showScrollPill,
@@ -990,6 +1177,7 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   onRunInTerminal?: (command: string) => void;
   streamingText: string;
   agentRunning: boolean;
+  activityHeadline?: string;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   handleScroll: () => void;
   showScrollPill: boolean;
@@ -1080,13 +1268,63 @@ const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
         {agentRunning && !streamingText && (
           <div style={{
             display: 'flex',
-            alignItems: 'center',
+            flexDirection: 'column',
+            alignItems: 'flex-start',
             gap: 8,
             paddingTop: 8,
             paddingRight: 16,
             paddingBottom: 12,
             paddingLeft: 16,
           }}>
+            {activityHeadline ? (
+              <div style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                maxWidth: '92%',
+                padding: '8px 12px',
+                borderRadius: 14,
+                background: 'rgba(255,255,255,0.78)',
+                backdropFilter: 'blur(14px) saturate(1.5)',
+                WebkitBackdropFilter: 'blur(14px) saturate(1.5)',
+                border: '1px solid rgba(37, 99, 235, 0.10)',
+                boxShadow: '0 10px 24px rgba(15, 23, 42, 0.05)',
+              }}>
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 22,
+                  height: 22,
+                  borderRadius: 8,
+                  background: 'rgba(37, 99, 235, 0.10)',
+                  color: '#2563eb',
+                  flexShrink: 0,
+                }}>
+                  <Brain size={13} strokeWidth={2.2} />
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: '#2563eb',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}>
+                    Live Activity
+                  </div>
+                  <div style={{
+                    marginTop: 1,
+                    fontSize: 12,
+                    color: 'var(--t-text)',
+                    lineHeight: 1.45,
+                    wordBreak: 'break-word',
+                  }}>
+                    {activityHeadline}
+                  </div>
+                </div>
+              </div>
+            ) : null}
             <div style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -1917,6 +2155,12 @@ export function DesktopChat({
         : '#8e8e93';
 
   const currentAgentName = selectedSession ? getAgentName(selectedSession) : 'Mister';
+  const liveActivityHeadline = useMemo(() => {
+    const headline = selectedSession?.activity?.headline?.trim();
+    if (!headline) return undefined;
+    if (headline.toLowerCase().startsWith('responded')) return undefined;
+    return headline;
+  }, [selectedSession?.activity?.headline]);
 
   const scrollToBottom = useCallback((force = false) => {
     if (!scrollRef.current) return;
@@ -2668,6 +2912,7 @@ export function DesktopChat({
         onRunInTerminal={onRunInTerminal}
         streamingText={streamingText}
         agentRunning={agentRunning}
+        activityHeadline={liveActivityHeadline}
         scrollRef={scrollRef}
         handleScroll={handleScroll}
         showScrollPill={showScrollPill}
