@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-21
 
+- `51e2820` feat: show sidebar web source links
 - `9e8e44c` feat: enrich desktop sidebar source context
 - `928dfc2` chore: remove nav rail search
 - `a40367a` chore: remove intent workspace
