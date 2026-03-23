@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-22
 
+- `67887fd` feat: Monaco Frost v2
 - `c9938b4` feat: Monaco 'Rainwater Frost' theme — icy light blue editor
 - `6ecb9fc` feat: Monaco Editor v3 — full IDE-grade file editing
 - `96449e5` feat: File editor v2
