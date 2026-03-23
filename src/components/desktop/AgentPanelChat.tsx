@@ -2916,7 +2916,7 @@ const DesktopComposePane = memo(function DesktopComposePane({
 
 // ── Main Component ──
 
-export function DesktopChat({
+export function AgentPanelChat({
   externalSessionKey,
   draftInjection,
   onOpenDiff,

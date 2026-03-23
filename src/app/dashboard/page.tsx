@@ -5,10 +5,10 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { DesktopWebSocketProvider, useSharedDesktopWs, type WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from '@/components/desktop/hooks/useDesktopWebSocket';
 import type { TerminalHandle } from '@/components/desktop/LiveOutput';
-import { TerminalWorkspace, type TerminalTabHandle } from '@/components/desktop/TerminalWorkspace';
+import { WorkspaceTerminal, type TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 // WorkspacesPanel merged into AgentPanel — unified agent+workspace view
-import { DesktopChat } from '@/components/desktop/DesktopChat';
+import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
 import { Canvas, CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
 import { GraphExplorer3D } from '@/components/desktop/GraphExplorer3D';
@@ -18,7 +18,7 @@ import { ThemeProvider } from '@/lib/theme/context';
 import { AlertTray } from '@/components/shared/AlertTray';
 import { AlertToast } from '@/components/shared/AlertToast';
 import { NavRail, type NavSection } from '@/components/desktop/NavRail';
-import { BottomTerminal, type BottomTerminalHandle } from '@/components/desktop/BottomTerminal';
+import { ContextualPanel, type ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { SettingsPage } from '@/components/desktop/SettingsPage';
@@ -76,7 +76,7 @@ function normalizeDetection(raw: Record<string, unknown>): DetectionResult {
 }
 import { LocalhostPreviewTabs } from '@/components/desktop/LocalhostPreviewTabs';
 import { TileContainer, type TileContentRegistry } from '@/components/desktop/TileContainer';
-import type { DesktopChatInjectionPayload } from '@/lib/chat/injection';
+import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import {
   type DetectedLocalhostPreview,
   formatPreviewSelectionContext,
@@ -122,7 +122,7 @@ function DashboardInner() {
   const termCreatedRef = useRef(false);
   const terminalRef = useRef<TerminalHandle>(null);
   const termWorkspaceRef = useRef<TerminalTabHandle>(null);
-  const bottomTermRef = useRef<BottomTerminalHandle>(null);
+  const bottomTermRef = useRef<ContextualPanelHandle>(null);
   const [agentsJson, setAgentsJson] = useState('[]');
   const [activeWorkspace, setActiveWorkspace] = useState<string | undefined>();
   const [showMemoryView, setShowMemoryView] = useState(false);
@@ -235,11 +235,11 @@ function DashboardInner() {
   const [desktopDraftInjection, setDesktopDraftInjection] = useState<{ id: string; text: string } | null>(null);
   const [thoughtsDraftInjection, setThoughtsDraftInjection] = useState<{ id: string; text: string } | null>(null);
 
-  // Terminal WS hook — routes events to TerminalWorkspace + BottomTerminal
+  // Terminal WS hook — routes events to WorkspaceTerminal + ContextualPanel
   const terminalWsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
     onTerminalCreated: (sessionName: string, requestId?: string) => {
       setDashTermSession(sessionName);
-      // Route to BottomTerminal first — if it claims, skip TerminalWorkspace
+      // Route to ContextualPanel first — if it claims, skip WorkspaceTerminal
       const claimed = bottomTermRef.current?.onSessionCreated(sessionName, requestId);
       if (!claimed) {
         termWorkspaceRef.current?.onSessionCreated(sessionName, requestId);
@@ -283,7 +283,7 @@ function DashboardInner() {
     sendAgentKill,
   } = useSharedDesktopWs(undefined, terminalWsCallbacks);
 
-  // Terminal auto-creation now handled by TerminalWorkspace component
+  // Terminal auto-creation now handled by WorkspaceTerminal component
 
   // ── Alert system ──
   const {
@@ -334,7 +334,7 @@ function DashboardInner() {
   }, [tileLayout, tileLayoutHydrated]);
 
   const bottomPanelVisible = useMemo(
-    () => Boolean(findLeafByContentKind(tileLayout.root, 'bottom-terminal')),
+    () => Boolean(findLeafByContentKind(tileLayout.root, 'contextual-panel')),
     [tileLayout.root],
   );
   const hasThoughtsTile = useMemo(
@@ -469,13 +469,13 @@ function DashboardInner() {
     return result.newTileId;
   }, [findInsertionTarget, findWorkspaceTarget, tileLayout, workspacePreviews]);
 
-  const toggleBottomTerminalTile = useCallback(() => {
-    const existingLeaf = findLeafByContentKind(tileLayout.root, 'bottom-terminal');
+  const toggleContextualPanelTile = useCallback(() => {
+    const existingLeaf = findLeafByContentKind(tileLayout.root, 'contextual-panel');
     if (existingLeaf) {
       handleCloseTile(existingLeaf.id);
       return;
     }
-    ensureTileKind('bottom-terminal', {
+    ensureTileKind('contextual-panel', {
       direction: 'horizontal',
       preferredKinds: ['terminal', 'canvas', 'preview'],
       ratio: 0.68,
@@ -635,7 +635,7 @@ function DashboardInner() {
   }, []);
 
   const handlePreviewSelection = useCallback((selection: PreviewSelectionPayload) => {
-    const payload: DesktopChatInjectionPayload = {
+    const payload: AgentPanelChatInjectionPayload = {
       reason: 'preview',
       text: formatPreviewSelectionContext(selection),
     };
@@ -646,7 +646,7 @@ function DashboardInner() {
     });
   }, []);
 
-  const handleDesktopChatInjection = useCallback((payload: DesktopChatInjectionPayload) => {
+  const handleDesktopChatInjection = useCallback((payload: AgentPanelChatInjectionPayload) => {
     const nextInjection = {
       id: `${payload.reason}-${Date.now()}`,
       text: payload.text,
@@ -673,7 +673,7 @@ function DashboardInner() {
 
   // ── Run command in bottom terminal ──
   const handleRunInTerminal = useCallback((command: string) => {
-    ensureTileKind('bottom-terminal', {
+    ensureTileKind('contextual-panel', {
       direction: 'horizontal',
       preferredKinds: ['terminal', 'canvas', 'preview'],
       ratio: 0.68,
@@ -854,11 +854,11 @@ function DashboardInner() {
       ),
     },
     terminal: {
-      label: 'Terminal Workspace',
+      label: 'Workspace Terminal',
       description: 'Multi-tab terminal and chat workspace for active sessions.',
       singleton: true,
       render: () => (
-        <TerminalWorkspace
+        <WorkspaceTerminal
           ref={termWorkspaceRef}
           sendTerminalCreate={sendTerminalCreate}
           sendTerminalAttach={sendTerminalAttach}
@@ -915,12 +915,12 @@ function DashboardInner() {
         />
       ),
     },
-    'bottom-terminal': {
-      label: 'Bottom Terminal',
+    'contextual-panel': {
+      label: 'Contextual Panel',
       description: 'Single focused terminal with a CLI picker for quick command execution.',
       singleton: true,
       render: ({ tileId }) => (
-        <BottomTerminal
+        <ContextualPanel
           ref={bottomTermRef}
           sendTerminalCreate={sendTerminalCreate}
           sendTerminalAttach={sendTerminalAttach}
@@ -980,7 +980,7 @@ function DashboardInner() {
         sidebarVisible={sidebarVisible}
         onToggleSidebar={() => setSidebarVisible(v => !v)}
         bottomPanelVisible={bottomPanelVisible}
-        onToggleBottomPanel={toggleBottomTerminalTile}
+        onToggleBottomPanel={toggleContextualPanelTile}
         chatVisible={chatVisible}
         onToggleChat={() => setChatVisible(v => !v)}
         wsStatus={wsStatus}
@@ -1036,7 +1036,7 @@ function DashboardInner() {
           if (section === 'memory') setShowMemoryView(true);
           else setShowMemoryView(false);
           if (section === 'terminal') {
-            ensureTileKind('bottom-terminal', {
+            ensureTileKind('contextual-panel', {
               direction: 'horizontal',
               preferredKinds: ['terminal', 'canvas', 'preview'],
               ratio: 0.68,
@@ -1236,7 +1236,7 @@ function DashboardInner() {
         overflow: 'hidden',
         borderLeft: '1px solid var(--t-divider)',
       }}>
-        <DesktopChat
+        <AgentPanelChat
           externalSessionKey={activeSessionKey}
           draftInjection={desktopDraftInjection}
           onOpenDiff={() => {
