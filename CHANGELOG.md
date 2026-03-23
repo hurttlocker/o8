@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-23
 
+- `1111c6e` feat: GitHub PAT support + config lives in ~/.Rainwater-ide/
 - `2d9c123` fix: Split frontend/server for native shell build + tested end-to-end
 - `c5085de` feat: Bundle Node.js inside the app — zero-config for users
 - `9f199e2` fix: Remove all hardcoded personal data for production distribution
