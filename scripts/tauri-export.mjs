@@ -4,7 +4,8 @@
  *   out/frontend/  → Tauri frontendDist (just the loader HTML)
  *   out/server/    → Tauri bundle resource (Next.js server + Node binary)
  */
-import { cpSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'fs';
+import { cpSync, mkdirSync, writeFileSync, existsSync, rmSync, chmodSync } from 'fs';
+import { homedir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -63,8 +64,8 @@ const loaderHtml = `<!DOCTYPE html>
         .then(() => { window.location.href = TARGET; })
         .catch(() => {
           attempts++;
-          if (attempts < 120) setTimeout(check, 500);
-          else document.getElementById('status').textContent = 'Server failed to start.';
+          if (attempts < 30) setTimeout(check, 500);
+          else document.getElementById('status').innerHTML = 'Server failed to start.<br><br><span style="color:#94a3b8;font-size:12px">Make sure Node.js is installed: <a href="https://nodejs.org" style="color:#60a5fa">nodejs.org</a></span>';
         });
     }
     setTimeout(check, 500);
@@ -115,6 +116,18 @@ for (const mod of nativeModules) {
     cpSync(src, dest, { recursive: true });
     console.log(`📦 Copied native module: ${mod}`);
   }
+}
+
+// ── Bundle Cortex memory binary ──
+const cortexBin = join(homedir(), 'bin', 'cortex');
+if (existsSync(cortexBin)) {
+  const dest = join(server, 'bin', 'cortex');
+  mkdirSync(join(server, 'bin'), { recursive: true });
+  cpSync(cortexBin, dest);
+  chmodSync(dest, 0o755);
+  console.log('📦 Bundled cortex binary (memory engine)');
+} else {
+  console.warn('⚠️  ~/bin/cortex not found — memory features will be disabled');
 }
 
 // ── Compile WS server ──
