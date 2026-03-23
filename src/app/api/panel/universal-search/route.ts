@@ -5,7 +5,7 @@ import { execSync } from 'child_process';
 
 const HOME = process.env.HOME || require('os').homedir();
 const CORTEX_BINARY = process.env.CORTEX_BINARY || `${HOME}/bin/cortex`;
-const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || `${HOME}/projects/cortex-ide`;
+const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || `process.cwd()`;
 const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || '';
 const GATEWAY_PORT = process.env.OPENCLAW_GATEWAY_PORT || '18789';
 
@@ -149,7 +149,7 @@ function searchMemory(query: string): UniversalResult[] {
 
 function searchIssues(query: string): UniversalResult[] {
   const raw = execQuiet(
-    `cd "${HOME}/projects/cortex-ide" && gh issue list --search "${query.replace(/"/g, '\\"')}" --json number,title,state,body --limit 8 2>/dev/null`,
+    `cd "process.cwd()" && gh issue list --search "${query.replace(/"/g, '\\"')}" --json number,title,state,body --limit 8 2>/dev/null`,
     { timeout: 5000 },
   );
   if (!raw) return [];
