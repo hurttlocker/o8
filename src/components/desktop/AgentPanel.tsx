@@ -3314,6 +3314,7 @@ export const AgentPanel = memo(function AgentPanel({
   const [fileFilter, setFileFilter] = useState<'all' | 'changes'>('changes');
   const [fileDropdownOpen, setFileDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('files');
+  const [tabsExpanded, setTabsExpanded] = useState(true);
   const [activityOpen, setActivityOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(true);
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
@@ -3570,7 +3571,21 @@ export const AgentPanel = memo(function AgentPanel({
         paddingBottom: 0,
         paddingLeft: 14,
         flexShrink: 0,
+        alignItems: 'center',
       }}>
+        <button
+          type="button"
+          onClick={() => setTabsExpanded(v => !v)}
+          style={{
+            padding: '4px 2px', border: 'none', background: 'transparent',
+            cursor: 'pointer', color: 'var(--t-text-muted)', flexShrink: 0,
+            transform: tabsExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform 150ms ease',
+          }}
+          title={tabsExpanded ? 'Collapse' : 'Expand'}
+        >
+          <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -3772,23 +3787,25 @@ export const AgentPanel = memo(function AgentPanel({
         </div>
       ) : null}
 
-      {/* ── Content Area ── */}
-      <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        borderTop: expandedGroup ? 'none' : '1px solid var(--t-divider-subtle)',
-        marginTop: expandedGroup ? 0 : 4,
-      }}>
-        {activeTab === 'files' ? (
-          <FileTree
-            tree={fileFilter === 'changes' ? filterTreeToChanged(fileTree, changedFiles) : fileTree}
-            changedFiles={changedFiles}
-            onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)}
-          />
-        ) : null}
-        {activeTab === 'deploy' ? <DeployList onOpenDeploy={onOpenDeploy} /> : null}
-
-      </div>
+      {/* ── Content Area (collapsible) ── */}
+      {tabsExpanded && (
+        <div style={{
+          maxHeight: 280,
+          overflowY: 'auto',
+          borderTop: expandedGroup ? 'none' : '1px solid var(--t-divider-subtle)',
+          marginTop: expandedGroup ? 0 : 4,
+          flexShrink: 0,
+        }}>
+          {activeTab === 'files' ? (
+            <FileTree
+              tree={fileFilter === 'changes' ? filterTreeToChanged(fileTree, changedFiles) : fileTree}
+              changedFiles={changedFiles}
+              onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)}
+            />
+          ) : null}
+          {activeTab === 'deploy' ? <DeployList onOpenDeploy={onOpenDeploy} /> : null}
+        </div>
+      )}
 
       {/* ── Activity Dropdown (above agents, collapsed by default) ── */}
       <div style={{ flexShrink: 0, paddingLeft: 14, paddingRight: 14, paddingTop: 4, paddingBottom: 0 }}>
