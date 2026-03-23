@@ -1,7 +1,8 @@
+import { execSync } from 'child_process';
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { ghExec, detectRepo } from '@/lib/github';
 import { getCached, setCached, SLOW_TTL_MS } from '@/lib/github/cache';
 
 const DEFAULT_REPO = process.env.GITHUB_REPO || '';
