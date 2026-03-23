@@ -50,27 +50,14 @@ import { IssueCreator } from './IssueCreator';
 import { GraphExplorer3D } from './GraphExplorer3D';
 import dynamic from 'next/dynamic';
 
-// Polyfill ClipboardItem BEFORE Monaco loads (it references it at module scope)
-if (typeof window !== 'undefined' && typeof globalThis.ClipboardItem === 'undefined') {
-  (globalThis as Record<string, unknown>).ClipboardItem = class ClipboardItem {
-    readonly types: string[];
-    constructor(private items: Record<string, Blob | Promise<Blob>>) { this.types = Object.keys(items); }
-    getType(type: string) { return Promise.resolve(this.items[type]); }
-  };
-}
-if (typeof window !== 'undefined' && !window.navigator?.clipboard) {
-  Object.defineProperty(window.navigator, 'clipboard', {
-    value: { writeText: async () => {}, readText: async () => '', write: async () => {}, read: async () => [] },
-    configurable: true,
-  });
-}
-
-const MonacoEditor = dynamic(() => import('@monaco-editor/react').then(async (mod) => {
-  const { loader } = mod;
-  const monaco = await import('monaco-editor');
-  loader.config({ monaco });
-  return mod.default;
-}), {
+const MonacoEditor = dynamic(() => import('@/lib/monaco-polyfills').then(() =>
+  import('@monaco-editor/react').then(async (mod) => {
+    const { loader } = mod;
+    const monaco = await import('monaco-editor');
+    loader.config({ monaco });
+    return mod.default;
+  })
+), {
   ssr: false,
   loading: () => <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading editor…</div>,
 });
