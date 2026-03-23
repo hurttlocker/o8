@@ -18,3 +18,4 @@ mockups/
 chocolate-*.png
 *.png
 .vercel
+out/
