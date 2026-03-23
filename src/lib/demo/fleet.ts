@@ -33,7 +33,7 @@ export const demoFleet: FleetSnapshot = {
   agents: [
     {
       id: 'agent-mister',
-      name: 'Mister',
+      name: 'Assistant',
       squadId: 'squad-platform',
       runtime: 'openclaw',
       model: 'gpt-5.4',

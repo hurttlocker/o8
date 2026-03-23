@@ -7,7 +7,7 @@ import { listRepos } from '@/lib/repos/registry';
 import { getCached, setCached } from '@/lib/github/cache';
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_REPO = process.env.CORTEX_IDE_REVIEW_REPO || 'hurttlocker/cortex-ide';
+const DEFAULT_REPO = process.env.CORTEX_IDE_REVIEW_REPO || '';
 
 function normalizeRepoSlug(remoteUrl: string | null | undefined) {
   if (!remoteUrl) return null;

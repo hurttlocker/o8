@@ -171,7 +171,7 @@ export function useProactiveItems(
           subtitle: s.currentTask.slice(0, 80),
           actionLabel: prMatch ? 'Review' : undefined,
           action: prMatch && onReviewPR
-            ? () => onReviewPR(s.workspace || 'hurttlocker/cortex-ide', parseInt(prMatch[1]))
+            ? () => onReviewPR(s.workspace || '', parseInt(prMatch[1]))
             : undefined,
           color: prMatch ? '#af52de' : '#34c759',
           iconPath: prMatch

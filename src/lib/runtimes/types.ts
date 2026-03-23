@@ -57,7 +57,7 @@ export interface RuntimeSession {
   branch?: string;
   /** Git commit SHA if known */
   headSha?: string;
-  /** Repository slug if known (e.g., "hurttlocker/cortex-ide") */
+  /** Repository slug if known (e.g., '') */
   repoSlug?: string;
   /** Current status */
   status: RuntimeSessionStatus;

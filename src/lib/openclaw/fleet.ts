@@ -215,7 +215,7 @@ function buildOpenClawRuntimeSurface(title: string, session: OpenClawRecentSessi
     },
     reviewContext: {
       branch,
-      repoSlug: 'hurttlocker/cortex-ide',
+      repoSlug: '',
     },
   };
 }

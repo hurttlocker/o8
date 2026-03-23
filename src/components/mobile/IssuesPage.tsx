@@ -39,7 +39,7 @@ interface IssuesPageProps {
 /* ── Helpers ──────────────────────────────────────────────── */
 
 const STORAGE_KEY = 'cortex-ide:registered-repos';
-const DEFAULT_REPOS = ['hurttlocker/cortex-ide', 'hurttlocker/cortex'];
+const DEFAULT_REPOS = ['', 'hurttlocker/cortex'];
 
 function loadRegisteredRepos(): string[] {
   if (typeof window === 'undefined') return DEFAULT_REPOS;
@@ -69,7 +69,7 @@ function timeAgo(iso: string): string {
 
 function repoShort(repo: string): string {
   const map: Record<string, string> = {
-    'hurttlocker/cortex-ide': 'Cortex IDE',
+    '': 'Cortex IDE',
     'hurttlocker/cortex': 'Cortex',
     'LavonTMCQ/spear-production': 'Spear',
     'LavonTMCQ/mybeautifulwife': 'Antiflammi',

@@ -16,7 +16,7 @@ interface DeployStatusProps {
   repos?: string[];
 }
 
-const REPOS = ['hurttlocker/cortex-ide', 'hurttlocker/cortex'];
+const REPOS = ['', 'hurttlocker/cortex'];
 
 function stateColor(state: string): string {
   switch (state.toLowerCase()) {
@@ -40,7 +40,7 @@ function stateLabel(state: string): string {
 
 function repoShort(repo: string): string {
   const map: Record<string, string> = {
-    'hurttlocker/cortex-ide': 'Cortex IDE',
+    '': 'Cortex IDE',
     'hurttlocker/cortex': 'Cortex',
     'LavonTMCQ/spear-production': 'Spear',
     'LavonTMCQ/mybeautifulwife': 'Antiflammi',

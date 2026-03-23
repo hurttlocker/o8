@@ -83,14 +83,14 @@ export function generateMockSegments(): TimelineSegment[] {
     const d = Math.min(dur, elapsed - c);
     if (d > 0) { segs.push({ kind, startMin: c, durationMin: d, label, agent }); c += d; }
   };
-  add('thinking', 12, 'Boot + context load', 'Mister');
-  add('coding', 35, 'NavRail + TitleBar', 'Mister');
-  add('thinking', 5, 'Planning', 'Mister');
-  add('coding', 45, 'SessionTimeline + Canvas', 'Mister');
-  add('testing', 15, 'Tauri verification', 'Mister');
-  add('coding', 25, 'Icon fixes + permissions', 'Mister');
-  add('error', 3, 'startDragging denied', 'Mister');
-  add('coding', 30, 'Timeline expand + colors', 'Mister');
+  add('thinking', 12, 'Boot + context load', 'Agent');
+  add('coding', 35, 'NavRail + TitleBar', 'Agent');
+  add('thinking', 5, 'Planning', 'Agent');
+  add('coding', 45, 'SessionTimeline + Canvas', 'Agent');
+  add('testing', 15, 'Tauri verification', 'Agent');
+  add('coding', 25, 'Icon fixes + permissions', 'Agent');
+  add('error', 3, 'startDragging denied', 'Agent');
+  add('coding', 30, 'Timeline expand + colors', 'Agent');
   if (c < elapsed) add('idle', elapsed - c, 'Idle');
   return segs;
 }
@@ -397,7 +397,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
 
   // Agent → repo mapping for issue fetching
   const agentRepoMap: Record<string, string> = {
-    Mister: 'hurttlocker/cortex-ide',
+    Mister: '',
     Niot: 'hurttlocker/cortex',
     Hawk: 'hurttlocker/cortex',
   };
@@ -410,7 +410,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     });
     setIssuesPanelOpen(true);
     setIssuesLoading(true);
-    const repo = (selectedAgent && agentRepoMap[selectedAgent]) || 'hurttlocker/cortex-ide';
+    const repo = (selectedAgent && agentRepoMap[selectedAgent]) || '';
     fetch(`/api/panel/issues?repo=${encodeURIComponent(repo)}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -447,7 +447,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
   const handleAssignIssue = useCallback(async (issueNumber: number) => {
     if (!selectedAgent) return;
     setAssigningIssue(issueNumber);
-    const repo = agentRepoMap[selectedAgent] || 'hurttlocker/cortex-ide';
+    const repo = agentRepoMap[selectedAgent] || '';
     try {
       await fetch('/api/panel/assign-issue', {
         method: 'POST',

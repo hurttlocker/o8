@@ -32,9 +32,9 @@ const AGENT_DIRS: Record<string, string> = {
 };
 
 const AGENT_NAMES: Record<string, string> = {
-  main: 'Mister',
-  ace: 'Niot',
-  hawk: 'Hawk',
+  main: 'Main Agent',
+  ace: 'Agent 2',
+  hawk: 'Agent 3',
 };
 
 export async function GET(request: Request) {

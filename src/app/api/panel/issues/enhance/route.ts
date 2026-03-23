@@ -49,7 +49,7 @@ export async function POST(request: Request) {
   }
 
   // Fetch repo context in parallel
-  const repoSlug = repo || 'hurttlocker/cortex-ide';
+  const repoSlug = repo || '';
   const [labels, recentTitles] = await Promise.all([
     Promise.resolve(getRepoLabels(repoSlug)),
     Promise.resolve(getRecentIssueTitles(repoSlug)),

@@ -2276,7 +2276,7 @@ export function RepoRegistrySection({
         .then((data: { workspaces?: { repo: string; branch: string; agentName: string; sessionKey: string; agentStatus: string }[] }) => {
           const map = new Map<string, Map<string, BranchAgent[]>>();
           const AGENT_COLORS: Record<string, string> = {
-            'Mister': '#111827',
+            'Assistant': '#111827',
             'Niot': '#2563eb',
             'Hawk': '#f59e0b',
           };
@@ -2822,7 +2822,7 @@ export function RepoRegistrySection({
               setValidationError(null);
               setValidationResult(null);
             }}
-            placeholder="~/clawd/repos/cortex-ide"
+            placeholder="~/projects/cortex-ide"
             autoFocus
             style={{
               width: '100%',

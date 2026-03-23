@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 
-const DEFAULT_REPO = process.env.GITHUB_REPO || 'hurttlocker/cortex-ide';
+const DEFAULT_REPO = process.env.GITHUB_REPO || '';
 
 export async function POST(request: Request) {
   const body = await request.json();
