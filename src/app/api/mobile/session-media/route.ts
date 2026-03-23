@@ -6,7 +6,7 @@ import { existsSync, readdirSync, statSync } from 'fs';
 import { join, basename } from 'path';
 import { getGatewayStatus } from '@/lib/openclaw/gateway-client';
 
-const HOME = process.env.HOME || '/Users/marquisehurtt';
+const HOME = process.env.HOME || require('os').homedir();
 const SESSIONS_DIR = join(HOME, '.openclaw/agents/main/sessions');
 
 interface MediaItem {

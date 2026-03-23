@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkS
 import { join, relative, dirname } from 'node:path';
 import { createGithubIssue, readGithubIssueOrPr, createPullRequest } from '@/lib/github/tools';
 
-const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const MAX_FILE_SIZE = 50_000; // 50KB
 
 // ── Tool Definitions (provider-agnostic) ──

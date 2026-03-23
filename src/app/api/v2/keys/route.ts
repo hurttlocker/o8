@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-const REPO_ROOT = process.env.CORTEX_IDE_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+const REPO_ROOT = process.env.CORTEX_IDE_REPO_ROOT || process.cwd();
 const ENV_FILE = join(REPO_ROOT, '.env.local');
 
 interface ProviderKeyConfig {

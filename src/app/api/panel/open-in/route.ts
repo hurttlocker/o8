@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
 
   // Fallback: check common paths
   if (!localPath) {
-    const home = process.env.HOME || '/Users/marquisehurtt';
+    const home = process.env.HOME || require('os').homedir();
     const repoName = repo.split('/').pop() || repo;
     const candidates = [
       `${home}/clawd/repos/${repoName}`,

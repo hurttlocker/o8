@@ -17,7 +17,7 @@ const MIME_MAP: Record<string, string> = {
 };
 
 const ALLOWED_ROOTS = [
-  process.env.HOME || '/Users/marquisehurtt',
+  process.env.HOME || require('os').homedir(),
   '/tmp',
 ];
 
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   }
 
   // Resolve ~ to HOME
-  const home = process.env.HOME || '/Users/marquisehurtt';
+  const home = process.env.HOME || require('os').homedir();
   const resolved = filePath.startsWith('~') ? filePath.replace('~', home) : filePath;
 
   // Security: must be under allowed roots

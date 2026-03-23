@@ -12,13 +12,13 @@ import type {
 import type { MobileReviewFileDetail } from '@/lib/mobile/types';
 
 const execFileAsync = promisify(execFile);
-const REVIEW_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+const REVIEW_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const REVIEW_REPO_SLUG = process.env.CORTEX_IDE_REVIEW_REPO || 'hurttlocker/cortex-ide';
 const FALLBACK_ACTIVE_ISSUE_NUMBER = Number.parseInt(process.env.CORTEX_IDE_ACTIVE_REVIEW_ISSUE || '18', 10);
 const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
 
 function shortenPath(path: string) {
-  return path.replace('/Users/marquisehurtt/', '~/');
+  return path.replace(require('os').homedir() + '/', '~/');
 }
 
 // Cache changed files list for 30 seconds to avoid re-running git commands per file click

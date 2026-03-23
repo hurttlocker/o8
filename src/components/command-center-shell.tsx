@@ -754,7 +754,7 @@ export function CommandCenterShell({
   const browserError = realtimeState.browserError ?? initialBrowserError ?? null;
   const [selectedId, setSelectedId] = useState(() => pickPreferredAgent(initialSnapshot));
   const [refreshError, setRefreshError] = useState<string | null>(null);
-  const [launchCwd, setLaunchCwd] = useState(initialReview?.repoPath ?? '/Users/marquisehurtt/clawd/repos/cortex-ide');
+  const [launchCwd, setLaunchCwd] = useState(initialReview?.repoPath ?? process.cwd());
   const [launchPrompt, setLaunchPrompt] = useState('');
   const [launchState, setLaunchState] = useState<'idle' | 'launching'>('idle');
   const [launchNote, setLaunchNote] = useState<string | null>(null);
@@ -804,7 +804,7 @@ export function CommandCenterShell({
 
   useEffect(() => {
     if (review?.repoPath && !launchPrompt) {
-      setLaunchCwd((current) => (current === '/Users/marquisehurtt/clawd/repos/cortex-ide' ? review.repoPath ?? current : current));
+      setLaunchCwd((current) => (current === process.cwd() ? review.repoPath ?? current : current));
     }
   }, [review?.repoPath, launchPrompt]);
 
@@ -1335,7 +1335,7 @@ export function CommandCenterShell({
                         className="operator-textarea"
                         value={launchCwd}
                         onChange={(event) => setLaunchCwd(event.target.value)}
-                        placeholder="/Users/marquisehurtt/clawd/repos/cortex-ide"
+                        placeholder="~/projects/my-app"
                       />
                       <textarea
                         className="operator-textarea"

@@ -17,7 +17,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'repoPath and branch required' }, { status: 400 });
     }
 
-    const cwd = repoPath.replace(/^~/, process.env.HOME || '/Users/marquisehurtt');
+    const cwd = repoPath.replace(/^~/, process.env.HOME || require('os').homedir());
 
     // Check for uncommitted changes
     let dirty = false;

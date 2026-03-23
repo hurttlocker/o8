@@ -94,7 +94,7 @@ Optional `.env.local` values:
 - `WS_TOKEN` — required for authenticated worktree/WebSocket routes when used
 
 ```bash
-cd /Users/marquisehurtt/clawd/repos/cortex-ide
+cd cortex-ide
 npm install
 npm run dev
 ```
@@ -107,7 +107,7 @@ Routes:
 ## Native desktop shell (current dev path)
 
 ```bash
-cd /Users/marquisehurtt/clawd/repos/cortex-ide
+cd cortex-ide
 npm install
 npm run desktop:dev
 ```
