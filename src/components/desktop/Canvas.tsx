@@ -843,6 +843,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
     ]).then(([contentData, diffData]) => {
       if (!cancelled) {
         setContent(contentData.content ?? null);
+        setEditContent(contentData.content ?? '');
         setDiff(diffData.diff ?? '');
         setHasDiff(diffData.hasDiff ?? false);
         if (diffData.hasDiff) setActiveView('diff');
@@ -1015,7 +1016,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
           <MonacoEditor
             height="100%"
             language={getMonacoLanguage(filePath)}
-            value={editing ? editContent : content}
+            value={editContent}
             theme="cortex-frost"
             onChange={(value) => {
               if (editing && value !== undefined) {
