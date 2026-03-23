@@ -49,8 +49,22 @@ import { IssueCreator } from './IssueCreator';
 import { GraphExplorer3D } from './GraphExplorer3D';
 import dynamic from 'next/dynamic';
 
+// Polyfill ClipboardItem BEFORE Monaco loads (it references it at module scope)
+if (typeof window !== 'undefined' && typeof globalThis.ClipboardItem === 'undefined') {
+  (globalThis as Record<string, unknown>).ClipboardItem = class ClipboardItem {
+    readonly types: string[];
+    constructor(private items: Record<string, Blob | Promise<Blob>>) { this.types = Object.keys(items); }
+    getType(type: string) { return Promise.resolve(this.items[type]); }
+  };
+}
+if (typeof window !== 'undefined' && !window.navigator?.clipboard) {
+  Object.defineProperty(window.navigator, 'clipboard', {
+    value: { writeText: async () => {}, readText: async () => '', write: async () => {}, read: async () => [] },
+    configurable: true,
+  });
+}
+
 const MonacoEditor = dynamic(() => import('@monaco-editor/react').then(async (mod) => {
-  // Use local monaco-editor instead of CDN to avoid cancel/network errors
   const { loader } = mod;
   const monaco = await import('monaco-editor');
   loader.config({ monaco });
@@ -983,8 +997,8 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                provider: 'anthropic',
-                model: 'claude-haiku-3-5-20241022',
+                provider: 'google',
+                model: 'gemini-2.5-flash',
                 messages: [{
                   role: 'user',
                   content: `Complete this ${language} code. Output ONLY the completion text (the code that comes right after the cursor). No explanations. Max 3 lines.\n\n<code_before_cursor>\n${prefix}\n</code_before_cursor>\n<code_after_cursor>\n${suffix}\n</code_after_cursor>`,
@@ -1066,8 +1080,8 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          provider: 'anthropic',
-          model: 'claude-sonnet-4-20250514',
+          provider: 'google',
+          model: 'gemini-2.5-flash',
           messages: [{
             role: 'user',
             content: `Edit this ${language} code. ${inlineEditPrompt.trim()}\n\nReturn ONLY the edited code, no explanations or markdown fences.\n\n${selectedText}`,
@@ -1307,28 +1321,6 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
             }}
             onMount={handleEditorMount}
             beforeMount={(monaco) => {
-              // Polyfill clipboard + ClipboardItem for Tauri webview
-              if (typeof window !== 'undefined') {
-                if (!window.navigator.clipboard) {
-                  Object.defineProperty(window.navigator, 'clipboard', {
-                    value: {
-                      writeText: async (text: string) => { void text; },
-                      readText: async () => '',
-                      write: async () => {},
-                      read: async () => [],
-                    },
-                    writable: false,
-                    configurable: true,
-                  });
-                }
-                if (typeof globalThis.ClipboardItem === 'undefined') {
-                  (globalThis as Record<string, unknown>).ClipboardItem = class ClipboardItem {
-                    constructor(public items: Record<string, Blob>) {}
-                    get types() { return Object.keys(this.items); }
-                    getType(type: string) { return Promise.resolve(this.items[type]); }
-                  };
-                }
-              }
               // Dark theme matching our zinc UI
               monaco.editor.defineTheme('cortex-dark', {
                 base: 'vs-dark',
