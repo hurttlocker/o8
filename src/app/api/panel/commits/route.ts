@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { execSync } from 'child_process';
+import { NextRequest, NextResponse } from 'next/server';
+import { ghExec, detectRepo } from '@/lib/github';
 import { getCached, setCached } from '@/lib/github/cache';
 
 export async function GET(req: NextRequest) {
