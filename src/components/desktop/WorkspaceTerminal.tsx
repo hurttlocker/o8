@@ -58,7 +58,7 @@ export interface TerminalTabHandle {
   clearDetectedPreview: (port: number) => void;
 }
 
-interface TerminalWorkspaceProps {
+interface WorkspaceTerminalProps {
   sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
@@ -1990,8 +1990,8 @@ const TabBar = memo(function TabBar({
 
 /* ── Main Component ── */
 
-export const TerminalWorkspace = forwardRef<TerminalTabHandle, TerminalWorkspaceProps>(
-  function TerminalWorkspace(
+export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminalProps>(
+  function WorkspaceTerminal(
     {
       sendTerminalCreate,
       sendTerminalAttach,

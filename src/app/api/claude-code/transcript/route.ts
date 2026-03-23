@@ -54,7 +54,7 @@ function extractText(content: string | ContentBlock[] | undefined): string {
  * GET /api/claude-code/transcript?sessionKey=claude-code:live-PID&limit=50
  *
  * Reads the Claude Code session JSONL and returns transcript entries
- * compatible with the DesktopChat transcript format.
+ * compatible with the AgentPanelChat transcript format.
  */
 export async function GET(req: NextRequest) {
   const sessionKey = req.nextUrl.searchParams.get('sessionKey') ?? '';
