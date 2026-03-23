@@ -948,112 +948,11 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
         setTimeout(() => inlineEditInputRef.current?.focus(), 50);
       });
 
-      // Tab autocomplete — inline ghost text suggestions
-      const language = getMonacoLanguage(filePath);
-      const disposable = monaco.languages.registerInlineCompletionsProvider(language, {
-        provideInlineCompletions: async (model, position, _context, token) => {
-          // Cancel any in-flight request
-          tabCompleteAbortRef.current?.abort();
-
-          // Get surrounding context (up to 60 lines before, 10 after)
-          const lineCount = model.getLineCount();
-          const startLine = Math.max(1, position.lineNumber - 60);
-          const endLine = Math.min(lineCount, position.lineNumber + 10);
-          const prefix = model.getValueInRange({
-            startLineNumber: startLine,
-            startColumn: 1,
-            endLineNumber: position.lineNumber,
-            endColumn: position.column,
-          });
-          const suffix = model.getValueInRange({
-            startLineNumber: position.lineNumber,
-            startColumn: position.column,
-            endLineNumber: endLine,
-            endColumn: model.getLineMaxColumn(endLine),
-          });
-
-          // Don't autocomplete on empty lines or very short context
-          const currentLine = model.getLineContent(position.lineNumber).trim();
-          if (prefix.trim().length < 10 && !currentLine) {
-            return { items: [] };
-          }
-
-          const abortController = new AbortController();
-          tabCompleteAbortRef.current = abortController;
-
-          // Debounce: wait 400ms after typing stops
-          await new Promise<void>((resolve, reject) => {
-            if (tabCompleteTimerRef.current) clearTimeout(tabCompleteTimerRef.current);
-            tabCompleteTimerRef.current = setTimeout(resolve, 400);
-            token.onCancellationRequested(() => { abortController.abort(); resolve(); });
-          });
-
-          if (token.isCancellationRequested || abortController.signal.aborted) return { items: [] };
-
-          try {
-            const res = await fetch('/api/v2/proxy/llm', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                provider: 'google',
-                model: 'gemini-2.5-flash',
-                messages: [{
-                  role: 'user',
-                  content: `Complete this ${language} code. Output ONLY the completion text (the code that comes right after the cursor). No explanations. Max 3 lines.\n\n<code_before_cursor>\n${prefix}\n</code_before_cursor>\n<code_after_cursor>\n${suffix}\n</code_after_cursor>`,
-                }],
-                max_tokens: 200,
-              }),
-              signal: abortController.signal,
-            });
-
-            if (!res.ok || token.isCancellationRequested) return { items: [] };
-
-            // Parse SSE stream to get the completion text
-            const reader = res.body?.getReader();
-            if (!reader) return { items: [] };
-            const decoder = new TextDecoder();
-            let completion = '';
-
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              const chunk = decoder.decode(value);
-              for (const line of chunk.split('\n')) {
-                if (!line.startsWith('data: ') || line === 'data: [DONE]') continue;
-                try {
-                  const event = JSON.parse(line.slice(6)) as Record<string, unknown>;
-                  if (event.type === 'content' || event.type === 'delta') {
-                    completion += (event.text ?? '') as string;
-                  }
-                } catch { /* skip */ }
-              }
-            }
-
-            if (!completion.trim() || token.isCancellationRequested) return { items: [] };
-
-            // Strip markdown fences if included
-            let text = completion;
-            if (text.startsWith('```')) text = text.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
-
-            return {
-              items: [{
-                insertText: text,
-                range: {
-                  startLineNumber: position.lineNumber,
-                  startColumn: position.column,
-                  endLineNumber: position.lineNumber,
-                  endColumn: position.column,
-                },
-              }],
-            };
-          } catch {
-            return { items: [] };
-          }
-        },
-        disposeInlineCompletions: () => { /* no-op */ },
-      });
-
-      tabCompleteDisposableRef.current = disposable;
+      // Tab autocomplete — disabled for now (Monaco internal lifecycle crash)
+      // Will re-enable with a debounced widget approach instead of inline provider
+      /* eslint-disable @typescript-eslint/no-unused-vars -- kept for re-enable */
+      // Tab autocomplete disabled — Monaco internal lifecycle crash on cancel
+      // Will re-implement with widget-based approach
     });
   }, [handleSave, filePath]);
 
@@ -1429,7 +1328,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
               quickSuggestions: false,
               suggestOnTriggerCharacters: false,
               parameterHints: { enabled: false },
-              inlineSuggest: { enabled: true },
+              inlineSuggest: { enabled: false }, // re-enable when tab autocomplete is stabilized
               renderWhitespace: 'selection',
               guides: { bracketPairs: true, indentation: true },
             }}
