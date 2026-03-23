@@ -14,6 +14,9 @@ import { sql } from 'drizzle-orm';
 export async function GET() {
   try {
     const db = getDb();
+    if (!db) {
+      return NextResponse.json({ status: 'unavailable', message: 'Database module not loaded' });
+    }
 
     // Count rows in each table
     const counts = {
