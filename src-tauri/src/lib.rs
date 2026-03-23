@@ -154,7 +154,7 @@ pub fn run() {
 
             // ── Start bundled Next.js server ──
             let resource_dir = app.path().resource_dir().expect("failed to resolve resource dir");
-            let server_dir = resource_dir.join("out");
+            let server_dir = resource_dir.join("server");
             let server_js = server_dir.join("server.js");
 
             if server_js.exists() {

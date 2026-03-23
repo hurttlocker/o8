@@ -18,7 +18,7 @@ import { Readable } from 'stream';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
-const outDir = join(root, 'out', 'node');
+const outDir = join(root, 'out', 'server', 'node');
 
 // Node.js LTS version to bundle
 const NODE_VERSION = '22.14.0';
