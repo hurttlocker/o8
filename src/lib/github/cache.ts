@@ -13,11 +13,11 @@ interface CacheEntry<T> {
 
 const cache = new Map<string, CacheEntry<unknown>>();
 
-/** Default TTL: 30 seconds for fast-changing data (issues, PRs) */
-const DEFAULT_TTL_MS = 30_000;
+/** Default TTL: 5 minutes — repo data rarely changes faster than this */
+const DEFAULT_TTL_MS = 5 * 60 * 1000;
 
-/** Longer TTL for slow-changing data (CI, deployments) */
-export const SLOW_TTL_MS = 60_000;
+/** Longer TTL for slow-changing data (CI runs, deployments) */
+export const SLOW_TTL_MS = 10 * 60 * 1000;
 
 /**
  * Get a cached response, or return null if stale/missing.
