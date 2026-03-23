@@ -107,7 +107,7 @@ if (existsSync(pub)) {
 }
 
 // ── Copy native modules + create Turbopack hash symlinks ──
-const nativeModules = ['better-sqlite3'];
+const nativeModules = ['better-sqlite3', 'node-pty'];
 for (const mod of nativeModules) {
   const src = join(root, 'node_modules', mod);
   const dest = join(server, 'node_modules', mod);
