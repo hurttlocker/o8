@@ -4,6 +4,10 @@ Development activity for Rainwater IDE.
 
 ---
 
+## 2026-03-23
+
+- `0d8a736` feat: Inline AI widget — frosted glass card at cursor line
+
 ## 2026-03-22
 
 - `e9d167a` fix: Inline edit prompt
