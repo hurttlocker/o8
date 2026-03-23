@@ -863,11 +863,33 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
     return () => window.removeEventListener('keydown', handler);
   }, [editing, handleSave]);
 
+  // Handle Tab key in editor (insert 2 spaces instead of focus change)
+  const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const ta = e.currentTarget;
+      const start = ta.selectionStart;
+      const end = ta.selectionEnd;
+      const val = ta.value;
+      const indent = '  ';
+      const next = val.substring(0, start) + indent + val.substring(end);
+      setEditContent(next);
+      setDirty(next !== content);
+      // Restore cursor position after React re-render
+      requestAnimationFrame(() => {
+        ta.selectionStart = ta.selectionEnd = start + indent.length;
+      });
+    }
+  }, [content]);
+
   if (loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading file…</div>;
   }
 
   const fileName = filePath.split('/').pop() ?? filePath;
+  const lineCount = (editing ? editContent : content ?? '').split('\n').length;
+  const fileSize = new Blob([content ?? '']).size;
+  const fileSizeLabel = fileSize > 1024 ? `${(fileSize / 1024).toFixed(1)} KB` : `${fileSize} B`;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -889,6 +911,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
           {fileName}{dirty ? ' •' : ''}
         </span>
         <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>{filePath}</span>
+        <span style={{ fontSize: 10, color: 'var(--t-text-muted)', opacity: 0.7 }}>{lineCount} lines · {fileSizeLabel}</span>
 
         {saveNote ? (
           <span style={{
@@ -975,28 +998,54 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
       {/* Body */}
       <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
         {editing ? (
-          <textarea
-            ref={textareaRef}
-            value={editContent}
-            onChange={(e) => { setEditContent(e.target.value); setDirty(e.target.value !== content); }}
-            spellCheck={false}
-            style={{
-              flex: 1,
-              margin: 0,
-              padding: '14px 16px',
-              fontSize: '0.8rem',
-              lineHeight: 1.65,
-              fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
-              whiteSpace: 'pre',
-              wordBreak: 'break-word',
-              color: 'var(--t-text-strong)',
-              background: 'var(--t-bg)',
-              border: 'none',
-              outline: 'none',
-              resize: 'none',
-              tabSize: 2,
-            }}
-          />
+          <div style={{ flex: 1, display: 'flex', position: 'relative' }}>
+            {/* Line numbers gutter */}
+            <div
+              aria-hidden
+              style={{
+                width: 48,
+                flexShrink: 0,
+                padding: '14px 0',
+                textAlign: 'right',
+                fontSize: '0.8rem',
+                lineHeight: 1.65,
+                fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
+                color: 'var(--t-text-muted)',
+                opacity: 0.4,
+                userSelect: 'none',
+                borderRight: '1px solid var(--t-divider-subtle)',
+                background: 'var(--t-panel)',
+                overflowY: 'hidden',
+              }}
+            >
+              {editContent.split('\n').map((_, i) => (
+                <div key={i} style={{ paddingRight: 8 }}>{i + 1}</div>
+              ))}
+            </div>
+            <textarea
+              ref={textareaRef}
+              value={editContent}
+              onChange={(e) => { setEditContent(e.target.value); setDirty(e.target.value !== content); }}
+              onKeyDown={handleEditorKeyDown}
+              spellCheck={false}
+              style={{
+                flex: 1,
+                margin: 0,
+                padding: '14px 16px',
+                fontSize: '0.8rem',
+                lineHeight: 1.65,
+                fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
+                whiteSpace: 'pre',
+                wordBreak: 'break-word',
+                color: 'var(--t-text-strong)',
+                background: 'var(--t-bg)',
+                border: 'none',
+                outline: 'none',
+                resize: 'none',
+                tabSize: 2,
+              }}
+            />
+          </div>
         ) : activeView === 'diff' && hasDiff ? (
           <pre style={{
             margin: 0,
@@ -1014,25 +1063,52 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
             {renderDiffLines(diff)}
           </pre>
         ) : content !== null ? (
-          <pre
-            style={{
-              margin: 0,
-              paddingTop: 14,
-              paddingRight: 16,
-              paddingBottom: 14,
-              paddingLeft: 16,
-              fontSize: '0.8rem',
-              lineHeight: 1.65,
-              fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-              color: 'var(--t-text-strong)',
-              cursor: 'text',
-            }}
+          <div
+            style={{ display: 'flex', flex: 1, cursor: 'text' }}
             onDoubleClick={() => { setEditing(true); setEditContent(content ?? ''); }}
           >
-            {content}
-          </pre>
+            {/* Line numbers gutter (read-only) */}
+            <div
+              aria-hidden
+              style={{
+                width: 48,
+                flexShrink: 0,
+                padding: '14px 0',
+                textAlign: 'right',
+                fontSize: '0.8rem',
+                lineHeight: 1.65,
+                fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
+                color: 'var(--t-text-muted)',
+                opacity: 0.3,
+                userSelect: 'none',
+                borderRight: '1px solid var(--t-divider-subtle)',
+              }}
+            >
+              {content.split('\n').map((_, i) => (
+                <div key={i} style={{ paddingRight: 8 }}>{i + 1}</div>
+              ))}
+            </div>
+            <pre
+              style={{
+                margin: 0,
+                flex: 1,
+                paddingTop: 14,
+                paddingRight: 16,
+                paddingBottom: 14,
+                paddingLeft: 12,
+                fontSize: '0.8rem',
+                lineHeight: 1.65,
+                fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                color: 'var(--t-text-strong)',
+              }}
+            >
+              {content.split('\n').map((line, i) => (
+                <div key={i}>{highlightLine(line, getFileLanguage(filePath))}</div>
+              ))}
+            </pre>
+          </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>
             Could not load file content
@@ -3395,6 +3471,125 @@ function DiffHunk({ hunkHeader, lines, startIndex, defaultExpanded }: {
       })}
     </div>
   );
+}
+
+// ── Lightweight syntax highlighting ──
+
+function getFileLanguage(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() ?? '';
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+    json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'toml',
+    md: 'markdown', mdx: 'markdown',
+    env: 'env', sh: 'shell', bash: 'shell', zsh: 'shell',
+    css: 'css', scss: 'css', html: 'html', xml: 'html',
+    py: 'python', rs: 'rust', go: 'go', rb: 'ruby',
+    sql: 'sql', graphql: 'graphql', gql: 'graphql',
+    dockerfile: 'docker', gitignore: 'config',
+  };
+  const name = path.split('/').pop()?.toLowerCase() ?? '';
+  if (name.startsWith('.env')) return 'env';
+  if (name === 'dockerfile') return 'docker';
+  if (name === '.gitignore' || name === '.dockerignore') return 'config';
+  return map[ext] || 'text';
+}
+
+const syntaxColors = {
+  keyword: '#c678dd',    // purple
+  string: '#98c379',     // green
+  number: '#d19a66',     // orange
+  comment: '#5c6370',    // gray
+  property: '#e06c75',   // red
+  type: '#e5c07b',       // yellow
+  punctuation: '#abb2bf', // light gray
+  env_key: '#e06c75',    // red
+  env_value: '#98c379',  // green
+  env_equals: '#56b6c2', // cyan
+};
+
+function highlightLine(line: string, lang: string): React.ReactNode {
+  // ENV files: KEY=VALUE
+  if (lang === 'env') {
+    if (line.startsWith('#')) return <span style={{ color: syntaxColors.comment }}>{line}</span>;
+    const eqIdx = line.indexOf('=');
+    if (eqIdx > 0) {
+      return (
+        <>
+          <span style={{ color: syntaxColors.env_key }}>{line.slice(0, eqIdx)}</span>
+          <span style={{ color: syntaxColors.env_equals }}>=</span>
+          <span style={{ color: syntaxColors.env_value }}>{line.slice(eqIdx + 1)}</span>
+        </>
+      );
+    }
+    return line;
+  }
+
+  // JSON: basic key/value coloring
+  if (lang === 'json') {
+    return line.replace(/^(\s*)("(?:[^"\\]|\\.)*")(\s*:\s*)?/g, (_match, indent, key, colon) => {
+      // This is a simplified approach — return the raw line with spans
+      void indent; void key; void colon;
+      return _match;
+    }) ? <span dangerouslySetInnerHTML={{ __html:
+      line
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/("(?:[^"\\]|\\.)*")(\s*:)/g, `<span style="color:${syntaxColors.property}">$1</span>$2`)
+        .replace(/:(\s*"(?:[^"\\]|\\.)*")/g, `:<span style="color:${syntaxColors.string}">$1</span>`)
+        .replace(/:(\s*(?:\d+\.?\d*|true|false|null))/g, `:<span style="color:${syntaxColors.number}">$1</span>`)
+    }} /> : <>{line}</>;
+  }
+
+  // TypeScript/JavaScript: basic keyword highlighting
+  if (lang === 'typescript' || lang === 'javascript') {
+    if (line.trimStart().startsWith('//') || line.trimStart().startsWith('*') || line.trimStart().startsWith('/*')) {
+      return <span style={{ color: syntaxColors.comment }}>{line}</span>;
+    }
+    return <span dangerouslySetInnerHTML={{ __html:
+      line
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/\b(import|export|from|const|let|var|function|return|if|else|for|while|class|interface|type|extends|implements|async|await|new|throw|try|catch|finally|typeof|instanceof|in|of|default|switch|case|break|continue|void|null|undefined|true|false)\b/g,
+          `<span style="color:${syntaxColors.keyword}">$1</span>`)
+        .replace(/('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`(?:[^`\\]|\\.)*`)/g,
+          `<span style="color:${syntaxColors.string}">$1</span>`)
+        .replace(/\b(\d+\.?\d*)\b/g, `<span style="color:${syntaxColors.number}">$1</span>`)
+    }} />;
+  }
+
+  // YAML: key: value
+  if (lang === 'yaml') {
+    if (line.trimStart().startsWith('#')) return <span style={{ color: syntaxColors.comment }}>{line}</span>;
+    const colonIdx = line.indexOf(':');
+    if (colonIdx > 0 && !line.trimStart().startsWith('-')) {
+      return (
+        <>
+          <span style={{ color: syntaxColors.property }}>{line.slice(0, colonIdx)}</span>
+          <span style={{ color: syntaxColors.punctuation }}>:</span>
+          <span style={{ color: syntaxColors.string }}>{line.slice(colonIdx + 1)}</span>
+        </>
+      );
+    }
+    return line;
+  }
+
+  // Shell: comments and basic
+  if (lang === 'shell') {
+    if (line.trimStart().startsWith('#')) return <span style={{ color: syntaxColors.comment }}>{line}</span>;
+    return line;
+  }
+
+  // Config files (.gitignore etc)
+  if (lang === 'config') {
+    if (line.trimStart().startsWith('#')) return <span style={{ color: syntaxColors.comment }}>{line}</span>;
+    return line;
+  }
+
+  // Markdown: headers
+  if (lang === 'markdown') {
+    if (line.startsWith('#')) return <span style={{ color: syntaxColors.keyword, fontWeight: 600 }}>{line}</span>;
+    return line;
+  }
+
+  return line;
 }
 
 function renderDiffLines(text: string) {
