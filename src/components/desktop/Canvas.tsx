@@ -826,7 +826,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
   const [dirty, setDirty] = useState(false);
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<'content' | 'diff'>('content');
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(true); // Always editable — click in, start typing
   const editorRef = useRef<unknown>(null);
 
   useEffect(() => {
@@ -950,48 +950,16 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
           }}>{saveNote}</span>
         ) : null}
 
+        {/* Save indicator — shows inline when dirty */}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
-          {editing ? (
-            <>
-              <button
-                type="button"
-                onClick={() => void handleSave()}
-                disabled={!dirty || saving}
-                style={{
-                  padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(34,197,94,0.3)',
-                  background: dirty ? 'rgba(34,197,94,0.08)' : 'transparent',
-                  color: dirty ? '#16a34a' : 'var(--t-text-muted)',
-                  fontSize: 11, fontWeight: 600, cursor: dirty ? 'pointer' : 'default',
-                }}
-              >
-                {saving ? 'Saving…' : '⌘S Save'}
-              </button>
-              <button
-                type="button"
-                onClick={() => { setEditing(false); setEditContent(content ?? ''); setDirty(false); }}
-                style={{
-                  padding: '4px 10px', borderRadius: 6, border: 'none',
-                  background: 'transparent', color: 'var(--t-text-muted)',
-                  fontSize: 11, fontWeight: 500, cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => { setEditing(true); setEditContent(content ?? ''); }}
-              style={{
-                padding: '4px 10px', borderRadius: 6,
-                border: '1px solid rgba(37,99,235,0.2)',
-                background: 'rgba(37,99,235,0.06)',
-                color: '#2563eb', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-              }}
-            >
-              Edit
-            </button>
-          )}
+          {dirty ? (
+            <span style={{
+              fontSize: 11, fontWeight: 500,
+              color: saving ? 'var(--t-text-muted)' : '#b45309',
+            }}>
+              {saving ? 'Saving…' : '⌘S to save'}
+            </span>
+          ) : null}
         </div>
 
         {hasDiff && !editing ? (
@@ -1091,63 +1059,65 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
                 },
               });
 
-              // Icy frost light theme — very light blue with crisp syntax
+              // Cortex Frost — icy blue background, warm earthy syntax
+              // Inspired by Anthropic Claude (warm beige tones) + Apple (icy clean)
               monaco.editor.defineTheme('cortex-frost', {
                 base: 'vs',
                 inherit: true,
                 rules: [
-                  { token: 'comment', foreground: '94a3b8', fontStyle: 'italic' },
-                  { token: 'keyword', foreground: '7c3aed' },
-                  { token: 'string', foreground: '059669' },
-                  { token: 'number', foreground: 'ea580c' },
-                  { token: 'type', foreground: '2563eb' },
-                  { token: 'variable', foreground: 'dc2626' },
-                  { token: 'function', foreground: '2563eb' },
-                  { token: 'delimiter', foreground: '64748b' },
-                  { token: 'tag', foreground: 'dc2626' },
-                  { token: 'attribute.name', foreground: 'ea580c' },
-                  { token: 'attribute.value', foreground: '059669' },
+                  { token: 'comment', foreground: 'a1998e', fontStyle: 'italic' },  // warm stone
+                  { token: 'keyword', foreground: 'b45309' },   // amber-700 — warm gold
+                  { token: 'string', foreground: '16a34a' },    // green-600 — natural leaf
+                  { token: 'number', foreground: 'c2410c' },    // orange-700 — terracotta
+                  { token: 'type', foreground: '92400e' },      // amber-800 — deep honey
+                  { token: 'variable', foreground: 'b91c1c' },  // red-700 — warm brick
+                  { token: 'function', foreground: '9a3412' },  // orange-800 — burnt sienna
+                  { token: 'delimiter', foreground: '78716c' },  // stone-500
+                  { token: 'tag', foreground: 'b91c1c' },       // warm brick
+                  { token: 'attribute.name', foreground: 'b45309' },  // amber
+                  { token: 'attribute.value', foreground: '16a34a' }, // leaf
+                  { token: 'operator', foreground: '78716c' },  // stone
                 ],
                 colors: {
-                  'editor.background': '#f0f7ff',
-                  'editor.foreground': '#1e293b',
-                  'editor.lineHighlightBackground': '#e0edff',
-                  'editor.selectionBackground': '#bfdbfe',
-                  'editorLineNumber.foreground': '#94a3b8',
-                  'editorLineNumber.activeForeground': '#475569',
-                  'editor.inactiveSelectionBackground': '#dbeafe80',
-                  'editorCursor.foreground': '#2563eb',
+                  'editor.background': '#f0f7ff',              // icy blue
+                  'editor.foreground': '#292524',              // stone-800 — warm near-black
+                  'editor.lineHighlightBackground': '#e8f1fc', // softer blue highlight
+                  'editor.selectionBackground': '#c7d8f0',     // muted blue selection
+                  'editorLineNumber.foreground': '#a8a29e',    // stone-400
+                  'editorLineNumber.activeForeground': '#78716c', // stone-500
+                  'editor.inactiveSelectionBackground': '#dbeafe60',
+                  'editorCursor.foreground': '#b45309',        // amber cursor
                   'editorGutter.background': '#f0f7ff',
-                  'editorWidget.background': '#f8fafc',
-                  'editorWidget.border': '#cbd5e1',
-                  'input.background': '#ffffff',
-                  'input.border': '#cbd5e1',
-                  'focusBorder': '#2563eb',
+                  'editorWidget.background': '#faf8f5',        // warm white for popups
+                  'editorWidget.border': '#d6d3d1',            // stone-300
+                  'input.background': '#faf8f5',
+                  'input.border': '#d6d3d1',
+                  'focusBorder': '#b45309',                    // amber focus
                   'minimap.background': '#f0f7ff',
-                  'scrollbarSlider.background': '#94a3b840',
-                  'scrollbarSlider.hoverBackground': '#64748b40',
-                  'editorBracketMatch.background': '#dbeafe',
-                  'editorBracketMatch.border': '#93c5fd',
+                  'scrollbarSlider.background': '#a8a29e40',
+                  'scrollbarSlider.hoverBackground': '#78716c40',
+                  'editorBracketMatch.background': '#fef3c7',  // amber-100
+                  'editorBracketMatch.border': '#fbbf24',      // amber-400
                 },
               });
             }}
             options={{
-              readOnly: !editing,
+              readOnly: false,
               fontSize: 13,
               fontFamily: '"SF Mono", "Menlo", "Monaco", "Cascadia Code", ui-monospace, monospace',
               lineHeight: 20,
               tabSize: 2,
               insertSpaces: true,
-              minimap: { enabled: editing, maxColumn: 80 },
+              minimap: { enabled: true, maxColumn: 80, scale: 2 },
               scrollBeyondLastLine: false,
               wordWrap: 'on',
               lineNumbers: 'on',
               glyphMargin: false,
               folding: true,
               bracketPairColorization: { enabled: true },
-              renderLineHighlight: editing ? 'line' : 'none',
-              occurrencesHighlight: editing ? 'singleFile' : 'off',
-              matchBrackets: editing ? 'always' : 'never',
+              renderLineHighlight: 'line',
+              occurrencesHighlight: 'singleFile',
+              matchBrackets: 'always',
               smoothScrolling: true,
               cursorBlinking: 'smooth',
               cursorSmoothCaretAnimation: 'on',
@@ -1160,10 +1130,12 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
                 horizontalScrollbarSize: 8,
                 useShadows: false,
               },
-              contextmenu: editing,
+              contextmenu: true,
               quickSuggestions: false,
               suggestOnTriggerCharacters: false,
               parameterHints: { enabled: false },
+              renderWhitespace: 'selection',
+              guides: { bracketPairs: true, indentation: true },
             }}
           />
         ) : (
