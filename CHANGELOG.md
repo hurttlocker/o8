@@ -6,7 +6,6 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-23
 
-- `169f2bc` feat: Layout overhaul
 - `a22ec01` feat: Drop bundled Node (prerequisite) + bundle Memory binary
 - `3dbbdb8` fix: Rainwater-facts parallel queries + Node 25 for native module compat
 - `afc4cdb` fix: Production audit — graceful degradation for all endpoints
