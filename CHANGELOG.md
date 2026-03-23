@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-22
 
+- `96449e5` feat: File editor v2
 - `62e95ae` fix: Files/Deploy section collapsible — chevron toggle + maxHeight cap
 - `beaa4c7` layout: Move Files/Deploy tabs above Activity section
 - `dca2823` feat: Inline file editor with Cmd+S save + files default to Changes view
