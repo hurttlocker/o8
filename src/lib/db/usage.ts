@@ -50,7 +50,7 @@ function currentBillingPeriod(): string {
  * Log a single API request's token usage.
  */
 export function logUsage(input: LogUsageInput): void {
-  getDb().insert(usageLogs).values({
+  getDb()!.insert(usageLogs).values({
     id: randomUUID(),
     userId: input.userId,
     model: input.model,
@@ -72,7 +72,7 @@ export function logUsage(input: LogUsageInput): void {
  */
 export function getCurrentPeriodCost(userId: string): number {
   const period = currentBillingPeriod();
-  const result = getDb()
+  const result = getDb()!
     .select({ total: sql<number>`COALESCE(SUM(cost_usd), 0)` })
     .from(usageLogs)
     .where(and(
@@ -96,7 +96,7 @@ export function getRemainingBudget(userId: string, budgetUsd: number | null): nu
  * Get full usage summary for a user in a given period.
  */
 export function getUsageSummary(userId: string, period?: string): UsageSummary {
-  const db = getDb();
+  const db = getDb()!;
   const targetPeriod = period ?? currentBillingPeriod();
 
   const logs = db
@@ -159,7 +159,7 @@ export function getUsageSummary(userId: string, period?: string): UsageSummary {
  * Get recent usage logs (for the usage dashboard feed).
  */
 export function getRecentUsage(userId: string, limit = 50) {
-  return getDb()
+  const _d = getDb(); if (!_d) return []; return _d
     .select()
     .from(usageLogs)
     .where(eq(usageLogs.userId, userId))

@@ -29,7 +29,8 @@ if (!existsSync(DATA_DIR)) {
 // ── Singleton connection ──
 
 let _db: BetterSQLite3Database<typeof schema> | null = null;
-let _sqlite: InstanceType<typeof import('better-sqlite3').default> | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _sqlite: any = null;
 
 /**
  * Get the database instance. Creates it on first call.

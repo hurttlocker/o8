@@ -577,7 +577,9 @@ export async function GET(request: Request) {
     let llmMessages = 0;
 
     try {
-      const rows = getDb().select().from(usageLogs).all();
+      const db = getDb();
+      if (!db) return NextResponse.json({});
+      const rows = db.select().from(usageLogs).all();
       for (const row of rows) {
         if (row.agentName !== 'llm-chat') continue;
         if (row.requestType && row.requestType !== 'chat') continue;

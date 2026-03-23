@@ -58,7 +58,7 @@ const PLAN_BUDGETS: Record<Plan, number | null> = {
  * Create a new user. Returns the created user.
  */
 export function createUser(input: CreateUserInput) {
-  const db = getDb();
+  const db = getDb()!;
   const id = randomUUID();
   const plan = input.plan ?? 'free';
 
@@ -80,28 +80,28 @@ export function createUser(input: CreateUserInput) {
  * Find user by ID.
  */
 export function findUserById(id: string) {
-  return getDb().select().from(users).where(eq(users.id, id)).get() ?? null;
+  return getDb()!.select().from(users).where(eq(users.id, id)).get() ?? null;
 }
 
 /**
  * Find user by GitHub ID. Used during OAuth callback.
  */
 export function findUserByGithubId(githubId: number) {
-  return getDb().select().from(users).where(eq(users.githubId, githubId)).get() ?? null;
+  return getDb()!.select().from(users).where(eq(users.githubId, githubId)).get() ?? null;
 }
 
 /**
  * Find user by Discord ID.
  */
 export function findUserByDiscordId(discordId: string) {
-  return getDb().select().from(users).where(eq(users.discordId, discordId)).get() ?? null;
+  return getDb()!.select().from(users).where(eq(users.discordId, discordId)).get() ?? null;
 }
 
 /**
  * Find user by email.
  */
 export function findUserByEmail(email: string) {
-  return getDb().select().from(users).where(eq(users.email, email)).get() ?? null;
+  return getDb()!.select().from(users).where(eq(users.email, email)).get() ?? null;
 }
 
 /**
@@ -133,7 +133,7 @@ export function updateUser(id: string, fields: Partial<{
   tokenBudgetUsd: number | null;
   lastLoginAt: string | null;
 }>) {
-  const db = getDb();
+  const db = getDb()!;
   const updates: Record<string, unknown> = { ...fields, updatedAt: new Date().toISOString() };
 
   // If plan changed, update budget
@@ -149,7 +149,7 @@ export function updateUser(id: string, fields: Partial<{
  * Get full user profile with subscription + API key status.
  */
 export function getUserProfile(id: string): UserProfile | null {
-  const db = getDb();
+  const db = getDb()!;
   const user = findUserById(id);
   if (!user) return null;
 
@@ -187,7 +187,7 @@ export function getUserProfile(id: string): UserProfile | null {
  * Delete a user and all associated data (cascades).
  */
 export function deleteUser(id: string): boolean {
-  const result = getDb().delete(users).where(eq(users.id, id)).run();
+  const result = getDb()!.delete(users).where(eq(users.id, id)).run();
   return result.changes > 0;
 }
 
@@ -195,6 +195,6 @@ export function deleteUser(id: string): boolean {
  * Count total users (for admin/analytics).
  */
 export function countUsers(): number {
-  const result = getDb().select().from(users).all();
+  const result = getDb()!.select().from(users).all();
   return result.length;
 }
