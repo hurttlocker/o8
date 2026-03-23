@@ -158,15 +158,18 @@ pub fn run() {
             let server_js = server_dir.join("server.js");
 
             if server_js.exists() {
-                // Check if Node.js is available
-                let node_check = Command::new("node").arg("--version").output();
-                if node_check.is_err() || !node_check.as_ref().unwrap().status.success() {
-                    log::error!("Node.js not found — install from https://nodejs.org");
-                    // The loader HTML will show a timeout message
-                }
+                // Prefer bundled Node, fall back to system Node
+                let bundled_node = server_dir.join("node").join("node");
+                let node_bin = if bundled_node.exists() {
+                    log::info!("Using bundled Node.js at {:?}", bundled_node);
+                    bundled_node.to_string_lossy().to_string()
+                } else {
+                    log::info!("No bundled Node — using system node");
+                    "node".to_string()
+                };
 
-                log::info!("Starting bundled server from {:?}", server_dir);
-                match Command::new("node")
+                log::info!("Starting server: {} {:?}", node_bin, server_js);
+                match Command::new(&node_bin)
                     .arg(&server_js)
                     .current_dir(&server_dir)
                     .env("PORT", "3001")
@@ -180,7 +183,7 @@ pub fn run() {
                         log::info!("Next.js server started (pid: {})", child.id());
                     }
                     Err(e) => {
-                        log::error!("Failed to start Next.js server: {}", e);
+                        log::error!("Failed to start server: {}. Is Node.js installed?", e);
                     }
                 }
             } else {
