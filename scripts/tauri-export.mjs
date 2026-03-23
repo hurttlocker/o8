@@ -117,25 +117,25 @@ for (const mod of nativeModules) {
   }
 }
 
-// Turbopack renames externals with hash suffixes — create symlinks
-// Scan the server chunks for hashed module names and symlink them
-const { readdirSync, symlinkSync } = await import('fs');
-const chunksDir = join(server, '.next', 'server', 'chunks');
-if (existsSync(chunksDir)) {
-  const chunkFiles = execSync(`grep -rl "better-sqlite3-" "${chunksDir}" 2>/dev/null || true`, { encoding: 'utf-8' });
-  const hashMatch = chunkFiles.match(/better-sqlite3-[a-f0-9]+/);
-  if (hashMatch) {
-    const hashedName = hashMatch[0];
-    const symlinkPath = join(server, 'node_modules', hashedName);
-    if (!existsSync(symlinkPath)) {
-      symlinkSync('better-sqlite3', symlinkPath);
-      console.log(`📦 Symlinked ${hashedName} → better-sqlite3`);
-    }
-  }
-}
-
 // ── Compile WS server ──
 const { execSync } = await import('child_process');
+const { symlinkSync } = await import('fs');
+
+// Turbopack renames externals with hash suffixes — create symlinks
+const chunksDir = join(server, '.next', 'server', 'chunks');
+if (existsSync(chunksDir)) {
+  try {
+    const grepResult = execSync(`grep -roh "better-sqlite3-[a-f0-9]*" "${chunksDir}" 2>/dev/null | head -1`, { encoding: 'utf-8' }).trim();
+    if (grepResult) {
+      const aliasPath = join(server, 'node_modules', grepResult);
+      if (!existsSync(aliasPath)) {
+        // Copy instead of symlink — Tauri bundler doesn't follow symlinks
+        cpSync(join(server, 'node_modules', 'better-sqlite3'), aliasPath, { recursive: true });
+        console.log(`📦 Copied better-sqlite3 → ${grepResult} (Turbopack alias)`);
+      }
+    }
+  } catch (e) { console.warn('⚠️  Symlink step:', e.message); }
+}
 try {
   execSync(
     `npx esbuild src/ws-server.ts --bundle --platform=node --format=esm --outfile=out/server/ws-server.mjs --external:node-pty --banner:js='import { createRequire } from "module"; const require = createRequire(import.meta.url);'`,

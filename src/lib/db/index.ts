@@ -11,7 +11,6 @@
 
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { existsSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,14 +29,15 @@ if (!existsSync(DATA_DIR)) {
 // ── Singleton connection ──
 
 let _db: BetterSQLite3Database<typeof schema> | null = null;
-let _sqlite: Database.Database | null = null;
+let _sqlite: InstanceType<typeof import('better-sqlite3').default> | null = null;
 
 /**
  * Get the database instance. Creates it on first call.
- * Tables are auto-created if they don't exist.
+ * Returns null if better-sqlite3 is not available (production bundle issue).
  */
-export function getDb(): BetterSQLite3Database<typeof schema> {
+export function getDb(): BetterSQLite3Database<typeof schema> | null {
   if (_db) return _db;
+  if (!Database || !drizzle) return null;
 
   _sqlite = new Database(DB_PATH);
 
@@ -48,7 +48,7 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
   _sqlite.pragma('cache_size = -20000');     // 20MB page cache
   _sqlite.pragma('foreign_keys = ON');       // Enforce FK constraints
 
-  _db = drizzle(_sqlite, { schema });
+  _db = drizzle!(_sqlite, { schema });
 
   // Auto-create tables
   ensureTables(_sqlite);
@@ -61,7 +61,7 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
  * Get the raw SQLite instance (for transactions, pragmas, etc).
  */
 export function getSqlite(): Database.Database {
-  if (!_sqlite) getDb(); // ensure initialized
+  if (!_sqlite) getDb();
   return _sqlite!;
 }
 
