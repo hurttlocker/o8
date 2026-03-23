@@ -47,6 +47,12 @@ import {
 import { MarkdownBody } from './MarkdownBody';
 import { IssueCreator } from './IssueCreator';
 import { GraphExplorer3D } from './GraphExplorer3D';
+import dynamic from 'next/dynamic';
+
+const MonacoEditor = dynamic(() => import('@monaco-editor/react').then(mod => mod.default), {
+  ssr: false,
+  loading: () => <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading editor…</div>,
+});
 import {
   formatCiCheckBatchInjection,
   formatCiCheckInjection,
@@ -787,6 +793,29 @@ interface TranscriptMessage {
 
 // ── File Viewer ──
 
+// Monaco language mapping from file extension
+function getMonacoLanguage(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase() ?? '';
+  const name = path.split('/').pop()?.toLowerCase() ?? '';
+  if (name.startsWith('.env')) return 'ini';
+  if (name === 'dockerfile') return 'dockerfile';
+  if (name === '.gitignore' || name === '.dockerignore') return 'plaintext';
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
+    json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'toml',
+    md: 'markdown', mdx: 'markdown', html: 'html', xml: 'xml',
+    css: 'css', scss: 'scss', less: 'less',
+    py: 'python', rs: 'rust', go: 'go', rb: 'ruby', java: 'java',
+    c: 'c', cpp: 'cpp', h: 'c', hpp: 'cpp',
+    sh: 'shell', bash: 'shell', zsh: 'shell',
+    sql: 'sql', graphql: 'graphql', gql: 'graphql',
+    swift: 'swift', kt: 'kotlin',
+    r: 'r', lua: 'lua', php: 'php', perl: 'perl',
+    ini: 'ini', conf: 'ini', cfg: 'ini',
+  };
+  return map[ext] || 'plaintext';
+}
+
 const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath: string; workspace?: string }) {
   const [content, setContent] = useState<string | null>(null);
   const [editContent, setEditContent] = useState<string>('');
@@ -798,7 +827,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<'content' | 'diff'>('content');
   const [editing, setEditing] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<unknown>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -863,24 +892,23 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
     return () => window.removeEventListener('keydown', handler);
   }, [editing, handleSave]);
 
-  // Handle Tab key in editor (insert 2 spaces instead of focus change)
-  const handleEditorKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      const ta = e.currentTarget;
-      const start = ta.selectionStart;
-      const end = ta.selectionEnd;
-      const val = ta.value;
-      const indent = '  ';
-      const next = val.substring(0, start) + indent + val.substring(end);
-      setEditContent(next);
-      setDirty(next !== content);
-      // Restore cursor position after React re-render
-      requestAnimationFrame(() => {
-        ta.selectionStart = ta.selectionEnd = start + indent.length;
+  // Monaco editor mount handler
+  const handleEditorMount = useCallback((editor: unknown) => {
+    editorRef.current = editor;
+    // Add Cmd+S keybinding directly on the Monaco instance
+    const monacoEditor = editor as { addCommand?: (keybinding: number, handler: () => void) => void; KeyMod?: Record<string, number>; KeyCode?: Record<string, number> };
+    if (monacoEditor.addCommand) {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      import('@monaco-editor/react').then(({ loader }) => {
+        loader.init().then((monaco) => {
+          (editor as { addCommand: (k: number, h: () => void) => void }).addCommand(
+            monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
+            () => { void handleSave(); }
+          );
+        });
       });
     }
-  }, [content]);
+  }, [handleSave]);
 
   if (loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading file…</div>;
@@ -996,119 +1024,108 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
       </div>
 
       {/* Body */}
-      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-        {editing ? (
-          <div style={{ flex: 1, display: 'flex', position: 'relative' }}>
-            {/* Line numbers gutter */}
-            <div
-              aria-hidden
-              style={{
-                width: 48,
-                flexShrink: 0,
-                padding: '14px 0',
-                textAlign: 'right',
-                fontSize: '0.8rem',
-                lineHeight: 1.65,
-                fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
-                color: 'var(--t-text-muted)',
-                opacity: 0.4,
-                userSelect: 'none',
-                borderRight: '1px solid var(--t-divider-subtle)',
-                background: 'var(--t-panel)',
-                overflowY: 'hidden',
-              }}
-            >
-              {editContent.split('\n').map((_, i) => (
-                <div key={i} style={{ paddingRight: 8 }}>{i + 1}</div>
-              ))}
-            </div>
-            <textarea
-              ref={textareaRef}
-              value={editContent}
-              onChange={(e) => { setEditContent(e.target.value); setDirty(e.target.value !== content); }}
-              onKeyDown={handleEditorKeyDown}
-              spellCheck={false}
-              style={{
-                flex: 1,
-                margin: 0,
-                padding: '14px 16px',
-                fontSize: '0.8rem',
-                lineHeight: 1.65,
-                fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
-                whiteSpace: 'pre',
-                wordBreak: 'break-word',
-                color: 'var(--t-text-strong)',
-                background: 'var(--t-bg)',
-                border: 'none',
-                outline: 'none',
-                resize: 'none',
-                tabSize: 2,
-              }}
-            />
-          </div>
-        ) : activeView === 'diff' && hasDiff ? (
-          <pre style={{
-            margin: 0,
-            paddingTop: 14,
-            paddingRight: 16,
-            paddingBottom: 14,
-            paddingLeft: 16,
-            fontSize: '0.8rem',
-            lineHeight: 1.65,
-            fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            color: 'var(--t-text-strong)',
-          }}>
-            {renderDiffLines(diff)}
-          </pre>
-        ) : content !== null ? (
-          <div
-            style={{ display: 'flex', flex: 1, cursor: 'text' }}
-            onDoubleClick={() => { setEditing(true); setEditContent(content ?? ''); }}
-          >
-            {/* Line numbers gutter (read-only) */}
-            <div
-              aria-hidden
-              style={{
-                width: 48,
-                flexShrink: 0,
-                padding: '14px 0',
-                textAlign: 'right',
-                fontSize: '0.8rem',
-                lineHeight: 1.65,
-                fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
-                color: 'var(--t-text-muted)',
-                opacity: 0.3,
-                userSelect: 'none',
-                borderRight: '1px solid var(--t-divider-subtle)',
-              }}
-            >
-              {content.split('\n').map((_, i) => (
-                <div key={i} style={{ paddingRight: 8 }}>{i + 1}</div>
-              ))}
-            </div>
-            <pre
-              style={{
-                margin: 0,
-                flex: 1,
-                paddingTop: 14,
-                paddingRight: 16,
-                paddingBottom: 14,
-                paddingLeft: 12,
-                fontSize: '0.8rem',
-                lineHeight: 1.65,
-                fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                color: 'var(--t-text-strong)',
-              }}
-            >
-              {content.split('\n').map((line, i) => (
-                <div key={i}>{highlightLine(line, getFileLanguage(filePath))}</div>
-              ))}
+      <div style={{ flex: 1, overflow: 'hidden' }}>
+        {activeView === 'diff' && hasDiff && !editing ? (
+          <div style={{ height: '100%', overflowY: 'auto' }}>
+            <pre style={{
+              margin: 0,
+              paddingTop: 14,
+              paddingRight: 16,
+              paddingBottom: 14,
+              paddingLeft: 16,
+              fontSize: '0.8rem',
+              lineHeight: 1.65,
+              fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              color: 'var(--t-text-strong)',
+            }}>
+              {renderDiffLines(diff)}
             </pre>
           </div>
+        ) : content !== null ? (
+          <MonacoEditor
+            height="100%"
+            language={getMonacoLanguage(filePath)}
+            value={editing ? editContent : content}
+            theme="cortex-dark"
+            onChange={(value) => {
+              if (editing && value !== undefined) {
+                setEditContent(value);
+                setDirty(value !== content);
+              }
+            }}
+            onMount={handleEditorMount}
+            beforeMount={(monaco) => {
+              // Define custom dark theme matching our UI
+              monaco.editor.defineTheme('cortex-dark', {
+                base: 'vs-dark',
+                inherit: true,
+                rules: [
+                  { token: 'comment', foreground: '5c6370', fontStyle: 'italic' },
+                  { token: 'keyword', foreground: 'c678dd' },
+                  { token: 'string', foreground: '98c379' },
+                  { token: 'number', foreground: 'd19a66' },
+                  { token: 'type', foreground: 'e5c07b' },
+                  { token: 'variable', foreground: 'e06c75' },
+                  { token: 'function', foreground: '61afef' },
+                ],
+                colors: {
+                  'editor.background': '#09090b',
+                  'editor.foreground': '#e4e4e7',
+                  'editor.lineHighlightBackground': '#18181b',
+                  'editor.selectionBackground': '#2563eb33',
+                  'editorLineNumber.foreground': '#3f3f46',
+                  'editorLineNumber.activeForeground': '#71717a',
+                  'editor.inactiveSelectionBackground': '#2563eb1a',
+                  'editorCursor.foreground': '#2563eb',
+                  'editorGutter.background': '#09090b',
+                  'editorWidget.background': '#18181b',
+                  'editorWidget.border': '#27272a',
+                  'input.background': '#18181b',
+                  'input.border': '#27272a',
+                  'focusBorder': '#2563eb',
+                  'minimap.background': '#09090b',
+                  'scrollbarSlider.background': '#27272a80',
+                  'scrollbarSlider.hoverBackground': '#3f3f4680',
+                },
+              });
+            }}
+            options={{
+              readOnly: !editing,
+              fontSize: 13,
+              fontFamily: '"SF Mono", "Menlo", "Monaco", "Cascadia Code", ui-monospace, monospace',
+              lineHeight: 20,
+              tabSize: 2,
+              insertSpaces: true,
+              minimap: { enabled: editing, maxColumn: 80 },
+              scrollBeyondLastLine: false,
+              wordWrap: 'on',
+              lineNumbers: 'on',
+              glyphMargin: false,
+              folding: true,
+              bracketPairColorization: { enabled: true },
+              renderLineHighlight: editing ? 'line' : 'none',
+              occurrencesHighlight: editing ? 'singleFile' : 'off',
+              matchBrackets: editing ? 'always' : 'never',
+              smoothScrolling: true,
+              cursorBlinking: 'smooth',
+              cursorSmoothCaretAnimation: 'on',
+              padding: { top: 12, bottom: 12 },
+              overviewRulerLanes: 0,
+              hideCursorInOverviewRuler: true,
+              overviewRulerBorder: false,
+              scrollbar: {
+                verticalScrollbarSize: 8,
+                horizontalScrollbarSize: 8,
+                useShadows: false,
+              },
+              contextmenu: editing,
+              quickSuggestions: false,
+              suggestOnTriggerCharacters: false,
+              parameterHints: { enabled: false },
+            }}
+          />
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>
             Could not load file content
