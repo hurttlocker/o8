@@ -49,7 +49,13 @@ import { IssueCreator } from './IssueCreator';
 import { GraphExplorer3D } from './GraphExplorer3D';
 import dynamic from 'next/dynamic';
 
-const MonacoEditor = dynamic(() => import('@monaco-editor/react').then(mod => mod.default), {
+const MonacoEditor = dynamic(() => import('@monaco-editor/react').then(async (mod) => {
+  // Use local monaco-editor instead of CDN to avoid cancel/network errors
+  const { loader } = mod;
+  const monaco = await import('monaco-editor');
+  loader.config({ monaco });
+  return mod.default;
+}), {
   ssr: false,
   loading: () => <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading editor…</div>,
 });
@@ -1060,45 +1066,46 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
                 },
               });
 
-              // Cortex Frost — icy blue background, warm earthy syntax
-              // Inspired by Anthropic Claude (warm beige tones) + Apple (icy clean)
+              // Cortex Frost — icy blue background, pastel blue/violet syntax
+              // Apple-clean with soft pastels that pop on the ice
               monaco.editor.defineTheme('cortex-frost', {
                 base: 'vs',
                 inherit: true,
                 rules: [
-                  { token: 'comment', foreground: 'a1998e', fontStyle: 'italic' },  // warm stone
-                  { token: 'keyword', foreground: 'b45309' },   // amber-700 — warm gold
-                  { token: 'string', foreground: '16a34a' },    // green-600 — natural leaf
-                  { token: 'number', foreground: 'c2410c' },    // orange-700 — terracotta
-                  { token: 'type', foreground: '92400e' },      // amber-800 — deep honey
-                  { token: 'variable', foreground: 'b91c1c' },  // red-700 — warm brick
-                  { token: 'function', foreground: '9a3412' },  // orange-800 — burnt sienna
-                  { token: 'delimiter', foreground: '78716c' },  // stone-500
-                  { token: 'tag', foreground: 'b91c1c' },       // warm brick
-                  { token: 'attribute.name', foreground: 'b45309' },  // amber
-                  { token: 'attribute.value', foreground: '16a34a' }, // leaf
-                  { token: 'operator', foreground: '78716c' },  // stone
+                  { token: 'comment', foreground: '94a3b8', fontStyle: 'italic' },  // slate-400
+                  { token: 'keyword', foreground: '6366f1' },   // indigo-500 — soft violet
+                  { token: 'string', foreground: '0d9488' },    // teal-600 — ocean green
+                  { token: 'number', foreground: 'e879a0' },    // pastel rose
+                  { token: 'type', foreground: '8b5cf6' },      // violet-500
+                  { token: 'variable', foreground: '0284c7' },  // sky-600
+                  { token: 'function', foreground: '4f46e5' },  // indigo-600
+                  { token: 'delimiter', foreground: '94a3b8' }, // slate-400
+                  { token: 'tag', foreground: 'e879a0' },       // pastel rose
+                  { token: 'attribute.name', foreground: '8b5cf6' },  // violet
+                  { token: 'attribute.value', foreground: '0d9488' }, // teal
+                  { token: 'operator', foreground: '64748b' },  // slate-500
+                  { token: 'regexp', foreground: 'e879a0' },    // pastel rose
                 ],
                 colors: {
                   'editor.background': '#f0f7ff',              // icy blue
-                  'editor.foreground': '#292524',              // stone-800 — warm near-black
-                  'editor.lineHighlightBackground': '#e8f1fc', // softer blue highlight
-                  'editor.selectionBackground': '#c7d8f0',     // muted blue selection
-                  'editorLineNumber.foreground': '#a8a29e',    // stone-400
-                  'editorLineNumber.activeForeground': '#78716c', // stone-500
-                  'editor.inactiveSelectionBackground': '#dbeafe60',
-                  'editorCursor.foreground': '#b45309',        // amber cursor
+                  'editor.foreground': '#1e293b',              // slate-800
+                  'editor.lineHighlightBackground': '#e8f1fc', // soft blue line
+                  'editor.selectionBackground': '#c7d2fe',     // indigo-200
+                  'editorLineNumber.foreground': '#94a3b8',    // slate-400
+                  'editorLineNumber.activeForeground': '#475569', // slate-600
+                  'editor.inactiveSelectionBackground': '#c7d2fe60',
+                  'editorCursor.foreground': '#4f46e5',        // indigo cursor
                   'editorGutter.background': '#f0f7ff',
-                  'editorWidget.background': '#faf8f5',        // warm white for popups
-                  'editorWidget.border': '#d6d3d1',            // stone-300
-                  'input.background': '#faf8f5',
-                  'input.border': '#d6d3d1',
-                  'focusBorder': '#b45309',                    // amber focus
+                  'editorWidget.background': '#f8fafc',        // slate-50
+                  'editorWidget.border': '#cbd5e1',            // slate-300
+                  'input.background': '#ffffff',
+                  'input.border': '#cbd5e1',
+                  'focusBorder': '#6366f1',                    // indigo focus
                   'minimap.background': '#f0f7ff',
-                  'scrollbarSlider.background': '#a8a29e40',
-                  'scrollbarSlider.hoverBackground': '#78716c40',
-                  'editorBracketMatch.background': '#fef3c7',  // amber-100
-                  'editorBracketMatch.border': '#fbbf24',      // amber-400
+                  'scrollbarSlider.background': '#94a3b840',
+                  'scrollbarSlider.hoverBackground': '#64748b40',
+                  'editorBracketMatch.background': '#e0e7ff',  // indigo-100
+                  'editorBracketMatch.border': '#a5b4fc',      // indigo-300
                 },
               });
             }}
