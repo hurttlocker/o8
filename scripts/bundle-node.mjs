@@ -20,8 +20,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 const outDir = join(root, 'out', 'server', 'node');
 
-// Node.js LTS version to bundle
-const NODE_VERSION = '22.14.0';
+// Node.js version to bundle — MUST match the version native modules were compiled against
+// Check: node -p process.versions.modules → 141 = Node 25.x
+const NODE_VERSION = '25.5.0';
 
 // Parse args
 const args = process.argv.slice(2);
