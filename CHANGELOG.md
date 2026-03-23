@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-23
 
+- `5bb7f32` feat: WS server bundled in native shell app — terminals + chat work in production
 - `19a0500` fix: Security hardening
 - `36cade2` feat: GitHub App authentication — 5,450 req/hr, auto-refreshing tokens
 - `1111c6e` feat: GitHub PAT support + config lives in ~/.Rainwater-ide/
