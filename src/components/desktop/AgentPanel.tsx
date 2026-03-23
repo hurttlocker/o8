@@ -3561,6 +3561,235 @@ export const AgentPanel = memo(function AgentPanel({
         WebkitAppRegion: 'drag' as unknown as string,
       } as React.CSSProperties} />
 
+      {/* ── Tab Bar ── */}
+      <div style={{
+        display: 'flex',
+        gap: 2,
+        paddingTop: 8,
+        paddingRight: 14,
+        paddingBottom: 0,
+        paddingLeft: 14,
+        flexShrink: 0,
+      }}>
+        {tabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeTab === tab.id;
+          const isFiles = tab.id === 'files';
+          return (
+            <div key={tab.id} style={{ flex: 1, position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (isFiles && isActive) {
+                    // Already on Files — toggle dropdown
+                    setFileDropdownOpen(v => !v);
+                  } else {
+                    setActiveTab(tab.id);
+                    if (!isFiles) setFileDropdownOpen(false);
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 5,
+                  paddingTop: 8,
+                  paddingRight: 0,
+                  paddingBottom: 8,
+                  paddingLeft: 0,
+                  border: 'none',
+                  borderBottom: isActive ? '2px solid #ef4444' : '2px solid transparent',
+                  background: 'transparent',
+                  color: isActive ? 'var(--t-text)' : 'var(--t-text-muted)',
+                  fontSize: 12,
+                  fontWeight: isActive ? 600 : 400,
+                  cursor: 'pointer',
+                  transition: 'all 150ms ease',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}
+              >
+                <Icon size={14} strokeWidth={isActive ? 2 : 1.5} />
+                {isFiles ? (fileFilter === 'changes' ? 'Changes' : tab.label) : tab.label}
+                {isFiles && isActive ? (
+                  <ChevronDown size={10} strokeWidth={2} style={{
+                    transition: 'transform 150ms ease',
+                    transform: fileDropdownOpen ? 'rotate(180deg)' : 'none',
+                    opacity: 0.5,
+                  }} />
+                ) : null}
+              </button>
+              {/* Files filter dropdown */}
+              {isFiles && fileDropdownOpen ? (
+                <>
+                  {/* Backdrop */}
+                  <div
+                    onClick={() => setFileDropdownOpen(false)}
+                    style={{ position: 'fixed', inset: 0, zIndex: 99 }}
+                  />
+                  {/* Glass popover */}
+                  <div style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    marginTop: 4,
+                    minWidth: 150,
+                    borderRadius: 10,
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    background: 'rgba(255,255,255,0.78)',
+                    backdropFilter: 'blur(24px) saturate(1.8)',
+                    WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
+                    boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.06)',
+                    overflow: 'hidden',
+                    zIndex: 100,
+                  }}>
+                    {[
+                      { id: 'all' as const, label: 'All Files' },
+                      { id: 'changes' as const, label: `Changes${changedFiles.size > 0 ? ` (${changedFiles.size})` : ''}` },
+                    ].map((opt) => (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => {
+                          setFileFilter(opt.id);
+                          setFileDropdownOpen(false);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          width: '100%',
+                          padding: '8px 12px',
+                          border: 'none',
+                          background: fileFilter === opt.id ? 'rgba(239,68,68,0.06)' : 'transparent',
+                          color: fileFilter === opt.id ? '#dc2626' : 'var(--t-text)',
+                          fontSize: 12,
+                          fontWeight: fileFilter === opt.id ? 600 : 400,
+                          cursor: 'pointer',
+                          fontFamily: '-apple-system, system-ui, sans-serif',
+                          textAlign: 'left',
+                        }}
+                        onMouseEnter={(e) => {
+                          if (fileFilter !== opt.id) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.03)';
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = fileFilter === opt.id ? 'rgba(239,68,68,0.06)' : 'transparent';
+                        }}
+                      >
+                        <span style={{
+                          width: 14,
+                          textAlign: 'center',
+                          fontSize: 12,
+                          color: fileFilter === opt.id ? '#dc2626' : 'transparent',
+                        }}>✓</span>
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ── Scoped Context Label ── */}
+      {expandedGroup ? (
+        <div style={{
+          paddingTop: 6,
+          paddingRight: 14,
+          paddingBottom: 4,
+          paddingLeft: 14,
+          fontSize: 11,
+          color: 'var(--t-text-muted)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          borderTop: '1px solid var(--t-divider-subtle)',
+          marginTop: 4,
+        }}>
+          <span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+            {workspaceGroups.find(g => g.workspace === expandedGroup)?.displayName ?? 'All'}
+          </span>
+          {activeRepo ? (
+            <>
+              <span>·</span>
+              <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{activeRepo}</span>
+              <button
+                type="button"
+                onClick={() => onOpenGitLog?.(activeWorkspace ?? undefined)}
+                title="View git history"
+                style={{
+                  marginLeft: 'auto',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  paddingTop: 2,
+                  paddingRight: 6,
+                  paddingBottom: 2,
+                  paddingLeft: 6,
+                  borderRadius: 4,
+                  border: '1px solid var(--t-btn-secondary-border)',
+                  background: 'var(--t-panel-hover)',
+                  fontSize: 10,
+                  color: 'var(--t-text-secondary)',
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontWeight: 500,
+                }}
+              >
+                <GitCommit size={11} strokeWidth={2} />
+                Log
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenCI?.(activeRepo)}
+                title="View CI / GitHub Actions"
+                style={{
+                  marginLeft: 'auto',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  paddingTop: 2,
+                  paddingRight: 6,
+                  paddingBottom: 2,
+                  paddingLeft: 6,
+                  borderRadius: 4,
+                  border: '1px solid var(--t-btn-secondary-border)',
+                  background: 'var(--t-panel-hover)',
+                  fontSize: 10,
+                  color: 'var(--t-text-secondary)',
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  fontWeight: 500,
+                }}
+              >
+                <PlayCircle size={11} strokeWidth={2} />
+                CI
+              </button>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+
+      {/* ── Content Area ── */}
+      <div style={{
+        flex: 1,
+        overflowY: 'auto',
+        borderTop: expandedGroup ? 'none' : '1px solid var(--t-divider-subtle)',
+        marginTop: expandedGroup ? 0 : 4,
+      }}>
+        {activeTab === 'files' ? (
+          <FileTree
+            tree={fileFilter === 'changes' ? filterTreeToChanged(fileTree, changedFiles) : fileTree}
+            changedFiles={changedFiles}
+            onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)}
+          />
+        ) : null}
+        {activeTab === 'deploy' ? <DeployList onOpenDeploy={onOpenDeploy} /> : null}
+
+      </div>
+
       {/* ── Activity Dropdown (above agents, collapsed by default) ── */}
       <div style={{ flexShrink: 0, paddingLeft: 14, paddingRight: 14, paddingTop: 4, paddingBottom: 0 }}>
         <button
@@ -3844,235 +4073,6 @@ export const AgentPanel = memo(function AgentPanel({
         onSelectSession={onSelectSession}
         onSelectPR={onSelectPR}
       />
-
-      {/* ── Tab Bar ── */}
-      <div style={{
-        display: 'flex',
-        gap: 2,
-        paddingTop: 8,
-        paddingRight: 14,
-        paddingBottom: 0,
-        paddingLeft: 14,
-        flexShrink: 0,
-      }}>
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          const isFiles = tab.id === 'files';
-          return (
-            <div key={tab.id} style={{ flex: 1, position: 'relative' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  if (isFiles && isActive) {
-                    // Already on Files — toggle dropdown
-                    setFileDropdownOpen(v => !v);
-                  } else {
-                    setActiveTab(tab.id);
-                    if (!isFiles) setFileDropdownOpen(false);
-                  }
-                }}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 5,
-                  paddingTop: 8,
-                  paddingRight: 0,
-                  paddingBottom: 8,
-                  paddingLeft: 0,
-                  border: 'none',
-                  borderBottom: isActive ? '2px solid #ef4444' : '2px solid transparent',
-                  background: 'transparent',
-                  color: isActive ? 'var(--t-text)' : 'var(--t-text-muted)',
-                  fontSize: 12,
-                  fontWeight: isActive ? 600 : 400,
-                  cursor: 'pointer',
-                  transition: 'all 150ms ease',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                }}
-              >
-                <Icon size={14} strokeWidth={isActive ? 2 : 1.5} />
-                {isFiles ? (fileFilter === 'changes' ? 'Changes' : tab.label) : tab.label}
-                {isFiles && isActive ? (
-                  <ChevronDown size={10} strokeWidth={2} style={{
-                    transition: 'transform 150ms ease',
-                    transform: fileDropdownOpen ? 'rotate(180deg)' : 'none',
-                    opacity: 0.5,
-                  }} />
-                ) : null}
-              </button>
-              {/* Files filter dropdown */}
-              {isFiles && fileDropdownOpen ? (
-                <>
-                  {/* Backdrop */}
-                  <div
-                    onClick={() => setFileDropdownOpen(false)}
-                    style={{ position: 'fixed', inset: 0, zIndex: 99 }}
-                  />
-                  {/* Glass popover */}
-                  <div style={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: 0,
-                    marginTop: 4,
-                    minWidth: 150,
-                    borderRadius: 10,
-                    border: '1px solid rgba(255,255,255,0.18)',
-                    background: 'rgba(255,255,255,0.78)',
-                    backdropFilter: 'blur(24px) saturate(1.8)',
-                    WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.06)',
-                    overflow: 'hidden',
-                    zIndex: 100,
-                  }}>
-                    {[
-                      { id: 'all' as const, label: 'All Files' },
-                      { id: 'changes' as const, label: `Changes${changedFiles.size > 0 ? ` (${changedFiles.size})` : ''}` },
-                    ].map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => {
-                          setFileFilter(opt.id);
-                          setFileDropdownOpen(false);
-                        }}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8,
-                          width: '100%',
-                          padding: '8px 12px',
-                          border: 'none',
-                          background: fileFilter === opt.id ? 'rgba(239,68,68,0.06)' : 'transparent',
-                          color: fileFilter === opt.id ? '#dc2626' : 'var(--t-text)',
-                          fontSize: 12,
-                          fontWeight: fileFilter === opt.id ? 600 : 400,
-                          cursor: 'pointer',
-                          fontFamily: '-apple-system, system-ui, sans-serif',
-                          textAlign: 'left',
-                        }}
-                        onMouseEnter={(e) => {
-                          if (fileFilter !== opt.id) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.03)';
-                        }}
-                        onMouseLeave={(e) => {
-                          (e.currentTarget as HTMLButtonElement).style.background = fileFilter === opt.id ? 'rgba(239,68,68,0.06)' : 'transparent';
-                        }}
-                      >
-                        <span style={{
-                          width: 14,
-                          textAlign: 'center',
-                          fontSize: 12,
-                          color: fileFilter === opt.id ? '#dc2626' : 'transparent',
-                        }}>✓</span>
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* ── Scoped Context Label ── */}
-      {expandedGroup ? (
-        <div style={{
-          paddingTop: 6,
-          paddingRight: 14,
-          paddingBottom: 4,
-          paddingLeft: 14,
-          fontSize: 11,
-          color: 'var(--t-text-muted)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          borderTop: '1px solid var(--t-divider-subtle)',
-          marginTop: 4,
-        }}>
-          <span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>
-            {workspaceGroups.find(g => g.workspace === expandedGroup)?.displayName ?? 'All'}
-          </span>
-          {activeRepo ? (
-            <>
-              <span>·</span>
-              <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{activeRepo}</span>
-              <button
-                type="button"
-                onClick={() => onOpenGitLog?.(activeWorkspace ?? undefined)}
-                title="View git history"
-                style={{
-                  marginLeft: 'auto',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 3,
-                  paddingTop: 2,
-                  paddingRight: 6,
-                  paddingBottom: 2,
-                  paddingLeft: 6,
-                  borderRadius: 4,
-                  border: '1px solid var(--t-btn-secondary-border)',
-                  background: 'var(--t-panel-hover)',
-                  fontSize: 10,
-                  color: 'var(--t-text-secondary)',
-                  cursor: 'pointer',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                  fontWeight: 500,
-                }}
-              >
-                <GitCommit size={11} strokeWidth={2} />
-                Log
-              </button>
-              <button
-                type="button"
-                onClick={() => onOpenCI?.(activeRepo)}
-                title="View CI / GitHub Actions"
-                style={{
-                  marginLeft: 'auto',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 3,
-                  paddingTop: 2,
-                  paddingRight: 6,
-                  paddingBottom: 2,
-                  paddingLeft: 6,
-                  borderRadius: 4,
-                  border: '1px solid var(--t-btn-secondary-border)',
-                  background: 'var(--t-panel-hover)',
-                  fontSize: 10,
-                  color: 'var(--t-text-secondary)',
-                  cursor: 'pointer',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                  fontWeight: 500,
-                }}
-              >
-                <PlayCircle size={11} strokeWidth={2} />
-                CI
-              </button>
-            </>
-          ) : null}
-        </div>
-      ) : null}
-
-      {/* ── Content Area ── */}
-      <div style={{
-        flex: 1,
-        overflowY: 'auto',
-        borderTop: expandedGroup ? 'none' : '1px solid var(--t-divider-subtle)',
-        marginTop: expandedGroup ? 0 : 4,
-      }}>
-        {activeTab === 'files' ? (
-          <FileTree
-            tree={fileFilter === 'changes' ? filterTreeToChanged(fileTree, changedFiles) : fileTree}
-            changedFiles={changedFiles}
-            onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)}
-          />
-        ) : null}
-        {activeTab === 'deploy' ? <DeployList onOpenDeploy={onOpenDeploy} /> : null}
-
-      </div>
 
       {/* ── Issue Detail Modal ── */}
       {selectedIssue !== null ? (
