@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-23
 
+- `7a6cda8` fix: Add out/ to .gitignore — build artifact, not source
 - `a9233f8` feat: Standalone server bundling for native shell — real distributable app
 - `41f1f02` feat: Inline edit
 - `658912f` feat: 'Environments' filter in files dropdown — quick access to .env files
