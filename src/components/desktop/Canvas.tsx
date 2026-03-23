@@ -1307,18 +1307,27 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
             }}
             onMount={handleEditorMount}
             beforeMount={(monaco) => {
-              // Polyfill clipboard for environments where it's unavailable (Tauri webview)
-              if (typeof window !== 'undefined' && window.navigator && !window.navigator.clipboard) {
-                Object.defineProperty(window.navigator, 'clipboard', {
-                  value: {
-                    writeText: async (text: string) => { void text; },
-                    readText: async () => '',
-                    write: async () => {},
-                    read: async () => [],
-                  },
-                  writable: false,
-                  configurable: true,
-                });
+              // Polyfill clipboard + ClipboardItem for Tauri webview
+              if (typeof window !== 'undefined') {
+                if (!window.navigator.clipboard) {
+                  Object.defineProperty(window.navigator, 'clipboard', {
+                    value: {
+                      writeText: async (text: string) => { void text; },
+                      readText: async () => '',
+                      write: async () => {},
+                      read: async () => [],
+                    },
+                    writable: false,
+                    configurable: true,
+                  });
+                }
+                if (typeof globalThis.ClipboardItem === 'undefined') {
+                  (globalThis as Record<string, unknown>).ClipboardItem = class ClipboardItem {
+                    constructor(public items: Record<string, Blob>) {}
+                    get types() { return Object.keys(this.items); }
+                    getType(type: string) { return Promise.resolve(this.items[type]); }
+                  };
+                }
               }
               // Dark theme matching our zinc UI
               monaco.editor.defineTheme('cortex-dark', {
