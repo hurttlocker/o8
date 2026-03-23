@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-22
 
+- `cb9e201` fix: Security hardening
 - `85ee219` fix: Suppress 'cancelled' error from tab autocomplete debounce
 - `4186c93` fix: ClipboardItem polyfill before Monaco import + switch to AI provider Flash
 - `5badea6` fix: Polyfill ClipboardItem for Monaco in native shell webview
