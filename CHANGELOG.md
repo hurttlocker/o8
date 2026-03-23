@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-22
 
+- `4186c93` fix: ClipboardItem polyfill before Monaco import + switch to AI provider Flash
 - `5badea6` fix: Polyfill ClipboardItem for Monaco in native shell webview
 - `9d8c4d7` fix: Polyfill navigator.clipboard for Monaco in native shell webview
 - `39ee35a` feat: Tab autocomplete — AI ghost text suggestions while typing
