@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-22
 
+- `dca2823` feat: Inline file editor with Cmd+S save + files default to Changes view
 - `dfd8bb6` fix: Production hardening
 - `6ae12fd` chore(branding): add Rainwater logo concept PNGs (force past .gitignore)
 - `048d303` feat(branding): add Rainwater logo component + concept assets
