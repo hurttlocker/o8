@@ -13,7 +13,13 @@ const filesCache = new Map<string, { data: unknown; ts: number }>();
 const FILES_CACHE_TTL_MS = 15_000;
 const MAX_DEPTH = 3;
 // Dotfiles/dirs to show (everything else starting with . is hidden)
-const SHOW_DOT = new Set(['.github', '.vscode', '.claude', '.env', '.env.local', '.env.example', '.env.development', '.gitignore', '.gitattributes', '.eslintrc', '.eslintrc.js', '.eslintrc.json', '.prettierrc', '.prettierrc.js']);
+const SHOW_DOT = new Set([
+  '.github', '.vscode', '.claude', '.cursor', '.cortexrules', '.cursorrules', '.clinerules',
+  '.env', '.env.local', '.env.example', '.env.development', '.env.production', '.env.test',
+  '.gitignore', '.gitattributes', '.npmrc', '.nvmrc', '.node-version',
+  '.eslintrc', '.eslintrc.js', '.eslintrc.json', '.prettierrc', '.prettierrc.js',
+  '.editorconfig', '.dockerignore', '.tool-versions', 'CLAUDE.md', 'AGENTS.md',
+]);
 
 interface FileNode {
   name: string;

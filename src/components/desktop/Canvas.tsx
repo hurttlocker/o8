@@ -789,10 +789,16 @@ interface TranscriptMessage {
 
 const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath: string; workspace?: string }) {
   const [content, setContent] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState<string>('');
   const [diff, setDiff] = useState<string>('');
   const [hasDiff, setHasDiff] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [saveNote, setSaveNote] = useState<string | null>(null);
   const [activeView, setActiveView] = useState<'content' | 'diff'>('content');
+  const [editing, setEditing] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -818,6 +824,45 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
     return () => { cancelled = true; };
   }, [filePath, workspace]);
 
+  // Save file via API
+  const handleSave = useCallback(async () => {
+    if (!dirty || saving) return;
+    setSaving(true);
+    setSaveNote(null);
+    try {
+      const res = await fetch('/api/v2/files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: filePath, content: editContent }),
+      });
+      if (res.ok) {
+        setContent(editContent);
+        setDirty(false);
+        setSaveNote('Saved');
+        setTimeout(() => setSaveNote(null), 2000);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setSaveNote(`Error: ${(data as Record<string, string>).error ?? 'Save failed'}`);
+      }
+    } catch (err) {
+      setSaveNote(`Error: ${err instanceof Error ? err.message : 'Save failed'}`);
+    } finally {
+      setSaving(false);
+    }
+  }, [dirty, saving, filePath, editContent]);
+
+  // Cmd+S keyboard shortcut
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's' && editing) {
+        e.preventDefault();
+        void handleSave();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [editing, handleSave]);
+
   if (loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading file…</div>;
   }
@@ -840,10 +885,65 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
         flexShrink: 0,
       }}>
         <FileText size={16} strokeWidth={1.8} style={{ color: 'var(--t-text-muted)' }} />
-        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--t-text)' }}>{fileName}</span>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--t-text)' }}>
+          {fileName}{dirty ? ' •' : ''}
+        </span>
         <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>{filePath}</span>
 
-        {hasDiff ? (
+        {saveNote ? (
+          <span style={{
+            fontSize: 11,
+            fontWeight: 500,
+            color: saveNote.startsWith('Error') ? '#ef4444' : '#22c55e',
+            marginLeft: 8,
+          }}>{saveNote}</span>
+        ) : null}
+
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          {editing ? (
+            <>
+              <button
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={!dirty || saving}
+                style={{
+                  padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(34,197,94,0.3)',
+                  background: dirty ? 'rgba(34,197,94,0.08)' : 'transparent',
+                  color: dirty ? '#16a34a' : 'var(--t-text-muted)',
+                  fontSize: 11, fontWeight: 600, cursor: dirty ? 'pointer' : 'default',
+                }}
+              >
+                {saving ? 'Saving…' : '⌘S Save'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setEditing(false); setEditContent(content ?? ''); setDirty(false); }}
+                style={{
+                  padding: '4px 10px', borderRadius: 6, border: 'none',
+                  background: 'transparent', color: 'var(--t-text-muted)',
+                  fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setEditing(true); setEditContent(content ?? ''); }}
+              style={{
+                padding: '4px 10px', borderRadius: 6,
+                border: '1px solid rgba(37,99,235,0.2)',
+                background: 'rgba(37,99,235,0.06)',
+                color: '#2563eb', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              Edit
+            </button>
+          )}
+        </div>
+
+        {hasDiff && !editing ? (
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
             {(['content', 'diff'] as const).map((view) => (
               <button
@@ -873,8 +973,31 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
       </div>
 
       {/* Body */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {activeView === 'diff' && hasDiff ? (
+      <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        {editing ? (
+          <textarea
+            ref={textareaRef}
+            value={editContent}
+            onChange={(e) => { setEditContent(e.target.value); setDirty(e.target.value !== content); }}
+            spellCheck={false}
+            style={{
+              flex: 1,
+              margin: 0,
+              padding: '14px 16px',
+              fontSize: '0.8rem',
+              lineHeight: 1.65,
+              fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
+              whiteSpace: 'pre',
+              wordBreak: 'break-word',
+              color: 'var(--t-text-strong)',
+              background: 'var(--t-bg)',
+              border: 'none',
+              outline: 'none',
+              resize: 'none',
+              tabSize: 2,
+            }}
+          />
+        ) : activeView === 'diff' && hasDiff ? (
           <pre style={{
             margin: 0,
             paddingTop: 14,
@@ -891,19 +1014,23 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
             {renderDiffLines(diff)}
           </pre>
         ) : content !== null ? (
-          <pre style={{
-            margin: 0,
-            paddingTop: 14,
-            paddingRight: 16,
-            paddingBottom: 14,
-            paddingLeft: 16,
-            fontSize: '0.8rem',
-            lineHeight: 1.65,
-            fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            color: 'var(--t-text-strong)',
-          }}>
+          <pre
+            style={{
+              margin: 0,
+              paddingTop: 14,
+              paddingRight: 16,
+              paddingBottom: 14,
+              paddingLeft: 16,
+              fontSize: '0.8rem',
+              lineHeight: 1.65,
+              fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              color: 'var(--t-text-strong)',
+              cursor: 'text',
+            }}
+            onDoubleClick={() => { setEditing(true); setEditContent(content ?? ''); }}
+          >
             {content}
           </pre>
         ) : (
