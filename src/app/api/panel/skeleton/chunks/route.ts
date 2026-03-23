@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { getChunksForFile, getChunksForRepo, getChunkStats } from '@/lib/skeleton/store';
 
-const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 
 /**
  * GET /api/panel/skeleton/chunks?workspace=<path>&file=<relative>&kind=<symbolKind>

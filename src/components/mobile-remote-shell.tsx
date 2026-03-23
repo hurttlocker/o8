@@ -332,7 +332,7 @@ function MobileRemoteShellInner({
     && selectedSession?.runtimeSurface?.lifecycle?.availability === 'ready-for-resume',
   );
   const worktreeRepoRoot = selectedReviewPacket?.repoPath
-    ? selectedReviewPacket.repoPath.replace(/^~(?=\/|$)/, '/Users/marquisehurtt')
+    ? selectedReviewPacket.repoPath.replace(/^~(?=\/|$)/, require('os').homedir())
     : null;
   const mobileWorktree = linkedWorktree ? {
     id: linkedWorktree.id,

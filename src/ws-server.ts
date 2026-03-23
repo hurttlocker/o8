@@ -97,16 +97,18 @@ const BACKPRESSURE_FLUSH_MS = 50; // check interval to flush queued messages
 interface GatewayConfig {
   port: number;
   token?: string;
+  configFound: boolean;
 }
 
 function loadGatewayConfig(): GatewayConfig {
-  const configPath = join(process.env.HOME ?? '/Users/marquisehurtt', '.openclaw', 'openclaw.json');
+  const home = process.env.HOME ?? require('os').homedir();
+  const configPath = join(home, '.openclaw', 'openclaw.json');
   try {
     const raw = readFileSync(configPath, 'utf-8');
     const config = JSON.parse(raw);
-    return { port: config?.gateway?.port ?? 18789, token: config?.gateway?.auth?.token };
+    return { port: config?.gateway?.port ?? 18789, token: config?.gateway?.auth?.token, configFound: true };
   } catch {
-    return { port: 18789 };
+    return { port: 18789, configFound: false };
   }
 }
 
@@ -162,6 +164,8 @@ const gatewayConfig = loadGatewayConfig();
 let gatewayWs: WebSocket | null = null;
 let gatewayConnecting = false;
 let gatewayBackoff = 1000;
+let gatewayAuthFailures = 0;
+const GATEWAY_MAX_AUTH_FAILURES = 3; // Stop retrying after 3 consecutive auth rejections
 let gatewayReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 const gatewayInstanceId = randomUUID();
 let gatewayRequestCounter = 0;
@@ -169,6 +173,19 @@ const chatListeners = new Set<(delta: ChatDelta) => void>();
 
 function connectGateway() {
   if (gatewayConnecting || gatewayWs?.readyState === WebSocket.OPEN) return;
+
+  // Don't attempt connection if no config file exists (fresh machine)
+  if (!gatewayConfig.configFound) {
+    console.log('[ws-server] No openclaw.json found — skipping gateway connection. Run the setup wizard or install OpenClaw to configure.');
+    return;
+  }
+
+  // Don't retry after repeated auth failures (bad/missing token)
+  if (gatewayAuthFailures >= GATEWAY_MAX_AUTH_FAILURES) {
+    console.log(`[ws-server] Gateway auth failed ${gatewayAuthFailures} times — stopping retries. Fix credentials and restart, or use the setup wizard.`);
+    return;
+  }
+
   gatewayConnecting = true;
 
   const url = `ws://127.0.0.1:${gatewayConfig.port}`;
@@ -219,8 +236,11 @@ function connectGateway() {
       if (parsed.ok) {
         console.log('[ws-server] Gateway authenticated');
         gatewayConnecting = false;
+        gatewayAuthFailures = 0; // Reset on successful auth
       } else {
-        console.error('[ws-server] Gateway auth failed:', (parsed.error as { message?: string })?.message);
+        gatewayAuthFailures++;
+        const msg = (parsed.error as { message?: string })?.message ?? 'unknown error';
+        console.error(`[ws-server] Gateway auth failed (${gatewayAuthFailures}/${GATEWAY_MAX_AUTH_FAILURES}): ${msg}`);
         ws.close();
       }
       return;
@@ -1893,7 +1913,7 @@ setInterval(() => {
 
 // ── Git watcher — push diff stats + file changes on changes ──
 
-const REPO_ROOT = resolve(process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide');
+const REPO_ROOT = resolve(process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd());
 const GIT_DIR = resolve(REPO_ROOT, '.git');
 let lastDiffHash = '';
 let diffDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1902,7 +1922,7 @@ const reviewTargetHashes = new Map<string, string>();
 const REVIEW_POLL_INTERVAL_MS = 10_000;
 
 function shortHome(filePath: string) {
-  const home = process.env.HOME ?? '/Users/marquisehurtt';
+  const home = process.env.HOME ?? require('os').homedir();
   return filePath.startsWith(`${home}/`) ? filePath.replace(`${home}/`, '~/') : filePath;
 }
 

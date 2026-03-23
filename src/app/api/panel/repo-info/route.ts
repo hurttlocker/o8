@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   }
 
   // Expand ~ to home dir
-  const home = process.env.HOME || '/Users/marquisehurtt';
+  const home = process.env.HOME || require('os').homedir();
   const absPath = workspace.startsWith('~') ? workspace.replace('~', home) : workspace;
 
   if (!existsSync(absPath)) {

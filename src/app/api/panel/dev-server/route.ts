@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Resolve path
-    const cwd = repoPath.replace(/^~/, process.env.HOME || '/Users/marquisehurtt');
+    const cwd = repoPath.replace(/^~/, process.env.HOME || require('os').homedir());
 
     // Spawn the dev server
     const child = spawn('sh', ['-c', command], {

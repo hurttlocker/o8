@@ -131,7 +131,7 @@ export async function createPullRequest(args: {
   body: string;
   baseBranch?: string;
 }): Promise<GitHubToolResult> {
-  const repoRoot = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+  const repoRoot = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
   const opts = { encoding: 'utf-8' as const, cwd: repoRoot, timeout: 15000 };
 
   try {
