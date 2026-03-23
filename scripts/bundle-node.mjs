@@ -20,9 +20,12 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 const outDir = join(root, 'out', 'server', 'node');
 
-// Node.js version to bundle — MUST match the version native modules were compiled against
-// Check: node -p process.versions.modules → 141 = Node 25.x
-const NODE_VERSION = '25.5.0';
+// REMOVED: Node.js is now a prerequisite, not bundled.
+// Users must have Node.js installed (any recent version).
+// This script is kept for reference but no longer called by tauri:prebuild.
+console.log('⏭️  Node.js bundling disabled — prerequisite model');
+console.log('   Users need Node.js installed: https://nodejs.org');
+process.exit(0);
 
 // Parse args
 const args = process.argv.slice(2);
