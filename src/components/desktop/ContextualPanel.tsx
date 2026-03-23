@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * BottomTerminal — interactive terminal in the bottom contextual panel.
+ * ContextualPanel — interactive terminal in the bottom contextual panel.
  *
  * Single tmux session with CLI agent picker (Shell, Claude Code, Codex, etc.).
  * Replaces LiveOutput when no canvas tabs are open.
@@ -25,7 +25,7 @@ type CliAgent = (typeof CLI_AGENTS)[number];
 
 // ── Types ──
 
-export interface BottomTerminalHandle {
+export interface ContextualPanelHandle {
   onSessionCreated: (sessionName: string, requestId?: string) => boolean;
   writeToTerminal: (sessionName: string, data: string) => void;
   showImage: (sessionName: string, imageB64: string, filename: string) => void;
@@ -37,7 +37,7 @@ export interface BottomTerminalHandle {
   runCommand: (command: string) => void;
 }
 
-export interface BottomTerminalProps {
+export interface ContextualPanelProps {
   sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
@@ -327,7 +327,7 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
 
 // ── Main Component ──
 
-interface BottomTerminalTab {
+interface ContextualPanelTab {
   id: string;
   label: string;
   agentId: CliAgent['id'];
@@ -336,8 +336,8 @@ interface BottomTerminalTab {
   lastActivity: number;
 }
 
-export const BottomTerminal = forwardRef<BottomTerminalHandle, BottomTerminalProps>(
-  function BottomTerminal(
+export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanelProps>(
+  function ContextualPanel(
     {
       sendTerminalCreate,
       sendTerminalAttach,
@@ -349,7 +349,7 @@ export const BottomTerminal = forwardRef<BottomTerminalHandle, BottomTerminalPro
     },
     ref,
   ) {
-    const [tabs, setTabs] = useState<BottomTerminalTab[]>([]);
+    const [tabs, setTabs] = useState<ContextualPanelTab[]>([]);
     const [activeTabId, setActiveTabId] = useState<string>('');
     const [addMenuOpen, setAddMenuOpen] = useState(false);
     const pendingTabIdsRef = useRef<string[]>([]);
@@ -357,7 +357,7 @@ export const BottomTerminal = forwardRef<BottomTerminalHandle, BottomTerminalPro
     const pendingRequestRef = useRef<Map<string, string>>(new Map());
     const pendingCommandsRef = useRef<Map<string, string>>(new Map());
     const tabCountRef = useRef(0);
-    const tabsRef = useRef<BottomTerminalTab[]>([]);
+    const tabsRef = useRef<ContextualPanelTab[]>([]);
     const xtermRefs = useRef<Map<string, XtermPanelHandle>>(new Map());
     const addMenuRef = useRef<HTMLDivElement>(null);
 
@@ -366,7 +366,7 @@ export const BottomTerminal = forwardRef<BottomTerminalHandle, BottomTerminalPro
     const createBottomTab = useCallback((agent: CliAgent, initialCommand?: string) => {
       tabCountRef.current += 1;
       const now = Date.now();
-      const nextTab: BottomTerminalTab = {
+      const nextTab: ContextualPanelTab = {
         id: `bottom-tab-${tabCountRef.current}`,
         label: agent.label,
         agentId: agent.id,

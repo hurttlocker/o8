@@ -66,7 +66,7 @@ import {
   formatCiCheckInjection,
   formatReviewCommentBatchInjection,
   formatReviewCommentInjection,
-  type DesktopChatInjectionPayload,
+  type AgentPanelChatInjectionPayload,
 } from '@/lib/chat/injection';
 
 // ── Tab Types ──
@@ -89,7 +89,7 @@ export interface CanvasProps {
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onSelectCommit?: (hash: string) => void;
-  onInjectChatContext?: (payload: DesktopChatInjectionPayload) => void;
+  onInjectChatContext?: (payload: AgentPanelChatInjectionPayload) => void;
 }
 
 // ── Main Canvas ──
@@ -251,7 +251,7 @@ const TabContent = memo(function TabContent({
 }: {
   tab: CanvasTab;
   onSelectCommit?: (hash: string) => void;
-  onInjectChatContext?: (payload: DesktopChatInjectionPayload) => void;
+  onInjectChatContext?: (payload: AgentPanelChatInjectionPayload) => void;
 }) {
   switch (tab.kind) {
     case 'issue':
@@ -2641,7 +2641,7 @@ function PRViewer({
 }: {
   prNumber: number;
   repo?: string;
-  onInjectChatContext?: (payload: DesktopChatInjectionPayload) => void;
+  onInjectChatContext?: (payload: AgentPanelChatInjectionPayload) => void;
 }) {
   const [pr, setPr] = useState<PRDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2737,7 +2737,7 @@ function PRViewer({
     return () => { cancelled = true; };
   }, [activeSection, prNumber, repo, reviewComments.length]);
 
-  const injectPayload = useCallback((key: string, payload: DesktopChatInjectionPayload) => {
+  const injectPayload = useCallback((key: string, payload: AgentPanelChatInjectionPayload) => {
     if (!onInjectChatContext) return;
     onInjectChatContext(payload);
     setAddedContextKeys((current) => ({ ...current, [key]: true }));

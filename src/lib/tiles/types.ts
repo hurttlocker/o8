@@ -6,7 +6,7 @@ export type TileContentKind =
   | 'preview'
   | 'canvas'
   | 'thoughts'
-  | 'bottom-terminal';
+  | 'contextual-panel';
 
 export interface WorkspaceTileContent {
   kind: 'workspace';
@@ -30,7 +30,7 @@ export interface ThoughtsTileContent {
 }
 
 export interface BottomTerminalTileContent {
-  kind: 'bottom-terminal';
+  kind: 'contextual-panel';
 }
 
 export type TileContent =

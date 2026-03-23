@@ -1,4 +1,4 @@
-export interface DesktopChatInjectionPayload {
+export interface AgentPanelChatInjectionPayload {
   reason: string;
   text: string;
 }
@@ -36,7 +36,7 @@ function formatDuration(startedAt?: string, completedAt?: string) {
   return `${Math.round(ms / 60_000)}m`;
 }
 
-export function formatReviewCommentInjection(context: ReviewCommentContext): DesktopChatInjectionPayload {
+export function formatReviewCommentInjection(context: ReviewCommentContext): AgentPanelChatInjectionPayload {
   const lines = [
     `[PR comment from ${formatRepoContext(context.prNumber, context.repo)}]`,
     `Author: ${context.author}`,
@@ -58,7 +58,7 @@ export function formatReviewCommentBatchInjection(
   prNumber: number,
   repo: string | undefined,
   comments: ReviewCommentContext[],
-): DesktopChatInjectionPayload {
+): AgentPanelChatInjectionPayload {
   const header = `[PR comment bundle from ${formatRepoContext(prNumber, repo)}]`;
   const blocks = comments
     .filter((comment) => comment.body.trim())
@@ -73,7 +73,7 @@ export function formatReviewCommentBatchInjection(
   };
 }
 
-export function formatCiCheckInjection(context: CiCheckContext): DesktopChatInjectionPayload {
+export function formatCiCheckInjection(context: CiCheckContext): AgentPanelChatInjectionPayload {
   const duration = formatDuration(context.startedAt, context.completedAt);
   const lines = [
     `[CI check context from ${formatRepoContext(context.prNumber, context.repo)}]`,
@@ -96,7 +96,7 @@ export function formatCiCheckBatchInjection(
   prNumber: number,
   repo: string | undefined,
   checks: CiCheckContext[],
-): DesktopChatInjectionPayload {
+): AgentPanelChatInjectionPayload {
   const header = `[Failing CI checks from ${formatRepoContext(prNumber, repo)}]`;
   const lines = checks.map((check, index) => {
     const duration = formatDuration(check.startedAt, check.completedAt);
