@@ -157,9 +157,10 @@ pub fn run() {
             let server_dir = resource_dir.join("server");
             let server_js = server_dir.join("server.js");
 
+            let bundled_node = server_dir.join("node").join("node");
+
             if server_js.exists() {
                 // Prefer bundled Node, fall back to system Node
-                let bundled_node = server_dir.join("node").join("node");
                 let node_bin = if bundled_node.exists() {
                     log::info!("Using bundled Node.js at {:?}", bundled_node);
                     bundled_node.to_string_lossy().to_string()
@@ -188,6 +189,31 @@ pub fn run() {
                 }
             } else {
                 log::warn!("No bundled server found at {:?} — running in dev mode", server_js);
+            }
+
+            // ── Start WebSocket server (terminals, chat, git watcher) ──
+            let ws_server = server_dir.join("ws-server.mjs");
+            if ws_server.exists() {
+                let ws_node = if bundled_node.exists() {
+                    bundled_node.to_string_lossy().to_string()
+                } else {
+                    "node".to_string()
+                };
+                log::info!("Starting WS server: {} {:?}", ws_node, ws_server);
+                match Command::new(&ws_node)
+                    .arg(&ws_server)
+                    .current_dir(&server_dir)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                {
+                    Ok(child) => {
+                        log::info!("WS server started (pid: {})", child.id());
+                    }
+                    Err(e) => {
+                        log::error!("Failed to start WS server: {}", e);
+                    }
+                }
             }
 
             log::info!("Cortex IDE desktop shell initialized");
