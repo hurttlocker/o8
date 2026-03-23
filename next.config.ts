@@ -1,8 +1,11 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  output: 'standalone',
+  outputFileTracingRoot: __dirname, // Keep standalone output at project root, not workspace root
   reactStrictMode: true,
   images: {
+    unoptimized: true, // Required for standalone — no image optimization server
     remotePatterns: [
       {
         protocol: 'https',

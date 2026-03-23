@@ -1,0 +1,44 @@
+session:
+  trigger: on-demand
+  max_loops: 1
+  quality_mode: quality
+  cost_cap_usd: 10
+  stop_on_cost_cap: true
+
+target:
+  repo_path: /Users/marquisehurtt/clawd/repos/cortex
+  target_ref: main
+  allow_dirty_override: false
+  candidate_refs:
+    - feat/cross-encoder-reranker-wip
+
+benchmark:
+  dataset: locomo
+  slice: conv30_smoke
+  answerable_categories: [1, 2, 4]
+  import_flags:
+    - --recursive
+    - --extract
+    - --no-enrich
+    - --no-classify
+
+providers:
+  llm: openrouter
+  embed: ollama/nomic-embed-text
+
+models:
+  quality:
+    synthesis: openrouter/google/gemini-2.5-pro
+    benchmark_answer: openrouter/google/gemini-2.5-flash
+    literature: openrouter/google/gemini-2.5-pro
+    tagging: openrouter/google/gemini-2.5-flash
+  stable:
+    synthesis: openrouter/google/gemini-2.5-pro
+    benchmark_answer: openrouter/google/gemini-2.5-flash
+    literature: openrouter/google/gemini-2.5-pro
+    tagging: openrouter/google/gemini-2.5-flash
+  cheap:
+    synthesis: openrouter/google/gemini-2.5-flash
+    benchmark_answer: openrouter/google/gemini-2.5-flash
+    literature: openrouter/google/gemini-2.5-flash
+    tagging: openrouter/google/gemini-2.5-flash

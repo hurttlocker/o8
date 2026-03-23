@@ -152,6 +152,41 @@ pub fn run() {
                 });
             }
 
+            // ── Start bundled Next.js server ──
+            let resource_dir = app.path().resource_dir().expect("failed to resolve resource dir");
+            let server_dir = resource_dir.join("out");
+            let server_js = server_dir.join("server.js");
+
+            if server_js.exists() {
+                // Check if Node.js is available
+                let node_check = Command::new("node").arg("--version").output();
+                if node_check.is_err() || !node_check.as_ref().unwrap().status.success() {
+                    log::error!("Node.js not found — install from https://nodejs.org");
+                    // The loader HTML will show a timeout message
+                }
+
+                log::info!("Starting bundled server from {:?}", server_dir);
+                match Command::new("node")
+                    .arg(&server_js)
+                    .current_dir(&server_dir)
+                    .env("PORT", "3001")
+                    .env("HOSTNAME", "127.0.0.1")
+                    .env("NODE_ENV", "production")
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                {
+                    Ok(child) => {
+                        log::info!("Next.js server started (pid: {})", child.id());
+                    }
+                    Err(e) => {
+                        log::error!("Failed to start Next.js server: {}", e);
+                    }
+                }
+            } else {
+                log::warn!("No bundled server found at {:?} — running in dev mode", server_js);
+            }
+
             log::info!("Cortex IDE desktop shell initialized");
 
             Ok(())
