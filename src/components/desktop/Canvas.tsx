@@ -912,6 +912,14 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
   const [inlineEditResponse, setInlineEditResponse] = useState('');
   const [inlineEditMode, setInlineEditMode] = useState<'edit' | 'explain'>('edit');
   const [inlineEditAgent, setInlineEditAgent] = useState<'flash' | 'sonnet' | 'opus'>('flash');
+  // Diff preview for accept/reject
+  const [pendingDiff, setPendingDiff] = useState<{ original: string; modified: string; selection: import('monaco-editor').IRange | null; isFullFile: boolean } | null>(null);
+  // Prompt history
+  const [promptHistory] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try { return JSON.parse(localStorage.getItem('cortex.inline-edit-history') ?? '[]'); } catch { return []; }
+  });
+  const [historyIndex, setHistoryIndex] = useState(-1);
   const inlineEditInputRef = useRef<HTMLInputElement>(null);
   const inlineWidgetRef = useRef<{ dispose: () => void } | null>(null);
   const inlineWidgetDomRef = useRef<HTMLDivElement | null>(null);
@@ -1074,28 +1082,56 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
           cleaned = cleaned.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
         }
 
-        if (isFullFile) {
-          const fullRange = model.getFullModelRange();
-          ed.executeEdits('cortex-inline-edit', [{ range: fullRange, text: cleaned }]);
-        } else if (selection) {
-          ed.executeEdits('cortex-inline-edit', [{ range: selection, text: cleaned }]);
-        }
-
-        setEditContent(model.getValue());
-        setDirty(model.getValue() !== content);
+        // Show diff preview — don't auto-apply
+        setPendingDiff({
+          original: selectedText,
+          modified: cleaned,
+          selection: isFullFile ? null : (selection ?? null),
+          isFullFile,
+        });
       }
 
-      // Auto-close on successful edit
-      setInlineEditOpen(false);
-      setInlineEditPrompt('');
-      inlineWidgetRef.current?.dispose();
-      inlineWidgetRef.current = null;
+      // Save to history
+      const prompt = inlineEditPrompt.trim();
+      if (prompt) {
+        const newHistory = [prompt, ...promptHistory.filter(h => h !== prompt)].slice(0, 10);
+        promptHistory.splice(0, promptHistory.length, ...newHistory);
+        localStorage.setItem('cortex.inline-edit-history', JSON.stringify(newHistory));
+      }
     } catch (err) {
       setInlineEditResponse(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
     } finally {
       setInlineEditLoading(false);
     }
-  }, [inlineEditPrompt, inlineEditLoading, inlineEditAgent, filePath, content]);
+  }, [inlineEditPrompt, inlineEditLoading, inlineEditAgent, filePath, content, promptHistory]);
+
+  // Accept the pending diff
+  const handleAcceptDiff = useCallback(() => {
+    const ed = editorRef.current as import('monaco-editor').editor.IStandaloneCodeEditor | null;
+    if (!ed || !pendingDiff) return;
+    const model = ed.getModel();
+    if (!model) return;
+
+    if (pendingDiff.isFullFile) {
+      const fullRange = model.getFullModelRange();
+      ed.executeEdits('cortex-inline-edit', [{ range: fullRange, text: pendingDiff.modified }]);
+    } else if (pendingDiff.selection) {
+      ed.executeEdits('cortex-inline-edit', [{ range: pendingDiff.selection, text: pendingDiff.modified }]);
+    }
+
+    setEditContent(model.getValue());
+    setDirty(model.getValue() !== content);
+    setPendingDiff(null);
+    setInlineEditOpen(false);
+    setInlineEditPrompt('');
+    inlineWidgetRef.current?.dispose();
+    inlineWidgetRef.current = null;
+  }, [pendingDiff, content]);
+
+  // Reject the pending diff
+  const handleRejectDiff = useCallback(() => {
+    setPendingDiff(null);
+  }, []);
 
   if (loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading file…</div>;
@@ -1231,14 +1267,34 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && inlineEditPrompt.trim()) {
                   e.preventDefault();
+                  setPendingDiff(null);
                   void handleInlineEdit();
                 }
                 if (e.key === 'Escape') {
                   setInlineEditOpen(false);
                   setInlineEditPrompt('');
                   setInlineEditResponse('');
+                  setPendingDiff(null);
                   inlineWidgetRef.current?.dispose();
                   inlineWidgetRef.current = null;
+                }
+                // Arrow up/down for prompt history
+                if (e.key === 'ArrowUp' && promptHistory.length > 0) {
+                  e.preventDefault();
+                  const next = Math.min(historyIndex + 1, promptHistory.length - 1);
+                  setHistoryIndex(next);
+                  setInlineEditPrompt(promptHistory[next]);
+                }
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  if (historyIndex <= 0) {
+                    setHistoryIndex(-1);
+                    setInlineEditPrompt('');
+                  } else {
+                    const next = historyIndex - 1;
+                    setHistoryIndex(next);
+                    setInlineEditPrompt(promptHistory[next]);
+                  }
                 }
               }}
               placeholder={inlineEditLoading ? 'Thinking…' : '"add error handling" or "explain this"'}
@@ -1274,6 +1330,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
           </div>
 
           {/* Response area (explain mode or error) */}
+          {/* Response area (explain mode or error) */}
           {inlineEditResponse ? (
             <div style={{
               padding: '8px 10px',
@@ -1290,6 +1347,86 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
               whiteSpace: 'pre-wrap',
             }}>
               {inlineEditResponse}
+            </div>
+          ) : null}
+
+          {/* Diff preview + Accept/Reject */}
+          {pendingDiff ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{
+                maxHeight: 160,
+                overflowY: 'auto',
+                borderRadius: 8,
+                border: '1px solid rgba(99,102,241,0.1)',
+                fontSize: 11,
+                fontFamily: '"SF Mono", "Menlo", ui-monospace, monospace',
+                lineHeight: 1.6,
+              }}>
+                {(() => {
+                  const origLines = pendingDiff.original.split('\n');
+                  const modLines = pendingDiff.modified.split('\n');
+                  const maxLen = Math.max(origLines.length, modLines.length);
+                  const diffLines: Array<{ text: string; type: 'same' | 'add' | 'remove' }> = [];
+                  for (let i = 0; i < maxLen; i++) {
+                    const orig = origLines[i] ?? '';
+                    const mod = modLines[i] ?? '';
+                    if (i >= origLines.length) {
+                      diffLines.push({ text: mod, type: 'add' });
+                    } else if (i >= modLines.length) {
+                      diffLines.push({ text: orig, type: 'remove' });
+                    } else if (orig !== mod) {
+                      diffLines.push({ text: orig, type: 'remove' });
+                      diffLines.push({ text: mod, type: 'add' });
+                    } else {
+                      diffLines.push({ text: orig, type: 'same' });
+                    }
+                  }
+                  return diffLines.map((line, i) => (
+                    <div key={i} style={{
+                      padding: '0 8px',
+                      background: line.type === 'add' ? 'rgba(34,197,94,0.08)'
+                        : line.type === 'remove' ? 'rgba(239,68,68,0.06)'
+                        : 'transparent',
+                      color: line.type === 'add' ? '#16a34a'
+                        : line.type === 'remove' ? '#dc2626'
+                        : '#64748b',
+                      textDecoration: line.type === 'remove' ? 'line-through' : 'none',
+                      opacity: line.type === 'remove' ? 0.7 : 1,
+                    }}>
+                      <span style={{ display: 'inline-block', width: 14, color: '#94a3b8', userSelect: 'none' }}>
+                        {line.type === 'add' ? '+' : line.type === 'remove' ? '−' : ' '}
+                      </span>
+                      {line.text || ' '}
+                    </div>
+                  ));
+                })()}
+              </div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  type="button"
+                  onClick={handleAcceptDiff}
+                  style={{
+                    flex: 1, padding: '6px 0', borderRadius: 8,
+                    border: '1px solid rgba(34,197,94,0.3)',
+                    background: 'rgba(34,197,94,0.06)',
+                    color: '#16a34a', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  ✓ Accept
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRejectDiff}
+                  style={{
+                    flex: 1, padding: '6px 0', borderRadius: 8,
+                    border: '1px solid rgba(239,68,68,0.2)',
+                    background: 'transparent',
+                    color: '#dc2626', fontSize: 11, fontWeight: 500, cursor: 'pointer',
+                  }}
+                >
+                  ✗ Reject
+                </button>
+              </div>
             </div>
           ) : null}
         </div>,
