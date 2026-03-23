@@ -106,6 +106,34 @@ if (existsSync(pub)) {
   console.log('📦 Copied public');
 }
 
+// ── Copy native modules + create Turbopack hash symlinks ──
+const nativeModules = ['better-sqlite3'];
+for (const mod of nativeModules) {
+  const src = join(root, 'node_modules', mod);
+  const dest = join(server, 'node_modules', mod);
+  if (existsSync(src) && !existsSync(dest)) {
+    cpSync(src, dest, { recursive: true });
+    console.log(`📦 Copied native module: ${mod}`);
+  }
+}
+
+// Turbopack renames externals with hash suffixes — create symlinks
+// Scan the server chunks for hashed module names and symlink them
+const { readdirSync, symlinkSync } = await import('fs');
+const chunksDir = join(server, '.next', 'server', 'chunks');
+if (existsSync(chunksDir)) {
+  const chunkFiles = execSync(`grep -rl "better-sqlite3-" "${chunksDir}" 2>/dev/null || true`, { encoding: 'utf-8' });
+  const hashMatch = chunkFiles.match(/better-sqlite3-[a-f0-9]+/);
+  if (hashMatch) {
+    const hashedName = hashMatch[0];
+    const symlinkPath = join(server, 'node_modules', hashedName);
+    if (!existsSync(symlinkPath)) {
+      symlinkSync('better-sqlite3', symlinkPath);
+      console.log(`📦 Symlinked ${hashedName} → better-sqlite3`);
+    }
+  }
+}
+
 // ── Compile WS server ──
 const { execSync } = await import('child_process');
 try {
