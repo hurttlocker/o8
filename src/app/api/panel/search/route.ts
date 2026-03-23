@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 
-const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 
 interface SearchResult {
   file: string;
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ results: [], query: query ?? '' });
   }
 
-  const home = process.env.HOME || '/Users/marquisehurtt';
+  const home = process.env.HOME || require('os').homedir();
   let root = DEFAULT_ROOT;
   if (workspaceParam) {
     root = workspaceParam.startsWith('~') ? workspaceParam.replace('~', home) : workspaceParam;

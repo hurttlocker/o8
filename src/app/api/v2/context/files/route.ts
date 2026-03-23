@@ -10,7 +10,7 @@ import { execSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const MAX_FILE_SIZE = 100_000; // 100KB max per file
 const MAX_FILES = 5; // max files per request
 

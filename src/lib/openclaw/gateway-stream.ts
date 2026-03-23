@@ -42,7 +42,7 @@ type GatewayConfig = {
 
 function loadGatewayConfig(): GatewayConfig {
   const configPath = join(
-    process.env.HOME ?? '/Users/marquisehurtt',
+    process.env.HOME ?? require('os').homedir(),
     '.openclaw',
     'openclaw.json',
   );

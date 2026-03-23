@@ -20,7 +20,7 @@ const MIN_CONFIDENCE = 0.3;
 const MIN_SCORE = 0.4; // Below this, results are too noisy to include
 
 // Cortex binary path for fact queries
-const CORTEX_BIN = process.env.CORTEX_BINARY || `${process.env.HOME || '/Users/marquisehurtt'}/bin/cortex`;
+const CORTEX_BIN = process.env.CORTEX_BINARY || `${process.env.HOME || require('os').homedir()}/bin/cortex`;
 
 interface RecallResult {
   text: string;       // Formatted memory block for system prompt

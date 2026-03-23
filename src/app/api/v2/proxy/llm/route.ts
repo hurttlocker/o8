@@ -570,7 +570,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
                   try {
                     const { readFileSync, existsSync } = await import('node:fs');
                     const { join } = await import('node:path');
-                    const repoRoot = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+                    const repoRoot = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
                     const fullPath = join(repoRoot, filePath);
                     if (existsSync(fullPath)) {
                       const before = readFileSync(fullPath, 'utf-8');

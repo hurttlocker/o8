@@ -83,7 +83,7 @@ type OpenClawAgentConfig = {
 function readOpenClawAgentConfigs(): OpenClawAgentConfig[] {
   try {
     const configPath = join(
-      process.env.HOME ?? '/Users/marquisehurtt',
+      process.env.HOME ?? require('os').homedir(),
       '.openclaw',
       'openclaw.json',
     );
@@ -125,7 +125,7 @@ function relativeAge(ageMs?: number) {
 
 function shortenPath(path?: string) {
   if (!path) return 'unknown';
-  return path.replace('/Users/marquisehurtt/', '~/');
+  return path.replace(require('os').homedir() + '/', '~/');
 }
 
 function isDuplicateRunSurface(key: string) {

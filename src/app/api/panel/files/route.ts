@@ -5,7 +5,7 @@ import { execSync } from 'child_process';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 
-const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const IGNORE = new Set(['node_modules', '.next', '.turbo', 'target', 'dist', '.DS_Store', '.pnpm-store', '.cache']);
 
 // Response cache — file tree doesn't change every second
@@ -79,7 +79,7 @@ export async function GET(request: Request) {
 
   let root = DEFAULT_ROOT;
   if (workspaceParam) {
-    const home = process.env.HOME || '/Users/marquisehurtt';
+    const home = process.env.HOME || require('os').homedir();
     root = workspaceParam.startsWith('~') ? workspaceParam.replace('~', home) : workspaceParam;
   }
 

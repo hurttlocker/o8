@@ -12,7 +12,7 @@ import { spawnSync } from 'node:child_process';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const CORTEX_BIN = process.env.CORTEX_BINARY || join(process.env.HOME || '/Users/marquisehurtt', 'bin', 'cortex');
+const CORTEX_BIN = process.env.CORTEX_BINARY || join(process.env.HOME || require('os').homedir(), 'bin', 'cortex');
 
 const EXACT_COMMANDS = new Map<string, string[]>([
   ['cleanup', ['cleanup']],

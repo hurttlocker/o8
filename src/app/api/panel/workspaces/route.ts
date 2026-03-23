@@ -72,17 +72,18 @@ function deriveRepo(workspace: string): string {
 // Map OpenClaw agent session keys to the repos they actively work on
 // This is how the agent cards show the correct repo's diff
 function getAgentActiveRepo(sessionKey: string): { repo: string; path: string } | null {
-  const HOME = process.env.HOME || '/Users/marquisehurtt';
+  const HOME = process.env.HOME || require('os').homedir();
+  // Agent → repo mapping is auto-detected from the workspace root.
+  // Falls back to process.cwd() when CORTEX_IDE_WORKSPACE_ROOT is not set.
+  const workspaceRoot = process.env.CORTEX_IDE_WORKSPACE_ROOT || process.cwd();
   const map: Record<string, { repo: string; path: string }> = {
-    'agent:main:main': { repo: 'cortex-ide', path: `${HOME}/clawd/repos/cortex-ide` },
-    'agent:ace:main': { repo: 'cortex', path: `${HOME}/clawd/repos/cortex` },
-    'agent:hawk:main': { repo: 'cortex', path: `${HOME}/clawd/repos/cortex` },
+    'agent:main:main': { repo: require('path').basename(workspaceRoot), path: workspaceRoot },
   };
   return map[sessionKey] || null;
 }
 
 function resolveWorkspacePath(workspace: string): string {
-  return workspace.replace(/^~/, process.env.HOME || '/Users/marquisehurtt');
+  return workspace.replace(/^~/, process.env.HOME || require('os').homedir());
 }
 
 // Resolve current git branch for a path
@@ -113,9 +114,9 @@ const DIFF_CACHE_TTL = 30_000;
 
 function getLocalDiffStats(workspace: string): { additions: number; deletions: number; changedFiles: number } | null {
   try {
-    const isClawd = workspace === 'unknown';
-    const cwd = isClawd
-      ? (process.env.HOME || '/Users/marquisehurtt') + '/clawd'
+    const isDefault = workspace === 'unknown';
+    const cwd = isDefault
+      ? (process.env.CORTEX_IDE_WORKSPACE_ROOT || process.cwd())
       : resolveWorkspacePath(workspace);
 
     // Check cache
@@ -124,7 +125,7 @@ function getLocalDiffStats(workspace: string): { additions: number; deletions: n
 
     // For agent workspaces (clawd): show only uncommitted changes
     // For code repos (cortex-ide etc): origin/main..HEAD + uncommitted (resets on push)
-    const cmd = isClawd
+    const cmd = isDefault
       ? 'git diff --shortstat 2>/dev/null'
       : 'git diff --shortstat origin/main..HEAD 2>/dev/null; git diff --shortstat 2>/dev/null';
     const diffStat = execSync(cmd, { cwd, encoding: 'utf-8', timeout: 5000 }).trim();

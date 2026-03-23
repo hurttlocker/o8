@@ -5,7 +5,7 @@ import { getRenderedSkeletonCached, searchSymbols } from '@/lib/skeleton';
 import { getAllCached } from '@/lib/skeleton/store';
 import { ensureBooted, triggerScanIfStale } from '@/lib/skeleton/autoscan';
 
-const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 
 /**
  * GET /api/panel/skeleton?workspace=<path>&search=<query>

@@ -13,9 +13,9 @@ import { join } from 'node:path';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const CORTEX_HOME = join(process.env.HOME || '/Users/marquisehurtt', '.cortex');
+const CORTEX_HOME = join(process.env.HOME || require('os').homedir(), '.cortex');
 const CONFIG_PATH = join(CORTEX_HOME, 'config.yaml');
-const CORTEX_BIN = process.env.CORTEX_BINARY || join(process.env.HOME || '/Users/marquisehurtt', 'bin', 'cortex');
+const CORTEX_BIN = process.env.CORTEX_BINARY || join(process.env.HOME || require('os').homedir(), 'bin', 'cortex');
 
 function safeExec(cmd: string, timeoutMs = 8000): string {
   try {

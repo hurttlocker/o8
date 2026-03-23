@@ -668,7 +668,7 @@ async function gatewayRpcViaCli<T>(
       'openclaw',
       ['gateway', 'call', method, '--json', '--params', paramsJson],
       {
-        cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || '/Users/marquisehurtt',
+        cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || require('os').homedir(),
         maxBuffer: 10 * 1024 * 1024,
         timeout: timeoutMs,
         env: {
@@ -729,7 +729,7 @@ async function gatewayRpcViaFile<T>(
     const timer = setTimeout(() => reject(new Error('gatewayRpcViaFile timeout')), timeoutMs + 5000);
 
     const child = spawn(process.execPath, ['-e', inlineScript], {
-      cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || '/Users/marquisehurtt',
+      cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || require('os').homedir(),
       env: {
         ...process.env,
         PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',

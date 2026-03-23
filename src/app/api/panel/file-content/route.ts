@@ -5,7 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 
-const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || '/Users/marquisehurtt/clawd/repos/cortex-ide';
+const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'path param required' }, { status: 400 });
   }
 
-  const home = process.env.HOME || '/Users/marquisehurtt';
+  const home = process.env.HOME || require('os').homedir();
   let root = DEFAULT_ROOT;
   if (workspaceParam) {
     root = workspaceParam.startsWith('~') ? workspaceParam.replace('~', home) : workspaceParam;

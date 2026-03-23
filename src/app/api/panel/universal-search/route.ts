@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 
-const HOME = process.env.HOME || '/Users/marquisehurtt';
+const HOME = process.env.HOME || require('os').homedir();
 const CORTEX_BINARY = process.env.CORTEX_BINARY || `${HOME}/bin/cortex`;
 const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || `${HOME}/clawd/repos/cortex-ide`;
 const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || '';
