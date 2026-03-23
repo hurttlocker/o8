@@ -1,0 +1,85 @@
+/**
+ * GitHub App authentication — generates installation tokens from PEM key.
+ * 15,000 req/hr per installation (vs 5,000 PAT / 60 unauthenticated).
+ *
+ * Config: ~/.cortex-ide/github-app.pem + app ID + installation ID
+ */
+import { readFileSync, existsSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
+import { createSign } from 'crypto';
+
+const CONFIG_DIR = join(homedir(), '.cortex-ide');
+const PEM_PATH = join(CONFIG_DIR, 'github-app.pem');
+
+const APP_ID = process.env.GITHUB_APP_ID || '3167857';
+const INSTALLATION_ID = process.env.GITHUB_APP_INSTALLATION_ID || '118508031';
+
+// Cache the installation token (valid for 1 hour, refresh at 50min)
+let _token: string | null = null;
+let _tokenExpiresAt = 0;
+
+/** Create a JWT signed with the app's private key */
+function createJWT(): string | null {
+  if (!existsSync(PEM_PATH)) return null;
+
+  const pem = readFileSync(PEM_PATH, 'utf-8');
+  const now = Math.floor(Date.now() / 1000);
+
+  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({
+    iat: now - 60,      // issued 60s ago (clock skew)
+    exp: now + 600,     // expires in 10min
+    iss: APP_ID,
+  })).toString('base64url');
+
+  const sign = createSign('RSA-SHA256');
+  sign.update(`${header}.${payload}`);
+  const signature = sign.sign(pem, 'base64url');
+
+  return `${header}.${payload}.${signature}`;
+}
+
+/** Get a fresh installation access token (cached for ~50min) */
+export async function getInstallationToken(): Promise<string | null> {
+  // Return cached token if still valid
+  if (_token && Date.now() < _tokenExpiresAt) {
+    return _token;
+  }
+
+  const jwt = createJWT();
+  if (!jwt) return null;
+
+  try {
+    const res = await fetch(
+      `https://api.github.com/app/installations/${INSTALLATION_ID}/access_tokens`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+      },
+    );
+
+    if (!res.ok) {
+      console.error(`GitHub App token error: ${res.status} ${await res.text()}`);
+      return null;
+    }
+
+    const data = await res.json();
+    _token = data.token;
+    // Refresh 10 min before expiry
+    _tokenExpiresAt = Date.now() + 50 * 60 * 1000;
+    return _token;
+  } catch (e) {
+    console.error('GitHub App token fetch failed:', e);
+    return null;
+  }
+}
+
+/** Check if GitHub App is configured */
+export function isGitHubAppConfigured(): boolean {
+  return existsSync(PEM_PATH);
+}
