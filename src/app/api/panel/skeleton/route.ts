@@ -18,6 +18,13 @@ export async function GET(request: Request) {
   const workspace = searchParams.get('workspace') || DEFAULT_ROOT;
   const search = searchParams.get('search');
 
+  // Don't scan the bundle directory or invalid paths
+  const { existsSync } = await import('fs');
+  const { join } = await import('path');
+  if (!existsSync(join(workspace, '.git'))) {
+    return NextResponse.json({ skeleton: '', symbols: [], workspace });
+  }
+
   // Ensure boot scan has fired (no-op after first call)
   ensureBooted();
   // Trigger rescan if this workspace's cache is stale
