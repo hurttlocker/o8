@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-23
 
+- `47acc33` fix: Monaco clipboard polyfill loaded before monaco-editor import
 - `0d8a736` feat: Inline AI widget — frosted glass card at cursor line
 
 ## 2026-03-22
