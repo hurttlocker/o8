@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_REPO = process.env.CORTEX_IDE_REVIEW_REPO || 'hurttlocker/cortex-ide';
+const DEFAULT_REPO = process.env.CORTEX_IDE_REVIEW_REPO || '';
 
 export async function GET(
   request: NextRequest,

@@ -173,7 +173,7 @@ interface AgentTarget {
 }
 
 const AGENTS: AgentTarget[] = [
-  { key: 'agent:main:main', name: 'Mister', emoji: '', color: '#111827' },
+  { key: 'agent:main:main', name: 'Assistant', emoji: '', color: '#111827' },
   { key: 'agent:ace:main', name: 'Niot', emoji: '', color: '#2563eb' },
   { key: 'agent:hawk:main', name: 'Hawk', emoji: '', color: '#f59e0b' },
 ];

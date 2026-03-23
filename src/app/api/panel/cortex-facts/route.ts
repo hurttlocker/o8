@@ -15,7 +15,7 @@ const QUERIES = [
   // People
   { q: 'Q Marquise person name', cat: 'People' },
   { q: 'SB Sydney family wedding', cat: 'People' },
-  { q: 'agent Mister Niot Hawk', cat: 'People' },
+  { q: 'agent fleet members', cat: 'People' },
   { q: 'who user human owner', cat: 'People' },
   // Decisions
   { q: 'decided decision chose preference', cat: 'Decisions' },

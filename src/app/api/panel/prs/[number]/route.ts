@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 import { listRepos } from '@/lib/repos/registry';
 
-const DEFAULT_REPO = process.env.GITHUB_REPO || 'hurttlocker/cortex-ide';
+const DEFAULT_REPO = process.env.GITHUB_REPO || '';
 
 function normalizeRepoSlug(remoteUrl: string | null | undefined) {
   if (!remoteUrl) return null;

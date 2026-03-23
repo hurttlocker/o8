@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 import { getCached, setCached, SLOW_TTL_MS } from '@/lib/github/cache';
 
-const DEFAULT_REPO = process.env.GITHUB_REPO || 'hurttlocker/cortex-ide';
+const DEFAULT_REPO = process.env.GITHUB_REPO || '';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);

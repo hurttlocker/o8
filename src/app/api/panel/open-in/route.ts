@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
     const home = process.env.HOME || require('os').homedir();
     const repoName = repo.split('/').pop() || repo;
     const candidates = [
-      `${home}/clawd/repos/${repoName}`,
+      `process.cwd() + '/../'${repoName}`,
       `${home}/${repoName}`,
       `${home}/code/${repoName}`,
     ];

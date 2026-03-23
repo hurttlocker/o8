@@ -116,7 +116,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
           Issue #{created.number} created
         </div>
         <div style={{ fontSize: 13, color: 'var(--t-text-secondary)' }}>
-          {repo || 'hurttlocker/cortex-ide'}
+          {repo || ''}
         </div>
       </div>
     );
@@ -144,7 +144,7 @@ export const IssueCreator = memo(function IssueCreator({ repo, onCreated }: Issu
         <div>
           <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text)' }}>New Issue</div>
           <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 2, fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-            {repo || 'hurttlocker/cortex-ide'}
+            {repo || ''}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>

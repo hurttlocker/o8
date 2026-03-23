@@ -1225,14 +1225,14 @@ const FILTER_TABS: { key: FeedFilter; label: string; icon: React.ReactNode }[] =
 
 // Agent → GitHub repo mapping (same as workspaces API)
 const AGENT_REPO_MAP: Record<string, string> = {
-  'agent:main:main': 'hurttlocker/cortex-ide',
+  'agent:main:main': '',
   'agent:ace:main': 'hurttlocker/cortex',
   'agent:hawk:main': 'hurttlocker/cortex',
 };
 
 // Display names for repos
 const REPO_DISPLAY: Record<string, string> = {
-  'hurttlocker/cortex-ide': 'Cortex IDE',
+  '': 'Cortex IDE',
   'hurttlocker/cortex': 'Cortex',
   'hurttlocker/sleeping-beauties': 'Copy Trade',
 };
@@ -1302,7 +1302,7 @@ const ActivityFeed = memo(function ActivityFeed({
     if (repoOverride) return repoOverride;
     if (activeAgentKey && AGENT_REPO_MAP[activeAgentKey]) return AGENT_REPO_MAP[activeAgentKey];
     if (externalRepo) return externalRepo;
-    return 'hurttlocker/cortex-ide';
+    return '';
   }, [repoOverride, activeAgentKey, externalRepo]);
 
   const isAllRepos = repo === ALL_REPOS_KEY;

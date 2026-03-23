@@ -179,7 +179,7 @@ function DashboardInner() {
   const [globalRepoBranch, setGlobalRepoBranch] = useState<string>('main');
   const [globalRepoList, setGlobalRepoList] = useState<string[]>([]);
   const REPO_DISPLAY: Record<string, string> = {
-    'hurttlocker/cortex-ide': 'Cortex IDE',
+    '': 'Cortex IDE',
     'hurttlocker/cortex': 'Cortex',
     'hurttlocker/sleeping-beauties': 'Copy Trade',
   };
