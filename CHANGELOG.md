@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-23
 
+- `5827b8f` fix: Graceful degradation for database in production bundle
 - `797fd34` fix: Production native shell app fully working — database copy (not symlink)
 - `b7afcab` fix: Standalone app
 - `5bb7f32` feat: WS server bundled in native shell app — terminals + chat work in production
