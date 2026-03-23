@@ -826,9 +826,30 @@ function DashboardInner() {
             fontSize: 12,
             lineHeight: 1.6,
             color: 'rgba(226,232,240,0.72)',
+            marginBottom: 16,
           }}>
             Split first, then open a preview, issue, or bottom terminal. Cortex will route it into the active workspace pane automatically.
           </div>
+          <button
+            type="button"
+            onClick={() => {
+              window.localStorage.removeItem(TILE_LAYOUT_STORAGE_KEY);
+              setTileLayout(createDefaultTileLayout());
+              setTileLayoutHydrated(true);
+            }}
+            style={{
+              padding: '8px 20px',
+              borderRadius: 8,
+              border: '1px solid rgba(96,165,250,0.3)',
+              background: 'rgba(96,165,250,0.08)',
+              color: '#93c5fd',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Reset Layout
+          </button>
         </div>
       ),
     },
