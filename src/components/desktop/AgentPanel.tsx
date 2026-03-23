@@ -3197,6 +3197,21 @@ function filterTreeToChanged(nodes: FileNode[], changed: Set<string>): FileNode[
     .filter((n): n is FileNode => n !== null);
 }
 
+function filterTreeToEnv(nodes: FileNode[]): FileNode[] {
+  const envPattern = /^\.env|\.env\./;
+  return nodes
+    .map((node) => {
+      if (node.type === 'file') {
+        const name = node.name.toLowerCase();
+        return envPattern.test(name) ? node : null;
+      }
+      const filteredChildren = filterTreeToEnv(node.children ?? []);
+      if (filteredChildren.length === 0) return null;
+      return { ...node, children: filteredChildren };
+    })
+    .filter((n): n is FileNode => n !== null);
+}
+
 const FileTree = memo(function FileTree({ tree, changedFiles, onSelectFile }: {
   tree: FileNode[];
   changedFiles: Set<string>;
@@ -3311,7 +3326,7 @@ export const AgentPanel = memo(function AgentPanel({
   const [prs, setPrs] = useState<GHPullRequest[]>([]);
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
-  const [fileFilter, setFileFilter] = useState<'all' | 'changes'>('changes');
+  const [fileFilter, setFileFilter] = useState<'all' | 'changes' | 'env'>('changes');
   const [fileDropdownOpen, setFileDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('files');
   const [tabsExpanded, setTabsExpanded] = useState(true);
@@ -3627,7 +3642,7 @@ export const AgentPanel = memo(function AgentPanel({
                 }}
               >
                 <Icon size={14} strokeWidth={isActive ? 2 : 1.5} />
-                {isFiles ? (fileFilter === 'changes' ? 'Changes' : tab.label) : tab.label}
+                {isFiles ? (fileFilter === 'changes' ? 'Changes' : fileFilter === 'env' ? 'Env' : tab.label) : tab.label}
                 {isFiles && isActive ? (
                   <ChevronDown size={10} strokeWidth={2} style={{
                     transition: 'transform 150ms ease',
@@ -3663,6 +3678,7 @@ export const AgentPanel = memo(function AgentPanel({
                     {[
                       { id: 'all' as const, label: 'All Files' },
                       { id: 'changes' as const, label: `Changes${changedFiles.size > 0 ? ` (${changedFiles.size})` : ''}` },
+                      { id: 'env' as const, label: 'Environments' },
                     ].map((opt) => (
                       <button
                         key={opt.id}
@@ -3801,7 +3817,7 @@ export const AgentPanel = memo(function AgentPanel({
           }}>
             {activeTab === 'files' ? (
               <FileTree
-                tree={fileFilter === 'changes' ? filterTreeToChanged(fileTree, changedFiles) : fileTree}
+                tree={fileFilter === 'changes' ? filterTreeToChanged(fileTree, changedFiles) : fileFilter === 'env' ? filterTreeToEnv(fileTree) : fileTree}
                 changedFiles={changedFiles}
                 onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)}
               />
