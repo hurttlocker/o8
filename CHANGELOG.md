@@ -6,6 +6,8 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-22
 
+- `3d9da29` fix: Load Monaco locally (no CDN) + pastel blue/violet theme
+- `53c9da2` docs: add combined Rainwater locomo benchmark
 - `8ebaa9e` fix: Monaco shows empty content — editContent not populated on load
 - `67887fd` feat: Monaco Frost v2
 - `c9938b4` feat: Monaco 'Rainwater Frost' theme — icy light blue editor
