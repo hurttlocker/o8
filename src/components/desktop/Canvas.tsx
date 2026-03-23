@@ -899,23 +899,122 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
     return () => window.removeEventListener('keydown', handler);
   }, [editing, handleSave]);
 
+  // Inline edit state
+  const [inlineEditOpen, setInlineEditOpen] = useState(false);
+  const [inlineEditPrompt, setInlineEditPrompt] = useState('');
+  const [inlineEditLoading, setInlineEditLoading] = useState(false);
+  const inlineEditInputRef = useRef<HTMLInputElement>(null);
+  const monacoRef = useRef<typeof import('monaco-editor') | null>(null);
+
   // Monaco editor mount handler
   const handleEditorMount = useCallback((editor: unknown) => {
     editorRef.current = editor;
-    // Add Cmd+S keybinding directly on the Monaco instance
-    const monacoEditor = editor as { addCommand?: (keybinding: number, handler: () => void) => void; KeyMod?: Record<string, number>; KeyCode?: Record<string, number> };
-    if (monacoEditor.addCommand) {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      import('@monaco-editor/react').then(({ loader }) => {
-        loader.init().then((monaco) => {
-          (editor as { addCommand: (k: number, h: () => void) => void }).addCommand(
-            monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
-            () => { void handleSave(); }
-          );
-        });
+
+    import('monaco-editor').then((monaco) => {
+      monacoRef.current = monaco;
+      const ed = editor as import('monaco-editor').editor.IStandaloneCodeEditor;
+
+      // Cmd+S — save
+      ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+        void handleSave();
       });
-    }
+
+      // Cmd+E — inline AI edit
+      ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyE, () => {
+        setInlineEditOpen(true);
+        setTimeout(() => inlineEditInputRef.current?.focus(), 50);
+      });
+    });
   }, [handleSave]);
+
+  // Handle inline edit submission
+  const handleInlineEdit = useCallback(async () => {
+    const ed = editorRef.current as import('monaco-editor').editor.IStandaloneCodeEditor | null;
+    if (!ed || !inlineEditPrompt.trim() || inlineEditLoading) return;
+
+    const selection = ed.getSelection();
+    const model = ed.getModel();
+    if (!model) return;
+
+    const selectedText = selection && !selection.isEmpty()
+      ? model.getValueInRange(selection)
+      : model.getValue();
+    const isFullFile = !selection || selection.isEmpty();
+    const language = getMonacoLanguage(filePath);
+
+    setInlineEditLoading(true);
+    try {
+      const res = await fetch('/api/v2/proxy/llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'anthropic',
+          model: 'claude-sonnet-4-20250514',
+          messages: [{
+            role: 'user',
+            content: `Edit this ${language} code. ${inlineEditPrompt.trim()}\n\nReturn ONLY the edited code, no explanations or markdown fences.\n\n${selectedText}`,
+          }],
+          max_tokens: 4096,
+        }),
+      });
+
+      if (!res.ok) throw new Error('LLM request failed');
+
+      // Parse SSE stream
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('No response body');
+      const decoder = new TextDecoder();
+      let result = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value);
+        for (const line of chunk.split('\n')) {
+          if (!line.startsWith('data: ') || line === 'data: [DONE]') continue;
+          try {
+            const event = JSON.parse(line.slice(6)) as Record<string, unknown>;
+            if (event.type === 'content' || event.type === 'delta') {
+              result += (event.text ?? '') as string;
+            }
+          } catch { /* skip */ }
+        }
+      }
+
+      if (result.trim()) {
+        // Strip markdown fences if model included them
+        let cleaned = result.trim();
+        if (cleaned.startsWith('```')) {
+          cleaned = cleaned.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
+        }
+
+        if (isFullFile) {
+          // Replace entire file
+          const fullRange = model.getFullModelRange();
+          ed.executeEdits('cortex-inline-edit', [{
+            range: fullRange,
+            text: cleaned,
+          }]);
+        } else if (selection) {
+          // Replace selection
+          ed.executeEdits('cortex-inline-edit', [{
+            range: selection,
+            text: cleaned,
+          }]);
+        }
+
+        setEditContent(model.getValue());
+        setDirty(model.getValue() !== content);
+      }
+    } catch (err) {
+      setSaveNote(`Edit failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      setTimeout(() => setSaveNote(null), 3000);
+    } finally {
+      setInlineEditLoading(false);
+      setInlineEditOpen(false);
+      setInlineEditPrompt('');
+    }
+  }, [inlineEditPrompt, inlineEditLoading, filePath, content]);
 
   if (loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading file…</div>;
@@ -997,6 +1096,64 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
           </div>
         ) : null}
       </div>
+
+      {/* Inline Edit Bar (Cmd+E) */}
+      {inlineEditOpen && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '8px 16px',
+          background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(139, 92, 246, 0.06))',
+          borderBottom: '1px solid rgba(99, 102, 241, 0.15)',
+          flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#6366f1', flexShrink: 0 }}>✨ Edit</span>
+          <input
+            ref={inlineEditInputRef}
+            type="text"
+            value={inlineEditPrompt}
+            onChange={(e) => setInlineEditPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && inlineEditPrompt.trim()) {
+                e.preventDefault();
+                void handleInlineEdit();
+              }
+              if (e.key === 'Escape') {
+                setInlineEditOpen(false);
+                setInlineEditPrompt('');
+              }
+            }}
+            placeholder={inlineEditLoading ? 'Thinking…' : 'Describe the change… (Enter to apply, Esc to cancel)'}
+            disabled={inlineEditLoading}
+            style={{
+              flex: 1,
+              padding: '6px 10px',
+              borderRadius: 8,
+              border: '1px solid rgba(99, 102, 241, 0.2)',
+              background: 'rgba(255,255,255,0.8)',
+              fontSize: 13,
+              color: '#1e293b',
+              outline: 'none',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          />
+          {inlineEditLoading ? (
+            <div style={{ width: 16, height: 16, border: '2px solid #6366f1', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.6s linear infinite', flexShrink: 0 }} />
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setInlineEditOpen(false); setInlineEditPrompt(''); }}
+              style={{
+                padding: '4px 8px', border: 'none', background: 'transparent',
+                color: 'var(--t-text-muted)', fontSize: 11, cursor: 'pointer',
+              }}
+            >
+              Esc
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Body */}
       <div style={{ flex: 1, overflow: 'hidden' }}>
