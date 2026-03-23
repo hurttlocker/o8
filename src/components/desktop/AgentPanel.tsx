@@ -3315,6 +3315,8 @@ export const AgentPanel = memo(function AgentPanel({
   const [fileDropdownOpen, setFileDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('files');
   const [tabsExpanded, setTabsExpanded] = useState(true);
+  const [filesHeight, setFilesHeight] = useState(240);
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
   const [activityOpen, setActivityOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(true);
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
@@ -3787,24 +3789,62 @@ export const AgentPanel = memo(function AgentPanel({
         </div>
       ) : null}
 
-      {/* ── Content Area (collapsible) ── */}
+      {/* ── Content Area (collapsible + resizable) ── */}
       {tabsExpanded && (
-        <div style={{
-          maxHeight: 280,
-          overflowY: 'auto',
-          borderTop: expandedGroup ? 'none' : '1px solid var(--t-divider-subtle)',
-          marginTop: expandedGroup ? 0 : 4,
-          flexShrink: 0,
-        }}>
-          {activeTab === 'files' ? (
-            <FileTree
-              tree={fileFilter === 'changes' ? filterTreeToChanged(fileTree, changedFiles) : fileTree}
-              changedFiles={changedFiles}
-              onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)}
-            />
-          ) : null}
-          {activeTab === 'deploy' ? <DeployList onOpenDeploy={onOpenDeploy} /> : null}
-        </div>
+        <>
+          <div style={{
+            height: filesHeight,
+            overflowY: 'auto',
+            borderTop: expandedGroup ? 'none' : '1px solid var(--t-divider-subtle)',
+            marginTop: expandedGroup ? 0 : 4,
+            flexShrink: 0,
+          }}>
+            {activeTab === 'files' ? (
+              <FileTree
+                tree={fileFilter === 'changes' ? filterTreeToChanged(fileTree, changedFiles) : fileTree}
+                changedFiles={changedFiles}
+                onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)}
+              />
+            ) : null}
+            {activeTab === 'deploy' ? <DeployList onOpenDeploy={onOpenDeploy} /> : null}
+          </div>
+          {/* Drag handle */}
+          <div
+            onMouseDown={(e) => {
+              e.preventDefault();
+              dragRef.current = { startY: e.clientY, startH: filesHeight };
+              const onMove = (ev: MouseEvent) => {
+                if (!dragRef.current) return;
+                const delta = ev.clientY - dragRef.current.startY;
+                setFilesHeight(Math.max(80, Math.min(600, dragRef.current.startH + delta)));
+              };
+              const onUp = () => {
+                dragRef.current = null;
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+              };
+              document.addEventListener('mousemove', onMove);
+              document.addEventListener('mouseup', onUp);
+            }}
+            style={{
+              height: 6,
+              cursor: 'row-resize',
+              background: 'transparent',
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <div style={{
+              width: 32,
+              height: 3,
+              borderRadius: 2,
+              background: 'var(--t-divider)',
+              opacity: 0.5,
+            }} />
+          </div>
+        </>
       )}
 
       {/* ── Activity Dropdown (above agents, collapsed by default) ── */}
