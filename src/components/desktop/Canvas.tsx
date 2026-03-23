@@ -1048,7 +1048,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
             height="100%"
             language={getMonacoLanguage(filePath)}
             value={editing ? editContent : content}
-            theme="cortex-dark"
+            theme="cortex-frost"
             onChange={(value) => {
               if (editing && value !== undefined) {
                 setEditContent(value);
@@ -1057,7 +1057,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
             }}
             onMount={handleEditorMount}
             beforeMount={(monaco) => {
-              // Define custom dark theme matching our UI
+              // Dark theme matching our zinc UI
               monaco.editor.defineTheme('cortex-dark', {
                 base: 'vs-dark',
                 inherit: true,
@@ -1088,6 +1088,46 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
                   'minimap.background': '#09090b',
                   'scrollbarSlider.background': '#27272a80',
                   'scrollbarSlider.hoverBackground': '#3f3f4680',
+                },
+              });
+
+              // Icy frost light theme — very light blue with crisp syntax
+              monaco.editor.defineTheme('cortex-frost', {
+                base: 'vs',
+                inherit: true,
+                rules: [
+                  { token: 'comment', foreground: '94a3b8', fontStyle: 'italic' },
+                  { token: 'keyword', foreground: '7c3aed' },
+                  { token: 'string', foreground: '059669' },
+                  { token: 'number', foreground: 'ea580c' },
+                  { token: 'type', foreground: '2563eb' },
+                  { token: 'variable', foreground: 'dc2626' },
+                  { token: 'function', foreground: '2563eb' },
+                  { token: 'delimiter', foreground: '64748b' },
+                  { token: 'tag', foreground: 'dc2626' },
+                  { token: 'attribute.name', foreground: 'ea580c' },
+                  { token: 'attribute.value', foreground: '059669' },
+                ],
+                colors: {
+                  'editor.background': '#f0f7ff',
+                  'editor.foreground': '#1e293b',
+                  'editor.lineHighlightBackground': '#e0edff',
+                  'editor.selectionBackground': '#bfdbfe',
+                  'editorLineNumber.foreground': '#94a3b8',
+                  'editorLineNumber.activeForeground': '#475569',
+                  'editor.inactiveSelectionBackground': '#dbeafe80',
+                  'editorCursor.foreground': '#2563eb',
+                  'editorGutter.background': '#f0f7ff',
+                  'editorWidget.background': '#f8fafc',
+                  'editorWidget.border': '#cbd5e1',
+                  'input.background': '#ffffff',
+                  'input.border': '#cbd5e1',
+                  'focusBorder': '#2563eb',
+                  'minimap.background': '#f0f7ff',
+                  'scrollbarSlider.background': '#94a3b840',
+                  'scrollbarSlider.hoverBackground': '#64748b40',
+                  'editorBracketMatch.background': '#dbeafe',
+                  'editorBracketMatch.border': '#93c5fd',
                 },
               });
             }}
