@@ -47,7 +47,7 @@ export const demoApprovals: ApprovalRequest[] = [
     title: 'Delete 23 stale branches?',
     description: 'Codex wants to run git branch cleanup on cortex-ide. This will permanently delete 23 remote branches older than 30 days.',
     metadata: {
-      Repository: 'hurttlocker/cortex-ide',
+      Repository: '',
       Branches: '23',
       Action: 'git push origin --delete',
     },

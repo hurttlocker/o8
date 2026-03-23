@@ -152,7 +152,7 @@ function getLocalDiffStats(workspace: string): { additions: number; deletions: n
 function ghOwnerRepo(repoName: string): string {
   // Map local repo dir names to GitHub owner/repo
   const map: Record<string, string> = {
-    'cortex-ide': 'hurttlocker/cortex-ide',
+    'cortex-ide': '',
     'cortex': 'hurttlocker/cortex',
     'parasite-network': 'hurttlocker/parasite-network',
     'spear-production': 'LavonTMCQ/spear-production',

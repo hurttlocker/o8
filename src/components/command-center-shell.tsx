@@ -1137,7 +1137,7 @@ export function CommandCenterShell({
               <button>{`PR #${reviewPullRequest.number}`}</button>
             </a>
           ) : null}
-          <a href={`https://github.com/${review?.repoSlug ?? 'hurttlocker/cortex-ide'}/issues`} target="_blank" rel="noreferrer">
+          <a href={`https://github.com/${review?.repoSlug ?? ''}/issues`} target="_blank" rel="noreferrer">
             <button>Issues</button>
           </a>
           <button type="button" onClick={() => window.location.reload()}>
@@ -1229,7 +1229,7 @@ export function CommandCenterShell({
               <div className="signal-stack">
                 <div className="signal-row">
                   <span>Repo</span>
-                  <strong>{review?.repoSlug ?? 'hurttlocker/cortex-ide'}</strong>
+                  <strong>{review?.repoSlug ?? ''}</strong>
                 </div>
                 <div className="signal-row">
                   <span>Branch</span>

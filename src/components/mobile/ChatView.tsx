@@ -113,7 +113,7 @@ const MessageBubble = memo(function MessageBubble({
     );
   }
 
-  const agentName = isOwnedCodexSession ? 'Codex' : (selectedSession?.isCurrentSession ? 'Mister' : undefined);
+  const agentName = isOwnedCodexSession ? 'Codex' : (selectedSession?.isCurrentSession ? 'Assistant' : undefined);
 
   return (
     <article
@@ -562,7 +562,7 @@ export function ChatView({
           return (
             <article className="remodex-message-card remodex-message-card-assistant remodex-streaming-card">
               <div className="remodex-message-header">
-                <span className="remodex-speaker-label">{selectedSession ? agentDisplayName(selectedSession) : 'Mister'}</span>
+                <span className="remodex-speaker-label">{selectedSession ? agentDisplayName(selectedSession) : 'Assistant'}</span>
                 <div className="remodex-typing-bubble-dots" style={{ display: 'inline-flex', marginLeft: 6 }}>
                   <span className="remodex-typing-dot" />
                   <span className="remodex-typing-dot" />
@@ -654,7 +654,7 @@ export function ChatView({
         if (waitingForResponse || actionState === 'steering') {
           return (
             <div className="remodex-typing-bubble">
-              <span className="remodex-typing-bubble-label">{selectedSession ? agentDisplayName(selectedSession) : 'Mister'}</span>
+              <span className="remodex-typing-bubble-label">{selectedSession ? agentDisplayName(selectedSession) : 'Assistant'}</span>
               <div className="remodex-typing-bubble-dots">
                 <span className="remodex-typing-dot" />
                 <span className="remodex-typing-dot" />

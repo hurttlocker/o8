@@ -216,7 +216,7 @@ export const ComposeBar = memo(function ComposeBar({
               }}
               onFocus={() => handlers.onFocusChange(true)}
               onBlur={() => handlers.onFocusChange(false)}
-              placeholder={attachments.length ? 'Add context for the image…' : `Message ${session ? agentDisplayName(session) : 'Mister'}…`}
+              placeholder={attachments.length ? 'Add context for the image…' : `Message ${session ? agentDisplayName(session) : 'Assistant'}…`}
             />
             {showSlashSuggestions ? (
               <div
@@ -321,7 +321,7 @@ export const ComposeBar = memo(function ComposeBar({
                   }
                   void handlers.onSend(sessionKey);
                 }}
-                aria-label={`Send message to ${session ? agentDisplayName(session) : 'Mister'}`}
+                aria-label={`Send message to ${session ? agentDisplayName(session) : 'Assistant'}`}
               >
                 {actionState === 'steering' ? (
                   <>

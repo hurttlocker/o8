@@ -73,7 +73,7 @@ type TranscriptGroup = {
 
 function getAgentName(s: SessionSummary): string {
   if (s.runtime === 'claude-code') return 'Claude Code';
-  if (s.isCurrentSession) return 'Mister';
+  if (s.isCurrentSession) return 'Assistant';
   const name = s.name || s.sessionKey;
   if (name.includes('codex-owned')) return 'Codex';
   if (name.includes('ace')) return 'Niot';
@@ -3134,7 +3134,7 @@ export function DesktopChat({
         ? '#ff9f0a'
         : '#8e8e93';
 
-  const currentAgentName = selectedSession ? getAgentName(selectedSession) : 'Mister';
+  const currentAgentName = selectedSession ? getAgentName(selectedSession) : 'Assistant';
   const sidebarCapabilities = useMemo<SidebarRuntimeCapabilities>(
     () => deriveSidebarRuntimeCapabilities(selectedSession),
     [selectedSession],

@@ -234,7 +234,7 @@ export async function GET() {
     for (const file of openclawFiles.split('\n').filter(Boolean)) {
       const agentMatch = file.match(/agents\/([^/]+)\//);
       const agentKey = agentMatch ? agentMatch[1] : 'unknown';
-      const agentDisplayNames: Record<string, string> = { main: 'Mister', ace: 'Niot', hawk: 'Hawk' };
+      const agentDisplayNames: Record<string, string> = { main: 'Main', ace: 'Agent 2', hawk: 'Agent 3' };
       const agent = agentDisplayNames[agentKey] || agentKey;
       const lines = execQuiet(`tail -500 "${file}" 2>/dev/null`, { timeout: 10000 });
       if (!lines) continue;

@@ -424,7 +424,7 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
         />
         <SettingsRow
           label="GitHub"
-          action={() => window.open('https://github.com/hurttlocker/cortex-ide', '_blank')}
+          action={() => window.open(process.env.NEXT_PUBLIC_REPO_URL || 'https://github.com/hurttlocker/cortex-ide', '_blank')}
           last
         />
       </SettingsGroup>

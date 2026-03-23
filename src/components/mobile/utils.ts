@@ -105,7 +105,7 @@ export function formatStreamingPreview(raw: string): string {
 export function roleLabel(role: MobileTranscriptEntry['role'], agentName?: string) {
   switch (role) {
     case 'assistant':
-      return agentName ?? 'Mister';
+      return agentName ?? 'Assistant';
     case 'user':
       return 'You';
     case 'system':
@@ -214,7 +214,7 @@ export function sessionStatusSummary(
 }
 
 export function threadLaneLabel(session: SessionSummary) {
-  if (session.isCurrentSession) return 'Mister';
+  if (session.isCurrentSession) return 'Assistant';
   if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') return 'Codex';
   if (session.runtime === 'claude-code') return 'Claude Code';
   return session.runtime === 'openclaw' ? 'OpenClaw' : 'Session';
@@ -733,7 +733,7 @@ export async function readJson<T>(response: Response) {
 }
 
 export function agentDisplayName(session: SessionSummary): string {
-  if (session.isCurrentSession) return 'Mister';
+  if (session.isCurrentSession) return 'Assistant';
   if (session.runtime === 'codex') return 'Codex';
   const name = session.name || '';
   if (name.startsWith('Hawk')) return 'Hawk';
@@ -741,7 +741,7 @@ export function agentDisplayName(session: SessionSummary): string {
   if (name.includes('automation') || name.includes('cron')) return 'Cron';
   if (name.includes('Telegram')) return 'Telegram';
   if (name.includes('Discord')) return 'Discord';
-  if (name.includes('Mister')) return 'Mister';
+  if (name.includes('Assistant')) return 'Assistant';
   return name.split(/[\s·•/]/)[0] || 'Agent';
 }
 
