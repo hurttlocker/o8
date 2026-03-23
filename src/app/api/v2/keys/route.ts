@@ -12,11 +12,16 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 
-const REPO_ROOT = process.env.CORTEX_IDE_REPO_ROOT || process.cwd();
-const ENV_FILE = join(REPO_ROOT, '.env.local');
+// Config lives in ~/.cortex-ide/ so it survives app updates
+const CONFIG_DIR = join(homedir(), '.cortex-ide');
+const ENV_FILE = join(CONFIG_DIR, '.env.local');
+
+// Also check project-local .env.local as fallback (dev mode)
+const LOCAL_ENV = join(process.cwd(), '.env.local');
 
 interface ProviderKeyConfig {
   id: string;
@@ -48,12 +53,19 @@ const PROVIDERS: ProviderKeyConfig[] = [
     placeholder: 'AIza...',
     docsUrl: 'https://aistudio.google.com/apikey',
   },
+  {
+    id: 'github',
+    label: 'GitHub',
+    envVar: 'GH_TOKEN',
+    placeholder: 'ghp_...',
+    docsUrl: 'https://github.com/settings/tokens',
+  },
 ];
 
-function parseEnvFile(): Map<string, string> {
+function parseEnvFromPath(path: string): Map<string, string> {
   const vars = new Map<string, string>();
-  if (!existsSync(ENV_FILE)) return vars;
-  const content = readFileSync(ENV_FILE, 'utf-8');
+  if (!existsSync(path)) return vars;
+  const content = readFileSync(path, 'utf-8');
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
@@ -70,7 +82,17 @@ function parseEnvFile(): Map<string, string> {
   return vars;
 }
 
+function parseEnvFile(): Map<string, string> {
+  // Merge: project-local first, then ~/.cortex-ide/ overrides
+  const local = parseEnvFromPath(LOCAL_ENV);
+  const global = parseEnvFromPath(ENV_FILE);
+  // Also check process.env for runtime-set values
+  return new Map([...local, ...global]);
+}
+
 function writeEnvFile(vars: Map<string, string>) {
+  // Ensure config dir exists
+  mkdirSync(CONFIG_DIR, { recursive: true });
   // Read existing file to preserve comments and ordering
   let lines: string[] = [];
   if (existsSync(ENV_FILE)) {
