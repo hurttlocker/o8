@@ -981,7 +981,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
           model: 'gemini-2.5-flash',
           messages: [{
             role: 'user',
-            content: `Edit this ${language} code. ${inlineEditPrompt.trim()}\n\nReturn ONLY the edited code, no explanations or markdown fences.\n\n${selectedText}`,
+            content: `You are a code editor. Rewrite this ${language} code to: ${inlineEditPrompt.trim()}\n\nSELECTED CODE:\n${selectedText}\n\nOutput ONLY the modified code. No explanations. No markdown fences. No conversation. If the instruction is unclear, return the code unchanged.`,
           }],
           max_tokens: 4096,
         }),
