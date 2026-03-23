@@ -857,7 +857,11 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
       }
     });
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      tabCompleteDisposableRef.current?.dispose();
+      tabCompleteAbortRef.current?.abort();
+    };
   }, [filePath, workspace]);
 
   // Save file via API
@@ -906,6 +910,11 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
   const inlineEditInputRef = useRef<HTMLInputElement>(null);
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null);
 
+  // Tab completion abort controller
+  const tabCompleteAbortRef = useRef<AbortController | null>(null);
+  const tabCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tabCompleteDisposableRef = useRef<{ dispose: () => void } | null>(null);
+
   // Monaco editor mount handler
   const handleEditorMount = useCallback((editor: unknown) => {
     editorRef.current = editor;
@@ -924,8 +933,117 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
         setInlineEditOpen(true);
         setTimeout(() => inlineEditInputRef.current?.focus(), 50);
       });
+
+      // Tab autocomplete — inline ghost text suggestions
+      const language = getMonacoLanguage(filePath);
+      const disposable = monaco.languages.registerInlineCompletionsProvider(language, {
+        provideInlineCompletions: async (model, position, _context, token) => {
+          // Cancel any in-flight request
+          tabCompleteAbortRef.current?.abort();
+
+          // Get surrounding context (up to 60 lines before, 10 after)
+          const lineCount = model.getLineCount();
+          const startLine = Math.max(1, position.lineNumber - 60);
+          const endLine = Math.min(lineCount, position.lineNumber + 10);
+          const prefix = model.getValueInRange({
+            startLineNumber: startLine,
+            startColumn: 1,
+            endLineNumber: position.lineNumber,
+            endColumn: position.column,
+          });
+          const suffix = model.getValueInRange({
+            startLineNumber: position.lineNumber,
+            startColumn: position.column,
+            endLineNumber: endLine,
+            endColumn: model.getLineMaxColumn(endLine),
+          });
+
+          // Don't autocomplete on empty lines or very short context
+          const currentLine = model.getLineContent(position.lineNumber).trim();
+          if (prefix.trim().length < 10 && !currentLine) {
+            return { items: [] };
+          }
+
+          const abortController = new AbortController();
+          tabCompleteAbortRef.current = abortController;
+
+          // Debounce: wait 400ms after typing stops
+          await new Promise<void>((resolve, reject) => {
+            if (tabCompleteTimerRef.current) clearTimeout(tabCompleteTimerRef.current);
+            tabCompleteTimerRef.current = setTimeout(resolve, 400);
+            token.onCancellationRequested(() => { abortController.abort(); reject(new Error('cancelled')); });
+          });
+
+          if (token.isCancellationRequested || abortController.signal.aborted) {
+            return { items: [] };
+          }
+
+          try {
+            const res = await fetch('/api/v2/proxy/llm', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                provider: 'anthropic',
+                model: 'claude-haiku-3-5-20241022',
+                messages: [{
+                  role: 'user',
+                  content: `Complete this ${language} code. Output ONLY the completion text (the code that comes right after the cursor). No explanations. Max 3 lines.\n\n<code_before_cursor>\n${prefix}\n</code_before_cursor>\n<code_after_cursor>\n${suffix}\n</code_after_cursor>`,
+                }],
+                max_tokens: 200,
+              }),
+              signal: abortController.signal,
+            });
+
+            if (!res.ok || token.isCancellationRequested) return { items: [] };
+
+            // Parse SSE stream to get the completion text
+            const reader = res.body?.getReader();
+            if (!reader) return { items: [] };
+            const decoder = new TextDecoder();
+            let completion = '';
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              const chunk = decoder.decode(value);
+              for (const line of chunk.split('\n')) {
+                if (!line.startsWith('data: ') || line === 'data: [DONE]') continue;
+                try {
+                  const event = JSON.parse(line.slice(6)) as Record<string, unknown>;
+                  if (event.type === 'content' || event.type === 'delta') {
+                    completion += (event.text ?? '') as string;
+                  }
+                } catch { /* skip */ }
+              }
+            }
+
+            if (!completion.trim() || token.isCancellationRequested) return { items: [] };
+
+            // Strip markdown fences if included
+            let text = completion;
+            if (text.startsWith('```')) text = text.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
+
+            return {
+              items: [{
+                insertText: text,
+                range: {
+                  startLineNumber: position.lineNumber,
+                  startColumn: position.column,
+                  endLineNumber: position.lineNumber,
+                  endColumn: position.column,
+                },
+              }],
+            };
+          } catch {
+            return { items: [] };
+          }
+        },
+        disposeInlineCompletions: () => { /* no-op */ },
+      });
+
+      tabCompleteDisposableRef.current = disposable;
     });
-  }, [handleSave]);
+  }, [handleSave, filePath]);
 
   // Handle inline edit submission
   const handleInlineEdit = useCallback(async () => {
@@ -1299,6 +1417,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
               quickSuggestions: false,
               suggestOnTriggerCharacters: false,
               parameterHints: { enabled: false },
+              inlineSuggest: { enabled: true },
               renderWhitespace: 'selection',
               guides: { bracketPairs: true, indentation: true },
             }}
