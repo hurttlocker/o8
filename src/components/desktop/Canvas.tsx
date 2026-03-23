@@ -985,12 +985,10 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
           await new Promise<void>((resolve, reject) => {
             if (tabCompleteTimerRef.current) clearTimeout(tabCompleteTimerRef.current);
             tabCompleteTimerRef.current = setTimeout(resolve, 400);
-            token.onCancellationRequested(() => { abortController.abort(); reject(new Error('cancelled')); });
+            token.onCancellationRequested(() => { abortController.abort(); resolve(); });
           });
 
-          if (token.isCancellationRequested || abortController.signal.aborted) {
-            return { items: [] };
-          }
+          if (token.isCancellationRequested || abortController.signal.aborted) return { items: [] };
 
           try {
             const res = await fetch('/api/v2/proxy/llm', {
