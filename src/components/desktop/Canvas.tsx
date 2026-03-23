@@ -16,6 +16,7 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertCircle,
   BookOpen,
@@ -921,8 +922,14 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
   const [inlineEditOpen, setInlineEditOpen] = useState(false);
   const [inlineEditPrompt, setInlineEditPrompt] = useState('');
   const [inlineEditLoading, setInlineEditLoading] = useState(false);
+  const [inlineEditResponse, setInlineEditResponse] = useState('');
+  const [inlineEditMode, setInlineEditMode] = useState<'edit' | 'explain'>('edit');
+  const [inlineEditAgent, setInlineEditAgent] = useState<'flash' | 'sonnet' | 'opus'>('flash');
   const inlineEditInputRef = useRef<HTMLInputElement>(null);
+  const inlineWidgetRef = useRef<{ dispose: () => void } | null>(null);
+  const inlineWidgetDomRef = useRef<HTMLDivElement | null>(null);
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null);
+  const cursorLineRef = useRef(1);
 
   // Tab completion abort controller
   const tabCompleteAbortRef = useRef<AbortController | null>(null);
@@ -942,10 +949,45 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
         void handleSave();
       });
 
-      // Cmd+E — inline AI edit
+      // Track cursor line for widget positioning
+      ed.onDidChangeCursorPosition((e) => {
+        cursorLineRef.current = e.position.lineNumber;
+      });
+
+      // Cmd+E — inline AI edit widget
       ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyE, () => {
+        const pos = ed.getPosition();
+        if (pos) cursorLineRef.current = pos.lineNumber;
+
+        // Remove existing widget
+        if (inlineWidgetRef.current) {
+          inlineWidgetRef.current.dispose();
+          inlineWidgetRef.current = null;
+        }
+
+        // Create widget DOM
+        if (!inlineWidgetDomRef.current) {
+          inlineWidgetDomRef.current = document.createElement('div');
+          inlineWidgetDomRef.current.id = 'cortex-inline-widget';
+        }
+
+        const lineNumber = cursorLineRef.current;
+        const widget = {
+          getId: () => 'cortex.inline.edit',
+          getDomNode: () => inlineWidgetDomRef.current!,
+          getPosition: () => ({
+            position: { lineNumber, column: 1 },
+            preference: [monaco.editor.ContentWidgetPositionPreference.BELOW],
+          }),
+        };
+
+        ed.addContentWidget(widget);
+        inlineWidgetRef.current = { dispose: () => ed.removeContentWidget(widget) };
+
         setInlineEditOpen(true);
-        setTimeout(() => inlineEditInputRef.current?.focus(), 50);
+        setInlineEditResponse('');
+        setInlineEditMode('edit');
+        setTimeout(() => inlineEditInputRef.current?.focus(), 80);
       });
 
       // Tab autocomplete — disabled for now (Monaco internal lifecycle crash)
@@ -955,6 +997,13 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
       // Will re-implement with widget-based approach
     });
   }, [handleSave, filePath]);
+
+  // Agent model mapping
+  const agentModels: Record<string, { provider: string; model: string }> = {
+    flash: { provider: 'google', model: 'gemini-2.5-flash' },
+    sonnet: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+    opus: { provider: 'anthropic', model: 'claude-opus-4-6-20250929' },
+  };
 
   // Handle inline edit submission
   const handleInlineEdit = useCallback(async () => {
@@ -971,25 +1020,38 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
     const isFullFile = !selection || selection.isEmpty();
     const language = getMonacoLanguage(filePath);
 
+    // Detect mode: if prompt starts with "explain" or "?", use explain mode
+    const trimmed = inlineEditPrompt.trim();
+    const isExplain = /^(explain|what|why|how|\?)/.test(trimmed.toLowerCase());
+    setInlineEditMode(isExplain ? 'explain' : 'edit');
     setInlineEditLoading(true);
+    setInlineEditResponse('');
+
+    const { provider, model: llmModel } = agentModels[inlineEditAgent];
+    const systemPrompt = isExplain
+      ? `You are a senior developer explaining code. Be concise (max 4 sentences). No markdown fences.`
+      : `You are a code editor. Output ONLY modified code. No explanations. No markdown fences. No conversation. If the instruction is unclear, return the code unchanged.`;
+
+    const userContent = isExplain
+      ? `${trimmed}\n\nCODE:\n${selectedText}`
+      : `Rewrite this ${language} code to: ${trimmed}\n\nSELECTED CODE:\n${selectedText}`;
+
     try {
       const res = await fetch('/api/v2/proxy/llm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          provider: 'google',
-          model: 'gemini-2.5-flash',
-          messages: [{
-            role: 'user',
-            content: `You are a code editor. Rewrite this ${language} code to: ${inlineEditPrompt.trim()}\n\nSELECTED CODE:\n${selectedText}\n\nOutput ONLY the modified code. No explanations. No markdown fences. No conversation. If the instruction is unclear, return the code unchanged.`,
-          }],
+          provider,
+          model: llmModel,
+          messages: [
+            { role: 'user', content: `${systemPrompt}\n\n${userContent}` },
+          ],
           max_tokens: 4096,
         }),
       });
 
       if (!res.ok) throw new Error('LLM request failed');
 
-      // Parse SSE stream
       const reader = res.body?.getReader();
       if (!reader) throw new Error('No response body');
       const decoder = new TextDecoder();
@@ -1005,45 +1067,48 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
             const event = JSON.parse(line.slice(6)) as Record<string, unknown>;
             if (event.type === 'content' || event.type === 'delta') {
               result += (event.text ?? '') as string;
+              // Stream response into the widget
+              if (isExplain) setInlineEditResponse(result);
             }
           } catch { /* skip */ }
         }
       }
 
+      if (isExplain) {
+        // Just show the explanation — don't modify code
+        setInlineEditResponse(result.trim());
+        setInlineEditLoading(false);
+        return;
+      }
+
       if (result.trim()) {
-        // Strip markdown fences if model included them
         let cleaned = result.trim();
         if (cleaned.startsWith('```')) {
           cleaned = cleaned.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
         }
 
         if (isFullFile) {
-          // Replace entire file
           const fullRange = model.getFullModelRange();
-          ed.executeEdits('cortex-inline-edit', [{
-            range: fullRange,
-            text: cleaned,
-          }]);
+          ed.executeEdits('cortex-inline-edit', [{ range: fullRange, text: cleaned }]);
         } else if (selection) {
-          // Replace selection
-          ed.executeEdits('cortex-inline-edit', [{
-            range: selection,
-            text: cleaned,
-          }]);
+          ed.executeEdits('cortex-inline-edit', [{ range: selection, text: cleaned }]);
         }
 
         setEditContent(model.getValue());
         setDirty(model.getValue() !== content);
       }
-    } catch (err) {
-      setSaveNote(`Edit failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
-      setTimeout(() => setSaveNote(null), 3000);
-    } finally {
-      setInlineEditLoading(false);
+
+      // Auto-close on successful edit
       setInlineEditOpen(false);
       setInlineEditPrompt('');
+      inlineWidgetRef.current?.dispose();
+      inlineWidgetRef.current = null;
+    } catch (err) {
+      setInlineEditResponse(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setInlineEditLoading(false);
     }
-  }, [inlineEditPrompt, inlineEditLoading, filePath, content]);
+  }, [inlineEditPrompt, inlineEditLoading, inlineEditAgent, filePath, content]);
 
   if (loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading file…</div>;
@@ -1126,62 +1191,122 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
         ) : null}
       </div>
 
-      {/* Inline Edit Bar (Cmd+E) */}
-      {inlineEditOpen && (
+      {/* Inline Edit Widget — renders into Monaco content widget via portal */}
+      {inlineEditOpen && inlineWidgetDomRef.current && createPortal(
         <div style={{
+          width: 420,
+          borderRadius: 14,
+          border: '1px solid rgba(99, 102, 241, 0.2)',
+          background: 'rgba(248, 250, 255, 0.92)',
+          backdropFilter: 'blur(20px) saturate(1.2)',
+          WebkitBackdropFilter: 'blur(20px) saturate(1.2)',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.08), 0 2px 8px rgba(99,102,241,0.06)',
+          padding: '10px 12px',
           display: 'flex',
-          alignItems: 'center',
+          flexDirection: 'column',
           gap: 8,
-          padding: '8px 16px',
-          background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.06), rgba(139, 92, 246, 0.06))',
-          borderBottom: '1px solid rgba(99, 102, 241, 0.15)',
-          flexShrink: 0,
+          zIndex: 9999,
+          fontFamily: '-apple-system, BlinkMacSystemFont, system-ui, sans-serif',
         }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: '#6366f1', flexShrink: 0 }}>✨ Edit</span>
-          <input
-            ref={inlineEditInputRef}
-            type="text"
-            value={inlineEditPrompt}
-            onChange={(e) => setInlineEditPrompt(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && inlineEditPrompt.trim()) {
-                e.preventDefault();
-                void handleInlineEdit();
-              }
-              if (e.key === 'Escape') {
-                setInlineEditOpen(false);
-                setInlineEditPrompt('');
-              }
-            }}
-            placeholder={inlineEditLoading ? 'Thinking…' : 'Describe the change… (Enter to apply, Esc to cancel)'}
-            disabled={inlineEditLoading}
-            style={{
-              flex: 1,
-              padding: '6px 10px',
-              borderRadius: 8,
-              border: '1px solid rgba(99, 102, 241, 0.2)',
-              background: 'rgba(255,255,255,0.8)',
-              fontSize: 13,
-              color: '#1e293b',
-              outline: 'none',
-              fontFamily: '-apple-system, system-ui, sans-serif',
-            }}
-          />
-          {inlineEditLoading ? (
-            <div style={{ width: 16, height: 16, border: '2px solid #6366f1', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.6s linear infinite', flexShrink: 0 }} />
-          ) : (
-            <button
-              type="button"
-              onClick={() => { setInlineEditOpen(false); setInlineEditPrompt(''); }}
-              style={{
-                padding: '4px 8px', border: 'none', background: 'transparent',
-                color: 'var(--t-text-muted)', fontSize: 11, cursor: 'pointer',
+          {/* Agent picker pills */}
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+            <span style={{ fontSize: 10, color: '#6366f1', fontWeight: 600, marginRight: 4 }}>✨</span>
+            {(['flash', 'sonnet', 'opus'] as const).map((agent) => (
+              <button
+                key={agent}
+                type="button"
+                onClick={() => setInlineEditAgent(agent)}
+                style={{
+                  padding: '2px 8px', borderRadius: 6, border: 'none',
+                  fontSize: 10, fontWeight: inlineEditAgent === agent ? 600 : 400,
+                  color: inlineEditAgent === agent ? '#fff' : '#64748b',
+                  background: inlineEditAgent === agent
+                    ? (agent === 'flash' ? '#6366f1' : agent === 'sonnet' ? '#2563eb' : '#7c3aed')
+                    : 'rgba(148,163,184,0.1)',
+                  cursor: 'pointer',
+                  transition: 'all 120ms ease',
+                  textTransform: 'capitalize',
+                }}
+              >
+                {agent}
+              </button>
+            ))}
+            <span style={{ marginLeft: 'auto', fontSize: 9, color: '#94a3b8' }}>⌘E</span>
+          </div>
+
+          {/* Input */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input
+              ref={inlineEditInputRef}
+              type="text"
+              value={inlineEditPrompt}
+              onChange={(e) => setInlineEditPrompt(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && inlineEditPrompt.trim()) {
+                  e.preventDefault();
+                  void handleInlineEdit();
+                }
+                if (e.key === 'Escape') {
+                  setInlineEditOpen(false);
+                  setInlineEditPrompt('');
+                  setInlineEditResponse('');
+                  inlineWidgetRef.current?.dispose();
+                  inlineWidgetRef.current = null;
+                }
               }}
-            >
-              Esc
-            </button>
-          )}
-        </div>
+              placeholder={inlineEditLoading ? 'Thinking…' : '"add error handling" or "explain this"'}
+              disabled={inlineEditLoading}
+              style={{
+                flex: 1,
+                padding: '7px 10px',
+                borderRadius: 8,
+                border: '1px solid rgba(99, 102, 241, 0.15)',
+                background: 'rgba(255,255,255,0.7)',
+                fontSize: 12,
+                color: '#1e293b',
+                outline: 'none',
+              }}
+            />
+            {inlineEditLoading ? (
+              <div style={{ width: 14, height: 14, border: '2px solid #6366f1', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.6s linear infinite', flexShrink: 0 }} />
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setInlineEditOpen(false); setInlineEditPrompt(''); setInlineEditResponse('');
+                  inlineWidgetRef.current?.dispose(); inlineWidgetRef.current = null;
+                }}
+                style={{
+                  padding: '4px 6px', border: 'none', background: 'transparent',
+                  color: '#94a3b8', fontSize: 10, cursor: 'pointer', fontWeight: 500,
+                }}
+              >
+                esc
+              </button>
+            )}
+          </div>
+
+          {/* Response area (explain mode or error) */}
+          {inlineEditResponse ? (
+            <div style={{
+              padding: '8px 10px',
+              borderRadius: 8,
+              background: inlineEditResponse.startsWith('Error')
+                ? 'rgba(239,68,68,0.06)'
+                : 'rgba(99,102,241,0.04)',
+              border: `1px solid ${inlineEditResponse.startsWith('Error') ? 'rgba(239,68,68,0.15)' : 'rgba(99,102,241,0.1)'}`,
+              fontSize: 11,
+              lineHeight: 1.5,
+              color: inlineEditResponse.startsWith('Error') ? '#dc2626' : '#334155',
+              maxHeight: 120,
+              overflowY: 'auto',
+              whiteSpace: 'pre-wrap',
+            }}>
+              {inlineEditResponse}
+            </div>
+          ) : null}
+        </div>,
+        inlineWidgetDomRef.current,
       )}
 
       {/* Body */}
