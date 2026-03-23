@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-23
 
+- `3dbbdb8` fix: Rainwater-facts parallel queries + Node 25 for native module compat
 - `afc4cdb` fix: Production audit — graceful degradation for all endpoints
 - `5471dc4` fix: Add 'Reset Layout' button to empty workspace tile
 - `c4a6852` fix: Bundle node-pty + chat auto-restores on nav switch
