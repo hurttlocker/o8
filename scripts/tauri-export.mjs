@@ -106,7 +106,18 @@ if (existsSync(pub)) {
   console.log('📦 Copied public');
 }
 
+// ── Compile WS server ──
 const { execSync } = await import('child_process');
+try {
+  execSync(
+    `npx esbuild src/ws-server.ts --bundle --platform=node --format=esm --outfile=out/server/ws-server.mjs --external:node-pty --banner:js='import { createRequire } from "module"; const require = createRequire(import.meta.url);'`,
+    { cwd: root, stdio: 'inherit' },
+  );
+  console.log('📦 Compiled ws-server.mjs');
+} catch (e) {
+  console.warn('⚠️  WS server compilation failed:', e.message);
+}
+
 const size = execSync(`du -sh "${server}" 2>/dev/null`).toString().trim().split('\\t')[0];
 console.log('\\n✅ Export complete');
 console.log(`   frontend/ → loader HTML`);
