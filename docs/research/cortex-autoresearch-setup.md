@@ -2,7 +2,7 @@
 
 ## Goal
 
-Set up a weekly agent-run research loop for Cortex Memory that turns LoCoMo benchmark failures into ranked improvement specs, then measures whether shipped work actually moved the benchmark.
+Set up an on-demand agent-run research loop for Cortex Memory that turns LoCoMo benchmark failures into ranked improvement specs, then measures whether shipped work actually moved the benchmark.
 
 This should use **Karpathy's `autoresearch` loop as the core operating pattern** and then borrow a few useful packaging ideas from AutoResearchClaw.
 
@@ -58,7 +58,7 @@ Karpathy's repo is much smaller and much more relevant to the actual shape we wa
 The directly useful tactics are:
 
 - **One mutable surface.**
-  In `karpathy/autoresearch`, the agent edits `train.py` and does not touch the fixed prep/eval harness. For Cortex, the equivalent is that one weekly implementation spec should map to one bounded improvement seam, not a grab bag of unrelated changes.
+  In `karpathy/autoresearch`, the agent edits `train.py` and does not touch the fixed prep/eval harness. For Cortex, the equivalent is that one implementation spec per triggered session should map to one bounded improvement seam, not a grab bag of unrelated changes.
 
 - **Immutable evaluator.**
   In Karpathy's setup, `prepare.py` and `evaluate_bpb` are read-only ground truth. For Cortex, LoCoMo prep, scoring, and aggregation need the same protection. The agent may analyze outputs, but it should not rewrite the scorer in the same improvement cycle.
@@ -67,13 +67,13 @@ The directly useful tactics are:
   Karpathy uses a fixed 5-minute run and optimizes one scalar metric, `val_bpb`. Cortex should also choose one headline metric for `keep` / `discard` decisions, with secondary guardrails rather than an ambiguous basket of metrics.
 
 - **Baseline first.**
-  Karpathy's first run records the untouched baseline. Cortex should do the same at the start of each weekly cycle against the current mainline binary.
+  Karpathy's first run records the untouched baseline. Cortex should do the same at the start of each triggered session against the current mainline binary.
 
 - **Keep or discard.**
   Karpathy advances only if the experiment actually improves the score. Cortex should maintain the same discipline: hypotheses are only promoted when the rerun beats the current accepted baseline and does not break key guardrails.
 
 - **Lightweight research program.**
-  Karpathy treats `program.md` as the human-authored research-org code. Cortex should also have a small, explicit agent instruction file for the weekly loop instead of burying research policy across prompts and scripts.
+  Karpathy treats `program.md` as the human-authored research-org code. Cortex should also have a small, explicit agent instruction file for the session loop instead of burying research policy across prompts and scripts.
 
 - **Results ledger outside git history.**
   Karpathy logs every attempt into `results.tsv`. Cortex should keep a similarly simple scoreboard alongside the richer SQLite registry so humans can inspect progress quickly.
@@ -102,22 +102,148 @@ For Cortex, adapt that into a tighter loop:
 
 Do not copy the 23-stage paper pipeline or multi-agent sprawl. Cortex only needs one bounded research loop with better artifact discipline.
 
-## Weekly Loop
+## Session Loop
 
 ```mermaid
 flowchart TD
-  A[Resolve current Cortex binary] --> B[Run LoCoMo benchmark]
-  B --> C[Aggregate metrics and regressions]
-  C --> D[Cluster failures by pattern]
-  D --> E[Generate ranked hypotheses]
-  E --> F[Run literature and repo scan]
-  F --> G[Write top 3 implementation specs]
-  G --> H[Update registry and weekly report]
-  H --> I{Shipped hypotheses waiting for measurement?}
-  I -->|Yes| J[Queue post-merge rerun]
-  I -->|No| K[End weekly cycle]
-  J --> B
+  A[Trigger research session] --> B[Resolve current Cortex main binary]
+  B --> C[Run baseline LoCoMo benchmark]
+  C --> D[Aggregate metrics and regressions]
+  D --> E[Cluster failures by pattern]
+  E --> F[Generate ranked hypotheses]
+  F --> G{Loop budget remaining?}
+  G -->|Yes| H[Optional candidate branch or alt-model pass]
+  G -->|No| I[Run literature and repo scan]
+  H --> I
+  I --> J[Write top 3 implementation specs]
+  J --> K[Update registry and session report]
+  K --> L{Shipped hypotheses waiting for measurement?}
+  L -->|Yes| M[Queue post-merge rerun]
+  L -->|No| N[End session]
+  M --> C
 ```
+
+## Run Modes
+
+The default operating mode should be **on-demand sessions**, not a scheduled weekly job.
+
+- `on_demand`
+  manual operator-triggered session
+- `daily_optional`
+  same entrypoint, scheduled once per day only after the on-demand flow is trustworthy
+- `post_merge`
+  automatic rerun after a linked hypothesis lands on `main`
+
+Recommended rollout:
+
+1. start with manual `on_demand`
+2. learn what one session actually costs and how long it takes
+3. add `daily_optional` only if the signal-to-cost ratio is good
+
+## Session Loop Budget
+
+One triggered session should run a small number of bounded passes.
+
+- default: `1` loop
+- recommended max: `3` loops
+- never run indefinitely
+
+Suggested meaning of each loop:
+
+- loop `1`
+  latest `main` baseline, always required
+- loop `2`
+  optional candidate branch comparison, for example `#355`
+- loop `3`
+  optional second candidate or rerun with a different synthesis model/config
+
+This is intentionally narrower than Karpathy's overnight infinite loop. For Cortex, the goal is operator-controlled benchmark research, not unattended endless exploration.
+
+## Concrete Session Config
+
+The session runner should accept a checked-in config plus CLI overrides.
+
+Suggested file:
+
+- `config/research/cortex-autoresearch.yaml`
+
+Minimum fields worth supporting from day one:
+
+- `max_loops`
+- `quality_mode`
+- `cost_cap_usd`
+- `target_repo`
+- `target_ref`
+- `candidate_refs`
+- `benchmark_slice`
+
+Example:
+
+```yaml
+session:
+  trigger: on-demand
+  max_loops: 1
+  quality_mode: quality
+  cost_cap_usd: 10
+  stop_on_cost_cap: true
+
+target:
+  repo_path: /Users/marquisehurtt/clawd/repos/cortex
+  target_ref: main
+  allow_dirty_override: false
+  candidate_refs:
+    - feat/cross-encoder-reranker-wip
+
+benchmark:
+  dataset: locomo
+  slice: conv30_smoke
+  answerable_categories: [1, 2, 4]
+  import_flags:
+    - --recursive
+    - --extract
+    - --no-enrich
+    - --no-classify
+
+providers:
+  llm: openrouter
+  embed: ollama/nomic-embed-text
+
+models:
+  quality:
+    synthesis: openrouter/google/gemini-2.5-pro
+    benchmark_answer: openrouter/google/gemini-2.5-flash
+    literature: openrouter/google/gemini-2.5-pro
+    tagging: openrouter/google/gemini-2.5-flash
+  stable:
+    synthesis: openrouter/google/gemini-2.5-pro
+    benchmark_answer: openrouter/google/gemini-2.5-flash
+    literature: openrouter/google/gemini-2.5-pro
+    tagging: openrouter/google/gemini-2.5-flash
+  cheap:
+    synthesis: openrouter/google/gemini-2.5-flash
+    benchmark_answer: openrouter/google/gemini-2.5-flash
+    literature: openrouter/google/gemini-2.5-flash
+    tagging: openrouter/google/gemini-2.5-flash
+```
+
+Recommended CLI override shape:
+
+```bash
+npm run research:session -- --max-loops 3 --quality-mode quality --cost-cap-usd 20
+```
+
+Direct model override example:
+
+```bash
+npm run research:session:2 -- \
+  --allow-dirty-target \
+  --benchmark-answer-model gemini-3.1-pro-preview
+```
+
+Important note:
+
+- if the runner is using provider-only OpenRouter config, model IDs should be fully qualified like `openrouter/google/gemini-2.5-flash`
+- if the runner is using direct Google Gemini config, model IDs can use the raw Google names like `gemini-3.1-pro-preview`
 
 ## Benchmark Contract
 
@@ -142,6 +268,37 @@ The benchmark stage should be stable enough that runs are comparable over time.
   - evaluator version
 
 Important rule: if evaluator logic changes, bump an explicit `evaluator_version` and do not compare those runs as a clean trendline.
+
+### Target binary policy
+
+The loop should never benchmark a stale Cortex binary.
+
+- Every session baseline always resolves the latest `main` from the configured Cortex repo.
+- The baseline build should happen after `git fetch origin` and a fast-forward update of `main`.
+- The run manifest should record:
+  - `main_sha`
+  - binary version
+  - build timestamp
+  - whether the tree was clean
+- If the Cortex checkout is dirty, the baseline should fail closed unless the operator explicitly passes an override.
+
+Open work should be evaluated as **candidate runs**, not silently folded into the baseline.
+
+- `baseline_main`
+  latest fast-forwarded `main`
+- `candidate_branch`
+  an open PR branch or local feature branch benchmarked against the same evaluator
+- `post_merge`
+  rerun after a linked hypothesis or PR lands on `main`
+
+As of **March 23, 2026**, the mainline baseline should include:
+
+- `#349` quick wins
+- `#350` Honcho steals
+- `#351` temporal normalization
+- `#356` entity resolution + graph
+
+As of **March 23, 2026**, `#355` cross-encoder reranker should be tracked as a `candidate_branch` run until it merges.
 
 ### Primary optimization target
 
@@ -171,7 +328,7 @@ docs/
   research/
     cortex-autoresearch/
       program.md
-      weekly/
+      sessions/
       specs/
 
 scripts/
@@ -184,7 +341,7 @@ scripts/
     generate-hypotheses.ts
     literature-scan.ts
     propose-specs.ts
-    render-weekly-report.ts
+    render-session-report.ts
     update-registry.ts
 
 artifacts/
@@ -204,9 +361,9 @@ artifacts/
           report.md
 ```
 
-Raw run artifacts should live under `artifacts/research/` and be gitignored later. Distilled weekly summaries and approved specs should live under `docs/research/cortex-autoresearch/` and be committed.
+Raw run artifacts should live under `artifacts/research/` and be gitignored later. Distilled session summaries and approved specs should live under `docs/research/cortex-autoresearch/` and be committed.
 
-## What Each Weekly Run Should Write
+## What Each Session Should Write
 
 ### Raw run folder
 
@@ -241,7 +398,7 @@ runs/<run_id>/
 
 ### Committed outputs
 
-- `docs/research/cortex-autoresearch/weekly/<run_id>.md`
+- `docs/research/cortex-autoresearch/sessions/<run_id>.md`
 - `docs/research/cortex-autoresearch/specs/H001-<slug>.md`
 - optional later: `docs/research/cortex-autoresearch/index.md`
 
@@ -249,27 +406,28 @@ runs/<run_id>/
 
 | Script | Purpose | Main output |
 | --- | --- | --- |
-| `scripts/research/run-cortex-autoresearch.ts` | Top-level weekly orchestrator. Runs each stage, assigns `run_id`, updates registry. | Full run folder + weekly report |
-| `scripts/research/resolve-cortex-binary.ts` | Resolves the benchmark target. Either uses a configured binary path or builds from a configured Cortex repo/ref. Captures SHA/version. | `manifest.json` binary metadata |
+| `scripts/research/run-cortex-autoresearch.ts` | Top-level session orchestrator. Runs each stage, assigns `run_id`, enforces loop budget, and updates registry. | Full run folder + session report |
+| `scripts/research/resolve-cortex-binary.ts` | Resolves the benchmark target. By default it fetches and builds the latest Cortex `main`; optionally it can build tracked candidate branches after the baseline run. Captures SHA/version and tree state. | `manifest.json` binary metadata |
 | `scripts/research/prepare-locomo.ts` | Downloads or validates LoCoMo, materializes the markdown corpus in the benchmark format used by prior notes, and records dataset version. | Prepared corpus + dataset manifest |
 | `scripts/research/benchmark-locomo.ts` | Creates a fresh DB, imports corpus, waits for embeddings if needed, runs configured retrieval/synthesis modes, and scores all questions. | `benchmark/results.json`, `metrics.json`, `failures.jsonl` |
 | `scripts/research/analyze-locomo.ts` | Produces category tables, regression deltas vs the prior baseline, and clustered failure patterns. | `analysis/category_summary.json`, `failure_patterns.json`, `worst_examples.md` |
 | `scripts/research/generate-hypotheses.ts` | Reads benchmark + analysis artifacts and outputs ranked, structured hypotheses. | `hypotheses/ranked.json` |
 | `scripts/research/literature-scan.ts` | For each top failure pattern, gathers papers, repos, and techniques from arXiv/OpenAlex/Semantic Scholar/GitHub and writes annotated notes. | `literature/H###.json`, `literature/H###.md` |
 | `scripts/research/propose-specs.ts` | Turns the top 3 ranked hypotheses into implementation specs with code seams, tests, rollout plan, and success gates. | `proposals/H###-spec.md` |
-| `scripts/research/render-weekly-report.ts` | Collapses the run into a short operator report and a committed markdown summary. | `report.md` + `docs/.../weekly/<run_id>.md` |
+| `scripts/research/render-session-report.ts` | Collapses the run into a short operator report and a committed markdown summary. | `report.md` + `docs/.../sessions/<run_id>.md` |
 | `scripts/research/update-registry.ts` | Inserts run, metric, hypothesis, spec, and measurement lineage into SQLite. | `registry.db` |
 
 ## Karpathy-Style Run Discipline
 
 Every run should follow the same high-level loop:
 
-1. Record the untouched baseline.
-2. Analyze failures against the fixed benchmark.
-3. Generate ranked ideas.
-4. Pick only the top `1-3` hypotheses for promotion.
-5. For shipped work, rerun the exact same benchmark recipe.
-6. Mark each hypothesis `keep`, `discard`, or `refine`.
+1. Record the untouched `main` baseline.
+2. If configured, benchmark tracked candidate branches against that same baseline.
+3. Analyze failures against the fixed benchmark.
+4. Generate ranked ideas.
+5. Pick only the top `1-3` hypotheses for promotion.
+6. For shipped work, rerun the exact same benchmark recipe.
+7. Mark each hypothesis or candidate branch `keep`, `discard`, or `refine`.
 
 ### `keep` / `discard` / `refine`
 
@@ -301,6 +459,56 @@ Suggested columns:
 - `description`
 
 The registry remains the detailed source of truth, but the TSV gives the same quick operator scan that `results.tsv` gives in Karpathy's repo.
+
+## Model Policy
+
+Use the newest Google models deliberately, not indiscriminately.
+
+As of **March 23, 2026**, the official Google docs show these relevant Gemini text models:
+
+- `Gemini 3.1 Pro Preview`
+- `Gemini 3 Flash` Preview
+- `Gemini 3.1 Flash-Lite` Preview
+- stable `Gemini 2.5 Pro`
+- stable `Gemini 2.5 Flash`
+- stable `Gemini 2.5 Flash-Lite`
+- deprecated `Gemini 2.0 Flash`
+
+For Cortex AutoResearch, split model usage by job:
+
+- benchmark answer-generation paths that must stay comparable over time:
+  prefer stable `gemini-2.5-pro` or `gemini-2.5-flash`
+- manual on-demand research sessions where we want the strongest reasoning:
+  allow `gemini-3.1-pro-preview`
+- faster, cheaper literature and hypothesis passes:
+  allow `gemini-3-flash-preview`
+- cheap bulk classification or tagging:
+  allow `gemini-3.1-flash-lite-preview` or stable `gemini-2.5-flash-lite`
+
+Recommended default:
+
+- session quality mode:
+  `gemini-3.1-pro-preview` for hypothesis generation, literature scan synthesis, and spec writing
+- session benchmark-comparability mode:
+  `gemini-2.5-flash` for measured answer-generation paths we want to trend over time
+
+Why this split matters:
+
+- preview models are worth using for manual exploration
+- stable 2.5 models are safer for trendlines because preview behavior and availability can change
+
+### Current Google pricing signals
+
+Official Google pricing currently shows, on Vertex AI:
+
+- `Gemini 3.1 Pro Preview`: `$1/M` input and `$6/M` output with Flex/Batch at `<= 200K` input tokens
+- `Gemini 3 Flash` Preview: `$0.25/M` input and `$1.5/M` output with Flex/Batch
+- `Gemini 3.1 Flash-Lite` Preview: `$0.13/M` input and `$0.75/M` output with Flex/Batch
+- `Gemini 2.5 Pro`: `$1.25/M` input and `$10/M` output
+- `Gemini 2.5 Flash`: `$0.30/M` input and `$2.50/M` output
+- `Gemini 2.5 Flash-Lite`: `$0.10/M` input and `$0.40/M` output
+
+The exact bill depends on prompt volume, but this is another reason to cap each session at `1-3` loops.
 
 ## Analysis Stage Design
 
@@ -370,7 +578,7 @@ Then apply hard penalties for:
 - large latency regression risk
 - benchmark-specific code paths
 
-This prevents the weekly loop from always picking the most benchmark-local hack.
+This prevents the session loop from always picking the most benchmark-local hack.
 
 Important discipline from Karpathy:
 
@@ -459,7 +667,7 @@ This is the source of truth for cross-run tracking.
 
 Location:
 
-- `docs/research/cortex-autoresearch/weekly/`
+- `docs/research/cortex-autoresearch/sessions/`
 - `docs/research/cortex-autoresearch/specs/`
 
 Use this for:
@@ -476,7 +684,7 @@ Use a small SQLite lineage model.
 
 | Table | Purpose |
 | --- | --- |
-| `runs` | One row per weekly or post-merge run. Stores `run_id`, trigger, binary SHA, dataset version, evaluator version, status. |
+| `runs` | One row per session, candidate-branch, or post-merge run. Stores `run_id`, `run_kind`, trigger, binary SHA, dataset version, evaluator version, status. |
 | `metrics` | One row per metric per run, split, mode, and category. |
 | `failures` | Question-level outcomes and assigned failure tags. |
 | `hypotheses` | Ranked ideas generated from a run, with decision and expected gain fields. |
@@ -528,8 +736,8 @@ This can be self-sustaining with very little infrastructure:
 1. One runner.
    A self-hosted machine with Node 22, access to the Cortex repo or binary, access to model keys, and enough disk for benchmark artifacts.
 
-2. One scheduler.
-   Prefer a GitHub Actions workflow with `schedule` and `workflow_dispatch` on a self-hosted runner. If that is not ready yet, use `launchd` or `cron` on the same machine and call the exact same CLI entrypoint.
+2. One trigger surface.
+   Prefer `workflow_dispatch` or a local CLI first. Add a daily schedule later only if manual sessions prove useful.
 
 3. One registry.
    A local SQLite file under `artifacts/research/cortex-autoresearch/registry.db`.
@@ -557,7 +765,9 @@ Add package scripts once the harness exists:
 
 ```json
 {
-  "research:weekly": "tsx scripts/research/run-cortex-autoresearch.ts --trigger weekly",
+  "research:session": "tsx scripts/research/run-cortex-autoresearch.ts --trigger on-demand --max-loops 1",
+  "research:session:3": "tsx scripts/research/run-cortex-autoresearch.ts --trigger on-demand --max-loops 3",
+  "research:daily": "tsx scripts/research/run-cortex-autoresearch.ts --trigger daily --max-loops 1",
   "research:bench": "tsx scripts/research/benchmark-locomo.ts",
   "research:analyze": "tsx scripts/research/analyze-locomo.ts",
   "research:post-merge": "tsx scripts/research/run-cortex-autoresearch.ts --trigger post-merge"
@@ -566,26 +776,27 @@ Add package scripts once the harness exists:
 
 Then add one workflow later:
 
-- `.github/workflows/research-weekly.yml`
+- `.github/workflows/research-session.yml`
 
 Recommended triggers:
 
-- weekly cron for the full loop
-- `workflow_dispatch` for manual reruns
+- `workflow_dispatch` for manual sessions
+- optional daily cron after the manual flow is proven
 - post-merge rerun when a PR merged with a `Hypothesis: H###` footer
 
-## Weekly Operator Flow
+## Session Operator Flow
 
-1. Run `research:weekly`.
+1. Run `research:session` or `research:session:3`.
 2. Benchmark current Cortex binary against LoCoMo.
-3. Compare against the last accepted baseline.
-4. Tag and cluster the worst failures.
-5. Rank hypotheses.
-6. Promote only the top `1-3` hypotheses.
-7. Build literature packets for the promoted ones.
-8. Write top 3 specs.
-9. Commit the weekly summary and approved specs.
-10. If a linked hypothesis was shipped since the last run, schedule or run `research:post-merge`.
+3. Compare against the last accepted `main` baseline.
+4. If tracked PR branches exist, run them as candidate branches against the same evaluator.
+5. Tag and cluster the worst failures on `main`.
+6. Rank hypotheses.
+7. Promote only the top `1-3` hypotheses.
+8. Build literature packets for the promoted ones.
+9. Write top 3 specs.
+10. Commit the session summary and approved specs.
+11. If a linked hypothesis was shipped since the last run, schedule or run `research:post-merge`.
 
 This makes the loop continuous instead of a pile of disconnected research notes.
 
@@ -599,11 +810,11 @@ Build first:
 - `resolve-cortex-binary.ts`
 - `benchmark-locomo.ts`
 - `update-registry.ts`
-- `render-weekly-report.ts`
+- `render-session-report.ts`
 
 Goal:
 
-- every weekly run produces stable metrics and a committed markdown summary
+- every session produces stable metrics and a committed markdown summary
 
 ### Phase 2: diagnosis
 
@@ -615,7 +826,7 @@ Build next:
 
 Goal:
 
-- weekly run says what failed, not just how much
+- each session says what failed, not just how much
 
 ### Phase 3: synthesis
 
@@ -628,13 +839,13 @@ Build next:
 
 Goal:
 
-- weekly run ends with top 3 concrete specs
+- each session ends with top 3 concrete specs
 
 ### Phase 4: closed loop
 
 Build last:
 
-- scheduled workflow
+- optional daily workflow
 - post-merge rerun trigger
 - implementation linkage via hypothesis IDs
 
@@ -654,6 +865,11 @@ The first version does not need to start from zero. Seed the initial taxonomy an
 
 The existing benchmark and plan docs already show that these are real failure families. The automation should formalize them, not rediscover them manually each time.
 
+Current branch handling should reflect the known Cortex state as of **March 23, 2026**:
+
+- merged into `main`: `#349`, `#350`, `#351`, `#356`
+- still candidate-only until merged: `#355`
+
 ## Recommendation
 
 Build this as a repo-local research subsystem, not as a separate service.
@@ -665,7 +881,7 @@ The minimum viable stack is:
 - one SQLite registry
 - one quick scoreboard TSV
 - one artifact tree
-- one weekly orchestrator
+- one on-demand session orchestrator
 - one post-merge rerun path
 - one spec writer
 
