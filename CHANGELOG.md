@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-23
 
+- `c5085de` feat: Bundle Node.js inside the app — zero-config for users
 - `9f199e2` fix: Remove all hardcoded personal data for production distribution
 - `7a6cda8` fix: Add out/ to .gitignore — build artifact, not source
 - `a9233f8` feat: Standalone server bundling for native shell — real distributable app
