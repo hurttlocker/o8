@@ -1307,6 +1307,19 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
             }}
             onMount={handleEditorMount}
             beforeMount={(monaco) => {
+              // Polyfill clipboard for environments where it's unavailable (Tauri webview)
+              if (typeof window !== 'undefined' && window.navigator && !window.navigator.clipboard) {
+                Object.defineProperty(window.navigator, 'clipboard', {
+                  value: {
+                    writeText: async (text: string) => { void text; },
+                    readText: async () => '',
+                    write: async () => {},
+                    read: async () => [],
+                  },
+                  writable: false,
+                  configurable: true,
+                });
+              }
               // Dark theme matching our zinc UI
               monaco.editor.defineTheme('cortex-dark', {
                 base: 'vs-dark',
