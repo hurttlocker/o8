@@ -4,12 +4,16 @@
 
 Set up a weekly agent-run research loop for Cortex Memory that turns LoCoMo benchmark failures into ranked improvement specs, then measures whether shipped work actually moved the benchmark.
 
-This should borrow the useful parts of AutoResearchClaw's methodology:
+This should use **Karpathy's `autoresearch` loop as the core operating pattern** and then borrow a few useful packaging ideas from AutoResearchClaw.
 
-- artifactized stages
-- benchmark as a first-class pipeline step
-- a `ship` / `refine` / `drop` decision after analysis
-- cross-run lessons that inform the next run
+Karpathy's core tactics are the right foundation here:
+
+- one bounded mutable surface per experiment
+- fixed benchmark recipe and fixed optimization target
+- immutable evaluator
+- baseline first
+- explicit `keep` / `discard` discipline
+- a lightweight `program.md`-style instruction surface for the agent
 
 This should **not** become a full autonomous research platform. The target here is a small, repeatable improvement engine for Cortex Memory.
 
@@ -47,9 +51,39 @@ What is missing is the loop:
 5. Optimize for general Cortex quality, not benchmark gaming.
    Each spec must include product value beyond LoCoMo and avoid benchmark-only code paths.
 
-## What To Copy From AutoResearchClaw
+## What To Copy From Karpathy's `autoresearch`
 
-AutoResearchClaw's useful patterns for this setup are:
+Karpathy's repo is much smaller and much more relevant to the actual shape we want here than a full paper-writing pipeline.
+
+The directly useful tactics are:
+
+- **One mutable surface.**
+  In `karpathy/autoresearch`, the agent edits `train.py` and does not touch the fixed prep/eval harness. For Cortex, the equivalent is that one weekly implementation spec should map to one bounded improvement seam, not a grab bag of unrelated changes.
+
+- **Immutable evaluator.**
+  In Karpathy's setup, `prepare.py` and `evaluate_bpb` are read-only ground truth. For Cortex, LoCoMo prep, scoring, and aggregation need the same protection. The agent may analyze outputs, but it should not rewrite the scorer in the same improvement cycle.
+
+- **Fixed time budget and fixed metric.**
+  Karpathy uses a fixed 5-minute run and optimizes one scalar metric, `val_bpb`. Cortex should also choose one headline metric for `keep` / `discard` decisions, with secondary guardrails rather than an ambiguous basket of metrics.
+
+- **Baseline first.**
+  Karpathy's first run records the untouched baseline. Cortex should do the same at the start of each weekly cycle against the current mainline binary.
+
+- **Keep or discard.**
+  Karpathy advances only if the experiment actually improves the score. Cortex should maintain the same discipline: hypotheses are only promoted when the rerun beats the current accepted baseline and does not break key guardrails.
+
+- **Lightweight research program.**
+  Karpathy treats `program.md` as the human-authored research-org code. Cortex should also have a small, explicit agent instruction file for the weekly loop instead of burying research policy across prompts and scripts.
+
+- **Results ledger outside git history.**
+  Karpathy logs every attempt into `results.tsv`. Cortex should keep a similarly simple scoreboard alongside the richer SQLite registry so humans can inspect progress quickly.
+
+- **Context hygiene.**
+  Karpathy explicitly redirects logs to files and reads summaries back out. Cortex should do the same: benchmark logs belong in artifacts, not in live agent context.
+
+## What To Borrow From AutoResearchClaw
+
+Once the Karpathy core is in place, AutoResearchClaw contributes a few useful patterns:
 
 - per-run artifact folders with stable structure
 - a dedicated benchmark/evaluation subsystem
@@ -66,7 +100,7 @@ For Cortex, adapt that into a tighter loop:
 - `propose`
 - `measure again after ship`
 
-Do not copy the 23-stage paper pipeline or multi-agent sprawl. Cortex only needs one bounded research loop.
+Do not copy the 23-stage paper pipeline or multi-agent sprawl. Cortex only needs one bounded research loop with better artifact discipline.
 
 ## Weekly Loop
 
@@ -95,6 +129,8 @@ The benchmark stage should be stable enough that runs are comparable over time.
 - Modes: `bm25`, `hybrid`, `answer`, `ask`
 - Fresh isolated Cortex DB per run
 - Fixed scorer version per evaluator release
+- Read-only evaluator scripts during an improvement cycle
+- First run of each cycle is the untouched baseline
 - Logged config for:
   - Cortex binary path
   - Cortex git SHA or binary version
@@ -107,12 +143,36 @@ The benchmark stage should be stable enough that runs are comparable over time.
 
 Important rule: if evaluator logic changes, bump an explicit `evaluator_version` and do not compare those runs as a clean trendline.
 
+### Primary optimization target
+
+To stay Karpathy-style, the loop needs one headline score.
+
+Recommended headline score:
+
+- `primary_score = ask_f1_answerable_categories_1_4`
+
+Recommended guardrails:
+
+- `answerable_em` does not regress materially
+- category `4` does not regress materially
+- degraded response count does not spike
+- average latency stays within an agreed bound
+
+This gives Cortex one clear number to optimize while still protecting against pathological wins.
+
 ## Proposed Repo Layout
 
 ```text
 config/
   research/
     cortex-autoresearch.yaml
+
+docs/
+  research/
+    cortex-autoresearch/
+      program.md
+      weekly/
+      specs/
 
 scripts/
   research/
@@ -132,6 +192,7 @@ artifacts/
     cortex-autoresearch/
       registry.db
       lessons.jsonl
+      scoreboard.tsv
       runs/
         2026-03-22T230500Z-4da4d21/
           manifest.json
@@ -141,12 +202,6 @@ artifacts/
           literature/
           proposals/
           report.md
-
-docs/
-  research/
-    cortex-autoresearch/
-      weekly/
-      specs/
 ```
 
 Raw run artifacts should live under `artifacts/research/` and be gitignored later. Distilled weekly summaries and approved specs should live under `docs/research/cortex-autoresearch/` and be committed.
@@ -180,6 +235,7 @@ runs/<run_id>/
     H001-spec.md
     H002-spec.md
     H003-spec.md
+  decisions.tsv
   report.md
 ```
 
@@ -203,6 +259,48 @@ runs/<run_id>/
 | `scripts/research/propose-specs.ts` | Turns the top 3 ranked hypotheses into implementation specs with code seams, tests, rollout plan, and success gates. | `proposals/H###-spec.md` |
 | `scripts/research/render-weekly-report.ts` | Collapses the run into a short operator report and a committed markdown summary. | `report.md` + `docs/.../weekly/<run_id>.md` |
 | `scripts/research/update-registry.ts` | Inserts run, metric, hypothesis, spec, and measurement lineage into SQLite. | `registry.db` |
+
+## Karpathy-Style Run Discipline
+
+Every run should follow the same high-level loop:
+
+1. Record the untouched baseline.
+2. Analyze failures against the fixed benchmark.
+3. Generate ranked ideas.
+4. Pick only the top `1-3` hypotheses for promotion.
+5. For shipped work, rerun the exact same benchmark recipe.
+6. Mark each hypothesis `keep`, `discard`, or `refine`.
+
+### `keep` / `discard` / `refine`
+
+- `keep`
+  The post-merge rerun improves `primary_score` and passes guardrails.
+
+- `discard`
+  The post-merge rerun does not beat the accepted baseline, or improves the benchmark while clearly hurting latency or product realism.
+
+- `refine`
+  The direction looks valid, but the implementation or answer shaping is incomplete and should spawn exactly one follow-up spec.
+
+This is the Cortex equivalent of Karpathy's branch-advance rule.
+
+### Scoreboard
+
+Maintain a simple tab-separated ledger at:
+
+- `artifacts/research/cortex-autoresearch/scoreboard.tsv`
+
+Suggested columns:
+
+- `run_id`
+- `binary_sha`
+- `hypothesis_id`
+- `primary_score`
+- `latency_ms`
+- `decision`
+- `description`
+
+The registry remains the detailed source of truth, but the TSV gives the same quick operator scan that `results.tsv` gives in Karpathy's repo.
 
 ## Analysis Stage Design
 
@@ -274,6 +372,12 @@ Then apply hard penalties for:
 
 This prevents the weekly loop from always picking the most benchmark-local hack.
 
+Important discipline from Karpathy:
+
+- rank many ideas
+- promote only a few
+- do not let the loop spray work across many unrelated changes in one cycle
+
 ## Literature Stage Design
 
 Each top failure pattern should get a short research packet with:
@@ -317,7 +421,7 @@ This step is where the loop stops being "research notes" and becomes an actionab
 
 ## Where Benchmark Results Accumulate
 
-Use a two-tier storage model.
+Use a three-tier storage model.
 
 ### Tier 1: raw artifacts
 
@@ -399,7 +503,7 @@ That is enough for the agent to join benchmark artifacts to shipped code later.
 
 ## Cross-Run Lessons
 
-Borrow AutoResearchClaw's "lessons" idea, but keep it small.
+Borrow AutoResearchClaw's "lessons" idea, but keep it small and subordinate to the benchmark ledger.
 
 Store a `lessons.jsonl` file with entries like:
 
@@ -435,6 +539,9 @@ This can be self-sustaining with very little infrastructure:
 
 5. One agent-capable synthesis layer.
    Any agent or LLM surface that can consume JSON artifacts and emit structured markdown/JSON for hypotheses, literature, and specs.
+
+6. One lightweight research program file.
+   A committed `docs/research/cortex-autoresearch/program.md` that states the fixed benchmark recipe, optimization target, guardrails, and `keep` / `discard` policy for the agent.
 
 Not required for v1:
 
@@ -474,10 +581,11 @@ Recommended triggers:
 3. Compare against the last accepted baseline.
 4. Tag and cluster the worst failures.
 5. Rank hypotheses.
-6. Build literature packets for the strongest ones.
-7. Write top 3 specs.
-8. Commit the weekly summary and approved specs.
-9. If a linked hypothesis was shipped since the last run, schedule or run `research:post-merge`.
+6. Promote only the top `1-3` hypotheses.
+7. Build literature packets for the promoted ones.
+8. Write top 3 specs.
+9. Commit the weekly summary and approved specs.
+10. If a linked hypothesis was shipped since the last run, schedule or run `research:post-merge`.
 
 This makes the loop continuous instead of a pile of disconnected research notes.
 
@@ -553,7 +661,9 @@ Build this as a repo-local research subsystem, not as a separate service.
 The minimum viable stack is:
 
 - one benchmark harness
+- one committed research `program.md`
 - one SQLite registry
+- one quick scoreboard TSV
 - one artifact tree
 - one weekly orchestrator
 - one post-merge rerun path
@@ -563,6 +673,8 @@ That is enough to make Cortex Memory improvement measurable, repeatable, and com
 
 ## References
 
+- Karpathy `autoresearch` README: https://github.com/karpathy/autoresearch
+- Karpathy `program.md`: https://github.com/karpathy/autoresearch/blob/master/program.md
 - AutoResearchClaw README: https://github.com/aiming-lab/AutoResearchClaw
 - LoCoMo repo: https://github.com/snap-research/locomo
 - LoCoMo paper: https://aclanthology.org/2024.acl-long.747/
