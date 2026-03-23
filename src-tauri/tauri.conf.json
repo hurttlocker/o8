@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.cortexide.app",
   "build": {
-    "frontendDist": "../out",
+    "frontendDist": "../out/frontend",
     "devUrl": "http://localhost:3001/dashboard",
     "beforeDevCommand": "npm run desktop:dev",
     "beforeBuildCommand": "npm run tauri:prebuild"
@@ -38,6 +38,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "../out/server": "server/"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

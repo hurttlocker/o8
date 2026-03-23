@@ -1,100 +1,35 @@
 #!/usr/bin/env node
 /**
- * Tauri prebuild — bundles the Next.js standalone server into `out/`.
- *
- * Next.js `output: 'standalone'` produces a self-contained server.js
- * that includes only the node_modules needed at runtime (~15-25MB).
- * 
- * Structure:
- *   out/
- *     server.js          ← Next.js standalone server entry
- *     server/            ← compiled server chunks
- *     public/            ← static assets
- *     .next/static/      ← client bundles
- *     start.sh           ← launcher script for Tauri sidecar
- *
- * Tauri spawns `node out/server.js` as a sidecar, then loads localhost:3001.
+ * Tauri prebuild — splits the build into:
+ *   out/frontend/  → Tauri frontendDist (just the loader HTML)
+ *   out/server/    → Tauri bundle resource (Next.js server + Node binary)
  */
-import { cpSync, mkdirSync, writeFileSync, existsSync, rmSync, readFileSync } from 'fs';
+import { cpSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 const out = join(root, 'out');
+const frontend = join(out, 'frontend');
+const server = join(out, 'server');
 const standalone = join(root, '.next', 'standalone');
 const staticDir = join(root, '.next', 'static');
 const pub = join(root, 'public');
 
 // Clean previous build
 if (existsSync(out)) rmSync(out, { recursive: true });
-mkdirSync(out, { recursive: true });
+mkdirSync(frontend, { recursive: true });
+mkdirSync(server, { recursive: true });
 
-// Verify standalone build exists
+// Verify standalone build
 if (!existsSync(standalone)) {
-  console.error('❌ No standalone build found at .next/standalone');
-  console.error('   Run `next build` first (output: "standalone" must be in next.config.ts)');
+  console.error('❌ No standalone build at .next/standalone — run next build first');
   process.exit(1);
 }
 
-// Copy only the essential standalone files (not the whole project tree)
-console.log('📦 Copying standalone server...');
-
-// server.js + package.json
-for (const f of ['server.js', 'package.json']) {
-  const src = join(standalone, f);
-  if (existsSync(src)) cpSync(src, join(out, f));
-}
-
-// node_modules (the minimal traced set)
-const standaloneModules = join(standalone, 'node_modules');
-if (existsSync(standaloneModules)) {
-  cpSync(standaloneModules, join(out, 'node_modules'), { recursive: true });
-  console.log('📦 Copied node_modules');
-}
-
-// .next/server (compiled server chunks — required for API routes + pages)
-const serverChunks = join(standalone, '.next');
-if (existsSync(serverChunks)) {
-  cpSync(serverChunks, join(out, '.next'), { recursive: true });
-  console.log('📦 Copied .next/server chunks');
-}
-
-// Copy static assets (client JS/CSS bundles)
-const outStatic = join(out, '.next', 'static');
-mkdirSync(outStatic, { recursive: true });
-cpSync(staticDir, outStatic, { recursive: true });
-console.log('📦 Copied .next/static');
-
-// Copy public assets
-if (existsSync(pub)) {
-  cpSync(pub, join(out, 'public'), { recursive: true });
-  console.log('📦 Copied public/');
-}
-
-// Create a shell launcher for the server
+// ── Frontend (loader HTML for Tauri webview) ──
 const PORT = process.env.CORTEX_IDE_PORT || '3001';
-const launcher = `#!/bin/bash
-# Cortex IDE server launcher — started by Tauri as a sidecar
-cd "$(dirname "$0")"
-export PORT=${PORT}
-export HOSTNAME=127.0.0.1
-export NODE_ENV=production
-exec node server.js
-`;
-writeFileSync(join(out, 'start.sh'), launcher, { mode: 0o755 });
-
-// Also create a Windows batch file for future cross-platform
-const winLauncher = `@echo off
-cd /d "%~dp0"
-set PORT=${PORT}
-set HOSTNAME=127.0.0.1
-set NODE_ENV=production
-node server.js
-`;
-writeFileSync(join(out, 'start.bat'), winLauncher);
-
-// Create a loader HTML that Tauri shows while the server boots
 const loaderHtml = `<!DOCTYPE html>
 <html>
 <head>
@@ -129,7 +64,7 @@ const loaderHtml = `<!DOCTYPE html>
         .catch(() => {
           attempts++;
           if (attempts < 120) setTimeout(check, 500);
-          else document.getElementById('status').textContent = 'Server failed to start. Check logs.';
+          else document.getElementById('status').textContent = 'Server failed to start.';
         });
     }
     setTimeout(check, 500);
@@ -140,10 +75,39 @@ const loaderHtml = `<!DOCTYPE html>
   <p id="status">Starting Cortex IDE…</p>
 </body>
 </html>`;
-writeFileSync(join(out, 'index.html'), loaderHtml);
+writeFileSync(join(frontend, 'index.html'), loaderHtml);
+console.log('📦 Created frontend loader');
 
-// Report size
+// ── Server bundle ──
+// server.js + package.json
+for (const f of ['server.js', 'package.json']) {
+  const src = join(standalone, f);
+  if (existsSync(src)) cpSync(src, join(server, f));
+}
+
+// node_modules
+const mods = join(standalone, 'node_modules');
+if (existsSync(mods)) {
+  cpSync(mods, join(server, 'node_modules'), { recursive: true });
+  console.log('📦 Copied node_modules');
+}
+
+// .next (server chunks + static)
+const nextDir = join(standalone, '.next');
+if (existsSync(nextDir)) {
+  cpSync(nextDir, join(server, '.next'), { recursive: true });
+}
+cpSync(staticDir, join(server, '.next', 'static'), { recursive: true });
+console.log('📦 Copied .next');
+
+// public
+if (existsSync(pub)) {
+  cpSync(pub, join(server, 'public'), { recursive: true });
+  console.log('📦 Copied public');
+}
+
 const { execSync } = await import('child_process');
-const size = execSync(`du -sh "${out}" 2>/dev/null || echo "unknown"`).toString().trim().split('\t')[0];
-console.log(`\n✅ Tauri export complete: out/ (${size})`);
-console.log('   server.js + node_modules + static assets + loader');
+const size = execSync(`du -sh "${server}" 2>/dev/null`).toString().trim().split('\\t')[0];
+console.log('\\n✅ Export complete');
+console.log(`   frontend/ → loader HTML`);
+console.log(`   server/ → ${size}`);
