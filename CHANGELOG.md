@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-23
 
+- `19a0500` fix: Security hardening
 - `36cade2` feat: GitHub App authentication — 5,450 req/hr, auto-refreshing tokens
 - `1111c6e` feat: GitHub PAT support + config lives in ~/.Rainwater-ide/
 - `2d9c123` fix: Split frontend/server for native shell build + tested end-to-end
