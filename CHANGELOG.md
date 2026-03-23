@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-23
 
+- `afc4cdb` fix: Production audit — graceful degradation for all endpoints
 - `5471dc4` fix: Add 'Reset Layout' button to empty workspace tile
 - `c4a6852` fix: Bundle node-pty + chat auto-restores on nav switch
 - `e8fe05e` fix: Bundle node-pty for terminal support + copy .env.local to ~/.Rainwater-ide/
