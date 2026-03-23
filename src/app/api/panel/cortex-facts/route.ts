@@ -78,32 +78,41 @@ export async function GET() {
     const facts: CortexFact[] = [];
     const seen = new Set<string>();
 
-    for (const { q, cat } of QUERIES) {
-      try {
-        const results = await client.search(q, 30);
-        if (!Array.isArray(results)) continue;
-
-        for (const r of results) {
-          const snippet = r.snippet || '';
-          if (!snippet || snippet.length < 10) continue;
-
-          const cleanText = snippet.replace(/^[#\s*-]+/, '').trim();
-          const key = cleanText.slice(0, 50).toLowerCase();
-          if (seen.has(key)) continue;
-          seen.add(key);
-
-          const confidence = typeof r.score === 'number'
-            ? Math.min(r.score * 100, 100)
-            : 50;
-
-          facts.push({
-            text: cleanText.length > 140 ? cleanText.slice(0, 137) + '…' : cleanText,
-            confidence,
-            source: r.source_section || r.source_file?.split('/').pop() || 'cortex',
-            category: cat,
-          });
+    // Run queries in parallel with 3s timeout per query
+    const results = await Promise.allSettled(
+      QUERIES.map(async ({ q, cat }) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 3000);
+        try {
+          const results = await client.search(q, 30);
+          clearTimeout(timer);
+          return { results, cat };
+        } catch {
+          clearTimeout(timer);
+          return { results: [], cat };
         }
-      } catch { /* skip failed query */ }
+      })
+    );
+
+    for (const result of results) {
+      if (result.status !== 'fulfilled') continue;
+      const { results: searchResults, cat } = result.value;
+      if (!Array.isArray(searchResults)) continue;
+      for (const r of searchResults) {
+        const snippet = r.snippet || '';
+        if (!snippet || snippet.length < 10) continue;
+        const cleanText = snippet.replace(/^[#\s*-]+/, '').trim();
+        const key = cleanText.slice(0, 50).toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const confidence = typeof r.score === 'number' ? Math.min(r.score * 100, 100) : 50;
+        facts.push({
+          text: cleanText.length > 140 ? cleanText.slice(0, 137) + '…' : cleanText,
+          confidence,
+          source: (r as any).source || 'cortex',
+          category: cat,
+        });
+      }
     }
 
     // Get stats via client
