@@ -1010,6 +1010,8 @@ function DashboardInner() {
         activeSection={activeNavSection}
         onSectionChange={(section) => {
           setActiveNavSection(section);
+          // Always show chat when switching nav sections
+          if (!chatVisible) setChatVisible(true);
           if (section === 'memory') setShowMemoryView(true);
           else setShowMemoryView(false);
           if (section === 'terminal') {
