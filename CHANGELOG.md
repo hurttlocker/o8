@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-23
 
+- `c4a6852` fix: Bundle node-pty + chat auto-restores on nav switch
 - `e8fe05e` fix: Bundle node-pty for terminal support + copy .env.local to ~/.Rainwater-ide/
 - `5827b8f` fix: Graceful degradation for database in production bundle
 - `797fd34` fix: Production native shell app fully working — database copy (not symlink)
