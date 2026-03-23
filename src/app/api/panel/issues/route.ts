@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { listRepos } from '@/lib/repos/registry';
 import { getCached, setCached } from '@/lib/github/cache';
+import { getGitHubToken } from '@/lib/github';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_REPO = process.env.CORTEX_IDE_REVIEW_REPO || '';
@@ -51,13 +52,15 @@ export async function GET(request: Request) {
   }
 
   try {
+    const token = getGitHubToken();
+    const env = token ? { ...process.env, GH_TOKEN: token } : undefined;
     const { stdout } = await execFileAsync('gh', [
       'issue', 'list',
       '--repo', repo,
       '--state', 'open',
       '--limit', '15',
       '--json', 'number,title,labels,state,author,assignees,comments,body,createdAt',
-    ], { timeout: 15_000 });
+    ], { timeout: 15_000, env });
 
     const issues = (JSON.parse(stdout || '[]') as Array<{
       number?: number;
