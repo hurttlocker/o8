@@ -68,6 +68,13 @@ const CATEGORIES = [
 export async function GET() {
   try {
     const client = getCortexClient();
+
+    // Quick availability check — don't hang for 2+ min if cortex binary missing
+    const available = await client.isAvailable().catch(() => false);
+    if (!available) {
+      return NextResponse.json({ facts: [], categories: CATEGORIES });
+    }
+
     const facts: CortexFact[] = [];
     const seen = new Set<string>();
 
