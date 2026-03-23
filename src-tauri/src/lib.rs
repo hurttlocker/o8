@@ -157,17 +157,16 @@ pub fn run() {
             let server_dir = resource_dir.join("server");
             let server_js = server_dir.join("server.js");
 
-            let bundled_node = server_dir.join("node").join("node");
-
             if server_js.exists() {
-                // Prefer bundled Node, fall back to system Node
-                let node_bin = if bundled_node.exists() {
-                    log::info!("Using bundled Node.js at {:?}", bundled_node);
-                    bundled_node.to_string_lossy().to_string()
-                } else {
-                    log::info!("No bundled Node — using system node");
-                    "node".to_string()
-                };
+                // Use system Node.js (prerequisite)
+                let node_bin = "node".to_string();
+
+                // Set Cortex binary path if bundled
+                let cortex_bin = server_dir.join("bin").join("cortex");
+                if cortex_bin.exists() {
+                    std::env::set_var("CORTEX_BINARY", &cortex_bin);
+                    log::info!("Bundled cortex binary at {:?}", cortex_bin);
+                }
 
                 log::info!("Starting server: {} {:?}", node_bin, server_js);
                 match Command::new(&node_bin)
@@ -194,11 +193,7 @@ pub fn run() {
             // ── Start WebSocket server (terminals, chat, git watcher) ──
             let ws_server = server_dir.join("ws-server.mjs");
             if ws_server.exists() {
-                let ws_node = if bundled_node.exists() {
-                    bundled_node.to_string_lossy().to_string()
-                } else {
-                    "node".to_string()
-                };
+                let ws_node = "node".to_string();
                 log::info!("Starting WS server: {} {:?}", ws_node, ws_server);
                 match Command::new(&ws_node)
                     .arg(&ws_server)
