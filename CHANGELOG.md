@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-22
 
+- `e813ed4` feat: Resizable files panel — drag handle between files and activity
 - `3d9da29` fix: Load Monaco locally (no CDN) + pastel blue/violet theme
 - `53c9da2` docs: add combined Rainwater locomo benchmark
 - `8ebaa9e` fix: Monaco shows empty content — editContent not populated on load
