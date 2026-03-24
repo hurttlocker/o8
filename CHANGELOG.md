@@ -4,6 +4,10 @@ Development activity for Rainwater IDE.
 
 ---
 
+## 2026-03-24
+
+- `eab62fb` feat: ship github app broker foundation
+
 ## 2026-03-23
 
 - `0ed8bec` docs: native shell-DEPLOYMENT.md — full handoff guide for next agent
