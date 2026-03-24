@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import os from 'node:os';
 import { join } from 'node:path';
 import { demoFleet } from '@/lib/demo/fleet';
 import { getOwnedCodexFleetAdditions } from '@/lib/codex/owned';
@@ -83,7 +84,7 @@ type OpenClawAgentConfig = {
 function readOpenClawAgentConfigs(): OpenClawAgentConfig[] {
   try {
     const configPath = join(
-      process.env.HOME ?? require('os').homedir(),
+      process.env.HOME ?? os.homedir(),
       '.openclaw',
       'openclaw.json',
     );
@@ -125,7 +126,7 @@ function relativeAge(ageMs?: number) {
 
 function shortenPath(path?: string) {
   if (!path) return 'unknown';
-  return path.replace(require('os').homedir() + '/', '~/');
+  return path.replace(os.homedir() + '/', '~/');
 }
 
 function isDuplicateRunSurface(key: string) {
@@ -777,19 +778,11 @@ export async function getOpenClawFleetSnapshot(
     const ownedThreadIds = new Set(ownedCodex.ownedThreadIds);
     // Only show discovered codex sessions that are actively running or recently active
     // enough to still be in review. Filter out stale SQLite session records.
-    // Then deduplicate: only keep the most recent running/reviewing thread per workspace+branch
     const runningDiscovered = codexDiscovery.agents.filter((agent) => {
       if (ownedThreadIds.has(agent.sessionId ?? '')) return false;
-      return agent.status === 'running' || agent.status === 'reviewing';
+      return agent.status === 'running';
     });
-    // Deduplicate: one agent per workspace+branch (keep first = most recent,
-    // since discovery sorts by updated_at desc)
-    const deduped = new Map<string, typeof runningDiscovered[number]>();
-    for (const agent of runningDiscovered) {
-      const key = `${agent.workspace}::${agent.branch}`;
-      if (!deduped.has(key)) deduped.set(key, agent);
-    }
-    const filteredDiscoveredAgents = [...deduped.values()];
+    const filteredDiscoveredAgents = runningDiscovered;
     const filteredDiscoveredAgentIds = new Set(filteredDiscoveredAgents.map((agent) => agent.id));
     const filteredDiscoveredEvents = codexDiscovery.events.filter((event) => filteredDiscoveredAgentIds.has(event.agentId ?? ''));
     const filteredDiscoveredArtifacts = codexDiscovery.artifacts.filter(
@@ -813,7 +806,7 @@ export async function getOpenClawFleetSnapshot(
 
     // Only include Claude Code sessions that are actively running or recently active
     const liveClaudeCodeAgents = claudeCodeSessions.agents.filter(
-      (agent) => agent.status === 'running' || agent.status === 'reviewing'
+      (agent) => agent.status === 'running'
     );
     const liveClaudeCodeSquads = liveClaudeCodeAgents.length > 0 ? claudeCodeSessions.squads : [];
 

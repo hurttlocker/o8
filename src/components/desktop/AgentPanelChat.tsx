@@ -179,6 +179,63 @@ function buildGroupSourceCards(entries: MobileTranscriptEntry[]): GroupSourceCar
   return normalizeSidebarSourceCards(entries) as GroupSourceCard[];
 }
 
+function stripOperatorMarkdown(text: string) {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const OPERATOR_COLLAPSE_MARKERS = [
+  /analyze the user'?s input/i,
+  /analyze tool results/i,
+  /determine the best response strategy/i,
+  /formulate the response/i,
+  /draft the response/i,
+  /drafting the response/i,
+  /drafting the content/i,
+  /execution plan/i,
+  /self-correction/i,
+  /operator summary/i,
+  /thought for \d/i,
+  /gemini 3\.1 pro/i,
+  /click to play from here/i,
+];
+
+function shouldCollapseOperatorEntry(entry: MobileTranscriptEntry) {
+  if (entry.role === 'user' || (entry.toolCalls?.length ?? 0) > 0) return false;
+  const lineCount = entry.text.split('\n').length;
+  const markerHits = OPERATOR_COLLAPSE_MARKERS.filter((pattern) => pattern.test(entry.text)).length;
+  return markerHits >= 2 || (markerHits >= 1 && (entry.text.length > 1400 || lineCount > 24));
+}
+
+function buildOperatorSummary(text: string) {
+  const lines = text
+    .split('\n')
+    .map((line) => stripOperatorMarkdown(line))
+    .filter(Boolean)
+    .filter((line) => !/^thought for \d/i.test(line))
+    .filter((line) => !/^(gemini|opus|claude code|codex)\b/i.test(line))
+    .filter((line) => !/^\d{1,2}:\d{2}\s?(am|pm)$/i.test(line));
+
+  const headline = compactLine(lines[0] ?? stripOperatorMarkdown(text) ?? 'Long assistant note', 'Long assistant note', 180);
+  const details = lines
+    .slice(1)
+    .filter((line) => line !== headline)
+    .slice(0, 3)
+    .map((line) => compactLine(line, line, 160));
+
+  return {
+    headline,
+    details,
+    stats: `${lines.length || text.split('\n').length} lines • ${Math.max(1, Math.round(text.length / 100)) / 10}k chars`,
+  };
+}
+
 function chipStyles(tone: GroupChipTone): React.CSSProperties {
   if (tone === 'blue') {
     return { background: 'rgba(37, 99, 235, 0.08)', color: '#2563eb' };
@@ -314,6 +371,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
 
   const [activeBlock, setActiveBlock] = useState<number | null>(null);
   const [handoffExpanded, setHandoffExpanded] = useState(false);
+  const [operatorExpanded, setOperatorExpanded] = useState(false);
   const playingRef = useRef(false);
 
   useEffect(() => {
@@ -638,6 +696,120 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
     );
   }
 
+  const collapsedOperator = shouldCollapseOperatorEntry(entry) ? buildOperatorSummary(entry.text) : null;
+
+  if (!isUser && collapsedOperator && !operatorExpanded) {
+    return (
+      <article className={`remodex-message-card remodex-message-card-assistant${isNew ? ' remodex-turn-new' : ''}`}>
+        {speakerChanged ? (
+          <div className="remodex-message-head">
+            <span>{roleLabel(entry.role, agentName)}</span>
+          </div>
+        ) : null}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          padding: '2px 0',
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+          }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 28,
+              height: 28,
+              borderRadius: 10,
+              background: 'rgba(15, 23, 42, 0.06)',
+              color: '#475569',
+              flexShrink: 0,
+            }}>
+              <SlidersHorizontal size={14} strokeWidth={2.1} />
+            </span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: 'var(--t-text)',
+                letterSpacing: '-0.01em',
+              }}>
+                Operator summary
+              </div>
+              <div style={{
+                marginTop: 3,
+                fontSize: 12,
+                lineHeight: 1.55,
+                color: 'var(--t-text-secondary)',
+              }}>
+                {collapsedOperator.headline}
+              </div>
+            </div>
+          </div>
+
+          {collapsedOperator.details.length > 0 ? (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              paddingLeft: 38,
+            }}>
+              {collapsedOperator.details.map((detail) => (
+                <div
+                  key={detail}
+                  style={{
+                    fontSize: 11,
+                    color: '#64748b',
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {detail}
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            paddingLeft: 38,
+          }}>
+            <span style={{
+              fontSize: 10,
+              color: '#94a3b8',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+            }}>
+              {collapsedOperator.stats}
+            </span>
+            <button
+              type="button"
+              onClick={() => setOperatorExpanded(true)}
+              style={{
+                border: '1px solid rgba(148, 163, 184, 0.16)',
+                borderRadius: 999,
+                background: 'rgba(255,255,255,0.72)',
+                color: '#475569',
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.02em',
+                padding: '4px 9px',
+                cursor: 'pointer',
+              }}
+            >
+              View full note
+            </button>
+          </div>
+        </div>
+      </article>
+    );
+  }
+
   return (
     <article className={`remodex-message-card remodex-message-card-assistant${isNew ? ' remodex-turn-new' : ''}`}>
       {speakerChanged ? (
@@ -691,6 +863,25 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
       ) : null}
       {entry.role === 'assistant' && hasText ? (
         <MessageActions messageId={entry.id} messageText={entry.text} />
+      ) : null}
+      {collapsedOperator ? (
+        <div style={{ marginTop: 8 }}>
+          <button
+            type="button"
+            onClick={() => setOperatorExpanded(false)}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: '#64748b',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >
+            Collapse note
+          </button>
+        </div>
       ) : null}
     </article>
   );
@@ -2575,6 +2766,7 @@ const DesktopComposePane = memo(function DesktopComposePane({
   stopping,
   stopRun,
   chatSendDisabled,
+  canInterruptSelected,
 }: {
   pendingFiles: { name: string; mimeType: string; content: string; preview?: string }[];
   removePendingFile: (idx: number) => void;
@@ -2598,6 +2790,7 @@ const DesktopComposePane = memo(function DesktopComposePane({
   stopping: boolean;
   stopRun: () => Promise<void>;
   chatSendDisabled: boolean;
+  canInterruptSelected: boolean;
 }) {
   return (
     <div style={{
@@ -2792,7 +2985,7 @@ const DesktopComposePane = memo(function DesktopComposePane({
               <Sparkles size={18} strokeWidth={2} className={enhancing ? 'spin' : undefined} />
             </button>
           ) : null}
-          {agentRunning && !draft.trim() ? (
+          {(agentRunning || canInterruptSelected) && !draft.trim() ? (
             <button
               type="button"
               disabled={stopping}
@@ -3174,9 +3367,9 @@ export function AgentPanelChat({
       const data = (await res.json()) as MobileInboxSnapshot;
       setSnapshot(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
       setSessions(prev => JSON.stringify(prev) === JSON.stringify(data.sessions) ? prev : data.sessions);
-      if (!selectedKey && data.sessions.length > 0) {
-        const telegramGroup = data.sessions.find(s => s.sessionKey.includes('telegram:group'));
-        const primary = telegramGroup ?? data.sessions.find(s => s.isCurrentSession) ?? data.sessions[0];
+      const selectedStillExists = data.sessions.some((session) => session.sessionKey === selectedKey);
+      if ((!selectedKey || !selectedStillExists) && data.sessions.length > 0) {
+        const primary = data.sessions.find(s => s.isCurrentSession) ?? data.sessions[0];
         setSelectedKey(primary.sessionKey);
       }
     } catch { /* silent */ }
@@ -3189,7 +3382,7 @@ export function AgentPanelChat({
     try {
       // Route local runtimes to runtime-specific transcript APIs.
       const isCC = key.startsWith('claude-code:');
-      const isCodex = key.startsWith('codex:');
+      const isCodex = key.startsWith('codex:') || key.startsWith('codex-live:');
       const url = isCC
         ? `/api/claude-code/transcript?sessionKey=${encodeURIComponent(key)}&limit=50`
         : isCodex
@@ -3596,7 +3789,7 @@ export function AgentPanelChat({
   }, [sessions, selectedKey, scrollToBottom]);
 
   const send = useCallback(async () => {
-    if ((!draft.trim() && pendingFiles.length === 0) || !selectedKey || sending) return;
+    if ((!draft.trim() && pendingFiles.length === 0) || !selectedKey || sending || !selectedSession?.runtimeSurface?.capabilities.sendInput) return;
     const text = draft.trim();
     const files = [...pendingFiles];
     const relaySlashToTerminal = Boolean(text && files.length === 0 && isSlashCommandText(text) && supportsSlashTerminalRelay && selectedSession?.tmuxSession);
@@ -3885,7 +4078,9 @@ export function AgentPanelChat({
     return isNew;
   }, []);
 
-  const chatSendDisabled = !selectedKey || sending || !draft.trim();
+  const canSendToSelected = Boolean(selectedSession?.runtimeSurface?.capabilities.sendInput);
+  const canInterruptSelected = Boolean(selectedSession?.runtimeSurface?.capabilities.interrupt && selectedSession?.status === 'running');
+  const chatSendDisabled = !selectedKey || sending || !draft.trim() || !canSendToSelected;
 
   return (
     <div
@@ -4063,6 +4258,7 @@ export function AgentPanelChat({
         stopping={stopping}
         stopRun={stopRun}
         chatSendDisabled={chatSendDisabled}
+        canInterruptSelected={canInterruptSelected}
       />
       {diffOpen ? <DiffModal onClose={() => setDiffOpen(false)} /> : null}
       <style>{`

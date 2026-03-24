@@ -59,7 +59,7 @@ function mapAgentToSession(
     status,
     ownership,
     sessionCapabilities: {
-      canSendInput: surface?.capabilities?.sendInput ?? false,
+      canSendInput: surface?.capabilities?.sendInput ?? (ownership !== 'owned'),
       canInterrupt: surface?.capabilities?.interrupt ?? false,
       canReviewDiffs: surface?.capabilities?.diffContext ?? false,
     },
@@ -143,6 +143,13 @@ export const codexRuntime: AgentRuntime = {
       return { ok: true, note: result.note, sessionKey };
     }
 
+    if (sessionKey.startsWith('codex-live:')) {
+      return {
+        ok: false,
+        note: 'This live Codex terminal has no durable thread binding yet, so resume is unavailable from the sidebar.',
+      };
+    }
+
     // Discovered Codex sessions: resume directly via CLI
     const threadId = sessionKey.replace(/^codex:/, '').replace(/^codex-discovered:/, '');
     try {
@@ -164,12 +171,42 @@ export const codexRuntime: AgentRuntime = {
   },
 
   async interrupt(sessionKey: string): Promise<RuntimeActionResult> {
-    const result = await interruptOwnedCodexSession(sessionKey);
-    return {
-      ok: result.interrupted,
-      note: result.note,
-      sessionKey,
-    };
+    if (sessionKey.startsWith('codex-owned:')) {
+      const result = await interruptOwnedCodexSession(sessionKey);
+      return {
+        ok: result.interrupted,
+        note: result.note,
+        sessionKey,
+      };
+    }
+
+    const discovered = await getCodexDiscoveredFleetAdditions({ fresh: true });
+    const agent = discovered.agents.find((entry) => entry.sessionKey === sessionKey);
+    const pidMatch = agent?.runtimeSurface?.sourceLabel.match(/live pid (\d+)/i);
+    const pid = pidMatch?.[1] ? Number(pidMatch[1]) : NaN;
+
+    if (!Number.isFinite(pid)) {
+      return {
+        ok: false,
+        note: 'No live Codex PID is attached to this discovered session right now.',
+        sessionKey,
+      };
+    }
+
+    try {
+      process.kill(pid, 'SIGINT');
+      return {
+        ok: true,
+        note: `Interrupt sent to local Codex pid ${pid}.`,
+        sessionKey,
+      };
+    } catch (err) {
+      return {
+        ok: false,
+        note: err instanceof Error ? err.message : `Unable to interrupt pid ${pid}.`,
+        sessionKey,
+      };
+    }
   },
 
   async getChangedFiles(sessionKey: string): Promise<RuntimeChangedFile[]> {

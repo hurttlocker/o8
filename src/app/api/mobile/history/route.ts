@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOwnedCodexRuntimeTail } from '@/lib/codex/owned';
 import { getCodexRuntimeTail } from '@/lib/codex/sessions';
-import type { MobileHistoryResponse, MobileTranscriptEntry } from '@/lib/mobile/types';
+import type { MobileHistoryResponse, MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { getSessionTranscript } from '@/lib/openclaw/chat';
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
@@ -15,6 +15,28 @@ function runtimeTailRole(label: string): MobileTranscriptEntry['role'] {
   if (normalized.includes('user')) return 'user';
   if (normalized.includes('tool')) return 'tool';
   return 'system';
+}
+
+function parseToolArgs(raw: string): Record<string, unknown> | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return { input: parsed };
+  } catch {
+    return { input: trimmed };
+  }
+}
+
+function toolCallFromEntry(name: string, text: string): MobileTranscriptToolCall {
+  return {
+    name: name || 'tool',
+    args: parseToolArgs(text),
+    status: 'done',
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -67,8 +89,9 @@ export async function GET(request: NextRequest) {
           } else if (entry.kind === 'tool') {
             chatTranscript.push({
               id: entry.id,
-              role: 'system',
-              text: `🔧 ${entry.label || 'Tool'}`,
+              role: 'assistant',
+              text: '',
+              toolCalls: [toolCallFromEntry(entry.label || 'exec_command', entry.text)],
               timestampLabel: entry.timestampLabel,
             });
           }
@@ -96,6 +119,16 @@ export async function GET(request: NextRequest) {
           transcript.push({ id: entry.id, role: 'assistant', text: entry.text, timestampLabel: entry.timestampLabel });
           continue;
         }
+        if (entry.kind === 'tool') {
+          transcript.push({
+            id: entry.id,
+            role: 'assistant',
+            text: '',
+            toolCalls: [toolCallFromEntry(entry.label || 'tool', entry.text)],
+            timestampLabel: entry.timestampLabel,
+          });
+          continue;
+        }
         if (entry.kind === 'message') {
           const role = runtimeTailRole(entry.label);
           if (role === 'system' || role === 'user') {
@@ -105,8 +138,8 @@ export async function GET(request: NextRequest) {
           transcript.push({ id: entry.id, role, text: entry.text, timestampLabel: entry.timestampLabel });
           continue;
         }
-        // Tool calls and output: skip — the assistant summary covers what happened
-        if (entry.kind === 'tool' || entry.kind === 'tool-output') {
+        // Tool output: skip — the assistant summary covers what happened
+        if (entry.kind === 'tool-output') {
           continue;
         }
       }
@@ -114,7 +147,10 @@ export async function GET(request: NextRequest) {
       const seen = new Set<string>();
       const deduped: MobileTranscriptEntry[] = [];
       for (const entry of transcript) {
-        const key = `${entry.role}:${entry.text.trim().slice(0, 200)}`;
+        const toolKey = (entry.toolCalls ?? [])
+          .map((tool) => `${tool.name}:${JSON.stringify(tool.args ?? {})}`)
+          .join('|');
+        const key = `${entry.role}:${entry.text.trim().slice(0, 200)}:${toolKey}`;
         if (seen.has(key)) continue;
         seen.add(key);
         deduped.push(entry);

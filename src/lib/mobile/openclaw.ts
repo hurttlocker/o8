@@ -7,12 +7,15 @@ import { invalidateMobileBootstrapBroker } from '@/lib/render/bootstrap';
 
 function sessionActions(agent: AgentSummary): MobileControlAction[] {
   const runtimeSurface = agent.runtimeSurface;
-  const isOpenClaw = agent.runtime === 'openclaw';
-  const canSteer = isOpenClaw && Boolean(runtimeSurface?.capabilities.sendInput);
-  const canStop = isOpenClaw && Boolean(runtimeSurface?.capabilities.interrupt);
+  const canSteer = Boolean(runtimeSurface?.capabilities.sendInput);
+  const canStop = Boolean(runtimeSurface?.capabilities.interrupt);
   const ownershipNote = agent.runtime === 'codex'
-    ? 'Owned Codex on phone now supports review-state visibility, exact diff review, between-runs resume, and active-run interrupt when the session is IDE-owned and currently running.'
-    : 'This action is not wired truthfully on the current runtime surface.';
+    ? runtimeSurface?.ownership === 'owned'
+      ? 'This owned Codex surface can resume between runs and interrupt a live run when one is active.'
+      : 'This discovered Codex terminal is only actionable while its live local process is still attached.'
+    : agent.runtime === 'claude-code'
+      ? 'This Claude Code surface is only actionable while the live local process is still present.'
+      : 'This action is not wired truthfully on the current runtime surface.';
 
   return [
     {
@@ -75,6 +78,48 @@ function mobileSessionPriority(agent: AgentSummary) {
   return 40;
 }
 
+function isLiveDiscoveredCodex(agent: AgentSummary) {
+  return agent.runtime === 'codex'
+    && agent.runtimeSurface?.ownership === 'discovered'
+    && agent.status === 'running'
+    && /live pid \d+/i.test(agent.runtimeSurface?.sourceLabel ?? '');
+}
+
+function isLiveClaudeCode(agent: AgentSummary) {
+  return agent.runtime === 'claude-code'
+    && agent.status === 'running'
+    && Boolean(agent.runtimeSurface?.capabilities.interrupt);
+}
+
+function shouldExposeMobileSession(agent: AgentSummary) {
+  if (agent.runtime === 'openclaw') {
+    return Boolean(agent.isCurrentSession)
+      || ['running', 'reviewing', 'blocked', 'waiting'].includes(agent.status);
+  }
+
+  if (agent.runtime === 'codex') {
+    if (agent.runtimeSurface?.ownership === 'owned') {
+      return ['running', 'reviewing', 'waiting', 'failed'].includes(agent.status);
+    }
+    return isLiveDiscoveredCodex(agent);
+  }
+
+  if (agent.runtime === 'claude-code') {
+    return isLiveClaudeCode(agent);
+  }
+
+  return false;
+}
+
+function mobileSessionIdentity(agent: AgentSummary) {
+  if (agent.runtime === 'codex' && agent.runtimeSurface?.ownership === 'owned') {
+    const repoSlug = agent.runtimeSurface.reviewContext?.repoSlug ?? agent.workspace;
+    const branch = agent.runtimeSurface.reviewContext?.branch ?? agent.branch;
+    return `codex-owned:${repoSlug}:${branch}`;
+  }
+  return agent.sessionKey;
+}
+
 function summarizeTranscript(text: string) {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
@@ -125,7 +170,7 @@ async function _fetchMobileInboxSnapshot(options: { fresh?: boolean } = {}): Pro
   const fresh = options.fresh ?? false;
 
   const fleet = await getRuntimeInventorySnapshot({ fresh });
-  const sessions = fleet.agents
+  const orderedSessions = fleet.agents
     .filter((agent) => (
       agent.runtime === 'openclaw'
         || agent.runtime === 'codex'
@@ -137,6 +182,15 @@ async function _fetchMobileInboxSnapshot(options: { fresh?: boolean } = {}): Pro
       return priorityDiff !== 0 ? priorityDiff : left.index - right.index;
     })
     .map(({ agent }) => agent);
+  const sessions: AgentSummary[] = [];
+  const seenSessionIds = new Set<string>();
+  for (const agent of orderedSessions) {
+    if (!shouldExposeMobileSession(agent)) continue;
+    const identity = mobileSessionIdentity(agent);
+    if (seenSessionIds.has(identity)) continue;
+    seenSessionIds.add(identity);
+    sessions.push(agent);
+  }
   const primarySession = sessions.find((session) => session.sessionKey === fleet.meta.primarySessionKey)
     ?? sessions.find((session) => session.runtime === 'openclaw' && session.isCurrentSession)
     ?? sessions.find((session) => session.runtime === 'openclaw')

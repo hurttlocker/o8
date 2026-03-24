@@ -1,6 +1,6 @@
 /**
  * Persisted terminal tab state — survives app restarts.
- * Stored at ~/.cortex-ide/terminal-state.json
+ * Stored per workspace tile under ~/.cortex-ide/terminal-states/<scope>.json
  */
 
 export interface PersistedTab {
@@ -24,10 +24,16 @@ export interface PersistedTabState {
 
 const API_PATH = '/api/panel/terminal-state';
 
+function buildStatePath(scope: string) {
+  const params = new URLSearchParams();
+  params.set('scope', scope);
+  return `${API_PATH}?${params.toString()}`;
+}
+
 /** Save tab state to server */
-export async function saveTabState(state: PersistedTabState): Promise<void> {
+export async function saveTabState(state: PersistedTabState, scope = 'tile-root'): Promise<void> {
   try {
-    await fetch(API_PATH, {
+    await fetch(buildStatePath(scope), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(state),
@@ -38,9 +44,9 @@ export async function saveTabState(state: PersistedTabState): Promise<void> {
 }
 
 /** Load tab state from server */
-export async function loadTabState(): Promise<PersistedTabState | null> {
+export async function loadTabState(scope = 'tile-root'): Promise<PersistedTabState | null> {
   try {
-    const res = await fetch(API_PATH);
+    const res = await fetch(buildStatePath(scope));
     if (!res.ok) return null;
     const data = await res.json();
     if (data.version !== 1) return null;

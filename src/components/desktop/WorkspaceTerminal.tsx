@@ -59,6 +59,8 @@ export interface TerminalTabHandle {
 }
 
 interface WorkspaceTerminalProps {
+  stateScope: string;
+  defaultTab: 'llm-chat' | 'terminal';
   sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
@@ -1993,6 +1995,8 @@ const TabBar = memo(function TabBar({
 export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminalProps>(
   function WorkspaceTerminal(
     {
+      stateScope,
+      defaultTab,
       sendTerminalCreate,
       sendTerminalAttach,
       sendTerminalInput,
@@ -2039,9 +2043,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           })),
           savedAt: new Date().toISOString(),
         };
-        saveTabState(persisted);
+        saveTabState(persisted, stateScope);
       }, 500);
-    }, []);
+    }, [stateScope]);
 
     const requestTerminalForTab = useCallback((tabId: string, command?: string) => {
       const requestId = `workspace-${tabId}-${Date.now()}`;
@@ -2060,7 +2064,34 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       }
     }, [tabs, activeTabId, persistTabs]);
 
-    // Restore tabs on WS connect, but always land on the primary chat surface first.
+    const createDefaultShellTab = useCallback((): TerminalTab => {
+      tabCountRef.current += 1;
+      const now = Date.now();
+      return {
+        id: `tab-${tabCountRef.current}`,
+        label: 'Shell',
+        kind: 'terminal',
+        tmuxSession: null,
+        cliAgent: 'shell',
+        createdAt: now,
+        lastActivity: now,
+      };
+    }, []);
+
+    const createDefaultChatTab = useCallback((): TerminalTab => {
+      tabCountRef.current += 1;
+      const now = Date.now();
+      return {
+        id: `llm-${tabCountRef.current}`,
+        label: 'Chat',
+        kind: 'llm-chat',
+        tmuxSession: null,
+        createdAt: now,
+        lastActivity: now,
+      };
+    }, []);
+
+    // Restore tabs on WS connect.
     useEffect(() => {
       if (!termWsConnected || restoredRef.current) return;
       restoredRef.current = true;
@@ -2070,7 +2101,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       setTimeout(() => { urlDetectionEnabledRef.current = true; }, 5000);
 
       (async () => {
-        const saved = await loadTabState();
+        const saved = await loadTabState(stateScope);
 
         if (saved && saved.tabs.length > 0) {
           // Check which tmux sessions are still alive
@@ -2078,6 +2109,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           const alive = await checkAliveSessions(tmuxNames);
 
           const restoredTabs: TerminalTab[] = [];
+          let restoredActiveTabId: string | null = null;
           for (const st of saved.tabs) {
             tabCountRef.current += 1;
             const now = Date.now();
@@ -2094,6 +2126,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                 createdAt: now,
                 lastActivity: now,
               });
+              if (st.id === saved.activeTabId) {
+                restoredActiveTabId = tabId;
+              }
             } else if (tabKind === 'chat') {
               // CLI Session tab — restore without tmux
               const tabId = `chat-${tabCountRef.current}`;
@@ -2108,6 +2143,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                 lastActivity: now,
                 chatMessages: [],
               });
+              if (st.id === saved.activeTabId) {
+                restoredActiveTabId = tabId;
+              }
             } else {
               // Terminal tab
               const tabId = `tab-${tabCountRef.current}`;
@@ -2138,26 +2176,26 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                   lastActivity: now,
                 });
               }
+              if (st.id === saved.activeTabId) {
+                restoredActiveTabId = tabId;
+              }
             }
           }
 
-          const restoredChat = restoredTabs.find((tab) => tab.kind === 'llm-chat');
-          if (restoredChat) {
-            setTabs(restoredTabs);
-            setActiveTabId(restoredChat.id);
+          if (defaultTab === 'llm-chat') {
+            const restoredChat = restoredTabs.find((tab) => tab.kind === 'llm-chat');
+            if (restoredChat) {
+              setTabs(restoredTabs);
+              setActiveTabId(restoredActiveTabId ?? restoredChat.id);
+            } else {
+              const defaultChat = createDefaultChatTab();
+              setTabs([defaultChat, ...restoredTabs]);
+              setActiveTabId(defaultChat.id);
+            }
           } else {
-            tabCountRef.current += 1;
-            const now = Date.now();
-            const defaultChat: TerminalTab = {
-              id: `llm-${tabCountRef.current}`,
-              label: 'Chat',
-              kind: 'llm-chat',
-              tmuxSession: null,
-              createdAt: now,
-              lastActivity: now,
-            };
-            setTabs([defaultChat, ...restoredTabs]);
-            setActiveTabId(defaultChat.id);
+            setTabs(restoredTabs);
+            const restoredTerminal = restoredTabs.find((tab) => tab.kind === 'terminal');
+            setActiveTabId(restoredActiveTabId ?? restoredTerminal?.id ?? restoredTabs[0]?.id ?? '');
           }
 
           // Create new sessions for terminal tabs that need them (not chat/llm-chat)
@@ -2167,22 +2205,19 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             requestTerminalForTab(deadTab.id, restoreCommand);
           }
         } else {
-          // No saved state — create default LLM Chat tab
-          tabCountRef.current += 1;
-          const now = Date.now();
-          const defaultChat: TerminalTab = {
-            id: `llm-${tabCountRef.current}`,
-            label: 'Chat',
-            kind: 'llm-chat',
-            tmuxSession: null,
-            createdAt: now,
-            lastActivity: now,
-          };
-          setTabs([defaultChat]);
-          setActiveTabId(defaultChat.id);
+          if (defaultTab === 'llm-chat') {
+            const defaultChat = createDefaultChatTab();
+            setTabs([defaultChat]);
+            setActiveTabId(defaultChat.id);
+          } else {
+            const defaultShell = createDefaultShellTab();
+            setTabs([defaultShell]);
+            setActiveTabId(defaultShell.id);
+            requestTerminalForTab(defaultShell.id);
+          }
         }
       })();
-    }, [requestTerminalForTab, termWsConnected, sendTerminalAttach]);
+    }, [createDefaultChatTab, createDefaultShellTab, defaultTab, requestTerminalForTab, sendTerminalAttach, stateScope, termWsConnected]);
 
     // Reset restored flag when WS disconnects
     useEffect(() => {
@@ -2195,6 +2230,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     // Called when WS server confirms a new tmux session was created
     const handleSessionCreated = useCallback((sessionName: string, requestId?: string) => {
       const directTabId = requestId ? pendingRequestRef.current.get(requestId) : undefined;
+      if (requestId && !directTabId) {
+        return false;
+      }
       if (requestId) pendingRequestRef.current.delete(requestId);
 
       let claimed = false;
@@ -2209,22 +2247,8 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           claimed = true;
           return updated;
         }
-        // No pending tab — this is the initial auto-created session
-        tabCountRef.current += 1;
-        const now = Date.now();
-        const newTab: TerminalTab = {
-          id: `tab-${tabCountRef.current}`,
-          label: 'Shell',
-          kind: 'terminal',
-          tmuxSession: sessionName,
-          cliAgent: 'shell',
-          createdAt: now,
-          lastActivity: now,
-        };
-        claimed = true;
-        return [...prev, newTab];
+        return prev;
       });
-      setActiveTabId(prev => prev || `tab-${tabCountRef.current}`);
       return claimed;
     }, []);
 

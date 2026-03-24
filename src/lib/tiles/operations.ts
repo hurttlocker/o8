@@ -173,6 +173,19 @@ export function splitTile(
   };
 }
 
+export function wrapRootWithSplit(
+  node: TileNode,
+  direction: TileSplitDirection,
+  nextContent: TileContent,
+  ratio = 0.5,
+): { root: TileNode; newTileId: string } {
+  const nextLeaf = createLeaf(nextContent);
+  return {
+    root: createSplit(direction, ratio, [node, nextLeaf]),
+    newTileId: nextLeaf.id,
+  };
+}
+
 export function resizeTile(node: TileNode, splitId: string, ratio: number): TileNode {
   return mapTile(node, splitId, (current) => {
     if (!isTileSplitNode(current)) {

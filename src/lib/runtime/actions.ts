@@ -215,30 +215,47 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
       );
     }
     case 'codex': {
-      // Discovered Codex sessions (user-launched from terminal) can be steered
-      // via the OpenClaw gateway's sessions_send, same as OpenClaw sessions.
       if (runtimeSurface.ownership !== 'owned') {
-        if (payload.action === 'steer') {
+        const runtime = getRuntime('codex');
+        if (!runtime) {
+          return unavailable(agent, payload.action, 'Codex runtime is not registered.');
+        }
+
+        if (payload.action === 'steer' || payload.action === 'send_input') {
           const message = payload.message?.trim();
           if (!message) {
             throw new Error('message is required to steer a Codex session');
           }
-          const result = await steerOpenClawSession(agent.sessionKey, message, []);
+          const result = await runtime.resume(agent.sessionKey, message);
           return {
-            ok: true,
+            ok: result.ok,
             action: payload.action,
             surfaceId: runtimeSurface.id,
             runtime: agent.runtime,
             clientMutationId: payload.clientMutationId,
-            status: 'queued',
-            note: 'Sent.',
-            runId: result.runId,
+            status: result.ok ? 'queued' : 'unavailable',
+            note: result.note,
           };
         }
+
+        if (payload.action === 'stop' || payload.action === 'interrupt') {
+          const result = await runtime.interrupt(agent.sessionKey);
+          return {
+            ok: result.ok,
+            action: payload.action,
+            surfaceId: runtimeSurface.id,
+            runtime: agent.runtime,
+            clientMutationId: payload.clientMutationId,
+            status: result.ok ? 'completed' : 'unavailable',
+            note: result.note,
+            aborted: result.ok,
+          };
+        }
+
         return unavailable(
           agent,
           payload.action,
-          'This Codex surface was discovered from local runtime history. Only steer (send message) is supported right now.',
+          'This Codex surface was discovered from a local terminal. Only steer and interrupt are supported while the live pid is still attached.',
         );
       }
 

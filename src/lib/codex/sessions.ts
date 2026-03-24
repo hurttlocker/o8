@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { access, open, realpath } from 'node:fs/promises';
+import { access, open, readFile, readdir, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -15,6 +15,7 @@ const execFileAsync = promisify(execFile);
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
 const CODEX_STATE_DB = path.join(CODEX_HOME, 'state_5.sqlite');
 const CODEX_SESSIONS_ROOT = path.join(CODEX_HOME, 'sessions');
+const CODEX_SHELL_SNAPSHOTS_ROOT = path.join(CODEX_HOME, 'shell_snapshots');
 const CODEX_SOURCE_LABEL = 'Local Codex discovery';
 const RECENT_WINDOW_MS = 6 * 60 * 60_000;
 const CODEX_DISCOVERED_FLEET_TTL_MS = 15_000;
@@ -39,10 +40,12 @@ type CodexProcessBinding = {
 
 type LiveCodexProcess = {
   pid: number;
+  parentPid?: number;
   tty?: string;
   elapsed?: string;
   command?: string;
   cwd?: string;
+  termSessionId?: string;
 };
 
 type CodexThreadActivity = {
@@ -132,12 +135,17 @@ function repoSlugFromOrigin(value?: string | null) {
 }
 
 function repoNameFromThread(thread: CodexThreadRow) {
+  const localName = path.basename(thread.cwd);
+  if (localName) {
+    return localName;
+  }
+
   const repoSlug = repoSlugFromOrigin(thread.git_origin_url);
   if (repoSlug) {
     return repoSlug.split('/').pop() ?? repoSlug;
   }
 
-  return path.basename(thread.cwd) || 'codex';
+  return 'codex';
 }
 
 function branchLabel(branch?: string | null) {
@@ -239,6 +247,18 @@ async function readProcessCwd(pid: number) {
   }
 }
 
+async function readProcessTermSessionId(pid: number) {
+  try {
+    const { stdout } = await execFileAsync('ps', ['eww', '-p', String(pid), '-o', 'command='], {
+      maxBuffer: 256 * 1024,
+    });
+    const match = stdout.match(/(?:^|\s)TERM_SESSION_ID=([^\s]+)/);
+    return match?.[1]?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function queryLiveCodexProcesses(pids: number[]) {
   if (!pids.length) {
     return new Map<number, LiveCodexProcess>();
@@ -247,7 +267,7 @@ async function queryLiveCodexProcesses(pids: number[]) {
   try {
     const { stdout } = await execFileAsync(
       'ps',
-      ['-o', 'pid=', '-o', 'tt=', '-o', 'etime=', '-o', 'command=', '-p', pids.join(',')],
+      ['-o', 'pid=', '-o', 'ppid=', '-o', 'tt=', '-o', 'etime=', '-o', 'command=', '-p', pids.join(',')],
       {
         maxBuffer: 512 * 1024,
       },
@@ -258,15 +278,16 @@ async function queryLiveCodexProcesses(pids: number[]) {
       .split('\n')
       .map((value) => value.trim())
       .filter(Boolean)) {
-      const match = line.match(/^(\d+)\s+(\S+)\s+(\S+)\s+(.*)$/);
+      const match = line.match(/^(\d+)\s+(\d+)\s+(\S+)\s+(\S+)\s+(.*)$/);
       if (!match) continue;
       const pid = Number(match[1]);
       if (!Number.isFinite(pid)) continue;
       const row: LiveCodexProcess = {
         pid,
-        tty: match[2],
-        elapsed: match[3],
-        command: match[4],
+        parentPid: Number(match[2]),
+        tty: match[3],
+        elapsed: match[4],
+        command: match[5],
       };
       if (!row.command?.includes('/codex')) continue;
       rows.push(row);
@@ -278,10 +299,73 @@ async function queryLiveCodexProcesses(pids: number[]) {
         result.set(row.pid, {
           ...row,
           cwd: await readProcessCwd(row.pid),
+          termSessionId: await readProcessTermSessionId(row.pid),
         });
       }),
     );
     return result;
+  } catch {
+    return new Map<number, LiveCodexProcess>();
+  }
+}
+
+async function buildShellSnapshotSessionMap(threadIds: string[]) {
+  if (!threadIds.length) {
+    return new Map<string, string>();
+  }
+
+  let snapshotFiles: string[];
+  try {
+    snapshotFiles = await readdir(CODEX_SHELL_SNAPSHOTS_ROOT);
+  } catch {
+    return new Map<string, string>();
+  }
+
+  const wanted = new Set(threadIds);
+  const mapping = new Map<string, string>();
+
+  for (const fileName of snapshotFiles) {
+    const [threadId] = fileName.split('.');
+    if (!threadId || !wanted.has(threadId) || mapping.has(threadId)) continue;
+    const filePath = path.join(CODEX_SHELL_SNAPSHOTS_ROOT, fileName);
+    try {
+      const raw = await readFile(filePath, 'utf8');
+      const match = raw.match(/^export TERM_SESSION_ID=(.+)$/m);
+      if (match?.[1]) {
+        mapping.set(threadId, match[1].trim());
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return mapping;
+}
+
+async function queryAllLiveCodexProcesses() {
+  try {
+    const { stdout: psOut } = await execFileAsync(
+      'bash',
+      ['-c', 'ps -eo pid=,command= | grep codex | grep -v grep'],
+      { maxBuffer: 256 * 1024 },
+    );
+
+    const allPids: number[] = [];
+    for (const line of psOut.split('\n').map((l) => l.trim()).filter(Boolean)) {
+      const pidMatch = line.match(/^(\d+)/);
+      if (!pidMatch?.[1]) continue;
+      const pid = Number(pidMatch[1]);
+      if (Number.isFinite(pid) && line.includes('/codex')) {
+        allPids.push(pid);
+      }
+    }
+
+    const allLive = await queryLiveCodexProcesses(allPids);
+    const pidSet = new Set(allLive.keys());
+
+    return new Map(
+      [...allLive.entries()].filter(([, proc]) => !proc.parentPid || !pidSet.has(proc.parentPid)),
+    );
   } catch {
     return new Map<number, LiveCodexProcess>();
   }
@@ -312,6 +396,7 @@ function deriveStatus(thread: CodexThreadRow, activity?: CodexThreadActivity): A
 function buildRuntimeSurface(thread: CodexThreadRow, activity?: CodexThreadActivity): RuntimeSurfaceSummary {
   const repoSlug = repoSlugFromOrigin(thread.git_origin_url);
   const activityState = classifyActivity(thread, activity);
+  const isLive = activityState === 'active';
   const activeProcessLabel = activity?.active
     ? `Local Codex discovery • live pid ${activity.pid}${activity.tty ? ` • ${activity.tty}` : ''}`
     : activityState === 'recent'
@@ -331,8 +416,8 @@ function buildRuntimeSurface(thread: CodexThreadRow, activity?: CodexThreadActiv
     capabilities: {
       attach: true,
       readTail: true,
-      sendInput: false,
-      interrupt: false,
+      sendInput: isLive,
+      interrupt: isLive,
       resize: false,
       diffContext: Boolean(thread.git_branch || repoSlug),
       reviewContext: Boolean(thread.git_branch || repoSlug),
@@ -365,6 +450,8 @@ async function buildActivityMap(threads: CodexThreadRow[]) {
   const threadIds = new Set(threads.map((thread) => thread.id));
   const threadById = new Map(threads.map((thread) => [thread.id, thread]));
   const bindings = await queryProcessBindings();
+  const threadSessionIds = await buildShellSnapshotSessionMap(threads.map((thread) => thread.id));
+  const allLiveProcesses = await queryAllLiveCodexProcesses();
 
   const latestBindingByProcess = new Map<string, CodexProcessBinding>();
   for (const binding of bindings) {
@@ -417,44 +504,60 @@ async function buildActivityMap(threads: CodexThreadRow[]) {
     });
   }
 
-  // Fallback: find ALL live Codex processes via ps and match by CWD
-  // This catches new sessions that haven't written process_uuid to the DB yet
-  try {
-    const { stdout: psOut } = await execFileAsync(
-      'bash', ['-c', 'ps -eo pid=,command= | grep codex | grep -v grep'],
-      { maxBuffer: 256 * 1024 },
-    );
-    const allPids: number[] = [];
-    for (const line of psOut.split('\n').map((l) => l.trim()).filter(Boolean)) {
-      const pidMatch = line.match(/^(\d+)/);
-      if (pidMatch) {
-        const pid = Number(pidMatch[1]);
-        if (Number.isFinite(pid) && line.includes('/codex')) allPids.push(pid);
-      }
-    }
-    const allLive = await queryLiveCodexProcesses(allPids);
-    for (const [pid, proc] of allLive) {
-      if (!proc.cwd) continue;
-      const normalizedCwd = normalizeFsPath(proc.cwd);
-      // Find threads in this CWD that aren't already marked active
-      for (const thread of threads) {
-        if (normalizeFsPath(thread.cwd) !== normalizedCwd) continue;
-        const existing = byThreadId.get(thread.id);
-        if (existing?.active) continue;
-        // Match the most recently updated thread for this CWD
-        byThreadId.set(thread.id, {
-          ...existing,
-          active: true,
-          pid,
-          tty: proc.tty,
-          lastLogTs: existing?.lastLogTs ?? thread.updated_at,
-        });
-        break; // One process per CWD match
-      }
-    }
-  } catch { /* ps fallback not available */ }
+  // Exact fallback: bind live processes to threads via TERM_SESSION_ID recovered from
+  // Codex shell snapshots. This is truthful for local Terminal.app sessions even when
+  // the sqlite process_uuid linkage is missing.
+  for (const [threadId, termSessionId] of threadSessionIds) {
+    if (!termSessionId) continue;
+    const thread = threadById.get(threadId);
+    if (!thread) continue;
+
+    const proc = [...allLiveProcesses.values()].find((candidate) => (
+      candidate.termSessionId === termSessionId
+      && normalizeFsPath(candidate.cwd) === normalizeFsPath(thread.cwd)
+    ));
+    if (!proc) continue;
+
+    const previous = byThreadId.get(threadId);
+    byThreadId.set(threadId, {
+      ...previous,
+      active: true,
+      pid: proc.pid,
+      tty: proc.tty,
+      lastLogTs: Math.max(previous?.lastLogTs ?? 0, thread.updated_at),
+    });
+  }
 
   return byThreadId;
+}
+
+function buildSyntheticLiveProcessSurface(
+  pid: number,
+  proc: LiveCodexProcess,
+): RuntimeSurfaceSummary {
+  const cwd = shortenPath(proc.cwd ?? '');
+  const titleBase = path.basename(proc.cwd ?? '') || 'codex';
+
+  return {
+    id: `codex-live:${pid}`,
+    runtime: 'codex',
+    kind: 'terminal-session',
+    ownership: 'discovered',
+    title: `${titleBase}${proc.tty ? ` • ${proc.tty}` : ''}`,
+    cwd,
+    branch: undefined,
+    sourceLabel: `Local Codex discovery • live pid ${pid}${proc.tty ? ` • ${proc.tty}` : ''} • process-only`,
+    tailSourceLabel: 'live process inventory',
+    capabilities: {
+      attach: false,
+      readTail: false,
+      sendInput: false,
+      interrupt: true,
+      resize: false,
+      diffContext: false,
+      reviewContext: false,
+    },
+  };
 }
 
 export async function getCodexDiscoveredFleetAdditions(
@@ -473,7 +576,7 @@ export async function getCodexDiscoveredFleetAdditions(
 
   const promise = (async () => {
   try {
-    const threads = await queryCodexThreads();
+    const threads = await queryCodexThreads(64);
     if (!threads.length) {
       return {
         agents: [],
@@ -484,6 +587,7 @@ export async function getCodexDiscoveredFleetAdditions(
     }
 
     const activityMap = await buildActivityMap(threads);
+    const liveProcesses = await queryAllLiveCodexProcesses();
 
     const agents: AgentSummary[] = threads.map((thread) => {
       const activity = activityMap.get(thread.id);
@@ -517,6 +621,39 @@ export async function getCodexDiscoveredFleetAdditions(
         runtimeSurface: surface,
       } satisfies AgentSummary;
     });
+
+    const matchedLivePids = new Set(
+      [...activityMap.values()]
+        .map((activity) => activity.pid)
+        .filter((pid): pid is number => Number.isFinite(pid)),
+    );
+    for (const [pid, proc] of liveProcesses) {
+      if (matchedLivePids.has(pid)) continue;
+      const surface = buildSyntheticLiveProcessSurface(pid, proc);
+      agents.push({
+        id: surface.id,
+        name: surface.title,
+        squadId: 'squad-codex-local',
+        runtime: 'codex',
+        model: 'codex local',
+        status: 'running',
+        currentTask: `Live Codex terminal detected${proc.tty ? ` on ${proc.tty}` : ''}. Durable thread binding has not been recovered yet, so transcript/resume stay disabled.`,
+        workspace: surface.cwd ?? shortenPath(proc.cwd ?? ''),
+        branch: 'detached',
+        sessionKey: surface.id,
+        approvalStatus: 'none',
+        lastEventAt: 'just now',
+        context: {
+          usedPercent: 0,
+          trend: 'stable',
+        },
+        alerts: 0,
+        sessionId: `live:${pid}`,
+        sessionKind: 'terminal',
+        surfaceLabel: 'Codex terminal • live',
+        runtimeSurface: surface,
+      } satisfies AgentSummary);
+    }
 
     const activeCount = agents.filter((agent) => agent.status === 'running').length;
     const squad: SquadSummary = {
@@ -700,6 +837,28 @@ export async function getCodexRuntimeTail(surfaceId: string): Promise<{
   surface: RuntimeSurfaceSummary;
   entries: RuntimeTailEntry[];
 }> {
+  const livePidMatch = surfaceId.match(/^codex-live:(\d+)$/);
+  if (livePidMatch?.[1]) {
+    const pid = Number(livePidMatch[1]);
+    const liveProcesses = await queryAllLiveCodexProcesses();
+    const proc = liveProcesses.get(pid);
+    if (!proc) {
+      throw new Error('Live Codex process was not found.');
+    }
+
+    const surface = buildSyntheticLiveProcessSurface(pid, proc);
+
+    return {
+      surface,
+      entries: [{
+        id: `live-${pid}-notice`,
+        kind: 'event',
+        label: 'Live process',
+        text: `Live Codex process ${pid}${proc.tty ? ` on ${proc.tty}` : ''} is running in ${shortenPath(proc.cwd ?? '')}. Transcript and resume stay unavailable until Codex writes a durable thread binding.`,
+      }],
+    };
+  }
+
   const thread = await findCodexThreadBySurfaceId(surfaceId);
   if (!thread) {
     throw new Error('Codex runtime surface was not found.');
