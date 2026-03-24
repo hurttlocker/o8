@@ -187,7 +187,7 @@ export function TileContainer({
       <TileLeafView
         key={node.id}
         active={node.id === activeTileId}
-        canClose={totalLeaves > 1 && (registry[node.content.kind]?.closable !== false)}
+        canClose={totalLeaves > 1}
         node={node}
         registry={registry}
         onActivateTile={onActivateTile}

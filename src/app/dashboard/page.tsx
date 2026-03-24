@@ -93,6 +93,7 @@ import {
   replaceTileContent,
   resizeTile,
   serializeTileLayout,
+  collectLeafContentKinds,
   countLeaves,
   splitTile,
 } from '@/lib/tiles/operations';
@@ -365,8 +366,10 @@ function DashboardInner() {
   const handleCloseTile = useCallback((tileId: string) => {
     // Never close the WorkspaceTerminal tile
     const tile = findTile(tileLayout.root, tileId);
+    // Protect the LAST terminal tile — but allow closing extras
     if (tile?.type === 'leaf' && tile.content.kind === 'terminal') {
-      return; // Protected — cannot close
+      const allTerminals = collectLeafContentKinds(tileLayout.root).filter(k => k === 'terminal');
+      if (allTerminals.length <= 1) return; // Can't close the last one
     }
     const result = closeTile(tileLayout.root, tileId);
     if (!result.closed) {
@@ -870,7 +873,7 @@ function DashboardInner() {
       label: 'Workspace Terminal',
       description: 'Multi-tab terminal and chat workspace for active sessions.',
       singleton: true,
-      closable: false, // WorkspaceTerminal must NEVER be closable
+      // closable determined dynamically in TileContainer (last terminal is protected)
       render: () => (
         <WorkspaceTerminal
           ref={termWorkspaceRef}

@@ -59,7 +59,7 @@ export interface TileSplitNode {
 export type TileNode = TileLeafNode | TileSplitNode;
 
 export interface TileLayout {
-  version: 1;
+  version: number;
   root: TileNode;
 }
 
