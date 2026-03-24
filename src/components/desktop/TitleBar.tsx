@@ -75,6 +75,7 @@ interface TitleBarProps {
   repoList?: string[];
   repoDisplayNames?: Record<string, string>;
   onRepoChange?: (repo: string) => void;
+  onOpenFolder?: () => void;
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
   bottomPanelVisible?: boolean;
@@ -165,6 +166,7 @@ export function TitleBar({
   repoList = [],
   repoDisplayNames = {},
   onRepoChange,
+  onOpenFolder,
   sidebarVisible = true,
   onToggleSidebar,
   bottomPanelVisible = true,
@@ -392,7 +394,73 @@ export function TitleBar({
               </>
             ) : null}
           </div>
-        ) : null}
+        ) : (
+          <div style={{ position: 'relative', flexShrink: 0, ['WebkitAppRegion' as string]: 'no-drag' }} data-no-drag="">
+            <button
+              type="button"
+              onClick={() => setRepoPickerOpen(v => !v)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '5px 10px',
+                borderRadius: 8,
+                border: '1px solid var(--t-search-border)',
+                background: 'var(--t-search-bg)',
+                backdropFilter: 'blur(12px)',
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>
+              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--t-text-muted)' }}>
+                Open Folder
+              </span>
+            </button>
+            {repoPickerOpen && (
+              <>
+                <div onClick={() => setRepoPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 9998 }} />
+                <div style={{
+                  position: 'absolute', top: '100%', left: 0, marginTop: 6, minWidth: 220,
+                  borderRadius: 10, border: '1px solid rgba(255,255,255,0.3)',
+                  background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(40px) saturate(1.8)',
+                  WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
+                  boxShadow: '0 12px 48px rgba(0,0,0,0.12)', overflow: 'hidden', zIndex: 9999,
+                }}>
+                  <button
+                    type="button"
+                    onClick={() => { onOpenFolder?.(); setRepoPickerOpen(false); }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                      padding: '8px 12px', border: 'none', background: 'transparent',
+                      color: 'var(--t-text)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
+                      fontFamily: '-apple-system, system-ui, sans-serif', textAlign: 'left',
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg> Open Folder…
+                  </button>
+                  {repoList.length > 0 && <div style={{ height: 1, background: 'var(--t-divider)', margin: '2px 0' }} />}
+                  {repoList.map((repo) => (
+                    <button
+                      key={repo}
+                      type="button"
+                      onClick={() => { onRepoChange?.(repo); setRepoPickerOpen(false); }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                        padding: '8px 12px', border: 'none', background: 'transparent',
+                        color: 'var(--t-text)', fontSize: 12, cursor: 'pointer',
+                        fontFamily: '-apple-system, system-ui, sans-serif', textAlign: 'left',
+                      }}
+                    >
+                      {repo.split('/').pop()}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
         <div style={{
           width: '100%',
           maxWidth: searchExpanded ? 640 : 280,
