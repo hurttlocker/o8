@@ -93,6 +93,7 @@ import {
   replaceTileContent,
   resizeTile,
   serializeTileLayout,
+  countLeaves,
   splitTile,
 } from '@/lib/tiles/operations';
 import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
@@ -178,13 +179,10 @@ function DashboardInner() {
   const [globalRepo, setGlobalRepo] = useState<string | null>(null);
   const [globalRepoBranch, setGlobalRepoBranch] = useState<string>('main');
   const [globalRepoList, setGlobalRepoList] = useState<string[]>([]);
-  const REPO_DISPLAY: Record<string, string> = {
-    '': 'Cortex IDE',
-    'hurttlocker/cortex': 'Cortex',
-    'hurttlocker/sleeping-beauties': 'Copy Trade',
-  };
+  // No hardcoded repos — start empty, user adds repos
+  const REPO_DISPLAY: Record<string, string> = {};
 
-  // Fetch repos for picker on mount
+  // Fetch registered repos on mount — but don't auto-select
   useEffect(() => {
     fetch('/api/panel/repos')
       .then(r => r.json())
@@ -194,17 +192,14 @@ function DashboardInner() {
           const parts = url.split('/');
           return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : null;
         }).filter(Boolean) as string[];
-        const list = repos.length > 0 ? repos : Object.keys(REPO_DISPLAY);
-        setGlobalRepoList(list);
-        // Auto-select first or restore from sessionStorage
+        setGlobalRepoList(repos);
+        // Only restore if user previously selected one
         const saved = typeof window !== 'undefined' ? sessionStorage.getItem('cortex-global-repo') : null;
-        if (saved && list.includes(saved)) setGlobalRepo(saved);
-        else if (list.length > 0) setGlobalRepo(list[0]);
+        if (saved && repos.includes(saved)) setGlobalRepo(saved);
+        // Otherwise leave null — show "Open Folder" prompt
       })
       .catch(() => {
-        const list = Object.keys(REPO_DISPLAY);
-        setGlobalRepoList(list);
-        if (list.length > 0) setGlobalRepo(list[0]);
+        setGlobalRepoList([]);
       });
   }, []);
 
@@ -476,15 +471,23 @@ function DashboardInner() {
   const toggleContextualPanelTile = useCallback(() => {
     const existingLeaf = findLeafByContentKind(tileLayout.root, 'contextual-panel');
     if (existingLeaf) {
-      handleCloseTile(existingLeaf.id);
+      // Only close if there's a workspace terminal tile that will remain visible
+      const terminalTile = findLeafByContentKind(tileLayout.root, 'terminal');
+      if (terminalTile && countLeaves(tileLayout.root) > 1) {
+        handleCloseTile(existingLeaf.id);
+      }
       return;
     }
-    ensureTileKind('contextual-panel', {
-      direction: 'horizontal',
-      preferredKinds: ['terminal', 'contextual-panel', 'preview'],
-      ratio: 0.68,
-    });
-  }, [ensureTileKind, handleCloseTile, tileLayout.root]);
+    // Always split from the terminal tile (top/bottom split)
+    const terminalTile = findLeafByContentKind(tileLayout.root, 'terminal');
+    if (terminalTile) {
+      const result = splitTile(tileLayout.root, terminalTile.id, 'horizontal', createTileContent('contextual-panel'), 0.68);
+      if (result.newTileId) {
+        setTileLayout({ ...tileLayout, root: result.root });
+        setActiveTileId(result.newTileId);
+      }
+    }
+  }, [handleCloseTile, tileLayout, setTileLayout]);
 
   const handlePreviewDetected = useCallback((preview: DetectedLocalhostPreview) => {
     setWorkspacePreviews((current) => {
@@ -1039,11 +1042,11 @@ function DashboardInner() {
           if (section === 'memory') setShowMemoryView(true);
           else setShowMemoryView(false);
           if (section === 'terminal') {
-            ensureTileKind('contextual-panel', {
-              direction: 'horizontal',
-              preferredKinds: ['terminal', 'contextual-panel', 'preview'],
-              ratio: 0.68,
-            });
+            // Show the contextual panel if not already visible
+            const existing = findLeafByContentKind(tileLayout.root, 'contextual-panel');
+            if (!existing) {
+              toggleContextualPanelTile();
+            }
           }
         }}
         alertCount={unreadCount}
