@@ -30,6 +30,7 @@ type CodexThreadRow = {
   git_sha?: string | null;
   git_origin_url?: string | null;
   first_user_message?: string | null;
+  model?: string | null;
 };
 
 type CodexProcessBinding = {
@@ -194,7 +195,8 @@ export async function queryCodexThreads(limit = 6) {
     "coalesce(git_branch, '') as git_branch,",
     "coalesce(git_sha, '') as git_sha,",
     "coalesce(git_origin_url, '') as git_origin_url,",
-    "coalesce(first_user_message, '') as first_user_message",
+    "coalesce(first_user_message, '') as first_user_message,",
+    "coalesce(model, '') as model",
     'from threads',
     'where archived = 0',
     'order by updated_at desc',
@@ -602,7 +604,7 @@ export async function getCodexDiscoveredFleetAdditions(
         name: surface.title,
         squadId: 'squad-codex-local',
         runtime: 'codex',
-        model: 'codex local',
+        model: thread.model || 'gpt-5.4',
         status,
         currentTask: buildCurrentTask(thread, activity),
         workspace,
@@ -635,7 +637,7 @@ export async function getCodexDiscoveredFleetAdditions(
         name: surface.title,
         squadId: 'squad-codex-local',
         runtime: 'codex',
-        model: 'codex local',
+        model: 'gpt-5.4',
         status: 'running',
         currentTask: `Live Codex terminal detected${proc.tty ? ` on ${proc.tty}` : ''}. Durable thread binding has not been recovered yet, so transcript/resume stay disabled.`,
         workspace: surface.cwd ?? shortenPath(proc.cwd ?? ''),

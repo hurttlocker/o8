@@ -154,6 +154,7 @@ interface ClaudeCodeMessage {
   message?: {
     role: string;
     content: MessageContent;
+    model?: string;
     usage?: Record<string, number>;
   };
 }
@@ -229,6 +230,7 @@ interface SessionMeta {
   firstUserMessage?: string;
   cwd?: string;
   gitBranch?: string;
+  model?: string;
   contextUsedPercent?: number;
   hasErrorInTail?: boolean;
 }
@@ -264,12 +266,14 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
       let firstUserMessage: string | undefined;
       let cwd: string | undefined;
       let gitBranch: string | undefined;
+      let model: string | undefined;
 
       for (const line of lines.slice(0, 20)) {
         try {
           const parsed = JSON.parse(line) as ClaudeCodeMessage;
           if (parsed.cwd && !cwd) cwd = parsed.cwd;
           if (parsed.gitBranch && !gitBranch) gitBranch = parsed.gitBranch;
+          if (parsed.message?.model && !model) model = parsed.message.model;
           if (parsed.type === 'user' && parsed.message?.content && !firstUserMessage) {
             const text = typeof parsed.message.content === 'string'
               ? parsed.message.content
@@ -278,6 +282,17 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
           }
           if (cwd && gitBranch && firstUserMessage) break;
         } catch { /* skip malformed lines */ }
+      }
+
+      const modelTailLines = lines.slice(-50).reverse();
+      for (const tl of modelTailLines) {
+        try {
+          const tp = JSON.parse(tl) as ClaudeCodeMessage;
+          if (tp.message?.model) {
+            model = tp.message.model;
+            break;
+          }
+        } catch { /* skip */ }
       }
 
       // Extract context % from last assistant message usage (read tail)
@@ -323,6 +338,7 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
         firstUserMessage,
         cwd: cwd ?? projectPath,
         gitBranch,
+        model,
         contextUsedPercent,
         hasErrorInTail,
       });
@@ -442,7 +458,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         },
         lastActivityAt: meta.lastModified,
         initialTask: meta.firstUserMessage,
-        model: 'claude',
+        model: meta.model ?? 'claude',
         contextUsedPercent: meta.contextUsedPercent,
       };
     });
@@ -471,6 +487,7 @@ export const claudeCodeRuntime: AgentRuntime = {
       let contextUsedPercent: number | undefined;
       let firstUserMessage: string | undefined;
       let gitBranch: string | undefined;
+      let model: string | undefined;
 
       try {
         const dirEntries = await readdir(projectDirPath);
@@ -497,6 +514,7 @@ export const claudeCodeRuntime: AgentRuntime = {
               try {
                 const p = JSON.parse(line) as ClaudeCodeMessage;
                 if (p.gitBranch && !gitBranch) gitBranch = p.gitBranch;
+                if (p.message?.model && !model) model = p.message.model;
                 if (p.type === 'user' && p.message?.content && !firstUserMessage) {
                   const text = typeof p.message.content === 'string'
                     ? p.message.content
@@ -504,6 +522,16 @@ export const claudeCodeRuntime: AgentRuntime = {
                   firstUserMessage = text.slice(0, 200);
                 }
                 if (gitBranch && firstUserMessage) break;
+              } catch { /* skip */ }
+            }
+            const modelTailLines = lines.slice(-50).reverse();
+            for (const tl of modelTailLines) {
+              try {
+                const tp = JSON.parse(tl) as ClaudeCodeMessage;
+                if (tp.message?.model) {
+                  model = tp.message.model;
+                  break;
+                }
               } catch { /* skip */ }
             }
             // Context from tail
@@ -544,7 +572,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         },
         lastActivityAt: new Date(),
         initialTask: firstUserMessage ?? `Live Claude Code session (PID ${proc.pid})`,
-        model: 'claude',
+        model: model ?? 'claude',
         contextUsedPercent,
       });
     }
