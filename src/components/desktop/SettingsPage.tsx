@@ -30,6 +30,23 @@ interface GitHubRepo {
   updatedAt: string;
 }
 
+interface GitHubBrokerStatus {
+  configured: boolean;
+  appId: string | null;
+  privateKeyConfigured: boolean;
+  webhookSecretConfigured: boolean;
+  publicBaseUrlConfigured: boolean;
+  webhookUrl: string | null;
+  productionWebhookReady: boolean;
+  installationReachable: boolean;
+  installationId: number | null;
+  installationAccount: string | null;
+  probeRepo: string | null;
+  tokenReady: boolean;
+  authSource: 'github-app' | 'local-gh' | 'none';
+  note: string;
+}
+
 interface GitHubDeviceFlowState {
   flowId: string;
   userCode: string;
@@ -376,6 +393,8 @@ function ChevronDownIcon({ rotated }: { rotated?: boolean }) {
 function GitHubTab({
   accounts,
   repos,
+  repoCount,
+  broker,
   loading,
   actionBusy,
   actionNote,
@@ -391,6 +410,8 @@ function GitHubTab({
 }: {
   accounts: GitHubAccount[];
   repos: GitHubRepo[];
+  repoCount: number;
+  broker: GitHubBrokerStatus | null;
   loading: boolean;
   actionBusy?: GitHubActionKind | null;
   actionNote?: string | null;
@@ -561,7 +582,7 @@ function GitHubTab({
               </div>
               <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 4, lineHeight: 1.45 }}>
                 {connected && activeAccount
-                  ? `${activeAccount.login} • ${repos.length} repos • ${diagnosticsReadyCount}/${diagnostics.length} diagnostics ready`
+                  ? `${activeAccount.login} • ${repoCount} repos • ${diagnosticsReadyCount}/${diagnostics.length} diagnostics ready`
                   : 'Source control, issues, pull requests, and local GitHub CLI auth'}
               </div>
             </div>
@@ -628,7 +649,7 @@ function GitHubTab({
             {connected && activeAccount ? (
               <>
                 <span style={{ padding: '4px 9px', borderRadius: 999, background: 'var(--t-bg-subtle)', color: 'var(--t-text-secondary)', fontSize: 11, fontWeight: 600 }}>{activeAccount.login}</span>
-                <span style={{ padding: '4px 9px', borderRadius: 999, background: 'var(--t-bg-subtle)', color: 'var(--t-text-secondary)', fontSize: 11, fontWeight: 600 }}>{repos.length} repos</span>
+                <span style={{ padding: '4px 9px', borderRadius: 999, background: 'var(--t-bg-subtle)', color: 'var(--t-text-secondary)', fontSize: 11, fontWeight: 600 }}>{repoCount} repos</span>
                 <span style={{
                   padding: '4px 9px',
                   borderRadius: 999,
@@ -665,7 +686,7 @@ function GitHubTab({
                     {activeAccount.name && <span style={{ fontSize: 12, color: 'var(--t-text-secondary)' }}>{activeAccount.name}</span>}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 3 }}>
-                    Protocol: {activeAccount.protocol} · {activeAccount.scopes.length} scopes · {repos.length} repositories
+                    Protocol: {activeAccount.protocol} · {activeAccount.scopes.length} scopes · {repoCount} repositories
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
                     {activeAccount.scopes.map((s) => <ScopeBadge key={s} scope={s} />)}
@@ -719,6 +740,110 @@ function GitHubTab({
                 lineHeight: 1.45,
               }}>
                 Use the recommended device login below for the best local flow, or fall back to <code style={{ background: 'var(--t-divider-subtle)', padding: '1px 4px', borderRadius: 4 }}>gh auth login --web</code> in a terminal if you prefer the raw CLI path.
+              </div>
+            )}
+
+            {broker && (
+              <div style={{
+                padding: 14,
+                borderRadius: 12,
+                background: 'var(--t-bg-subtle)',
+                border: '1px solid var(--t-panel-border)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>GitHub App Broker</div>
+                    <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 4, lineHeight: 1.45 }}>
+                      {broker.note}
+                    </div>
+                  </div>
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: '4px 9px',
+                    borderRadius: 999,
+                    background: broker.tokenReady ? 'rgba(34, 197, 94, 0.08)' : 'rgba(245, 158, 11, 0.08)',
+                    color: broker.tokenReady ? '#166534' : '#92400e',
+                    fontSize: 11,
+                    fontWeight: 700,
+                  }}>
+                    {broker.tokenReady ? 'Broker Ready' : 'Needs Config'}
+                  </span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+                  <ScopeDiagnostic
+                    title="App key"
+                    status={broker.privateKeyConfigured ? 'ready' : 'missing'}
+                    detail={broker.privateKeyConfigured ? `GitHub App ${broker.appId ?? 'unknown'} can sign installation token requests.` : 'Missing GitHub App private key.'}
+                  />
+                  <ScopeDiagnostic
+                    title="Installation"
+                    status={broker.installationReachable ? 'ready' : 'missing'}
+                    detail={broker.installationReachable
+                      ? `Installation ${broker.installationId ?? 'unknown'} is reachable for ${broker.probeRepo ?? 'the probe repo'}.`
+                      : `Unable to reach an installation for ${broker.probeRepo ?? 'the configured repo scope'}.`}
+                  />
+                  <ScopeDiagnostic
+                    title="Webhook secret"
+                    status={broker.webhookSecretConfigured ? 'ready' : 'missing'}
+                    detail={broker.webhookSecretConfigured ? 'Webhook signature verification can be enforced.' : 'Set GITHUB_APP_WEBHOOK_SECRET before enabling production webhooks.'}
+                  />
+                  <ScopeDiagnostic
+                    title="Production URL"
+                    status={broker.publicBaseUrlConfigured ? 'ready' : 'missing'}
+                    detail={broker.publicBaseUrlConfigured
+                      ? `Webhook target resolves to ${broker.webhookUrl ?? 'the configured public URL'}.`
+                      : 'Set CORTEX_IDE_PUBLIC_BASE_URL once the production URL exists.'}
+                  />
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {broker.installationReachable && broker.installationAccount ? (
+                    <a
+                      href={`https://github.com/settings/installations/${broker.installationId ?? ''}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '7px 12px',
+                        borderRadius: 8,
+                        border: '1px solid var(--t-panel-border)',
+                        background: 'var(--t-panel)',
+                        color: 'var(--t-text-secondary)',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        textDecoration: 'none',
+                      }}
+                    >
+                      Installation Settings
+                    </a>
+                  ) : null}
+                  <a
+                    href="https://github.com/settings/apps/cortex-dev-agent"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '7px 12px',
+                      borderRadius: 8,
+                      border: '1px solid var(--t-panel-border)',
+                      background: 'var(--t-panel)',
+                      color: 'var(--t-text-secondary)',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    Open App Settings
+                  </a>
+                </div>
               </div>
             )}
 
@@ -874,7 +999,7 @@ function GitHubTab({
                   color: 'var(--t-text)',
                 }}
               >
-                <span>Repositories ({repos.length})</span>
+                <span>Repositories ({repoCount})</span>
                 <ChevronDownIcon rotated={reposExpanded} />
               </button>
               {reposExpanded && (
@@ -3690,6 +3815,8 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<GitHubAccount[]>([]);
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
+  const [repoCount, setRepoCount] = useState(0);
+  const [brokerStatus, setBrokerStatus] = useState<GitHubBrokerStatus | null>(null);
   const [deviceFlowEnabled, setDeviceFlowEnabled] = useState(false);
   const [deviceFlow, setDeviceFlow] = useState<GitHubDeviceFlowState | null>(null);
   const [actionBusy, setActionBusy] = useState<GitHubActionKind | null>(null);
@@ -3720,7 +3847,10 @@ export function SettingsPage() {
       } else {
         setAccounts([]);
       }
-      setRepos(data.repos ? (Array.isArray(data.repos) ? data.repos : []) : []);
+      const nextRepos = Array.isArray(data.repos) ? data.repos : [];
+      setRepos(nextRepos);
+      setRepoCount(Array.isArray(data.repos) ? data.repos.length : Number(data.repos ?? 0));
+      setBrokerStatus(data.broker ?? null);
       setDeviceFlowEnabled(Boolean(data.deviceFlowEnabled ?? true));
     } catch {
       setActionNote('Unable to refresh GitHub status right now.');
@@ -3755,7 +3885,10 @@ export function SettingsPage() {
       if (refreshRes.ok) {
         const refreshData = await refreshRes.json();
         setAccounts(refreshData.accounts || []);
-        setRepos(refreshData.repos || []);
+        const nextRepos = Array.isArray(refreshData.repos) ? refreshData.repos : [];
+        setRepos(nextRepos);
+        setRepoCount(Array.isArray(refreshData.repos) ? refreshData.repos.length : Number(refreshData.repos ?? 0));
+        setBrokerStatus(refreshData.broker ?? null);
       }
     } catch (error) {
       setActionNote(error instanceof Error ? error.message : 'GitHub action failed.');
@@ -3905,6 +4038,8 @@ export function SettingsPage() {
             <GitHubTab
               accounts={accounts}
               repos={repos}
+              repoCount={repoCount}
+              broker={brokerStatus}
               loading={loading}
               actionBusy={actionBusy}
               actionNote={actionNote}

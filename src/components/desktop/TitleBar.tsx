@@ -360,6 +360,29 @@ export function TitleBar({
                   overflow: 'hidden',
                   zIndex: 9999,
                 }}>
+                  <button
+                    type="button"
+                    onClick={() => { onOpenFolder?.(); setRepoPickerOpen(false); }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      width: '100%',
+                      padding: '8px 12px',
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--t-text)',
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>
+                    Open Folder…
+                  </button>
+                  {repoList.length > 0 ? <div style={{ height: 1, background: 'var(--t-divider)', margin: '2px 0' }} /> : null}
                   {repoList.map((repo) => (
                     <button
                       key={repo}

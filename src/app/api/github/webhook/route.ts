@@ -1,0 +1,165 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { verifyGitHubWebhookSignature } from '@/lib/github-broker';
+import {
+  markGitHubSyncSuccess,
+  upsertGitHubInstallation,
+  upsertGitHubIssue,
+  upsertGitHubPullRequest,
+  upsertGitHubRepository,
+} from '@/lib/github-broker/store';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+export async function POST(request: NextRequest) {
+  const rawBody = await request.text();
+  const signature = request.headers.get('x-hub-signature-256');
+  const event = request.headers.get('x-github-event');
+
+  try {
+    if (!verifyGitHubWebhookSignature(rawBody, signature)) {
+      return NextResponse.json({ error: 'Invalid GitHub webhook signature.' }, { status: 401 });
+    }
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Webhook verification failed.' }, { status: 500 });
+  }
+
+  const payload = JSON.parse(rawBody) as {
+    installation?: {
+      id?: number;
+      account?: { login?: string; type?: string };
+      target_type?: string;
+      permissions?: Record<string, string>;
+    };
+    repository?: {
+      id?: number;
+      full_name?: string;
+      name?: string;
+      private?: boolean;
+      default_branch?: string | null;
+      owner?: { login?: string | null };
+    };
+    issue?: {
+      id: number;
+      number: number;
+      title: string;
+      state: string;
+      body?: string | null;
+      html_url: string;
+      created_at: string;
+      updated_at: string;
+      closed_at?: string | null;
+      comments?: number;
+      user?: { login?: string | null } | null;
+      assignees?: Array<{ login?: string | null }>;
+      labels?: Array<{ name?: string | null; color?: string | null }>;
+    };
+    pull_request?: {
+      id: number;
+      number: number;
+      title: string;
+      state: string;
+      body?: string | null;
+      html_url: string;
+      created_at: string;
+      updated_at: string;
+      closed_at?: string | null;
+      merged_at?: string | null;
+      additions?: number;
+      deletions?: number;
+      changed_files?: number;
+      user?: { login?: string | null } | null;
+      head?: { ref?: string | null };
+      base?: { ref?: string | null };
+    };
+  };
+  const repoFullName = payload.repository?.full_name;
+
+  if (!event || !repoFullName) {
+    return NextResponse.json({ ok: true, ignored: true });
+  }
+
+  try {
+    const repoParts = repoFullName.split('/');
+    const installation = payload.installation;
+    if (installation?.id) {
+      upsertGitHubInstallation({
+        installationId: installation.id,
+        accountLogin: installation.account?.login ?? repoParts[0],
+        accountType: installation.account?.type ?? null,
+        targetType: installation.target_type ?? null,
+        permissions: installation.permissions ?? null,
+      });
+    }
+
+    if (payload.repository?.id) {
+      upsertGitHubRepository({
+        repoId: payload.repository.id,
+        fullName: repoFullName,
+        owner: payload.repository.owner?.login ?? repoParts[0] ?? '',
+        name: payload.repository.name ?? repoParts[1] ?? repoFullName,
+        private: Boolean(payload.repository.private),
+        defaultBranch: payload.repository.default_branch ?? null,
+        installationId: installation?.id ?? null,
+        lastWebhookAt: new Date().toISOString(),
+      });
+    }
+
+    if (event === 'issues') {
+      const issue = payload.issue;
+      if (issue) {
+        upsertGitHubIssue({
+          issueId: issue.id,
+          repoFullName,
+          number: issue.number,
+          title: issue.title,
+          state: issue.state,
+          author: issue.user?.login ? { login: issue.user.login } : null,
+          assignees: (issue.assignees ?? [])
+            .map((assignee) => assignee.login ? { login: assignee.login } : null)
+            .filter((assignee): assignee is { login: string } => Boolean(assignee)),
+          labels: (issue.labels ?? [])
+            .map((label) => label.name ? { name: label.name, color: label.color ?? '000000' } : null)
+            .filter((label): label is { name: string; color: string } => Boolean(label)),
+          comments: issue.comments ?? 0,
+          body: issue.body ?? '',
+          url: issue.html_url,
+          createdAt: issue.created_at,
+          updatedAt: issue.updated_at,
+          closedAt: issue.closed_at ?? null,
+        });
+        markGitHubSyncSuccess(repoFullName, 'issues', null);
+      }
+    } else if (event === 'pull_request') {
+      const pr = payload.pull_request;
+      if (pr) {
+        upsertGitHubPullRequest({
+          pullRequestId: pr.id,
+          repoFullName,
+          number: pr.number,
+          title: pr.title,
+          state: pr.state,
+          author: pr.user?.login ? { login: pr.user.login } : null,
+          body: pr.body ?? '',
+          headRefName: pr.head?.ref ?? '',
+          baseRefName: pr.base?.ref ?? '',
+          additions: pr.additions ?? 0,
+          deletions: pr.deletions ?? 0,
+          changedFiles: pr.changed_files ?? 0,
+          reviewDecision: null,
+          statusCheckRollup: [],
+          url: pr.html_url,
+          createdAt: pr.created_at,
+          updatedAt: pr.updated_at,
+          closedAt: pr.closed_at ?? null,
+          mergedAt: pr.merged_at ?? null,
+        });
+        markGitHubSyncSuccess(repoFullName, 'pull_requests', null);
+      }
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Webhook sync failed.' }, { status: 500 });
+  }
+}

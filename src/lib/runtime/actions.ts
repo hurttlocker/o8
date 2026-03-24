@@ -44,6 +44,7 @@ export interface RuntimeLaunchRequest {
   taskName?: string;
   baseBranch?: string;
   isolate?: boolean;
+  isolation?: 'main' | 'branch';
   skipSetup?: boolean;
 }
 

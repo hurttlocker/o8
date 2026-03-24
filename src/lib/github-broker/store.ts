@@ -1,0 +1,481 @@
+import 'server-only';
+
+import { getSqlite } from '@/lib/db';
+
+export type GitHubSyncResource = 'issues' | 'pull_requests';
+
+export interface GitHubSyncState {
+  key: string;
+  repoFullName: string;
+  resource: GitHubSyncResource;
+  etag: string | null;
+  lastSyncedAt: string | null;
+  lastSuccessfulAt: string | null;
+  lastError: string | null;
+  staleAt: string | null;
+  updatedAt: string;
+}
+
+export interface GitHubIssueSnapshot {
+  issueId: number;
+  repoFullName: string;
+  number: number;
+  title: string;
+  state: string;
+  author: { login: string } | null;
+  assignees: Array<{ login: string }>;
+  labels: Array<{ name: string; color: string }>;
+  comments: number;
+  body: string;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+}
+
+export interface GitHubPullRequestSnapshot {
+  pullRequestId: number;
+  repoFullName: string;
+  number: number;
+  title: string;
+  state: string;
+  author: { login: string } | null;
+  body: string;
+  headRefName: string;
+  baseRefName: string;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  reviewDecision: string | null;
+  statusCheckRollup: Array<{ name: string; status?: string | null; conclusion?: string | null }>;
+  url: string;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+  mergedAt: string | null;
+}
+
+function parseJson<T>(value: string | null | undefined, fallback: T): T {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export function readGitHubSyncState(repoFullName: string, resource: GitHubSyncResource): GitHubSyncState | null {
+  const sqlite = getSqlite();
+  return sqlite
+    .prepare(`
+      SELECT key, repo_full_name as repoFullName, resource, etag, last_synced_at as lastSyncedAt,
+             last_successful_at as lastSuccessfulAt, last_error as lastError, stale_at as staleAt, updated_at as updatedAt
+      FROM github_sync_state
+      WHERE repo_full_name = ? AND resource = ?
+      LIMIT 1
+    `)
+    .get(repoFullName, resource) as GitHubSyncState | undefined ?? null;
+}
+
+export function upsertGitHubInstallation(installation: {
+  installationId: number;
+  accountLogin: string;
+  accountType?: string | null;
+  targetType?: string | null;
+  permissions?: Record<string, string> | null;
+}) {
+  const sqlite = getSqlite();
+  sqlite.prepare(`
+    INSERT INTO github_installations (
+      installation_id, account_login, account_type, target_type, permissions_json, updated_at
+    ) VALUES (?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(installation_id) DO UPDATE SET
+      account_login = excluded.account_login,
+      account_type = excluded.account_type,
+      target_type = excluded.target_type,
+      permissions_json = excluded.permissions_json,
+      updated_at = datetime('now')
+  `).run(
+    installation.installationId,
+    installation.accountLogin,
+    installation.accountType ?? null,
+    installation.targetType ?? null,
+    JSON.stringify(installation.permissions ?? {}),
+  );
+}
+
+export function upsertGitHubRepository(repo: {
+  repoId: number;
+  fullName: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  defaultBranch?: string | null;
+  installationId?: number | null;
+  lastWebhookAt?: string | null;
+}) {
+  const sqlite = getSqlite();
+  sqlite.prepare(`
+    INSERT INTO github_repositories (
+      repo_id, full_name, owner, name, private, default_branch, installation_id, last_webhook_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(repo_id) DO UPDATE SET
+      full_name = excluded.full_name,
+      owner = excluded.owner,
+      name = excluded.name,
+      private = excluded.private,
+      default_branch = excluded.default_branch,
+      installation_id = excluded.installation_id,
+      last_webhook_at = COALESCE(excluded.last_webhook_at, github_repositories.last_webhook_at),
+      updated_at = datetime('now')
+  `).run(
+    repo.repoId,
+    repo.fullName,
+    repo.owner,
+    repo.name,
+    repo.private ? 1 : 0,
+    repo.defaultBranch ?? null,
+    repo.installationId ?? null,
+    repo.lastWebhookAt ?? null,
+  );
+}
+
+export function upsertGitHubIssue(issue: GitHubIssueSnapshot) {
+  const sqlite = getSqlite();
+  sqlite.prepare(`
+    INSERT INTO github_issues (
+      issue_id, repo_full_name, number, title, state, author_login, body, labels_json,
+      assignees_json, comments_count, url, created_at, updated_at, closed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(issue_id) DO UPDATE SET
+      repo_full_name = excluded.repo_full_name,
+      number = excluded.number,
+      title = excluded.title,
+      state = excluded.state,
+      author_login = excluded.author_login,
+      body = excluded.body,
+      labels_json = excluded.labels_json,
+      assignees_json = excluded.assignees_json,
+      comments_count = excluded.comments_count,
+      url = excluded.url,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at,
+      closed_at = excluded.closed_at
+  `).run(
+    issue.issueId,
+    issue.repoFullName,
+    issue.number,
+    issue.title,
+    issue.state,
+    issue.author?.login ?? null,
+    issue.body,
+    JSON.stringify(issue.labels),
+    JSON.stringify(issue.assignees),
+    issue.comments,
+    issue.url,
+    issue.createdAt,
+    issue.updatedAt,
+    issue.closedAt,
+  );
+}
+
+export function upsertGitHubPullRequest(pull: GitHubPullRequestSnapshot) {
+  const sqlite = getSqlite();
+  sqlite.prepare(`
+    INSERT INTO github_pull_requests (
+      pull_request_id, repo_full_name, number, title, state, author_login, body, head_ref_name,
+      base_ref_name, additions, deletions, changed_files, review_decision, status_checks_json,
+      url, created_at, updated_at, closed_at, merged_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(pull_request_id) DO UPDATE SET
+      repo_full_name = excluded.repo_full_name,
+      number = excluded.number,
+      title = excluded.title,
+      state = excluded.state,
+      author_login = excluded.author_login,
+      body = excluded.body,
+      head_ref_name = excluded.head_ref_name,
+      base_ref_name = excluded.base_ref_name,
+      additions = excluded.additions,
+      deletions = excluded.deletions,
+      changed_files = excluded.changed_files,
+      review_decision = excluded.review_decision,
+      status_checks_json = excluded.status_checks_json,
+      url = excluded.url,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at,
+      closed_at = excluded.closed_at,
+      merged_at = excluded.merged_at
+  `).run(
+    pull.pullRequestId,
+    pull.repoFullName,
+    pull.number,
+    pull.title,
+    pull.state,
+    pull.author?.login ?? null,
+    pull.body,
+    pull.headRefName,
+    pull.baseRefName,
+    pull.additions,
+    pull.deletions,
+    pull.changedFiles,
+    pull.reviewDecision,
+    JSON.stringify(pull.statusCheckRollup),
+    pull.url,
+    pull.createdAt,
+    pull.updatedAt,
+    pull.closedAt,
+    pull.mergedAt,
+  );
+}
+
+export function markGitHubSyncSuccess(repoFullName: string, resource: GitHubSyncResource, etag?: string | null) {
+  const sqlite = getSqlite();
+  const key = `${repoFullName}:${resource}`;
+  sqlite.prepare(`
+    INSERT INTO github_sync_state (
+      key, repo_full_name, resource, etag, last_synced_at, last_successful_at, last_error, updated_at
+    ) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'), NULL, datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET
+      etag = excluded.etag,
+      last_synced_at = datetime('now'),
+      last_successful_at = datetime('now'),
+      last_error = NULL,
+      updated_at = datetime('now')
+  `).run(key, repoFullName, resource, etag ?? null);
+}
+
+export function markGitHubSyncError(repoFullName: string, resource: GitHubSyncResource, error: string) {
+  const sqlite = getSqlite();
+  const key = `${repoFullName}:${resource}`;
+  sqlite.prepare(`
+    INSERT INTO github_sync_state (
+      key, repo_full_name, resource, last_synced_at, last_error, updated_at
+    ) VALUES (?, ?, ?, datetime('now'), ?, datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET
+      last_synced_at = datetime('now'),
+      last_error = excluded.last_error,
+      updated_at = datetime('now')
+  `).run(key, repoFullName, resource, error);
+}
+
+export function replaceGitHubIssues(repoFullName: string, issues: GitHubIssueSnapshot[]) {
+  const sqlite = getSqlite();
+  const upsert = sqlite.prepare(`
+    INSERT INTO github_issues (
+      issue_id, repo_full_name, number, title, state, author_login, body, labels_json,
+      assignees_json, comments_count, url, created_at, updated_at, closed_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(issue_id) DO UPDATE SET
+      repo_full_name = excluded.repo_full_name,
+      number = excluded.number,
+      title = excluded.title,
+      state = excluded.state,
+      author_login = excluded.author_login,
+      body = excluded.body,
+      labels_json = excluded.labels_json,
+      assignees_json = excluded.assignees_json,
+      comments_count = excluded.comments_count,
+      url = excluded.url,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at,
+      closed_at = excluded.closed_at
+  `);
+
+  const closeMissing = sqlite.prepare(`
+    UPDATE github_issues
+    SET state = 'closed', closed_at = COALESCE(closed_at, datetime('now'))
+    WHERE repo_full_name = ?
+  `);
+
+  const transaction = sqlite.transaction((nextIssues: GitHubIssueSnapshot[]) => {
+    closeMissing.run(repoFullName);
+    for (const issue of nextIssues) {
+      upsert.run(
+        issue.issueId,
+        repoFullName,
+        issue.number,
+        issue.title,
+        issue.state,
+        issue.author?.login ?? null,
+        issue.body,
+        JSON.stringify(issue.labels),
+        JSON.stringify(issue.assignees),
+        issue.comments,
+        issue.url,
+        issue.createdAt,
+        issue.updatedAt,
+        issue.closedAt,
+      );
+    }
+  });
+
+  transaction(issues);
+}
+
+export function replaceGitHubPullRequests(repoFullName: string, pulls: GitHubPullRequestSnapshot[]) {
+  const sqlite = getSqlite();
+  const upsert = sqlite.prepare(`
+    INSERT INTO github_pull_requests (
+      pull_request_id, repo_full_name, number, title, state, author_login, body, head_ref_name,
+      base_ref_name, additions, deletions, changed_files, review_decision, status_checks_json,
+      url, created_at, updated_at, closed_at, merged_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(pull_request_id) DO UPDATE SET
+      repo_full_name = excluded.repo_full_name,
+      number = excluded.number,
+      title = excluded.title,
+      state = excluded.state,
+      author_login = excluded.author_login,
+      body = excluded.body,
+      head_ref_name = excluded.head_ref_name,
+      base_ref_name = excluded.base_ref_name,
+      additions = excluded.additions,
+      deletions = excluded.deletions,
+      changed_files = excluded.changed_files,
+      review_decision = excluded.review_decision,
+      status_checks_json = excluded.status_checks_json,
+      url = excluded.url,
+      created_at = excluded.created_at,
+      updated_at = excluded.updated_at,
+      closed_at = excluded.closed_at,
+      merged_at = excluded.merged_at
+  `);
+
+  const closeMissing = sqlite.prepare(`
+    UPDATE github_pull_requests
+    SET state = 'closed', closed_at = COALESCE(closed_at, datetime('now'))
+    WHERE repo_full_name = ?
+  `);
+
+  const transaction = sqlite.transaction((nextPulls: GitHubPullRequestSnapshot[]) => {
+    closeMissing.run(repoFullName);
+    for (const pull of nextPulls) {
+      upsert.run(
+        pull.pullRequestId,
+        repoFullName,
+        pull.number,
+        pull.title,
+        pull.state,
+        pull.author?.login ?? null,
+        pull.body,
+        pull.headRefName,
+        pull.baseRefName,
+        pull.additions,
+        pull.deletions,
+        pull.changedFiles,
+        pull.reviewDecision,
+        JSON.stringify(pull.statusCheckRollup),
+        pull.url,
+        pull.createdAt,
+        pull.updatedAt,
+        pull.closedAt,
+        pull.mergedAt,
+      );
+    }
+  });
+
+  transaction(pulls);
+}
+
+export function listGitHubIssues(repoFullName: string): GitHubIssueSnapshot[] {
+  const sqlite = getSqlite();
+  const rows = sqlite.prepare(`
+    SELECT issue_id as issueId, repo_full_name as repoFullName, number, title, state, author_login as authorLogin,
+           body, labels_json as labelsJson, assignees_json as assigneesJson, comments_count as commentsCount,
+           url, created_at as createdAt, updated_at as updatedAt, closed_at as closedAt
+    FROM github_issues
+    WHERE repo_full_name = ? AND state = 'open'
+    ORDER BY datetime(COALESCE(updated_at, created_at)) DESC
+    LIMIT 20
+  `).all(repoFullName) as Array<{
+    issueId: number;
+    repoFullName: string;
+    number: number;
+    title: string;
+    state: string;
+    authorLogin: string | null;
+    body: string | null;
+    labelsJson: string;
+    assigneesJson: string;
+    commentsCount: number;
+    url: string;
+    createdAt: string | null;
+    updatedAt: string | null;
+    closedAt: string | null;
+  }>;
+
+  return rows.map((row) => ({
+    issueId: row.issueId,
+    repoFullName: row.repoFullName,
+    number: row.number,
+    title: row.title,
+    state: row.state,
+    author: row.authorLogin ? { login: row.authorLogin } : null,
+    assignees: parseJson<Array<{ login: string }>>(row.assigneesJson, []),
+    labels: parseJson<Array<{ name: string; color: string }>>(row.labelsJson, []),
+    comments: row.commentsCount,
+    body: row.body ?? '',
+    url: row.url,
+    createdAt: row.createdAt ?? '',
+    updatedAt: row.updatedAt ?? row.createdAt ?? '',
+    closedAt: row.closedAt,
+  }));
+}
+
+export function listGitHubPullRequests(repoFullName: string): GitHubPullRequestSnapshot[] {
+  const sqlite = getSqlite();
+  const rows = sqlite.prepare(`
+    SELECT pull_request_id as pullRequestId, repo_full_name as repoFullName, number, title, state,
+           author_login as authorLogin, body, head_ref_name as headRefName, base_ref_name as baseRefName,
+           additions, deletions, changed_files as changedFiles, review_decision as reviewDecision,
+           status_checks_json as statusChecksJson, url, created_at as createdAt, updated_at as updatedAt,
+           closed_at as closedAt, merged_at as mergedAt
+    FROM github_pull_requests
+    WHERE repo_full_name = ? AND state = 'open'
+    ORDER BY datetime(COALESCE(updated_at, created_at)) DESC
+    LIMIT 20
+  `).all(repoFullName) as Array<{
+    pullRequestId: number;
+    repoFullName: string;
+    number: number;
+    title: string;
+    state: string;
+    authorLogin: string | null;
+    body: string | null;
+    headRefName: string | null;
+    baseRefName: string | null;
+    additions: number;
+    deletions: number;
+    changedFiles: number;
+    reviewDecision: string | null;
+    statusChecksJson: string;
+    url: string;
+    createdAt: string | null;
+    updatedAt: string | null;
+    closedAt: string | null;
+    mergedAt: string | null;
+  }>;
+
+  return rows.map((row) => ({
+    pullRequestId: row.pullRequestId,
+    repoFullName: row.repoFullName,
+    number: row.number,
+    title: row.title,
+    state: row.state,
+    author: row.authorLogin ? { login: row.authorLogin } : null,
+    body: row.body ?? '',
+    headRefName: row.headRefName ?? '',
+    baseRefName: row.baseRefName ?? '',
+    additions: row.additions,
+    deletions: row.deletions,
+    changedFiles: row.changedFiles,
+    reviewDecision: row.reviewDecision,
+    statusCheckRollup: parseJson<Array<{ name: string; status?: string | null; conclusion?: string | null }>>(row.statusChecksJson, []),
+    url: row.url,
+    createdAt: row.createdAt ?? '',
+    updatedAt: row.updatedAt ?? row.createdAt ?? '',
+    closedAt: row.closedAt,
+    mergedAt: row.mergedAt,
+  }));
+}

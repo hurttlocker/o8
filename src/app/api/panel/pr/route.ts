@@ -1,23 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-
-const exec = promisify(execFile);
+import { DEFAULT_GITHUB_REPO, fetchGitHubPullRequestDetail, resolveRepoSlug } from '@/lib/github-broker';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-async function gh(args: string[], cwd?: string): Promise<string> {
-  const { stdout } = await exec('gh', args, {
-    cwd,
-    timeout: 15_000,
-    env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' },
-  });
-  return stdout.trim();
-}
-
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const repo = searchParams.get('repo');
+  const repo = await resolveRepoSlug(searchParams.get('repo'), DEFAULT_GITHUB_REPO);
   const number = searchParams.get('number');
 
   if (!repo || !number) {
@@ -25,18 +13,13 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const raw = await gh([
-      'pr', 'view', number,
-      '--json', 'number,title,body,author,headRefName,baseRefName,state,mergeable,additions,deletions,changedFiles,statusCheckRollup,reviewDecision,files,url',
-    ], repo);
-
-    const data = JSON.parse(raw);
+    const data = await fetchGitHubPullRequestDetail(repo, parseInt(number, 10));
 
     const checksStatus = (() => {
       const checks = data.statusCheckRollup || [];
       if (checks.length === 0) return 'unknown';
-      const failed = checks.some((c: { conclusion: string }) => c.conclusion === 'FAILURE');
-      const pending = checks.some((c: { status: string }) => c.status !== 'COMPLETED');
+      const failed = checks.some((c) => (c.conclusion ?? '').toUpperCase() === 'FAILURE');
+      const pending = checks.some((c) => (c.status ?? '').toUpperCase() !== 'COMPLETED' && !c.conclusion);
       if (failed) return 'failure';
       if (pending) return 'pending';
       return 'success';
@@ -46,20 +29,19 @@ export async function GET(request: NextRequest) {
       number: data.number,
       title: data.title,
       body: data.body || '',
-      author: data.author?.login || 'unknown',
+      author: data.author || 'unknown',
       branch: data.headRefName,
       baseBranch: data.baseRefName,
       state: data.state,
-      mergeable: data.mergeable === 'MERGEABLE',
+      mergeable: data.mergeable,
       additions: data.additions || 0,
       deletions: data.deletions || 0,
       changedFiles: data.changedFiles || 0,
       checksStatus,
       reviewDecision: data.reviewDecision || null,
-      files: (data.files || []).map((f: { path: string; additions: number; deletions: number }) => ({
+      files: (data.files || []).map((f) => ({
         path: f.path,
-        status: f.additions > 0 && f.deletions === 0 ? 'added' :
-                f.additions === 0 && f.deletions > 0 ? 'deleted' : 'modified',
+        status: f.status,
         additions: f.additions || 0,
         deletions: f.deletions || 0,
       })),

@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
       prompt: payload?.prompt ?? '',
       taskName: payload?.taskName,
       baseBranch: payload?.baseBranch,
-      isolate: payload?.isolate,
+      isolate: payload?.isolate ?? (payload?.isolation === 'branch' ? true : payload?.isolation === 'main' ? false : undefined),
       skipSetup: payload?.skipSetup,
     });
 
