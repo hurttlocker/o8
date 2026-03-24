@@ -172,3 +172,81 @@ export const waitlist = sqliteTable('waitlist', {
   source: text('source'), // where they heard about us
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
 });
+
+// ══════════════════════════════════════════════════════════════════
+//  GitHub Broker — durable remote snapshots for local and prod
+// ══════════════════════════════════════════════════════════════════
+
+export const githubInstallations = sqliteTable('github_installations', {
+  installationId: integer('installation_id').primaryKey(),
+  accountLogin: text('account_login').notNull(),
+  accountType: text('account_type'),
+  targetType: text('target_type'),
+  permissionsJson: text('permissions_json'),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+});
+
+export const githubRepositories = sqliteTable('github_repositories', {
+  repoId: integer('repo_id').primaryKey(),
+  fullName: text('full_name').notNull().unique(),
+  owner: text('owner').notNull(),
+  name: text('name').notNull(),
+  private: integer('private', { mode: 'boolean' }).notNull().default(false),
+  defaultBranch: text('default_branch'),
+  installationId: integer('installation_id').references(() => githubInstallations.installationId, { onDelete: 'set null' }),
+  lastWebhookAt: text('last_webhook_at'),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+});
+
+export const githubSyncState = sqliteTable('github_sync_state', {
+  key: text('key').primaryKey(),
+  repoFullName: text('repo_full_name').notNull(),
+  resource: text('resource').notNull(),
+  etag: text('etag'),
+  lastSyncedAt: text('last_synced_at'),
+  lastSuccessfulAt: text('last_successful_at'),
+  lastError: text('last_error'),
+  staleAt: text('stale_at'),
+  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+});
+
+export const githubIssues = sqliteTable('github_issues', {
+  issueId: integer('issue_id').primaryKey(),
+  repoFullName: text('repo_full_name').notNull(),
+  number: integer('number').notNull(),
+  title: text('title').notNull(),
+  state: text('state').notNull(),
+  authorLogin: text('author_login'),
+  body: text('body'),
+  labelsJson: text('labels_json').notNull().default('[]'),
+  assigneesJson: text('assignees_json').notNull().default('[]'),
+  commentsCount: integer('comments_count').notNull().default(0),
+  url: text('url').notNull(),
+  createdAt: text('created_at'),
+  updatedAt: text('updated_at'),
+  closedAt: text('closed_at'),
+});
+
+export const githubPullRequests = sqliteTable('github_pull_requests', {
+  pullRequestId: integer('pull_request_id').primaryKey(),
+  repoFullName: text('repo_full_name').notNull(),
+  number: integer('number').notNull(),
+  title: text('title').notNull(),
+  state: text('state').notNull(),
+  authorLogin: text('author_login'),
+  body: text('body'),
+  headRefName: text('head_ref_name'),
+  baseRefName: text('base_ref_name'),
+  additions: integer('additions').notNull().default(0),
+  deletions: integer('deletions').notNull().default(0),
+  changedFiles: integer('changed_files').notNull().default(0),
+  reviewDecision: text('review_decision'),
+  statusChecksJson: text('status_checks_json').notNull().default('[]'),
+  url: text('url').notNull(),
+  createdAt: text('created_at'),
+  updatedAt: text('updated_at'),
+  closedAt: text('closed_at'),
+  mergedAt: text('merged_at'),
+});
