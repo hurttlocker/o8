@@ -90,6 +90,8 @@ export interface CanvasProps {
   onCloseTab: (tabId: string) => void;
   onSelectCommit?: (hash: string) => void;
   onInjectChatContext?: (payload: AgentPanelChatInjectionPayload) => void;
+  /** When embedded in ContextualPanel, hide the tab bar (parent manages tabs) */
+  embedded?: boolean;
 }
 
 // ── Main Canvas ──
@@ -101,6 +103,7 @@ export const Canvas = memo(function Canvas({
   onCloseTab,
   onSelectCommit,
   onInjectChatContext,
+  embedded,
 }: CanvasProps) {
   const activeTab = tabs.find((t) => t.id === activeTabId) || null;
 
@@ -117,8 +120,8 @@ export const Canvas = memo(function Canvas({
       background: 'var(--t-bg-subtle)',
       borderTop: '1px solid var(--t-divider)',
     }}>
-      {/* Tab bar */}
-      <div style={{
+      {/* Tab bar — hidden when embedded in ContextualPanel */}
+      {!embedded && <div style={{
         display: 'flex',
         alignItems: 'center',
         gap: 0,
@@ -201,7 +204,7 @@ export const Canvas = memo(function Canvas({
             </div>
           );
         })}
-      </div>
+      </div>}
 
       {/* Tab content */}
       <div style={{

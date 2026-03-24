@@ -4,9 +4,10 @@ export type TileContentKind =
   | 'workspace'
   | 'terminal'
   | 'preview'
-  | 'canvas'
   | 'thoughts'
-  | 'contextual-panel';
+  | 'contextual-panel'
+  // Legacy — migrated on deserialization but kept for type compat
+  | 'canvas';
 
 export interface WorkspaceTileContent {
   kind: 'workspace';
