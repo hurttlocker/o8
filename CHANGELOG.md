@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-23
 
+- `7952eb9` fix: Bump tile layout version to force reset broken layouts
 - `764f4a9` fix: WorkspaceTerminal is now unclosable — prevents layout corruption
 - `44f983c` fix: Empty repo selector + safe ContextualPanel toggle
 - `8be8073` fix: Monaco editor fills ContextualPanel + suppress clipboard cancel errors
