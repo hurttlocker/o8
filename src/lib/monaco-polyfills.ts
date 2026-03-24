@@ -44,4 +44,24 @@ if (typeof window !== 'undefined') {
   }
 }
 
+// Suppress Monaco's internal cancellation errors (async.js cancel → clipboardService)
+if (typeof window !== 'undefined') {
+  const origAddEventListener = window.addEventListener.bind(window);
+  window.addEventListener = (type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
+    if (type === 'unhandledrejection') {
+      const wrappedListener = (event: Event) => {
+        const reason = (event as PromiseRejectionEvent).reason;
+        if (reason?.message === 'Canceled' || reason?.name === 'Canceled') {
+          event.preventDefault();
+          return;
+        }
+        if (typeof listener === 'function') listener(event);
+        else listener.handleEvent(event);
+      };
+      return origAddEventListener(type, wrappedListener, options);
+    }
+    return origAddEventListener(type, listener, options);
+  };
+}
+
 export {};
