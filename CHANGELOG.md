@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-23
 
+- `d655dab` feat: Unified ContextualPanel — canvas tabs merged into bottom panel
 - `0da0bc7` refactor: Canonical naming for all panels
 - `a22ec01` feat: Drop bundled Node (prerequisite) + bundle Memory binary
 - `3dbbdb8` fix: Rainwater-facts parallel queries + Node 25 for native module compat
