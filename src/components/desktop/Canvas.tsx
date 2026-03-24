@@ -209,7 +209,10 @@ export const Canvas = memo(function Canvas({
       {/* Tab content */}
       <div style={{
         flex: 1,
-        overflow: 'auto',
+        overflow: 'hidden',
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
       }}>
         {activeTab ? (
           <TabContent tab={activeTab} onSelectCommit={onSelectCommit} onInjectChatContext={onInjectChatContext} />

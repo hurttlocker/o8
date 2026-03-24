@@ -796,7 +796,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
 
         {/* Canvas content — shown when a canvas tab is active */}
         {!activeTabId && activeCanvasTabId && canvasTabs && canvasTabs.length > 0 && (
-          <div style={{ flex: 1, overflow: 'hidden' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
             <Canvas
               tabs={canvasTabs}
               activeTabId={activeCanvasTabId}
