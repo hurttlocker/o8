@@ -391,7 +391,11 @@ function DashboardInner() {
 
   const handleSplitTile = useCallback((tileId: string, direction: 'horizontal' | 'vertical') => {
     const ratio = direction === 'vertical' ? 0.55 : 0.62;
-    const result = splitTile(tileLayout.root, tileId, direction, createTileContent('workspace'), ratio);
+    // Split creates the same type: workspace splits → new terminal (chat), contextual splits → new contextual (shell)
+    const sourceTile = findTile(tileLayout.root, tileId);
+    const sourceKind = sourceTile?.type === 'leaf' ? sourceTile.content.kind : 'workspace';
+    const newKind = sourceKind === 'contextual-panel' ? 'contextual-panel' : 'terminal';
+    const result = splitTile(tileLayout.root, tileId, direction, createTileContent(newKind), ratio);
     if (!result.newTileId) {
       return;
     }

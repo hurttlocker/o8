@@ -574,7 +574,10 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                 <button
                   key={tab.id}
                   type="button"
-                  onClick={() => setActiveTabId(tab.id)}
+                  onClick={() => {
+                    setActiveTabId(tab.id);
+                    onSelectCanvasTab?.(''); // deselect canvas tabs
+                  }}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -806,9 +809,9 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
           </div>
         )}
 
-        {/* Terminal body — shown when a terminal tab is active */}
-        {activeTabId && tabs.length > 0 ? (
-          <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        {/* Terminal body — always rendered, hidden when canvas tab is active */}
+        {tabs.length > 0 ? (
+          <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: activeTabId ? 'flex' : 'none', flexDirection: 'column' }}>
             {tabs.map((tab) => (
               tab.tmuxSession ? (
                 <BottomXtermPanel
