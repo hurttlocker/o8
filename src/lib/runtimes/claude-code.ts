@@ -63,6 +63,10 @@ function shortenPath(filePath: string): string {
   return filePath.replace(`${os.homedir()}/`, '~/');
 }
 
+function normalizeFsPath(filePath?: string) {
+  return (filePath ?? '').replace(/\/+$/, '');
+}
+
 function encodeProjectPath(projectPath: string): string {
   const resolved = path.resolve(projectPath);
   return `-${resolved.replace(/^\/+/, '').replace(/\//g, '-')}`;
@@ -369,22 +373,14 @@ async function findLiveClaudeProcesses(): Promise<LiveClaudeProcess[]> {
   }
 }
 
-// ── Determine session status ──
-
-function inferSessionStatus(meta: SessionMeta, liveProcesses: LiveClaudeProcess[]): RuntimeSession['status'] {
-  // Check if a live claude process matches this session's CWD
-  const hasLiveProcess = liveProcesses.some((p) => p.cwd && meta.cwd && p.cwd.startsWith(meta.cwd));
-  if (hasLiveProcess) return 'running';
-
-  // If the JSONL tail contains error/crash indicators, mark as failed
+function inferHistoricalClaudeStatus(meta: SessionMeta): RuntimeSession['status'] {
   if (meta.hasErrorInTail) {
     const ageMs = Date.now() - meta.lastModified.getTime();
-    if (ageMs < 30 * 60_000) return 'failed'; // Failed within last 30 min
+    if (ageMs < 30 * 60_000) return 'failed';
   }
 
-  // Recent activity = reviewing, older = idle
   const ageMs = Date.now() - meta.lastModified.getTime();
-  if (ageMs < 5 * 60_000) return 'reviewing'; // Active in last 5 min
+  if (ageMs < 5 * 60_000) return 'reviewing';
   return 'idle';
 }
 
@@ -412,9 +408,23 @@ export const claudeCodeRuntime: AgentRuntime = {
 
     // Sort by most recent first
     allSessions.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
+    const liveSlotsByCwd = new Map<string, number>();
+    for (const proc of liveProcesses) {
+      const cwd = normalizeFsPath(proc.cwd);
+      if (!cwd) continue;
+      liveSlotsByCwd.set(cwd, (liveSlotsByCwd.get(cwd) ?? 0) + 1);
+    }
+    const claimedLiveSlots = new Map<string, number>();
 
     const results: RuntimeSession[] = allSessions.map((meta): RuntimeSession => {
-      const status = inferSessionStatus(meta, liveProcesses);
+      const normalizedCwd = normalizeFsPath(meta.cwd ?? meta.projectPath);
+      const availableSlots = liveSlotsByCwd.get(normalizedCwd) ?? 0;
+      const claimedSlots = claimedLiveSlots.get(normalizedCwd) ?? 0;
+      const isLiveSession = availableSlots > claimedSlots;
+      if (isLiveSession) {
+        claimedLiveSlots.set(normalizedCwd, claimedSlots + 1);
+      }
+      const status = isLiveSession ? 'running' : inferHistoricalClaudeStatus(meta);
       const name = `${projectDisplayName(meta.projectPath)}${meta.gitBranch ? ` • ${meta.gitBranch}` : ''}`;
 
       return {
@@ -426,7 +436,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         status,
         ownership: 'discovered',
         sessionCapabilities: {
-          canSendInput: status !== 'running',
+          canSendInput: status !== 'failed',
           canInterrupt: status === 'running',
           canReviewDiffs: true,
         },
@@ -441,9 +451,9 @@ export const claudeCodeRuntime: AgentRuntime = {
     // Instead of synthetic IDs, find the REAL most-recent JSONL in the matching project dir
     // so transcript and resume actually work.
     const matchedCwds = new Set(
-      allSessions
-        .filter((m) => inferSessionStatus(m, liveProcesses) === 'running')
-        .map((m) => m.cwd)
+      results
+        .filter((session) => session.status === 'running')
+        .map((session) => session.cwd)
         .filter(Boolean),
     );
 
@@ -789,17 +799,57 @@ export const claudeCodeRuntime: AgentRuntime = {
   },
 
   async interrupt(sessionKey: string): Promise<RuntimeActionResult> {
-    // Find the process by matching the session
+    const sessionId = sessionKey.replace('claude-code:', '');
     const liveProcesses = await findLiveClaudeProcesses();
     if (liveProcesses.length === 0) {
       return { ok: false, note: 'No live Claude Code process found to interrupt.' };
     }
 
-    // Try SIGINT on all claude processes (they handle it gracefully)
-    let interrupted = false;
-    for (const proc of liveProcesses) {
+    const livePidMatch = sessionId.match(/^live-(\d+)$/);
+    let targetPids: number[] = [];
+
+    if (livePidMatch?.[1]) {
+      targetPids = [Number(livePidMatch[1])];
+    } else {
+      let sessionCwd: string | undefined;
       try {
-        process.kill(proc.pid, 'SIGINT');
+        const projectDirs = await readdir(CLAUDE_PROJECTS_DIR);
+        for (const dir of projectDirs) {
+          const candidate = path.join(CLAUDE_PROJECTS_DIR, dir, `${sessionId}.jsonl`);
+          try {
+            await access(candidate);
+            sessionCwd = decodeProjectPath(dir);
+            break;
+          } catch { /* skip */ }
+        }
+      } catch { /* skip */ }
+
+      if (sessionCwd) {
+        const normalizedTarget = normalizeFsPath(sessionCwd);
+        targetPids = liveProcesses
+          .filter((proc) => {
+            const normalizedProc = normalizeFsPath(proc.cwd);
+            return normalizedProc === normalizedTarget
+              || normalizedProc.startsWith(`${normalizedTarget}/`)
+              || normalizedTarget.startsWith(`${normalizedProc}/`);
+          })
+          .map((proc) => proc.pid);
+      }
+    }
+
+    targetPids = [...new Set(targetPids.filter((pid) => Number.isFinite(pid) && pid > 0))];
+    if (targetPids.length === 0) {
+      return {
+        ok: false,
+        note: 'No live Claude Code PID matched this session.',
+        sessionKey,
+      };
+    }
+
+    let interrupted = false;
+    for (const pid of targetPids) {
+      try {
+        process.kill(pid, 'SIGINT');
         interrupted = true;
       } catch { /* process may have exited */ }
     }
@@ -807,8 +857,8 @@ export const claudeCodeRuntime: AgentRuntime = {
     return {
       ok: interrupted,
       note: interrupted
-        ? 'SIGINT sent to Claude Code process.'
-        : 'Could not interrupt Claude Code process.',
+        ? `SIGINT sent to Claude Code pid${targetPids.length === 1 ? '' : 's'} ${targetPids.join(', ')}.`
+        : 'Could not interrupt the live Claude Code process for this session.',
       sessionKey,
     };
   },

@@ -102,6 +102,7 @@ import {
   collectLeafContentKinds,
   countLeaves,
   splitTile,
+  wrapRootWithSplit,
 } from '@/lib/tiles/operations';
 import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
 
@@ -129,8 +130,8 @@ function DashboardInner() {
   const [dashTermSession, setDashTermSession] = useState<string | null>(null);
   const termCreatedRef = useRef(false);
   const terminalRef = useRef<TerminalHandle>(null);
-  const termWorkspaceRef = useRef<TerminalTabHandle>(null);
-  const bottomTermRef = useRef<ContextualPanelHandle>(null);
+  const workspaceTerminalHandlesRef = useRef<Map<string, TerminalTabHandle>>(new Map());
+  const contextualPanelHandlesRef = useRef<Map<string, ContextualPanelHandle>>(new Map());
   const [agentsJson, setAgentsJson] = useState('[]');
   const [activeWorkspace, setActiveWorkspace] = useState<string | undefined>();
   const [showMemoryView, setShowMemoryView] = useState(false);
@@ -288,34 +289,90 @@ function DashboardInner() {
   const [desktopDraftInjection, setDesktopDraftInjection] = useState<{ id: string; text: string } | null>(null);
   const [thoughtsDraftInjection, setThoughtsDraftInjection] = useState<{ id: string; text: string } | null>(null);
 
+  const registerWorkspaceTerminalHandle = useCallback((tileId: string, handle: TerminalTabHandle | null) => {
+    if (handle) {
+      workspaceTerminalHandlesRef.current.set(tileId, handle);
+      return;
+    }
+    workspaceTerminalHandlesRef.current.delete(tileId);
+  }, []);
+
+  const registerContextualPanelHandle = useCallback((tileId: string, handle: ContextualPanelHandle | null) => {
+    if (handle) {
+      contextualPanelHandlesRef.current.set(tileId, handle);
+      return;
+    }
+    contextualPanelHandlesRef.current.delete(tileId);
+  }, []);
+
+  const getPreferredContextualPanelHandle = useCallback((preferredTileId?: string | null) => {
+    if (preferredTileId) {
+      const preferredHandle = contextualPanelHandlesRef.current.get(preferredTileId);
+      if (preferredHandle) {
+        return preferredHandle;
+      }
+    }
+    if (activeTileId) {
+      const activeHandle = contextualPanelHandlesRef.current.get(activeTileId);
+      if (activeHandle) {
+        return activeHandle;
+      }
+    }
+    return contextualPanelHandlesRef.current.values().next().value ?? null;
+  }, [activeTileId]);
+
   // Terminal WS hook — routes events to WorkspaceTerminal + ContextualPanel
   const terminalWsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
     onTerminalCreated: (sessionName: string, requestId?: string) => {
       setDashTermSession(sessionName);
-      // Route to ContextualPanel first — if it claims, skip WorkspaceTerminal
-      const claimed = bottomTermRef.current?.onSessionCreated(sessionName, requestId);
+      let claimed = false;
+
+      for (const handle of contextualPanelHandlesRef.current.values()) {
+        claimed = handle.onSessionCreated(sessionName, requestId) || claimed;
+        if (claimed) break;
+      }
+
       if (!claimed) {
-        termWorkspaceRef.current?.onSessionCreated(sessionName, requestId);
+        for (const handle of workspaceTerminalHandlesRef.current.values()) {
+          claimed = handle.onSessionCreated(sessionName, requestId) || claimed;
+          if (claimed) break;
+        }
       }
     },
     onTerminalData: (sessionName: string, data: string) => {
       terminalRef.current?.writeToTerminal(data);
-      termWorkspaceRef.current?.writeToTerminal(sessionName, data);
-      bottomTermRef.current?.writeToTerminal(sessionName, data);
+      for (const handle of workspaceTerminalHandlesRef.current.values()) {
+        handle.writeToTerminal(sessionName, data);
+      }
+      for (const handle of contextualPanelHandlesRef.current.values()) {
+        handle.writeToTerminal(sessionName, data);
+      }
     },
     onTerminalError: (sessionName: string, error: string) => {
       terminalRef.current?.setTermError(error);
-      termWorkspaceRef.current?.setTermError(sessionName, error);
-      bottomTermRef.current?.setTermError(sessionName, error);
+      for (const handle of workspaceTerminalHandlesRef.current.values()) {
+        handle.setTermError(sessionName, error);
+      }
+      for (const handle of contextualPanelHandlesRef.current.values()) {
+        handle.setTermError(sessionName, error);
+      }
     },
     onTerminalExited: (sessionName: string, _exitCode: number) => {
       terminalRef.current?.setTermExited(true);
-      termWorkspaceRef.current?.setTermExited(sessionName);
-      bottomTermRef.current?.setTermExited(sessionName);
+      for (const handle of workspaceTerminalHandlesRef.current.values()) {
+        handle.setTermExited(sessionName);
+      }
+      for (const handle of contextualPanelHandlesRef.current.values()) {
+        handle.setTermExited(sessionName);
+      }
     },
     onTerminalImage: (sessionName: string, imageB64: string, filename: string) => {
-      termWorkspaceRef.current?.showImage(sessionName, imageB64, filename);
-      bottomTermRef.current?.showImage(sessionName, imageB64, filename);
+      for (const handle of workspaceTerminalHandlesRef.current.values()) {
+        handle.showImage(sessionName, imageB64, filename);
+      }
+      for (const handle of contextualPanelHandlesRef.current.values()) {
+        handle.showImage(sessionName, imageB64, filename);
+      }
     },
     onAgentLifecycle: (sessionName: string, state: string, exitCode?: number) => {
       setLifecycleEvents(prev => {
@@ -490,6 +547,21 @@ function DashboardInner() {
       return existingLeaf.id;
     }
 
+    if (kind === 'contextual-panel') {
+      const result = wrapRootWithSplit(
+        tileLayout.root,
+        options?.direction ?? 'horizontal',
+        createTileContent('contextual-panel'),
+        options?.ratio ?? 0.68,
+      );
+      setTileLayout({
+        ...tileLayout,
+        root: result.root,
+      });
+      setActiveTileId(result.newTileId);
+      return result.newTileId;
+    }
+
     const workspaceTarget = findWorkspaceTarget();
     if (workspaceTarget) {
       const nextContent = kind === 'preview'
@@ -536,23 +608,16 @@ function DashboardInner() {
   const toggleContextualPanelTile = useCallback(() => {
     const existingLeaf = findLeafByContentKind(tileLayout.root, 'contextual-panel');
     if (existingLeaf) {
-      // Only close if there's a workspace terminal tile that will remain visible
-      const terminalTile = findLeafByContentKind(tileLayout.root, 'terminal');
-      if (terminalTile && countLeaves(tileLayout.root) > 1) {
+      if (countLeaves(tileLayout.root) > 1) {
         handleCloseTile(existingLeaf.id);
       }
       return;
     }
-    // Always split from the terminal tile (top/bottom split)
-    const terminalTile = findLeafByContentKind(tileLayout.root, 'terminal');
-    if (terminalTile) {
-      const result = splitTile(tileLayout.root, terminalTile.id, 'horizontal', createTileContent('contextual-panel'), 0.68);
-      if (result.newTileId) {
-        setTileLayout({ ...tileLayout, root: result.root });
-        setActiveTileId(result.newTileId);
-      }
-    }
-  }, [handleCloseTile, tileLayout, setTileLayout]);
+    ensureTileKind('contextual-panel', {
+      direction: 'horizontal',
+      ratio: 0.68,
+    });
+  }, [ensureTileKind, handleCloseTile, tileLayout]);
 
   const handlePreviewDetected = useCallback((preview: DetectedLocalhostPreview) => {
     setWorkspacePreviews((current) => {
@@ -591,7 +656,9 @@ function DashboardInner() {
 
     const remainingPreviews = workspacePreviews.filter((entry) => entry.id !== previewId);
     setWorkspacePreviews(remainingPreviews);
-    termWorkspaceRef.current?.clearDetectedPreview(preview.port);
+    for (const handle of workspaceTerminalHandlesRef.current.values()) {
+      handle.clearDetectedPreview(preview.port);
+    }
 
     const currentTile = findTile(tileLayout.root, tileId);
     if (currentTile?.type !== 'leaf' || currentTile.content.kind !== 'preview') {
@@ -746,13 +813,23 @@ function DashboardInner() {
 
   // ── Run command in bottom terminal ──
   const handleRunInTerminal = useCallback((command: string) => {
-    ensureTileKind('contextual-panel', {
+    const tileId = ensureTileKind('contextual-panel', {
       direction: 'horizontal',
       preferredKinds: ['terminal', 'contextual-panel', 'preview'],
       ratio: 0.68,
     });
-    bottomTermRef.current?.runCommand(command);
-  }, [ensureTileKind]);
+    const runCommand = (attempt = 0) => {
+      const handle = getPreferredContextualPanelHandle(tileId);
+      if (handle) {
+        handle.runCommand(command);
+        return;
+      }
+      if (attempt < 8) {
+        window.setTimeout(() => runCommand(attempt + 1), 50);
+      }
+    };
+    runCommand();
+  }, [ensureTileKind, getPreferredContextualPanelHandle]);
 
   // ── Alert action: navigate to agent session ──
   const handleAlertAction = useCallback((alert: import('@/lib/alerts/types').Alert) => {
@@ -931,9 +1008,11 @@ function DashboardInner() {
       description: 'Multi-tab terminal and chat workspace for active sessions.',
       singleton: true,
       // closable determined dynamically in TileContainer (last terminal is protected)
-      render: () => (
+      render: ({ tileId }) => (
         <WorkspaceTerminal
-          ref={termWorkspaceRef}
+          ref={(handle) => registerWorkspaceTerminalHandle(tileId, handle)}
+          stateScope={tileId}
+          defaultTab={tileId === 'tile-root' ? 'llm-chat' : 'terminal'}
           sendTerminalCreate={sendTerminalCreate}
           sendTerminalAttach={sendTerminalAttach}
           sendTerminalInput={sendTerminalInput}
@@ -987,7 +1066,7 @@ function DashboardInner() {
       singleton: true,
       render: ({ tileId }) => (
         <ContextualPanel
-          ref={bottomTermRef}
+          ref={(handle) => registerContextualPanelHandle(tileId, handle)}
           sendTerminalCreate={sendTerminalCreate}
           sendTerminalAttach={sendTerminalAttach}
           sendTerminalInput={sendTerminalInput}
@@ -1017,6 +1096,8 @@ function DashboardInner() {
     handleSelectCommit,
     handleSelectPreviewTile,
     parsedAgents,
+    registerContextualPanelHandle,
+    registerWorkspaceTerminalHandle,
     sendAgentKill,
     sendTerminalAttach,
     sendTerminalCreate,

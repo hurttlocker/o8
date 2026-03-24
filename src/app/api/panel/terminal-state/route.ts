@@ -6,16 +6,35 @@ import path from 'path';
 
 const HOME = process.env.HOME ?? '/tmp';
 const STATE_DIR = path.join(HOME, '.cortex-ide');
-const STATE_FILE = path.join(STATE_DIR, 'terminal-state.json');
+const STATE_SCOPE_DIR = path.join(STATE_DIR, 'terminal-states');
+const LEGACY_STATE_FILE = path.join(STATE_DIR, 'terminal-state.json');
+
+function sanitizeScope(rawScope: string | null) {
+  const trimmed = rawScope?.trim() || 'tile-root';
+  return trimmed.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120) || 'tile-root';
+}
+
+function getStateFile(scope: string) {
+  return path.join(STATE_SCOPE_DIR, `${scope}.json`);
+}
 
 /** GET — load persisted tab state */
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    if (!existsSync(STATE_FILE)) {
-      return NextResponse.json(null, { status: 404 });
+    const scope = sanitizeScope(new URL(request.url).searchParams.get('scope'));
+    const stateFile = getStateFile(scope);
+
+    if (existsSync(stateFile)) {
+      const data = JSON.parse(readFileSync(stateFile, 'utf-8'));
+      return NextResponse.json(data);
     }
-    const data = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
-    return NextResponse.json(data);
+
+    if (scope === 'tile-root' && existsSync(LEGACY_STATE_FILE)) {
+      const data = JSON.parse(readFileSync(LEGACY_STATE_FILE, 'utf-8'));
+      return NextResponse.json(data);
+    }
+
+    return NextResponse.json(null, { status: 404 });
   } catch {
     return NextResponse.json(null, { status: 404 });
   }
@@ -24,11 +43,19 @@ export async function GET() {
 /** POST — save tab state */
 export async function POST(request: Request) {
   try {
+    const scope = sanitizeScope(new URL(request.url).searchParams.get('scope'));
     const state = await request.json();
     if (!existsSync(STATE_DIR)) {
       mkdirSync(STATE_DIR, { recursive: true });
     }
-    writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+    if (!existsSync(STATE_SCOPE_DIR)) {
+      mkdirSync(STATE_SCOPE_DIR, { recursive: true });
+    }
+    const serialized = JSON.stringify(state, null, 2);
+    writeFileSync(getStateFile(scope), serialized);
+    if (scope === 'tile-root') {
+      writeFileSync(LEGACY_STATE_FILE, serialized);
+    }
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

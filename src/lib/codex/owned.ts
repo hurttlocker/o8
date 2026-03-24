@@ -340,6 +340,30 @@ function parseOwnedRunLog(raw: string, run: OwnedCodexRunRecord): ParsedRunLog {
           }
           continue;
         }
+
+        if (item.type === 'command_execution') {
+          const command = String(item.command ?? '').trim();
+          const output = compactText(String(item.aggregated_output ?? ''), 500);
+
+          entries.push({
+            id: `${run.id}:tool:${String(item.id ?? entries.length)}`,
+            kind: 'tool',
+            label: 'exec_command',
+            text: command ? JSON.stringify({ command }) : '',
+            timestampLabel: formatClock(run.finishedAt ?? run.startedAt),
+          });
+
+          if (output) {
+            entries.push({
+              id: `${run.id}:tool-output:${String(item.id ?? entries.length)}`,
+              kind: 'tool-output',
+              label: 'Tool output',
+              text: output,
+              timestampLabel: formatClock(run.finishedAt ?? run.startedAt),
+            });
+          }
+          continue;
+        }
       }
 
       if (type === 'turn.completed') {
