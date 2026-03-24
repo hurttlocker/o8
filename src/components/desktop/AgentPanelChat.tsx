@@ -21,13 +21,11 @@ import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
 import {
   ArrowUp,
-  Brain,
   ChevronDown,
   ChevronRight,
   FolderOpen,
   Loader2,
   Plus,
-  RefreshCw,
   SlidersHorizontal,
   Sparkles,
   Square,
@@ -57,6 +55,7 @@ import {
   lastSidebarTurnToolCalls as normalizeLastSidebarTurnToolCalls,
   type SidebarRuntimeCapabilities,
 } from '@/lib/chat/sidebar-events';
+import { formatModelLabel } from '@/lib/format';
 import { ttsEngine } from '@/lib/tts/engine';
 import { autocompleteSlashCommand, buildSlashTerminalInput, getSlashCommandSuggestions, isSlashCommandText } from '@/lib/slash-commands';
 
@@ -81,6 +80,20 @@ function getAgentName(s: SessionSummary): string {
   return name;
 }
 
+function sessionDisplayModel(session?: SessionSummary) {
+  if (!session) return 'Live';
+  if (session.runtime === 'openclaw') {
+    return formatModelLabel(session.primaryModel ?? session.model ?? session.heartbeatModel ?? 'OpenClaw');
+  }
+  if (session.runtime === 'codex') {
+    return formatModelLabel(session.model ?? 'Codex');
+  }
+  if (session.runtime === 'claude-code') {
+    return formatModelLabel(session.model ?? 'Claude Code');
+  }
+  return formatModelLabel(session.model ?? 'Live');
+}
+
 function roleLabel(role: string, agentName?: string): string {
   if (role === 'user') return 'You';
   if (role === 'system') return 'System';
@@ -91,6 +104,16 @@ function compactLine(text: string | null | undefined, fallback: string, max = 26
   const val = text ?? fallback;
   if (val.length <= max) return val;
   return val.slice(0, max - 1) + '…';
+}
+
+function sessionLocalFolderLabel(session: SessionSummary) {
+  const cwd = session.runtimeSurface?.cwd?.trim() || session.workspace?.trim();
+  if (!cwd) return null;
+  const sourceLabel = session.runtimeSurface?.sourceLabel ?? '';
+  const ttyMatch = sourceLabel.match(/(?:^|• )([st]tys?\d{3}|s\d{3})(?: •|$)/i);
+  const tty = ttyMatch?.[1]?.trim();
+  const folder = compactLine(cwd, cwd, 44);
+  return tty ? `${folder} • ${tty}` : folder;
 }
 
 function mediaHref(path: string): string {
@@ -1351,6 +1374,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
             const isExpanded = expandedGroup === group.workspace;
             const isSingle = group.sessions.length === 1;
             const containsSelected = group.sessions.some((s) => s.id === selectedSession?.id);
+            const singleSessionFolder = isSingle ? sessionLocalFolderLabel(group.sessions[0]) : null;
             const isGroupMainOpenClaw = group.sessions.some((s) => s.runtime === 'openclaw' && s.sessionKey === 'agent:main:main');
             const dotColor = isGroupMainOpenClaw
               ? '#2563eb'
@@ -1428,7 +1452,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                       lineHeight: 1.3,
                       marginTop: '1px',
                     }}>
-                      {group.summary}
+                      {singleSessionFolder ?? group.summary}
                       {group.mostRecentTime ? ` · ${group.mostRecentTime}` : ''}
                     </div>
                   </div>
@@ -1468,7 +1492,8 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                         : session.runtime === 'codex' ? ' · Codex'
                         : '';
                       const name = rawName + runtimeTag;
-                      const subtitle = session.currentTask
+                      const subtitle = sessionLocalFolderLabel(session)
+                        ?? session.currentTask
                         ?? session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '')
                         ?? session.sessionKey
                         ?? '';
@@ -2573,18 +2598,12 @@ const ThinkingXray = memo(function ThinkingXray({
   const isThinking = agentRunning && !streamingText;
   const isStreaming = agentRunning && !!streamingText;
 
-  // Short model label
-  const shortModel = model
-    .replace('claude-', '').replace('openai-', '')
-    .replace('codex/', '').replace('anthropic/', '')
-    .split('-').slice(0, 2).join('-');
-
   return (
     <div style={{ position: 'relative' }}>
       <div className="remodex-compose-status-bar" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         {/* Model pill */}
         <span className="remodex-compose-chip remodex-compose-pill">
-          {shortModel}
+          {model}
         </span>
 
         {/* Thinking X-ray pill */}
@@ -2756,8 +2775,6 @@ const DesktopComposePane = memo(function DesktopComposePane({
   currentAgentName,
   send,
   fileInputRef,
-  selectedKey,
-  fetchTranscript,
   enhancing,
   enhance,
   agentRunning,
@@ -2780,8 +2797,6 @@ const DesktopComposePane = memo(function DesktopComposePane({
   currentAgentName: string;
   send: () => Promise<void>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
-  selectedKey: string;
-  fetchTranscript: (key: string) => Promise<void>;
   enhancing: boolean;
   enhance: () => Promise<void>;
   agentRunning: boolean;
@@ -2870,7 +2885,7 @@ const DesktopComposePane = memo(function DesktopComposePane({
 
       <div className="remodex-compose-surface">
         <ThinkingXray
-          model={selectedSession?.model ?? 'live'}
+          model={sessionDisplayModel(selectedSession)}
           agentRunning={agentRunning}
           streamingText={streamingText}
         />
@@ -2956,22 +2971,6 @@ const DesktopComposePane = memo(function DesktopComposePane({
             onClick={() => fileInputRef.current?.click()}
           >
             <Plus size={16} strokeWidth={2.2} />
-          </button>
-          <button
-            type="button"
-            className="remodex-compose-chip remodex-compose-chip-icon"
-            aria-label="Refresh"
-            onClick={() => void fetchTranscript(selectedKey)}
-          >
-            <RefreshCw size={16} strokeWidth={2.2} />
-          </button>
-          <button
-            type="button"
-            className="remodex-compose-chip remodex-compose-chip-icon"
-            aria-label="Memory recall"
-            style={{ color: '#2563eb' }}
-          >
-            <Brain size={17} strokeWidth={2} />
           </button>
           {draft.trim().length >= 3 ? (
             <button
@@ -3106,6 +3105,7 @@ const DesktopComposePane = memo(function DesktopComposePane({
     </div>
   );
 });
+
 
 // ── Main Component ──
 
@@ -4199,7 +4199,6 @@ export function AgentPanelChat({
         scrollToBottom={scrollToBottom}
         getIsNewEntry={getIsNewEntry}
       />
-
       {/* ── Resize Handle ── */}
       <div
         onMouseDown={(e) => {
@@ -4248,8 +4247,6 @@ export function AgentPanelChat({
         currentAgentName={currentAgentName}
         send={send}
         fileInputRef={fileInputRef}
-        selectedKey={selectedKey}
-        fetchTranscript={fetchTranscript}
         enhancing={enhancing}
         enhance={enhance}
         agentRunning={agentRunning}

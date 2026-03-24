@@ -29,8 +29,9 @@ export default function FactCard({ fact, onReinforce, onRetire, onInject, compac
   const [actionState, setActionState] = useState<'idle' | 'reinforced' | 'retired'>('idle');
 
   const typeColor = FACT_TYPE_COLORS[fact.factType] ?? '#5b6475';
-  const confidencePercent = Math.round(fact.confidence * 100);
+  const confidencePercent = Math.max(0, Math.min(100, Math.round(fact.confidence * 100)));
   const confidenceColor = confidencePercent >= 80 ? '#059669' : confidencePercent >= 50 ? '#b45309' : '#dc2626';
+  const showExpandedSection = expanded || (compact && Boolean(onInject));
 
   const handleReinforce = useCallback(() => { onReinforce?.(fact.id); setActionState('reinforced'); }, [fact.id, onReinforce]);
   const handleRetire = useCallback(() => { onRetire?.(fact.id); setActionState('retired'); }, [fact.id, onRetire]);
@@ -88,17 +89,25 @@ export default function FactCard({ fact, onReinforce, onRetire, onInject, compac
         WebkitBoxOrient: 'vertical', overflow: 'hidden',
       }}>{fact.text}</div>
 
-      {expanded && (
+      {showExpandedSection && (
         <div style={{ marginTop: 14 }}>
-          <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
-            {fact.source}
-            {fact.sourceSection && <span> · {fact.sourceSection}</span>}
-          </div>
-          <div style={{ height: 4, background: 'rgba(15, 23, 42, 0.06)', borderRadius: 2, marginBottom: 14, overflow: 'hidden' }}>
-            <div style={{ height: '100%', width: `${confidencePercent}%`, background: confidenceColor, borderRadius: 2, transition: 'width 0.4s ease' }} />
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: onInject ? '1fr 1fr 1fr' : '1fr 1fr', gap: 8 }}>
-            {onReinforce && (
+          {!compact && (
+            <>
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
+                {fact.source}
+                {fact.sourceSection && <span> · {fact.sourceSection}</span>}
+              </div>
+              <div style={{ height: 4, background: 'rgba(15, 23, 42, 0.06)', borderRadius: 2, marginBottom: 14, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${confidencePercent}%`, background: confidenceColor, borderRadius: 2, transition: 'width 0.4s ease' }} />
+              </div>
+            </>
+          )}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: compact ? '1fr' : (onInject ? '1fr 1fr 1fr' : '1fr 1fr'),
+            gap: 8,
+          }}>
+            {!compact && onReinforce && (
               <button onClick={(e) => { e.stopPropagation(); handleReinforce(); }} style={{
                 padding: '10px 0', borderRadius: 12, border: '1px solid rgba(5, 150, 105, 0.15)',
                 background: 'rgba(5, 150, 105, 0.06)', color: '#059669',
@@ -108,7 +117,7 @@ export default function FactCard({ fact, onReinforce, onRetire, onInject, compac
                 <ArrowUp size={14} /> Keep
               </button>
             )}
-            {onRetire && (
+            {!compact && onRetire && (
               <button onClick={(e) => { e.stopPropagation(); handleRetire(); }} style={{
                 padding: '10px 0', borderRadius: 12, border: '1px solid rgba(15, 23, 42, 0.08)',
                 background: 'rgba(15, 23, 42, 0.03)', color: '#64748b',
