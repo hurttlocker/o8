@@ -9,6 +9,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type React from 'react';
+import { Canvas } from './Canvas';
 
 // ── CLI Agents (terminal only, no chat modes) ──
 
@@ -45,6 +46,13 @@ export interface ContextualPanelProps {
   sendTerminalDetach: (sessionName: string) => void;
   sendAgentKill: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
   termWsConnected: boolean;
+  // Canvas tabs (issues, diffs, files, timeline — rendered as tabs alongside terminals)
+  canvasTabs?: import('./Canvas').CanvasTab[];
+  activeCanvasTabId?: string | null;
+  onSelectCanvasTab?: (tabId: string) => void;
+  onCloseCanvasTab?: (tabId: string) => void;
+  onInjectChatContext?: (payload: import('@/lib/chat/injection').AgentPanelChatInjectionPayload) => void;
+  onSelectCommit?: (hash: string) => void;
   onClose: () => void;
 }
 
@@ -345,6 +353,12 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       sendTerminalResize,
       sendTerminalDetach,
       termWsConnected,
+      canvasTabs,
+      activeCanvasTabId,
+      onSelectCanvasTab,
+      onCloseCanvasTab,
+      onInjectChatContext,
+      onSelectCommit,
       onClose,
     },
     ref,
@@ -609,6 +623,56 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                 </button>
               );
             })}
+
+            {/* Canvas tabs (issues, diffs, files, timeline) */}
+            {canvasTabs && canvasTabs.length > 0 && (
+              <>
+                <div style={{ width: 1, height: 16, background: 'var(--t-divider)', flexShrink: 0 }} />
+                {canvasTabs.map((ct) => {
+                  const isActive = ct.id === activeCanvasTabId && !activeTabId;
+                  return (
+                    <button
+                      key={ct.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveTabId(''); // deselect terminal tabs
+                        onSelectCanvasTab?.(ct.id);
+                      }}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        height: 28,
+                        paddingTop: 0,
+                        paddingRight: 10,
+                        paddingBottom: 0,
+                        paddingLeft: 10,
+                        borderRadius: 8,
+                        border: 'none',
+                        background: isActive ? 'var(--t-panel)' : 'transparent',
+                        boxShadow: isActive ? 'var(--t-panel-shadow)' : 'none',
+                        color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                        cursor: 'pointer',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span style={{ fontSize: 12, fontWeight: isActive ? 600 : 500, whiteSpace: 'nowrap' }}>
+                        {ct.label}
+                      </span>
+                      <span
+                        onClick={(e) => { e.stopPropagation(); onCloseCanvasTab?.(ct.id); }}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 16, height: 16, borderRadius: 4, color: 'var(--t-text-muted)',
+                        }}
+                      >
+                        <XIcon size={10} />
+                      </span>
+                    </button>
+                  );
+                })}
+              </>
+            )}
           </div>
 
           <div ref={addMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
@@ -727,8 +791,23 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
           </button>
         </div>
 
-        {/* Terminal body */}
-        {tabs.length > 0 ? (
+        {/* Canvas content — shown when a canvas tab is active */}
+        {!activeTabId && activeCanvasTabId && canvasTabs && canvasTabs.length > 0 && (
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <Canvas
+              tabs={canvasTabs}
+              activeTabId={activeCanvasTabId}
+              onSelectTab={(id) => onSelectCanvasTab?.(id)}
+              onCloseTab={(id) => onCloseCanvasTab?.(id)}
+              onInjectChatContext={onInjectChatContext}
+              onSelectCommit={onSelectCommit}
+              embedded
+            />
+          </div>
+        )}
+
+        {/* Terminal body — shown when a terminal tab is active */}
+        {activeTabId && tabs.length > 0 ? (
           <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
             {tabs.map((tab) => (
               tab.tmuxSession ? (

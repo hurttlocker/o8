@@ -9,7 +9,7 @@ import { WorkspaceTerminal, type TerminalTabHandle } from '@/components/desktop/
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 // WorkspacesPanel merged into AgentPanel — unified agent+workspace view
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
-import { Canvas, CanvasTab } from '@/components/desktop/Canvas';
+import { Canvas, type CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch } from '@/components/shared/UniversalSearch';
 import { GraphExplorer3D } from '@/components/desktop/GraphExplorer3D';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
@@ -477,7 +477,7 @@ function DashboardInner() {
     }
     ensureTileKind('contextual-panel', {
       direction: 'horizontal',
-      preferredKinds: ['terminal', 'canvas', 'preview'],
+      preferredKinds: ['terminal', 'contextual-panel', 'preview'],
       ratio: 0.68,
     });
   }, [ensureTileKind, handleCloseTile, tileLayout.root]);
@@ -491,7 +491,7 @@ function DashboardInner() {
     });
     ensureTileKind('preview', {
       direction: 'vertical',
-      preferredKinds: ['terminal', 'canvas'],
+      preferredKinds: ['terminal', 'contextual-panel'],
       ratio: 0.56,
       selectedPreviewId: preview.id,
     });
@@ -544,10 +544,11 @@ function DashboardInner() {
   const [activeCanvasTabId, setActiveCanvasTabId] = useState<string | null>(null);
 
   const openCanvasTab = useCallback((tab: CanvasTab) => {
-    ensureTileKind('canvas', {
+    // Canvas tabs open inside the ContextualPanel (bottom panel)
+    ensureTileKind('contextual-panel', {
       direction: 'horizontal',
       preferredKinds: ['terminal', 'preview'],
-      ratio: 0.62,
+      ratio: 0.68,
     });
     console.log('[Canvas] openCanvasTab called:', tab.kind, tab.id);
     setCanvasTabs((prev) => {
@@ -646,7 +647,7 @@ function DashboardInner() {
     });
   }, []);
 
-  const handleDesktopChatInjection = useCallback((payload: AgentPanelChatInjectionPayload) => {
+  const handleAgentPanelChatInjection = useCallback((payload: AgentPanelChatInjectionPayload) => {
     const nextInjection = {
       id: `${payload.reason}-${Date.now()}`,
       text: payload.text,
@@ -675,7 +676,7 @@ function DashboardInner() {
   const handleRunInTerminal = useCallback((command: string) => {
     ensureTileKind('contextual-panel', {
       direction: 'horizontal',
-      preferredKinds: ['terminal', 'canvas', 'preview'],
+      preferredKinds: ['terminal', 'contextual-panel', 'preview'],
       ratio: 0.68,
     });
     bottomTermRef.current?.runCommand(command);
@@ -886,20 +887,12 @@ function DashboardInner() {
         />
       ),
     },
+    // Legacy — canvas tabs now render inside ContextualPanel
     canvas: {
-      label: 'Canvas',
-      description: 'Issues, diffs, transcripts, files, deploys, and timeline tabs.',
+      label: 'Canvas (Legacy)',
+      description: 'Redirects to ContextualPanel',
       singleton: true,
-      render: () => (
-        <Canvas
-          tabs={canvasTabs}
-          activeTabId={activeCanvasTabId}
-          onSelectTab={setActiveCanvasTabId}
-          onCloseTab={closeCanvasTab}
-          onInjectChatContext={handleDesktopChatInjection}
-          onSelectCommit={handleSelectCommit}
-        />
-      ),
+      render: () => <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-faint)' }}>Canvas merged into Contextual Panel</div>,
     },
     thoughts: {
       label: 'Thoughts',
@@ -929,6 +922,12 @@ function DashboardInner() {
           sendTerminalDetach={sendTerminalDetach}
           sendAgentKill={sendAgentKill}
           termWsConnected={termWsConnected}
+          canvasTabs={canvasTabs}
+          activeCanvasTabId={activeCanvasTabId}
+          onSelectCanvasTab={setActiveCanvasTabId}
+          onCloseCanvasTab={closeCanvasTab}
+          onInjectChatContext={handleAgentPanelChatInjection}
+          onSelectCommit={handleSelectCommit}
           onClose={() => handleCloseTile(tileId)}
         />
       ),
@@ -939,7 +938,7 @@ function DashboardInner() {
     closeCanvasTab,
     handleClosePreviewTileItem,
     handleCloseTile,
-    handleDesktopChatInjection,
+    handleAgentPanelChatInjection,
     handlePreviewDetected,
     handlePreviewSelection,
     handleSelectCommit,
@@ -1038,7 +1037,7 @@ function DashboardInner() {
           if (section === 'terminal') {
             ensureTileKind('contextual-panel', {
               direction: 'horizontal',
-              preferredKinds: ['terminal', 'canvas', 'preview'],
+              preferredKinds: ['terminal', 'contextual-panel', 'preview'],
               ratio: 0.68,
             });
           }
@@ -1079,7 +1078,7 @@ function DashboardInner() {
           });
           ensureTileKind('preview', {
             direction: 'vertical',
-            preferredKinds: ['terminal', 'canvas'],
+            preferredKinds: ['terminal', 'contextual-panel'],
             ratio: 0.56,
             selectedPreviewId: previewId,
           });
