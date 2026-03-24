@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readdir, readFile, stat } from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -29,25 +30,51 @@ interface ContentBlock {
   content?: ContentBlock[];
 }
 
-function extractText(content: string | ContentBlock[] | undefined): string {
-  if (!content) return '';
-  if (typeof content === 'string') return content;
+function coerceToolArgs(input: unknown): Record<string, unknown> | undefined {
+  if (!input) return undefined;
+  if (typeof input === 'object' && !Array.isArray(input)) {
+    return input as Record<string, unknown>;
+  }
+  return { input };
+}
 
-  const parts: string[] = [];
+function extractTranscriptPayload(content: string | ContentBlock[] | undefined): {
+  text: string;
+  toolCalls: MobileTranscriptToolCall[];
+} {
+  if (!content) return { text: '', toolCalls: [] };
+  if (typeof content === 'string') return { text: content, toolCalls: [] };
+
+  const textParts: string[] = [];
+  const toolCalls: MobileTranscriptToolCall[] = [];
+
   for (const block of content) {
     if (block.type === 'text' && block.text) {
-      parts.push(block.text);
-    } else if (block.type === 'tool_use' && block.name) {
-      parts.push(`🔧 ${block.name}`);
-    } else if (block.type === 'tool_result') {
-      // Recurse into tool result content
-      if (Array.isArray(block.content)) {
-        const inner = extractText(block.content);
-        if (inner) parts.push(inner);
+      textParts.push(block.text);
+      continue;
+    }
+
+    if (block.type === 'tool_use' && block.name) {
+      toolCalls.push({
+        name: block.name,
+        args: coerceToolArgs(block.input),
+        status: 'done',
+      });
+      continue;
+    }
+
+    if (block.type === 'tool_result' && Array.isArray(block.content)) {
+      const inner = extractTranscriptPayload(block.content);
+      if (inner.text) {
+        textParts.push(inner.text);
       }
     }
   }
-  return parts.join('\n');
+
+  return {
+    text: textParts.join('\n').trim(),
+    toolCalls,
+  };
 }
 
 /**
@@ -114,6 +141,7 @@ export async function GET(req: NextRequest) {
       role: string;
       text: string;
       timestampLabel: string;
+      toolCalls?: MobileTranscriptToolCall[];
     }[] = [];
 
     for (const line of lines) {
@@ -127,10 +155,11 @@ export async function GET(req: NextRequest) {
         if (entry.isMeta) continue;
 
         const role = entry.type === 'user' ? 'user' : 'assistant';
-        const text = extractText(entry.message?.content);
+        const payload = extractTranscriptPayload(entry.message?.content);
+        const text = payload.text;
 
         // Skip empty or command-only messages
-        if (!text.trim() || text.startsWith('<command-message>')) continue;
+        if ((!text.trim() && payload.toolCalls.length === 0) || text.startsWith('<command-message>')) continue;
 
         const ts = entry.timestamp ? new Date(entry.timestamp) : new Date();
         const timestampLabel = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -140,6 +169,7 @@ export async function GET(req: NextRequest) {
           role,
           text,
           timestampLabel,
+          toolCalls: payload.toolCalls.length > 0 ? payload.toolCalls : undefined,
         });
       } catch { /* skip malformed lines */ }
     }
