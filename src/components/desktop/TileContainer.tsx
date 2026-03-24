@@ -17,6 +17,8 @@ export interface TileContentDefinition<TContent extends TileContent = TileConten
   label: string;
   render: (props: TileContentRenderProps<TContent>) => React.ReactNode;
   singleton?: boolean;
+  /** If false, the tile cannot be closed by the user. Default: true */
+  closable?: boolean;
 }
 
 export type TileContentRegistry = Record<TileContentKind, TileContentDefinition>;
@@ -185,7 +187,7 @@ export function TileContainer({
       <TileLeafView
         key={node.id}
         active={node.id === activeTileId}
-        canClose={totalLeaves > 1}
+        canClose={totalLeaves > 1 && (registry[node.content.kind]?.closable !== false)}
         node={node}
         registry={registry}
         onActivateTile={onActivateTile}
