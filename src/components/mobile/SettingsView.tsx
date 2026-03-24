@@ -76,6 +76,11 @@ interface GitHubStatus {
   authenticated: boolean;
   username: string;
   repos: number;
+  broker?: {
+    tokenReady: boolean;
+    productionWebhookReady: boolean;
+    note: string;
+  } | null;
 }
 
 function SettingsGroup({ label, children }: { label: string; children: React.ReactNode }) {
@@ -333,6 +338,18 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
           label="Account"
           value={github?.authenticated ? github.username : 'Not connected'}
           detail={github?.authenticated ? `${github.repos} repositories` : 'Connect via gh auth login'}
+        />
+        <SettingsRow
+          label="Broker"
+          value={github?.broker?.tokenReady ? 'Ready' : 'Needs setup'}
+          detail={github?.broker?.note ?? 'GitHub App broker status unavailable'}
+        />
+        <SettingsRow
+          label="Webhooks"
+          value={github?.broker?.productionWebhookReady ? 'Ready' : 'Blocked'}
+          detail={github?.broker?.productionWebhookReady
+            ? 'Production webhook sync can be completed.'
+            : 'Waiting on production public URL and webhook secret.'}
         />
         <SettingsRow
           label="Repositories"

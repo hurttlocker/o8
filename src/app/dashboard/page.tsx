@@ -74,6 +74,12 @@ function normalizeDetection(raw: Record<string, unknown>): DetectionResult {
     summary: String(raw.summary ?? ''),
   };
 }
+
+function repoSlugFromRemote(remoteUrl?: string | null) {
+  const url = (remoteUrl ?? '').replace(/\.git$/, '');
+  const parts = url.split('/');
+  return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : null;
+}
 import { LocalhostPreviewTabs } from '@/components/desktop/LocalhostPreviewTabs';
 import { TileContainer, type TileContentRegistry } from '@/components/desktop/TileContainer';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
@@ -183,17 +189,20 @@ function DashboardInner() {
   // No hardcoded repos — start empty, user adds repos
   const REPO_DISPLAY: Record<string, string> = {};
 
+  const loadRegisteredRepos = useCallback(async () => {
+    const response = await fetch('/api/panel/repos');
+    const data = await response.json() as { repos?: Array<{ remoteUrl?: string }> };
+    const repos = (data.repos ?? [])
+      .map((repo) => repoSlugFromRemote(repo.remoteUrl))
+      .filter((repo): repo is string => Boolean(repo));
+    setGlobalRepoList(repos);
+    return repos;
+  }, []);
+
   // Fetch registered repos on mount — but don't auto-select
   useEffect(() => {
-    fetch('/api/panel/repos')
-      .then(r => r.json())
-      .then(data => {
-        const repos = (data.repos ?? []).map((r: { remoteUrl?: string }) => {
-          const url = (r.remoteUrl ?? '').replace(/\.git$/, '');
-          const parts = url.split('/');
-          return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : null;
-        }).filter(Boolean) as string[];
-        setGlobalRepoList(repos);
+    loadRegisteredRepos()
+      .then((repos) => {
         // Only restore if user previously selected one
         const saved = typeof window !== 'undefined' ? sessionStorage.getItem('cortex-global-repo') : null;
         if (saved && repos.includes(saved)) setGlobalRepo(saved);
@@ -202,7 +211,7 @@ function DashboardInner() {
       .catch(() => {
         setGlobalRepoList([]);
       });
-  }, []);
+  }, [loadRegisteredRepos]);
 
   // Fetch branch when globalRepo changes
   useEffect(() => {
@@ -227,6 +236,54 @@ function DashboardInner() {
       })
       .catch(() => {});
   }, [globalRepo]);
+
+  const handleOpenFolder = useCallback(async () => {
+    let folderPath: string | null = null;
+
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const result = await open({ directory: true, title: 'Select project folder' });
+      if (typeof result === 'string') folderPath = result;
+    } catch {
+      try {
+        const response = await fetch('/api/panel/browse-folder', { method: 'POST' });
+        const data = await response.json() as { path?: string | null };
+        if (data.path) folderPath = data.path;
+      } catch {
+        folderPath = window.prompt('Enter folder path:');
+      }
+    }
+
+    if (!folderPath) return;
+
+    try {
+      const response = await fetch('/api/panel/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', localPath: folderPath }),
+      });
+      const data = await response.json() as {
+        error?: string;
+        repo?: { remoteUrl?: string | null; defaultBranch?: string | null; name?: string | null };
+      };
+
+      if (!response.ok || !data.repo) {
+        throw new Error(data.error ?? 'Unable to add repository.');
+      }
+
+      await loadRegisteredRepos();
+
+      const nextRepo = repoSlugFromRemote(data.repo.remoteUrl);
+      if (nextRepo) {
+        setGlobalRepo(nextRepo);
+      }
+      if (data.repo.defaultBranch) {
+        setGlobalRepoBranch(data.repo.defaultBranch);
+      }
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to open folder.');
+    }
+  }, [loadRegisteredRepos]);
   const [lifecycleEvents, setLifecycleEvents] = useState<Map<string, { state: string; exitCode?: number; ts: number }>>(new Map());
   const [desktopDraftInjection, setDesktopDraftInjection] = useState<{ id: string; text: string } | null>(null);
   const [thoughtsDraftInjection, setThoughtsDraftInjection] = useState<{ id: string; text: string } | null>(null);
@@ -992,6 +1049,7 @@ function DashboardInner() {
         repoList={globalRepoList}
         repoDisplayNames={REPO_DISPLAY}
         onRepoChange={setGlobalRepo}
+        onOpenFolder={handleOpenFolder}
         sidebarVisible={sidebarVisible}
         onToggleSidebar={() => setSidebarVisible(v => !v)}
         bottomPanelVisible={bottomPanelVisible}
@@ -1113,6 +1171,7 @@ function DashboardInner() {
         position: 'relative',
       }}>
         <AgentPanel
+          selectedRepo={globalRepo}
           onSelectSession={handleSelectSession}
           onSelectIssue={handleSelectIssue}
           onSelectCommit={handleSelectCommit}

@@ -131,6 +131,11 @@ Several API routes use `process.cwd()` as the default workspace root. In the Tau
 - **Cache:** `src/lib/github/cache.ts` — 5min TTL for issues/PRs/commits, 10min for CI
 - **All `gh` CLI calls:** Go through `src/lib/github.ts` → `ghExec()` which injects the token
 
+Broker rollout note:
+
+- New broker-backed setup and environment requirements are documented in [GITHUB-BROKER-SETUP.md](/Users/marquisehurtt/clawd/repos/cortex-ide/docs/GITHUB-BROKER-SETUP.md)
+- Production webhook sync still requires the final public URL before the GitHub App webhook can be completed
+
 ## Repo Selector
 
 - Starts empty — no auto-loaded repos

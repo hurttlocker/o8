@@ -1,13 +1,9 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { listRepos } from '@/lib/repos/registry';
-import { getCached, setCached } from '@/lib/github/cache';
-import { getGitHubToken } from '@/lib/github';
+import { ensureGitHubPullRequests } from '@/lib/github-broker';
 
-const execFileAsync = promisify(execFile);
 const DEFAULT_REPO = process.env.CORTEX_IDE_REVIEW_REPO || '';
 
 function normalizeRepoSlug(remoteUrl: string | null | undefined) {
@@ -33,7 +29,7 @@ async function resolveRepoSlug(repoLike: string | null) {
     if (entry.name.toLowerCase() === normalizedTarget) return slug;
   }
 
-  return null;
+  return DEFAULT_REPO;
 }
 
 export async function GET(request: Request) {
@@ -44,27 +40,26 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Invalid repo format', prs: [] }, { status: 400 });
   }
 
-  // Check cache first
-  const cacheKey = `prs:${repo}`;
-  const cached = getCached<unknown[]>(cacheKey);
-  if (cached) {
-    return NextResponse.json({ prs: cached, repo });
-  }
-
-  try {
-    const token = getGitHubToken();
-    const { stdout } = await execFileAsync('gh', [
-      'pr', 'list',
-      '--repo', repo,
-      '--state', 'open',
-      '--limit', '10',
-      '--json', 'number,title,author,headRefName,baseRefName,state,additions,deletions,changedFiles,statusCheckRollup,reviewDecision,url,createdAt',
-    ], { timeout: 15_000, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1', ...(token ? { GH_TOKEN: token } : {}) } });
-
-    const prs = JSON.parse(stdout || '[]');
-    setCached(cacheKey, prs);
-    return NextResponse.json({ prs, repo });
-  } catch {
-    return NextResponse.json({ prs: [], repo });
-  }
+  const result = await ensureGitHubPullRequests(repo);
+  return NextResponse.json({
+    prs: result.prs.map((pr) => ({
+      number: pr.number,
+      title: pr.title,
+      author: pr.author,
+      headRefName: pr.headRefName,
+      baseRefName: pr.baseRefName,
+      state: pr.state,
+      additions: pr.additions,
+      deletions: pr.deletions,
+      changedFiles: pr.changedFiles,
+      statusCheckRollup: pr.statusCheckRollup,
+      reviewDecision: pr.reviewDecision,
+      url: pr.url,
+      createdAt: pr.createdAt,
+      updatedAt: pr.updatedAt,
+    })),
+    repo,
+    error: result.error,
+    stale: result.stale,
+  });
 }

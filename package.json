@@ -10,7 +10,7 @@
     "dev:ws": "tsx src/ws-server.ts",
     "dev:all": "npm run dev & npm run dev:ws &",
     "build": "next build",
-    "start": "next start -p 3001",
+    "start": "sh -c 'next start -p \"${PORT:-3001}\"'",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "research:session": "tsx scripts/research/run-cortex-autoresearch.ts --trigger on-demand --max-loops 1",

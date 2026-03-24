@@ -186,6 +186,84 @@ function ensureTables(sqlite: Database.Database): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS github_installations (
+      installation_id INTEGER PRIMARY KEY,
+      account_login TEXT NOT NULL,
+      account_type TEXT,
+      target_type TEXT,
+      permissions_json TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS github_repositories (
+      repo_id INTEGER PRIMARY KEY,
+      full_name TEXT NOT NULL UNIQUE,
+      owner TEXT NOT NULL,
+      name TEXT NOT NULL,
+      private INTEGER NOT NULL DEFAULT 0,
+      default_branch TEXT,
+      installation_id INTEGER REFERENCES github_installations(installation_id) ON DELETE SET NULL,
+      last_webhook_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS github_sync_state (
+      key TEXT PRIMARY KEY,
+      repo_full_name TEXT NOT NULL,
+      resource TEXT NOT NULL,
+      etag TEXT,
+      last_synced_at TEXT,
+      last_successful_at TEXT,
+      last_error TEXT,
+      stale_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS github_issues (
+      issue_id INTEGER PRIMARY KEY,
+      repo_full_name TEXT NOT NULL,
+      number INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      state TEXT NOT NULL,
+      author_login TEXT,
+      body TEXT,
+      labels_json TEXT NOT NULL DEFAULT '[]',
+      assignees_json TEXT NOT NULL DEFAULT '[]',
+      comments_count INTEGER NOT NULL DEFAULT 0,
+      url TEXT NOT NULL,
+      created_at TEXT,
+      updated_at TEXT,
+      closed_at TEXT
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_github_issues_repo_number ON github_issues(repo_full_name, number);
+
+    CREATE TABLE IF NOT EXISTS github_pull_requests (
+      pull_request_id INTEGER PRIMARY KEY,
+      repo_full_name TEXT NOT NULL,
+      number INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      state TEXT NOT NULL,
+      author_login TEXT,
+      body TEXT,
+      head_ref_name TEXT,
+      base_ref_name TEXT,
+      additions INTEGER NOT NULL DEFAULT 0,
+      deletions INTEGER NOT NULL DEFAULT 0,
+      changed_files INTEGER NOT NULL DEFAULT 0,
+      review_decision TEXT,
+      status_checks_json TEXT NOT NULL DEFAULT '[]',
+      url TEXT NOT NULL,
+      created_at TEXT,
+      updated_at TEXT,
+      closed_at TEXT,
+      merged_at TEXT
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_github_prs_repo_number ON github_pull_requests(repo_full_name, number);
+
     -- Indexes for common queries
     CREATE INDEX IF NOT EXISTS idx_usage_logs_user_period ON usage_logs(user_id, billing_period);
     CREATE INDEX IF NOT EXISTS idx_usage_logs_created ON usage_logs(created_at);
@@ -194,6 +272,10 @@ function ensureTables(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
     CREATE INDEX IF NOT EXISTS idx_team_members_team ON team_members(team_id);
     CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
+    CREATE INDEX IF NOT EXISTS idx_github_repositories_installation ON github_repositories(installation_id);
+    CREATE INDEX IF NOT EXISTS idx_github_sync_repo_resource ON github_sync_state(repo_full_name, resource);
+    CREATE INDEX IF NOT EXISTS idx_github_issues_repo_state_updated ON github_issues(repo_full_name, state, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_github_prs_repo_state_updated ON github_pull_requests(repo_full_name, state, updated_at);
   `);
 }
 

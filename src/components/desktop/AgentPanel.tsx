@@ -47,6 +47,7 @@ import { MarkdownBody } from './MarkdownBody';
 import { RepoRegistrySection } from './RepoRegistrySection';
 import { WorktreeBadge } from '@/components/mobile/WorktreeBadge';
 import { formatModelLabel } from '@/lib/format';
+import type { RuntimeSurfaceSummary } from '@/lib/fleet/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 
 // ── Types ──
@@ -83,6 +84,7 @@ interface AgentDetail {
   activity?: { coding: number; thinking: number; testing: number; idle: number };
   workspaceStatus?: 'in_progress' | 'in_review' | 'done' | 'idle' | 'cancelled';
   tmuxSession?: string;
+  runtimeSurface?: RuntimeSurfaceSummary;
   worktree?: WorktreeInfo;
   // Agent lifecycle (from WS)
   lifecycleState?: 'active' | 'completed' | 'failed' | 'killed' | 'stalled';
@@ -194,7 +196,7 @@ function arraysMatchBy<T>(a: T[], b: T[], key: (item: T) => string | number): bo
 
 /** Fingerprint an AgentDetail by its most-volatile scalar fields. */
 function agentFp(a: AgentDetail): string {
-  return `${a.id}|${a.status}|${a.currentTask}|${a.lastEventAt}|${a.alerts}|${a.branch ?? ''}|${a.workspaceStatus ?? ''}|${a.lifecycleState ?? ''}`;
+  return `${a.id}|${a.status}|${a.currentTask}|${a.lastEventAt}|${a.alerts}|${a.branch ?? ''}|${a.workspaceStatus ?? ''}|${a.lifecycleState ?? ''}|${a.runtimeSurface?.reviewContext?.repoSlug ?? ''}|${a.runtimeSurface?.cwd ?? ''}`;
 }
 
 /** Fingerprint an EventEntry. */
@@ -1179,6 +1181,10 @@ type ActivityItem =
   | { kind: 'pr'; number: number; title: string; state: string; author: string; branch: string; additions: number; deletions: number; changedFiles: number; age: string; ts: number; repo: string; reviewDecision?: string; checkSummary?: { passed: number; failed: number; pending: number }; failingChecks?: string[] }
   | { kind: 'ci'; id: number; title: string; status: string; conclusion: string; branch: string; workflow: string; age: string; ts: number; repo: string };
 
+type RepoTaskLaunchRequest =
+  | { kind: 'issue'; repo: string; number: number; title: string; body?: string }
+  | { kind: 'pr'; repo: string; number: number; title: string; branch?: string };
+
 function relativeAge(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
   const mins = Math.floor(diff / 60000);
@@ -1223,32 +1229,58 @@ const FILTER_TABS: { key: FeedFilter; label: string; icon: React.ReactNode }[] =
   { key: 'ci', label: 'CI', icon: <CheckCircle2 size={11} strokeWidth={2} /> },
 ];
 
-// Agent → GitHub repo mapping (same as workspaces API)
-const AGENT_REPO_MAP: Record<string, string> = {
-  'agent:main:main': '',
-  'agent:ace:main': 'hurttlocker/cortex',
-  'agent:hawk:main': 'hurttlocker/cortex',
-};
-
-// Display names for repos
-const REPO_DISPLAY: Record<string, string> = {
-  '': 'Cortex IDE',
-  'hurttlocker/cortex': 'Cortex',
-  'hurttlocker/sleeping-beauties': 'Copy Trade',
-};
-
-const FALLBACK_REPOS = Object.keys(REPO_DISPLAY);
-
 // Special "all repos" key
 const ALL_REPOS_KEY = '__github__';
+
+function normalizeRepoSlug(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  return /^[\w.-]+\/[\w.-]+$/.test(trimmed) ? trimmed : null;
+}
+
+function repoSlugFromRemoteUrl(remoteUrl?: string | null) {
+  const normalized = remoteUrl
+    ?.replace(/\.git$/, '')
+    .replace(/^git@github\.com:/, 'https://github.com/');
+  const match = normalized?.match(/github\.com\/([^/]+\/[^/]+)$/);
+  return match?.[1] ?? null;
+}
+
+function shortRepoLabel(repo?: string | null) {
+  if (!repo) return 'Local activity';
+  return repo.split('/').pop() ?? repo;
+}
+
+function shortWorkspaceLabel(workspace?: string | null) {
+  const trimmed = workspace?.trim();
+  if (!trimmed || trimmed === 'unknown') return 'Local activity';
+
+  const parts = trimmed.replace(/\/+$/, '').split('/').filter(Boolean);
+  if (parts.length >= 2) return parts.slice(-2).join('/');
+  return parts[0] ?? 'Local activity';
+}
+
+function agentRepoSlug(agent?: AgentDetail | null) {
+  return normalizeRepoSlug(agent?.runtimeSurface?.reviewContext?.repoSlug);
+}
+
+function activityItemKey(item: ActivityItem) {
+  if (item.kind === 'commit') return `c-${item.repo ?? 'local'}-${item.hash}`;
+  if (item.kind === 'event') return `e-${item.data.id}`;
+  if (item.kind === 'issue') return `i-${item.repo}-${item.number}`;
+  if (item.kind === 'pr') return `pr-${item.repo}-${item.number}`;
+  return `ci-${item.repo}-${item.id}`;
+}
 
 const ActivityFeed = memo(function ActivityFeed({
   events,
   commits,
   agents,
   onSelectSession,
+  onSelectIssue,
   onSelectCommit,
   onSelectPR,
+  onLaunchTask,
   activeRepo: externalRepo,
   activeAgentKey,
   refreshKey,
@@ -1257,13 +1289,16 @@ const ActivityFeed = memo(function ActivityFeed({
   commits: { hash: string; message: string; age: string }[];
   agents: AgentDetail[];
   onSelectSession?: (sessionKey: string) => void;
+  onSelectIssue?: (issueNumber: number, repo?: string) => void;
   onSelectCommit?: (hash: string) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
+  onLaunchTask?: (request: RepoTaskLaunchRequest) => void;
   activeRepo?: string | null;
   activeAgentKey?: string | null;
   refreshKey?: number;
 }) {
   const [extras, setExtras] = useState<{ issues: ActivityItem[]; prs: ActivityItem[]; ciRuns: ActivityItem[]; repoCommits: ActivityItem[] }>({ issues: [], prs: [], ciRuns: [], repoCommits: [] });
+  const [remoteScopeError, setRemoteScopeError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FeedFilter>('all');
   const [repoOverride, setRepoOverride] = useState<string | null>(null);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
@@ -1291,22 +1326,52 @@ const ActivityFeed = memo(function ActivityFeed({
       .catch(() => {});
   }, []);
 
-  // Merge registered repos with known repos (deduped)
-  const allRepos = useMemo(() => {
-    const set = new Set([...registeredRepos, ...FALLBACK_REPOS]);
-    return Array.from(set);
-  }, [registeredRepos]);
+  const activeAgent = useMemo(
+    () => agents.find((agent) => agent.sessionKey === activeAgentKey) ?? null,
+    [agents, activeAgentKey],
+  );
+  const activeAgentRepo = useMemo(() => agentRepoSlug(activeAgent), [activeAgent]);
+  const activeAgentWorkspaceLabel = useMemo(
+    () => shortWorkspaceLabel(activeAgent?.runtimeSurface?.cwd ?? activeAgent?.workspace),
+    [activeAgent],
+  );
+  const externalPanelRepo = useMemo(() => normalizeRepoSlug(externalRepo), [externalRepo]);
+  const liveAgentRepos = useMemo(
+    () => agents
+      .map((agent) => agentRepoSlug(agent))
+      .filter((repo): repo is string => Boolean(repo)),
+    [agents],
+  );
 
-  // Resolve active repo: override > agent-derived > external > default
+  // Merge live repo truth with registered GitHub repos (deduped, stable order)
+  const allRepos = useMemo(() => {
+    const set = new Set<string>();
+    if (activeAgentRepo) set.add(activeAgentRepo);
+    if (externalPanelRepo) set.add(externalPanelRepo);
+    for (const repo of liveAgentRepos) set.add(repo);
+    for (const repo of registeredRepos) {
+      const normalized = normalizeRepoSlug(repo);
+      if (normalized) set.add(normalized);
+    }
+    return Array.from(set);
+  }, [activeAgentRepo, externalPanelRepo, liveAgentRepos, registeredRepos]);
+
+  // Resolve Activity scope: manual override > live agent repo > expanded workspace repo > GitHub aggregate
   const repo = useMemo(() => {
     if (repoOverride) return repoOverride;
-    if (activeAgentKey && AGENT_REPO_MAP[activeAgentKey]) return AGENT_REPO_MAP[activeAgentKey];
-    if (externalRepo) return externalRepo;
-    return '';
-  }, [repoOverride, activeAgentKey, externalRepo]);
+    if (externalPanelRepo) return externalPanelRepo;
+    if (activeAgentRepo) return activeAgentRepo;
+    if (allRepos.length > 0) return ALL_REPOS_KEY;
+    return null;
+  }, [repoOverride, activeAgentRepo, externalPanelRepo, allRepos]);
 
   const isAllRepos = repo === ALL_REPOS_KEY;
-  const repoLabel = isAllRepos ? 'GitHub' : (REPO_DISPLAY[repo] ?? repo.split('/').pop() ?? repo);
+  const repoLabel = isAllRepos ? 'GitHub' : repo ? shortRepoLabel(repo) : activeAgentWorkspaceLabel;
+  const scopeHelp = isAllRepos
+    ? 'GitHub scope for all registered local repos. Agent events stay live/local.'
+    : repo
+      ? `GitHub scope for ${repo}. Agent events stay live/local.`
+      : 'No GitHub repo scoped yet. Agent events stay live/local.';
 
   // Clear override when agent changes
   useEffect(() => { setRepoOverride(null); }, [activeAgentKey]);
@@ -1322,9 +1387,11 @@ const ActivityFeed = memo(function ActivityFeed({
       ]);
 
       const repoSlug = r.split('/').pop() ?? r;
+      const errors: string[] = [];
       const issueItems: ActivityItem[] = [];
       if (issuesRes?.ok) {
         const data = await issuesRes.json();
+        if (data.error) errors.push(String(data.error));
         for (const i of (data.issues ?? []).slice(0, 8)) {
           const ts = i.createdAt ? new Date(i.createdAt).getTime() : 0;
           issueItems.push({
@@ -1349,6 +1416,7 @@ const ActivityFeed = memo(function ActivityFeed({
       const prItems: ActivityItem[] = [];
       if (prsRes?.ok) {
         const data = await prsRes.json();
+        if (data.error) errors.push(String(data.error));
         for (const p of (data.prs ?? []).slice(0, 8)) {
           const ts = p.createdAt ? new Date(p.createdAt).getTime() : 0;
           const checks = p.statusCheckRollup ?? [];
@@ -1382,6 +1450,7 @@ const ActivityFeed = memo(function ActivityFeed({
       const ciItems: ActivityItem[] = [];
       if (ciRes?.ok) {
         const data = await ciRes.json();
+        if (data.error) errors.push(String(data.error));
         for (const c of (data.runs ?? []).slice(0, 6)) {
           const ts = c.createdAt ? new Date(c.createdAt).getTime() : 0;
           ciItems.push({ kind: 'ci', id: c.databaseId, title: c.displayTitle ?? '', status: c.status ?? '', conclusion: c.conclusion ?? '', branch: c.headBranch ?? '', workflow: c.workflowName ?? '', age: c.createdAt ? relativeAge(c.createdAt) : '', ts, repo: r });
@@ -1391,32 +1460,54 @@ const ActivityFeed = memo(function ActivityFeed({
       const commitItems: ActivityItem[] = [];
       if (commitsRes?.ok) {
         const data = await commitsRes.json();
+        if (data.error) errors.push(String(data.error));
         for (const c of (data.commits ?? []).slice(0, 10)) {
           const ts = c.date ? new Date(c.date).getTime() : 0;
           commitItems.push({ kind: 'commit', hash: c.hash ?? '', message: `${isAllRepos ? `[${repoSlug}] ` : ''}${c.message ?? ''}`, age: c.date ? relativeAge(c.date) : '', ts, repo: r });
         }
       }
 
-      return { issues: issueItems, prs: prItems, ciRuns: ciItems, commits: commitItems };
+      return { issues: issueItems, prs: prItems, ciRuns: ciItems, commits: commitItems, errors };
     }
 
     async function fetchExtras() {
       try {
+        if (!repo) {
+          setExtras({ issues: [], prs: [], ciRuns: [], repoCommits: [] });
+          setRemoteScopeError(null);
+          return;
+        }
+
         if (isAllRepos) {
-          // Fetch from all registered repos in parallel
-          const repos = allRepos.length > 0 ? allRepos : FALLBACK_REPOS;
-          const results = await Promise.all(repos.map(r => fetchForRepo(r).catch(() => ({ issues: [], prs: [], ciRuns: [], commits: [] }))));
+          // Fetch from all known repos in parallel
+          const repos = allRepos;
+          if (repos.length === 0) {
+            setExtras({ issues: [], prs: [], ciRuns: [], repoCommits: [] });
+            setRemoteScopeError(null);
+            return;
+          }
+          const results = await Promise.all(repos.map(r => fetchForRepo(r).catch((error) => ({
+            issues: [],
+            prs: [],
+            ciRuns: [],
+            commits: [],
+            errors: [error instanceof Error ? error.message : 'Unable to load repo activity'],
+          }))));
           const merged = { issues: [] as ActivityItem[], prs: [] as ActivityItem[], ciRuns: [] as ActivityItem[], repoCommits: [] as ActivityItem[] };
+          const mergedErrors: string[] = [];
           for (const r of results) {
             merged.issues.push(...r.issues);
             merged.prs.push(...r.prs);
             merged.ciRuns.push(...r.ciRuns);
             merged.repoCommits.push(...r.commits);
+            mergedErrors.push(...r.errors);
           }
           setExtras(merged);
+          setRemoteScopeError(mergedErrors.length > 0 ? Array.from(new Set(mergedErrors)).join(' | ') : null);
         } else {
           const result = await fetchForRepo(repo);
           setExtras({ issues: result.issues, prs: result.prs, ciRuns: result.ciRuns, repoCommits: result.commits });
+          setRemoteScopeError(result.errors.length > 0 ? result.errors.join(' | ') : null);
         }
       } catch { /* silent */ }
     }
@@ -1485,18 +1576,7 @@ const ActivityFeed = memo(function ActivityFeed({
 
   useEffect(() => {
     if (!hoveredItemKey) return;
-    const hoveredItem = items.find((item) => {
-      const itemKey = item.kind === 'commit'
-        ? `c-${item.hash}`
-        : item.kind === 'event'
-          ? `e-${item.data.id}`
-          : item.kind === 'issue'
-            ? `i-${item.number}`
-            : item.kind === 'pr'
-              ? `pr-${item.number}`
-              : `ci-${item.id}`;
-      return itemKey === hoveredItemKey;
-    });
+    const hoveredItem = items.find((item) => activityItemKey(item) === hoveredItemKey);
     if (!hoveredItem) return;
 
     if (hoveredItem.kind === 'pr' && !prHoverDetails[hoveredItemKey]) {
@@ -1642,7 +1722,7 @@ const ActivityFeed = memo(function ActivityFeed({
                 </span>
                 <button
                   type="button"
-                  onClick={() => onSelectPR?.(openPr.number, repo)}
+                  onClick={() => onSelectPR?.(openPr.number, openPr.repo)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -1716,7 +1796,7 @@ const ActivityFeed = memo(function ActivityFeed({
                     color: 'var(--t-text-faint)',
                     fontFamily: '"SF Mono", ui-monospace, monospace',
                   }}>
-                    all repos
+                    registered
                   </span>
                   {selected ? <CheckCircle2 size={12} strokeWidth={2} style={{ color: '#2563eb' }} /> : null}
                 </button>
@@ -1747,7 +1827,7 @@ const ActivityFeed = memo(function ActivityFeed({
                   }}
                 >
                   <Folder size={12} strokeWidth={2} style={{ color: selected ? '#2563eb' : 'var(--t-text-muted)' }} />
-                  {REPO_DISPLAY[r] ?? r.split('/').pop()}
+                  {shortRepoLabel(r)}
                   <span style={{
                     marginLeft: 'auto',
                     fontSize: 9,
@@ -1760,6 +1840,25 @@ const ActivityFeed = memo(function ActivityFeed({
                 </button>
               );
             })}
+          </div>
+        ) : null}
+
+        <div style={{
+          padding: '0 10px 6px',
+          fontSize: 10,
+          color: 'var(--t-text-faint)',
+          lineHeight: 1.35,
+        }}>
+          {scopeHelp}
+        </div>
+        {remoteScopeError ? (
+          <div style={{
+            padding: '0 10px 6px',
+            fontSize: 10,
+            color: '#b45309',
+            lineHeight: 1.35,
+          }}>
+            GitHub data warning: {remoteScopeError}
           </div>
         ) : null}
 
@@ -1837,16 +1936,22 @@ const ActivityFeed = memo(function ActivityFeed({
           </div>
           {group.items.map((item, idx) => {
             const fi = feedIcon(item);
-            const key = item.kind === 'commit' ? `c-${item.hash}` : item.kind === 'event' ? `e-${item.data.id}` : item.kind === 'issue' ? `i-${item.number}` : item.kind === 'pr' ? `pr-${item.number}` : `ci-${item.id}`;
+            const key = activityItemKey(item);
             const clickable = (item.kind === 'commit' && !!onSelectCommit) || item.kind === 'issue' || item.kind === 'pr' || item.kind === 'ci';
             const handleClick = () => {
               if (item.kind === 'commit') { onSelectCommit?.(item.hash); return; }
+              if (item.kind === 'issue') {
+                if (onSelectIssue) {
+                  onSelectIssue(item.number, item.repo);
+                  return;
+                }
+              }
               // PRs open in contextual canvas
-              if (item.kind === 'pr') { onSelectPR?.(item.number, repo); return; }
+              if (item.kind === 'pr') { onSelectPR?.(item.number, item.repo); return; }
               // Issues/CI open in browser
               let url = '';
-              if (item.kind === 'issue') url = `https://github.com/${repo}/issues/${item.number}`;
-              else if (item.kind === 'ci') url = `https://github.com/${repo}/actions/runs/${item.id}`;
+              if (item.kind === 'issue') url = `https://github.com/${item.repo}/issues/${item.number}`;
+              else if (item.kind === 'ci') url = `https://github.com/${item.repo}/actions/runs/${item.id}`;
               if (url) window.open(url, '_blank');
             };
             const agentForEvent = item.kind === 'event'
@@ -2032,13 +2137,13 @@ const ActivityFeed = memo(function ActivityFeed({
                             ? `#${item.number} ${item.title}`
                             : item.title}
                     subtitle={item.kind === 'pr'
-                      ? `${item.author} • ${item.branch}`
+                        ? `${item.author} • ${item.branch}`
                       : item.kind === 'ci'
                         ? `${item.workflow} • ${item.branch}`
                         : item.kind === 'issue'
-                          ? `${item.author} opened this in ${repoLabel}`
+                          ? `${item.author} opened this in ${shortRepoLabel(item.repo)}`
                           : item.kind === 'commit'
-                            ? `${repoLabel} • ${item.hash}`
+                            ? `${shortRepoLabel(item.repo)} • ${item.hash}`
                             : agentForEvent
                               ? `${agentForEvent.name} • ${agentForEvent.model}`
                               : item.data.timestamp}
@@ -2059,15 +2164,28 @@ const ActivityFeed = memo(function ActivityFeed({
                           <BlueGlassMetricPill label="Risk" value={mergeRisk?.label ?? 'warming'} color={mergeRisk?.color ?? '#64748b'} />
                         </div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          {onLaunchTask ? (
+                            <BlueGlassActionButton
+                              icon={<PlayCircle size={12} strokeWidth={2} />}
+                              label="Launch review"
+                              onClick={() => onLaunchTask({
+                                kind: 'pr',
+                                repo: item.repo,
+                                number: item.number,
+                                title: item.title,
+                                branch: item.branch,
+                              })}
+                            />
+                          ) : null}
                           <BlueGlassActionButton
                             icon={<GitPullRequest size={12} strokeWidth={2} />}
                             label="Review"
-                            onClick={() => onSelectPR?.(item.number, repo)}
+                            onClick={() => onSelectPR?.(item.number, item.repo)}
                           />
                           <BlueGlassActionButton
                             icon={<ExternalLink size={12} strokeWidth={2} />}
                             label="Open PR"
-                            onClick={() => window.open(`https://github.com/${repo}/pull/${item.number}`, '_blank', 'noopener,noreferrer')}
+                            onClick={() => window.open(`https://github.com/${item.repo}/pull/${item.number}`, '_blank', 'noopener,noreferrer')}
                           />
                         </div>
                       </>
@@ -2080,7 +2198,7 @@ const ActivityFeed = memo(function ActivityFeed({
                         <BlueGlassActionButton
                           icon={<ExternalLink size={12} strokeWidth={2} />}
                           label="Open Run"
-                          onClick={() => window.open(`https://github.com/${repo}/actions/runs/${item.id}`, '_blank', 'noopener,noreferrer')}
+                          onClick={() => window.open(`https://github.com/${item.repo}/actions/runs/${item.id}`, '_blank', 'noopener,noreferrer')}
                         />
                       </>
                     ) : item.kind === 'commit' ? (
@@ -2109,9 +2227,20 @@ const ActivityFeed = memo(function ActivityFeed({
                           <BlueGlassMetricPill label="Age" value={item.age} color="rgba(15,23,42,0.78)" />
                         </div>
                         <BlueGlassActionButton
+                          icon={<PlayCircle size={12} strokeWidth={2} />}
+                          label="Launch agent"
+                          onClick={() => onLaunchTask?.({
+                            kind: 'issue',
+                            repo: item.repo,
+                            number: item.number,
+                            title: item.title,
+                            body: item.body,
+                          })}
+                        />
+                        <BlueGlassActionButton
                           icon={<ExternalLink size={12} strokeWidth={2} />}
                           label="Open Issue"
-                          onClick={() => window.open(`https://github.com/${repo}/issues/${item.number}`, '_blank', 'noopener,noreferrer')}
+                          onClick={() => window.open(`https://github.com/${item.repo}/issues/${item.number}`, '_blank', 'noopener,noreferrer')}
                         />
                       </>
                     ) : (
@@ -3285,6 +3414,7 @@ function MemoryTabContent({ onOpenMemory }: { onOpenMemory?: () => void }) {
 // ── Main Panel ──
 
 export const AgentPanel = memo(function AgentPanel({
+  selectedRepo,
   onSelectSession,
   onSelectIssue,
   onSelectCommit,
@@ -3300,6 +3430,7 @@ export const AgentPanel = memo(function AgentPanel({
   onAgentKill,
   lifecycleEvents,
 }: {
+  selectedRepo?: string | null;
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
   onSelectCommit?: (hash: string) => void;
@@ -3340,6 +3471,71 @@ export const AgentPanel = memo(function AgentPanel({
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
   const [globalRepoDiff, setGlobalRepoDiff] = useState<{ additions: number; deletions: number } | null>(null);
+  const scopedRepo = selectedRepo ?? activeRepo;
+
+  const launchRepoTask = useCallback(async (request: RepoTaskLaunchRequest) => {
+    const response = await fetch('/api/panel/repos');
+    const data = await response.json() as {
+      repos?: Array<{
+        id: string;
+        localPath: string;
+        remoteUrl?: string | null;
+        defaultBranch: string;
+        setup: { installOnCreateWorkspace: boolean };
+      }>;
+    };
+
+    const repoEntry = (data.repos ?? []).find((repo) => {
+      const remote = repoSlugFromRemoteUrl(repo.remoteUrl ?? null);
+      return remote === request.repo;
+    });
+
+    if (!repoEntry) {
+      throw new Error(`No local checkout is registered for ${request.repo}. Open the repo locally before launching an agent on it.`);
+    }
+
+    const prompt = request.kind === 'issue'
+      ? [
+          `Work on GitHub issue #${request.number} in ${request.repo}: ${request.title}.`,
+          'Start by reading the issue context, inspect the current repo state, implement the fix, run focused validation, and summarize the result.',
+          request.body ? `Issue context:\n${request.body}` : null,
+        ].filter(Boolean).join('\n\n')
+      : [
+          `Review GitHub PR #${request.number} in ${request.repo}: ${request.title}.`,
+          `Head branch: ${request.branch ?? 'unknown'}.`,
+          'Start by reading the PR context and changed files, validate the change locally, identify risks or regressions, and leave the repo in a reviewable state.',
+        ].join('\n\n');
+
+    const launchResponse = await fetch('/api/runtime/launch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        runtime: 'codex',
+        repoPath: repoEntry.localPath,
+        prompt,
+        taskName: request.kind === 'issue'
+          ? `issue-${request.number}-${request.title}`
+          : `pr-${request.number}-${request.title}`,
+        baseBranch: repoEntry.defaultBranch,
+        isolate: true,
+        skipSetup: !repoEntry.setup.installOnCreateWorkspace,
+      }),
+    });
+
+    const launchData = await launchResponse.json() as { error?: string; surfaceId?: string };
+    if (!launchResponse.ok || !launchData.surfaceId) {
+      throw new Error(launchData.error ?? 'Unable to launch agent task.');
+    }
+
+    void fetch('/api/panel/repos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'touch', id: repoEntry.id }),
+    }).catch(() => null);
+
+    onSelectSession?.(launchData.surfaceId);
+    setTimeout(() => fetchNowRef.current(), 800);
+  }, [onSelectSession]);
 
   // Build workspace groups from agents
   const workspaceGroups = buildWorkspaceGroups(agents);
@@ -3500,7 +3696,13 @@ export const AgentPanel = memo(function AgentPanel({
 
   // Fetch GitHub issues + PRs in a single effect (same dep + same cadence)
   useEffect(() => {
-    const repoParam = activeRepo ? `?repo=${encodeURIComponent(activeRepo)}` : '';
+    if (!scopedRepo) {
+      setIssues([]);
+      setPrs([]);
+      return;
+    }
+
+    const repoParam = scopedRepo ? `?repo=${encodeURIComponent(scopedRepo)}` : '';
     async function fetchGitHub() {
       const [issuesRes, prsRes] = await Promise.all([
         fetch(`/api/panel/issues${repoParam}`).catch(() => null),
@@ -3520,30 +3722,30 @@ export const AgentPanel = memo(function AgentPanel({
     void fetchGitHub();
     const id = setInterval(fetchGitHub, 60_000);
     return () => clearInterval(id);
-  }, [activeRepo]);
+  }, [scopedRepo]);
 
   // Resolve repo → local path for file tree
   const [repoLocalPath, setRepoLocalPath] = useState<string | null>(null);
   useEffect(() => {
-    if (!activeRepo) { setRepoLocalPath(null); return; }
+    if (!scopedRepo) { setRepoLocalPath(null); return; }
     fetch('/api/panel/repos')
       .then(r => r.json())
       .then(data => {
         const match = (data.repos ?? []).find((r: { remoteUrl?: string }) => {
           const url = (r.remoteUrl ?? '').replace(/\.git$/, '');
-          return url.endsWith(activeRepo!);
+          return url.endsWith(scopedRepo);
         });
         setRepoLocalPath(match?.localPath ?? null);
       })
       .catch(() => setRepoLocalPath(null));
-  }, [activeRepo]);
+  }, [scopedRepo]);
 
   // Fetch file tree (re-fetch when repo or workspace changes)
   useEffect(() => {
     async function fetchFiles() {
       try {
-        // Priority: workspace > repo local path > default
-        const wsPath = activeWorkspace ?? repoLocalPath;
+        // V1: top header repo is the left-panel source of truth when selected.
+        const wsPath = selectedRepo ? repoLocalPath : (activeWorkspace ?? repoLocalPath);
         const wsParam = wsPath ? `?workspace=${encodeURIComponent(wsPath)}` : '';
         const res = await fetch(`/api/panel/files${wsParam}`);
         if (!res.ok) return;
@@ -3557,7 +3759,7 @@ export const AgentPanel = memo(function AgentPanel({
     void fetchFiles();
     const id = setInterval(fetchFiles, 60_000);
     return () => clearInterval(id);
-  }, [activeWorkspace, repoLocalPath]);
+  }, [activeWorkspace, repoLocalPath, selectedRepo]);
 
   return (
     <div style={{
@@ -3590,19 +3792,6 @@ export const AgentPanel = memo(function AgentPanel({
         flexShrink: 0,
         alignItems: 'center',
       }}>
-        <button
-          type="button"
-          onClick={() => setTabsExpanded(v => !v)}
-          style={{
-            padding: '4px 2px', border: 'none', background: 'transparent',
-            cursor: 'pointer', color: 'var(--t-text-muted)', flexShrink: 0,
-            transform: tabsExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
-            transition: 'transform 150ms ease',
-          }}
-          title={tabsExpanded ? 'Collapse' : 'Expand'}
-        >
-          <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -3624,12 +3813,12 @@ export const AgentPanel = memo(function AgentPanel({
                   width: '100%',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center',
+                  justifyContent: isFiles && isActive ? 'space-between' : 'center',
                   gap: 5,
                   paddingTop: 8,
-                  paddingRight: 0,
+                  paddingRight: isFiles && isActive ? 8 : 0,
                   paddingBottom: 8,
-                  paddingLeft: 0,
+                  paddingLeft: isFiles && isActive ? 8 : 0,
                   border: 'none',
                   borderBottom: isActive ? '2px solid #ef4444' : '2px solid transparent',
                   background: 'transparent',
@@ -3641,8 +3830,15 @@ export const AgentPanel = memo(function AgentPanel({
                   fontFamily: '-apple-system, system-ui, sans-serif',
                 }}
               >
-                <Icon size={14} strokeWidth={isActive ? 2 : 1.5} />
-                {isFiles ? (fileFilter === 'changes' ? 'Changes' : fileFilter === 'env' ? 'Env' : tab.label) : tab.label}
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  minWidth: 0,
+                }}>
+                  <Icon size={14} strokeWidth={isActive ? 2 : 1.5} />
+                  <span>{isFiles ? (fileFilter === 'changes' ? 'Changes' : fileFilter === 'env' ? 'Env' : tab.label) : tab.label}</span>
+                </span>
                 {isFiles && isActive ? (
                   <ChevronDown size={10} strokeWidth={2} style={{
                     transition: 'transform 150ms ease',
@@ -3724,10 +3920,28 @@ export const AgentPanel = memo(function AgentPanel({
             </div>
           );
         })}
+        <button
+          type="button"
+          onClick={() => setTabsExpanded(v => !v)}
+          style={{
+            padding: '4px 2px',
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            color: 'var(--t-text-muted)',
+            flexShrink: 0,
+            marginLeft: 4,
+            transform: tabsExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform 150ms ease',
+          }}
+          title={tabsExpanded ? 'Collapse' : 'Expand'}
+        >
+          <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
       </div>
 
       {/* ── Scoped Context Label ── */}
-      {expandedGroup ? (
+      {(selectedRepo || expandedGroup) ? (
         <div style={{
           paddingTop: 6,
           paddingRight: 14,
@@ -3742,15 +3956,15 @@ export const AgentPanel = memo(function AgentPanel({
           marginTop: 4,
         }}>
           <span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>
-            {workspaceGroups.find(g => g.workspace === expandedGroup)?.displayName ?? 'All'}
+            {selectedRepo ? (selectedRepo.split('/').pop() ?? selectedRepo) : (workspaceGroups.find(g => g.workspace === expandedGroup)?.displayName ?? 'All')}
           </span>
-          {activeRepo ? (
+          {scopedRepo ? (
             <>
               <span>·</span>
-              <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{activeRepo}</span>
+              <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{scopedRepo}</span>
               <button
                 type="button"
-                onClick={() => onOpenGitLog?.(activeWorkspace ?? undefined)}
+                onClick={() => onOpenGitLog?.((selectedRepo ? repoLocalPath : activeWorkspace) ?? undefined)}
                 title="View git history"
                 style={{
                   marginLeft: 'auto',
@@ -3776,10 +3990,9 @@ export const AgentPanel = memo(function AgentPanel({
               </button>
               <button
                 type="button"
-                onClick={() => onOpenCI?.(activeRepo)}
+                onClick={() => onOpenCI?.(scopedRepo)}
                 title="View CI / GitHub Actions"
                 style={{
-                  marginLeft: 'auto',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 3,
@@ -3819,7 +4032,7 @@ export const AgentPanel = memo(function AgentPanel({
               <FileTree
                 tree={fileFilter === 'changes' ? filterTreeToChanged(fileTree, changedFiles) : fileFilter === 'env' ? filterTreeToEnv(fileTree) : fileTree}
                 changedFiles={changedFiles}
-                onSelectFile={(path) => onSelectFile?.(path, activeWorkspace ?? undefined)}
+                onSelectFile={(path) => onSelectFile?.(path, (selectedRepo ? repoLocalPath : activeWorkspace) ?? undefined)}
               />
             ) : null}
             {activeTab === 'deploy' ? <DeployList onOpenDeploy={onOpenDeploy} /> : null}
@@ -3919,10 +4132,16 @@ export const AgentPanel = memo(function AgentPanel({
               commits={commits}
               agents={agents}
               onSelectSession={onSelectSession}
+              onSelectIssue={onSelectIssue}
               onSelectCommit={onSelectCommit}
               onSelectPR={onSelectPR}
-              activeRepo={activeRepo}
-              activeAgentKey={expandedGroup ? agents.find(a => a.workspace === expandedGroup)?.sessionKey ?? null : null}
+              onLaunchTask={(request) => {
+                void launchRepoTask(request).catch((error) => {
+                  window.alert(error instanceof Error ? error.message : 'Unable to launch repo task.');
+                });
+              }}
+              activeRepo={scopedRepo}
+              activeAgentKey={selectedRepo ? null : (expandedGroup ? agents.find(a => a.workspace === expandedGroup)?.sessionKey ?? null : null)}
               refreshKey={activityRefreshKey}
             />
           </div>
