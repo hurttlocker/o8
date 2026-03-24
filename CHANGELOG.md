@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-24
 
+- `cf47283` fix: harden desktop runtime sessions and transcripts
 - `eab62fb` feat: ship github app broker foundation
 
 ## 2026-03-23
