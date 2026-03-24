@@ -363,6 +363,11 @@ function DashboardInner() {
   }, [activeTileId, tileLayout.root]);
 
   const handleCloseTile = useCallback((tileId: string) => {
+    // Never close the WorkspaceTerminal tile
+    const tile = findTile(tileLayout.root, tileId);
+    if (tile?.type === 'leaf' && tile.content.kind === 'terminal') {
+      return; // Protected — cannot close
+    }
     const result = closeTile(tileLayout.root, tileId);
     if (!result.closed) {
       return;
@@ -865,6 +870,7 @@ function DashboardInner() {
       label: 'Workspace Terminal',
       description: 'Multi-tab terminal and chat workspace for active sessions.',
       singleton: true,
+      closable: false, // WorkspaceTerminal must NEVER be closable
       render: () => (
         <WorkspaceTerminal
           ref={termWorkspaceRef}
