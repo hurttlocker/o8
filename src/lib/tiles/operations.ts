@@ -239,8 +239,10 @@ function isTileContent(value: unknown): value is TileContent {
   return kind === 'workspace'
     || kind === 'terminal'
     || kind === 'preview'
-    || kind === 'canvas'
     || kind === 'thoughts'
+    || kind === 'contextual-panel'
+    // Legacy kinds — accepted for deserialization, migrated later
+    || kind === 'canvas'
     || kind === 'bottom-terminal';
 }
 
@@ -303,6 +305,25 @@ export function serializeTileLayout(layout: TileLayout): string {
   });
 }
 
+/** Migrate old tile kind names to current ones */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function migrateNode(node: any): any {
+  if (!node) return node;
+  if (node.type === 'leaf' && node.content) {
+    const KIND_MAP: Record<string, string> = {
+      'canvas': 'contextual-panel',
+      'bottom-terminal': 'contextual-panel',
+    };
+    if (KIND_MAP[node.content.kind]) {
+      node.content.kind = KIND_MAP[node.content.kind];
+    }
+  }
+  if (node.children) {
+    node.children = node.children.map(migrateNode);
+  }
+  return node;
+}
+
 export function deserializeTileLayout(raw: string | null | undefined): TileLayout | null {
   if (!raw) {
     return null;
@@ -310,13 +331,14 @@ export function deserializeTileLayout(raw: string | null | undefined): TileLayou
 
   try {
     const parsed = JSON.parse(raw) as { version?: unknown; root?: unknown };
-    if (parsed.version !== TILE_LAYOUT_VERSION || !isTileNode(parsed.root)) {
+    // Migrate old tile kinds BEFORE validation
+    const migratedRoot = migrateNode(parsed.root);
+    if (parsed.version !== TILE_LAYOUT_VERSION || !isTileNode(migratedRoot)) {
       return null;
     }
-
     return {
       version: TILE_LAYOUT_VERSION,
-      root: normalizeNode(parsed.root),
+      root: normalizeNode(migratedRoot),
     };
   } catch {
     return null;
