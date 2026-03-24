@@ -9,7 +9,7 @@ import type {
 } from '@/lib/tiles/types';
 import { isTileLeafNode, isTileSplitNode } from '@/lib/tiles/types';
 
-const TILE_LAYOUT_VERSION = 1;
+const TILE_LAYOUT_VERSION = 2; // Bumped to force reset of broken layouts
 const MIN_SPLIT_RATIO = 0.2;
 const MAX_SPLIT_RATIO = 0.8;
 
