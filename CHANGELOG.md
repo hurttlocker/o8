@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-23
 
+- `44f983c` fix: Empty repo selector + safe ContextualPanel toggle
 - `8be8073` fix: Monaco editor fills ContextualPanel + suppress clipboard cancel errors
 - `9cf241c` fix: ContextualPanel tab switching preserves state + smart splits
 - `d655dab` feat: Unified ContextualPanel — canvas tabs merged into bottom panel
