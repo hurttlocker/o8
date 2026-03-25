@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- terminal image previews intentionally use raw panel-served URLs */
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio, ArrowUp, ArrowDown, Square, AlertCircle, LifeBuoy, RotateCcw } from 'lucide-react';
+import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio, ArrowUp, ArrowDown, Square, AlertCircle, RotateCcw } from 'lucide-react';
 import LLMChat, { ChainOfThought, MessageBubble, type LLMMessage } from './LLMChat';
 import { IssueLinkPickerModal, buildLinkedIssueContext, type LinkedIssueRef } from './IssueLinkPicker';
 import { useTheme } from '@/lib/theme/context';
@@ -127,6 +127,16 @@ const CODEX_CLI_MODELS: WorkspaceCliModelOption[] = [
   { id: 'gpt-5.4', label: 'GPT-5.4', color: '#10b981' },
   { id: 'gpt-4o', label: 'GPT-4o', color: '#10b981' },
 ];
+
+function buildCheckpointLabel(tab: TerminalTab, messages: MobileTranscriptEntry[]) {
+  const lastUser = [...messages].reverse().find((entry) => entry.role === 'user' && entry.text.trim());
+  const taskMeta = parseWorkspaceTaskLabel(tab.label);
+  const base = taskMeta
+    ? tab.label
+    : (lastUser?.text.trim().split('\n')[0] ?? tab.label ?? 'Checkpoint');
+  const trimmed = base.replace(/\s+/g, ' ').trim();
+  return trimmed.length > 56 ? `${trimmed.slice(0, 56)}…` : trimmed;
+}
 
 const CLI_SUGGESTED_PROMPTS = [
   { icon: '💡', text: 'Summarize the current repo state', description: 'Quickly orient this CLI session to the local checkout' },
@@ -782,6 +792,8 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   onSelectModel,
   onConsumeDraftInjection,
   onLinkedIssueChange,
+  onSaveCheckpoint,
+  onRestoreLatestCheckpoint,
 }: {
   tab: TerminalTab;
   onUpdateMessages: (tabId: string, messages: MobileTranscriptEntry[]) => void;
@@ -790,6 +802,8 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   onSelectModel: (tabId: string, modelId: string) => void;
   onConsumeDraftInjection: (tabId: string, injectionId: string) => void;
   onLinkedIssueChange: (tabId: string, issue: LinkedIssueRef | null) => void;
+  onSaveCheckpoint: (tabId: string) => void;
+  onRestoreLatestCheckpoint: (tabId: string) => void;
 }) {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
@@ -930,6 +944,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
           sessionId: chatSessionKey,
           cwd: tab.repo?.localPath,
           model: selectedModel?.id,
+          continueLatest: tab.chatContinueLatest !== false,
         };
       } else if (chatRuntime === 'codex') {
         endpoint = '/api/codex/send';
@@ -1246,7 +1261,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
       setStreamMeta({});
       setTimeout(() => { void fetchTranscript(); }, 400);
     }
-  }, [chatRuntime, chatSessionKey, fetchTranscript, linkedIssue, onUpdateMessages, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.repo?.localPath, tabId]);
+  }, [chatRuntime, chatSessionKey, fetchTranscript, linkedIssue, onUpdateMessages, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.chatContinueLatest, tab.repo?.localPath, tabId]);
 
   const handleSend = useCallback(async () => {
     const text = draft.trim();
@@ -1681,6 +1696,59 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                 <AlertCircle size={13} />
                 {linkedIssue ? `Issue #${linkedIssue.number}` : 'Link issue'}
               </button>
+              <button
+                type="button"
+                onClick={() => onSaveCheckpoint(tabId)}
+                disabled={messages.length === 0}
+                title={messages.length === 0 ? 'Checkpoint becomes available once this chat has transcript history' : 'Save a safe checkpoint from this chat'}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  minHeight: 28,
+                  padding: '0 10px',
+                  borderRadius: 999,
+                  border: '1px solid var(--t-panel-border)',
+                  background: THEME_BG_CARD,
+                  color: messages.length === 0 ? 'var(--t-text-faint)' : 'var(--t-text-secondary)',
+                  cursor: messages.length === 0 ? 'default' : 'pointer',
+                  fontSize: 11,
+                  fontStyle: 'italic',
+                  fontWeight: 700,
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <AlertCircle size={13} />
+                Checkpoint
+              </button>
+              {tab.chatCheckpoints && tab.chatCheckpoints.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => onRestoreLatestCheckpoint(tabId)}
+                  title={`Restore from the latest checkpoint (${tab.chatCheckpoints[0]?.label})`}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    minHeight: 28,
+                    padding: '0 10px',
+                    borderRadius: 999,
+                    border: `1px solid ${THEME_ACCENT_BORDER}`,
+                    background: THEME_ACCENT_SOFT,
+                    color: THEME_ACCENT,
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    fontStyle: 'italic',
+                    fontWeight: 700,
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  <RotateCcw size={13} />
+                  Restore latest
+                </button>
+              ) : null}
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -2017,6 +2085,7 @@ const TabBar = memo(function TabBar({
           const agent = CLI_AGENTS.find(a => a.id === tab.cliAgent);
           const taskMeta = parseWorkspaceTaskLabel(tab.label);
           const taskState = taskMeta ? inferWorkspaceTaskState(tab) : null;
+          const checkpointCount = tab.kind === 'chat' ? (tab.chatCheckpoints?.length ?? 0) : 0;
           const runtimeTag = tab.kind === 'chat'
             ? (tab.chatRuntime === 'claude-code' ? 'Claude' : 'Codex')
             : null;
@@ -2070,7 +2139,7 @@ const TabBar = memo(function TabBar({
                 }}>
                   {tab.label}
                 </span>
-                {taskMeta ? (
+                {taskMeta || checkpointCount > 0 ? (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                     {runtimeTag ? (
                       <span style={{
@@ -2087,7 +2156,7 @@ const TabBar = memo(function TabBar({
                         {runtimeTag}
                       </span>
                     ) : null}
-                    {taskState ? (
+                    {taskMeta && taskState ? (
                       <span style={{
                         display: 'inline-flex',
                         alignItems: 'center',
@@ -2100,6 +2169,21 @@ const TabBar = memo(function TabBar({
                         letterSpacing: '0.01em',
                       }}>
                         {taskState.label}
+                      </span>
+                    ) : null}
+                    {checkpointCount > 0 ? (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        padding: '1px 6px',
+                        borderRadius: 999,
+                        background: 'rgba(37, 99, 235, 0.12)',
+                        color: '#2563eb',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.01em',
+                      }}>
+                        {checkpointCount} cp
                       </span>
                     ) : null}
                   </span>
@@ -2698,6 +2782,8 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             chatRuntime: t.chatRuntime,
             chatSessionKey: t.chatSessionKey,
             chatModel: t.chatModel,
+            chatContinueLatest: t.chatContinueLatest,
+            chatCheckpoints: t.chatCheckpoints,
             linkedIssue: t.linkedIssue ?? undefined,
           })),
           savedAt: new Date().toISOString(),
@@ -2802,6 +2888,8 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                 chatRuntime: st.chatRuntime,
                 chatSessionKey: st.chatSessionKey,
                 chatModel: st.chatModel,
+                chatContinueLatest: st.chatContinueLatest,
+                chatCheckpoints: st.chatCheckpoints ?? [],
                 repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : undefined,
                 linkedIssue: st.linkedIssue ?? null,
                 createdAt: now,
@@ -2972,6 +3060,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                   ...tab,
                   label: options.label ?? tab.label,
                   chatModel: options.modelId ?? tab.chatModel,
+                  chatContinueLatest: tab.chatContinueLatest ?? (resolvedRuntime === 'claude-code'),
                   chatDraftInjection: injection ?? tab.chatDraftInjection,
                 }
               : tab
@@ -2990,7 +3079,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           chatRuntime: resolvedRuntime,
           chatSessionKey: undefined,
           chatModel: options.modelId ?? (resolvedRuntime === 'claude-code' ? CLAUDE_CLI_MODELS[0].id : CODEX_CLI_MODELS[0].id),
+          chatContinueLatest: resolvedRuntime === 'claude-code',
           chatDraftInjection: injection,
+          chatCheckpoints: [],
           repo: options.repo,
           createdAt: now,
           lastActivity: now,
@@ -3138,12 +3229,14 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         kind: 'chat',
         tmuxSession: null,
         chatRuntime: runtime,
+        chatContinueLatest: runtime === 'claude-code',
         chatModel: runtime === 'claude-code' ? CLAUDE_CLI_MODELS[0].id : CODEX_CLI_MODELS[0].id,
         repo,
         linkedIssue: null,
         createdAt: now,
         lastActivity: now,
         chatMessages: [],
+        chatCheckpoints: [],
       };
       setTabs(prev => [...prev, newTab]);
       setActiveTabId(tabId);
@@ -3188,6 +3281,70 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       setTabs(prev => prev.map(t =>
         t.id === tabId ? { ...t, linkedIssue } : t
       ));
+    }, []);
+
+    const handleSaveCheckpoint = useCallback((tabId: string) => {
+      setTabs((prev) => prev.map((tab) => {
+        if (tab.id !== tabId || tab.kind !== 'chat') return tab;
+        const messages = (tab.chatMessages ?? []).filter((entry) => !entry.id.startsWith('stream:'));
+        if (messages.length === 0) return tab;
+        const checkpoint: PersistedChatCheckpoint = {
+          id: `checkpoint-${Date.now()}`,
+          label: buildCheckpointLabel(tab, messages),
+          createdAt: Date.now(),
+          sourceMessageId: messages[messages.length - 1]?.id,
+          messages: messages.map((entry) => ({ ...entry })),
+        };
+        return {
+          ...tab,
+          chatCheckpoints: [checkpoint, ...(tab.chatCheckpoints ?? [])].slice(0, 5),
+        };
+      }));
+    }, []);
+
+    const handleRestoreLatestCheckpoint = useCallback((tabId: string) => {
+      let nextActiveTabId = '';
+      setTabs((prev) => {
+        const sourceTab = prev.find((tab) => tab.id === tabId && tab.kind === 'chat');
+        const checkpoint = sourceTab?.chatCheckpoints?.[0];
+        if (!sourceTab || !checkpoint) return prev;
+
+        tabCountRef.current += 1;
+        const nextTabId = `chat-${tabCountRef.current}`;
+        nextActiveTabId = nextTabId;
+        const now = Date.now();
+        const recoveryNote = [
+          `Resume from checkpoint "${checkpoint.label}".`,
+          'Use this saved transcript point as the last known safe state.',
+          'Re-establish the plan from the preserved context before making new edits.',
+        ].join('\n\n');
+
+        const restoredTab: TerminalTab = {
+          id: nextTabId,
+          label: `${sourceTab.label} · checkpoint`,
+          kind: 'chat',
+          tmuxSession: null,
+          chatRuntime: sourceTab.chatRuntime,
+          chatSessionKey: undefined,
+          chatModel: sourceTab.chatModel,
+          chatContinueLatest: false,
+          chatDraftInjection: {
+            id: `workspace-chat-injection-${Date.now()}`,
+            text: recoveryNote,
+            autoSend: false,
+          },
+          chatCheckpoints: sourceTab.chatCheckpoints,
+          repo: sourceTab.repo,
+          linkedIssue: sourceTab.linkedIssue ?? null,
+          createdAt: now,
+          lastActivity: now,
+          chatMessages: checkpoint.messages.map((entry) => ({ ...entry })),
+        };
+        return [...prev, restoredTab];
+      });
+      if (nextActiveTabId) {
+        setActiveTabId(nextActiveTabId);
+      }
     }, []);
 
     const handleConsumeChatDraftInjection = useCallback((tabId: string, injectionId: string) => {
@@ -3285,6 +3442,11 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     const [previewHeight, setPreviewHeight] = useState(0.55); // 55% default for preview
     const [isDragging, setIsDragging] = useState(false);
     const containerDivRef = useRef<HTMLDivElement>(null);
+    const activeTab = useMemo(
+      () => tabs.find((tab) => tab.id === activeTabId) ?? null,
+      [tabs, activeTabId],
+    );
+    const activeCheckpoint = activeTab?.kind === 'chat' ? activeTab.chatCheckpoints?.[0] : null;
 
     const handleDragStart = useCallback((e: React.MouseEvent) => {
       e.preventDefault();
@@ -3394,6 +3556,30 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             <span style={{ flex: 1, minWidth: 0 }}>
               Reconnecting to the workspace runtime. Saved tabs stay in place and sessions reattach automatically when the bridge returns.
             </span>
+            {activeTab?.kind === 'chat' && activeCheckpoint ? (
+              <button
+                type="button"
+                onClick={() => handleRestoreLatestCheckpoint(activeTab.id)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  border: 'none',
+                  borderRadius: 999,
+                  background: 'rgba(37, 99, 235, 0.12)',
+                  color: '#1d4ed8',
+                  padding: '4px 8px',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  flexShrink: 0,
+                }}
+              >
+                <RotateCcw size={11} />
+                Restore latest checkpoint
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => window.location.reload()}
@@ -3487,6 +3673,8 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                   onSelectModel={handleUpdateChatModel}
                   onConsumeDraftInjection={handleConsumeChatDraftInjection}
                   onLinkedIssueChange={handleUpdateLinkedIssue}
+                  onSaveCheckpoint={handleSaveCheckpoint}
+                  onRestoreLatestCheckpoint={handleRestoreLatestCheckpoint}
                 />
               </div>
             ) : tab.tmuxSession ? (

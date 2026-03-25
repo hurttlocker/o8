@@ -13,6 +13,7 @@ interface SendRequest {
   cwd?: string;
   sessionId?: string; // Claude Code session UUID for --resume
   model?: string;
+  continueLatest?: boolean;
 }
 
 function usageFromClaude(input: unknown) {
@@ -36,7 +37,7 @@ function usageFromClaude(input: unknown) {
  */
 export async function POST(req: NextRequest) {
   const body = (await req.json()) as SendRequest;
-  const { message, cwd, sessionId, model } = body;
+  const { message, cwd, sessionId, model, continueLatest } = body;
 
   if (!message?.trim()) {
     return new Response(JSON.stringify({ error: 'Message is required' }), {
@@ -54,7 +55,7 @@ export async function POST(req: NextRequest) {
 
   if (sessionId) {
     args.push('--resume', sessionId);
-  } else if (cwd) {
+  } else if (cwd && continueLatest !== false) {
     // --continue resumes the most recent conversation in the cwd
     args.push('--continue');
   }
