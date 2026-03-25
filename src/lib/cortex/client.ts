@@ -26,8 +26,16 @@ import type {
   CortexStaleFact,
   CortexStats,
   ContextInjection,
+  RecallFeedbackAction,
+  RecallFeedbackResult,
+  RecallItem,
   RecallCard,
 } from './types';
+import {
+  runCortexContext,
+  runCortexFeedback,
+  runCortexRecall,
+} from './fact-backed';
 
 const execFileAsync = promisify(execFile);
 
@@ -554,6 +562,84 @@ export function resetCortexClient(): void {
   clientInstance = null;
 }
 
+export async function cortexRecall(
+  query: string,
+  options: {
+    limit?: number;
+    project?: string;
+    agent?: string;
+    channel?: string;
+    sessionKey?: string;
+    boostAgent?: string;
+    boostChannel?: string;
+    boostSessionKey?: string;
+    after?: string;
+    before?: string;
+    includeSuperseded?: boolean;
+  } = {},
+): Promise<{ items: RecallItem[]; diagnostics: ContextInjection['diagnostics'] }> {
+  return runCortexRecall({
+    query,
+    limit: options.limit,
+    project: options.project,
+    agent: options.agent,
+    channel: options.channel,
+    sessionKey: options.sessionKey,
+    boostAgent: options.boostAgent,
+    boostChannel: options.boostChannel,
+    boostSessionKey: options.boostSessionKey,
+    after: options.after,
+    before: options.before,
+    includeSuperseded: options.includeSuperseded,
+  });
+}
+
+export async function cortexContext(
+  query: string,
+  options: {
+    limit?: number;
+    project?: string;
+    agent?: string;
+    channel?: string;
+    sessionKey?: string;
+    boostAgent?: string;
+    boostChannel?: string;
+    boostSessionKey?: string;
+    after?: string;
+    before?: string;
+    includeSuperseded?: boolean;
+    maxItems?: number;
+    maxTokens?: number;
+  } = {},
+): Promise<ContextInjection> {
+  return runCortexContext({
+    query,
+    limit: options.limit,
+    project: options.project,
+    agent: options.agent,
+    channel: options.channel,
+    sessionKey: options.sessionKey,
+    boostAgent: options.boostAgent,
+    boostChannel: options.boostChannel,
+    boostSessionKey: options.boostSessionKey,
+    after: options.after,
+    before: options.before,
+    includeSuperseded: options.includeSuperseded,
+    maxItems: options.maxItems,
+    maxTokens: options.maxTokens,
+  });
+}
+
+export async function cortexFeedback(options: {
+  factId: number;
+  action: RecallFeedbackAction;
+  relatedFactId?: number;
+  query?: string;
+  reason?: string;
+}): Promise<RecallFeedbackResult> {
+  return runCortexFeedback(options);
+}
+
 // ══════════════════════════════════════════════════════════════════
 //  Backward-compatible exports — existing code uses these directly
 //  These now delegate to getCortexClient() internally
@@ -586,17 +672,20 @@ export async function cortexConflicts(limit = 10): Promise<CortexConflict[]> {
 
 /** @deprecated Use getCortexClient().reinforce() */
 export async function cortexReinforce(factId: number): Promise<boolean> {
-  return getCortexClient().reinforce(factId);
+  const result = await cortexFeedback({ factId, action: 'reinforce' });
+  return result.status === 'ok';
 }
 
 /** @deprecated Use getCortexClient().retire() */
 export async function cortexRetire(factId: number): Promise<boolean> {
-  return getCortexClient().retire(factId);
+  const result = await cortexFeedback({ factId, action: 'retire' });
+  return result.status === 'ok';
 }
 
 /** @deprecated Use getCortexClient().supersede() */
 export async function cortexSupersede(oldFactId: number, newFactId: number): Promise<boolean> {
-  return getCortexClient().supersede(oldFactId, newFactId);
+  const result = await cortexFeedback({ factId: oldFactId, action: 'supersede', relatedFactId: newFactId });
+  return result.status === 'ok';
 }
 
 /** @deprecated Use getCortexClient().query() */
@@ -613,44 +702,9 @@ export async function cortexAnswer(query: string): Promise<string | null> {
 //  Composed Operations — shared logic across all client types
 // ══════════════════════════════════════════════════════════════════
 
-/**
- * Build recall cards from search results.
- * Maps raw Cortex search output to UI-friendly cards.
- */
 export async function getRecallCards(query: string, limit = 5): Promise<RecallCard[]> {
-  const client = getCortexClient();
-  const results = await client.search(query, Math.min(limit * 3, 30));
-
-  const cards: RecallCard[] = [];
-  const seenTexts: string[] = [];
-
-  for (const r of results) {
-    if (cards.length >= limit) break;
-
-    const text = r.snippet || r.content.slice(0, 200);
-    const normalized = text.toLowerCase().replace(/\s+/g, ' ').trim();
-
-    if (seenTexts.some((seen) => trigramSimilarity(normalized, seen) > 0.6)) {
-      continue;
-    }
-
-    seenTexts.push(normalized);
-    const factIds = r.fact_ids ?? [];
-    cards.push({
-      id: factIds[0] ?? r.memory_id,
-      memoryId: r.memory_id,
-      factIds,
-      text,
-      factType: 'state' as RecallCard['factType'],
-      confidence: r.score,
-      source: shortenPath(r.source_file),
-      sourceSection: r.source_section,
-      age: formatAge(r.imported_at),
-      score: r.score,
-    });
-  }
-
-  return cards;
+  const recall = await cortexRecall(query, { limit });
+  return recall.items;
 }
 
 /**
@@ -697,60 +751,25 @@ export async function getContextInjection(
   if (branch) queryParts.push(branch);
   const query = queryParts.join(' ').slice(0, 200);
 
-  const cards = await getRecallCards(query, 5);
-  const relevant = cards.filter((c) => c.score > 0.4);
-
-  if (relevant.length === 0) {
-    return { facts: [], contextBlock: '', factCount: 0 };
+  if (!query.trim()) {
+    return {
+      facts: [],
+      contextBlock: '',
+      structuredBlock: '',
+      factCount: 0,
+      tokenCount: 0,
+      diagnostics: { searched: 0, factBacked: 0, journalOnly: 0, droppedByPolicy: 0 },
+    };
   }
 
-  const lines = relevant.map((fact, i) =>
-    `${i + 1}. [${fact.factType}] ${fact.text} (${(fact.confidence * 100).toFixed(0)}% relevance)`,
-  );
-
-  const contextBlock = [
-    '[INSTITUTIONAL MEMORY — from Cortex]',
-    'The following facts are relevant to this task:',
-    ...lines,
-    'Consider these when making implementation decisions.',
-    '---',
-  ].join('\n');
-
-  return { facts: relevant, contextBlock, factCount: relevant.length };
+  return cortexContext(query, {
+    limit: 8,
+    maxItems: 6,
+    maxTokens: 450,
+  });
 }
 
 // ── Helpers ──
-
-function shortenPath(filePath: string): string {
-  const home = os.homedir();
-  return filePath.startsWith(home) ? `~${filePath.slice(home.length)}` : filePath;
-}
-
-function formatAge(isoDate: string): string {
-  const ms = Date.now() - new Date(isoDate).getTime();
-  const hours = ms / 3_600_000;
-  if (hours < 1) return 'just now';
-  if (hours < 24) return `${Math.floor(hours)}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  const weeks = Math.floor(days / 7);
-  return `${weeks}w ago`;
-}
-
-function trigramSimilarity(a: string, b: string): number {
-  if (a === b) return 1;
-  if (a.length < 3 || b.length < 3) return 0;
-  const trigrams = (s: string): Set<string> => {
-    const set = new Set<string>();
-    for (let i = 0; i <= s.length - 3; i++) set.add(s.slice(i, i + 3));
-    return set;
-  };
-  const setA = trigrams(a);
-  const setB = trigrams(b);
-  let intersection = 0;
-  for (const t of setA) if (setB.has(t)) intersection++;
-  return intersection / Math.max(setA.size, setB.size);
-}
 
 function emptyStats(): CortexStats {
   return {

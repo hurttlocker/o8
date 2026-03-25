@@ -1,19 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef, memo } from 'react';
-
-interface MemoryFact {
-  memory_id: number;
-  content: string;
-  source_file: string;
-  source_section: string;
-  class: string;
-  score: number;
-  snippet: string;
-  match_type: string;
-  fact_ids: number[];
-  imported_at: string;
-}
+import type { RecallCard } from '@/lib/cortex/types';
 
 interface MemoryStats {
   total_memories: number;
@@ -28,17 +16,6 @@ interface MemoryPageProps {
   onInjectText?: (text: string) => void;
 }
 
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
 function classColor(cls: string): string {
   switch (cls) {
     case 'rule': return '#007aff';
@@ -50,9 +27,10 @@ function classColor(cls: string): string {
   }
 }
 
-const FactRow = memo(function FactRow({ fact, onInject }: { fact: MemoryFact; onInject?: (text: string) => void }) {
+const FactRow = memo(function FactRow({ fact, onInject }: { fact: RecallCard; onInject?: (text: string) => void }) {
   const [expanded, setExpanded] = useState(false);
-  const source = fact.source_file.split('/').pop() ?? fact.source_file;
+  const source = fact.evidence[0]?.sourceFile ?? fact.sourceTier;
+  const factColor = classColor(fact.factType);
 
   return (
     <div
@@ -75,26 +53,37 @@ const FactRow = memo(function FactRow({ fact, onInject }: { fact: MemoryFact; on
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
         <span style={{
           width: 6, height: 6, borderRadius: '50%',
-          background: classColor(fact.class),
+          background: factColor,
           flexShrink: 0,
         }} />
         <span style={{
           fontSize: 10, fontWeight: 700,
           textTransform: 'uppercase',
           letterSpacing: '0.05em',
-          color: classColor(fact.class),
+          color: factColor,
           fontFamily: '"SF Mono", ui-monospace, monospace',
         }}>
-          {fact.class}
+          {fact.factType}
         </span>
+        {fact.promptEligible ? (
+          <span style={{
+            fontSize: 10,
+            color: '#2563eb',
+            background: 'rgba(37,99,235,0.08)',
+            borderRadius: 999,
+            padding: '2px 6px',
+          }}>
+            prompt
+          </span>
+        ) : null}
         <span style={{ fontSize: 10, color: '#8e8e93', marginLeft: 'auto' }}>
-          {timeAgo(fact.imported_at)}
+          {fact.evidenceCount} evidence
         </span>
         <span style={{
           fontSize: 9, color: '#8e8e93',
           fontFamily: '"SF Mono", ui-monospace, monospace',
         }}>
-          {fact.match_type === 'bm25' ? 'BM25' : 'SEM'}
+          {Math.round(fact.relevance * 100)}%
         </span>
       </div>
 
@@ -108,32 +97,51 @@ const FactRow = memo(function FactRow({ fact, onInject }: { fact: MemoryFact; on
         WebkitBoxOrient: 'vertical',
         overflow: 'hidden',
       }}>
-        {fact.snippet || fact.content.slice(0, 300)}
+        {fact.text}
       </p>
 
       {/* Expanded: source + actions */}
       {expanded ? (
-        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{
+        <div style={{ marginTop: 8, display: 'grid', gap: 8 }}>
+          <div style={{
             fontSize: 10, color: '#636366',
             fontFamily: '"SF Mono", ui-monospace, monospace',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            flex: 1,
           }}>
-            {source}{fact.source_section ? ` → ${fact.source_section.slice(0, 40)}` : ''}
-          </span>
+            {source}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <span style={{ fontSize: 10, color: '#5b6475' }}>{fact.sourceTier}</span>
+            <span style={{ fontSize: 10, color: '#5b6475' }}>{fact.memoryKind}</span>
+            <span style={{ fontSize: 10, color: '#5b6475' }}>{fact.retrievalVisibility}</span>
+          </div>
+          {fact.reasons.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {fact.reasons.map((reason) => (
+                <span key={reason} style={{
+                  fontSize: 10,
+                  color: '#5b6475',
+                  padding: '3px 7px',
+                  borderRadius: 999,
+                  background: 'rgba(15, 23, 42, 0.04)',
+                }}>
+                  {reason.replace(/_/g, ' ')}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {onInject ? (
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); onInject(fact.content.slice(0, 500)); }}
-              onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); onInject(fact.content.slice(0, 500)); }}
+              onClick={(e) => { e.stopPropagation(); onInject(fact.text); }}
+              onTouchEnd={(e) => { e.stopPropagation(); e.preventDefault(); onInject(fact.text); }}
               style={{
                 fontSize: 11, fontWeight: 600,
                 color: '#007aff',
                 background: 'rgba(0,122,255,0.08)',
                 border: '1px solid rgba(0,122,255,0.15)',
                 borderRadius: 8,
-                padding: '4px 10px',
+                padding: '6px 10px',
                 cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
               }}
@@ -149,7 +157,7 @@ const FactRow = memo(function FactRow({ fact, onInject }: { fact: MemoryFact; on
 
 export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<MemoryFact[]>([]);
+  const [results, setResults] = useState<RecallCard[]>([]);
   const [stats, setStats] = useState<MemoryStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'search' | 'recent' | 'health'>('recent');
@@ -170,7 +178,6 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: 'recent important decisions', limit: 10 }),
     })
-      .then(r => r.json())
       .then(r => r.json())
       .then(d => { setResults(d.cards ?? []); setLoading(false); })
       .catch(() => setLoading(false));
@@ -365,7 +372,7 @@ export default function MemoryPage({ onBack, onInjectText }: MemoryPageProps) {
             </div>
           ) : null}
           {results.map((fact, i) => (
-            <FactRow key={`${fact.memory_id}-${i}`} fact={fact} onInject={onInjectText} />
+            <FactRow key={`${fact.factId}-${i}`} fact={fact} onInject={onInjectText} />
           ))}
         </div>
       ) : (
