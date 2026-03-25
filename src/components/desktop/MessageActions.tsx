@@ -25,6 +25,11 @@ import {
 } from 'lucide-react';
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
 
+const THEME_ACCENT = 'var(--t-accent, #2563eb)';
+const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
+const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
+const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
+
 interface MessageActionsProps {
   messageId: string;
   messageText: string;
@@ -38,9 +43,9 @@ const iconBtnBase: React.CSSProperties = {
   width: 32,
   height: 32,
   borderRadius: 8,
-  border: '1px solid transparent',
-  background: 'transparent',
-  color: '#6b7280',
+  border: '1px solid var(--t-panel-border)',
+  background: THEME_BG_CARD,
+  color: 'var(--t-text-secondary)',
   cursor: 'pointer',
   transition: 'all 150ms ease',
   paddingTop: 0,
@@ -129,7 +134,7 @@ export const MessageActions = memo(function MessageActions({
           gap: 2,
           marginTop: 8,
           paddingTop: 6,
-          borderTop: '1px solid rgba(37, 99, 235, 0.12)',
+          borderTop: '1px solid var(--t-divider)',
         }}
       >
         {/* Back 10s */}
@@ -138,7 +143,7 @@ export const MessageActions = memo(function MessageActions({
           onClick={() => ttsEngine.seekRelative(-10)}
           title="Back 10s"
           aria-label="Back 10 seconds"
-          style={{ ...iconBtnBase, color: '#2563eb' }}
+          style={{ ...iconBtnBase, color: THEME_ACCENT }}
         >
           <RotateCcw size={15} strokeWidth={1.8} />
         </button>
@@ -153,12 +158,12 @@ export const MessageActions = memo(function MessageActions({
           title={ttsState === 'playing' ? 'Pause' : 'Resume'}
           aria-label={ttsState === 'playing' ? 'Pause' : 'Resume'}
           style={{
-            ...iconBtnBase,
-            width: 36,
-            height: 36,
-            background: 'rgba(37, 99, 235, 0.08)',
-            borderColor: 'rgba(37, 99, 235, 0.15)',
-            color: '#2563eb',
+          ...iconBtnBase,
+          width: 36,
+          height: 36,
+          background: THEME_ACCENT_SOFT,
+          borderColor: THEME_ACCENT_BORDER,
+            color: THEME_ACCENT,
           }}
         >
           {ttsState === 'loading' ? (
@@ -176,7 +181,7 @@ export const MessageActions = memo(function MessageActions({
           onClick={() => ttsEngine.seekRelative(10)}
           title="Forward 10s"
           aria-label="Forward 10 seconds"
-          style={{ ...iconBtnBase, color: '#2563eb' }}
+          style={{ ...iconBtnBase, color: THEME_ACCENT }}
         >
           <RotateCw size={15} strokeWidth={1.8} />
         </button>
@@ -208,7 +213,7 @@ export const MessageActions = memo(function MessageActions({
             fontSize: 11,
             fontWeight: 700,
             fontFamily: '-apple-system, system-ui, sans-serif',
-            color: rate === 1 ? '#9ca3af' : '#2563eb',
+            color: rate === 1 ? 'var(--t-text-faint)' : THEME_ACCENT,
           }}
         >
           {rate}x
@@ -218,7 +223,7 @@ export const MessageActions = memo(function MessageActions({
         <span style={{
           fontSize: 11,
           fontWeight: 500,
-          color: '#9ca3af',
+          color: 'var(--t-text-faint)',
           fontFamily: 'SF Mono, ui-monospace, monospace',
           letterSpacing: '-0.02em',
           marginLeft: 2,
@@ -234,10 +239,10 @@ export const MessageActions = memo(function MessageActions({
           onClick={() => ttsEngine.stop()}
           title="Stop"
           aria-label="Stop playback"
-          style={{
-            ...iconBtnBase,
-            marginLeft: 'auto',
-            color: '#ef4444',
+        style={{
+          ...iconBtnBase,
+          marginLeft: 'auto',
+          color: '#ef4444',
           }}
         >
           <Square size={14} strokeWidth={2} fill="#ef4444" />
@@ -249,21 +254,21 @@ export const MessageActions = memo(function MessageActions({
   // ── Default mode: ▶ 📋 ↻ ··· ──
   return (
     <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 4,
-        marginTop: 8,
-        paddingTop: 4,
-        borderTop: '1px solid rgba(0,0,0,0.04)',
-      }}
-    >
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4,
+          marginTop: 8,
+          paddingTop: 4,
+          borderTop: '1px solid var(--t-divider-subtle)',
+        }}
+      >
       <button
         type="button"
         onClick={handlePlay}
         title="Play"
         aria-label="Play"
-        style={{ ...iconBtnBase, color: '#6b7280' }}
+        style={{ ...iconBtnBase }}
       >
         <Play size={16} strokeWidth={1.8} />
       </button>
@@ -275,9 +280,9 @@ export const MessageActions = memo(function MessageActions({
         aria-label="Copy message"
         style={{
           ...iconBtnBase,
-          background: copied ? 'rgba(34, 197, 94, 0.08)' : undefined,
-          borderColor: copied ? 'rgba(34, 197, 94, 0.15)' : undefined,
-          color: copied ? '#22c55e' : '#6b7280',
+          background: copied ? 'rgba(34, 197, 94, 0.08)' : THEME_BG_CARD,
+          borderColor: copied ? 'rgba(34, 197, 94, 0.15)' : 'var(--t-panel-border)',
+          color: copied ? '#22c55e' : 'var(--t-text-secondary)',
         }}
       >
         {copied ? <Check size={16} strokeWidth={2} /> : <Copy size={16} strokeWidth={1.8} />}
@@ -288,7 +293,7 @@ export const MessageActions = memo(function MessageActions({
         onClick={onRetry ?? (() => {})}
         title="Retry"
         aria-label="Retry"
-        style={{ ...iconBtnBase, color: '#6b7280' }}
+        style={{ ...iconBtnBase }}
       >
         <RefreshCw size={16} strokeWidth={1.8} />
       </button>
@@ -297,7 +302,7 @@ export const MessageActions = memo(function MessageActions({
         type="button"
         title="More actions"
         aria-label="More actions"
-        style={{ ...iconBtnBase, color: '#6b7280' }}
+        style={{ ...iconBtnBase }}
       >
         <MoreHorizontal size={16} strokeWidth={1.8} />
       </button>

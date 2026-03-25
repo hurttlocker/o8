@@ -23,12 +23,14 @@ import {
 } from 'lucide-react';
 import { BlueGlassActionButton, BlueGlassHoverCard, BlueGlassMetricPill, BlueGlassSparklineLane } from './BlueGlassHoverCard';
 import type {
+  RepoReadinessState,
   RepoRegistryEntry,
   RepoSetupConfig,
   RepoSetupEnvMode,
   ValidatedRepoCandidate,
 } from '@/lib/repos/types';
 import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
+import { FOCUS_REPO_SETUP_EVENT, type FocusRepoSetupDetail } from '@/lib/desktop/events';
 
 interface JsonErrorShape {
   error?: string;
@@ -50,6 +52,14 @@ interface WorkspaceAgentLaunchRequest {
   createNew?: boolean;
   label?: string;
 }
+
+const THEME_ACCENT = 'var(--t-accent, #2563eb)';
+const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
+const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(37, 99, 235, 0.14))';
+const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
+const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
+const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
+const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
 
 function formatRelativeTime(value: string | null) {
   if (!value) return 'Never';
@@ -137,6 +147,19 @@ function normalizeSetupDraft(setup: RepoSetupConfig): RepoSetupConfig {
     devCommand: setup.devCommand?.trim() || null,
     defaultPort: setup.defaultPort ?? null,
   };
+}
+
+function repoReadinessPalette(state?: RepoReadinessState) {
+  switch (state) {
+    case 'ready':
+      return { background: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.16)', color: '#15803d' };
+    case 'needs_setup':
+      return { background: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.18)', color: '#b45309' };
+    case 'blocked':
+      return { background: 'rgba(239,68,68,0.10)', border: 'rgba(239,68,68,0.18)', color: '#b91c1c' };
+    default:
+      return { background: 'var(--t-divider-subtle)', border: 'var(--t-panel-border)', color: 'var(--t-text-secondary)' };
+  }
 }
 
 function sortRepoEntries(entries: RepoRegistryEntry[]) {
@@ -557,6 +580,24 @@ function RepoCard({
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const handleFocusRepoSetup = (event: Event) => {
+      const detail = (event as CustomEvent<FocusRepoSetupDetail>).detail;
+      if (!detail || (detail.repoId !== repo.id && detail.repoPath !== repo.localPath)) {
+        return;
+      }
+      setSettingsOpen(true);
+      requestAnimationFrame(() => {
+        cardRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      });
+    };
+
+    window.addEventListener(FOCUS_REPO_SETUP_EVENT, handleFocusRepoSetup as EventListener);
+    return () => {
+      window.removeEventListener(FOCUS_REPO_SETUP_EVENT, handleFocusRepoSetup as EventListener);
+    };
+  }, [repo.id, repo.localPath]);
+
   // Fetch branches when expanded
   useEffect(() => {
     if (!expanded) return;
@@ -878,15 +919,15 @@ function RepoCard({
   }, []);
 
   const cardBackground = isActive
-    ? 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(239,246,255,0.94))'
+    ? 'linear-gradient(180deg, var(--t-panel) 0%, var(--t-panel-translucent) 100%)'
     : expanded
-      ? 'linear-gradient(180deg, rgba(255,255,255,0.97), rgba(248,250,252,0.93))'
-      : 'rgba(255, 255, 255, 0.8)';
+      ? 'linear-gradient(180deg, var(--t-panel-translucent) 0%, var(--t-bg-card, rgba(148, 163, 184, 0.08)) 100%)'
+      : 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
   const cardBorder = isActive
-    ? '1px solid rgba(37, 99, 235, 0.18)'
+    ? `1px solid ${THEME_ACCENT_BORDER}`
     : expanded
-      ? '1px solid rgba(148, 163, 184, 0.2)'
-      : '1px solid rgba(148, 163, 184, 0.14)';
+      ? '1px solid var(--t-divider-strong)'
+      : '1px solid var(--t-panel-border)';
   const compactLayout = cardWidth > 0 && cardWidth < 320;
 
   const currentBadge = isActive ? (
@@ -896,9 +937,9 @@ function RepoCard({
         alignItems: 'center',
         padding: compactLayout ? '2px 8px' : '3px 9px',
         borderRadius: 999,
-        background: 'rgba(37, 99, 235, 0.08)',
-        border: '1px solid rgba(37, 99, 235, 0.14)',
-        color: '#2563eb',
+        background: THEME_ACCENT_SOFT,
+        border: `1px solid ${THEME_ACCENT_BORDER}`,
+        color: THEME_ACCENT,
         fontSize: 10,
         fontWeight: 700,
         letterSpacing: '0.04em',
@@ -941,18 +982,18 @@ function RepoCard({
         gap: 5,
         padding: compactLayout ? '2px 7px' : '2px 8px',
         borderRadius: 999,
-        background: 'linear-gradient(180deg, rgba(239,246,255,0.92), rgba(191,219,254,0.58))',
-        border: '1px solid rgba(96, 165, 250, 0.22)',
-        boxShadow: compactLayout ? '0 6px 16px rgba(37,99,235,0.08)' : '0 8px 20px rgba(37,99,235,0.12)',
+        background: THEME_ACCENT_SOFT,
+        border: `1px solid ${THEME_ACCENT_BORDER}`,
+        boxShadow: compactLayout ? `0 6px 16px ${THEME_ACCENT_RING}` : `0 8px 20px ${THEME_ACCENT_RING}`,
         flexShrink: 0,
       }}
     >
-      <GitPullRequest size={10} strokeWidth={2.2} color="#2563eb" />
+      <GitPullRequest size={10} strokeWidth={2.2} color="currentColor" />
       <span
         style={{
           fontSize: 10,
           fontWeight: 700,
-          color: '#1d4ed8',
+          color: THEME_ACCENT,
           fontFamily: '"SF Mono", ui-monospace, monospace',
         }}
       >
@@ -978,6 +1019,27 @@ function RepoCard({
       }}
     >
       {mergeRisk.label}
+    </span>
+  ) : null;
+  const readinessBadge = repo.readiness ? (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: compactLayout ? '2px 7px' : '2px 8px',
+        borderRadius: 999,
+        background: repoReadinessPalette(repo.readiness.state).background,
+        border: `1px solid ${repoReadinessPalette(repo.readiness.state).border}`,
+        color: repoReadinessPalette(repo.readiness.state).color,
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+        flexShrink: 0,
+      }}
+      title={repo.readiness.summary}
+    >
+      {repo.readiness.label}
     </span>
   ) : null;
   const branchBadge = (
@@ -1016,31 +1078,31 @@ function RepoCard({
         width: 30,
         height: 30,
         borderRadius: 10,
-        border: menuOpen ? '1px solid rgba(37, 99, 235, 0.16)' : '1px solid rgba(148, 163, 184, 0.14)',
+        border: menuOpen ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
         background: menuOpen
-          ? 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(239,246,255,0.92))'
-          : 'rgba(255,255,255,0.8)',
-        color: menuOpen ? '#2563eb' : 'var(--t-text-secondary)',
+          ? THEME_ACCENT_SOFT
+          : THEME_BG_CARD,
+        color: menuOpen ? THEME_ACCENT : 'var(--t-text-secondary)',
         cursor: 'pointer',
         flexShrink: 0,
         boxShadow: menuOpen
-          ? '0 8px 18px rgba(37, 99, 235, 0.08)'
-          : '0 4px 10px rgba(15, 23, 42, 0.04)',
+          ? `0 8px 18px ${THEME_ACCENT_RING}`
+          : '0 4px 10px rgba(15, 23, 42, 0.08)',
         transition: 'all 140ms ease',
       }}
       onMouseEnter={(e) => {
         const target = e.currentTarget;
         if (!menuOpen) {
-          target.style.background = 'rgba(255,255,255,0.96)';
-          target.style.borderColor = 'rgba(37, 99, 235, 0.14)';
-          target.style.color = '#2563eb';
+          target.style.background = THEME_ACCENT_SOFT;
+          target.style.borderColor = THEME_ACCENT_BORDER;
+          target.style.color = THEME_ACCENT;
         }
       }}
       onMouseLeave={(e) => {
         const target = e.currentTarget;
         if (!menuOpen) {
-          target.style.background = 'rgba(255,255,255,0.8)';
-          target.style.borderColor = 'rgba(148, 163, 184, 0.14)';
+          target.style.background = THEME_BG_CARD;
+          target.style.borderColor = 'var(--t-panel-border)';
           target.style.color = 'var(--t-text-secondary)';
         }
       }}
@@ -1061,10 +1123,10 @@ function RepoCard({
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
         boxShadow: isActive
-          ? '0 18px 34px rgba(37, 99, 235, 0.08)'
+          ? `0 18px 34px ${THEME_ACCENT_RING}`
           : expanded
-            ? '0 14px 30px rgba(15, 23, 42, 0.06)'
-            : '0 8px 18px rgba(15, 23, 42, 0.04)',
+            ? 'var(--t-panel-shadow)'
+            : '0 8px 18px rgba(15, 23, 42, 0.08)',
         overflow: 'hidden',
       }}
     >
@@ -1109,6 +1171,7 @@ function RepoCard({
           </span>
           {!compactLayout ? currentBadge : null}
           {!compactLayout ? portsBadge : null}
+          {!compactLayout ? readinessBadge : null}
           {!compactLayout ? prBadge : null}
           {!compactLayout ? mergeRiskBadge : null}
           {!compactLayout ? branchBadge : null}
@@ -1127,6 +1190,7 @@ function RepoCard({
           >
             {currentBadge}
             {portsBadge}
+            {readinessBadge}
             {prBadge}
             {branchBadge}
           </div>
@@ -1284,10 +1348,10 @@ function RepoCard({
               padding: '6px 0',
               borderRadius: 14,
               border: '1px solid var(--t-panel-border)',
-              background: 'rgba(255, 255, 255, 0.96)',
+              background: THEME_PANEL_GLASS,
               backdropFilter: 'blur(20px)',
               WebkitBackdropFilter: 'blur(20px)',
-              boxShadow: '0 14px 34px rgba(15,23,42,0.14), 0 4px 12px rgba(15,23,42,0.06)',
+              boxShadow: 'var(--t-panel-shadow)',
             }}
           >
             {[
@@ -1340,7 +1404,7 @@ function RepoCard({
                 padding: 0,
                 border: 'none',
                 background: 'transparent',
-                color: '#2563eb',
+                color: THEME_ACCENT,
                 fontSize: 11,
                 fontWeight: 500,
                 cursor: 'pointer',
@@ -1400,15 +1464,15 @@ function RepoCard({
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 3,
-                    padding: '2px 6px',
-                    borderRadius: 6,
-                    border: `1px solid ${devLogsOpen ? 'rgba(37,99,235,0.15)' : 'var(--t-btn-secondary-border)'}`,
-                    background: devLogsOpen ? 'rgba(37,99,235,0.04)' : 'transparent',
-                    color: devLogsOpen ? '#2563eb' : 'var(--t-text-muted)',
-                    fontSize: 10,
-                    fontWeight: 600,
-                    cursor: 'pointer',
+                  gap: 3,
+                  padding: '2px 6px',
+                  borderRadius: 6,
+                  border: `1px solid ${devLogsOpen ? THEME_ACCENT_BORDER : 'var(--t-btn-secondary-border)'}`,
+                  background: devLogsOpen ? THEME_ACCENT_SOFT : 'transparent',
+                  color: devLogsOpen ? THEME_ACCENT : 'var(--t-text-muted)',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  cursor: 'pointer',
                     fontFamily: '-apple-system, system-ui, sans-serif',
                   }}
                 >
@@ -1565,7 +1629,49 @@ function RepoCard({
               <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontWeight: 500 }}>
                 {workspaceNotice.branch}
               </span>
-              <span style={{ fontSize: 10, color: '#15803d', fontWeight: 600 }}>Ready</span>
+              <span style={{ fontSize: 10, color: '#15803d', fontWeight: 600 }}>Workspace ready</span>
+            </div>
+          ) : null}
+
+          {repo.readiness ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+                marginBottom: 8,
+                padding: '8px 10px',
+                borderRadius: 10,
+                border: `1px solid ${repoReadinessPalette(repo.readiness.state).border}`,
+                background: repoReadinessPalette(repo.readiness.state).background,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                    color: repoReadinessPalette(repo.readiness.state).color,
+                  }}
+                >
+                  {repo.readiness.label}
+                </span>
+                {repo.readiness.currentBranch ? (
+                  <span style={{ fontSize: 11, color: 'var(--t-text-secondary)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                    {repo.readiness.currentBranch}
+                  </span>
+                ) : null}
+              </div>
+              <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--t-text-secondary)' }}>
+                {repo.readiness.summary}
+              </div>
+              {repo.readiness.nextAction ? (
+                <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--t-text-muted)' }}>
+                  {repo.readiness.nextAction}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -1587,7 +1693,7 @@ function RepoCard({
                         handleCheckout(branch.name);
                       }
                     }}
-                    style={{
+                  style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
@@ -1596,7 +1702,7 @@ function RepoCard({
                       cursor: branch.current ? 'default' : checkoutBusy ? 'wait' : 'pointer',
                       transition: 'background 120ms ease',
                     }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(37,99,235,0.04)'; }}
+                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = THEME_ACCENT_SOFT; }}
                     onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
                   >
                     {/* Branch icon — colored by type */}
@@ -1756,9 +1862,9 @@ function RepoCard({
                           gap: 3,
                           padding: '1px 6px',
                           borderRadius: 4,
-                          border: '1px solid rgba(37,99,235,0.12)',
-                          background: 'rgba(37,99,235,0.04)',
-                          color: '#2563eb',
+                          border: `1px solid ${THEME_ACCENT_BORDER}`,
+                          background: THEME_ACCENT_SOFT,
+                          color: THEME_ACCENT,
                           fontSize: 9,
                           fontWeight: 600,
                           cursor: 'pointer',
@@ -1784,27 +1890,27 @@ function RepoCard({
                           width: 24,
                           height: 24,
                           borderRadius: 8,
-                          border: branchMenuOpen === branch.name ? '1px solid rgba(37, 99, 235, 0.14)' : '1px solid rgba(148, 163, 184, 0.12)',
-                          background: branchMenuOpen === branch.name ? 'rgba(37, 99, 235, 0.08)' : 'rgba(255,255,255,0.72)',
-                          color: branchMenuOpen === branch.name ? '#2563eb' : 'var(--t-text-secondary)',
+                          border: branchMenuOpen === branch.name ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
+                          background: branchMenuOpen === branch.name ? THEME_ACCENT_SOFT : THEME_BG_CARD,
+                          color: branchMenuOpen === branch.name ? THEME_ACCENT : 'var(--t-text-secondary)',
                           cursor: 'pointer',
                           flexShrink: 0,
                           transition: 'all 120ms ease',
-                          boxShadow: '0 3px 8px rgba(15, 23, 42, 0.03)',
+                          boxShadow: '0 3px 8px rgba(15, 23, 42, 0.08)',
                         }}
                         onMouseEnter={(e) => {
                           const target = e.currentTarget as HTMLButtonElement;
                           if (branchMenuOpen !== branch.name) {
-                            target.style.background = 'rgba(255,255,255,0.96)';
-                            target.style.borderColor = 'rgba(37, 99, 235, 0.14)';
-                            target.style.color = '#2563eb';
+                            target.style.background = THEME_ACCENT_SOFT;
+                            target.style.borderColor = THEME_ACCENT_BORDER;
+                            target.style.color = THEME_ACCENT;
                           }
                         }}
                         onMouseLeave={(e) => {
                           const target = e.currentTarget as HTMLButtonElement;
                           if (branchMenuOpen !== branch.name) {
-                            target.style.background = 'rgba(255,255,255,0.72)';
-                            target.style.borderColor = 'rgba(148, 163, 184, 0.12)';
+                            target.style.background = THEME_BG_CARD;
+                            target.style.borderColor = 'var(--t-panel-border)';
                             target.style.color = 'var(--t-text-secondary)';
                           }
                         }}
@@ -1822,7 +1928,7 @@ function RepoCard({
                       padding: '3px 0',
                       borderRadius: 8,
                       border: '1px solid var(--t-panel-border)',
-                      background: 'rgba(255,255,255,0.95)',
+                      background: THEME_PANEL_GLASS,
                       backdropFilter: 'blur(16px)',
                       width: 'fit-content',
                       minWidth: 120,
@@ -1999,7 +2105,7 @@ function RepoCard({
                 borderRadius: 6,
                 transition: 'color 120ms',
               }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = '#2563eb'; }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = THEME_ACCENT; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--t-text-muted)'; }}
             >
               <Plus size={11} strokeWidth={2} />
@@ -2505,6 +2611,27 @@ export function RepoRegistrySection({
   const [launchTaskName, setLaunchTaskName] = useState('');
   const [launchPrompt, setLaunchPrompt] = useState('');
   const [launchLoading, setLaunchLoading] = useState(false);
+
+  useEffect(() => {
+    const handleFocusRepoSetup = (event: Event) => {
+      const detail = (event as CustomEvent<FocusRepoSetupDetail>).detail;
+      if (!detail) return;
+      const targetRepo = repos.find((repo) => repo.id === detail.repoId || repo.localPath === detail.repoPath);
+      if (!targetRepo) return;
+      setReposOpen(true);
+      setExpandedRepoId(targetRepo.id);
+      try {
+        sessionStorage.setItem('cortex-repo-expanded-id', targetRepo.id);
+      } catch {
+        // Ignore session storage failures and still reveal the repo.
+      }
+    };
+
+    window.addEventListener(FOCUS_REPO_SETUP_EVENT, handleFocusRepoSetup as EventListener);
+    return () => {
+      window.removeEventListener(FOCUS_REPO_SETUP_EVENT, handleFocusRepoSetup as EventListener);
+    };
+  }, [repos, setReposOpen]);
   const [launchError, setLaunchError] = useState<string | null>(null);
 
   const [removeTarget, setRemoveTarget] = useState<RepoRegistryEntry | null>(null);
@@ -2825,6 +2952,8 @@ export function RepoRegistrySection({
           taskName,
           baseBranch: workspaceBaseBranch.trim() || undefined,
           skipSetup: !workspaceUseSetup,
+          envMode: workspaceRepo.setup.envMode,
+          envFiles: workspaceRepo.setup.envFiles,
         }),
       });
 
@@ -2989,7 +3118,7 @@ export function RepoRegistrySection({
                   style={{
                     borderRadius: 14,
                     border: '1px solid var(--t-panel-border)',
-                    background: 'rgba(255, 255, 255, 0.74)',
+                    background: THEME_PANEL_GLASS,
                     backdropFilter: 'blur(20px)',
                     WebkitBackdropFilter: 'blur(20px)',
                     boxShadow: 'var(--t-panel-shadow)',
@@ -2999,8 +3128,8 @@ export function RepoRegistrySection({
                     gap: 8,
                   }}
                 >
-                  <div style={{ width: `${58 + index * 12}%`, height: 12, borderRadius: 999, background: 'rgba(148,163,184,0.18)' }} />
-                  <div style={{ width: `${42 + index * 10}%`, height: 10, borderRadius: 999, background: 'rgba(148,163,184,0.12)' }} />
+                  <div style={{ width: `${58 + index * 12}%`, height: 12, borderRadius: 999, background: 'var(--t-divider-strong)' }} />
+                  <div style={{ width: `${42 + index * 10}%`, height: 10, borderRadius: 999, background: 'var(--t-divider)' }} />
                 </div>
               ))}
             </div>
@@ -3031,7 +3160,7 @@ export function RepoRegistrySection({
                 padding: 14,
                 borderRadius: 14,
                 border: '1px solid var(--t-panel-border)',
-                background: 'rgba(255, 255, 255, 0.7)',
+                background: THEME_PANEL_GLASS,
                 backdropFilter: 'blur(20px)',
                 WebkitBackdropFilter: 'blur(20px)',
                 boxShadow: 'var(--t-panel-shadow)',
@@ -3105,7 +3234,7 @@ export function RepoRegistrySection({
                 padding: '6px 4px',
                 border: 'none',
                 background: 'transparent',
-                color: 'var(--t-text-muted)',
+                color: 'var(--t-text-secondary)',
                 fontSize: 11,
                 fontWeight: 500,
                 cursor: 'pointer',
@@ -3382,7 +3511,7 @@ export function RepoRegistrySection({
               color: '#1d4ed8',
             }}
           >
-            Saved repo setup includes env/build preferences. Those fields are stored now and can be wired into workspace bootstrap separately.
+            Saved repo setup includes env/build preferences. Env files now bootstrap into new workspaces automatically, and build preferences remain available for the next bootstrap pass.
           </div>
         ) : null}
 

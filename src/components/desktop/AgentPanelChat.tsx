@@ -60,6 +60,14 @@ import { formatModelLabel } from '@/lib/format';
 import { ttsEngine } from '@/lib/tts/engine';
 import { autocompleteSlashCommand, buildSlashTerminalInput, getSlashCommandSuggestions, isSlashCommandText } from '@/lib/slash-commands';
 
+const THEME_ACCENT = 'var(--t-accent, #2563eb)';
+const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
+const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(37, 99, 235, 0.14))';
+const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
+const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
+const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
+const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
+
 // ── Types ──
 
 type SessionSummary = MobileInboxSnapshot['sessions'][number];
@@ -238,18 +246,18 @@ function sessionPickerChips(session?: SessionSummary): SessionPickerChip[] {
 function sessionChipStyles(tone: SessionPickerChipTone) {
   switch (tone) {
     case 'green':
-      return { color: '#15803d', background: 'rgba(34, 197, 94, 0.11)', border: '1px solid rgba(34, 197, 94, 0.16)' };
+      return { color: '#4ade80', background: 'rgba(34, 197, 94, 0.12)', border: '1px solid rgba(34, 197, 94, 0.2)' };
     case 'purple':
-      return { color: '#7c3aed', background: 'rgba(167, 139, 250, 0.12)', border: '1px solid rgba(167, 139, 250, 0.18)' };
+      return { color: '#c084fc', background: 'rgba(167, 139, 250, 0.14)', border: '1px solid rgba(167, 139, 250, 0.22)' };
     case 'amber':
-      return { color: '#b45309', background: 'rgba(245, 158, 11, 0.13)', border: '1px solid rgba(245, 158, 11, 0.18)' };
+      return { color: '#fbbf24', background: 'rgba(245, 158, 11, 0.13)', border: '1px solid rgba(245, 158, 11, 0.22)' };
     case 'red':
-      return { color: '#dc2626', background: 'rgba(239, 68, 68, 0.11)', border: '1px solid rgba(239, 68, 68, 0.16)' };
+      return { color: '#f87171', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.2)' };
     case 'slate':
-      return { color: '#475569', background: 'rgba(148, 163, 184, 0.12)', border: '1px solid rgba(148, 163, 184, 0.18)' };
+      return { color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-divider)' };
     case 'blue':
     default:
-      return { color: '#2563eb', background: 'rgba(37, 99, 235, 0.10)', border: '1px solid rgba(37, 99, 235, 0.15)' };
+      return { color: THEME_ACCENT, background: THEME_ACCENT_SOFT, border: `1px solid ${THEME_ACCENT_BORDER}` };
   }
 }
 
@@ -689,8 +697,8 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
               alignItems: 'center',
               padding: '3px 8px',
               borderRadius: 999,
-              background: 'rgba(37, 99, 235, 0.10)',
-              color: '#2563eb',
+              background: THEME_ACCENT_SOFT,
+              color: THEME_ACCENT,
               fontSize: 10,
               fontWeight: 700,
               letterSpacing: '0.02em',
@@ -721,8 +729,8 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
                 alignItems: 'center',
                 padding: '3px 8px',
                 borderRadius: 999,
-                background: 'rgba(148, 163, 184, 0.10)',
-                color: '#475569',
+                background: 'var(--t-divider-subtle)',
+                color: 'var(--t-text-secondary)',
                 fontSize: 10,
                 fontWeight: 700,
                 letterSpacing: '0.02em',
@@ -736,8 +744,8 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
                 alignItems: 'center',
                 padding: '3px 8px',
                 borderRadius: 999,
-                background: 'rgba(15, 23, 42, 0.06)',
-                color: '#334155',
+                background: THEME_BG_CARD,
+                color: 'var(--t-text-secondary)',
                 fontSize: 10,
                 fontWeight: 700,
                 letterSpacing: '0.02em',
@@ -746,21 +754,21 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
               </span>
             ) : null}
             {(runtimeEvent.action || runtimeEvent.rawPreviewLines?.length || runtimeEvent.changedFiles?.length) ? (
-              <button
-                type="button"
-                onClick={() => setHandoffExpanded((value) => !value)}
-                style={{
-                  display: 'inline-flex',
+                <button
+                  type="button"
+                  onClick={() => setHandoffExpanded((value) => !value)}
+                  style={{
+                    display: 'inline-flex',
                   alignItems: 'center',
-                  gap: 5,
-                  padding: '3px 8px',
-                  borderRadius: 999,
-                  border: '1px solid rgba(148, 163, 184, 0.16)',
-                  background: handoffExpanded ? 'rgba(148, 163, 184, 0.10)' : 'rgba(255,255,255,0.72)',
-                  color: '#475569',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  letterSpacing: '0.02em',
+                    gap: 5,
+                    padding: '3px 8px',
+                    borderRadius: 999,
+                    border: '1px solid var(--t-panel-border)',
+                    background: handoffExpanded ? THEME_ACCENT_SOFT : THEME_BG_CARD,
+                    color: handoffExpanded ? THEME_ACCENT : 'var(--t-text-secondary)',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.02em',
                   cursor: 'pointer',
                 }}
               >
@@ -776,15 +784,15 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
               gap: 8,
               padding: '10px 12px',
               borderRadius: 12,
-              background: 'rgba(248, 250, 252, 0.98)',
-              border: '1px solid rgba(226, 232, 240, 0.95)',
+              background: THEME_PANEL_GLASS,
+              border: '1px solid var(--t-panel-border)',
             }}>
               {runtimeEvent.action ? (
                 <div>
                   <div style={{
                     fontSize: 10,
                     fontWeight: 700,
-                    color: '#64748b',
+                    color: 'var(--t-text-muted)',
                     textTransform: 'uppercase',
                     letterSpacing: '0.04em',
                     marginBottom: 4,
@@ -806,7 +814,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
                   <div style={{
                     fontSize: 10,
                     fontWeight: 700,
-                    color: '#64748b',
+                    color: 'var(--t-text-muted)',
                     textTransform: 'uppercase',
                     letterSpacing: '0.04em',
                   }}>
@@ -835,7 +843,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
                   <div style={{
                     fontSize: 10,
                     fontWeight: 700,
-                    color: '#64748b',
+                    color: 'var(--t-text-muted)',
                     textTransform: 'uppercase',
                     letterSpacing: '0.04em',
                   }}>
@@ -844,11 +852,11 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
                   <div style={{
                     padding: '8px 10px',
                     borderRadius: 10,
-                    background: 'rgba(255,255,255,0.84)',
-                    border: '1px solid rgba(226, 232, 240, 0.95)',
+                    background: THEME_BG_CARD,
+                    border: '1px solid var(--t-panel-border)',
                     fontSize: 11,
                     lineHeight: 1.5,
-                    color: '#334155',
+                    color: 'var(--t-text-secondary)',
                     fontFamily: '"SF Mono", ui-monospace, monospace',
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
@@ -943,8 +951,8 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
               width: 28,
               height: 28,
               borderRadius: 10,
-              background: 'rgba(15, 23, 42, 0.06)',
-              color: '#475569',
+              background: THEME_BG_CARD,
+              color: 'var(--t-text-secondary)',
               flexShrink: 0,
             }}>
               <SlidersHorizontal size={14} strokeWidth={2.1} />
@@ -981,7 +989,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
                   key={detail}
                   style={{
                     fontSize: 11,
-                    color: '#64748b',
+                    color: 'var(--t-text-muted)',
                     lineHeight: 1.45,
                   }}
                 >
@@ -999,7 +1007,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
           }}>
             <span style={{
               fontSize: 10,
-              color: '#94a3b8',
+              color: 'var(--t-text-muted)',
               fontWeight: 700,
               textTransform: 'uppercase',
               letterSpacing: '0.04em',
@@ -1012,8 +1020,8 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
               style={{
                 border: '1px solid rgba(148, 163, 184, 0.16)',
                 borderRadius: 999,
-                background: 'rgba(255,255,255,0.72)',
-                color: '#475569',
+                background: THEME_BG_CARD,
+                color: 'var(--t-text-secondary)',
                 fontSize: 10,
                 fontWeight: 700,
                 letterSpacing: '0.02em',
@@ -1052,7 +1060,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
                   marginLeft: -10,
                   borderRadius: 2,
                   transition: 'border-color 200ms ease, background 200ms ease',
-                  background: activeBlock === idx ? 'rgba(37, 99, 235, 0.04)' : 'transparent',
+                  background: activeBlock === idx ? THEME_ACCENT_SOFT : 'transparent',
                 }}
                 title="Click to play from here"
               >
@@ -1461,11 +1469,11 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
         alignItems: 'center',
         gap: '8px',
         padding: '8px 10px',
-        borderBottom: '1px solid rgba(255, 255, 255, 0.22)',
-        background: 'linear-gradient(180deg, rgba(246,249,255,0.58), rgba(255,255,255,0.18))',
+        borderBottom: '1px solid var(--t-divider)',
+        background: 'linear-gradient(180deg, var(--t-panel) 0%, var(--t-panel-translucent) 100%)',
         backdropFilter: 'blur(24px) saturate(1.25)',
         WebkitBackdropFilter: 'blur(24px) saturate(1.25)',
-        boxShadow: '0 1px 0 rgba(255,255,255,0.42)',
+        boxShadow: 'var(--t-panel-shadow)',
         zIndex: 10,
       }}
     >
@@ -1481,29 +1489,29 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
             width: '100%',
             padding: '7px 9px',
             margin: 0,
-            border: pickerOpen ? '1px solid rgba(37, 99, 235, 0.18)' : '1px solid rgba(148, 163, 184, 0.14)',
+            border: pickerOpen ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
             borderRadius: 15,
             background: pickerOpen
-              ? 'linear-gradient(180deg, rgba(255,255,255,0.99), rgba(239,246,255,0.95))'
-              : 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.92))',
+              ? THEME_ACCENT_SOFT
+              : THEME_PANEL_GLASS,
             cursor: 'pointer',
             textAlign: 'left',
             WebkitTapHighlightColor: 'transparent',
             transition: 'background 180ms ease, border-color 180ms ease, box-shadow 180ms ease',
             boxShadow: pickerOpen
-              ? '0 10px 24px rgba(37, 99, 235, 0.07)'
-              : '0 6px 16px rgba(15, 23, 42, 0.035)',
+              ? `0 10px 24px ${THEME_ACCENT_RING}`
+              : '0 6px 16px rgba(15, 23, 42, 0.08)',
           }}
           onMouseEnter={(e) => {
             if (!pickerOpen) {
-              e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,255,255,0.99), rgba(241,245,255,0.94))';
-              e.currentTarget.style.borderColor = 'rgba(37, 99, 235, 0.12)';
+              e.currentTarget.style.background = THEME_ACCENT_SOFT;
+              e.currentTarget.style.borderColor = THEME_ACCENT_BORDER;
             }
           }}
           onMouseLeave={(e) => {
             if (!pickerOpen) {
-              e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.92))';
-              e.currentTarget.style.borderColor = 'rgba(148, 163, 184, 0.14)';
+              e.currentTarget.style.background = THEME_PANEL_GLASS;
+              e.currentTarget.style.borderColor = 'var(--t-panel-border)';
             }
           }}
           aria-label="Switch session"
@@ -1597,8 +1605,8 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                background: pickerOpen ? 'rgba(37, 99, 235, 0.08)' : 'rgba(15, 23, 42, 0.05)',
-                color: pickerOpen ? '#2563eb' : 'var(--t-text-faint)',
+                background: pickerOpen ? THEME_ACCENT_SOFT_STRONG : 'var(--t-divider-subtle)',
+                color: pickerOpen ? THEME_ACCENT : 'var(--t-text-faint)',
                 flexShrink: 0,
               }}
             >
@@ -1623,11 +1631,11 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
               right: '-4px',
               zIndex: 100,
               borderRadius: '18px',
-              border: '1px solid rgba(37, 99, 235, 0.12)',
-              background: 'linear-gradient(180deg, rgba(255,255,255,0.99), rgba(247,250,255,0.95))',
+              border: `1px solid ${THEME_ACCENT_BORDER}`,
+              background: THEME_PANEL_GLASS,
               backdropFilter: 'blur(40px) saturate(1.6)',
               WebkitBackdropFilter: 'blur(40px) saturate(1.6)',
-              boxShadow: '0 18px 44px rgba(15, 23, 42, 0.14), 0 6px 18px rgba(37, 99, 235, 0.05)',
+              boxShadow: 'var(--t-panel-shadow)',
               padding: '8px',
               maxHeight: '60vh',
               overflowY: 'auto',
@@ -1645,7 +1653,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                 color: 'var(--t-text-muted)',
                 fontSize: 12,
                 fontWeight: 500,
-                background: 'rgba(255,255,255,0.55)',
+                background: THEME_BG_CARD,
               }}>
                 {emptyStateLabel}
               </div>
@@ -1873,18 +1881,18 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
           paddingBottom: 7,
           paddingLeft: 12,
           borderRadius: 999,
-          border: diffIsActive ? '1px solid rgba(37, 99, 235, 0.16)' : '1px solid rgba(148, 163, 184, 0.14)',
+          border: diffIsActive ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
           background: diffIsActive
-            ? 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(239,246,255,0.92))'
-            : 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.92))',
+            ? THEME_ACCENT_SOFT
+            : THEME_BG_CARD,
           color: 'var(--t-text-muted)',
           fontSize: 12,
           fontWeight: 600,
           cursor: 'pointer',
           transition: 'all 150ms ease',
           boxShadow: diffIsActive
-            ? '0 8px 18px rgba(37, 99, 235, 0.07)'
-            : '0 5px 14px rgba(15, 23, 42, 0.035)',
+            ? `0 8px 18px ${THEME_ACCENT_RING}`
+            : '0 5px 14px rgba(15, 23, 42, 0.08)',
         }}
         aria-label="Open diff sheet"
       >
@@ -1899,8 +1907,8 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: diffIsActive ? 'rgba(37, 99, 235, 0.08)' : 'rgba(15, 23, 42, 0.05)',
-            color: diffIsActive ? '#2563eb' : 'var(--t-text-muted)',
+            background: diffIsActive ? THEME_ACCENT_SOFT_STRONG : 'var(--t-divider-subtle)',
+            color: diffIsActive ? THEME_ACCENT : 'var(--t-text-muted)',
           }}
         >
           <SlidersHorizontal size={11} strokeWidth={2} />
@@ -2090,8 +2098,8 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
               gap: 4,
               padding: '4px 10px',
               borderRadius: 10,
-              border: '1px solid rgba(0,0,0,0.08)',
-              background: 'rgba(255,255,255,0.85)',
+              border: '1px solid var(--t-panel-border)',
+              background: THEME_PANEL_GLASS,
               backdropFilter: 'blur(20px) saturate(1.6)',
               WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
               color: 'var(--t-text-secondary)',
@@ -2099,7 +2107,7 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
               fontWeight: 600,
               cursor: 'pointer',
               letterSpacing: '-0.01em',
-              boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+              boxShadow: 'var(--t-panel-shadow)',
               transition: 'all 150ms ease',
             }}
           >
@@ -2161,25 +2169,25 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
       }}
     >
       {showTimeSeparator || groupSummary.separatorLabel ? (
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          marginTop: 8,
-          marginBottom: 2,
-        }}>
-          <div style={{ flex: 1, height: 1, background: 'rgba(148, 163, 184, 0.16)' }} />
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            marginTop: 8,
+            marginBottom: 2,
+          }}>
+          <div style={{ flex: 1, height: 1, background: 'var(--t-divider)' }} />
           <span style={{
             fontSize: 10,
             fontWeight: 700,
-            color: '#94a3b8',
+            color: 'var(--t-text-muted)',
             textTransform: 'uppercase',
             letterSpacing: '0.05em',
             whiteSpace: 'nowrap',
           }}>
             {groupSummary.separatorLabel ?? groupSummary.timeLabel ?? 'run'}
           </span>
-          <div style={{ flex: 1, height: 1, background: 'rgba(148, 163, 184, 0.16)' }} />
+          <div style={{ flex: 1, height: 1, background: 'var(--t-divider)' }} />
         </div>
       ) : null}
 
@@ -2204,8 +2212,8 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
               gap: 6,
               padding: '4px 9px',
               borderRadius: 999,
-              background: 'rgba(37, 99, 235, 0.06)',
-              color: '#2563eb',
+              background: THEME_ACCENT_SOFT,
+              color: THEME_ACCENT,
               fontSize: 10,
               fontWeight: 700,
               textTransform: 'uppercase',
@@ -2218,7 +2226,7 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
             {groupSummary.timeLabel ? (
               <span style={{
                 fontSize: 10,
-                color: '#94a3b8',
+                color: 'var(--t-text-muted)',
                 fontWeight: 600,
               }}>
                 {groupSummary.timeLabel}
@@ -2268,9 +2276,9 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
                       minWidth: 120,
                       padding: '9px 10px',
                       borderRadius: 12,
-                      border: '1px solid rgba(226, 232, 240, 0.95)',
-                      background: expandedSourceId === card.id ? 'rgba(255,255,255,0.94)' : 'rgba(248,250,252,0.82)',
-                      boxShadow: expandedSourceId === card.id ? '0 10px 24px rgba(15, 23, 42, 0.06)' : 'none',
+                      border: '1px solid var(--t-panel-border)',
+                      background: expandedSourceId === card.id ? THEME_PANEL_GLASS : THEME_BG_CARD,
+                      boxShadow: expandedSourceId === card.id ? 'var(--t-panel-shadow)' : 'none',
                       transition: 'transform 180ms ease, box-shadow 180ms ease, background 180ms ease, border-color 180ms ease',
                       cursor: 'pointer',
                       textAlign: 'left',
@@ -2278,13 +2286,13 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
                     }}
                     onMouseEnter={(e) => {
                       e.currentTarget.style.transform = 'translateY(-1px)';
-                      e.currentTarget.style.boxShadow = '0 14px 28px rgba(15, 23, 42, 0.08)';
-                      e.currentTarget.style.background = 'rgba(255,255,255,0.94)';
+                      e.currentTarget.style.boxShadow = 'var(--t-panel-shadow)';
+                      e.currentTarget.style.background = THEME_PANEL_GLASS;
                     }}
                     onMouseLeave={(e) => {
                       e.currentTarget.style.transform = 'translateY(0)';
-                      e.currentTarget.style.boxShadow = expandedSourceId === card.id ? '0 10px 24px rgba(15, 23, 42, 0.06)' : 'none';
-                      e.currentTarget.style.background = expandedSourceId === card.id ? 'rgba(255,255,255,0.94)' : 'rgba(248,250,252,0.82)';
+                      e.currentTarget.style.boxShadow = expandedSourceId === card.id ? 'var(--t-panel-shadow)' : 'none';
+                      e.currentTarget.style.background = expandedSourceId === card.id ? THEME_PANEL_GLASS : THEME_BG_CARD;
                     }}
                   >
                     <span style={{
@@ -2301,7 +2309,7 @@ const AgentTurnGroup = memo(function AgentTurnGroup({
                     </span>
                     <span style={{
                       fontSize: 11,
-                      color: '#334155',
+                      color: 'var(--t-text-secondary)',
                       fontWeight: 600,
                       lineHeight: 1.35,
                     }}>
@@ -2542,9 +2550,9 @@ const ActiveTurnCard = memo(function ActiveTurnCard({
       maxWidth: '92%',
       padding: '12px 14px',
       borderRadius: 18,
-      background: 'linear-gradient(180deg, rgba(255,255,255,0.88), rgba(248,250,252,0.82))',
-      border: '1px solid rgba(37, 99, 235, 0.10)',
-      boxShadow: '0 16px 34px rgba(15, 23, 42, 0.06)',
+      background: 'linear-gradient(180deg, var(--t-panel) 0%, var(--t-panel-translucent) 100%)',
+      border: `1px solid ${THEME_ACCENT_BORDER}`,
+      boxShadow: 'var(--t-panel-shadow)',
       animation: 'sidebarActiveTurnIn 220ms ease-out',
       transition: 'box-shadow 180ms ease, border-color 180ms ease, transform 180ms ease',
     }}>
@@ -2560,8 +2568,8 @@ const ActiveTurnCard = memo(function ActiveTurnCard({
           gap: 6,
           padding: '4px 9px',
           borderRadius: 999,
-          background: 'rgba(37, 99, 235, 0.08)',
-          color: '#2563eb',
+          background: THEME_ACCENT_SOFT,
+          color: THEME_ACCENT,
           fontSize: 10,
           fontWeight: 700,
           textTransform: 'uppercase',
@@ -2574,7 +2582,7 @@ const ActiveTurnCard = memo(function ActiveTurnCard({
         {activityHeadline ? (
           <span style={{
             fontSize: 11,
-            color: '#475569',
+            color: 'var(--t-text-secondary)',
             fontWeight: 600,
             lineHeight: 1.4,
           }}>
@@ -2646,9 +2654,9 @@ const SidebarApprovalCard = memo(function SidebarApprovalCard({
       marginBottom: 10,
       marginLeft: 14,
       borderRadius: 18,
-      background: 'linear-gradient(180deg, rgba(255,255,255,0.92), rgba(248,250,252,0.88))',
-      border: '1px solid rgba(37, 99, 235, 0.10)',
-      boxShadow: '0 16px 34px rgba(15, 23, 42, 0.08)',
+      background: 'linear-gradient(180deg, var(--t-panel) 0%, var(--t-panel-translucent) 100%)',
+      border: `1px solid ${THEME_ACCENT_BORDER}`,
+      boxShadow: 'var(--t-panel-shadow)',
       animation: 'sidebarApprovalIn 220ms ease-out',
     }}>
       <div style={{
@@ -2663,8 +2671,8 @@ const SidebarApprovalCard = memo(function SidebarApprovalCard({
           width: 28,
           height: 28,
           borderRadius: 10,
-          background: 'rgba(37, 99, 235, 0.10)',
-          color: '#2563eb',
+          background: THEME_ACCENT_SOFT,
+          color: THEME_ACCENT,
           flexShrink: 0,
         }}>
           <Sparkles size={15} strokeWidth={2.2} />
@@ -2673,7 +2681,7 @@ const SidebarApprovalCard = memo(function SidebarApprovalCard({
           <div style={{
             fontSize: 12,
             fontWeight: 800,
-            color: '#0f172a',
+            color: 'var(--t-text-strong)',
             textTransform: 'uppercase',
             letterSpacing: '0.04em',
           }}>
@@ -2682,7 +2690,7 @@ const SidebarApprovalCard = memo(function SidebarApprovalCard({
           <div style={{
             marginTop: 2,
             fontSize: 11,
-            color: '#64748b',
+            color: 'var(--t-text-muted)',
             lineHeight: 1.4,
           }}>
             Review pending command or file actions for this session before the run continues.
@@ -2723,9 +2731,9 @@ const SidebarApprovalCard = memo(function SidebarApprovalCard({
               style={{
                 padding: '12px 12px 10px',
                 borderRadius: 14,
-                background: 'rgba(255,255,255,0.9)',
+                background: THEME_BG_CARD,
                 border: `1px solid ${riskTone.border}`,
-                boxShadow: '0 10px 20px rgba(15, 23, 42, 0.04)',
+                boxShadow: '0 10px 20px rgba(15, 23, 42, 0.08)',
               }}
             >
               <div style={{
@@ -2737,7 +2745,7 @@ const SidebarApprovalCard = memo(function SidebarApprovalCard({
                 <span style={{
                   fontSize: 12,
                   fontWeight: 700,
-                  color: '#0f172a',
+                  color: 'var(--t-text)',
                   flex: 1,
                   letterSpacing: '-0.01em',
                 }}>
@@ -2745,7 +2753,7 @@ const SidebarApprovalCard = memo(function SidebarApprovalCard({
                 </span>
                 <span style={{
                   fontSize: 10,
-                  color: '#94a3b8',
+                  color: 'var(--t-text-muted)',
                   fontWeight: 700,
                   letterSpacing: '0.02em',
                 }}>
@@ -2769,7 +2777,7 @@ const SidebarApprovalCard = memo(function SidebarApprovalCard({
 
               <div style={{
                 fontSize: 12,
-                color: '#475569',
+                color: 'var(--t-text-secondary)',
                 lineHeight: 1.55,
                 marginBottom: approval.command ? 8 : 10,
               }}>
@@ -3233,8 +3241,8 @@ export const DesktopComposePane = memo(function DesktopComposePane({
             gap: 6,
             padding: 10,
             borderRadius: 14,
-            border: '1px solid rgba(37, 99, 235, 0.12)',
-            background: 'rgba(255,255,255,0.86)',
+            border: `1px solid ${THEME_ACCENT_BORDER}`,
+            background: THEME_PANEL_GLASS,
           }}>
             {slashSuggestions.slice(0, 6).map((item) => (
               <button
@@ -3254,7 +3262,7 @@ export const DesktopComposePane = memo(function DesktopComposePane({
                   padding: '8px 10px',
                   borderRadius: 10,
                   border: 'none',
-                  background: 'rgba(37, 99, 235, 0.04)',
+                  background: THEME_ACCENT_SOFT,
                   color: 'var(--t-text)',
                   cursor: 'pointer',
                   textAlign: 'left',
@@ -3310,7 +3318,7 @@ export const DesktopComposePane = memo(function DesktopComposePane({
                 padding: '0 0.82rem',
                 borderRadius: 999,
                 border: '2px solid #ef4444',
-                background: stopping ? '#fef2f2' : 'rgba(239, 68, 68, 0.06)',
+                background: stopping ? 'rgba(127, 29, 29, 0.16)' : 'rgba(239, 68, 68, 0.10)',
                 color: '#ef4444',
                 fontSize: '0.84rem',
                 fontWeight: 700,
@@ -3344,11 +3352,11 @@ export const DesktopComposePane = memo(function DesktopComposePane({
                 padding: '0 0.82rem',
                 borderRadius: 999,
                 border: 'none',
-                background: chatSendDisabled ? 'var(--t-text-faint)' : '#ef4444',
+                background: chatSendDisabled ? 'var(--t-divider-strong)' : THEME_ACCENT,
                 color: chatSendDisabled ? 'var(--t-text-muted)' : '#ffffff',
                 fontSize: '0.84rem',
                 fontWeight: 700,
-                boxShadow: chatSendDisabled ? 'none' : '0 4px 14px rgba(239, 68, 68, 0.4)',
+                boxShadow: chatSendDisabled ? 'none' : `0 4px 14px ${THEME_ACCENT_RING}`,
                 cursor: chatSendDisabled ? 'default' : 'pointer',
               }}
             >
