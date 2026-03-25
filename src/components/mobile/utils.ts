@@ -825,7 +825,7 @@ export function buildProjectGroups(
 ): ProjectGroup[] {
   const isRelevant = (session: SessionSummary) => {
     if (session.isCurrentSession) return true;
-    if (session.id === selectedSession?.id) return true;
+    if (session.sessionKey === selectedSession?.sessionKey) return true;
 
     const ageText = session.lastEventAt ?? '';
     const hoursMatch = ageText.match(/^(\d+)h/);
@@ -833,32 +833,10 @@ export function buildProjectGroups(
     const ageHours = daysMatch ? parseInt(daysMatch[1], 10) * 24 : hoursMatch ? parseInt(hoursMatch[1], 10) : 0;
     const isStale = ageHours > 4;
 
-    if (session.runtime === 'claude-code') {
-      // Claude Code sessions are already filtered to live PIDs by fleet
-      return session.status === 'running';
-    }
-
-    if (session.runtime === 'codex') {
-      const sourceLabel = (session.runtimeSurface?.sourceLabel ?? '').toLowerCase();
-      const ownership = session.runtimeSurface?.ownership ?? '';
-      if (ownership === 'discovered') {
-        return session.status === 'running'
-          || session.status === 'reviewing'
-          || sourceLabel.includes('live pid');
-      }
-      if (ownership === 'owned') {
-        return session.status === 'running'
-          || session.status === 'reviewing'
-          || session.status === 'waiting'
-          || session.status === 'failed'
-          || sourceLabel.includes('active pid')
-          || sourceLabel.includes('ready for resume')
-          || sourceLabel.includes('last finished');
-      }
-      return session.status === 'running'
-        || session.status === 'reviewing'
-        || session.status === 'waiting'
-        || session.status === 'failed';
+    if (session.runtime === 'claude-code' || session.runtime === 'codex') {
+      // Desktop now scopes these surfaces to IDE-opened sessions only,
+      // so keep them in the picker even when they are briefly idle.
+      return true;
     }
 
     if (isStale) return false;
