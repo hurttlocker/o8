@@ -266,6 +266,35 @@ function agentCardSurfaceLabel(agent: AgentDetail, repo: string): string {
   return firstSurfaceWord;
 }
 
+function normalizeAgentTaskSummary(task?: string | null) {
+  const raw = task?.trim();
+  if (!raw) return '';
+
+  const cleaned = raw
+    .replace(/^Live Codex terminal verified via pid\/log mapping(?: on [^.]+)?\.\s*/i, '')
+    .replace(/^Live Codex terminal detected(?: on [^.]+)?\.\s*/i, '')
+    .replace(/^Recent Codex session recovered from local runtime history\.\s*/i, '')
+    .replace(/^Historical Codex session recovered from local runtime history\.\s*/i, '')
+    .replace(/^IDE-owned Codex session launched and waiting for its first thread id\.\s*/i, '')
+    .replace(/^IDE-owned Codex session is ready for resume after an interrupted run\.\s*/i, '')
+    .replace(/^IDE-owned Codex session is ready for a corrective follow-up after a failed run\.\s*/i, '')
+    .replace(/^IDE-owned Codex session ready for the next input via resume\.\s*/i, '')
+    .replace(/^IDE-owned Codex session is idle\.\s*/i, '')
+    .replace(/^Operator marked this owned result resolved\.\s*/i, '')
+    .replace(/^Mirroring the live Q ↔ Mister conversation, not spawning a fresh session\.\s*/i, '')
+    .trim();
+
+  if (!cleaned) return raw;
+  return cleaned.charAt(0).toLowerCase() === cleaned.charAt(0)
+    ? `${cleaned.charAt(0).toUpperCase()}${cleaned.slice(1)}`
+    : cleaned;
+}
+
+function agentCardFocusLine(agent: AgentDetail | null, fallback: string) {
+  const summary = normalizeAgentTaskSummary(agent?.currentTask);
+  return summary || fallback;
+}
+
 // formatModelLabel imported from @/lib/format
 
 /** Smart model attribution for expanded agent cards */
@@ -963,12 +992,14 @@ const AgentCard = memo(function AgentCard({
         agent.localDiff && ((agent.localDiff.additions ?? 0) > 0 || (agent.localDiff.deletions ?? 0) > 0)
       ))?.localDiff
       ?? null;
-  const focusLine = primaryAgent?.currentTask?.trim()
-    || primaryPr?.title
-    || branchLabel
-    || (activeAgents.length > 0
-      ? `${activeAgents.length} active ${activeAgents.length === 1 ? 'agent' : 'agents'} in this workspace`
-      : `${group.agents.length} connected ${group.agents.length === 1 ? 'surface' : 'surfaces'}`);
+  const focusLine = agentCardFocusLine(
+    primaryAgent,
+    primaryPr?.title
+      || branchLabel
+      || (activeAgents.length > 0
+        ? `${activeAgents.length} active ${activeAgents.length === 1 ? 'agent' : 'agents'} in this workspace`
+        : `${group.agents.length} connected ${group.agents.length === 1 ? 'surface' : 'surfaces'}`),
+  );
   const chipTone = blockedAgents.length > 0
     ? '#ef4444'
     : reviewingAgents.length > 0
@@ -4508,6 +4539,27 @@ export const AgentPanel = memo(function AgentPanel({
         </SidebarSection>
 
         <SidebarSection
+          title="Repositories"
+          icon={FolderOpen}
+          summary={currentLaunchRepoPath ? 'Current repository is pinned at the top of the list.' : 'Bring local repositories into Cortex and launch isolated work.'}
+          accent="#2563eb"
+          open={reposOpen}
+          onToggle={() => setReposOpen((current) => !current)}
+        >
+          <RepoRegistrySection
+            onLaunchComplete={() => { fetchNowRef.current(); }}
+            onSelectSession={onSelectSession}
+            onSelectPR={onSelectPR}
+            onLaunchWorkspaceAgent={onLaunchWorkspaceAgent}
+            activeRepoLocalPath={currentLaunchRepoPath}
+            sectionOpen={reposOpen}
+            onSectionOpenChange={setReposOpen}
+            launchIntent={launchIntent}
+            hideHeader
+          />
+        </SidebarSection>
+
+        <SidebarSection
           title="Changes"
           icon={FolderOpen}
           count={changedFiles.size}
@@ -4607,27 +4659,6 @@ export const AgentPanel = memo(function AgentPanel({
               }} />
             </div>
           </div>
-        </SidebarSection>
-
-        <SidebarSection
-          title="Repositories"
-          icon={FolderOpen}
-          summary={currentLaunchRepoPath ? 'Current repository is pinned at the top of the list.' : 'Bring local repositories into Cortex and launch isolated work.'}
-          accent="#2563eb"
-          open={reposOpen}
-          onToggle={() => setReposOpen((current) => !current)}
-        >
-          <RepoRegistrySection
-            onLaunchComplete={() => { fetchNowRef.current(); }}
-            onSelectSession={onSelectSession}
-            onSelectPR={onSelectPR}
-            onLaunchWorkspaceAgent={onLaunchWorkspaceAgent}
-            activeRepoLocalPath={currentLaunchRepoPath}
-            sectionOpen={reposOpen}
-            onSectionOpenChange={setReposOpen}
-            launchIntent={launchIntent}
-            hideHeader
-          />
         </SidebarSection>
       </div>
 
