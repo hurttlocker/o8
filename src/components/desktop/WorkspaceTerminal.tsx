@@ -2,11 +2,13 @@
 /* eslint-disable @next/next/no-img-element -- terminal image previews intentionally use raw panel-served URLs */
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio, ArrowUp, ArrowDown, Square, AlertCircle } from 'lucide-react';
+import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio, ArrowUp, ArrowDown, Square, AlertCircle, LifeBuoy, RotateCcw } from 'lucide-react';
 import LLMChat, { ChainOfThought, MessageBubble, type LLMMessage } from './LLMChat';
 import { IssueLinkPickerModal, buildLinkedIssueContext, type LinkedIssueRef } from './IssueLinkPicker';
-import { saveTabState, loadTabState, checkAliveSessions, type PersistedTabState } from '@/lib/terminal/tab-state';
+import { useTheme } from '@/lib/theme/context';
+import { saveTabState, loadTabState, checkAliveSessions, type PersistedChatCheckpoint, type PersistedTabState } from '@/lib/terminal/tab-state';
 import type { MobileTranscriptEntry, MobileTranscriptSource, MobileTranscriptThinkingStep, MobileTranscriptToolCall } from '@/lib/mobile/types';
+import { deriveWorkflowStage } from '@/lib/workflows/status';
 import {
   type DetectedLocalhostPreview,
   PREVIEW_HOST_MESSAGE_SOURCE,
@@ -29,8 +31,10 @@ export interface TerminalTab {
   chatRuntime?: 'codex' | 'claude-code' | 'openclaw';
   chatSessionKey?: string; // OpenClaw session key or CLI session ID
   chatModel?: string;
+  chatContinueLatest?: boolean;
   chatDraftInjection?: { id: string; text: string; autoSend?: boolean };
   chatMessages?: MobileTranscriptEntry[];
+  chatCheckpoints?: PersistedChatCheckpoint[];
   linkedIssue?: LinkedIssueRef | null;
 }
 
@@ -101,6 +105,12 @@ interface RegisteredRepo {
   remoteUrl?: string;
 }
 
+function shortenPath(value: string) {
+  const userPath = value.replace(/^\/Users\/[^/]+/, '~');
+  if (userPath !== value) return userPath;
+  return value.replace(/^\/home\/[^/]+/, '~');
+}
+
 interface WorkspaceCliModelOption {
   id: string;
   label: string;
@@ -124,6 +134,48 @@ const CLI_SUGGESTED_PROMPTS = [
   { icon: '🧪', text: 'Tell me what tests I should run next', description: 'Use the current branch and recent changes as context' },
   { icon: '📝', text: 'Explain what changed on this branch', description: 'Read the local diff and summarize the work in progress' },
 ];
+
+const THEME_ACCENT = 'var(--t-accent, #2563eb)';
+const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
+const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(37, 99, 235, 0.14))';
+const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
+const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
+const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
+const THEME_PANEL = 'var(--t-panel)';
+const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
+
+function readThemeColor(name: string, fallback: string) {
+  if (typeof window === 'undefined') return fallback;
+  const value = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function buildXtermTheme() {
+  return {
+    background: readThemeColor('--t-panel', '#30353c'),
+    foreground: readThemeColor('--t-text', '#eef3f8'),
+    cursor: readThemeColor('--t-accent', '#7aa2ff'),
+    cursorAccent: readThemeColor('--t-panel', '#30353c'),
+    selectionBackground: readThemeColor('--t-accent-soft-strong', 'rgba(122, 162, 255, 0.2)'),
+    selectionForeground: readThemeColor('--t-text-strong', '#fbfdff'),
+    black: '#151a1f',
+    red: '#ff6b6b',
+    green: '#4ade80',
+    yellow: '#fbbf24',
+    blue: readThemeColor('--t-accent', '#7aa2ff'),
+    magenta: '#c084fc',
+    cyan: '#67e8f9',
+    white: '#dbe4ee',
+    brightBlack: '#6b7280',
+    brightRed: '#f87171',
+    brightGreen: '#86efac',
+    brightYellow: '#fcd34d',
+    brightBlue: '#93c5fd',
+    brightMagenta: '#d8b4fe',
+    brightCyan: '#a5f3fc',
+    brightWhite: '#fbfdff',
+  };
+}
 
 /** Small colored dot for tab/picker items */
 function AgentDot({ color, size = 8 }: { color: string; size?: number }) {
@@ -191,18 +243,18 @@ function WorkspaceCliModelPicker({
           paddingLeft: 10,
           paddingRight: 10,
           borderRadius: 999,
-          background: '#ffffff',
-          border: '1px solid #e2e8f0',
+          background: THEME_BG_CARD,
+          border: '1px solid var(--t-panel-border)',
           fontSize: 12,
           fontWeight: 600,
-          color: '#475569',
+          color: 'var(--t-text-secondary)',
           cursor: disabled ? 'default' : 'pointer',
           opacity: disabled ? 0.6 : 1,
         }}
       >
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: selected.color }} />
         {selected.label}
-        <ChevronDown size={11} style={{ color: '#94a3b8', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 150ms ease' }} />
+        <ChevronDown size={11} style={{ color: 'var(--t-text-muted)', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 150ms ease' }} />
       </button>
 
       {open && (
@@ -214,11 +266,11 @@ function WorkspaceCliModelPicker({
             right: dropPos.right,
             zIndex: 9999,
             minWidth: 220,
-            background: 'white',
-            border: '1px solid #e2e8f0',
+            background: THEME_PANEL_GLASS,
+            border: '1px solid var(--t-panel-border)',
             borderRadius: 12,
             overflow: 'hidden',
-            boxShadow: '0 -8px 40px rgba(0, 0, 0, 0.12)',
+            boxShadow: 'var(--t-panel-shadow)',
           }}
         >
           {models.map((model) => (
@@ -236,14 +288,14 @@ function WorkspaceCliModelPicker({
                 paddingLeft: 12,
                 paddingRight: 12,
                 border: 'none',
-                background: model.id === selected.id ? '#f8fafc' : 'transparent',
-                color: '#1e293b',
+                background: model.id === selected.id ? THEME_ACCENT_SOFT : 'transparent',
+                color: 'var(--t-text)',
                 fontSize: 13,
                 cursor: 'pointer',
                 textAlign: 'left',
               }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = '#f1f5f9'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = model.id === selected.id ? '#f8fafc' : 'transparent'; }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = THEME_ACCENT_SOFT; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = model.id === selected.id ? THEME_ACCENT_SOFT : 'transparent'; }}
             >
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: model.color, flexShrink: 0 }} />
               <span style={{ fontWeight: 500 }}>{model.label}</span>
@@ -284,6 +336,7 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
   { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible },
   ref,
 ) {
+  const { themeId } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const termRef = useRef<any>(null);
@@ -376,30 +429,7 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
           allowTransparency: true,
           allowProposedApi: true,
           scrollback: 10000,
-          theme: {
-            background: '#ffffff',
-            foreground: '#1e293b',
-            cursor: '#dc2626',
-            cursorAccent: '#ffffff',
-            selectionBackground: 'rgba(59, 130, 246, 0.18)',
-            selectionForeground: '#0f172a',
-            black: '#1e293b',
-            red: '#dc2626',
-            green: '#16a34a',
-            yellow: '#ca8a04',
-            blue: '#2563eb',
-            magenta: '#9333ea',
-            cyan: '#0891b2',
-            white: '#f1f5f9',
-            brightBlack: '#64748b',
-            brightRed: '#ef4444',
-            brightGreen: '#22c55e',
-            brightYellow: '#eab308',
-            brightBlue: '#3b82f6',
-            brightMagenta: '#a855f7',
-            brightCyan: '#06b6d4',
-            brightWhite: '#ffffff',
-          },
+          theme: buildXtermTheme(),
         });
 
         const fitAddon = new FitAddon();
@@ -460,7 +490,7 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
       if (termRef.current) { termRef.current.dispose(); termRef.current = null; }
       fitAddonRef.current = null;
     };
-  }, [tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach]);
+  }, [themeId, tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach]);
 
   if (error) {
     return (
@@ -490,7 +520,7 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
       width: '100%',
       display: visible ? 'flex' : 'none',
       flexDirection: 'column',
-      background: '#ffffff',
+      background: THEME_PANEL,
       borderRadius: 0,
       overflow: 'hidden',
     }}>
@@ -501,7 +531,7 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
           paddingBottom: 8,
           paddingLeft: 12,
           paddingRight: 12,
-          borderBottom: '1px solid #f1f5f9',
+          borderBottom: '1px solid var(--t-divider)',
           flexShrink: 0,
         }}>
           <img
@@ -514,7 +544,7 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
               objectFit: 'contain',
             }}
           />
-          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, fontFamily: 'ui-monospace, monospace' }}>
+          <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 4, fontFamily: 'ui-monospace, monospace' }}>
             {img.filename}
           </div>
         </div>
@@ -525,7 +555,7 @@ const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermP
         style={{
           flex: 1,
           width: '100%',
-          background: '#ffffff',
+          background: THEME_PANEL,
           paddingTop: 2,
           paddingLeft: 2,
         }}
@@ -1320,9 +1350,10 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   }, [onUpdateMessages, tabId]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: '#ffffff', position: 'relative' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'var(--t-bg-gradient)', position: 'relative' }}>
       <div
         ref={scrollRef}
+        className="cortex-themed-scroll"
         onScroll={handleScroll}
         style={{
           flex: 1,
@@ -1331,7 +1362,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
           paddingBottom: 24,
           paddingLeft: 24,
           paddingRight: 24,
-          background: '#ffffff',
+          background: 'transparent',
         }}
       >
         {visibleMessages.length === 0 && !agentRunning ? (
@@ -1354,18 +1385,18 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                 width: 48,
                 height: 48,
                 borderRadius: 14,
-                background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
+                background: `linear-gradient(135deg, ${THEME_ACCENT} 0%, #8b5cf6 100%)`,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 4px 16px rgba(59, 130, 246, 0.2)',
+                boxShadow: `0 4px 16px ${THEME_ACCENT_RING}`,
               }}>
                 <MessageSquare size={24} style={{ color: 'white' }} />
               </div>
               <div style={{
                 fontSize: 24,
                 fontWeight: 600,
-                color: '#0f172a',
+                color: 'var(--t-text-strong)',
                 letterSpacing: '-0.02em',
               }}>
                 {(() => {
@@ -1376,7 +1407,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
               </div>
               <div style={{
                 fontSize: 14,
-                color: '#94a3b8',
+                color: 'var(--t-text-muted)',
                 textAlign: 'center',
                 maxWidth: 420,
                 lineHeight: '1.5',
@@ -1408,8 +1439,8 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                     paddingBottom: 14,
                     paddingLeft: 14,
                     paddingRight: 14,
-                    background: '#f8fafc',
-                    border: '1px solid #e2e8f0',
+                    background: THEME_BG_CARD,
+                    border: '1px solid var(--t-panel-border)',
                     borderRadius: 12,
                     cursor: 'pointer',
                     textAlign: 'left',
@@ -1417,24 +1448,24 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                     animation: `llmFadeIn 400ms ease-out ${100 + i * 50}ms both`,
                   }}
                   onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = '#3b82f6';
-                    e.currentTarget.style.background = '#f0f9ff';
+                    e.currentTarget.style.borderColor = THEME_ACCENT_BORDER;
+                    e.currentTarget.style.background = THEME_ACCENT_SOFT;
                     e.currentTarget.style.transform = 'translateY(-1px)';
-                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(59, 130, 246, 0.08)';
+                    e.currentTarget.style.boxShadow = `0 2px 8px ${THEME_ACCENT_RING}`;
                   }}
                   onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = '#e2e8f0';
-                    e.currentTarget.style.background = '#f8fafc';
+                    e.currentTarget.style.borderColor = 'var(--t-panel-border)';
+                    e.currentTarget.style.background = THEME_BG_CARD;
                     e.currentTarget.style.transform = 'translateY(0)';
                     e.currentTarget.style.boxShadow = 'none';
                   }}
                 >
                   <span style={{ fontSize: 18, lineHeight: '1', flexShrink: 0 }}>{prompt.icon}</span>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1e293b', lineHeight: '1.3' }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text)', lineHeight: '1.3' }}>
                       {prompt.text}
                     </span>
-                    <span style={{ fontSize: 11, color: '#94a3b8', lineHeight: '1.4' }}>
+                    <span style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: '1.4' }}>
                       {prompt.description}
                     </span>
                   </div>
@@ -1513,10 +1544,10 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
               minHeight: 34,
               padding: '7px 12px',
               borderRadius: 999,
-              border: '1px solid rgba(96, 165, 250, 0.22)',
-              background: 'linear-gradient(180deg, rgba(239,246,255,0.94), rgba(191,219,254,0.72))',
-              color: '#1d4ed8',
-              boxShadow: '0 12px 28px rgba(37, 99, 235, 0.16)',
+              border: `1px solid ${THEME_ACCENT_BORDER}`,
+              background: THEME_PANEL_GLASS,
+              color: THEME_ACCENT,
+              boxShadow: `0 12px 28px ${THEME_ACCENT_RING}`,
               backdropFilter: 'blur(18px)',
               WebkitBackdropFilter: 'blur(18px)',
               cursor: 'pointer',
@@ -1536,16 +1567,16 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
         paddingBottom: 16,
         paddingLeft: 24,
         paddingRight: 24,
-        borderTop: '1px solid #f1f5f9',
-        background: '#ffffff',
+        borderTop: '1px solid var(--t-divider)',
+        background: 'transparent',
       }}>
         <div style={{
           maxWidth: 720,
           marginLeft: 'auto',
           marginRight: 'auto',
-          border: '1px solid #e2e8f0',
+          border: '1px solid var(--t-panel-border)',
           borderRadius: 18,
-          background: '#fafafa',
+          background: THEME_PANEL_GLASS,
           transition: 'border-color 200ms, box-shadow 200ms',
           overflow: 'hidden',
         }}>
@@ -1576,7 +1607,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                 border: 'none',
                 outline: 'none',
                 background: 'transparent',
-                color: '#1e293b',
+                color: 'var(--t-text)',
                 fontSize: 14,
                 fontFamily: '-apple-system, system-ui, sans-serif',
                 lineHeight: '1.5',
@@ -1610,7 +1641,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                   borderRadius: 8,
                   border: 'none',
                   background: 'transparent',
-                  color: '#cbd5e1',
+                  color: 'var(--t-text-faint)',
                   cursor: 'default',
                 }}
                 title="Attachments coming soon"
@@ -1619,7 +1650,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
               </button>
               <span style={{
                 fontSize: 10,
-                color: '#cbd5e1',
+                color: 'var(--t-text-faint)',
                 fontFamily: '-apple-system, system-ui, sans-serif',
               }}>
                 CLI session
@@ -1635,11 +1666,11 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                   minHeight: 28,
                   padding: '0 10px',
                   borderRadius: 999,
-                  border: linkedIssue ? '1px solid rgba(96, 165, 250, 0.22)' : '1px solid rgba(148, 163, 184, 0.16)',
+                  border: linkedIssue ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
                   background: linkedIssue
-                    ? 'linear-gradient(180deg, rgba(239,246,255,0.94), rgba(191,219,254,0.72))'
-                    : 'rgba(255,255,255,0.72)',
-                  color: linkedIssue ? '#1d4ed8' : '#64748b',
+                    ? THEME_ACCENT_SOFT
+                    : THEME_BG_CARD,
+                  color: linkedIssue ? THEME_ACCENT : 'var(--t-text-secondary)',
                   cursor: 'pointer',
                   fontSize: 11,
                   fontWeight: 700,
@@ -1663,7 +1694,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                 width: 6,
                 height: 6,
                 borderRadius: '50%',
-                background: agentRunning ? '#22c55e' : '#d1d5db',
+                background: agentRunning ? '#22c55e' : 'var(--t-divider-strong)',
               }} />
 
               {agentRunning ? (
@@ -1700,8 +1731,8 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                     height: 32,
                     border: 'none',
                     borderRadius: 10,
-                    background: draft.trim() ? '#1e293b' : '#e2e8f0',
-                    color: draft.trim() ? '#ffffff' : '#94a3b8',
+                    background: draft.trim() ? THEME_ACCENT : 'var(--t-divider-strong)',
+                    color: draft.trim() ? '#ffffff' : 'var(--t-text-faint)',
                     cursor: draft.trim() ? 'pointer' : 'default',
                     flexShrink: 0,
                     transition: 'all 150ms',
@@ -1910,25 +1941,12 @@ function parseWorkspaceTaskLabel(label: string) {
 function inferWorkspaceTaskState(tab: TerminalTab) {
   const messages = tab.chatMessages ?? [];
   const latestAssistant = [...messages].reverse().find((entry) => entry.role === 'assistant' || entry.role === 'system');
-  const latestText = latestAssistant?.text?.toLowerCase() ?? '';
-  const ageMs = Date.now() - tab.lastActivity;
-
-  if ((tab.chatDraftInjection?.autoSend ?? false) && messages.length === 0) {
-    return { label: 'Queued', color: '#d97706', background: 'rgba(245, 158, 11, 0.12)' };
-  }
-  if (latestText && /(blocked|unable|failed|error|not ready|missing|broken)/.test(latestText)) {
-    return { label: 'Blocked', color: '#dc2626', background: 'rgba(239, 68, 68, 0.12)' };
-  }
-  if (latestText && /(ready for review|ready to merge|ready for merge|completed|complete\b|done\b|no file edits)/.test(latestText)) {
-    return { label: 'Ready', color: '#2563eb', background: 'rgba(37, 99, 235, 0.12)' };
-  }
-  if (messages.length > 0 && ageMs < 20_000) {
-    return { label: 'Working', color: '#16a34a', background: 'rgba(34, 197, 94, 0.12)' };
-  }
-  if (messages.length > 0) {
-    return { label: 'Waiting', color: '#64748b', background: 'rgba(148, 163, 184, 0.12)' };
-  }
-  return null;
+  return deriveWorkflowStage({
+    autoQueued: tab.chatDraftInjection?.autoSend ?? false,
+    latestText: latestAssistant?.text ?? '',
+    lastActivityAt: tab.lastActivity,
+    hasMessages: messages.length > 0,
+  });
 }
 
 const TabBar = memo(function TabBar({
@@ -1985,8 +2003,8 @@ const TabBar = memo(function TabBar({
       alignItems: 'stretch',
       height: 36,
       marginTop: 0,
-      background: '#f8fafc',
-      borderBottom: 'none',
+      background: 'var(--t-chrome)',
+      borderBottom: '1px solid var(--t-divider)',
       flexShrink: 0,
       overflow: 'visible',
       zIndex: 10,
@@ -2017,20 +2035,20 @@ const TabBar = memo(function TabBar({
                 paddingLeft: 12,
                 height: taskMeta ? 40 : '100%',
                 border: 'none',
-                borderRight: '1px solid #e2e8f0',
-                background: isActive ? '#ffffff' : 'transparent',
-                color: isActive ? '#0f172a' : '#64748b',
+                borderRight: '1px solid var(--t-divider)',
+                background: isActive ? 'var(--t-panel-translucent)' : 'transparent',
+                color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
                 fontSize: 12,
                 fontWeight: isActive ? 600 : 400,
                 fontFamily: 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
                 transition: 'background 100ms, color 100ms',
-                borderBottom: isActive ? '2px solid #93c5fd' : '2px solid transparent',
+                borderBottom: isActive ? `2px solid ${THEME_ACCENT}` : '2px solid transparent',
               }}
             >
               {tab.kind === 'llm-chat' ? (
-                <MessageSquare size={12} style={{ color: '#3b82f6' }} />
+                <MessageSquare size={12} style={{ color: THEME_ACCENT }} />
               ) : tab.kind === 'chat' ? (
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={
                   tab.chatRuntime === 'codex' ? '#10b981' : tab.chatRuntime === 'claude-code' ? '#8b5cf6' : '#ef4444'
@@ -2061,9 +2079,9 @@ const TabBar = memo(function TabBar({
                         padding: '1px 6px',
                         borderRadius: 999,
                         background: runtimeTag === 'Codex' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(139, 92, 246, 0.12)',
-                        color: runtimeTag === 'Codex' ? '#047857' : '#7c3aed',
-                        fontSize: 10,
-                        fontWeight: 700,
+                    color: runtimeTag === 'Codex' ? '#047857' : '#7c3aed',
+                    fontSize: 10,
+                    fontWeight: 700,
                         letterSpacing: '0.01em',
                       }}>
                         {runtimeTag}
@@ -2102,7 +2120,7 @@ const TabBar = memo(function TabBar({
                     height: 16,
                     borderRadius: 4,
                     marginLeft: 4,
-                    color: '#475569',
+                    color: 'var(--t-text-secondary)',
                     cursor: 'pointer',
                     transition: 'background 100ms, color 100ms',
                   }}
@@ -2140,13 +2158,13 @@ const TabBar = memo(function TabBar({
             paddingLeft: 10,
             border: 'none',
             background: 'transparent',
-            color: '#94a3b8',
+            color: 'var(--t-text-muted)',
             fontSize: 12,
             cursor: 'pointer',
             transition: 'color 100ms',
           }}
-          onMouseEnter={(e) => { (e.target as HTMLElement).style.color = '#3b82f6'; }}
-          onMouseLeave={(e) => { (e.target as HTMLElement).style.color = '#94a3b8'; }}
+          onMouseEnter={(e) => { (e.target as HTMLElement).style.color = THEME_ACCENT; }}
+          onMouseLeave={(e) => { (e.target as HTMLElement).style.color = 'var(--t-text-muted)'; }}
         >
           <Plus size={14} />
           <ChevronDown size={10} />
@@ -2161,11 +2179,11 @@ const TabBar = memo(function TabBar({
             zIndex: 9000,
             marginTop: 4,
             minWidth: 220,
-            background: '#ffffff',
-            border: '1px solid #e2e8f0',
+            background: THEME_PANEL_GLASS,
+            border: '1px solid var(--t-panel-border)',
             borderRadius: 10,
             overflow: 'hidden',
-            boxShadow: '0 12px 40px rgba(0, 0, 0, 0.12)',
+            boxShadow: 'var(--t-panel-shadow)',
           }}>
             {/* Step 1: Main menu — 3 clear choices */}
             {pickerStep === 'main' && (<>
@@ -2188,26 +2206,26 @@ const TabBar = memo(function TabBar({
                   paddingLeft: 12,
                   border: 'none',
                   background: 'transparent',
-                  color: '#1e293b',
+                  color: 'var(--t-text)',
                   fontSize: 13,
                   fontFamily: '-apple-system, system-ui, sans-serif',
                   cursor: 'pointer',
                   textAlign: 'left',
                   transition: 'background 100ms',
                 }}
-                onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                onMouseEnter={(e) => { (e.currentTarget).style.background = THEME_ACCENT_SOFT; }}
                 onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
               >
                 <span style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <MessageSquare size={14} style={{ color: '#3b82f6' }} />
+                  <MessageSquare size={14} style={{ color: THEME_ACCENT }} />
                 </span>
                 <div>
                   <div style={{ fontWeight: 500 }}>New Chat</div>
-                  <div style={{ fontSize: 11, color: '#94a3b8' }}>Direct LLM conversation</div>
+                  <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Direct LLM conversation</div>
                 </div>
               </button>
 
-              <div style={{ height: 1, background: '#f1f5f9' }} />
+              <div style={{ height: 1, background: 'var(--t-divider)' }} />
 
               {/* CLI Terminal — cascading submenu */}
               <button
@@ -2224,24 +2242,24 @@ const TabBar = memo(function TabBar({
                   paddingLeft: 12,
                   border: 'none',
                   background: 'transparent',
-                  color: '#1e293b',
+                  color: 'var(--t-text)',
                   fontSize: 13,
                   fontFamily: '-apple-system, system-ui, sans-serif',
                   cursor: 'pointer',
                   textAlign: 'left',
                   transition: 'background 100ms',
                 }}
-                onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                onMouseEnter={(e) => { (e.currentTarget).style.background = THEME_ACCENT_SOFT; }}
                 onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
               >
                 <span style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <TerminalIcon size={14} style={{ color: '#64748b' }} />
+                  <TerminalIcon size={14} style={{ color: 'var(--t-text-secondary)' }} />
                 </span>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 500 }}>CLI Terminal</div>
-                  <div style={{ fontSize: 11, color: '#94a3b8' }}>Shell or agent CLI</div>
+                  <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Shell or agent CLI</div>
                 </div>
-                <ChevronRight size={12} style={{ color: '#94a3b8' }} />
+                <ChevronRight size={12} style={{ color: 'var(--t-text-muted)' }} />
               </button>
 
               {/* CLI Session — cascading submenu */}
@@ -2259,14 +2277,14 @@ const TabBar = memo(function TabBar({
                   paddingLeft: 12,
                   border: 'none',
                   background: 'transparent',
-                  color: '#1e293b',
+                  color: 'var(--t-text)',
                   fontSize: 13,
                   fontFamily: '-apple-system, system-ui, sans-serif',
                   cursor: 'pointer',
                   textAlign: 'left',
                   transition: 'background 100ms',
                 }}
-                onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                onMouseEnter={(e) => { (e.currentTarget).style.background = THEME_ACCENT_SOFT; }}
                 onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
               >
                 <span style={{ width: 20, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -2274,9 +2292,9 @@ const TabBar = memo(function TabBar({
                 </span>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 500 }}>CLI Session</div>
-                  <div style={{ fontSize: 11, color: '#94a3b8' }}>Agent conversation</div>
+                  <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Agent conversation</div>
                 </div>
-                <ChevronRight size={12} style={{ color: '#94a3b8' }} />
+                <ChevronRight size={12} style={{ color: 'var(--t-text-muted)' }} />
               </button>
             </>)}
 
@@ -3302,7 +3320,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        background: '#ffffff',
+        background: 'var(--t-bg-gradient)',
       }}>
         {/* Localhost preview pane — slides in when dev servers detected */}
         {hasPreviews && (
@@ -3338,7 +3356,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             style={{
               height: 8,
               cursor: 'row-resize',
-              background: isDragging ? '#93c5fd' : '#e2e8f0',
+              background: isDragging ? THEME_ACCENT_SOFT_STRONG : 'var(--t-divider)',
               flexShrink: 0,
               display: 'flex',
               alignItems: 'center',
@@ -3351,12 +3369,55 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
               width: 32,
               height: 3,
               borderRadius: 2,
-              background: isDragging ? '#3b82f6' : '#94a3b8',
+              background: isDragging ? THEME_ACCENT : 'var(--t-text-muted)',
             }} />
           </div>
         )}
 
         {/* Tab bar — stays with the terminal */}
+        {!termWsConnected ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              justifyContent: 'space-between',
+              padding: '8px 12px',
+              borderBottom: '1px solid rgba(245, 158, 11, 0.16)',
+              background: 'rgba(245, 158, 11, 0.08)',
+              color: '#b45309',
+              fontSize: 12,
+              lineHeight: 1.45,
+              flexShrink: 0,
+            }}
+          >
+            <span style={{ flex: 1, minWidth: 0 }}>
+              Reconnecting to the workspace runtime. Saved tabs stay in place and sessions reattach automatically when the bridge returns.
+            </span>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                border: 'none',
+                borderRadius: 999,
+                background: 'rgba(180, 83, 9, 0.12)',
+                color: '#92400e',
+                padding: '4px 8px',
+                cursor: 'pointer',
+                fontSize: 11,
+                fontWeight: 700,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                flexShrink: 0,
+              }}
+            >
+              Reload workspace
+            </button>
+          </div>
+        ) : null}
+
         <TabBar
           tabs={tabs}
           activeTabId={activeTabId}
@@ -3450,14 +3511,24 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                   display: tab.id === activeTabId ? 'flex' : 'none',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: '#94a3b8',
+                  color: 'var(--t-text-muted)',
                   fontSize: 13,
-                  fontFamily: 'ui-monospace, monospace',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  flexDirection: 'column',
                   gap: 8,
+                  textAlign: 'center',
+                  padding: 24,
                 }}
               >
                 <TerminalIcon size={14} />
-                Starting session…
+                <div style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+                  {termWsConnected ? 'Starting workspace session…' : 'Waiting for the workspace bridge…'}
+                </div>
+                <div style={{ fontSize: 12, lineHeight: 1.5, maxWidth: 420 }}>
+                  {tab.repo?.localPath
+                    ? `Restoring ${tab.repo.name} in ${shortenPath(tab.repo.localPath)} and replaying the saved repo context.`
+                    : 'This tab will attach automatically as soon as the runtime is available.'}
+                </div>
               </div>
             )
           ))}
@@ -3469,7 +3540,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              color: '#94a3b8',
+              color: 'var(--t-text-muted)',
               fontSize: 14,
             }}>
               <TerminalIcon size={18} style={{ marginRight: 8 }} />

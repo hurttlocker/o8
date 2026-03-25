@@ -10,6 +10,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type React from 'react';
 import { Canvas, type CanvasRepoTaskLaunchRequest } from './Canvas';
+import { useTheme } from '@/lib/theme/context';
 
 // ── CLI Agents (terminal only, no chat modes) ──
 
@@ -102,6 +103,39 @@ function PlusIcon({ size = 14 }: { size?: number }) {
   );
 }
 
+function readThemeColor(name: string, fallback: string) {
+  if (typeof window === 'undefined') return fallback;
+  const value = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
+}
+
+function buildXtermTheme() {
+  return {
+    background: readThemeColor('--t-panel', '#30353c'),
+    foreground: readThemeColor('--t-text', '#eef3f8'),
+    cursor: readThemeColor('--t-accent', '#7aa2ff'),
+    cursorAccent: readThemeColor('--t-panel', '#30353c'),
+    selectionBackground: readThemeColor('--t-accent-soft-strong', 'rgba(122, 162, 255, 0.2)'),
+    selectionForeground: readThemeColor('--t-text-strong', '#fbfdff'),
+    black: '#151a1f',
+    red: '#ff6b6b',
+    green: '#4ade80',
+    yellow: '#fbbf24',
+    blue: readThemeColor('--t-accent', '#7aa2ff'),
+    magenta: '#c084fc',
+    cyan: '#67e8f9',
+    white: '#dbe4ee',
+    brightBlack: '#6b7280',
+    brightRed: '#f87171',
+    brightGreen: '#86efac',
+    brightYellow: '#fcd34d',
+    brightBlue: '#93c5fd',
+    brightMagenta: '#d8b4fe',
+    brightCyan: '#a5f3fc',
+    brightWhite: '#fbfdff',
+  };
+}
+
 // ── Inline XtermPanel (mirrors TerminalWorkspace pattern) ──
 
 interface InlineImage {
@@ -128,6 +162,7 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
   { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible },
   ref,
 ) {
+  const { themeId } = useTheme();
   const containerRef = useRef<HTMLDivElement>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const termRef = useRef<any>(null);
@@ -202,30 +237,7 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
           allowTransparency: true,
           allowProposedApi: true,
           scrollback: 10000,
-          theme: {
-            background: '#ffffff',
-            foreground: '#1e293b',
-            cursor: '#dc2626',
-            cursorAccent: '#ffffff',
-            selectionBackground: 'rgba(59, 130, 246, 0.18)',
-            selectionForeground: '#0f172a',
-            black: '#1e293b',
-            red: '#dc2626',
-            green: '#16a34a',
-            yellow: '#ca8a04',
-            blue: '#2563eb',
-            magenta: '#9333ea',
-            cyan: '#0891b2',
-            white: '#f1f5f9',
-            brightBlack: '#64748b',
-            brightRed: '#ef4444',
-            brightGreen: '#22c55e',
-            brightYellow: '#eab308',
-            brightBlue: '#3b82f6',
-            brightMagenta: '#a855f7',
-            brightCyan: '#06b6d4',
-            brightWhite: '#ffffff',
-          },
+          theme: buildXtermTheme(),
         });
 
         const fitAddon = new FitAddon();
@@ -282,7 +294,7 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
       if (termRef.current) { termRef.current.dispose(); termRef.current = null; }
       fitAddonRef.current = null;
     };
-  }, [tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach]);
+  }, [themeId, tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach]);
 
   if (error) {
     return (
@@ -312,25 +324,25 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
       width: '100%',
       display: visible ? 'flex' : 'none',
       flexDirection: 'column',
-      background: '#ffffff',
+      background: 'var(--t-panel)',
       overflow: 'hidden',
     }}>
       {inlineImages.map((img) => (
         <div key={img.id} style={{
           paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12,
-          borderBottom: '1px solid #f1f5f9', flexShrink: 0,
+          borderBottom: '1px solid var(--t-divider)', flexShrink: 0,
         }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={img.dataUrl} alt={img.filename} style={{
             maxWidth: '100%', maxHeight: 400, borderRadius: 8, objectFit: 'contain',
           }} />
-          <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4, fontFamily: 'ui-monospace, monospace' }}>
+          <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 4, fontFamily: 'ui-monospace, monospace' }}>
             {img.filename}
           </div>
         </div>
       ))}
       <div ref={containerRef} style={{
-        flex: 1, width: '100%', background: '#ffffff', paddingTop: 2, paddingLeft: 2,
+        flex: 1, width: '100%', background: 'var(--t-panel)', paddingTop: 2, paddingLeft: 2,
       }} />
     </div>
   );

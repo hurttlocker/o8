@@ -20,6 +20,10 @@ import type {
   MobileTranscriptToolCall,
 } from '@/lib/mobile/types';
 
+const THEME_ACCENT = 'var(--t-accent, #2563eb)';
+const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
+const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
+
 interface DesktopAgentMessageProps {
   entry: MobileTranscriptEntry;
   isLast?: boolean;
@@ -179,10 +183,10 @@ export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscrip
             flexDirection: 'column',
             gap: 6,
             padding: '10px 12px',
-            background: 'linear-gradient(180deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.94))',
-            border: '1px solid rgba(226, 232, 240, 0.95)',
+            background: THEME_PANEL_GLASS,
+            border: '1px solid var(--t-panel-border)',
             borderRadius: 12,
-            boxShadow: '0 8px 20px rgba(15, 23, 42, 0.04)',
+            boxShadow: 'var(--t-panel-shadow)',
           }}
         >
           <div style={{
@@ -197,8 +201,8 @@ export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscrip
               width: 24,
               height: 24,
               borderRadius: 8,
-              background: 'rgba(37, 99, 235, 0.10)',
-              color: '#2563eb',
+              background: THEME_ACCENT_SOFT,
+              color: THEME_ACCENT,
               flexShrink: 0,
             }}>
               <ToolIcon tool={tool} />
@@ -207,14 +211,14 @@ export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscrip
               <div style={{
                 fontSize: 12,
                 fontWeight: 700,
-                color: '#0f172a',
+                color: 'var(--t-text)',
                 letterSpacing: '-0.01em',
               }}>
                 {toolLabel(tool)}
               </div>
               <div style={{
                 fontSize: 10,
-                color: '#64748b',
+                color: 'var(--t-text-muted)',
                 fontFamily: '"SF Mono", ui-monospace, monospace',
                 textTransform: 'lowercase',
               }}>
@@ -227,7 +231,7 @@ export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscrip
               gap: 4,
               fontSize: 10,
               fontWeight: 700,
-              color: tool.status === 'done' || !tool.status ? '#10b981' : '#2563eb',
+              color: tool.status === 'done' || !tool.status ? '#10b981' : THEME_ACCENT,
               textTransform: 'uppercase',
               letterSpacing: '0.04em',
               flexShrink: 0,
@@ -239,7 +243,7 @@ export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscrip
                   width: 8,
                   height: 8,
                   borderRadius: '50%',
-                  background: '#2563eb',
+                  background: THEME_ACCENT,
                   opacity: 0.85,
                 }} />
               )}
@@ -251,7 +255,7 @@ export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscrip
             style={{
               fontSize: 12,
               lineHeight: 1.55,
-              color: '#334155',
+              color: 'var(--t-text-secondary)',
               wordBreak: 'break-word',
             }}
           >

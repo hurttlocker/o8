@@ -16,7 +16,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  Send,
   AlertCircle,
   ChevronDown,
   Square,
@@ -31,7 +30,6 @@ import {
   RefreshCw,
   Pencil,
   Bookmark,
-  MoreHorizontal,
   Loader2,
   Brain,
   ChevronRight,
@@ -41,7 +39,6 @@ import {
   Eye,
   Trash2,
   GitBranch,
-  Scissors,
   History,
   Star,
   PanelLeftClose,
@@ -137,6 +134,14 @@ const MODELS: ModelOption[] = [
   { id: 'gpt-4o', label: 'GPT-4o', provider: 'openai', color: '#10a37f', description: 'Multimodal' },
 ];
 
+const THEME_ACCENT = 'var(--t-accent, #2563eb)';
+const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
+const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(37, 99, 235, 0.14))';
+const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
+const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
+const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
+const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
+
 // ── Subcomponents ──
 
 /** Model picker dropdown — Claude Desktop style */
@@ -192,8 +197,8 @@ function ModelPicker({
           paddingRight: 6,
           border: 'none',
           borderRadius: 8,
-          background: open ? '#f1f5f9' : 'transparent',
-          color: open ? '#1e293b' : '#64748b',
+          background: open ? THEME_ACCENT_SOFT : 'transparent',
+          color: open ? 'var(--t-text)' : 'var(--t-text-secondary)',
           fontSize: 13,
           fontWeight: 400,
           fontFamily: '-apple-system, system-ui, sans-serif',
@@ -201,8 +206,8 @@ function ModelPicker({
           opacity: disabled ? 0.6 : 1,
           transition: 'color 150ms, background 150ms',
         }}
-        onMouseEnter={(e) => { if (!disabled && !open) { (e.currentTarget).style.color = '#1e293b'; (e.currentTarget).style.background = '#f1f5f9'; } }}
-        onMouseLeave={(e) => { if (!open) { (e.currentTarget).style.color = '#64748b'; (e.currentTarget).style.background = 'transparent'; } }}
+        onMouseEnter={(e) => { if (!disabled && !open) { (e.currentTarget).style.color = 'var(--t-text)'; (e.currentTarget).style.background = THEME_ACCENT_SOFT; } }}
+        onMouseLeave={(e) => { if (!open) { (e.currentTarget).style.color = 'var(--t-text-secondary)'; (e.currentTarget).style.background = 'transparent'; } }}
       >
         <span style={{
           width: 8,
@@ -212,7 +217,7 @@ function ModelPicker({
           flexShrink: 0,
         }} />
         {selected.label}
-        <ChevronDown size={12} style={{ color: '#94a3b8', marginLeft: 2, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
+        <ChevronDown size={12} style={{ color: 'var(--t-text-muted)', marginLeft: 2, transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
       </button>
 
       {open && createPortal(
@@ -222,11 +227,11 @@ function ModelPicker({
           right: dropPos.right,
           zIndex: 9999,
           minWidth: 260,
-          background: 'white',
-          border: '1px solid #e2e8f0',
+          background: THEME_PANEL_GLASS,
+          border: '1px solid var(--t-panel-border)',
           borderRadius: 12,
           overflow: 'hidden',
-          boxShadow: '0 -8px 40px rgba(0, 0, 0, 0.12)',
+          boxShadow: 'var(--t-panel-shadow)',
           animation: 'llmFadeIn 100ms ease-out',
         }}>
           {MODELS.map((m) => (
@@ -244,16 +249,16 @@ function ModelPicker({
                 paddingBottom: 8,
                 paddingLeft: 12,
                 border: 'none',
-                background: m.id === selected.id ? '#f8fafc' : 'transparent',
-                color: '#1e293b',
+                background: m.id === selected.id ? THEME_ACCENT_SOFT : 'transparent',
+                color: 'var(--t-text)',
                 fontSize: 13,
                 fontFamily: '-apple-system, system-ui, sans-serif',
                 cursor: 'pointer',
                 textAlign: 'left',
                 transition: 'background 100ms',
               }}
-              onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
-              onMouseLeave={(e) => { (e.currentTarget).style.background = m.id === selected.id ? '#f8fafc' : 'transparent'; }}
+              onMouseEnter={(e) => { (e.currentTarget).style.background = THEME_ACCENT_SOFT; }}
+              onMouseLeave={(e) => { (e.currentTarget).style.background = m.id === selected.id ? THEME_ACCENT_SOFT : 'transparent'; }}
             >
               <span style={{
                 width: 8,
@@ -264,9 +269,9 @@ function ModelPicker({
               }} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 500 }}>{m.label}</div>
-                <div style={{ fontSize: 11, color: '#94a3b8' }}>{m.description}</div>
+                <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{m.description}</div>
               </div>
-              {m.id === selected.id && <Check size={14} style={{ color: '#3b82f6' }} />}
+              {m.id === selected.id && <Check size={14} style={{ color: THEME_ACCENT }} />}
             </button>
           ))}
         </div>,
@@ -295,12 +300,12 @@ const ACTION_BTN_STYLE: React.CSSProperties = {
   justifyContent: 'center',
   width: 28,
   height: 28,
-  border: 'none',
-  background: 'transparent',
-  color: '#cbd5e1',
+  border: '1px solid var(--t-panel-border)',
+  background: THEME_BG_CARD,
+  color: 'var(--t-text-secondary)',
   cursor: 'pointer',
-  borderRadius: 6,
-  transition: 'color 150ms, background 150ms',
+  borderRadius: 8,
+  transition: 'color 150ms, background 150ms, border-color 150ms',
   padding: 0,
 };
 
@@ -322,14 +327,16 @@ function ActionButton({ icon, label, active, activeColor, onClick }: {
       }}
       onMouseEnter={(e) => {
         if (!active) {
-          (e.currentTarget).style.color = '#64748b';
-          (e.currentTarget).style.background = '#f1f5f9';
+          (e.currentTarget).style.color = 'var(--t-text-secondary)';
+          (e.currentTarget).style.background = THEME_ACCENT_SOFT;
+          (e.currentTarget).style.borderColor = THEME_ACCENT_BORDER;
         }
       }}
       onMouseLeave={(e) => {
         if (!active) {
-          (e.currentTarget).style.color = '#cbd5e1';
-          (e.currentTarget).style.background = 'transparent';
+          (e.currentTarget).style.color = 'var(--t-text-faint)';
+          (e.currentTarget).style.background = THEME_BG_CARD;
+          (e.currentTarget).style.borderColor = 'var(--t-panel-border)';
         }
       }}
     >
@@ -498,8 +505,8 @@ function FileChangeCard({ change }: { change: FileChangePreview }) {
           gap: 10,
           width: '100%',
           padding: '10px 12px',
-          background: '#fbfbfd',
-          border: '1px solid #e5e7eb',
+          background: THEME_BG_CARD,
+          border: '1px solid var(--t-panel-border)',
           borderRadius: 12,
           cursor: 'pointer',
           textAlign: 'left',
@@ -508,18 +515,18 @@ function FileChangeCard({ change }: { change: FileChangePreview }) {
         <ChevronRight
           size={14}
           style={{
-            color: '#64748b',
+            color: 'var(--t-text-secondary)',
             transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
             transition: 'transform 160ms ease',
             flexShrink: 0,
           }}
         />
-        <FileText size={14} style={{ color: '#64748b', flexShrink: 0 }} />
+        <FileText size={14} style={{ color: 'var(--t-text-secondary)', flexShrink: 0 }} />
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>
             1 file changed
           </div>
-          <div style={{ fontSize: 12, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {change.shortFile}
           </div>
         </div>
@@ -531,10 +538,10 @@ function FileChangeCard({ change }: { change: FileChangePreview }) {
       {expanded ? (
         <div style={{
           marginTop: 8,
-          border: '1px solid #e5e7eb',
+          border: '1px solid var(--t-panel-border)',
           borderRadius: 12,
           overflow: 'hidden',
-          background: '#fcfcfd',
+          background: THEME_PANEL_GLASS,
         }}>
           <div style={{
             display: 'flex',
@@ -542,11 +549,11 @@ function FileChangeCard({ change }: { change: FileChangePreview }) {
             justifyContent: 'space-between',
             gap: 8,
             padding: '10px 12px',
-            borderBottom: '1px solid #eef2f7',
-            background: '#f8fafc',
+            borderBottom: '1px solid var(--t-divider)',
+            background: THEME_BG_CARD,
           }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>{change.path}</div>
-            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700 }}>{change.tool}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{change.path}</div>
+            <div style={{ fontSize: 10, color: 'var(--t-text-secondary)', fontWeight: 700 }}>{change.tool}</div>
           </div>
           <div style={{ padding: 12 }}>
             {isWrite ? (
@@ -556,7 +563,7 @@ function FileChangeCard({ change }: { change: FileChangePreview }) {
                 fontSize: 12,
                 lineHeight: 1.5,
                 fontFamily: '"SF Mono", ui-monospace, monospace',
-                color: '#0f172a',
+                color: 'var(--t-text)',
               }}>
                 {change.content}
               </pre>
@@ -568,7 +575,7 @@ function FileChangeCard({ change }: { change: FileChangePreview }) {
                     margin: 0,
                     padding: 10,
                     borderRadius: 10,
-                    background: 'rgba(254, 242, 242, 0.9)',
+                    background: 'rgba(127, 29, 29, 0.18)',
                     color: '#7f1d1d',
                     whiteSpace: 'pre-wrap',
                     fontSize: 12,
@@ -585,7 +592,7 @@ function FileChangeCard({ change }: { change: FileChangePreview }) {
                     margin: 0,
                     padding: 10,
                     borderRadius: 10,
-                    background: 'rgba(240, 253, 244, 0.9)',
+                    background: 'rgba(20, 83, 45, 0.22)',
                     color: '#14532d',
                     whiteSpace: 'pre-wrap',
                     fontSize: 12,
@@ -722,8 +729,8 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
         paddingLeft: isUser ? 16 : 0,
         paddingRight: isUser ? 16 : 0,
         borderRadius: isUser ? 18 : 0,
-        background: isUser ? '#3b82f6' : message.isError ? 'rgba(239,68,68,0.06)' : 'transparent',
-        color: isUser ? 'white' : message.isError ? '#dc2626' : '#1e293b',
+        background: isUser ? THEME_ACCENT : message.isError ? 'rgba(239,68,68,0.12)' : 'transparent',
+        color: isUser ? 'white' : message.isError ? '#f87171' : 'var(--t-text)',
         fontSize: 14,
         lineHeight: '1.6',
         fontFamily: '-apple-system, system-ui, sans-serif',
@@ -787,12 +794,12 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
       {/* Tool calls display */}
       {!isUser && visibleToolCalls.length > 0 && !(message.thinkingSteps && message.thinkingSteps.length > 0) && (
         <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 4,
-          maxWidth: '90%',
-          marginTop: 4,
-        }}>
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              maxWidth: '90%',
+              marginTop: 4,
+            }}>
           {visibleToolCalls.map((tc, i) => (
             <div key={i} style={{
               display: 'flex',
@@ -802,8 +809,8 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
               paddingBottom: 6,
               paddingLeft: 10,
               paddingRight: 10,
-              background: '#f8fafc',
-              border: '1px solid #e2e8f0',
+              background: THEME_BG_CARD,
+              border: '1px solid var(--t-panel-border)',
               borderRadius: 8,
               fontSize: 12,
               fontFamily: '-apple-system, system-ui, sans-serif',
@@ -817,14 +824,14 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
                 flexShrink: 0,
                 ...(tc.status !== 'done' ? { animation: 'llmDot 1.4s ease-in-out infinite' } : {}),
               }} />
-              <span style={{ color: '#64748b', fontWeight: 500 }}>
+              <span style={{ color: 'var(--t-text-secondary)', fontWeight: 500 }}>
                 {tc.name === 'search_web' ? '🔍 Searched' :
                  tc.name === 'read_file' ? '📄 Read' :
                  tc.name === 'list_files' ? '📁 Listed' :
                  tc.name === 'search_code' ? '🔎 Searched code' :
                  `🔧 ${tc.name}`}
               </span>
-              <span style={{ color: '#94a3b8' }}>
+              <span style={{ color: 'var(--t-text-muted)' }}>
                 {tc.name === 'search_web' && tc.args?.query ? `"${tc.args.query}"` :
                  tc.name === 'read_file' && tc.args?.path ? String(tc.args.path) :
                  tc.name === 'search_code' && tc.args?.query ? `"${tc.args.query}"` :
@@ -866,19 +873,19 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
                 paddingBottom: 4,
                 paddingLeft: 8,
                 paddingRight: 10,
-                background: '#f0f9ff',
-                border: '1px solid #bae6fd',
+                background: THEME_ACCENT_SOFT,
+                border: `1px solid ${THEME_ACCENT_BORDER}`,
                 borderRadius: 6,
                 fontSize: 11,
-                color: '#0369a1',
+                color: THEME_ACCENT,
                 textDecoration: 'none',
                 fontFamily: '-apple-system, system-ui, sans-serif',
                 transition: 'background 100ms',
                 cursor: 'pointer',
                 animation: 'llmFadeIn 200ms ease-out',
               }}
-              onMouseEnter={(e) => { (e.currentTarget).style.background = '#e0f2fe'; }}
-              onMouseLeave={(e) => { (e.currentTarget).style.background = '#f0f9ff'; }}
+              onMouseEnter={(e) => { (e.currentTarget).style.background = THEME_ACCENT_SOFT_STRONG; }}
+              onMouseLeave={(e) => { (e.currentTarget).style.background = THEME_ACCENT_SOFT; }}
             >
               {src.index && (
                 <span style={{
@@ -888,7 +895,7 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
                   width: 16,
                   height: 16,
                   borderRadius: '50%',
-                  background: '#3b82f6',
+                  background: THEME_ACCENT,
                   color: 'white',
                   fontSize: 9,
                   fontWeight: 700,
@@ -1000,7 +1007,7 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
           {message.model && (
             <span style={{
               fontSize: 11,
-              color: '#94a3b8',
+              color: 'var(--t-text-muted)',
               marginRight: 4,
               fontFamily: '-apple-system, system-ui, sans-serif',
             }}>
@@ -1010,7 +1017,7 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
           {message.tokens && (
             <span style={{
               fontSize: 10,
-              color: '#cbd5e1',
+              color: 'var(--t-text-faint)',
               marginRight: 4,
               fontFamily: 'ui-monospace, monospace',
             }}>
@@ -1020,7 +1027,7 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
           {message.costUsd != null && message.costUsd > 0 && (
             <span style={{
               fontSize: 10,
-              color: '#cbd5e1',
+              color: 'var(--t-text-faint)',
               marginRight: 6,
               fontFamily: 'ui-monospace, monospace',
             }}>
@@ -1047,7 +1054,7 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
           )}
 
           {/* Divider */}
-          <div style={{ width: 1, height: 14, background: '#e2e8f0', marginLeft: 2, marginRight: 2 }} />
+          <div style={{ width: 1, height: 14, background: 'var(--t-divider)', marginLeft: 2, marginRight: 2 }} />
 
           {/* Copy */}
           <ActionButton
@@ -1203,8 +1210,8 @@ export function ChainOfThought({
           paddingBottom: 6,
           paddingLeft: 10,
           paddingRight: 10,
-          background: isLive ? 'rgba(239, 246, 255, 0.8)' : 'rgba(248, 250, 252, 0.88)',
-          border: `1px solid ${isLive ? 'rgba(147, 197, 253, 0.45)' : 'rgba(226, 232, 240, 0.9)'}`,
+          background: isLive ? THEME_ACCENT_SOFT : THEME_BG_CARD,
+          border: `1px solid ${isLive ? THEME_ACCENT_BORDER : 'var(--t-panel-border)'}`,
           borderRadius: 9,
           cursor: 'pointer',
           width: 'auto',
@@ -1214,12 +1221,12 @@ export function ChainOfThought({
           fontFamily: '-apple-system, system-ui, sans-serif',
         }}
         onMouseEnter={(e) => {
-          (e.currentTarget).style.background = 'rgba(240, 249, 255, 0.95)';
-          (e.currentTarget).style.borderColor = 'rgba(147, 197, 253, 0.7)';
+          (e.currentTarget).style.background = THEME_ACCENT_SOFT;
+          (e.currentTarget).style.borderColor = THEME_ACCENT_BORDER;
         }}
         onMouseLeave={(e) => {
-          (e.currentTarget).style.background = isLive ? 'rgba(239, 246, 255, 0.8)' : 'rgba(248, 250, 252, 0.88)';
-          (e.currentTarget).style.borderColor = isLive ? 'rgba(147, 197, 253, 0.45)' : 'rgba(226, 232, 240, 0.9)';
+          (e.currentTarget).style.background = isLive ? THEME_ACCENT_SOFT : THEME_BG_CARD;
+          (e.currentTarget).style.borderColor = isLive ? THEME_ACCENT_BORDER : 'var(--t-panel-border)';
         }}
       >
         <span style={{
@@ -1229,7 +1236,7 @@ export function ChainOfThought({
           width: 14,
           height: 14,
           flexShrink: 0,
-          color: isLive ? '#2563eb' : '#94a3b8',
+          color: isLive ? THEME_ACCENT : 'var(--t-text-muted)',
           ...(isLive ? { animation: 'llmDot 1.4s ease-in-out infinite' } : {}),
         }}>
           <Brain size={11} />
@@ -1241,7 +1248,7 @@ export function ChainOfThought({
             fontSize: 11,
             fontWeight: 500,
             fontStyle: 'italic',
-            color: '#64748b',
+            color: 'var(--t-text-secondary)',
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -1258,7 +1265,7 @@ export function ChainOfThought({
         <ChevronRight
           size={12}
           style={{
-            color: '#94a3b8',
+            color: 'var(--t-text-muted)',
             transform: expanded ? 'rotate(90deg)' : 'rotate(0)',
             transition: 'transform 200ms ease',
             flexShrink: 0,
@@ -1271,7 +1278,7 @@ export function ChainOfThought({
         <div style={{
           marginTop: 4,
           paddingLeft: 12,
-          borderLeft: '2px solid #e2e8f0',
+          borderLeft: '2px solid var(--t-divider)',
           marginLeft: 23,
           animation: 'llmFadeIn 200ms ease-out',
         }}>
@@ -2362,7 +2369,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
       display: 'flex',
       flexDirection: 'row',
       height: '100%',
-      background: '#ffffff',
+      background: 'var(--t-bg-gradient)',
       fontFamily: '-apple-system, system-ui, sans-serif',
       overflow: 'hidden',
     }}>
@@ -2370,12 +2377,12 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
       <div style={{
         width: historyOpen ? 260 : 0,
         minWidth: historyOpen ? 260 : 0,
-        borderRight: historyOpen ? '1px solid #f1f5f9' : 'none',
+        borderRight: historyOpen ? '1px solid var(--t-divider)' : 'none',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
         transition: 'width 200ms ease, min-width 200ms ease',
-        background: '#fafbfc',
+        background: THEME_PANEL_GLASS,
       }}>
         {historyOpen && (
           <>
@@ -2388,9 +2395,9 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
               paddingBottom: 12,
               paddingLeft: 14,
               paddingRight: 10,
-              borderBottom: '1px solid #f1f5f9',
+              borderBottom: '1px solid var(--t-divider)',
             }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: '#0f172a' }}>History</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}>History</span>
               <button
                 type="button"
                 onClick={() => setHistoryOpen(false)}
@@ -2399,7 +2406,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                   alignItems: 'center',
                   border: 'none',
                   background: 'transparent',
-                  color: '#94a3b8',
+                  color: 'var(--t-text-muted)',
                   cursor: 'pointer',
                   paddingTop: 4,
                   paddingBottom: 4,
@@ -2428,27 +2435,27 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                   paddingBottom: 7,
                   paddingLeft: 10,
                   paddingRight: 10,
-                  border: '1px solid #e2e8f0',
+                  border: '1px solid var(--t-panel-border)',
                   borderRadius: 8,
                   fontSize: 12,
                   outline: 'none',
                   boxSizing: 'border-box',
-                  background: 'white',
+                  background: THEME_BG_CARD,
                   transition: 'border-color 150ms',
                 }}
-                onFocus={(e) => { (e.currentTarget).style.borderColor = '#3b82f6'; }}
-                onBlur={(e) => { (e.currentTarget).style.borderColor = '#e2e8f0'; }}
+                onFocus={(e) => { (e.currentTarget).style.borderColor = THEME_ACCENT; }}
+                onBlur={(e) => { (e.currentTarget).style.borderColor = 'var(--t-panel-border)'; }}
               />
             </div>
 
             {/* Conversation list */}
-            <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 8 }}>
+            <div className="cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto', paddingBottom: 8 }}>
               {historyLoading ? (
-                <div style={{ textAlign: 'center', paddingTop: 20, color: '#94a3b8', fontSize: 12 }}>
+                <div style={{ textAlign: 'center', paddingTop: 20, color: 'var(--t-text-muted)', fontSize: 12 }}>
                   Loading...
                 </div>
               ) : historyItems.length === 0 ? (
-                <div style={{ textAlign: 'center', paddingTop: 20, color: '#94a3b8', fontSize: 12 }}>
+                <div style={{ textAlign: 'center', paddingTop: 20, color: 'var(--t-text-muted)', fontSize: 12 }}>
                   {historySearch ? 'No matches' : 'No saved conversations'}
                 </div>
               ) : (
@@ -2460,7 +2467,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                       paddingLeft: 14,
                       fontSize: 10,
                       fontWeight: 600,
-                      color: '#94a3b8',
+                      color: 'var(--t-text-muted)',
                       textTransform: 'uppercase',
                       letterSpacing: '0.05em',
                     }}>
@@ -2483,7 +2490,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                           marginLeft: 4,
                           marginRight: 4,
                         }}
-                        onMouseEnter={(e) => { (e.currentTarget).style.background = '#f1f5f9'; }}
+                        onMouseEnter={(e) => { (e.currentTarget).style.background = THEME_ACCENT_SOFT; }}
                         onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
                         onClick={() => {
                           if (onOpenHistoryChat) {
@@ -2491,12 +2498,12 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                           }
                         }}
                       >
-                        <MessageSquare size={13} style={{ color: '#94a3b8', marginTop: 2, flexShrink: 0 }} />
+                        <MessageSquare size={13} style={{ color: 'var(--t-text-muted)', marginTop: 2, flexShrink: 0 }} />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{
                             fontSize: 12,
                             fontWeight: 500,
-                            color: '#1e293b',
+                            color: 'var(--t-text)',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
@@ -2505,7 +2512,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                           </div>
                           <div style={{
                             fontSize: 11,
-                            color: '#94a3b8',
+                            color: 'var(--t-text-muted)',
                             marginTop: 2,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
@@ -2529,7 +2536,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                               paddingBottom: 2,
                               paddingLeft: 2,
                               paddingRight: 2,
-                              color: conv.starred ? '#f59e0b' : '#cbd5e1',
+                              color: conv.starred ? '#f59e0b' : 'var(--t-text-faint)',
                             }}
                             title={conv.starred ? 'Unstar' : 'Star'}
                           >
@@ -2549,7 +2556,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                               paddingBottom: 2,
                               paddingLeft: 2,
                               paddingRight: 2,
-                              color: '#cbd5e1',
+                              color: 'var(--t-text-faint)',
                             }}
                             title="Delete"
                           >
@@ -2608,7 +2615,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
         paddingBottom: 12,
         paddingLeft: 24,
         paddingRight: 24,
-        borderBottom: '1px solid #f1f5f9',
+        borderBottom: '1px solid var(--t-divider)',
       }}>
         {/* History toggle */}
         <button
@@ -2625,14 +2632,14 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
             paddingRight: 8,
             border: 'none',
             borderRadius: 8,
-            background: historyOpen ? '#f1f5f9' : 'transparent',
-            color: historyOpen ? '#3b82f6' : '#94a3b8',
+            background: historyOpen ? THEME_ACCENT_SOFT : 'transparent',
+            color: historyOpen ? THEME_ACCENT : 'var(--t-text-muted)',
             fontSize: 12,
             cursor: 'pointer',
             fontFamily: '-apple-system, system-ui, sans-serif',
             transition: 'all 150ms',
           }}
-          onMouseEnter={(e) => { if (!historyOpen) (e.currentTarget).style.background = '#f8fafc'; }}
+          onMouseEnter={(e) => { if (!historyOpen) (e.currentTarget).style.background = THEME_BG_CARD; }}
           onMouseLeave={(e) => { if (!historyOpen) (e.currentTarget).style.background = 'transparent'; }}
         >
           <History size={14} />
@@ -2644,7 +2651,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
         {messages.length > 0 && (
           <span style={{
             fontSize: 11,
-            color: '#94a3b8',
+            color: 'var(--t-text-muted)',
             fontFamily: 'ui-monospace, monospace',
             display: 'flex',
             alignItems: 'center',
@@ -2656,11 +2663,11 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
               const totalCost = messages.reduce((sum, m) => sum + (m.costUsd ?? 0), 0);
               return totalTokens > 0 ? (
                 <>
-                  <span style={{ color: '#cbd5e1' }}>·</span>
+                  <span style={{ color: 'var(--t-text-faint)' }}>·</span>
                   <span>{totalTokens > 1000 ? `${(totalTokens / 1000).toFixed(1)}K` : totalTokens} tokens</span>
                   {totalCost > 0 && (
                     <>
-                      <span style={{ color: '#cbd5e1' }}>·</span>
+                      <span style={{ color: 'var(--t-text-faint)' }}>·</span>
                       <span>${totalCost.toFixed(4)}</span>
                     </>
                   )}
@@ -2703,6 +2710,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
       {/* Message area */}
       <div
         ref={scrollRef}
+        className="cortex-themed-scroll"
         style={{
           flex: 1,
           overflowY: 'auto',
@@ -2734,18 +2742,18 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                 width: 48,
                 height: 48,
                 borderRadius: 14,
-                background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
+                background: `linear-gradient(135deg, ${THEME_ACCENT} 0%, #8b5cf6 100%)`,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 4px 16px rgba(59, 130, 246, 0.2)',
+                boxShadow: `0 4px 16px ${THEME_ACCENT_RING}`,
               }}>
                 <Sparkles size={24} style={{ color: 'white' }} />
               </div>
               <div style={{
                 fontSize: 24,
                 fontWeight: 600,
-                color: '#0f172a',
+                color: 'var(--t-text-strong)',
                 letterSpacing: '-0.02em',
               }}>
                 {(() => {
@@ -2756,7 +2764,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
               </div>
               <div style={{
                 fontSize: 14,
-                color: '#94a3b8',
+                color: 'var(--t-text-muted)',
                 textAlign: 'center',
                 maxWidth: 400,
                 lineHeight: '1.5',
@@ -2789,8 +2797,8 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                     paddingBottom: 14,
                     paddingLeft: 14,
                     paddingRight: 14,
-                    background: '#f8fafc',
-                    border: '1px solid #e2e8f0',
+                    background: THEME_BG_CARD,
+                    border: '1px solid var(--t-panel-border)',
                     borderRadius: 12,
                     cursor: 'pointer',
                     textAlign: 'left',
@@ -2798,24 +2806,24 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                     animation: `llmFadeIn 400ms ease-out ${100 + i * 50}ms both`,
                   }}
                   onMouseEnter={(e) => {
-                    (e.currentTarget).style.borderColor = '#3b82f6';
-                    (e.currentTarget).style.background = '#f0f9ff';
+                    (e.currentTarget).style.borderColor = THEME_ACCENT_BORDER;
+                    (e.currentTarget).style.background = THEME_ACCENT_SOFT;
                     (e.currentTarget).style.transform = 'translateY(-1px)';
-                    (e.currentTarget).style.boxShadow = '0 2px 8px rgba(59, 130, 246, 0.08)';
+                    (e.currentTarget).style.boxShadow = `0 2px 8px ${THEME_ACCENT_RING}`;
                   }}
                   onMouseLeave={(e) => {
-                    (e.currentTarget).style.borderColor = '#e2e8f0';
-                    (e.currentTarget).style.background = '#f8fafc';
+                    (e.currentTarget).style.borderColor = 'var(--t-panel-border)';
+                    (e.currentTarget).style.background = THEME_BG_CARD;
                     (e.currentTarget).style.transform = 'translateY(0)';
                     (e.currentTarget).style.boxShadow = 'none';
                   }}
                 >
                   <span style={{ fontSize: 18, lineHeight: '1', flexShrink: 0 }}>{prompt.icon}</span>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1e293b', lineHeight: '1.3' }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text)', lineHeight: '1.3' }}>
                       {prompt.text}
                     </span>
-                    <span style={{ fontSize: 11, color: '#94a3b8', lineHeight: '1.4' }}>
+                    <span style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: '1.4' }}>
                       {prompt.description}
                     </span>
                   </div>
@@ -3304,9 +3312,6 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
               data-approve-btn="true"
               onClick={() => {
                 const toolName = pendingApproval.name;
-                const editedArgs = toolName === 'run_terminal_command' && editedCommand
-                  ? { ...pendingApproval.args, command: editedCommand }
-                  : pendingApproval.args;
                 setPendingApproval(null);
 
                 // Build updated approval set synchronously
@@ -3530,7 +3535,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
         paddingBottom: 16,
         paddingLeft: 24,
         paddingRight: 24,
-        borderTop: '1px solid #f1f5f9',
+        borderTop: '1px solid var(--t-divider)',
         position: 'relative',
       }}>
         {/* Attached image previews */}
@@ -3636,10 +3641,10 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
             marginLeft: 'auto',
             marginRight: 'auto',
             marginBottom: 4,
-            background: 'white',
-            border: '1px solid #e2e8f0',
+            background: THEME_PANEL_GLASS,
+            border: '1px solid var(--t-panel-border)',
             borderRadius: 10,
-            boxShadow: '0 8px 30px rgba(0, 0, 0, 0.1)',
+            boxShadow: 'var(--t-panel-shadow)',
             overflow: 'hidden',
             maxHeight: 200,
             overflowY: 'auto',
@@ -3652,7 +3657,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
               paddingRight: 10,
               fontSize: 10,
               fontWeight: 600,
-              color: '#94a3b8',
+              color: 'var(--t-text-muted)',
               textTransform: 'uppercase',
               letterSpacing: '0.05em',
             }}>
@@ -3671,8 +3676,8 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                   paddingLeft: 12,
                   paddingRight: 12,
                   border: 'none',
-                  background: i === filePickerIndex ? '#f1f5f9' : 'transparent',
-                  color: '#1e293b',
+                  background: i === filePickerIndex ? THEME_ACCENT_SOFT : 'transparent',
+                  color: 'var(--t-text)',
                   fontSize: 12,
                   fontFamily: 'ui-monospace, monospace',
                   textAlign: 'left',
@@ -3697,10 +3702,10 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
             marginLeft: 'auto',
             marginRight: 'auto',
             marginBottom: 4,
-            background: 'white',
-            border: '1px solid #e2e8f0',
+            background: THEME_PANEL_GLASS,
+            border: '1px solid var(--t-panel-border)',
             borderRadius: 12,
-            boxShadow: '0 8px 30px rgba(0, 0, 0, 0.12)',
+            boxShadow: 'var(--t-panel-shadow)',
             overflow: 'hidden',
             zIndex: 100,
             animation: 'llmFadeIn 150ms ease-out',
@@ -3712,7 +3717,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
               paddingRight: 12,
               fontSize: 10,
               fontWeight: 600,
-              color: '#94a3b8',
+              color: 'var(--t-text-muted)',
               textTransform: 'uppercase',
               letterSpacing: '0.05em',
             }}>
@@ -3739,7 +3744,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                     paddingLeft: 12,
                     paddingRight: 12,
                     border: 'none',
-                    background: i === slashIndex ? '#f1f5f9' : 'transparent',
+                    background: i === slashIndex ? THEME_ACCENT_SOFT : 'transparent',
                     textAlign: 'left',
                     cursor: 'pointer',
                     transition: 'background 60ms',
@@ -3748,10 +3753,10 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                 >
                   <span style={{ fontSize: 16 }}>{cmd.icon}</span>
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 500, color: '#1e293b' }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text)' }}>
                       {cmd.command} <span style={{ fontWeight: 400, color: '#64748b' }}>{cmd.label}</span>
                     </div>
-                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{cmd.description}</div>
+                    <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{cmd.description}</div>
                   </div>
                 </button>
               ))}
@@ -3764,18 +3769,18 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
             maxWidth: 720,
             marginLeft: 'auto',
             marginRight: 'auto',
-            border: '1px solid #e2e8f0',
+            border: '1px solid var(--t-panel-border)',
             borderRadius: 18,
-            background: '#fafafa',
+            background: THEME_PANEL_GLASS,
             transition: 'border-color 200ms, box-shadow 200ms',
             overflow: 'hidden',
           }}
           onFocus={(e) => {
-            (e.currentTarget).style.borderColor = '#3b82f6';
-            (e.currentTarget).style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
+            (e.currentTarget).style.borderColor = THEME_ACCENT;
+            (e.currentTarget).style.boxShadow = `0 0 0 3px ${THEME_ACCENT_RING}`;
           }}
           onBlur={(e) => {
-            (e.currentTarget).style.borderColor = '#e2e8f0';
+            (e.currentTarget).style.borderColor = 'var(--t-panel-border)';
             (e.currentTarget).style.boxShadow = 'none';
           }}
         >
@@ -3801,7 +3806,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                 border: 'none',
                 outline: 'none',
                 background: 'transparent',
-                color: '#1e293b',
+                color: 'var(--t-text)',
                 fontSize: 14,
                 fontFamily: '-apple-system, system-ui, sans-serif',
                 lineHeight: '1.5',
@@ -3837,12 +3842,12 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                   borderRadius: 8,
                   border: 'none',
                   background: 'transparent',
-                  color: '#94a3b8',
+                  color: 'var(--t-text-muted)',
                   cursor: 'pointer',
                   transition: 'color 150ms, background 150ms',
                 }}
-                onMouseEnter={(e) => { (e.currentTarget).style.color = '#64748b'; (e.currentTarget).style.background = '#f1f5f9'; }}
-                onMouseLeave={(e) => { (e.currentTarget).style.color = '#94a3b8'; (e.currentTarget).style.background = 'transparent'; }}
+                onMouseEnter={(e) => { (e.currentTarget).style.color = 'var(--t-text-secondary)'; (e.currentTarget).style.background = THEME_BG_CARD; }}
+                onMouseLeave={(e) => { (e.currentTarget).style.color = 'var(--t-text-muted)'; (e.currentTarget).style.background = 'transparent'; }}
               >
                 <Plus size={16} />
                 <input
@@ -3872,7 +3877,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
               {/* Keyboard shortcuts hint */}
               <span style={{
                 fontSize: 10,
-                color: '#cbd5e1',
+                color: 'var(--t-text-faint)',
                 fontFamily: '-apple-system, system-ui, sans-serif',
               }}>
                 @file · /cmds
@@ -3888,11 +3893,11 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                   minHeight: 28,
                   padding: '0 10px',
                   borderRadius: 999,
-                  border: linkedIssue ? '1px solid rgba(96, 165, 250, 0.22)' : '1px solid rgba(148, 163, 184, 0.16)',
+                  border: linkedIssue ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
                   background: linkedIssue
-                    ? 'linear-gradient(180deg, rgba(239,246,255,0.94), rgba(191,219,254,0.72))'
-                    : 'rgba(255,255,255,0.72)',
-                  color: linkedIssue ? '#1d4ed8' : '#64748b',
+                    ? THEME_ACCENT_SOFT
+                    : THEME_BG_CARD,
+                  color: linkedIssue ? THEME_ACCENT : 'var(--t-text-secondary)',
                   cursor: 'pointer',
                   fontSize: 11,
                   fontWeight: 700,
@@ -3952,14 +3957,14 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                     height: 32,
                     border: 'none',
                     borderRadius: 10,
-                    background: input.trim() ? '#1e293b' : '#e2e8f0',
-                    color: input.trim() ? 'white' : '#94a3b8',
+                    background: input.trim() ? THEME_ACCENT : 'var(--t-divider-strong)',
+                    color: input.trim() ? 'white' : 'var(--t-text-faint)',
                     cursor: input.trim() ? 'pointer' : 'default',
                     flexShrink: 0,
                     transition: 'all 150ms',
                   }}
-                  onMouseEnter={(e) => { if (input.trim()) (e.currentTarget).style.background = '#0f172a'; }}
-                  onMouseLeave={(e) => { if (input.trim()) (e.currentTarget).style.background = '#1e293b'; }}
+                  onMouseEnter={(e) => { if (input.trim()) (e.currentTarget).style.background = THEME_ACCENT; }}
+                  onMouseLeave={(e) => { if (input.trim()) (e.currentTarget).style.background = THEME_ACCENT; }}
                 >
                   <ArrowUp size={16} />
                 </button>

@@ -2692,9 +2692,42 @@ button.workflow-file-item.workflow-file-item-active {
   display: block;
   flex: 1;
   min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--t-divider-strong) transparent;
 }
 .remodex-message-stack > [data-index] {
   padding-bottom: 1rem;
+}
+
+.remodex-message-stack::-webkit-scrollbar,
+.cortex-themed-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.remodex-message-stack::-webkit-scrollbar-track,
+.cortex-themed-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.remodex-message-stack::-webkit-scrollbar-thumb,
+.cortex-themed-scroll::-webkit-scrollbar-thumb {
+  background: var(--t-divider-strong);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.remodex-message-stack::-webkit-scrollbar-thumb:hover,
+.cortex-themed-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--t-text-faint);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.cortex-themed-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--t-divider-strong) transparent;
 }
 
 .remodex-scroll-anchor {
@@ -2973,7 +3006,7 @@ button.workflow-file-item.workflow-file-item-active {
 .remodex-loading-card {
   font-size: 1.08rem;
   line-height: 1.58;
-  color: #111111;
+  color: var(--t-text, #111111);
   white-space: pre-wrap;
 }
 
@@ -2987,7 +3020,7 @@ button.workflow-file-item.workflow-file-item-active {
 .remodex-rich-heading,
 .remodex-rich-list {
   margin: 0;
-  color: #111111;
+  color: var(--t-text, #111111);
 }
 
 .remodex-rich-paragraph,
@@ -3010,7 +3043,7 @@ button.workflow-file-item.workflow-file-item-active {
   font-size: 1rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: rgba(17, 24, 39, 0.5);
+  color: var(--t-text-secondary, rgba(17, 24, 39, 0.5));
 }
 
 .remodex-rich-list {
@@ -3030,9 +3063,10 @@ button.workflow-file-item.workflow-file-item-active {
 .remodex-rich-text code {
   padding: 0.14rem 0.36rem;
   border-radius: 0.45rem;
-  background: rgba(17, 24, 39, 0.08);
+  background: var(--t-bg-card, rgba(17, 24, 39, 0.08));
   font-size: 0.92em;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+  color: var(--t-text-strong, inherit);
 }
 
 .remodex-message-head {
@@ -3040,7 +3074,7 @@ button.workflow-file-item.workflow-file-item-active {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  color: rgba(17, 24, 39, 0.42);
+  color: var(--t-text-muted, rgba(17, 24, 39, 0.42));
   font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -3058,10 +3092,10 @@ button.workflow-file-item.workflow-file-item-active {
   max-width: 78%;
   padding: 0.95rem 1.1rem;
   border-radius: 28px;
-  background: rgba(37, 99, 235, 0.07);
-  border: 1px solid rgba(37, 99, 235, 0.08);
-  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.04);
-  color: #111827;
+  background: var(--t-accent-soft, rgba(37, 99, 235, 0.07));
+  border: 1px solid var(--t-accent-border, rgba(37, 99, 235, 0.08));
+  box-shadow: 0 6px 16px var(--t-accent-ring, rgba(37, 99, 235, 0.04));
+  color: var(--t-text-strong, #111827);
   font-size: 0.94rem;
   line-height: 1.35;
 }
@@ -3078,12 +3112,12 @@ button.workflow-file-item.workflow-file-item-active {
 
 .remodex-user-bubble .remodex-rich-heading {
   font-size: 0.82rem;
-  color: rgba(17, 24, 39, 0.48);
+  color: var(--t-text-secondary, rgba(17, 24, 39, 0.48));
 }
 
 .remodex-turn-time {
   padding-right: 0.25rem;
-  color: rgba(17, 24, 39, 0.32);
+  color: var(--t-text-muted, rgba(17, 24, 39, 0.32));
   font-size: 0.78rem;
 }
 
@@ -3099,16 +3133,16 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-media-card {
-  border: 1px solid rgba(15, 23, 42, 0.06);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.05);
+  border: 1px solid var(--t-panel-border, rgba(15, 23, 42, 0.06));
+  background: var(--t-panel-translucent, rgba(255, 255, 255, 0.9));
+  box-shadow: var(--t-panel-shadow, 0 10px 20px rgba(15, 23, 42, 0.05));
 }
 
 .remodex-media-card-image {
   overflow: hidden;
   padding: 0;
   border-radius: 24px;
-  background: rgba(247, 247, 248, 0.92);
+  background: var(--t-panel-translucent, rgba(247, 247, 248, 0.92));
 }
 
 .remodex-media-card-image img {
@@ -3117,13 +3151,13 @@ button.workflow-file-item.workflow-file-item-active {
   height: auto;
   object-fit: contain;
   object-position: top center;
-  background: rgba(247, 247, 248, 0.92);
+  background: var(--t-panel-translucent, rgba(247, 247, 248, 0.92));
 }
 
 .remodex-media-card-caption {
   display: block;
   padding: 0.65rem 0.8rem 0.8rem;
-  color: rgba(17, 24, 39, 0.48);
+  color: var(--t-text-secondary, rgba(17, 24, 39, 0.48));
   font-size: 0.82rem;
   text-align: left;
 }
@@ -3143,8 +3177,8 @@ button.workflow-file-item.workflow-file-item-active {
   display: grid;
   place-items: center;
   border-radius: 14px;
-  background: rgba(244, 244, 245, 0.92);
-  color: #111111;
+  background: var(--t-bg-card, rgba(244, 244, 245, 0.92));
+  color: var(--t-text, #111111);
 }
 
 .remodex-media-file-copy {
@@ -3153,12 +3187,12 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-media-file-copy strong {
-  color: #111111;
+  color: var(--t-text, #111111);
   font-size: 0.92rem;
 }
 
 .remodex-media-file-copy span {
-  color: rgba(17, 24, 39, 0.46);
+  color: var(--t-text-secondary, rgba(17, 24, 39, 0.46));
   font-size: 0.8rem;
 }
 
@@ -3170,7 +3204,7 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-media-file-actions a {
-  color: rgba(17, 24, 39, 0.62);
+  color: var(--t-text-secondary, rgba(17, 24, 39, 0.62));
   font-size: 0.86rem;
   font-weight: 600;
 }
@@ -3183,9 +3217,9 @@ button.workflow-file-item.workflow-file-item-active {
   margin-top: 0.4rem;
   padding: 0.65rem 0.7rem;
   border-radius: 16px;
-  border: 1px solid rgba(37, 99, 235, 0.08);
-  background: linear-gradient(135deg, rgba(239, 246, 255, 0.7), rgba(255, 255, 255, 0.9));
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.06);
+  border: 1px solid var(--t-accent-border, rgba(37, 99, 235, 0.08));
+  background: linear-gradient(135deg, var(--t-accent-soft, rgba(239, 246, 255, 0.7)), var(--t-panel-translucent, rgba(255, 255, 255, 0.9)));
+  box-shadow: 0 2px 8px var(--t-accent-ring, rgba(37, 99, 235, 0.06));
   transition: transform 120ms ease, box-shadow 120ms ease;
 }
 
@@ -3200,8 +3234,8 @@ button.workflow-file-item.workflow-file-item-active {
   border-radius: 10px;
   display: grid;
   place-items: center;
-  background: rgba(37, 99, 235, 0.08);
-  color: #2563eb;
+  background: var(--t-accent-soft, rgba(37, 99, 235, 0.08));
+  color: var(--t-accent, #2563eb);
   flex-shrink: 0;
 }
 
@@ -3214,7 +3248,7 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-inline-diff-copy strong {
-  color: #111827;
+  color: var(--t-text, #111827);
   font-size: 0.86rem;
   font-weight: 600;
   overflow: hidden;
@@ -3223,13 +3257,13 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-inline-diff-copy span {
-  color: rgba(17, 24, 39, 0.42);
+  color: var(--t-text-muted, rgba(17, 24, 39, 0.42));
   font-size: 0.76rem;
   font-weight: 500;
 }
 
 .remodex-inline-diff-chevron {
-  color: rgba(17, 24, 39, 0.2);
+  color: var(--t-text-faint, rgba(17, 24, 39, 0.2));
   flex-shrink: 0;
 }
 
@@ -3260,17 +3294,17 @@ button.workflow-file-item.workflow-file-item-active {
   gap: 0.42rem;
   padding: calc(0.48rem + (var(--remodex-compose-active) * 0.18rem));
   border-radius: calc(20px + (var(--remodex-compose-active) * 6px));
-  border: 1px solid rgba(191, 219, 254, calc(0.24 + (var(--remodex-compose-active) * 0.18)));
+  border: 1px solid var(--t-panel-border, rgba(191, 219, 254, calc(0.24 + (var(--remodex-compose-active) * 0.18))));
   background:
     linear-gradient(
       180deg,
-      rgba(219, 234, 254, calc(0.6 + (var(--remodex-compose-active) * 0.12))),
-      rgba(239, 246, 255, calc(0.48 + (var(--remodex-compose-active) * 0.14)))
+      color-mix(in srgb, var(--t-accent-soft, rgba(219, 234, 254, 0.6)) 88%, transparent),
+      color-mix(in srgb, var(--t-panel-translucent, rgba(239, 246, 255, 0.48)) 92%, transparent)
     );
   backdrop-filter: blur(calc(14px + (var(--remodex-compose-active) * 10px))) saturate(calc(1.04 + (var(--remodex-compose-active) * 0.16)));
   box-shadow:
-    0 12px 26px rgba(96, 165, 250, calc(0.08 + (var(--remodex-compose-active) * 0.1))),
-    0 10px 20px rgba(15, 23, 42, calc(0.04 + (var(--remodex-compose-active) * 0.03)));
+    0 12px 26px var(--t-accent-ring, rgba(96, 165, 250, calc(0.08 + (var(--remodex-compose-active) * 0.1)))),
+    0 10px 20px rgba(15, 23, 42, calc(0.08 + (var(--remodex-compose-active) * 0.03)));
   opacity: calc(0.9 + (var(--remodex-compose-active) * 0.08));
   /* No per-frame transforms — dock parent handles scroll visibility */
   transition:
@@ -3310,9 +3344,9 @@ button.workflow-file-item.workflow-file-item-active {
     calc(0.72rem + (var(--remodex-compose-active) * 0.14rem))
     calc(0.6rem + (var(--remodex-compose-active) * 0.14rem));
   border-radius: calc(18px + (var(--remodex-compose-active) * 4px));
-  background: rgba(255, 255, 255, calc(0.44 + (var(--remodex-compose-active) * 0.2)));
-  border: 1px solid rgba(255, 255, 255, calc(0.28 + (var(--remodex-compose-active) * 0.16)));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, calc(0.3 + (var(--remodex-compose-active) * 0.2)));
+  background: var(--t-panel-translucent, rgba(255, 255, 255, calc(0.44 + (var(--remodex-compose-active) * 0.2))));
+  border: 1px solid var(--t-panel-border, rgba(255, 255, 255, calc(0.28 + (var(--remodex-compose-active) * 0.16))));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, calc(0.12 + (var(--remodex-compose-active) * 0.12)));
   transition:
     gap 220ms ease,
     padding 220ms ease,
@@ -3337,13 +3371,13 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-watch-copy strong {
-  color: #111111;
+  color: var(--t-text, #111111);
   font-size: 0.96rem;
 }
 
 .remodex-watch-copy p {
   margin: 0;
-  color: rgba(17, 24, 39, 0.56);
+  color: var(--t-text-secondary, rgba(17, 24, 39, 0.56));
   font-size: 0.8rem;
   line-height: 1.4;
 }
@@ -3362,7 +3396,7 @@ button.workflow-file-item.workflow-file-item-active {
 
 .remodex-owned-review-copy {
   margin: 0;
-  color: rgba(17, 24, 39, 0.64);
+  color: var(--t-text-secondary, rgba(17, 24, 39, 0.64));
   font-size: 0.82rem;
   line-height: 1.45;
 }
@@ -3422,9 +3456,9 @@ button.workflow-file-item.workflow-file-item-active {
   min-width: min(100%, 225px);
   padding: 0.58rem 0.68rem;
   border-radius: 20px;
-  border: 1px solid rgba(191, 219, 254, 0.38);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(239, 246, 255, 0.68));
-  box-shadow: 0 10px 20px rgba(96, 165, 250, 0.1);
+  border: 1px solid var(--t-panel-border, rgba(191, 219, 254, 0.38));
+  background: linear-gradient(180deg, var(--t-panel-translucent, rgba(255, 255, 255, 0.72)), var(--t-bg-card, rgba(239, 246, 255, 0.68)));
+  box-shadow: 0 10px 20px var(--t-accent-ring, rgba(96, 165, 250, 0.1));
 }
 
 .remodex-attachment-pill img {
@@ -3441,12 +3475,12 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-attachment-pill-copy strong {
-  color: #111111;
+  color: var(--t-text, #111111);
   font-size: 0.92rem;
 }
 
 .remodex-attachment-pill-copy span {
-  color: rgba(17, 24, 39, 0.48);
+  color: var(--t-text-secondary, rgba(17, 24, 39, 0.48));
   font-size: 0.78rem;
 }
 
@@ -3457,8 +3491,8 @@ button.workflow-file-item.workflow-file-item-active {
   place-items: center;
   border: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
-  color: rgba(17, 24, 39, 0.66);
+  background: var(--t-panel, rgba(255, 255, 255, 0.92));
+  color: var(--t-text-secondary, rgba(17, 24, 39, 0.66));
   box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
 }
 
@@ -3470,7 +3504,7 @@ button.workflow-file-item.workflow-file-item-active {
   outline: none;
   resize: none;
   background: transparent;
-  color: #111111;
+  color: var(--t-text, #111111);
   font: inherit;
   font-size: 1rem;
   line-height: 1.35;
@@ -3479,7 +3513,7 @@ button.workflow-file-item.workflow-file-item-active {
 }
 
 .remodex-compose-input::placeholder {
-  color: rgba(17, 24, 39, 0.26);
+  color: var(--t-text-faint, rgba(17, 24, 39, 0.26));
 }
 
 .remodex-compose-row {
@@ -3504,11 +3538,11 @@ button.workflow-file-item.workflow-file-item-active {
   min-height: 32px;
   padding: 0.42rem 0.58rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, calc(0.32 + (var(--remodex-compose-active) * 0.16)));
-  background: rgba(255, 255, 255, calc(0.56 + (var(--remodex-compose-active) * 0.26)));
+  border: 1px solid var(--t-panel-border, rgba(255, 255, 255, calc(0.32 + (var(--remodex-compose-active) * 0.16))));
+  background: var(--t-bg-card, rgba(255, 255, 255, calc(0.56 + (var(--remodex-compose-active) * 0.26))));
   backdrop-filter: blur(calc(6px + (var(--remodex-compose-active) * 10px)));
-  box-shadow: 0 6px 14px rgba(96, 165, 250, calc(0.05 + (var(--remodex-compose-active) * 0.08)));
-  color: rgba(17, 24, 39, calc(0.72 + (var(--remodex-compose-active) * 0.12)));
+  box-shadow: 0 6px 14px var(--t-accent-ring, rgba(96, 165, 250, calc(0.05 + (var(--remodex-compose-active) * 0.08))));
+  color: var(--t-text-secondary, rgba(17, 24, 39, calc(0.72 + (var(--remodex-compose-active) * 0.12))));
   font-size: 0.78rem;
   font-weight: 500;
   transition: background 220ms ease, border-color 220ms ease, box-shadow 220ms ease, color 220ms ease, backdrop-filter 220ms ease;
@@ -3550,23 +3584,23 @@ button.workflow-file-item.workflow-file-item-active {
   padding: 0 0.82rem;
   border-radius: 999px;
   border: none;
-  background: #2563eb;
+  background: var(--t-accent, #2563eb);
   color: #ffffff;
   font-size: 0.84rem;
   font-weight: 700;
   letter-spacing: 0.01em;
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+  box-shadow: 0 4px 14px var(--t-accent-ring, rgba(37, 99, 235, 0.4));
   transition: background 160ms ease, box-shadow 160ms ease, transform 120ms ease;
 }
 
 .remodex-send-button:active {
   transform: scale(0.94);
-  background: #1d4ed8;
+  background: var(--t-accent, #1d4ed8);
 }
 
 .remodex-send-button:disabled {
-  background: #d1d5db;
-  color: #9ca3af;
+  background: var(--t-divider-strong, #d1d5db);
+  color: var(--t-text-faint, #9ca3af);
   box-shadow: none;
   transform: none;
 }
@@ -3584,7 +3618,7 @@ button.workflow-file-item.workflow-file-item-active {
 .remodex-compose-helper,
 .remodex-inline-action-note {
   margin: 0;
-  color: rgba(17, 24, 39, 0.46);
+  color: var(--t-text-secondary, rgba(17, 24, 39, 0.46));
   font-size: 0.72rem;
   line-height: 1.28;
 }
@@ -3594,10 +3628,10 @@ button.workflow-file-item.workflow-file-item-active {
   justify-content: center;
   padding: 0.3rem 0.5rem;
   margin: 0 -0.5rem;
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--t-chrome, rgba(255, 255, 255, 0.72));
   backdrop-filter: blur(20px) saturate(1.4);
   -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  border-top: 1px solid rgba(15, 23, 42, 0.04);
+  border-top: 1px solid var(--t-divider-subtle, rgba(15, 23, 42, 0.04));
   opacity: 0.96;
   transition: opacity 220ms ease;
 }
@@ -3610,17 +3644,17 @@ button.workflow-file-item.workflow-file-item-active {
   min-height: 30px;
   padding: 0.4rem 0.32rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, calc(0.42 + (var(--remodex-compose-active) * 0.12)));
-  background: rgba(255, 255, 255, calc(0.72 + (var(--remodex-compose-active) * 0.14)));
+  border: 1px solid var(--t-panel-border, rgba(255, 255, 255, calc(0.42 + (var(--remodex-compose-active) * 0.12))));
+  background: var(--t-panel-translucent, rgba(255, 255, 255, calc(0.72 + (var(--remodex-compose-active) * 0.14))));
   backdrop-filter: blur(calc(10px + (var(--remodex-compose-active) * 10px)));
-  color: rgba(17, 24, 39, calc(0.76 + (var(--remodex-compose-active) * 0.1)));
+  color: var(--t-text-secondary, rgba(17, 24, 39, calc(0.76 + (var(--remodex-compose-active) * 0.1))));
   font-size: 0.74rem;
   font-weight: 500;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  box-shadow: 0 8px 16px rgba(96, 165, 250, calc(0.03 + (var(--remodex-compose-active) * 0.06)));
+  box-shadow: 0 8px 16px var(--t-accent-ring, rgba(96, 165, 250, calc(0.03 + (var(--remodex-compose-active) * 0.06))));
   transition: background 220ms ease, border-color 220ms ease, box-shadow 220ms ease, color 220ms ease, backdrop-filter 220ms ease;
 }
 
@@ -3634,7 +3668,7 @@ button.workflow-file-item.workflow-file-item-active {
   background: transparent;
   backdrop-filter: none;
   box-shadow: none;
-  color: rgba(17, 24, 39, 0.36);
+  color: var(--t-text-faint, rgba(17, 24, 39, 0.36));
   font-size: 0.72rem;
   font-weight: 500;
   gap: 0.3rem;
@@ -3675,7 +3709,7 @@ button.workflow-file-item.workflow-file-item-active {
 
 .remodex-runtime-pressure-calm {
   background: transparent;
-  color: rgba(17, 24, 39, 0.36);
+  color: var(--t-text-faint, rgba(17, 24, 39, 0.36));
 }
 
 .remodex-runtime-pressure-calm .remodex-pressure-dot {
@@ -3684,7 +3718,7 @@ button.workflow-file-item.workflow-file-item-active {
 
 .remodex-runtime-pressure-calm .remodex-pressure-sep,
 .remodex-runtime-pressure-calm .remodex-pressure-branch {
-  color: rgba(17, 24, 39, 0.28);
+  color: var(--t-text-muted, rgba(17, 24, 39, 0.28));
 }
 
 .remodex-runtime-pressure-watch {
