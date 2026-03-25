@@ -18,7 +18,13 @@ export type FactType =
   | 'state'
   | 'temporal';
 
-export type FactState = 'active' | 'core' | 'retired' | 'archive';
+export type FactState = 'active' | 'core' | 'retired' | 'superseded';
+
+export type MemoryKind = 'journal' | 'durable_fact' | 'ephemeral_run_state';
+
+export type SourceTier = 'canonical' | 'derived' | 'journal' | 'transcript' | 'log';
+
+export type RetrievalVisibility = 'primary' | 'evidence_only' | 'archive';
 
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
 
@@ -147,25 +153,100 @@ export interface CortexHealthSummary {
   error?: string;
 }
 
+export interface RecallEvidence {
+  memoryId: number;
+  sourceFile: string;
+  sourceLine?: number;
+  quote?: string;
+}
+
+export interface RecallDiagnostics {
+  searched: number;
+  factBacked: number;
+  journalOnly: number;
+  droppedByPolicy: number;
+}
+
 // ── Recall Result (composed for UI) ──
 
-export interface RecallCard {
+export interface RecallItem {
   id: number;
+  factId: number;
   memoryId: number;
-  factIds: number[];
   text: string;
-  factType: FactType;
+  factType: FactType | string;
+  factState: FactState | string;
   confidence: number;
-  source: string;
-  sourceSection?: string;
-  age: string;
-  score: number;
+  relevance: number;
+  qualityScore: number;
+  sourceTier: SourceTier | string;
+  memoryKind: MemoryKind | string;
+  retrievalVisibility: RetrievalVisibility | string;
+  evidenceCount: number;
+  evidence: RecallEvidence[];
+  reasons: string[];
+  promptEligible: boolean;
+}
+
+export interface CortexRecallItemPayload {
+  id?: number;
+  fact_id?: number;
+  memory_id?: number;
+  text?: string;
+  fact_type?: string;
+  fact_state?: string;
+  confidence?: number;
+  relevance?: number;
+  quality_score?: number;
+  source_tier?: string;
+  memory_kind?: string;
+  retrieval_visibility?: string;
+  evidence_count?: number;
+  evidence?: Array<{
+    memory_id?: number;
+    source_file?: string;
+    source_line?: number;
+    quote?: string;
+  }>;
+  reasons?: string[];
+  prompt_eligible?: boolean;
+}
+
+export interface CortexRecallResponsePayload {
+  items?: CortexRecallItemPayload[];
+  diagnostics?: {
+    searched?: number;
+    fact_backed?: number;
+    journal_only?: number;
+    dropped_by_policy?: number;
+  };
+}
+
+export interface CortexContextResponsePayload extends CortexRecallResponsePayload {
+  structured_block?: string;
+  token_count?: number;
+}
+
+export type RecallFeedbackAction = 'reinforce' | 'retire' | 'supersede' | 'dismiss_for_query';
+
+export interface RecallFeedbackResult {
+  factId: number;
+  action: RecallFeedbackAction;
+  status: string;
+  relatedFactId?: number;
+  query?: string;
+  reason?: string;
 }
 
 // ── Pre-launch Context ──
 
 export interface ContextInjection {
-  facts: RecallCard[];
+  facts: RecallItem[];
   contextBlock: string;
+  structuredBlock: string;
   factCount: number;
+  tokenCount: number;
+  diagnostics: RecallDiagnostics;
 }
+
+export type RecallCard = RecallItem;

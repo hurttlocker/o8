@@ -1,8 +1,9 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { getRecallCards } from '@/lib/cortex/client';
+import { cortexRecall } from '@/lib/cortex/client';
 
+// Thin API wrapper over the shared Cortex recall client.
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -13,8 +14,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'query is required' }, { status: 400 });
     }
 
-    const cards = await getRecallCards(query, limit);
-    return NextResponse.json({ cards, count: cards.length });
+    const recall = await cortexRecall(query, { limit });
+    const cards = recall.items;
+    return NextResponse.json({
+      cards,
+      count: cards.length,
+      diagnostics: recall.diagnostics,
+    });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Recall failed' },

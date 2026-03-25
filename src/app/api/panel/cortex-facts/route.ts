@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { getCortexClient } from '@/lib/cortex/client';
+import { cortexRecall, getCortexClient } from '@/lib/cortex/client';
 
 interface CortexFact {
   text: string;
@@ -76,40 +76,35 @@ export async function GET() {
     }
 
     const facts: CortexFact[] = [];
-    const seen = new Set<string>();
+    const seenFactIds = new Set<number>();
 
     // Run queries in parallel with 3s timeout per query
     const results = await Promise.allSettled(
       QUERIES.map(async ({ q, cat }) => {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 3000);
         try {
-          const results = await client.search(q, 30);
-          clearTimeout(timer);
-          return { results, cat };
+          const recall = await cortexRecall(q, { limit: 8 });
+          return { items: recall.items, cat };
         } catch {
-          clearTimeout(timer);
-          return { results: [], cat };
+          return { items: [], cat };
         }
       })
     );
 
     for (const result of results) {
       if (result.status !== 'fulfilled') continue;
-      const { results: searchResults, cat } = result.value;
-      if (!Array.isArray(searchResults)) continue;
-      for (const r of searchResults) {
-        const snippet = r.snippet || '';
-        if (!snippet || snippet.length < 10) continue;
-        const cleanText = snippet.replace(/^[#\s*-]+/, '').trim();
-        const key = cleanText.slice(0, 50).toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        const confidence = typeof r.score === 'number' ? Math.min(r.score * 100, 100) : 50;
+      const { items, cat } = result.value;
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        if (!item.text || item.text.length < 10) continue;
+        if (seenFactIds.has(item.factId)) continue;
+        seenFactIds.add(item.factId);
+        const primaryEvidence = item.evidence[0];
+        const sourcePath = primaryEvidence?.sourceFile || item.sourceTier;
+        const confidence = Math.round(Math.max(item.relevance, item.confidence, item.qualityScore) * 100);
         facts.push({
-          text: cleanText.length > 140 ? cleanText.slice(0, 137) + '…' : cleanText,
+          text: item.text.length > 140 ? item.text.slice(0, 137) + '…' : item.text,
           confidence,
-          source: (r as any).source || 'cortex',
+          source: sourcePath || 'cortex',
           category: cat,
         });
       }

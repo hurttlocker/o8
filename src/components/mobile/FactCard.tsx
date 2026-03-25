@@ -26,15 +26,19 @@ interface FactCardProps {
 
 export default function FactCard({ fact, onReinforce, onRetire, onInject, compact }: FactCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [showEvidence, setShowEvidence] = useState(false);
   const [actionState, setActionState] = useState<'idle' | 'reinforced' | 'retired'>('idle');
 
   const typeColor = FACT_TYPE_COLORS[fact.factType] ?? '#5b6475';
   const confidencePercent = Math.max(0, Math.min(100, Math.round(fact.confidence * 100)));
   const confidenceColor = confidencePercent >= 80 ? '#059669' : confidencePercent >= 50 ? '#b45309' : '#dc2626';
   const showExpandedSection = expanded || (compact && Boolean(onInject));
+  const evidenceCount = fact.evidenceCount || fact.evidence.length;
+  const firstEvidence = fact.evidence[0];
+  const sourceLabel = firstEvidence?.sourceFile || fact.sourceTier;
 
-  const handleReinforce = useCallback(() => { onReinforce?.(fact.id); setActionState('reinforced'); }, [fact.id, onReinforce]);
-  const handleRetire = useCallback(() => { onRetire?.(fact.id); setActionState('retired'); }, [fact.id, onRetire]);
+  const handleReinforce = useCallback(() => { onReinforce?.(fact.factId); setActionState('reinforced'); }, [fact.factId, onReinforce]);
+  const handleRetire = useCallback(() => { onRetire?.(fact.factId); setActionState('retired'); }, [fact.factId, onRetire]);
   const handleInject = useCallback(() => { onInject?.(`[${fact.factType}] ${fact.text}`); }, [fact.factType, fact.text, onInject]);
 
   if (actionState === 'reinforced') {
@@ -77,10 +81,23 @@ export default function FactCard({ fact, onReinforce, onRetire, onInject, compac
           letterSpacing: '0.03em', color: typeColor,
           background: `${typeColor}14`, padding: '3px 8px', borderRadius: 6,
         }}>{fact.factType}</span>
+        <span style={{
+          fontSize: 11, fontWeight: 600, color: '#5b6475',
+          background: 'rgba(15, 23, 42, 0.05)', padding: '3px 8px', borderRadius: 6,
+          textTransform: 'capitalize',
+        }}>{fact.sourceTier.replace(/_/g, ' ')}</span>
+        {fact.promptEligible && (
+          <span style={{
+            fontSize: 11, fontWeight: 600, color: '#2563eb',
+            background: 'rgba(37, 99, 235, 0.08)', padding: '3px 8px', borderRadius: 6,
+          }}>Prompt</span>
+        )}
         <span style={{ fontSize: 11, color: confidenceColor, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
           {confidencePercent}%
         </span>
-        <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>{fact.age}</span>
+        <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>
+          {evidenceCount} evidence
+        </span>
       </div>
 
       <div style={{
@@ -93,13 +110,74 @@ export default function FactCard({ fact, onReinforce, onRetire, onInject, compac
         <div style={{ marginTop: 14 }}>
           {!compact && (
             <>
-              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12 }}>
-                {fact.source}
-                {fact.sourceSection && <span> · {fact.sourceSection}</span>}
+              <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                <span>{sourceLabel}</span>
+                <span>{fact.memoryKind.replace(/_/g, ' ')}</span>
+                <span>{fact.retrievalVisibility.replace(/_/g, ' ')}</span>
               </div>
               <div style={{ height: 4, background: 'rgba(15, 23, 42, 0.06)', borderRadius: 2, marginBottom: 14, overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${confidencePercent}%`, background: confidenceColor, borderRadius: 2, transition: 'width 0.4s ease' }} />
               </div>
+              {fact.reasons.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                  {fact.reasons.map((reason) => (
+                    <span key={reason} style={{
+                      fontSize: 11,
+                      color: '#5b6475',
+                      background: 'rgba(15, 23, 42, 0.04)',
+                      borderRadius: 999,
+                      padding: '4px 8px',
+                    }}>
+                      {reason.replace(/_/g, ' ')}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {evidenceCount > 0 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowEvidence((value) => !value);
+                  }}
+                  style={{
+                    width: '100%',
+                    marginBottom: 12,
+                    padding: '10px 12px',
+                    borderRadius: 12,
+                    border: '1px solid rgba(15, 23, 42, 0.08)',
+                    background: 'rgba(15, 23, 42, 0.03)',
+                    color: '#334155',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  {showEvidence ? 'Hide evidence' : `Show evidence (${evidenceCount})`}
+                </button>
+              )}
+              {showEvidence && fact.evidence.length > 0 && (
+                <div style={{ display: 'grid', gap: 8, marginBottom: 14 }}>
+                  {fact.evidence.map((evidence, index) => (
+                    <div key={`${evidence.memoryId}:${index}`} style={{
+                      padding: '10px 12px',
+                      borderRadius: 12,
+                      background: 'rgba(15, 23, 42, 0.03)',
+                      border: '1px solid rgba(15, 23, 42, 0.05)',
+                    }}>
+                      <div style={{ fontSize: 11, color: '#64748b', marginBottom: evidence.quote ? 6 : 0 }}>
+                        {evidence.sourceFile}
+                        {evidence.sourceLine ? `:${evidence.sourceLine}` : ''}
+                      </div>
+                      {evidence.quote && (
+                        <div style={{ fontSize: 12, lineHeight: '18px', color: '#111827' }}>
+                          {evidence.quote}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           )}
           <div style={{
