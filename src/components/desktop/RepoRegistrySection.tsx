@@ -498,6 +498,8 @@ function RepoCard({
   onToggle: () => void;
   isActive?: boolean;
 }) {
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [cardWidth, setCardWidth] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuRect, setMenuRect] = useState<DOMRect | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -533,6 +535,27 @@ function RepoCard({
   useEffect(() => {
     setDraftSetup(repo.setup);
   }, [repo.setup]);
+
+  useEffect(() => {
+    const node = cardRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+
+    const updateWidth = () => {
+      setCardWidth(node.getBoundingClientRect().width);
+    };
+
+    updateWidth();
+    const observer = new ResizeObserver((entries) => {
+      const nextWidth = entries[0]?.contentRect.width;
+      if (typeof nextWidth === 'number') {
+        setCardWidth(nextWidth);
+      } else {
+        updateWidth();
+      }
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   // Fetch branches when expanded
   useEffect(() => {
@@ -864,9 +887,172 @@ function RepoCard({
     : expanded
       ? '1px solid rgba(148, 163, 184, 0.2)'
       : '1px solid rgba(148, 163, 184, 0.14)';
+  const compactLayout = cardWidth > 0 && cardWidth < 320;
+
+  const currentBadge = isActive ? (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: compactLayout ? '2px 8px' : '3px 9px',
+        borderRadius: 999,
+        background: 'rgba(37, 99, 235, 0.08)',
+        border: '1px solid rgba(37, 99, 235, 0.14)',
+        color: '#2563eb',
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+        flexShrink: 0,
+      }}
+    >
+      Current
+    </span>
+  ) : null;
+  const portsBadge = activePorts && activePorts.length > 0 ? (
+    <span style={{
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: 4,
+      padding: compactLayout ? '1px 5px' : '1px 6px',
+      borderRadius: 999,
+      background: 'rgba(34,197,94,0.06)',
+      border: '1px solid rgba(34,197,94,0.12)',
+      flexShrink: 0,
+    }}>
+      <span style={{
+        width: 6, height: 6, borderRadius: '50%',
+        background: '#22c55e',
+        animation: 'agentCardPulse 2s ease-in-out infinite',
+      }} />
+      <span style={{
+        fontSize: 10, fontWeight: 600, color: '#16a34a',
+        fontFamily: '"SF Mono", ui-monospace, monospace',
+      }}>
+        {activePorts.length === 1 ? `:${activePorts[0]}` : `${activePorts.length} ports`}
+      </span>
+    </span>
+  ) : null;
+  const prBadge = prPreview.length > 0 ? (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        padding: compactLayout ? '2px 7px' : '2px 8px',
+        borderRadius: 999,
+        background: 'linear-gradient(180deg, rgba(239,246,255,0.92), rgba(191,219,254,0.58))',
+        border: '1px solid rgba(96, 165, 250, 0.22)',
+        boxShadow: compactLayout ? '0 6px 16px rgba(37,99,235,0.08)' : '0 8px 20px rgba(37,99,235,0.12)',
+        flexShrink: 0,
+      }}
+    >
+      <GitPullRequest size={10} strokeWidth={2.2} color="#2563eb" />
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          color: '#1d4ed8',
+          fontFamily: '"SF Mono", ui-monospace, monospace',
+        }}
+      >
+        PR #{prPreview[0].number}
+      </span>
+    </span>
+  ) : null;
+  const mergeRiskBadge = prPreview.length > 0 ? (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '2px 8px',
+        borderRadius: 999,
+        background: `${mergeRisk.color}14`,
+        border: `1px solid ${mergeRisk.color}28`,
+        color: mergeRisk.color,
+        fontSize: 10,
+        fontWeight: 700,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        flexShrink: 0,
+      }}
+    >
+      {mergeRisk.label}
+    </span>
+  ) : null;
+  const branchBadge = (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
+        padding: compactLayout ? '1px 5px' : '1px 6px',
+        borderRadius: 999,
+        background: 'var(--t-divider-subtle)',
+        color: 'var(--t-text-secondary)',
+        fontSize: 10,
+        fontWeight: 600,
+        fontFamily: '"SF Mono", ui-monospace, monospace',
+        flexShrink: 0,
+      }}
+    >
+      <GitBranch size={10} strokeWidth={2} />
+      {repo.defaultBranch}
+    </span>
+  );
+  const menuTrigger = (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        const rect = e.currentTarget.getBoundingClientRect();
+        setMenuRect(rect);
+        setMenuOpen((v) => !v);
+      }}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 30,
+        height: 30,
+        borderRadius: 10,
+        border: menuOpen ? '1px solid rgba(37, 99, 235, 0.16)' : '1px solid rgba(148, 163, 184, 0.14)',
+        background: menuOpen
+          ? 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(239,246,255,0.92))'
+          : 'rgba(255,255,255,0.8)',
+        color: menuOpen ? '#2563eb' : 'var(--t-text-secondary)',
+        cursor: 'pointer',
+        flexShrink: 0,
+        boxShadow: menuOpen
+          ? '0 8px 18px rgba(37, 99, 235, 0.08)'
+          : '0 4px 10px rgba(15, 23, 42, 0.04)',
+        transition: 'all 140ms ease',
+      }}
+      onMouseEnter={(e) => {
+        const target = e.currentTarget;
+        if (!menuOpen) {
+          target.style.background = 'rgba(255,255,255,0.96)';
+          target.style.borderColor = 'rgba(37, 99, 235, 0.14)';
+          target.style.color = '#2563eb';
+        }
+      }}
+      onMouseLeave={(e) => {
+        const target = e.currentTarget;
+        if (!menuOpen) {
+          target.style.background = 'rgba(255,255,255,0.8)';
+          target.style.borderColor = 'rgba(148, 163, 184, 0.14)';
+          target.style.color = 'var(--t-text-secondary)';
+        }
+      }}
+      aria-label={`Open actions for ${repo.name}`}
+    >
+      <OverflowDotsIcon color="currentColor" />
+    </button>
+  );
 
   return (
     <div
+      ref={cardRef}
       style={{
         position: 'relative',
         borderRadius: 18,
@@ -886,191 +1072,65 @@ function RepoCard({
       <div
         style={{
           display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '12px 14px',
+          flexDirection: 'column',
+          gap: compactLayout ? 8 : 0,
+          padding: compactLayout ? '11px 12px 10px' : '12px 14px',
           cursor: 'pointer',
         }}
         onClick={onToggle}
         onMouseEnter={(event) => schedulePreviewHover(event.currentTarget as HTMLDivElement, event.clientX, event.clientY)}
         onMouseLeave={closePreviewHover}
       >
-        <span style={{ color: 'var(--t-text-muted)', flexShrink: 0, display: 'flex' }}>
-          {expanded ? <ChevronDown size={14} strokeWidth={2} /> : <ChevronRight size={14} strokeWidth={2} />}
-        </span>
-        <span
-          style={{
-            fontSize: 13,
-            fontWeight: 700,
-            color: 'var(--t-text)',
-            letterSpacing: '-0.01em',
-            flex: 1,
-            minWidth: 0,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {repo.name}
-        </span>
-        {isActive ? (
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              padding: '3px 9px',
-              borderRadius: 999,
-              background: 'rgba(37, 99, 235, 0.08)',
-              border: '1px solid rgba(37, 99, 235, 0.14)',
-              color: '#2563eb',
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: '0.04em',
-              textTransform: 'uppercase',
-              flexShrink: 0,
-            }}
-          >
-            Current
-          </span>
-        ) : null}
-        {/* Running port indicator */}
-        {activePorts && activePorts.length > 0 ? (
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            padding: '1px 6px',
-            borderRadius: 999,
-            background: 'rgba(34,197,94,0.06)',
-            border: '1px solid rgba(34,197,94,0.12)',
-            flexShrink: 0,
-          }}>
-            <span style={{
-              width: 6, height: 6, borderRadius: '50%',
-              background: '#22c55e',
-              animation: 'agentCardPulse 2s ease-in-out infinite',
-            }} />
-            <span style={{
-              fontSize: 10, fontWeight: 600, color: '#16a34a',
-              fontFamily: '"SF Mono", ui-monospace, monospace',
-            }}>
-              {activePorts.length === 1 ? `:${activePorts[0]}` : `${activePorts.length} ports`}
-            </span>
-          </span>
-        ) : null}
-        {prPreview.length > 0 ? (
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '2px 8px',
-              borderRadius: 999,
-              background: 'linear-gradient(180deg, rgba(239,246,255,0.92), rgba(191,219,254,0.58))',
-              border: '1px solid rgba(96, 165, 250, 0.22)',
-              boxShadow: '0 8px 20px rgba(37,99,235,0.12)',
-              flexShrink: 0,
-            }}
-          >
-            <GitPullRequest size={10} strokeWidth={2.2} color="#2563eb" />
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: '#1d4ed8',
-                fontFamily: '"SF Mono", ui-monospace, monospace',
-              }}
-            >
-              PR #{prPreview[0].number}
-            </span>
-          </span>
-        ) : null}
-        {prPreview.length > 0 ? (
-          <span
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              padding: '2px 8px',
-              borderRadius: 999,
-              background: `${mergeRisk.color}14`,
-              border: `1px solid ${mergeRisk.color}28`,
-              color: mergeRisk.color,
-              fontSize: 10,
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              flexShrink: 0,
-            }}
-          >
-            {mergeRisk.label}
-          </span>
-        ) : null}
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 3,
-            padding: '1px 6px',
-            borderRadius: 999,
-            background: 'var(--t-divider-subtle)',
-            color: 'var(--t-text-secondary)',
-            fontSize: 10,
-            fontWeight: 600,
-            fontFamily: '"SF Mono", ui-monospace, monospace',
-            flexShrink: 0,
-          }}
-        >
-          <GitBranch size={10} strokeWidth={2} />
-          {repo.defaultBranch}
-        </span>
-        {/* Overflow menu trigger */}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            const rect = e.currentTarget.getBoundingClientRect();
-            setMenuRect(rect);
-            setMenuOpen((v) => !v);
-          }}
+        <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            width: 30,
-            height: 30,
-            borderRadius: 10,
-            border: menuOpen ? '1px solid rgba(37, 99, 235, 0.16)' : '1px solid rgba(148, 163, 184, 0.14)',
-            background: menuOpen
-              ? 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(239,246,255,0.92))'
-              : 'rgba(255,255,255,0.8)',
-            color: menuOpen ? '#2563eb' : 'var(--t-text-secondary)',
-            cursor: 'pointer',
-            flexShrink: 0,
-            boxShadow: menuOpen
-              ? '0 8px 18px rgba(37, 99, 235, 0.08)'
-              : '0 4px 10px rgba(15, 23, 42, 0.04)',
-            transition: 'all 140ms ease',
+            gap: 8,
+            minWidth: 0,
           }}
-          onMouseEnter={(e) => {
-            const target = e.currentTarget;
-            if (!menuOpen) {
-              target.style.background = 'rgba(255,255,255,0.96)';
-              target.style.borderColor = 'rgba(37, 99, 235, 0.14)';
-              target.style.color = '#2563eb';
-            }
-          }}
-          onMouseLeave={(e) => {
-            const target = e.currentTarget;
-            if (!menuOpen) {
-              target.style.background = 'rgba(255,255,255,0.8)';
-              target.style.borderColor = 'rgba(148, 163, 184, 0.14)';
-              target.style.color = 'var(--t-text-secondary)';
-            }
-          }}
-          aria-label={`Open actions for ${repo.name}`}
         >
-          <OverflowDotsIcon color="currentColor" />
-        </button>
+          <span style={{ color: 'var(--t-text-muted)', flexShrink: 0, display: 'flex' }}>
+            {expanded ? <ChevronDown size={14} strokeWidth={2} /> : <ChevronRight size={14} strokeWidth={2} />}
+          </span>
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 700,
+              color: 'var(--t-text)',
+              letterSpacing: '-0.01em',
+              flex: 1,
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {repo.name}
+          </span>
+          {!compactLayout ? currentBadge : null}
+          {!compactLayout ? portsBadge : null}
+          {!compactLayout ? prBadge : null}
+          {!compactLayout ? mergeRiskBadge : null}
+          {!compactLayout ? branchBadge : null}
+          {menuTrigger}
+        </div>
+
+        {compactLayout ? (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              flexWrap: 'wrap',
+              paddingLeft: 22,
+            }}
+          >
+            {currentBadge}
+            {portsBadge}
+            {prBadge}
+            {branchBadge}
+          </div>
+        ) : null}
       </div>
 
       {hoveringHeader && (prPreviewLoading || prPreview.length > 0) ? (
@@ -1267,9 +1327,9 @@ function RepoCard({
 
       {/* Expanded content */}
       {expanded ? (
-        <div style={{ padding: '6px 14px 16px 44px' }}>
+        <div style={{ padding: compactLayout ? '8px 12px 14px 24px' : '6px 14px 16px 44px' }}>
           {/* Primary actions row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', columnGap: compactLayout ? 10 : 12, rowGap: 8, flexWrap: compactLayout ? 'wrap' : 'nowrap', marginBottom: compactLayout ? 12 : 10 }}>
             <button
               type="button"
               onClick={() => onLaunchAgent(repo)}
@@ -1380,30 +1440,32 @@ function RepoCard({
                 </button>
               )
             ) : null}
-            <div style={{ flex: 1 }} />
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRemove(repo);
-              }}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                padding: 0,
-                border: 'none',
-                background: 'transparent',
-                color: '#b91c1c',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
-              }}
-            >
-              <Trash2 size={11} strokeWidth={2} />
-              Remove from Cortex
-            </button>
+            {!compactLayout ? <div style={{ flex: 1 }} /> : null}
+            {!compactLayout ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRemove(repo);
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: 0,
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#b91c1c',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}
+              >
+                <Trash2 size={11} strokeWidth={2} />
+                Remove from Cortex
+              </button>
+            ) : null}
           </div>
 
           {/* Multi-agent conflict warning */}
@@ -1513,7 +1575,11 @@ function RepoCard({
               <div style={{ fontSize: 11, color: 'var(--t-text-faint)', padding: '4px 0' }}>Loading branches…</div>
             ) : branches.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                {branches.map((branch) => (
+                {branches.map((branch) => {
+                  const branchAgents = agentsByBranch?.get(branch.name) ?? [];
+                  const visibleBranchAgents = compactLayout ? branchAgents.slice(0, 1) : branchAgents;
+                  const hiddenAgentCount = compactLayout ? Math.max(0, branchAgents.length - visibleBranchAgents.length) : 0;
+                  return (
                   <div key={branch.name}>
                   <div
                     onClick={() => {
@@ -1570,7 +1636,7 @@ function RepoCard({
                       </span>
                     ) : null}
                     {/* Agent indicators */}
-                    {agentsByBranch?.get(branch.name)?.map((agent) => (
+                    {visibleBranchAgents.map((agent) => (
                       <span
                         key={agent.sessionKey}
                         title={agent.name}
@@ -1596,6 +1662,24 @@ function RepoCard({
                         {agent.name}
                       </span>
                     ))}
+                    {hiddenAgentCount > 0 ? (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '1px 5px',
+                          borderRadius: 4,
+                          background: 'rgba(99, 102, 241, 0.08)',
+                          border: '1px solid rgba(99, 102, 241, 0.12)',
+                          fontSize: 9,
+                          fontWeight: 700,
+                          color: '#4f46e5',
+                          flexShrink: 0,
+                        }}
+                      >
+                        +{hiddenAgentCount}
+                      </span>
+                    ) : null}
                     {/* Worktree badge */}
                     {branch.isWorktree && !branch.current ? (
                       <span style={{
@@ -1625,7 +1709,7 @@ function RepoCard({
                       </span>
                     ) : null}
                     {/* Disk size for worktrees */}
-                    {branch.diskSize ? (
+                    {!compactLayout && branch.diskSize ? (
                       <span style={{
                         fontSize: 9,
                         color: 'var(--t-text-faint)',
@@ -1636,7 +1720,7 @@ function RepoCard({
                       </span>
                     ) : null}
                     {/* Ahead/behind */}
-                    {branch.ahead > 0 || branch.behind > 0 ? (
+                    {!compactLayout && (branch.ahead > 0 || branch.behind > 0) ? (
                       <span style={{
                         fontSize: 9,
                         fontWeight: 600,
@@ -1656,7 +1740,7 @@ function RepoCard({
                       {branch.lastCommitAge}
                     </span>
                     {/* Open PR button — on feature branches with commits ahead */}
-                    {!branch.current && branch.name !== repo.defaultBranch && branch.ahead > 0 ? (
+                    {!compactLayout && !branch.current && branch.name !== repo.defaultBranch && branch.ahead > 0 ? (
                       <button
                         type="button"
                         onClick={(e) => {
@@ -1820,7 +1904,7 @@ function RepoCard({
                     </div>
                   ) : null}
                   </div>
-                ))}
+                )})}
               </div>
             ) : null}
           </div>

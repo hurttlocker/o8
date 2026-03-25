@@ -290,9 +290,35 @@ function normalizeAgentTaskSummary(task?: string | null) {
     : cleaned;
 }
 
-function agentCardFocusLine(agent: AgentDetail | null, fallback: string) {
+function agentCardTaskLabel(task?: string | null) {
+  const summary = normalizeAgentTaskSummary(task);
+  if (!summary) return null;
+  const issueMatch = summary.match(/\bIssue #\d+\b/i);
+  if (issueMatch) return issueMatch[0].replace(/^issue/i, 'Issue');
+  const prMatch = summary.match(/\bPR #\d+\b/i);
+  if (prMatch) return prMatch[0].replace(/^pr/i, 'PR');
+  if (/review/i.test(summary)) return 'Review';
+  return null;
+}
+
+function agentCardRepoBranchLine(agent: AgentDetail | null, repoLabel?: string | null) {
+  if (!agent) return repoLabel ?? 'Session ready';
+  const branch = agent.branch?.trim() && !agent.branch.startsWith('surface/') ? agent.branch.trim() : 'main';
+  const repo = repoLabel?.trim()
+    || agent.runtimeSurface?.reviewContext?.repoSlug?.split('/').pop()?.trim()
+    || agent.workspace?.replace(/^~\//, '').split('/').filter(Boolean).pop()
+    || 'workspace';
+  return `${repo} · ${branch}`;
+}
+
+function agentCardFocusLine(agent: AgentDetail | null, repoLabel: string, fallback: string) {
+  const taskLabel = agentCardTaskLabel(agent?.currentTask);
+  if (taskLabel) return taskLabel;
   const summary = normalizeAgentTaskSummary(agent?.currentTask);
-  return summary || fallback;
+  if (summary && /^(Issue #\d+|PR #\d+|Review)\b/i.test(summary)) {
+    return summary;
+  }
+  return agentCardRepoBranchLine(agent, repoLabel) || fallback;
 }
 
 // formatModelLabel imported from @/lib/format
@@ -717,11 +743,13 @@ function WorkspaceHeroAction({
   icon,
   onClick,
   primary = false,
+  compact = false,
 }: {
   label: string;
   icon: React.ReactNode;
   onClick?: () => void;
   primary?: boolean;
+  compact?: boolean;
 }) {
   return (
     <button
@@ -732,19 +760,22 @@ function WorkspaceHeroAction({
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 6,
-        minHeight: 34,
-        padding: primary ? '9px 12px' : '8px 11px',
-        borderRadius: 10,
+        gap: compact ? 4 : 6,
+        minHeight: compact ? 29 : 32,
+        padding: primary
+          ? compact ? '7px 10px' : '8px 12px'
+          : compact ? '6px 9px' : '7px 11px',
+        borderRadius: compact ? 8 : 10,
         border: primary ? '1px solid rgba(37, 99, 235, 0.16)' : '1px solid rgba(148, 163, 184, 0.14)',
         background: primary ? 'linear-gradient(180deg, rgba(37,99,235,0.96), rgba(29,78,216,0.92))' : 'rgba(255,255,255,0.7)',
         color: primary ? '#fff' : 'var(--t-text-secondary)',
-        fontSize: 11,
+        fontSize: compact ? 9 : 11,
         fontWeight: 700,
         cursor: onClick ? 'pointer' : 'not-allowed',
         opacity: onClick ? 1 : 0.45,
         fontFamily: '-apple-system, system-ui, sans-serif',
-        boxShadow: primary ? '0 12px 24px rgba(37, 99, 235, 0.18)' : 'none',
+        boxShadow: primary ? (compact ? '0 8px 16px rgba(37, 99, 235, 0.15)' : '0 12px 24px rgba(37, 99, 235, 0.18)') : 'none',
+        whiteSpace: 'nowrap',
       }}
     >
       {icon}
@@ -755,8 +786,10 @@ function WorkspaceHeroAction({
 
 function WorkspaceHeroOptionsButton({
   onClick,
+  compact = false,
 }: {
   onClick?: () => void;
+  compact?: boolean;
 }) {
   return (
     <button
@@ -769,10 +802,10 @@ function WorkspaceHeroOptionsButton({
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        minWidth: 34,
-        minHeight: 34,
+        minWidth: compact ? 29 : 32,
+        minHeight: compact ? 29 : 32,
         padding: 0,
-        borderRadius: 10,
+        borderRadius: compact ? 8 : 10,
         border: '1px solid rgba(37, 99, 235, 0.16)',
         background: 'rgba(255,255,255,0.76)',
         color: '#2563eb',
@@ -783,7 +816,7 @@ function WorkspaceHeroOptionsButton({
         fontFamily: '-apple-system, system-ui, sans-serif',
       }}
     >
-      <ChevronDown size={14} strokeWidth={2.2} />
+      <ChevronDown size={compact ? 12 : 14} strokeWidth={2.2} />
     </button>
   );
 }
@@ -791,9 +824,13 @@ function WorkspaceHeroOptionsButton({
 function WorkspaceHeroPill({
   label,
   tone = 'neutral',
+  compact = false,
+  fullWidth = false,
 }: {
   label: string;
   tone?: 'neutral' | 'blue' | 'green';
+  compact?: boolean;
+  fullWidth?: boolean;
 }) {
   const palette = tone === 'blue'
     ? { background: 'rgba(37, 99, 235, 0.08)', border: 'rgba(37, 99, 235, 0.14)', color: '#2563eb' }
@@ -806,14 +843,19 @@ function WorkspaceHeroPill({
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        padding: '4px 9px',
+        justifyContent: fullWidth ? 'flex-start' : undefined,
+        maxWidth: fullWidth ? '100%' : undefined,
+        padding: compact ? '2px 7px' : '3px 8px',
         borderRadius: 999,
         background: palette.background,
         border: `1px solid ${palette.border}`,
         color: palette.color,
-        fontSize: 10,
+        fontSize: compact ? 9 : 10,
         fontWeight: 700,
         letterSpacing: '0.01em',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
       }}
     >
       {label}
@@ -846,9 +888,32 @@ function WorkspaceHero({
   onOpenGitLog?: () => void;
   onOpenCI?: () => void;
 }) {
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [cardWidth, setCardWidth] = useState(0);
+  const compact = cardWidth > 0 && cardWidth < 390;
+
+  useEffect(() => {
+    const node = cardRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+
+    const updateWidth = () => {
+      setCardWidth(node.getBoundingClientRect().width);
+    };
+
+    updateWidth();
+    const observer = new ResizeObserver((entries) => {
+      const nextWidth = entries[0]?.contentRect.width;
+      if (typeof nextWidth === 'number') setCardWidth(nextWidth);
+      else updateWidth();
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div style={{ paddingLeft: 14, paddingRight: 14, paddingBottom: 16 }}>
       <div
+        ref={cardRef}
         style={{
           position: 'relative',
           overflow: 'hidden',
@@ -868,13 +933,13 @@ function WorkspaceHero({
             pointerEvents: 'none',
           }}
         />
-        <div style={{ position: 'relative', padding: '18px 18px 16px' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ position: 'relative', padding: compact ? '14px 14px 13px' : '17px 17px 15px' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: compact ? 10 : 12 }}>
             <span
               style={{
-                width: 42,
-                height: 42,
-                borderRadius: 14,
+                width: compact ? 36 : 40,
+                height: compact ? 36 : 40,
+                borderRadius: compact ? 12 : 14,
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -883,7 +948,7 @@ function WorkspaceHero({
                 flexShrink: 0,
               }}
             >
-              <FolderOpen size={18} strokeWidth={2.1} />
+              <FolderOpen size={compact ? 16 : 18} strokeWidth={2.1} />
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: '#2563eb' }}>
@@ -891,9 +956,9 @@ function WorkspaceHero({
               </div>
               <div
                 style={{
-                  marginTop: 6,
-                  fontSize: 21,
-                  lineHeight: 1.05,
+                  marginTop: compact ? 4 : 6,
+                  fontSize: compact ? 17 : 20,
+                  lineHeight: 1.04,
                   fontWeight: 800,
                   letterSpacing: '-0.03em',
                   color: 'var(--t-text)',
@@ -901,39 +966,46 @@ function WorkspaceHero({
               >
                 {title}
               </div>
-              <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>
+              <div style={{ marginTop: 4, fontSize: compact ? 10 : 12, lineHeight: compact ? 1.4 : 1.5, color: 'var(--t-text-muted)' }}>
                 {subtitle}
               </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
-            {repoSlug ? <WorkspaceHeroPill label={repoSlug} tone="blue" /> : null}
-            {branch ? <WorkspaceHeroPill label={branch} /> : null}
-            {workspaceLabel ? <WorkspaceHeroPill label={workspaceLabel} /> : null}
-            <WorkspaceHeroPill label={`${changedFiles} changed`} tone={changedFiles > 0 ? 'blue' : 'neutral'} />
-            <WorkspaceHeroPill label={`${activeRuns} active`} tone={activeRuns > 0 ? 'green' : 'neutral'} />
+          <div style={{ display: 'flex', gap: compact ? 5 : 7, flexWrap: 'wrap', marginTop: compact ? 10 : 13 }}>
+            {repoSlug ? <WorkspaceHeroPill label={repoSlug} tone="blue" compact={compact} /> : null}
+            {branch ? <WorkspaceHeroPill label={branch} compact={compact} /> : null}
+            <WorkspaceHeroPill label={`${changedFiles} changed`} tone={changedFiles > 0 ? 'blue' : 'neutral'} compact={compact} />
+            <WorkspaceHeroPill label={`${activeRuns} active`} tone={activeRuns > 0 ? 'green' : 'neutral'} compact={compact} />
           </div>
+          {workspaceLabel ? (
+            <div style={{ marginTop: compact ? 6 : 7 }}>
+              <WorkspaceHeroPill label={workspaceLabel} compact={compact} fullWidth />
+            </div>
+          ) : null}
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', gap: compact ? 5 : 7, flexWrap: 'wrap', marginTop: compact ? 12 : 15 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: compact ? 4 : 6 }}>
               <WorkspaceHeroAction
                 label="Launch Agent"
-                icon={<PlayCircle size={13} strokeWidth={2} />}
+                icon={<PlayCircle size={compact ? 11 : 13} strokeWidth={2} />}
                 onClick={onLaunch}
                 primary
+                compact={compact}
               />
-              {onLaunchOptions ? <WorkspaceHeroOptionsButton onClick={onLaunchOptions} /> : null}
+              {onLaunchOptions ? <WorkspaceHeroOptionsButton onClick={onLaunchOptions} compact={compact} /> : null}
             </div>
             <WorkspaceHeroAction
               label="Git Log"
-              icon={<GitCommit size={13} strokeWidth={2} />}
+              icon={<GitCommit size={compact ? 11 : 13} strokeWidth={2} />}
               onClick={onOpenGitLog}
+              compact={compact}
             />
             <WorkspaceHeroAction
               label="CI"
-              icon={<CheckCircle2 size={13} strokeWidth={2} />}
+              icon={<CheckCircle2 size={compact ? 11 : 13} strokeWidth={2} />}
               onClick={onOpenCI}
+              compact={compact}
             />
           </div>
         </div>
@@ -994,6 +1066,7 @@ const AgentCard = memo(function AgentCard({
       ?? null;
   const focusLine = agentCardFocusLine(
     primaryAgent,
+    group.displayName,
     primaryPr?.title
       || branchLabel
       || (activeAgents.length > 0
