@@ -103,6 +103,22 @@ export interface MobileTranscriptToolCall {
   name: string;
   args?: Record<string, unknown>;
   status?: 'calling' | 'running' | 'done';
+  preview?: string;
+}
+
+export interface MobileTranscriptSource {
+  title: string;
+  url?: string;
+  path?: string;
+  index?: number;
+}
+
+export interface MobileTranscriptThinkingStep {
+  type: 'thinking' | 'tool' | 'search' | 'reading' | 'analyzing';
+  label: string;
+  description?: string;
+  status: 'active' | 'complete' | 'pending';
+  detail?: string;
 }
 
 export interface MobileTranscriptEntry {
@@ -113,6 +129,14 @@ export interface MobileTranscriptEntry {
   toolCalls?: MobileTranscriptToolCall[];
   timestamp?: number;
   timestampLabel?: string;
+  model?: string;
+  tokens?: { input: number; output: number };
+  costUsd?: number;
+  sources?: MobileTranscriptSource[];
+  thinking?: string;
+  thinkingSteps?: MobileTranscriptThinkingStep[];
+  thinkingDurationMs?: number;
+  recalledFacts?: number;
 }
 
 export interface MobileRuntimeTailGroup {

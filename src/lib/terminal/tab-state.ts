@@ -14,6 +14,13 @@ export interface PersistedTab {
   chatRuntime?: 'codex' | 'claude-code' | 'openclaw'; // for kind='chat' (CLI Session)
   chatSessionKey?: string; // for kind='chat' (CLI Session)
   chatModel?: string;
+  linkedIssue?: {
+    repo: string;
+    number: number;
+    title: string;
+    body?: string | null;
+    url?: string;
+  };
 }
 
 export interface PersistedTabState {

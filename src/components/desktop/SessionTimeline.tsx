@@ -55,6 +55,8 @@ const DRILL_MAX_WIDTH = 720;
 const DRILL_MIN_HEIGHT = 320;
 const DRILL_MAX_HEIGHT = 680;
 const DEFAULT_TIMELINE_REPO = 'hurttlocker/cortex-ide';
+const TIMELINE_BAR_HEIGHT = 20;
+const TIMELINE_ACTIVE_SEGMENT_MIN_PX = 4;
 // Intentionally disabled for v0.001.0 to keep the customer surface simpler.
 // Keep the drill-down implementation in place so we can restore it after the UX pass.
 const TIMELINE_DRILLDOWN_ENABLED = false;
@@ -106,6 +108,16 @@ function cleanTaskLabel(task: string | null | undefined): string | null {
     .trim();
 }
 
+function humanizeStatus(status: string | null | undefined): string {
+  if (!status) return 'Idle';
+  if (status === 'reviewing') return 'Reviewing';
+  if (status === 'running') return 'Running';
+  if (status === 'waiting') return 'Waiting';
+  if (status === 'blocked') return 'Blocked';
+  if (status === 'failed') return 'Failed';
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
 function timelineMatchesAgent(agentName: string, session: AgentSummary): boolean {
   const key = session.sessionKey.toLowerCase();
   const name = (session.name || '').toLowerCase();
@@ -140,6 +152,7 @@ function timelinePrimarySession(sessions: AgentSummary[]): AgentSummary | null {
 
 function useTimelineData() {
   const [segments, setSegments] = useState<TimelineSegment[]>([]);
+  const [windowMinutes, setWindowMinutes] = useState(0);
   const [loading, setLoading] = useState(true);
   const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
 
@@ -150,10 +163,17 @@ function useTimelineData() {
       const res = await fetch(appendOpenClawBetaQuery('/api/panel/timeline', openClawBetaEnabled));
       if (res.ok) {
         const data = await res.json();
+        setWindowMinutes(data.windowMinutes ?? 0);
         if (data.segments?.length > 0) {
           setSegments(data.segments);
           // Cache in sessionStorage
-          try { sessionStorage.setItem('cortex-timeline', JSON.stringify({ ts: Date.now(), segments: data.segments })); } catch {}
+          try {
+            sessionStorage.setItem('cortex-timeline', JSON.stringify({
+              ts: Date.now(),
+              segments: data.segments,
+              windowMinutes: data.windowMinutes ?? 0,
+            }));
+          } catch {}
           setLoading(false);
           return;
         }
@@ -166,12 +186,14 @@ function useTimelineData() {
         const parsed = JSON.parse(cached);
         if (Date.now() - parsed.ts < 300_000 && parsed.segments?.length > 0) {
           setSegments(parsed.segments);
+          setWindowMinutes(parsed.windowMinutes ?? 0);
           setLoading(false);
           return;
         }
       }
     } catch {}
     setSegments([]);
+    setWindowMinutes(0);
     setLoading(false);
   }, [openClawBetaEnabled]);
 
@@ -181,7 +203,7 @@ function useTimelineData() {
     return () => clearInterval(interval);
   }, [fetchData]);
 
-  return { segments, loading };
+  return { segments, windowMinutes, loading };
 }
 
 function useTimelineSessions() {
@@ -252,28 +274,21 @@ function TimelineButton({ icon, label, onClick }: { icon: React.ReactNode; label
 
 // ── Component ──
 
-export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
-  const { segments, loading } = useTimelineData();
+export function SessionTimeline({
+  onExpand,
+}: {
+  onExpand?: () => void;
+}) {
+  const { segments, windowMinutes, loading } = useTimelineData();
   const liveSessions = useTimelineSessions();
   const barRef = useRef<HTMLDivElement>(null);
+  const [barWidth, setBarWidth] = useState(0);
   const [hoverX, setHoverX] = useState<number | null>(null);
   const [hoverMin, setHoverMin] = useState<number | null>(null);
   const [hoverClientX, setHoverClientX] = useState<number | null>(null);
   const [hoverBarTop, setHoverBarTop] = useState<number>(0);
 
-  // totalSpan = end time of last segment (for time display)
-  const totalSpan = useMemo(() => {
-    if (segments.length === 0) return 0;
-    const last = segments[segments.length - 1];
-    return last.startMin + last.durationMin;
-  }, [segments]);
-
-  // totalRendered = sum of all durations (what flex actually distributes).
-  // Segments can overlap in time, so sum(durations) ≠ totalSpan.
-  // The flex bar divides space by this sum, so hover math must use it too.
-  const totalRendered = useMemo(() => {
-    return segments.reduce((sum, s) => sum + s.durationMin, 0);
-  }, [segments]);
+  const totalSpan = windowMinutes;
 
   const kindTotals = useMemo(() => {
     const totals: Partial<Record<SegmentKind, number>> = {};
@@ -283,23 +298,83 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     return totals;
   }, [segments]);
 
-  // Precompute cumulative pixel positions for each segment.
-  // Segments are rendered as flex children occupying a % of the bar.
-  // We calculate what fraction of the bar each segment covers and
-  // build a lookup table so cursor position → segment is O(1).
-  // Segment ranges use totalRendered (matches flex layout exactly)
-  const segmentRanges = useMemo(() => {
-    if (totalRendered === 0) return [];
-    let cumPct = 0;
-    return segments.map((seg) => {
-      const startPct = cumPct;
-      const widthPct = seg.durationMin / totalRendered;
-      cumPct += widthPct;
-      return { startPct, endPct: cumPct };
-    });
-  }, [segments, totalRendered]);
-
   const [hoveredSegIdx, setHoveredSegIdx] = useState<number | null>(null);
+
+  const segmentGeometry = useMemo(() => {
+    if (totalSpan === 0) return [];
+    return segments.map((seg, index) => {
+      if (seg.kind === 'idle') return null;
+      const leftPct = (seg.startMin / totalSpan) * 100;
+      const widthPct = (seg.durationMin / totalSpan) * 100;
+      const actualWidthPx = barWidth > 0 ? (seg.durationMin / totalSpan) * barWidth : 0;
+      const actualLeftPx = barWidth > 0 ? (seg.startMin / totalSpan) * barWidth : 0;
+      const displayWidthPx = barWidth > 0 ? Math.max(actualWidthPx, TIMELINE_ACTIVE_SEGMENT_MIN_PX) : 0;
+      const centeredLeftPx = actualLeftPx + (actualWidthPx / 2) - (displayWidthPx / 2);
+      const displayLeftPx = barWidth > 0
+        ? Math.min(Math.max(0, centeredLeftPx), Math.max(0, barWidth - displayWidthPx))
+        : 0;
+
+      return {
+        index,
+        seg,
+        leftPct,
+        widthPct,
+        actualLeftPx,
+        actualWidthPx,
+        displayLeftPx,
+        displayWidthPx,
+        color: SEGMENT_COLORS[seg.kind],
+      };
+    });
+  }, [barWidth, segments, totalSpan]);
+
+  const ribbonBridges = useMemo(() => {
+    if (barWidth <= 0 || totalSpan === 0) return [];
+    const bridges: Array<{ key: string; left: number; width: number; color: string; fromIndex: number; toIndex: number }> = [];
+
+    for (let index = 0; index < segments.length - 2; index += 1) {
+      const current = segments[index];
+      const gap = segments[index + 1];
+      const next = segments[index + 2];
+      if (!current || !gap || !next) continue;
+      if (current.kind === 'idle' || gap.kind !== 'idle' || next.kind !== current.kind || next.kind === 'error') continue;
+
+      const gapWidthPx = (gap.durationMin / totalSpan) * barWidth;
+      if (gap.durationMin > 5 || gapWidthPx > 22) continue;
+
+      const left = ((current.startMin + current.durationMin) / totalSpan) * barWidth;
+      const right = (next.startMin / totalSpan) * barWidth;
+      if (right <= left) continue;
+
+      bridges.push({
+        key: `${index}:${index + 2}`,
+        left,
+        width: right - left,
+        color: SEGMENT_COLORS[current.kind],
+        fromIndex: index,
+        toIndex: index + 2,
+      });
+    }
+
+    return bridges;
+  }, [barWidth, segments, totalSpan]);
+
+  useEffect(() => {
+    const node = barRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+
+    const update = () => {
+      setBarWidth(node.getBoundingClientRect().width);
+    };
+
+    update();
+    const observer = new ResizeObserver((entries) => {
+      const nextWidth = entries[0]?.contentRect.width;
+      setBarWidth(typeof nextWidth === 'number' ? nextWidth : node.getBoundingClientRect().width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
 
   // ── Drill-down modal state ──
   const [drillOpen, setDrillOpen] = useState(false);
@@ -652,29 +727,82 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     return contexts;
   }, [agentBreakdown, liveSessions]);
 
+  const hoveredSeg = hoveredSegIdx !== null ? segments[hoveredSegIdx] ?? null : null;
+  const hoveredContext = hoveredSeg?.agent ? liveAgentContext.get(hoveredSeg.agent) ?? null : null;
+
+  const hoverCard = useMemo(() => {
+    if (hoverMin === null) return null;
+    const isIdle = hoveredSeg?.kind === 'idle';
+
+    const startMin = hoveredSeg ? hoveredSeg.startMin : hoverMin;
+    const endMin = hoveredSeg ? Math.min(totalSpan, hoveredSeg.startMin + hoveredSeg.durationMin) : hoverMin;
+    const rangeLabel = hoveredSeg
+      ? `${formatTime(startMin)} - ${formatTime(endMin)}`
+      : formatTime(hoverMin);
+    const durationLabel = hoveredSeg ? formatDuration(hoveredSeg.durationMin) : null;
+    const kindLabel = hoveredSeg ? SEGMENT_LABELS[hoveredSeg.kind] : 'IDLE';
+    const kindColor = hoveredSeg ? SEGMENT_COLORS[hoveredSeg.kind] : '#94a3b8';
+
+    return {
+      rangeLabel,
+      durationLabel,
+      kindLabel,
+      kindColor,
+      laneLabel: isIdle
+        ? `${hoveredSeg?.agent || 'Timeline'} quiet window`
+        : hoveredContext?.label || hoveredSeg?.agent || 'Active lane',
+      runtimeLabel: isIdle ? null : hoveredContext?.runtime ?? null,
+      statusLabel: isIdle ? null : hoveredContext?.status ? humanizeStatus(hoveredContext.status) : null,
+      locationLabel: isIdle ? null : hoveredContext?.location || hoveredSeg?.agent || null,
+      summaryLabel: isIdle ? null : hoveredContext?.summary || null,
+    };
+  }, [hoverMin, hoveredSeg, hoveredContext, totalSpan]);
+
   const handleBarMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!barRef.current || totalRendered === 0) return;
+    if (!barRef.current || totalSpan === 0) return;
     const rect = barRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const pct = Math.max(0, Math.min(1, x / rect.width));
 
-    // Find segment at this pixel position (matches flex layout)
+    // Match hover against the rendered geometry, not the raw duration span.
+    // That keeps hover aligned with minimum-width visible blocks and ribbons.
     let foundIdx: number | null = null;
-    for (let i = 0; i < segmentRanges.length; i++) {
-      if (pct >= segmentRanges[i].startPct && pct < segmentRanges[i].endPct) {
-        foundIdx = i;
+    let foundLeftPx = 0;
+    let foundWidthPx = 0;
+
+    for (const entry of segmentGeometry) {
+      if (!entry) continue;
+      const leftPx = barWidth > 0 ? entry.displayLeftPx : rect.width * (entry.leftPct / 100);
+      const widthPx = barWidth > 0 ? entry.displayWidthPx : rect.width * (entry.widthPct / 100);
+      if (x >= leftPx && x <= leftPx + widthPx) {
+        foundIdx = entry.index;
+        foundLeftPx = leftPx;
+        foundWidthPx = Math.max(widthPx, 1);
         break;
       }
     }
 
-    // Compute the actual time from the segment's real startMin
+    if (foundIdx === null) {
+      for (const bridge of ribbonBridges) {
+        if (x >= bridge.left && x <= bridge.left + bridge.width) {
+          const midpoint = bridge.left + (bridge.width / 2);
+          foundIdx = x <= midpoint ? bridge.fromIndex : bridge.toIndex;
+          break;
+        }
+      }
+    }
+
+    // Compute the actual time from the segment's real startMin,
+    // but interpolate over the displayed width so the cursor feels aligned.
     let min: number;
     if (foundIdx !== null) {
       const seg = segments[foundIdx];
-      const range = segmentRanges[foundIdx];
-      // How far into this segment (0-1)
-      const withinPct = (pct - range.startPct) / (range.endPct - range.startPct);
-      min = Math.round(seg.startMin + withinPct * seg.durationMin);
+      if (foundWidthPx > 0) {
+        const withinPct = Math.max(0, Math.min(1, (x - foundLeftPx) / foundWidthPx));
+        min = Math.round(seg.startMin + withinPct * seg.durationMin);
+      } else {
+        min = Math.round(pct * totalSpan);
+      }
     } else {
       // Fallback: linear interpolation across total span
       min = Math.round(pct * totalSpan);
@@ -685,7 +813,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     setHoveredSegIdx(foundIdx);
     setHoverClientX(e.clientX);
     setHoverBarTop(rect.top);
-  }, [totalRendered, totalSpan, segmentRanges, segments]);
+  }, [barWidth, ribbonBridges, segmentGeometry, segments, totalSpan]);
 
   const handleBarMouseLeave = useCallback(() => {
     setHoverX(null);
@@ -694,7 +822,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     setHoverClientX(null);
   }, []);
 
-  if (loading || totalRendered === 0) return null;
+  if (loading || segments.length === 0 || totalSpan === 0) return null;
 
   return (
     <div style={{
@@ -732,91 +860,78 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
         onDoubleClick={TIMELINE_DRILLDOWN_ENABLED ? handleBarDoubleClick : undefined}
         style={{
           flex: 1,
-          height: 18,
-          borderRadius: 4,
+          height: TIMELINE_BAR_HEIGHT,
+          borderRadius: 6,
           overflow: 'visible',
-          display: 'flex',
           background: 'var(--t-timeline-bar)',
           position: 'relative',
           cursor: TIMELINE_DRILLDOWN_ENABLED ? 'crosshair' : 'default',
+          boxShadow: 'inset 0 0 0 1px rgba(148, 163, 184, 0.08)',
         }}
       >
+        {/* Gentle ribbons connecting nearby same-kind runs across tiny idle gaps */}
+        {ribbonBridges.map((bridge) => (
+          <div
+            key={bridge.key}
+            style={{
+              position: 'absolute',
+              left: bridge.left,
+              width: bridge.width,
+              top: 5,
+              height: TIMELINE_BAR_HEIGHT - 10,
+              borderRadius: 999,
+              background: `linear-gradient(90deg, ${bridge.color}08 0%, ${bridge.color}2d 50%, ${bridge.color}08 100%)`,
+              boxShadow: `0 0 12px ${bridge.color}18`,
+              pointerEvents: 'none',
+              zIndex: 1,
+            }}
+          />
+        ))}
+
         {/* Segments */}
-        {segments.map((seg, i) => {
-          const widthPct = (seg.durationMin / totalRendered) * 100;
-          const isHovered = hoveredSegIdx === i;
+        {segmentGeometry.map((entry) => {
+          if (!entry) return null;
+          const isHovered = hoveredSegIdx === entry.index;
           return (
             <div
-              key={i}
+              key={entry.index}
               style={{
-                width: `${widthPct}%`,
-                height: '100%',
-                background: SEGMENT_COLORS[seg.kind],
-                opacity: isHovered ? 1 : 0.75,
-                transition: 'opacity 60ms ease-out',
-                borderRight: i < segments.length - 1 ? '1px solid rgba(255,255,255,0.25)' : 'none',
-                borderRadius: i === 0 ? '4px 0 0 4px' : i === segments.length - 1 ? '0 4px 4px 0' : 0,
+                position: 'absolute',
+                left: barWidth > 0 ? entry.displayLeftPx : `${entry.leftPct}%`,
+                width: barWidth > 0 ? entry.displayWidthPx : `${entry.widthPct}%`,
+                top: 2,
+                height: TIMELINE_BAR_HEIGHT - 4,
+                background: `linear-gradient(180deg, rgba(255,255,255,0.18) 0%, ${entry.color} 22%, ${entry.color} 100%)`,
+                opacity: isHovered ? 1 : 0.92,
+                transition: 'opacity 60ms ease-out, transform 80ms ease-out, box-shadow 80ms ease-out',
+                borderRadius: 4,
+                boxShadow: isHovered
+                  ? `0 0 0 1px rgba(255,255,255,0.48) inset, 0 0 0 1px ${entry.color}55, 0 3px 12px ${entry.color}35`
+                  : `0 0 0 1px rgba(255,255,255,0.34) inset, 0 1px 6px ${entry.color}28`,
+                transform: isHovered ? 'translateY(-1px)' : 'none',
+                zIndex: isHovered ? 3 : 2,
               }}
             />
           );
         })}
 
-        {/* Hover scrubber line + badges */}
+        {/* Hover scrubber line */}
         {hoverX !== null && hoverMin !== null && (() => {
-          const seg = hoveredSegIdx !== null ? segments[hoveredSegIdx] : null;
-          const lineColor = seg ? SEGMENT_COLORS[seg.kind] : 'var(--t-text)';
-          const badgeBg = seg ? SEGMENT_COLORS[seg.kind] : 'var(--t-text)';
-          const kindLabel = seg ? SEGMENT_LABELS[seg.kind] : '';
-          const durLabel = seg ? formatDuration(seg.durationMin) : '';
-          const agentLabel = seg?.agent ? ` · ${seg.agent}` : '';
+          const lineColor = hoveredSeg ? SEGMENT_COLORS[hoveredSeg.kind] : 'var(--t-text)';
 
           return (
-            <>
-              {/* Vertical line — colored to match segment */}
-              <div style={{
-                position: 'absolute',
-                left: hoverX,
-                top: -6,
-                bottom: -6,
-                width: 2,
-                background: lineColor,
-                borderRadius: 1,
-                pointerEvents: 'none',
-                zIndex: 5,
-                boxShadow: `0 0 6px ${lineColor}40`,
-              }} />
-              {/* Single bottom tooltip — time + segment info */}
-              <div style={{
-                position: 'absolute',
-                left: hoverX,
-                top: '100%',
-                transform: 'translateX(-50%)',
-                marginTop: 6,
-                padding: '4px 10px',
-                borderRadius: 8,
-                background: lineColor,
-                color: (seg?.kind === 'thinking') ? '#1e3a5f' : '#fff',
-                fontSize: 10,
-                fontWeight: 600,
-                whiteSpace: 'nowrap',
-                pointerEvents: 'none',
-                zIndex: 10,
-                boxShadow: `0 2px 10px ${lineColor}50`,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                letterSpacing: '0.01em',
-              }}>
-                <span>{formatTime(hoverMin)}</span>
-                {seg && (
-                  <>
-                    <span style={{ opacity: 0.5 }}>·</span>
-                    <span>{kindLabel}</span>
-                    <span style={{ opacity: 0.6, fontWeight: 500 }}>{durLabel}{agentLabel}</span>
-                  </>
-                )}
-              </div>
-            </>
+            <div style={{
+              position: 'absolute',
+              left: hoverX,
+              top: -6,
+              bottom: -6,
+              width: 2,
+              background: lineColor,
+              borderRadius: 1,
+              pointerEvents: 'none',
+              zIndex: 5,
+              boxShadow: `0 0 6px ${lineColor}40`,
+            }} />
           );
         })()}
 
@@ -836,6 +951,92 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
           );
         })}
       </div>
+
+      {hoverCard && hoverClientX !== null && typeof document !== 'undefined' && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            left: Math.min(
+              Math.max(12, hoverClientX - 148),
+              (typeof window !== 'undefined' ? window.innerWidth : 320) - 308,
+            ),
+            top: hoverBarTop + TIMELINE_BAR_HEIGHT + 12,
+            width: 296,
+            padding: '12px 12px 11px',
+            borderRadius: 16,
+            background: 'rgba(255,255,255,0.78)',
+            backdropFilter: 'blur(24px) saturate(1.45)',
+            WebkitBackdropFilter: 'blur(24px) saturate(1.45)',
+            border: '1px solid rgba(255,255,255,0.72)',
+            boxShadow: '0 18px 40px rgba(15, 23, 42, 0.14), 0 2px 10px rgba(15, 23, 42, 0.08)',
+            pointerEvents: 'none',
+            zIndex: 10020,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '3px 8px',
+                borderRadius: 999,
+                background: `${hoverCard.kindColor}18`,
+                color: hoverCard.kindColor,
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+                whiteSpace: 'nowrap',
+              }}>
+                <span style={{ width: 6, height: 6, borderRadius: 999, background: hoverCard.kindColor }} />
+                {hoverCard.kindLabel}
+              </span>
+              {hoverCard.statusLabel ? (
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>
+                  {hoverCard.statusLabel}
+                </span>
+              ) : null}
+            </div>
+            {hoverCard.durationLabel ? (
+              <span style={{ fontSize: 11, fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
+                {hoverCard.durationLabel}
+              </span>
+            ) : null}
+          </div>
+
+          <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
+            {hoverCard.rangeLabel}
+          </div>
+
+          <div style={{ marginTop: 5, fontSize: 12, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.01em' }}>
+            {hoverCard.laneLabel}
+          </div>
+
+          {(hoverCard.runtimeLabel || hoverCard.locationLabel) ? (
+            <div style={{ marginTop: 3, fontSize: 11, color: '#475569', lineHeight: 1.35 }}>
+              {[hoverCard.runtimeLabel, hoverCard.locationLabel].filter(Boolean).join(' · ')}
+            </div>
+          ) : null}
+
+          {hoverCard.summaryLabel && hoveredSeg ? (
+            <div style={{
+              marginTop: 7,
+              fontSize: 11,
+              color: '#334155',
+              lineHeight: 1.4,
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+            }}>
+              {hoverCard.summaryLabel}
+            </div>
+          ) : null}
+
+        </div>,
+        document.body,
+      )}
 
       {/* ── Agent Drill-Down Modal (glass, draggable) ── */}
       {TIMELINE_DRILLDOWN_ENABLED && drillOpen && typeof document !== 'undefined' && createPortal(

@@ -2,10 +2,11 @@
 /* eslint-disable @next/next/no-img-element -- terminal image previews intentionally use raw panel-served URLs */
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio, ArrowUp, Square } from 'lucide-react';
-import LLMChat, { MessageBubble, type LLMMessage } from './LLMChat';
+import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio, ArrowUp, ArrowDown, Square, AlertCircle } from 'lucide-react';
+import LLMChat, { ChainOfThought, MessageBubble, type LLMMessage } from './LLMChat';
+import { IssueLinkPickerModal, buildLinkedIssueContext, type LinkedIssueRef } from './IssueLinkPicker';
 import { saveTabState, loadTabState, checkAliveSessions, type PersistedTabState } from '@/lib/terminal/tab-state';
-import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
+import type { MobileTranscriptEntry, MobileTranscriptSource, MobileTranscriptThinkingStep, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import {
   type DetectedLocalhostPreview,
   PREVIEW_HOST_MESSAGE_SOURCE,
@@ -30,6 +31,7 @@ export interface TerminalTab {
   chatModel?: string;
   chatDraftInjection?: { id: string; text: string; autoSend?: boolean };
   chatMessages?: MobileTranscriptEntry[];
+  linkedIssue?: LinkedIssueRef | null;
 }
 
 type LocalhostPreview = DetectedLocalhostPreview;
@@ -649,12 +651,50 @@ function PreviewToolbar({ preview, selectionEnabled, onToggleSelection, onRefres
 
 /* ── Workspace Chat Pane ── */
 
-function nextWorkspaceToolCalls(previous: MobileTranscriptToolCall[], toolName: string): MobileTranscriptToolCall[] {
-  const existingIndex = previous.findIndex((tool) => tool.name === toolName);
-  if (existingIndex >= 0) {
-    return previous.map((tool, index) => (index === existingIndex ? { ...tool, status: 'running' } : tool));
+function workspaceToolLabel(toolName: string, args?: Record<string, unknown>) {
+  if (toolName === 'search_web') return `Searching "${String(args?.query ?? '')}"`;
+  if (toolName === 'read_file' || toolName === 'Read') {
+    return `Reading ${String(args?.path ?? args?.file_path ?? '').split('/').pop() || 'file'}`;
   }
-  return [...previous, { name: toolName, status: 'running' }];
+  if (toolName === 'search_code' || toolName === 'Grep') return `Searching code for "${String(args?.query ?? args?.pattern ?? '')}"`;
+  if (toolName === 'list_files' || toolName === 'Glob') return `Listing ${String(args?.path ?? args?.pattern ?? '.')}`;
+  if (toolName === 'create_github_issue') return 'Creating GitHub issue';
+  if (toolName === 'read_github_issue_or_pr') return `Reading #${String(args?.number ?? '')}`;
+  if (toolName === 'create_pull_request') return 'Creating pull request';
+  if (toolName === 'Bash') return `Running ${String(args?.description ?? 'shell command')}`;
+  if (toolName === 'Edit' || toolName === 'Write' || toolName === 'NotebookEdit') return `Editing ${String(args?.file_path ?? args?.path ?? 'files')}`;
+  if (toolName === 'Task') return `Running task ${String(args?.description ?? '')}`.trim();
+  if (toolName === 'WebFetch') return `Fetching ${String(args?.url ?? 'web page')}`;
+  if (toolName === 'WebSearch') return `Searching "${String(args?.query ?? '')}"`;
+  if (toolName === 'Skill') return `Using skill ${String(args?.skill ?? '')}`.trim();
+  return `Running ${toolName}`;
+}
+
+function buildWorkspaceThinkingStep(tool: MobileTranscriptToolCall): MobileTranscriptThinkingStep {
+  const toolName = tool.name;
+  return {
+    type: toolName === 'search_web' || toolName === 'search_code' || toolName === 'WebSearch'
+      ? 'search'
+      : toolName === 'read_file' || toolName === 'list_files' || toolName === 'Read' || toolName === 'Glob'
+        ? 'reading'
+        : toolName === 'Bash'
+          ? 'analyzing'
+          : 'tool',
+    label: workspaceToolLabel(toolName, tool.args),
+    status: tool.status === 'done' ? 'complete' : tool.status === 'calling' ? 'pending' : 'active',
+    detail: typeof tool.preview === 'string' ? tool.preview : undefined,
+  };
+}
+
+function upsertWorkspaceToolCall(
+  previous: MobileTranscriptToolCall[],
+  next: MobileTranscriptToolCall,
+): MobileTranscriptToolCall[] {
+  const existingIndex = previous.findIndex((tool) => tool.name === next.name);
+  if (existingIndex >= 0) {
+    return previous.map((tool, index) => (index === existingIndex ? { ...tool, ...next, status: next.status ?? tool.status } : tool));
+  }
+  return [...previous, next];
 }
 
 const WorkspaceChatPane = memo(function WorkspaceChatPane({
@@ -664,6 +704,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   onRunInTerminal,
   onSelectModel,
   onConsumeDraftInjection,
+  onLinkedIssueChange,
 }: {
   tab: TerminalTab;
   onUpdateMessages: (tabId: string, messages: MobileTranscriptEntry[]) => void;
@@ -671,12 +712,15 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   onRunInTerminal?: (command: string) => void;
   onSelectModel: (tabId: string, modelId: string) => void;
   onConsumeDraftInjection: (tabId: string, injectionId: string) => void;
+  onLinkedIssueChange: (tabId: string, issue: LinkedIssueRef | null) => void;
 }) {
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
   const [streamingText, setStreamingText] = useState('');
   const [activeToolCalls, setActiveToolCalls] = useState<MobileTranscriptToolCall[]>([]);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [issuePickerOpen, setIssuePickerOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composeRef = useRef<HTMLTextAreaElement>(null);
   const liveToolCallsRef = useRef<MobileTranscriptToolCall[]>([]);
@@ -687,6 +731,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   const chatRuntime = tab.chatRuntime;
   const chatSessionKey = tab.chatSessionKey;
   const chatModel = tab.chatModel;
+  const linkedIssue = tab.linkedIssue ?? null;
   const runtimeLabels = useMemo(
     () => ({ 'codex': 'Codex', 'claude-code': 'Claude Code', 'openclaw': 'OpenClaw' } as const),
     [],
@@ -703,6 +748,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   const scrollToBottom = useCallback((force = false) => {
     if (!scrollRef.current) return;
     if (!force && !stickToBottomRef.current) return;
+    setShowScrollToBottom(false);
     requestAnimationFrame(() => {
       if (scrollRef.current) {
         scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -715,6 +761,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
     const el = scrollRef.current;
     const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     stickToBottomRef.current = distFromBottom < 80;
+    setShowScrollToBottom(distFromBottom >= 80);
   }, []);
 
   const fetchTranscript = useCallback(async () => {
@@ -753,6 +800,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
     const text = inputText.trim();
     if (!text || sending) return;
     stickToBottomRef.current = true;
+    setShowScrollToBottom(false);
     setSending(true);
     setAgentRunning(true);
     setStreamingText('');
@@ -776,10 +824,20 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
 
       if (chatRuntime === 'claude-code') {
         endpoint = '/api/claude-code/send';
-        body = { message: text, sessionId: chatSessionKey, cwd: tab.repo?.localPath, model: selectedModel?.id };
+        body = {
+          message: [buildLinkedIssueContext(linkedIssue), text].filter(Boolean).join('\n\n'),
+          sessionId: chatSessionKey,
+          cwd: tab.repo?.localPath,
+          model: selectedModel?.id,
+        };
       } else if (chatRuntime === 'codex') {
         endpoint = '/api/codex/send';
-        body = { message: text, threadId: chatSessionKey, cwd: tab.repo?.localPath, model: selectedModel?.id };
+        body = {
+          message: [buildLinkedIssueContext(linkedIssue), text].filter(Boolean).join('\n\n'),
+          threadId: chatSessionKey,
+          cwd: tab.repo?.localPath,
+          model: selectedModel?.id,
+        };
       } else {
         throw new Error('OpenClaw workspace sessions are no longer supported here.');
       }
@@ -925,7 +983,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
       setStreamingText('');
       setTimeout(() => { void fetchTranscript(); }, 400);
     }
-  }, [chatRuntime, chatSessionKey, fetchTranscript, messages, onUpdateMessages, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.repo?.localPath, tabId]);
+  }, [chatRuntime, chatSessionKey, fetchTranscript, linkedIssue, messages, onUpdateMessages, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.repo?.localPath, tabId]);
 
   const handleSend = useCallback(async () => {
     const text = draft.trim();
@@ -980,7 +1038,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   }, [activeToolCalls.length, llmMessages.length, scrollToBottom, streamingText]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: '#ffffff' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: '#ffffff', position: 'relative' }}>
       <div
         ref={scrollRef}
         onScroll={handleScroll}
@@ -1134,6 +1192,47 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
         )}
       </div>
 
+      {showScrollToBottom && (llmMessages.length > 0 || agentRunning) ? (
+        <div
+          style={{
+            position: 'absolute',
+            right: 30,
+            bottom: 104,
+            zIndex: 40,
+            animation: 'llmFadeIn 150ms ease-out',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              scrollToBottom(true);
+              stickToBottomRef.current = true;
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              minHeight: 34,
+              padding: '7px 12px',
+              borderRadius: 999,
+              border: '1px solid rgba(96, 165, 250, 0.22)',
+              background: 'linear-gradient(180deg, rgba(239,246,255,0.94), rgba(191,219,254,0.72))',
+              color: '#1d4ed8',
+              boxShadow: '0 12px 28px rgba(37, 99, 235, 0.16)',
+              backdropFilter: 'blur(18px)',
+              WebkitBackdropFilter: 'blur(18px)',
+              cursor: 'pointer',
+              fontSize: 11,
+              fontWeight: 700,
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
+            <ArrowDown size={13} />
+            Bottom messages
+          </button>
+        </div>
+      ) : null}
+
       <div style={{
         paddingTop: 12,
         paddingBottom: 16,
@@ -1227,6 +1326,32 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
               }}>
                 CLI session
               </span>
+              <button
+                type="button"
+                onClick={() => setIssuePickerOpen(true)}
+                title={linkedIssue ? `${linkedIssue.title}` : 'Link a GitHub issue to this chat'}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  minHeight: 28,
+                  padding: '0 10px',
+                  borderRadius: 999,
+                  border: linkedIssue ? '1px solid rgba(96, 165, 250, 0.22)' : '1px solid rgba(148, 163, 184, 0.16)',
+                  background: linkedIssue
+                    ? 'linear-gradient(180deg, rgba(239,246,255,0.94), rgba(191,219,254,0.72))'
+                    : 'rgba(255,255,255,0.72)',
+                  color: linkedIssue ? '#1d4ed8' : '#64748b',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <AlertCircle size={13} />
+                {linkedIssue ? `Issue #${linkedIssue.number}` : 'Link issue'}
+              </button>
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1291,6 +1416,15 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
           </div>
         </div>
       </div>
+
+      <IssueLinkPickerModal
+        open={issuePickerOpen}
+        onClose={() => setIssuePickerOpen(false)}
+        value={linkedIssue}
+        preferredRepo={tab.repo ?? null}
+        onSelect={(issue) => onLinkedIssueChange(tabId, issue)}
+        onClear={() => onLinkedIssueChange(tabId, null)}
+      />
     </div>
   );
 });
@@ -2248,6 +2382,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             chatRuntime: t.chatRuntime,
             chatSessionKey: t.chatSessionKey,
             chatModel: t.chatModel,
+            linkedIssue: t.linkedIssue ?? undefined,
           })),
           savedAt: new Date().toISOString(),
         };
@@ -2294,6 +2429,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         label: 'Chat',
         kind: 'llm-chat',
         tmuxSession: null,
+        linkedIssue: null,
         createdAt: now,
         lastActivity: now,
       };
@@ -2331,6 +2467,8 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                 label: st.label,
                 kind: 'llm-chat',
                 tmuxSession: null,
+                repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : undefined,
+                linkedIssue: st.linkedIssue ?? null,
                 createdAt: now,
                 lastActivity: now,
               });
@@ -2348,6 +2486,8 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                 chatRuntime: st.chatRuntime,
                 chatSessionKey: st.chatSessionKey,
                 chatModel: st.chatModel,
+                repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : undefined,
+                linkedIssue: st.linkedIssue ?? null,
                 createdAt: now,
                 lastActivity: now,
                 chatMessages: [],
@@ -2678,6 +2818,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         chatRuntime: runtime,
         chatModel: runtime === 'claude-code' ? CLAUDE_CLI_MODELS[0].id : CODEX_CLI_MODELS[0].id,
         repo,
+        linkedIssue: null,
         createdAt: now,
         lastActivity: now,
         chatMessages: [],
@@ -2695,6 +2836,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         label: 'Chat',
         kind: 'llm-chat',
         tmuxSession: null,
+        linkedIssue: null,
         createdAt: now,
         lastActivity: now,
       };
@@ -2717,6 +2859,12 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     const handleUpdateChatModel = useCallback((tabId: string, modelId: string) => {
       setTabs(prev => prev.map(t =>
         t.id === tabId ? { ...t, chatModel: modelId } : t
+      ));
+    }, []);
+
+    const handleUpdateLinkedIssue = useCallback((tabId: string, linkedIssue: LinkedIssueRef | null) => {
+      setTabs(prev => prev.map(t =>
+        t.id === tabId ? { ...t, linkedIssue } : t
       ));
     }, []);
 
@@ -2928,6 +3076,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
               }}>
                 <LLMChat
                   tabId={tab.id}
+                  preferredRepo={tab.repo ?? null}
+                  linkedIssue={tab.linkedIssue ?? null}
+                  onLinkedIssueChange={(issue) => handleUpdateLinkedIssue(tab.id, issue)}
                   onOpenHistoryChat={(historyTabId: string, title: string) => {
                     // Create a new tab that loads the history
                     tabCountRef.current += 1;
@@ -2937,6 +3088,8 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                       label: title.slice(0, 20) + (title.length > 20 ? '...' : ''),
                       kind: 'llm-chat',
                       tmuxSession: null,
+                      repo: tab.repo,
+                      linkedIssue: tab.linkedIssue ?? null,
                       createdAt: now,
                       lastActivity: now,
                     };
@@ -2968,6 +3121,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                   onRunInTerminal={handleRunCommandInTerminal}
                   onSelectModel={handleUpdateChatModel}
                   onConsumeDraftInjection={handleConsumeChatDraftInjection}
+                  onLinkedIssueChange={handleUpdateLinkedIssue}
                 />
               </div>
             ) : tab.tmuxSession ? (

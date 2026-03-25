@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 import os from 'node:os';
+import { listRepos } from '@/lib/repos/registry';
+import {
+  ensureGitHubPullRequests,
+  fetchGitHubPullRequestSummaries,
+  fetchGitHubWorkflowRuns,
+  normalizeRepoSlug,
+} from '@/lib/github-broker';
 /* eslint-disable @typescript-eslint/no-explicit-any -- runtime JSONL payloads vary by provider and are normalized defensively */
 
 // /api/panel/timeline — Aggregates today's agent activity into timeline segments.
@@ -15,6 +22,18 @@ interface TimelineSegment {
   durationMin: number;
   label?: string;
   agent?: string;
+}
+
+interface TimelineMilestone {
+  kind: 'pr_review' | 'pr_blocked' | 'pr_merged' | 'ci_success' | 'ci_failure' | 'ci_running';
+  atMin: number;
+  title: string;
+  repo: string;
+  branch?: string;
+  detail?: string;
+  number?: number;
+  runId?: number;
+  url?: string;
 }
 
 function execQuiet(cmd: string, opts?: { timeout?: number }): string {
@@ -32,20 +51,227 @@ function execQuiet(cmd: string, opts?: { timeout?: number }): string {
 
 type SegmentKind = 'thinking' | 'coding' | 'testing' | 'error' | 'idle';
 
+const TEST_PATTERNS = [
+  'tsc --noemit',
+  'npm test',
+  'npm run test',
+  'pnpm test',
+  'pnpm run test',
+  'yarn test',
+  'jest',
+  'vitest',
+  'playwright',
+  'cypress',
+  'pytest',
+  'go test',
+  'cargo test',
+  'eslint',
+  'npm run lint',
+  'pnpm lint',
+  'npm run build',
+  'pnpm build',
+];
+
+const ERROR_PATTERNS = [
+  /process exited with code [1-9]/,
+  /exit code[:\s]+[1-9]/,
+  /exit:\s*[1-9]/,
+  /\bfatal:/,
+  /\bpanic:/,
+  /\btraceback\b/,
+  /\bexception\b/,
+  /\bpermission denied\b/,
+  /\bcommand failed\b/,
+  /\bnpm err!\b/,
+  /\berror:\b/,
+  /\berrors:\b/,
+  /\bfailed\b/,
+  /\bsegmentation fault\b/,
+];
+
+const ERROR_IGNORE_PATTERNS = [
+  /process exited with code 0/,
+  /exit code[:\s]+0/,
+  /exit:\s*0/,
+  /\b0 failed\b/,
+  /\b0 errors\b/,
+  /\bno errors?\b/,
+  /\bwithout errors\b/,
+  /\bsuccess(?:fully)?\b/,
+  /\ball checks passed\b/,
+  /\btests passed\b/,
+];
+
+function flattenUnknown(value: unknown, depth = 0): string {
+  if (value == null || depth > 3) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return value.map((item) => flattenUnknown(item, depth + 1)).filter(Boolean).join(' ');
+  if (typeof value === 'object') {
+    return Object.values(value as Record<string, unknown>)
+      .map((item) => flattenUnknown(item, depth + 1))
+      .filter(Boolean)
+      .join(' ');
+  }
+  return '';
+}
+
+function looksLikeTesting(text: string) {
+  const lc = text.toLowerCase();
+  return TEST_PATTERNS.some((pattern) => lc.includes(pattern));
+}
+
+function looksLikeRealError(text: string) {
+  const lc = text.toLowerCase();
+  if (!lc.trim()) return false;
+  if (!ERROR_PATTERNS.some((pattern) => pattern.test(lc))) return false;
+  return !ERROR_IGNORE_PATTERNS.some((pattern) => pattern.test(lc));
+}
+
+function explicitFailureFlag(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value > 0;
+  if (typeof value !== 'string') return false;
+  const lc = value.toLowerCase();
+  return lc === 'failed' || lc === 'failure' || lc === 'error' || lc === 'errored';
+}
+
+function toWindowMinute(timestamp: string | null | undefined, todayStart: Date, windowMinutes: number) {
+  if (!timestamp) return null;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime()) || date < todayStart) return null;
+  const minute = Math.floor((date.getTime() - todayStart.getTime()) / 60000);
+  if (minute < 0 || minute > windowMinutes) return null;
+  return minute;
+}
+
+async function resolveTimelineRepos() {
+  const repos = await listRepos().catch(() => []);
+  const ordered = new Set<string>();
+  const preferred = process.env.CORTEX_IDE_REVIEW_REPO ?? '';
+  if (/^[\w.-]+\/[\w.-]+$/.test(preferred)) ordered.add(preferred);
+
+  for (const repo of repos) {
+    const slug = normalizeRepoSlug(repo.remoteUrl);
+    if (slug) ordered.add(slug);
+    if (ordered.size >= 2) break;
+  }
+
+  return Array.from(ordered).slice(0, 2);
+}
+
+async function collectTimelineMilestones(todayStart: Date, windowMinutes: number): Promise<TimelineMilestone[]> {
+  const repos = await resolveTimelineRepos();
+  if (repos.length === 0) return [];
+
+  const milestones: TimelineMilestone[] = [];
+
+  await Promise.all(repos.map(async (repo) => {
+    const [openPrsResult, closedPrsResult, ciRunsResult] = await Promise.allSettled([
+      ensureGitHubPullRequests(repo),
+      fetchGitHubPullRequestSummaries(repo, { states: ['closed'], limitPerState: 4 }),
+      fetchGitHubWorkflowRuns(repo, 6),
+    ]);
+
+    if (openPrsResult.status === 'fulfilled') {
+      const prs = openPrsResult.value.prs ?? [];
+      for (const pr of prs.slice(0, 4)) {
+        const atMin = toWindowMinute(pr.updatedAt ?? pr.createdAt, todayStart, windowMinutes);
+        if (atMin === null) continue;
+
+        if (pr.reviewDecision === 'CHANGES_REQUESTED') {
+          milestones.push({
+            kind: 'pr_blocked',
+            atMin,
+            title: `PR #${pr.number} changes requested`,
+            detail: pr.title,
+            repo,
+            branch: pr.headRefName ?? '',
+            number: pr.number,
+            url: pr.url ?? '',
+          });
+          continue;
+        }
+
+        if (pr.reviewDecision === 'REVIEW_REQUIRED' || pr.reviewDecision === 'APPROVED') {
+          milestones.push({
+            kind: 'pr_review',
+            atMin,
+            title: `PR #${pr.number} ${pr.reviewDecision === 'APPROVED' ? 'approved' : 'review ready'}`,
+            detail: pr.title,
+            repo,
+            branch: pr.headRefName ?? '',
+            number: pr.number,
+            url: pr.url ?? '',
+          });
+        }
+      }
+    }
+
+    if (closedPrsResult.status === 'fulfilled') {
+      for (const pr of closedPrsResult.value.slice(0, 4)) {
+        const atMin = toWindowMinute(pr.mergedAt ?? pr.createdAt, todayStart, windowMinutes);
+        if (atMin === null || !pr.mergedAt) continue;
+        milestones.push({
+          kind: 'pr_merged',
+          atMin,
+          title: `PR #${pr.number} merged`,
+          detail: pr.title,
+          repo,
+          branch: pr.headRefName ?? '',
+          number: pr.number,
+          url: pr.url ?? '',
+        });
+      }
+    }
+
+    if (ciRunsResult.status === 'fulfilled') {
+      for (const run of ciRunsResult.value.slice(0, 5)) {
+        const atMin = toWindowMinute(run.updatedAt || run.createdAt, todayStart, windowMinutes);
+        if (atMin === null) continue;
+
+        const kind = run.status === 'in_progress' || run.status === 'queued'
+          ? 'ci_running'
+          : run.conclusion === 'failure'
+            ? 'ci_failure'
+            : run.conclusion === 'success'
+              ? 'ci_success'
+              : null;
+        if (!kind) continue;
+
+        milestones.push({
+          kind,
+          atMin,
+          title: kind === 'ci_running'
+            ? `CI running · ${run.workflowName || run.displayTitle || 'Workflow'}`
+            : kind === 'ci_failure'
+              ? `CI failed · ${run.workflowName || run.displayTitle || 'Workflow'}`
+              : `CI passed · ${run.workflowName || run.displayTitle || 'Workflow'}`,
+          detail: run.displayTitle || run.headBranch || '',
+          repo,
+          branch: run.headBranch ?? '',
+          runId: run.databaseId,
+          url: run.url ?? '',
+        });
+      }
+    }
+  }));
+
+  return milestones
+    .sort((a, b) => a.atMin - b.atMin)
+    .slice(-12);
+}
+
 /** Classify OpenClaw JSONL messages */
 function classifyMessage(role: string, content: string, type: string): SegmentKind {
   const lc = content.toLowerCase();
 
   // Tool results are direct evidence of coding activity
   if (role === 'toolResult' || role === 'tool') {
-    // Only mark as error if it's a REAL failure (exit code non-zero at the end, or explicit error patterns)
-    const isRealError = (lc.includes('exit: 1') || lc.includes('permission denied') || lc.includes('command failed') || lc.includes('fatal:'))
-      && !lc.includes('exit: 0') && !lc.includes('successfully');
-    if (isRealError) {
+    if (looksLikeRealError(content)) {
       return 'error';
     }
-    // Check for testing patterns
-    if (lc.includes('tsc --noemit') || lc.includes('npm test') || lc.includes('npm run test') || lc.includes('jest') || lc.includes('vitest')) {
+    if (looksLikeTesting(content)) {
       return 'testing';
     }
     // All other tool results = coding
@@ -92,7 +318,12 @@ function classifyClaudeCode(entry: any): SegmentKind {
     // Tool results come back as user messages with tool_result content blocks
     if (Array.isArray(content)) {
       for (const block of content) {
-        if (block.type === 'tool_result') return 'coding';
+        if (block.type === 'tool_result') {
+          const blockText = flattenUnknown(block);
+          if (explicitFailureFlag(block.is_error) || looksLikeRealError(blockText)) return 'error';
+          if (looksLikeTesting(blockText)) return 'testing';
+          return 'coding';
+        }
       }
     }
     return 'thinking';
@@ -103,18 +334,14 @@ function classifyClaudeCode(entry: any): SegmentKind {
     for (const block of content) {
       if (block.type === 'tool_use') {
         const name = (block.name || '').toLowerCase();
-        // Testing tools
-        if (name === 'bash') {
-          const cmd = String(block.input?.command || '').toLowerCase();
-          if (cmd.includes('tsc --noemit') || cmd.includes('npm test') || cmd.includes('jest') || cmd.includes('vitest')) {
-            return 'testing';
-          }
-        }
+        const cmd = flattenUnknown(block.input);
+        if (looksLikeTesting(`${name} ${cmd}`)) return 'testing';
         return 'coding';
       }
     }
     // Text-only assistant message = thinking
     const text = content.filter((b: any) => b.type === 'text').map((b: any) => b.text || '').join(' ');
+    if (looksLikeRealError(text)) return 'error';
     if (text.length < 150) return 'coding'; // short narration between tools
     return 'thinking';
   }
@@ -135,17 +362,19 @@ function classifyCodex(entry: any): SegmentKind {
   if (type === 'response_item') {
     if (payloadType === 'function_call' || payloadType === 'function_call_output') {
       const name = String(payload.name || '').toLowerCase();
-      const args = String(payload.arguments || '').toLowerCase();
-      // Testing patterns
-      if (name.includes('shell') || name.includes('bash') || name.includes('exec')) {
-        if (args.includes('test') || args.includes('jest') || args.includes('vitest') || args.includes('tsc')) {
-          return 'testing';
-        }
+      const args = flattenUnknown(payload.arguments);
+      const output = flattenUnknown(payload.output);
+      if (explicitFailureFlag(payload.error) || explicitFailureFlag(payload.is_error) || explicitFailureFlag(payload.exit_code)) {
+        return 'error';
       }
+      if (looksLikeRealError(`${args} ${output}`)) return 'error';
+      if (looksLikeTesting(`${name} ${args} ${output}`)) return 'testing';
       return 'coding';
     }
     if (payloadType === 'message') {
       const role = payload.role || '';
+      const text = flattenUnknown(payload.content);
+      if (looksLikeRealError(text)) return 'error';
       if (role === 'user' || role === 'developer') return 'thinking';
       return 'coding'; // assistant messages during a turn
     }
@@ -153,6 +382,9 @@ function classifyCodex(entry: any): SegmentKind {
 
   // Event messages
   if (type === 'event_msg') {
+    if (payloadType === 'error' || explicitFailureFlag(payload.status) || explicitFailureFlag(payload.outcome)) {
+      return 'error';
+    }
     if (payloadType === 'task_complete' || payloadType === 'task_started') return 'coding';
     if (payloadType === 'agent_message') return 'coding';
     return 'thinking';
@@ -226,9 +458,11 @@ export async function GET(req: NextRequest) {
       todayStart.setDate(todayStart.getDate() - 1);
     }
     todayStart.setHours(6, 0, 0, 0);
+    const windowMinutes = Math.max(1, Math.min(24 * 60, Math.floor((now.getTime() - todayStart.getTime()) / 60000)));
 
     const home = os.homedir();
     const allSegments: TimelineSegment[] = [];
+    const milestones = await collectTimelineMilestones(todayStart, windowMinutes).catch(() => []);
 
     // ── 1. OpenClaw sessions ──
     if (includeOpenClaw) {
@@ -298,7 +532,15 @@ export async function GET(req: NextRequest) {
     }
 
     if (allSegments.length === 0) {
-      return NextResponse.json({ segments: [], totalMinutes: 0, source: 'none' });
+      return NextResponse.json({
+        segments: [],
+        milestones,
+        totalMinutes: 0,
+        windowMinutes,
+        anchorStartIso: todayStart.toISOString(),
+        nowIso: now.toISOString(),
+        source: 'none',
+      });
     }
 
     // Sort by start time
@@ -368,19 +610,47 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const totalMinutes = final.length > 0
-      ? final[final.length - 1].startMin + final[final.length - 1].durationMin
+    // Pass 4: strip idle spans that overlap active work and re-merge same-kind runs.
+    // This removes same-minute idle/coding duplicates that can happen when multiple
+    // runtime transcripts are unioned into the single top timeline lane.
+    const activeRanges = final
+      .filter((seg) => seg.kind !== 'idle')
+      .map((seg) => ({ start: seg.startMin, end: seg.startMin + seg.durationMin }));
+
+    const withoutIdleOverlap = final.filter((seg) => {
+      if (seg.kind !== 'idle') return true;
+      const start = seg.startMin;
+      const end = seg.startMin + seg.durationMin;
+      return !activeRanges.some((range) => start < range.end && range.start < end);
+    });
+
+    const normalized: TimelineSegment[] = [];
+    for (const seg of withoutIdleOverlap) {
+      const prev = normalized[normalized.length - 1];
+      if (prev && prev.kind === seg.kind && seg.startMin <= prev.startMin + prev.durationMin + 3) {
+        prev.durationMin = Math.max(prev.durationMin, (seg.startMin + seg.durationMin) - prev.startMin);
+      } else {
+        normalized.push({ ...seg });
+      }
+    }
+
+    const totalMinutes = normalized.length > 0
+      ? normalized[normalized.length - 1].startMin + normalized[normalized.length - 1].durationMin
       : 0;
 
     // Summary stats
     const kindTotals: Record<string, number> = {};
-    for (const seg of final) {
+    for (const seg of normalized) {
       kindTotals[seg.kind] = (kindTotals[seg.kind] || 0) + seg.durationMin;
     }
 
     return NextResponse.json({
-      segments: final,
+      segments: normalized,
+      milestones,
       totalMinutes,
+      windowMinutes,
+      anchorStartIso: todayStart.toISOString(),
+      nowIso: now.toISOString(),
       stats: kindTotals,
       source: 'multi-runtime',
     });

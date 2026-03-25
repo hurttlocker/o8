@@ -23,6 +23,10 @@ import {
   Cable,
   type LucideIcon,
 } from 'lucide-react';
+import {
+  readNavRailHoverExpandEnabled,
+  subscribeNavRailHoverExpandEnabled,
+} from '@/lib/appearance/nav-rail';
 
 // ── Types ──
 
@@ -411,18 +415,25 @@ export function NavRail({
   onPortPreview,
 }: NavRailProps) {
   const [expanded, setExpanded] = useState(false);
+  const [hoverExpandEnabled, setHoverExpandEnabled] = useState(() => readNavRailHoverExpandEnabled());
   const [alertAnchorEl, setAlertAnchorEl] = useState<HTMLDivElement | null>(null);
   const alertTrayNode = alertTray && isValidElement(alertTray)
     ? cloneElement(alertTray, { desktopAnchorEl: alertAnchorEl })
     : alertTray;
 
+  useEffect(() => subscribeNavRailHoverExpandEnabled(setHoverExpandEnabled), []);
+
   return (
     <motion.nav
       initial={false}
-      animate={{ width: expanded ? EXPANDED_WIDTH : COLLAPSED_WIDTH }}
+      animate={{ width: expanded && hoverExpandEnabled ? EXPANDED_WIDTH : COLLAPSED_WIDTH }}
       transition={SPRING}
-      onMouseEnter={() => setExpanded(true)}
-      onMouseLeave={() => setExpanded(false)}
+      onMouseEnter={() => {
+        if (hoverExpandEnabled) setExpanded(true);
+      }}
+      onMouseLeave={() => {
+        if (hoverExpandEnabled) setExpanded(false);
+      }}
       aria-label="Main navigation"
       style={{
         height: '100%',

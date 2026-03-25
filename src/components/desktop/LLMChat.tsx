@@ -17,6 +17,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Send,
+  AlertCircle,
   ChevronDown,
   Square,
   Copy,
@@ -53,6 +54,7 @@ import { renderLLMMarkdown } from './LLMMarkdown';
 import { saveChatHistory, loadChatHistory } from '@/lib/llm/chat-history';
 import { CompactionNode } from './CompactionNode';
 import { shouldCompact, compactConversation, type LLMMessage as CompactMessage } from '@/lib/chat/compaction';
+import { IssueLinkPickerModal, buildLinkedIssueContext, type LinkedIssueRef } from './IssueLinkPicker';
 
 // ── Types ──
 
@@ -868,7 +870,7 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
 /** Streaming dots indicator */
 // ── Chain of Thought Component ──
 
-function ChainOfThought({
+export function ChainOfThought({
   steps,
   thinking,
   durationMs,
@@ -1243,8 +1245,11 @@ function StreamingIndicator() {
 
 // ── Main Component ──
 
-export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpenHistoryChat }: {
+export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIssueChange, onOpenInCanvas, onRunInTerminal, onOpenHistoryChat }: {
   tabId: string;
+  preferredRepo?: { name?: string; remoteUrl?: string | null } | null;
+  linkedIssue?: LinkedIssueRef | null;
+  onLinkedIssueChange?: (issue: LinkedIssueRef | null) => void;
   onOpenInCanvas?: (code: string, language: string) => void;
   onRunInTerminal?: (command: string) => void;
   onOpenHistoryChat?: (historyTabId: string, title: string) => void;
@@ -1279,6 +1284,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
   const [historySearch, setHistorySearch] = useState('');
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [showTypingIndicator, setShowTypingIndicator] = useState(false);
+  const [issuePickerOpen, setIssuePickerOpen] = useState(false);
   const [historyItems, setHistoryItems] = useState<{
     tabId: string; title: string; preview: string; messageCount: number;
     model: string; savedAt: string; modifiedAt: string; starred: boolean;
@@ -1687,7 +1693,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
         provider: model.provider,
         messages: [
           ...recentMessages,
-          { role: 'user', content: messageForModel },
+          { role: 'user', content: [buildLinkedIssueContext(linkedIssue), messageForModel].filter(Boolean).join('\n\n') },
         ],
         approvedTools: [...approvedToolsSet],
       });
@@ -1983,7 +1989,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
       setShowTypingIndicator(false);
       abortRef.current = null;
     }
-  }, [input, isStreaming, messages, model, streamContent]);
+  }, [input, isStreaming, linkedIssue, messages, model, streamContent]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -2291,6 +2297,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
         flex: 1,
         minWidth: 0,
         height: '100%',
+        position: 'relative',
       }}>
       {/* CSS animations */}
       <style>{`
@@ -3204,9 +3211,8 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
       {isUserScrolledUp && messages.length > 0 && (
         <div style={{
           position: 'absolute',
-          bottom: 100,
-          left: '50%',
-          transform: 'translateX(-50%)',
+          right: 30,
+          bottom: 104,
           zIndex: 50,
           animation: 'llmFadeIn 150ms ease-out',
         }}>
@@ -3217,29 +3223,27 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
               setIsUserScrolledUp(false);
             }}
             style={{
-              display: 'flex',
+              display: 'inline-flex',
               alignItems: 'center',
-              gap: 6,
-              paddingTop: 6,
-              paddingBottom: 6,
-              paddingLeft: 12,
-              paddingRight: 12,
-              background: 'white',
-              border: '1px solid #e2e8f0',
-              borderRadius: 20,
-              boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+              gap: 7,
+              minHeight: 34,
+              padding: '7px 12px',
+              background: 'linear-gradient(180deg, rgba(239,246,255,0.94), rgba(191,219,254,0.72))',
+              border: '1px solid rgba(96, 165, 250, 0.22)',
+              borderRadius: 999,
+              boxShadow: '0 12px 28px rgba(37, 99, 235, 0.16)',
+              backdropFilter: 'blur(18px)',
+              WebkitBackdropFilter: 'blur(18px)',
               cursor: 'pointer',
-              fontSize: 12,
-              fontWeight: 500,
-              color: '#64748b',
+              fontSize: 11,
+              fontWeight: 700,
+              color: '#1d4ed8',
               fontFamily: '-apple-system, system-ui, sans-serif',
               transition: 'all 150ms',
             }}
-            onMouseEnter={(e) => { (e.currentTarget).style.background = '#f8fafc'; (e.currentTarget).style.borderColor = '#94a3b8'; }}
-            onMouseLeave={(e) => { (e.currentTarget).style.background = 'white'; (e.currentTarget).style.borderColor = '#e2e8f0'; }}
           >
             <ArrowDown size={13} />
-            New messages
+            Bottom messages
           </button>
         </div>
       )}
@@ -3597,6 +3601,32 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
               }}>
                 @file · /cmds
               </span>
+              <button
+                type="button"
+                onClick={() => setIssuePickerOpen(true)}
+                title={linkedIssue ? linkedIssue.title : 'Link a GitHub issue to this chat'}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  minHeight: 28,
+                  padding: '0 10px',
+                  borderRadius: 999,
+                  border: linkedIssue ? '1px solid rgba(96, 165, 250, 0.22)' : '1px solid rgba(148, 163, 184, 0.16)',
+                  background: linkedIssue
+                    ? 'linear-gradient(180deg, rgba(239,246,255,0.94), rgba(191,219,254,0.72))'
+                    : 'rgba(255,255,255,0.72)',
+                  color: linkedIssue ? '#1d4ed8' : '#64748b',
+                  cursor: 'pointer',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <AlertCircle size={13} />
+                {linkedIssue ? `Issue #${linkedIssue.number}` : 'Link issue'}
+              </button>
             </div>
 
             {/* Right — model picker + send */}
@@ -3887,6 +3917,15 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
           </div>
         </div>
       )}
+
+      <IssueLinkPickerModal
+        open={issuePickerOpen}
+        onClose={() => setIssuePickerOpen(false)}
+        value={linkedIssue}
+        preferredRepo={preferredRepo ?? null}
+        onSelect={(issue) => onLinkedIssueChange?.(issue)}
+        onClear={() => onLinkedIssueChange?.(null)}
+      />
     </div>
     </div>
   );

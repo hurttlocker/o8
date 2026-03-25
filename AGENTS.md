@@ -3,6 +3,9 @@
 ## Project Structure & Module Organization
 `src/app` contains the Next.js App Router pages and API routes. `src/components` holds UI surfaces, with major splits for `desktop`, `mobile`, and `landing`. Shared logic lives in `src/lib` by domain (`runtime`, `worktree`, `openclaw`, `cortex`, `review`, etc.). `src/ws-server.ts` runs the standalone WebSocket bridge used by the mobile shell. Native desktop packaging lives in `src-tauri`. Product notes, specs, and architecture docs live in `docs`; static assets are in `public` and `assets`.
 
+## Brand Direction
+Read [`BRAND.md`](/Users/marquisehurtt/clawd/repos/cortex-ide/BRAND.md) before making desktop or mobile visual changes. It defines the current product theme, spacing, color, motion, and component language.
+
 ## Build, Test, and Development Commands
 Use `npm install` to sync dependencies.
 
