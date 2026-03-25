@@ -987,6 +987,54 @@ function DashboardInner() {
     });
   }, [openCanvasTab]);
 
+  const handleLaunchWorkspaceAgent = useCallback(async (request: {
+    repoPath: string;
+    runtime?: 'codex' | 'claude-code';
+    modelId?: string;
+    initialText?: string;
+    autoSend?: boolean;
+    createNew?: boolean;
+    label?: string;
+  }) => {
+    const repos = globalRepoEntries.length > 0 ? globalRepoEntries : await loadRegisteredRepos();
+    const repoEntry = repos.find((repo) => repo.localPath === request.repoPath);
+
+    if (!repoEntry) {
+      throw new Error(`No local checkout is registered for ${request.repoPath}. Open the repo locally before launching work there.`);
+    }
+
+    setGlobalRepoId(repoEntry.id);
+    setGlobalRepoBranch(repoEntry.defaultBranch || 'main');
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('cortex-global-repo-id', repoEntry.id);
+    }
+
+    void fetch('/api/panel/repos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'touch', id: repoEntry.id }),
+    }).catch(() => null);
+
+    const workspaceTarget = await waitForWorkspaceTerminalTarget();
+    if (!workspaceTarget) {
+      throw new Error('No workspace terminal is available to launch the CLI session.');
+    }
+
+    workspaceTarget.handle.openCliChatSession({
+      runtime: request.runtime,
+      repo: {
+        name: repoEntry.name,
+        localPath: repoEntry.localPath,
+        remoteUrl: repoEntry.remoteUrl ?? undefined,
+      },
+      modelId: request.modelId,
+      initialText: request.initialText,
+      autoSend: request.autoSend,
+      createNew: request.createNew ?? true,
+      label: request.label,
+    });
+  }, [globalRepoEntries, loadRegisteredRepos, waitForWorkspaceTerminalTarget]);
+
   const handleLaunchWorkspaceRepoTask = useCallback(async (request: {
     kind: 'issue' | 'pr';
     repo: string;
@@ -1490,6 +1538,7 @@ function DashboardInner() {
           selectedRepoName={globalRepoEntry?.name ?? null}
           selectedRepoBranch={globalRepoBranch}
           selectedRepoLocalPath={globalRepoEntry?.localPath ?? null}
+          onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
           onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
           onSelectSession={handleSelectSession}
           onSelectIssue={handleSelectIssue}

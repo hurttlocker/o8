@@ -773,7 +773,7 @@ export function mobileSessionSecondaryLabel(session: SessionSummary): string {
 }
 
 function projectSessionPriority(session: SessionSummary, selectedSession?: SessionSummary): number {
-  if (session.id === selectedSession?.id) return 1000;
+  if (session.sessionKey === selectedSession?.sessionKey) return 1000;
   if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'discovered' && session.status === 'running') return 960;
   if (session.runtime === 'claude-code' && session.status === 'running') return 940;
   if (session.isCurrentSession) return 920;
@@ -787,6 +787,10 @@ function projectSessionPriority(session: SessionSummary, selectedSession?: Sessi
 }
 
 export function projectDisplayName(workspace: string, sessions: SessionSummary[]): string {
+  if (sessions.length === 1 && sessions[0]?.runtime !== 'openclaw') {
+    const label = sessions[0]?.name?.trim();
+    if (label) return label;
+  }
   if (workspace.includes('workspace-ace')) return 'Niot';
   if (workspace.includes('workspace-hawk')) return 'Hawk';
   const segments = workspace.replace(/^~\//, '').split('/');
@@ -877,15 +881,15 @@ export function buildProjectGroups(
     const dedupedSessions: SessionSummary[] = [];
     const seenIds = new Set<string>();
     for (const session of rawSessions) {
-      if (seenIds.has(session.id)) continue;
-      seenIds.add(session.id);
+      if (seenIds.has(session.sessionKey)) continue;
+      seenIds.add(session.sessionKey);
       dedupedSessions.push(session);
     }
-    const originalOrder = new Map(dedupedSessions.map((session, index) => [session.id, index]));
+    const originalOrder = new Map(dedupedSessions.map((session, index) => [session.sessionKey, index]));
     const sessions = [...dedupedSessions].sort((left, right) => {
       const priorityDiff = projectSessionPriority(right, selectedSession) - projectSessionPriority(left, selectedSession);
       if (priorityDiff !== 0) return priorityDiff;
-      return (originalOrder.get(left.id) ?? 0) - (originalOrder.get(right.id) ?? 0);
+      return (originalOrder.get(left.sessionKey) ?? 0) - (originalOrder.get(right.sessionKey) ?? 0);
     });
 
     const hasRunning = sessions.some((session) => session.status === 'running' || session.status === 'reviewing');

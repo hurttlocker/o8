@@ -8,12 +8,15 @@
  * scrubber line with timestamp. Click expand to open the full
  * timeline Canvas tab.
  *
- * Phase 1: Fetches real data from /api/panel/timeline.
- * Falls back to mock data if API is unavailable.
+ * Fetches real data from /api/panel/timeline.
+ * For the product surface, do not fall back to mock activity.
  */
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import type { AgentSummary } from '@/lib/fleet/types';
+import type { MobileInboxSnapshot } from '@/lib/mobile/types';
+import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 
 // ── Types ──
 
@@ -45,6 +48,17 @@ export const SEGMENT_LABELS: Record<SegmentKind, string> = {
   idle: 'IDLE',
 };
 
+const DRILL_LEFT_GUTTER = 72;
+const DRILL_TOP_GUTTER = 82;
+const DRILL_MIN_WIDTH = 340;
+const DRILL_MAX_WIDTH = 720;
+const DRILL_MIN_HEIGHT = 320;
+const DRILL_MAX_HEIGHT = 680;
+const DEFAULT_TIMELINE_REPO = 'hurttlocker/cortex-ide';
+// Intentionally disabled for v0.001.0 to keep the customer surface simpler.
+// Keep the drill-down implementation in place so we can restore it after the UX pass.
+const TIMELINE_DRILLDOWN_ENABLED = false;
+
 // ── Helpers ──
 
 export function formatDuration(minutes: number): string {
@@ -64,35 +78,62 @@ export function formatTime(minutesSinceAnchor: number): string {
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
 }
 
-// ── Mock data fallback ──
+function runtimeLabel(runtime: string | null | undefined): string {
+  if (runtime === 'openclaw') return 'OpenClaw';
+  if (runtime === 'claude-code') return 'Claude Code';
+  if (runtime === 'codex') return 'Codex';
+  return runtime || 'Runtime';
+}
 
-export function generateMockSegments(): TimelineSegment[] {
-  const now = new Date();
-  const startOfDay = new Date(now);
-  // Rolling 6 AM window — before 6 AM, anchor to yesterday 6 AM (matches API route)
-  if (now.getHours() < 6) {
-    startOfDay.setDate(startOfDay.getDate() - 1);
-  }
-  startOfDay.setHours(6, 0, 0, 0);
-  const elapsed = Math.max(0, Math.floor((now.getTime() - startOfDay.getTime()) / 60000));
-  if (elapsed === 0) return [{ kind: 'idle', startMin: 0, durationMin: 1 }];
+function compactWorkspacePath(path: string | null | undefined): string | null {
+  if (!path || path === 'unknown') return null;
+  const normalized = path.replace(/^\/Users\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~');
+  const parts = normalized.split('/').filter(Boolean);
+  if (parts.length <= 4) return normalized;
+  return `~/${parts.slice(-4).join('/')}`;
+}
 
-  const segs: TimelineSegment[] = [];
-  let c = 0;
-  const add = (kind: SegmentKind, dur: number, label: string, agent?: string) => {
-    const d = Math.min(dur, elapsed - c);
-    if (d > 0) { segs.push({ kind, startMin: c, durationMin: d, label, agent }); c += d; }
+function cleanTaskLabel(task: string | null | undefined): string | null {
+  if (!task) return null;
+  return task
+    .replace(/^IDE-owned Codex session ready for the next input via resume\.?\s*/i, '')
+    .replace(/^Live Codex terminal verified via pid\/log mapping on s\d+\.\s*/i, '')
+    .replace(/^Live Codex terminal detected on s\d+\.\s*/i, '')
+    .replace(/^Existing OpenClaw session mirrored into the control plane\.?\s*/i, '')
+    .replace(/^Shared channel surface attached to the same OpenClaw runtime\.?\s*/i, '')
+    .replace(/^Recent automation surface; useful for visibility, not the primary operator lane\.?\s*/i, '')
+    .replace(/^Mirroring the live Q ↔ Mister conversation, not spawning a fresh session\.?\s*/i, '')
+    .trim();
+}
+
+function timelineMatchesAgent(agentName: string, session: AgentSummary): boolean {
+  const key = session.sessionKey.toLowerCase();
+  const name = (session.name || '').toLowerCase();
+  if (agentName === 'Main') return session.runtime === 'openclaw' && key.startsWith('agent:main:');
+  if (agentName === 'Agent 2') return session.runtime === 'openclaw' && (key.startsWith('agent:ace:') || name.includes('ace'));
+  if (agentName === 'Agent 3') return session.runtime === 'openclaw' && (key.startsWith('agent:hawk:') || name.includes('hawk'));
+  if (agentName === 'codex') return session.runtime === 'codex';
+  const loweredAgent = agentName.toLowerCase();
+  return name.includes(loweredAgent) || key.includes(loweredAgent);
+}
+
+function timelinePrimarySession(sessions: AgentSummary[]): AgentSummary | null {
+  if (sessions.length === 0) return null;
+  const statusWeight = (status: string) => {
+    switch (status) {
+      case 'running': return 4;
+      case 'reviewing': return 3;
+      case 'waiting': return 2;
+      case 'idle': return 1;
+      default: return 0;
+    }
   };
-  add('thinking', 12, 'Boot + context load', 'Agent');
-  add('coding', 35, 'NavRail + TitleBar', 'Agent');
-  add('thinking', 5, 'Planning', 'Agent');
-  add('coding', 45, 'SessionTimeline + Canvas', 'Agent');
-  add('testing', 15, 'Tauri verification', 'Agent');
-  add('coding', 25, 'Icon fixes + permissions', 'Agent');
-  add('error', 3, 'startDragging denied', 'Agent');
-  add('coding', 30, 'Timeline expand + colors', 'Agent');
-  if (c < elapsed) add('idle', elapsed - c, 'Idle');
-  return segs;
+  return [...sessions].sort((a, b) => {
+    if (Boolean(a.isCurrentSession) !== Boolean(b.isCurrentSession)) return a.isCurrentSession ? -1 : 1;
+    const delta = statusWeight(b.status) - statusWeight(a.status);
+    if (delta !== 0) return delta;
+    return new Date(b.lastEventAt || 0).getTime() - new Date(a.lastEventAt || 0).getTime();
+  })[0] ?? null;
 }
 
 // ── Data fetching ──
@@ -100,10 +141,13 @@ export function generateMockSegments(): TimelineSegment[] {
 function useTimelineData() {
   const [segments, setSegments] = useState<TimelineSegment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
+
+  useEffect(() => subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled), []);
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch('/api/panel/timeline');
+      const res = await fetch(appendOpenClawBetaQuery('/api/panel/timeline', openClawBetaEnabled));
       if (res.ok) {
         const data = await res.json();
         if (data.segments?.length > 0) {
@@ -115,7 +159,7 @@ function useTimelineData() {
         }
       }
     } catch {}
-    // Fallback: try cache, then mock
+    // Fallback: try cache only. Product UI should not display invented activity.
     try {
       const cached = sessionStorage.getItem('cortex-timeline');
       if (cached) {
@@ -127,9 +171,9 @@ function useTimelineData() {
         }
       }
     } catch {}
-    setSegments(generateMockSegments());
+    setSegments([]);
     setLoading(false);
-  }, []);
+  }, [openClawBetaEnabled]);
 
   useEffect(() => {
     fetchData();
@@ -138,6 +182,32 @@ function useTimelineData() {
   }, [fetchData]);
 
   return { segments, loading };
+}
+
+function useTimelineSessions() {
+  const [sessions, setSessions] = useState<AgentSummary[]>([]);
+  const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
+
+  useEffect(() => subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled), []);
+
+  const fetchSessions = useCallback(async () => {
+    try {
+      const res = await fetch(appendOpenClawBetaQuery('/api/mobile/inbox', openClawBetaEnabled));
+      if (!res.ok) return;
+      const data = await res.json() as MobileInboxSnapshot;
+      setSessions(data.sessions ?? []);
+    } catch {
+      // silent
+    }
+  }, [openClawBetaEnabled]);
+
+  useEffect(() => {
+    void fetchSessions();
+    const interval = setInterval(fetchSessions, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchSessions]);
+
+  return sessions;
 }
 
 // ── Inline SVG Icons ──
@@ -184,6 +254,7 @@ function TimelineButton({ icon, label, onClick }: { icon: React.ReactNode; label
 
 export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
   const { segments, loading } = useTimelineData();
+  const liveSessions = useTimelineSessions();
   const barRef = useRef<HTMLDivElement>(null);
   const [hoverX, setHoverX] = useState<number | null>(null);
   const [hoverMin, setHoverMin] = useState<number | null>(null);
@@ -232,9 +303,10 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
 
   // ── Drill-down modal state ──
   const [drillOpen, setDrillOpen] = useState(false);
-  const [drillPos, setDrillPos] = useState({ x: 200, y: 100 });
+  const [drillPos, setDrillPos] = useState({ x: DRILL_LEFT_GUTTER, y: DRILL_TOP_GUTTER });
   const [drillSize, setDrillSize] = useState({ w: 520, h: 400 });
   const dragRef = useRef<{ startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const resizeRef = useRef<{ startX: number; startY: number; originW: number; originH: number } | null>(null);
 
   // ── Connected session panel state ──
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
@@ -262,13 +334,32 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
   const [assigningIssue, setAssigningIssue] = useState<number | null>(null);
   const sessionPanelElRef = useRef<HTMLDivElement>(null);
 
-  const handleBarDoubleClick = useCallback((e: React.MouseEvent) => {
-    // Open drill-down centered on click position
-    const x = Math.max(20, e.clientX - 260);
-    const y = Math.max(60, e.clientY + 10);
-    setDrillPos({ x, y });
-    setDrillOpen(true);
+  const clampDrillWidth = useCallback((width: number) => {
+    if (typeof window === 'undefined') return Math.min(Math.max(width, DRILL_MIN_WIDTH), DRILL_MAX_WIDTH);
+    const sessionPanelAllowance = 380 + 32 + 24;
+    const maxByViewport = Math.max(
+      DRILL_MIN_WIDTH,
+      Math.min(DRILL_MAX_WIDTH, window.innerWidth - DRILL_LEFT_GUTTER - sessionPanelAllowance),
+    );
+    return Math.min(Math.max(width, DRILL_MIN_WIDTH), maxByViewport);
   }, []);
+
+  const clampDrillHeight = useCallback((height: number) => {
+    if (typeof window === 'undefined') return Math.min(Math.max(height, DRILL_MIN_HEIGHT), DRILL_MAX_HEIGHT);
+    const maxByViewport = Math.max(DRILL_MIN_HEIGHT, Math.min(DRILL_MAX_HEIGHT, window.innerHeight - DRILL_TOP_GUTTER - 48));
+    return Math.min(Math.max(height, DRILL_MIN_HEIGHT), maxByViewport);
+  }, []);
+
+  const handleBarDoubleClick = useCallback((e: React.MouseEvent) => {
+    if (!TIMELINE_DRILLDOWN_ENABLED) return;
+    // Anchor activity rail to the left so follow-on drill panels always have room on the right.
+    setDrillPos({ x: DRILL_LEFT_GUTTER, y: DRILL_TOP_GUTTER });
+    setDrillSize((current) => ({
+      w: clampDrillWidth(current.w),
+      h: clampDrillHeight(current.h),
+    }));
+    setDrillOpen(true);
+  }, [clampDrillHeight, clampDrillWidth]);
 
   // Drag handler for modal
   const handleDrillDragStart = useCallback((e: React.MouseEvent) => {
@@ -290,6 +381,37 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     window.addEventListener('mouseup', onUp);
   }, [drillPos]);
 
+  const handleDrillResizeStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizeRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      originW: drillSize.w,
+      originH: drillSize.h,
+    };
+    const onMove = (ev: MouseEvent) => {
+      if (!resizeRef.current) return;
+      const nextW = clampDrillWidth(resizeRef.current.originW + (ev.clientX - resizeRef.current.startX));
+      const nextH = clampDrillHeight(resizeRef.current.originH + (ev.clientY - resizeRef.current.startY));
+      setDrillSize({ w: nextW, h: nextH });
+      if (selectedAgent) {
+        setSessionPanelPos((current) => ({ ...current, x: drillPos.x + nextW + 32 }));
+        if (issuesPanelOpen) {
+          setIssuesPanelPos((current) => ({ ...current, x: drillPos.x + nextW + 32 + 400 }));
+        }
+      }
+      tickDrag();
+    };
+    const onUp = () => {
+      resizeRef.current = null;
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [clampDrillHeight, clampDrillWidth, drillPos.x, drillSize.h, drillSize.w, issuesPanelOpen, selectedAgent, tickDrag]);
+
   // Agent card click → open connected session panel
   const handleAgentClick = useCallback((agentName: string) => {
     if (selectedAgent === agentName) {
@@ -300,7 +422,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     const cardEl = agentCardRefs.current.get(agentName);
     const cardRect = cardEl?.getBoundingClientRect();
     setSessionPanelPos({
-      x: drillPos.x + drillSize.w + 40,
+      x: drillPos.x + drillSize.w + 32,
       y: cardRect ? cardRect.top - 20 : drillPos.y,
     });
     setSelectedAgent(agentName);
@@ -397,20 +519,29 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
 
   // Agent → repo mapping for issue fetching
   const agentRepoMap: Record<string, string> = {
-    Mister: '',
+    Main: DEFAULT_TIMELINE_REPO,
+    'Agent 2': DEFAULT_TIMELINE_REPO,
+    'Agent 3': DEFAULT_TIMELINE_REPO,
+    codex: DEFAULT_TIMELINE_REPO,
+    Mister: DEFAULT_TIMELINE_REPO,
     Niot: 'hurttlocker/cortex',
     Hawk: 'hurttlocker/cortex',
   };
 
+  const resolveAgentRepo = useCallback((agentName: string | null) => {
+    if (!agentName) return DEFAULT_TIMELINE_REPO;
+    return agentRepoMap[agentName] || DEFAULT_TIMELINE_REPO;
+  }, []);
+
   // Open issues panel — spawns to the right of session panel
   const handleOpenIssues = useCallback(() => {
     setIssuesPanelPos({
-      x: sessionPanelPos.x + 400,
+      x: sessionPanelPos.x + 392,
       y: sessionPanelPos.y,
     });
     setIssuesPanelOpen(true);
     setIssuesLoading(true);
-    const repo = (selectedAgent && agentRepoMap[selectedAgent]) || '';
+    const repo = resolveAgentRepo(selectedAgent);
     fetch(`/api/panel/issues?repo=${encodeURIComponent(repo)}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
@@ -420,7 +551,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
       })
       .catch(() => {})
       .finally(() => setIssuesLoading(false));
-  }, [sessionPanelPos, selectedAgent]);
+  }, [resolveAgentRepo, selectedAgent, sessionPanelPos]);
 
   // Issues panel drag
   const handleIssuesDragStart = useCallback((e: React.MouseEvent) => {
@@ -447,7 +578,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
   const handleAssignIssue = useCallback(async (issueNumber: number) => {
     if (!selectedAgent) return;
     setAssigningIssue(issueNumber);
-    const repo = agentRepoMap[selectedAgent] || '';
+    const repo = resolveAgentRepo(selectedAgent);
     try {
       await fetch('/api/panel/assign-issue', {
         method: 'POST',
@@ -458,7 +589,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
       setGhIssues(prev => prev.filter(i => i.number !== issueNumber));
     } catch { /* silent */ }
     finally { setAssigningIssue(null); }
-  }, [selectedAgent]);
+  }, [resolveAgentRepo, selectedAgent]);
 
   // Close child panels when parent closes
   useEffect(() => {
@@ -481,6 +612,45 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
     }
     return Array.from(map.values()).sort((a, b) => b.totalMin - a.totalMin);
   }, [segments]);
+
+  const liveAgentContext = useMemo(() => {
+    const contexts = new Map<string, {
+      runtime: string;
+      status: string;
+      label: string;
+      summary: string;
+      location: string | null;
+      count: number;
+      extra: string | null;
+    }>();
+
+    for (const entry of agentBreakdown) {
+      const matches = liveSessions.filter((session) => timelineMatchesAgent(entry.agent, session));
+      const primary = timelinePrimarySession(matches);
+      if (!primary) continue;
+
+      const repoSlug = primary.runtimeSurface?.reviewContext?.repoSlug || '';
+      const repoName = repoSlug.split('/')[1] || null;
+      const cleanTask = cleanTaskLabel(primary.currentTask);
+      const location = repoName
+        ? `${repoName}${primary.branch ? ` · ${primary.branch}` : ''}`
+        : compactWorkspacePath(primary.workspace) ?? primary.surfaceLabel ?? primary.branch ?? null;
+      const label = primary.surfaceLabel || primary.name || runtimeLabel(primary.runtime);
+      const extra = matches.length > 1 ? `+${matches.length - 1} more` : null;
+
+      contexts.set(entry.agent, {
+        runtime: runtimeLabel(primary.runtime),
+        status: primary.status,
+        label,
+        summary: cleanTask || primary.surfaceLabel || primary.name || 'No current task detail',
+        location,
+        count: matches.length,
+        extra,
+      });
+    }
+
+    return contexts;
+  }, [agentBreakdown, liveSessions]);
 
   const handleBarMouseMove = useCallback((e: React.MouseEvent) => {
     if (!barRef.current || totalRendered === 0) return;
@@ -559,7 +729,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
         ref={barRef}
         onMouseMove={handleBarMouseMove}
         onMouseLeave={handleBarMouseLeave}
-        onDoubleClick={handleBarDoubleClick}
+        onDoubleClick={TIMELINE_DRILLDOWN_ENABLED ? handleBarDoubleClick : undefined}
         style={{
           flex: 1,
           height: 18,
@@ -568,7 +738,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
           display: 'flex',
           background: 'var(--t-timeline-bar)',
           position: 'relative',
-          cursor: 'crosshair',
+          cursor: TIMELINE_DRILLDOWN_ENABLED ? 'crosshair' : 'default',
         }}
       >
         {/* Segments */}
@@ -668,7 +838,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
       </div>
 
       {/* ── Agent Drill-Down Modal (glass, draggable) ── */}
-      {drillOpen && typeof document !== 'undefined' && createPortal(
+      {TIMELINE_DRILLDOWN_ENABLED && drillOpen && typeof document !== 'undefined' && createPortal(
         <>
           {/* Backdrop */}
           <div
@@ -748,89 +918,186 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
               flexDirection: 'column',
               gap: 14,
             }}>
-              {agentBreakdown.map((entry) => (
-                <div
-                  key={entry.agent}
-                  ref={(el) => { if (el) agentCardRefs.current.set(entry.agent, el); }}
-                  onClick={() => handleAgentClick(entry.agent)}
-                  style={{
-                    background: selectedAgent === entry.agent ? 'rgba(37, 99, 235, 0.12)' : 'rgba(255, 255, 255, 0.1)',
-                    border: selectedAgent === entry.agent ? '1px solid rgba(37, 99, 235, 0.3)' : '1px solid rgba(255, 255, 255, 0.15)',
-                    borderRadius: 12,
-                    padding: 12,
-                    cursor: 'pointer',
-                    transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
-                  }}
-                  onMouseEnter={(e) => { if (selectedAgent !== entry.agent) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)'; }}
-                  onMouseLeave={(e) => { if (selectedAgent !== entry.agent) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'; }}
-                >
-                  {/* Agent header */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{
-                        width: 24, height: 24, borderRadius: 8,
-                        background: 'rgba(37, 99, 235, 0.12)',
-                        border: '1px solid rgba(37, 99, 235, 0.2)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 11, fontWeight: 700, color: '#2563eb',
-                      }}>
-                        {entry.agent[0]}
+              {agentBreakdown.map((entry) => {
+                const context = liveAgentContext.get(entry.agent);
+                const runtimeTone = context?.runtime === 'OpenClaw'
+                  ? '#2563eb'
+                  : context?.runtime === 'Claude Code'
+                    ? '#8b5cf6'
+                    : context?.runtime === 'Codex'
+                      ? '#16a34a'
+                      : '#64748b';
+
+                return (
+                  <div
+                    key={entry.agent}
+                    ref={(el) => { if (el) agentCardRefs.current.set(entry.agent, el); }}
+                    onClick={() => handleAgentClick(entry.agent)}
+                    style={{
+                      background: selectedAgent === entry.agent ? 'rgba(37, 99, 235, 0.12)' : 'rgba(255, 255, 255, 0.1)',
+                      border: selectedAgent === entry.agent ? '1px solid rgba(37, 99, 235, 0.3)' : '1px solid rgba(255, 255, 255, 0.15)',
+                      borderRadius: 12,
+                      padding: 12,
+                      cursor: 'pointer',
+                      transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
+                    }}
+                    onMouseEnter={(e) => { if (selectedAgent !== entry.agent) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)'; }}
+                    onMouseLeave={(e) => { if (selectedAgent !== entry.agent) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'; }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: context ? 6 : 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                        <div style={{
+                          width: 24, height: 24, borderRadius: 8,
+                          background: 'rgba(37, 99, 235, 0.12)',
+                          border: '1px solid rgba(37, 99, 235, 0.2)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 11, fontWeight: 700, color: '#2563eb',
+                          flexShrink: 0,
+                        }}>
+                          {entry.agent[0]}
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
+                            {entry.agent}
+                          </div>
+                          {context?.label ? (
+                            <div
+                              style={{
+                                fontSize: 10,
+                                color: 'var(--t-text-muted)',
+                                marginTop: 1,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                maxWidth: 260,
+                              }}
+                            >
+                              {context.label}
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
-                        {entry.agent}
+                      <span style={{
+                        fontSize: 11, fontWeight: 600, color: 'var(--t-text-muted)',
+                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                        flexShrink: 0,
+                      }}>
+                        {formatDuration(entry.totalMin)}
                       </span>
                     </div>
-                    <span style={{
-                      fontSize: 11, fontWeight: 600, color: 'var(--t-text-muted)',
-                      fontFamily: '"SF Mono", ui-monospace, monospace',
-                    }}>
-                      {formatDuration(entry.totalMin)}
-                    </span>
-                  </div>
 
-                  {/* Per-agent timeline bar */}
-                  <div style={{
-                    height: 10, borderRadius: 5, overflow: 'hidden',
-                    display: 'flex', background: 'rgba(255, 255, 255, 0.08)',
-                  }}>
-                    {entry.segments.map((seg, i) => {
-                      const agentTotal = entry.segments.reduce((s, x) => s + x.durationMin, 0);
-                      const pct = (seg.durationMin / agentTotal) * 100;
-                      return (
-                        <div
-                          key={i}
-                          title={`${SEGMENT_LABELS[seg.kind]} — ${formatDuration(seg.durationMin)}${seg.label ? ` · ${seg.label}` : ''}`}
-                          style={{
-                            width: `${pct}%`,
-                            height: '100%',
-                            background: SEGMENT_COLORS[seg.kind],
-                            opacity: 0.85,
-                            transition: 'opacity 120ms',
-                          }}
-                          onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.85'; }}
-                        />
-                      );
-                    })}
-                  </div>
-
-                  {/* Breakdown stats */}
-                  <div style={{ display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
-                    {(['coding', 'thinking', 'testing', 'error'] as SegmentKind[]).map((kind) => {
-                      const mins = entry.breakdown[kind];
-                      if (!mins) return null;
-                      return (
-                        <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <div style={{ width: 6, height: 6, borderRadius: 3, background: SEGMENT_COLORS[kind] }} />
-                          <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontWeight: 500 }}>
-                            {SEGMENT_LABELS[kind]} {formatDuration(mins)}
+                    {context ? (
+                      <>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+                          <span style={{
+                            fontSize: 9,
+                            fontWeight: 700,
+                            color: runtimeTone,
+                            background: `${runtimeTone}14`,
+                            border: `1px solid ${runtimeTone}24`,
+                            borderRadius: 999,
+                            padding: '2px 6px',
+                          }}>
+                            {context.runtime}
                           </span>
+                          {context.location ? (
+                            <span style={{
+                              fontSize: 9,
+                              fontWeight: 600,
+                              color: 'var(--t-text-secondary)',
+                              background: 'rgba(255,255,255,0.16)',
+                              border: '1px solid rgba(255,255,255,0.16)',
+                              borderRadius: 999,
+                              padding: '2px 6px',
+                              fontFamily: '"SF Mono", ui-monospace, monospace',
+                            }}>
+                              {context.location}
+                            </span>
+                          ) : null}
+                          {context.extra ? (
+                            <span style={{
+                              fontSize: 9,
+                              fontWeight: 600,
+                              color: 'var(--t-text-muted)',
+                              background: 'rgba(255,255,255,0.12)',
+                              border: '1px solid rgba(255,255,255,0.14)',
+                              borderRadius: 999,
+                              padding: '2px 6px',
+                            }}>
+                              {context.extra}
+                            </span>
+                          ) : null}
                         </div>
-                      );
-                    })}
+                        <div
+                          style={{
+                            fontSize: 10.5,
+                            lineHeight: 1.45,
+                            color: 'var(--t-text-secondary)',
+                            marginBottom: 9,
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {context.summary}
+                        </div>
+                      </>
+                    ) : (
+                      <div
+                        style={{
+                          fontSize: 10.5,
+                          lineHeight: 1.45,
+                          color: 'var(--t-text-muted)',
+                          marginBottom: 9,
+                        }}
+                      >
+                        No live surface matched for this agent right now. Timeline is showing historical activity only.
+                      </div>
+                    )}
+
+                    <div style={{
+                      height: 10, borderRadius: 5, overflow: 'hidden',
+                      display: 'flex', background: 'rgba(255, 255, 255, 0.08)',
+                    }}>
+                      {entry.segments.map((seg, i) => {
+                        const agentTotal = entry.segments.reduce((s, x) => s + x.durationMin, 0);
+                        const pct = (seg.durationMin / agentTotal) * 100;
+                        return (
+                          <div
+                            key={i}
+                            title={`${SEGMENT_LABELS[seg.kind]} — ${formatDuration(seg.durationMin)}${seg.label ? ` · ${seg.label}` : ''}`}
+                            style={{
+                              width: `${pct}%`,
+                              height: '100%',
+                              background: SEGMENT_COLORS[seg.kind],
+                              opacity: 0.85,
+                              transition: 'opacity 120ms',
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.85'; }}
+                          />
+                        );
+                      })}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
+                      {(['coding', 'thinking', 'testing', 'error'] as SegmentKind[]).map((kind) => {
+                        const mins = entry.breakdown[kind];
+                        if (!mins) return null;
+                        return (
+                          <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <div style={{ width: 6, height: 6, borderRadius: 3, background: SEGMENT_COLORS[kind] }} />
+                            <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontWeight: 500 }}>
+                              {SEGMENT_LABELS[kind]} {formatDuration(mins)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
 
               {agentBreakdown.length === 0 && (
                 <div style={{ textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 12, padding: 20 }}>
@@ -838,6 +1105,36 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                 </div>
               )}
             </div>
+
+            {/* Bottom-right resize grip */}
+            <button
+              type="button"
+              onMouseDown={handleDrillResizeStart}
+              aria-label="Resize activity panel"
+              style={{
+                position: 'absolute',
+                right: 10,
+                bottom: 10,
+                width: 18,
+                height: 18,
+                padding: 0,
+                border: 'none',
+                borderRadius: 9,
+                background: 'rgba(255,255,255,0.14)',
+                cursor: 'nwse-resize',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--t-text-faint)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.32)',
+              }}
+            >
+              <svg width={10} height={10} viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
+                <path d="M3 7L7 3" />
+                <path d="M5 7L7 5" />
+                <path d="M7 7L7 7" />
+              </svg>
+            </button>
           </div>
 
           {/* ── SVG Connector Line ── */}
@@ -1185,7 +1482,7 @@ export function SessionTimeline({ onExpand }: { onExpand?: () => void }) {
                       Assign to {selectedAgent}
                     </span>
                     <span style={{ fontSize: 9, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-                      {selectedAgent && agentRepoMap[selectedAgent] ? agentRepoMap[selectedAgent].split('/')[1] : 'cortex-ide'}
+                      {resolveAgentRepo(selectedAgent).split('/')[1] ?? 'cortex-ide'}
                     </span>
                   </div>
                 </div>
