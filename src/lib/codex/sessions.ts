@@ -81,6 +81,11 @@ export type RuntimeTailEntry = {
   label: string;
   text: string;
   timestampLabel?: string;
+  thinking?: string;
+  tokens?: {
+    input: number;
+    output: number;
+  };
 };
 
 function compactText(value: string | null | undefined, max = 120) {
@@ -755,9 +760,25 @@ function extractTextParts(content: Array<Record<string, unknown>> | undefined) {
     .join(' ');
 }
 
+function extractReasoningSummary(summary: unknown) {
+  if (!Array.isArray(summary)) return '';
+  return summary
+    .map((item) => {
+      if (!item || typeof item !== 'object') return '';
+      const candidate = item as Record<string, unknown>;
+      if (typeof candidate.text === 'string') return candidate.text;
+      if (typeof candidate.summary_text === 'string') return candidate.summary_text;
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
 function summarizeTailFromJsonl(raw: string) {
   const entries: RuntimeTailEntry[] = [];
   const lines = raw.split('\n').slice(-180);
+  let pendingThinking = '';
 
   for (const line of lines) {
     if (!line.trim()) continue;
@@ -786,6 +807,14 @@ function summarizeTailFromJsonl(raw: string) {
       continue;
     }
 
+    if (type === 'response_item' && payload.type === 'reasoning') {
+      const text = extractReasoningSummary(payload.summary);
+      if (text) {
+        pendingThinking = text;
+      }
+      continue;
+    }
+
     if (type === 'response_item' && payload.type === 'message') {
       const role = String(payload.role ?? 'message');
       const phase = compactText(String(payload.phase ?? ''), 32);
@@ -798,7 +827,9 @@ function summarizeTailFromJsonl(raw: string) {
         label: compactText(`${role}${phase ? ` • ${phase}` : ''}`, 40),
         text,
         timestampLabel,
+        thinking: pendingThinking || undefined,
       });
+      pendingThinking = '';
       continue;
     }
 
@@ -824,6 +855,23 @@ function summarizeTailFromJsonl(raw: string) {
         text,
         timestampLabel,
       });
+      continue;
+    }
+
+    if (type === 'turn.completed') {
+      const usage = (parsed.usage ?? payload.usage) as { input_tokens?: unknown; output_tokens?: unknown } | undefined;
+      const input = typeof usage?.input_tokens === 'number' ? usage.input_tokens : null;
+      const output = typeof usage?.output_tokens === 'number' ? usage.output_tokens : null;
+      if (input == null && output == null) continue;
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const candidate = entries[index];
+        if (candidate.kind !== 'message') continue;
+        candidate.tokens = {
+          input: input ?? 0,
+          output: output ?? 0,
+        };
+        break;
+      }
     }
   }
 

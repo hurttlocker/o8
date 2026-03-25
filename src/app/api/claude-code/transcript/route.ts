@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readdir, readFile, stat } from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
+import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,11 +15,20 @@ interface ClaudeMessage {
     role?: string;
     content?: string | ContentBlock[];
     model?: string;
+    usage?: {
+      input_tokens?: number;
+      output_tokens?: number;
+    };
   };
   uuid?: string;
   timestamp?: string;
   isSidechain?: boolean;
   isMeta?: boolean;
+  total_cost_usd?: number;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+  };
 }
 
 interface ContentBlock {
@@ -28,6 +37,16 @@ interface ContentBlock {
   name?: string;
   input?: unknown;
   content?: ContentBlock[];
+}
+
+function usageFromUnknown(input: unknown): { input: number; output: number } | undefined {
+  if (!input || typeof input !== 'object') return undefined;
+  const usage = input as { input_tokens?: unknown; output_tokens?: unknown };
+  const next = {
+    input: typeof usage.input_tokens === 'number' ? usage.input_tokens : 0,
+    output: typeof usage.output_tokens === 'number' ? usage.output_tokens : 0,
+  };
+  return next.input > 0 || next.output > 0 ? next : undefined;
 }
 
 function coerceToolArgs(input: unknown): Record<string, unknown> | undefined {
@@ -136,17 +155,20 @@ export async function GET(req: NextRequest) {
     const raw = await readFile(targetFile, 'utf-8');
     const lines = raw.trim().split('\n').filter(Boolean);
 
-    const transcript: {
-      id: string;
-      role: string;
-      text: string;
-      timestampLabel: string;
-      toolCalls?: MobileTranscriptToolCall[];
-    }[] = [];
+    const transcript: MobileTranscriptEntry[] = [];
 
     for (const line of lines) {
       try {
         const entry = JSON.parse(line) as ClaudeMessage;
+
+        if (entry.type === 'result') {
+          const latestAssistant = [...transcript].reverse().find((candidate) => candidate.role === 'assistant');
+          if (latestAssistant) {
+            latestAssistant.costUsd = typeof entry.total_cost_usd === 'number' ? entry.total_cost_usd : latestAssistant.costUsd;
+            latestAssistant.tokens = usageFromUnknown(entry.usage) ?? latestAssistant.tokens;
+          }
+          continue;
+        }
 
         // Skip non-message entries
         if (entry.type !== 'user' && entry.type !== 'assistant') continue;
@@ -169,6 +191,8 @@ export async function GET(req: NextRequest) {
           role,
           text,
           timestampLabel,
+          model: entry.message?.model,
+          tokens: usageFromUnknown(entry.message?.usage),
           toolCalls: payload.toolCalls.length > 0 ? payload.toolCalls : undefined,
         });
       } catch { /* skip malformed lines */ }
