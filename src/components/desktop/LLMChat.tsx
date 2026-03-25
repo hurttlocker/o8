@@ -100,6 +100,18 @@ export interface LLMMessage {
   compactedCount?: number; // how many messages were compressed
 }
 
+interface FileChangePreview {
+  id: string;
+  path: string;
+  shortFile: string;
+  tool: 'Edit' | 'Write' | 'MultiEdit' | 'NotebookEdit' | 'apply_patch';
+  additions: number;
+  deletions: number;
+  oldText?: string;
+  newText?: string;
+  content?: string;
+}
+
 interface ModelOption {
   id: string;
   label: string;
@@ -326,6 +338,273 @@ function ActionButton({ icon, label, active, activeColor, onClick }: {
   );
 }
 
+function lineCount(text?: string) {
+  if (!text) return 0;
+  return text.split('\n').length;
+}
+
+function basenameFromPath(filePath?: string) {
+  if (!filePath) return 'file';
+  const normalized = filePath.replace(/\\/g, '/');
+  const parts = normalized.split('/');
+  return parts[parts.length - 1] || normalized;
+}
+
+function deriveFileChangesFromPatch(patchText: string) {
+  const changes: FileChangePreview[] = [];
+  const fileBlocks = patchText.split(/\*\*\*\s+(Update|Add)\s+File:\s+/);
+
+  for (let i = 1; i < fileBlocks.length; i += 2) {
+    const operation = fileBlocks[i];
+    const block = fileBlocks[i + 1];
+    if (!block) continue;
+    const lines = block.split('\n');
+    const filePath = lines[0].trim();
+    const shortFile = basenameFromPath(filePath);
+
+    if (operation === 'Add') {
+      const content = lines.slice(1).filter((line) => line.startsWith('+')).map((line) => line.slice(1)).join('\n');
+      changes.push({
+        id: `patch-${shortFile}-${changes.length}`,
+        path: filePath,
+        shortFile,
+        tool: 'apply_patch',
+        additions: lineCount(content),
+        deletions: 0,
+        content,
+      });
+      continue;
+    }
+
+    const oldLines: string[] = [];
+    const newLines: string[] = [];
+    let additions = 0;
+    let deletions = 0;
+
+    for (const line of lines.slice(1)) {
+      if (line.startsWith('@@')) continue;
+      if (line.startsWith('-')) {
+        oldLines.push(line.slice(1));
+        deletions += 1;
+      } else if (line.startsWith('+')) {
+        newLines.push(line.slice(1));
+        additions += 1;
+      } else if (line.startsWith(' ')) {
+        oldLines.push(line.slice(1));
+        newLines.push(line.slice(1));
+      }
+    }
+
+    changes.push({
+      id: `patch-${shortFile}-${changes.length}`,
+      path: filePath,
+      shortFile,
+      tool: 'apply_patch',
+      additions,
+      deletions,
+      oldText: oldLines.join('\n'),
+      newText: newLines.join('\n'),
+    });
+  }
+
+  return changes;
+}
+
+function deriveFileChangesFromTools(toolCalls?: ToolCallInfo[]): FileChangePreview[] {
+  if (!toolCalls?.length) return [];
+  const changes: FileChangePreview[] = [];
+
+  for (const tool of toolCalls) {
+    const name = tool.name;
+    const args = tool.args ?? {};
+
+    if (name === 'apply_patch') {
+      const patch = typeof args.input === 'string' ? args.input : typeof args.patch === 'string' ? args.patch : '';
+      if (patch) {
+        changes.push(...deriveFileChangesFromPatch(patch));
+      }
+      continue;
+    }
+
+    if (name === 'Edit' || name === 'edit_file') {
+      const filePath = String(args.file_path ?? args.path ?? '');
+      if (!filePath) continue;
+      const oldText = typeof args.old_string === 'string' ? args.old_string : typeof args.oldText === 'string' ? args.oldText : undefined;
+      const newText = typeof args.new_string === 'string' ? args.new_string : typeof args.newText === 'string' ? args.newText : undefined;
+      changes.push({
+        id: `${filePath}-${changes.length}`,
+        path: filePath,
+        shortFile: basenameFromPath(filePath),
+        tool: 'Edit',
+        additions: lineCount(newText),
+        deletions: lineCount(oldText),
+        oldText,
+        newText,
+      });
+      continue;
+    }
+
+    if (name === 'Write' || name === 'write_file' || name === 'NotebookEdit') {
+      const filePath = String(args.file_path ?? args.path ?? '');
+      const content = typeof args.content === 'string' ? args.content : '';
+      if (!filePath) continue;
+      changes.push({
+        id: `${filePath}-${changes.length}`,
+        path: filePath,
+        shortFile: basenameFromPath(filePath),
+        tool: name === 'NotebookEdit' ? 'NotebookEdit' : 'Write',
+        additions: lineCount(content),
+        deletions: 0,
+        content,
+      });
+      continue;
+    }
+
+    if (name === 'MultiEdit') {
+      const filePath = String(args.file_path ?? args.path ?? '');
+      const edits = Array.isArray(args.edits) ? args.edits as Array<Record<string, unknown>> : [];
+      if (!filePath || edits.length === 0) continue;
+      edits.forEach((edit, index) => {
+        const oldText = typeof edit.old_string === 'string' ? edit.old_string : undefined;
+        const newText = typeof edit.new_string === 'string' ? edit.new_string : undefined;
+        changes.push({
+          id: `${filePath}-${index}-${changes.length}`,
+          path: filePath,
+          shortFile: basenameFromPath(filePath),
+          tool: 'MultiEdit',
+          additions: lineCount(newText),
+          deletions: lineCount(oldText),
+          oldText,
+          newText,
+        });
+      });
+    }
+  }
+
+  return changes;
+}
+
+function FileChangeCard({ change }: { change: FileChangePreview }) {
+  const [expanded, setExpanded] = useState(false);
+  const isWrite = Boolean(change.content && !change.oldText && !change.newText);
+  return (
+    <div style={{ width: '100%' }}>
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          width: '100%',
+          padding: '10px 12px',
+          background: '#fbfbfd',
+          border: '1px solid #e5e7eb',
+          borderRadius: 12,
+          cursor: 'pointer',
+          textAlign: 'left',
+        }}
+      >
+        <ChevronRight
+          size={14}
+          style={{
+            color: '#64748b',
+            transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform 160ms ease',
+            flexShrink: 0,
+          }}
+        />
+        <FileText size={14} style={{ color: '#64748b', flexShrink: 0 }} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>
+            1 file changed
+          </div>
+          <div style={{ fontSize: 12, color: '#64748b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {change.shortFile}
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#16a34a' }}>+{change.additions}</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#dc2626' }}>-{change.deletions}</span>
+        </div>
+      </button>
+      {expanded ? (
+        <div style={{
+          marginTop: 8,
+          border: '1px solid #e5e7eb',
+          borderRadius: 12,
+          overflow: 'hidden',
+          background: '#fcfcfd',
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            padding: '10px 12px',
+            borderBottom: '1px solid #eef2f7',
+            background: '#f8fafc',
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>{change.path}</div>
+            <div style={{ fontSize: 10, color: '#64748b', fontWeight: 700 }}>{change.tool}</div>
+          </div>
+          <div style={{ padding: 12 }}>
+            {isWrite ? (
+              <pre style={{
+                margin: 0,
+                whiteSpace: 'pre-wrap',
+                fontSize: 12,
+                lineHeight: 1.5,
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                color: '#0f172a',
+              }}>
+                {change.content}
+              </pre>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#dc2626', marginBottom: 6 }}>Before</div>
+                  <pre style={{
+                    margin: 0,
+                    padding: 10,
+                    borderRadius: 10,
+                    background: 'rgba(254, 242, 242, 0.9)',
+                    color: '#7f1d1d',
+                    whiteSpace: 'pre-wrap',
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    minHeight: 80,
+                  }}>
+                    {change.oldText || 'No previous content'}
+                  </pre>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', marginBottom: 6 }}>After</div>
+                  <pre style={{
+                    margin: 0,
+                    padding: 10,
+                    borderRadius: 10,
+                    background: 'rgba(240, 253, 244, 0.9)',
+                    color: '#14532d',
+                    whiteSpace: 'pre-wrap',
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    minHeight: 80,
+                  }}>
+                    {change.newText || 'No updated content'}
+                  </pre>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFork, onApplyToFile, onOpenInCanvas, onRunInTerminal }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [liked, setLiked] = useState<'up' | 'down' | null>(null);
@@ -335,6 +614,10 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [ttsProgress, setTtsProgress] = useState(0);
   const isUser = message.role === 'user';
+  const fileChanges = !isUser ? deriveFileChangesFromTools(message.toolCalls) : [];
+  const visibleToolCalls = !isUser
+    ? (message.toolCalls ?? []).filter((tool) => !['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'edit_file', 'write_file', 'apply_patch'].includes(tool.name))
+    : [];
 
   // Clean up audio on unmount
   useEffect(() => {
@@ -486,8 +769,23 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
         />
       )}
 
+      {!isUser && fileChanges.length > 0 && (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          width: '100%',
+          maxWidth: '90%',
+          marginTop: 4,
+        }}>
+          {fileChanges.map((change) => (
+            <FileChangeCard key={change.id} change={change} />
+          ))}
+        </div>
+      )}
+
       {/* Tool calls display */}
-      {!isUser && message.toolCalls && message.toolCalls.length > 0 && !(message.thinkingSteps && message.thinkingSteps.length > 0) && (
+      {!isUser && visibleToolCalls.length > 0 && !(message.thinkingSteps && message.thinkingSteps.length > 0) && (
         <div style={{
           display: 'flex',
           flexDirection: 'column',
@@ -495,7 +793,7 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
           maxWidth: '90%',
           marginTop: 4,
         }}>
-          {message.toolCalls.map((tc, i) => (
+          {visibleToolCalls.map((tc, i) => (
             <div key={i} style={{
               display: 'flex',
               alignItems: 'center',
@@ -511,7 +809,6 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
               fontFamily: '-apple-system, system-ui, sans-serif',
               animation: 'llmFadeIn 200ms ease-out',
             }}>
-              {/* Status indicator */}
               <div style={{
                 width: 6,
                 height: 6,
@@ -520,7 +817,6 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
                 flexShrink: 0,
                 ...(tc.status !== 'done' ? { animation: 'llmDot 1.4s ease-in-out infinite' } : {}),
               }} />
-              {/* Tool name + args */}
               <span style={{ color: '#64748b', fontWeight: 500 }}>
                 {tc.name === 'search_web' ? '🔍 Searched' :
                  tc.name === 'read_file' ? '📄 Read' :
@@ -892,7 +1188,7 @@ export function ChainOfThought({
   return (
     <div style={{
       maxWidth: '90%',
-      marginBottom: 8,
+      marginBottom: 6,
       animation: 'llmFadeIn 200ms ease-out',
     }}>
       {/* Header — click to expand */}
@@ -902,50 +1198,50 @@ export function ChainOfThought({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
-          paddingTop: 8,
-          paddingBottom: 8,
-          paddingLeft: 12,
-          paddingRight: 12,
-          background: isLive ? 'linear-gradient(135deg, #f8fafc 0%, #f0f9ff 100%)' : '#f8fafc',
-          border: `1px solid ${isLive ? '#bae6fd' : '#e2e8f0'}`,
-          borderRadius: 10,
+          gap: 6,
+          paddingTop: 6,
+          paddingBottom: 6,
+          paddingLeft: 10,
+          paddingRight: 10,
+          background: isLive ? 'rgba(239, 246, 255, 0.8)' : 'rgba(248, 250, 252, 0.88)',
+          border: `1px solid ${isLive ? 'rgba(147, 197, 253, 0.45)' : 'rgba(226, 232, 240, 0.9)'}`,
+          borderRadius: 9,
           cursor: 'pointer',
-          width: '100%',
+          width: 'auto',
+          minWidth: 0,
           textAlign: 'left',
           transition: 'all 150ms ease',
           fontFamily: '-apple-system, system-ui, sans-serif',
         }}
         onMouseEnter={(e) => {
-          (e.currentTarget).style.background = '#f0f9ff';
-          (e.currentTarget).style.borderColor = '#93c5fd';
+          (e.currentTarget).style.background = 'rgba(240, 249, 255, 0.95)';
+          (e.currentTarget).style.borderColor = 'rgba(147, 197, 253, 0.7)';
         }}
         onMouseLeave={(e) => {
-          (e.currentTarget).style.background = isLive ? 'linear-gradient(135deg, #f8fafc 0%, #f0f9ff 100%)' : '#f8fafc';
-          (e.currentTarget).style.borderColor = isLive ? '#bae6fd' : '#e2e8f0';
+          (e.currentTarget).style.background = isLive ? 'rgba(239, 246, 255, 0.8)' : 'rgba(248, 250, 252, 0.88)';
+          (e.currentTarget).style.borderColor = isLive ? 'rgba(147, 197, 253, 0.45)' : 'rgba(226, 232, 240, 0.9)';
         }}
       >
-        {/* Brain icon */}
-        <div style={{
-          width: 24,
-          height: 24,
-          borderRadius: 6,
-          background: isLive ? 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)' : '#e2e8f0',
-          display: 'flex',
+        <span style={{
+          display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
+          width: 14,
+          height: 14,
           flexShrink: 0,
-          ...(isLive ? { animation: 'llmDot 2s ease-in-out infinite' } : {}),
+          color: isLive ? '#2563eb' : '#94a3b8',
+          ...(isLive ? { animation: 'llmDot 1.4s ease-in-out infinite' } : {}),
         }}>
-          <Brain size={13} style={{ color: isLive ? 'white' : '#64748b' }} />
-        </div>
+          <Brain size={11} />
+        </span>
 
         {/* Label */}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: 500,
-            color: '#1e293b',
+            fontStyle: 'italic',
+            color: '#64748b',
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -956,31 +1252,11 @@ export function ChainOfThought({
               <span>Thought for {durationSec ? `${durationSec}s` : `${completedCount} step${completedCount !== 1 ? 's' : ''}`}</span>
             )}
           </div>
-          {isLive && (
-            <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 1 }}>
-              {completedCount} step{completedCount !== 1 ? 's' : ''} completed
-            </div>
-          )}
         </div>
-
-        {/* Progress dots */}
-        {isLive && (
-          <div style={{ display: 'flex', gap: 3, marginRight: 4 }}>
-            {[0, 1, 2].map(i => (
-              <div key={i} style={{
-                width: 4,
-                height: 4,
-                borderRadius: '50%',
-                background: '#3b82f6',
-                animation: `llmDot 1.4s ease-in-out ${i * 0.2}s infinite`,
-              }} />
-            ))}
-          </div>
-        )}
 
         {/* Chevron */}
         <ChevronRight
-          size={14}
+          size={12}
           style={{
             color: '#94a3b8',
             transform: expanded ? 'rotate(90deg)' : 'rotate(0)',

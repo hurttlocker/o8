@@ -147,7 +147,7 @@ export async function POST(req: NextRequest) {
 	                ));
 	              }
 
-	              if (itemType === 'tool_call' || itemType === 'function_call') {
+	              if (itemType === 'tool_call' || itemType === 'function_call' || itemType === 'custom_tool_call') {
 	                const toolName = typeof rawItem.name === 'string' ? rawItem.name : '';
 	                if (toolName) {
 	                  controller.enqueue(encoder.encode(
@@ -155,13 +155,16 @@ export async function POST(req: NextRequest) {
 	                      type: 'tool_call',
 	                      name: toolName,
 	                      status: 'running',
-	                      args: parseCodexArgs(rawItem.arguments),
+	                      args: parseCodexArgs(rawItem.arguments)
+	                        ?? (typeof rawItem.input === 'string'
+	                          ? parseCodexArgs(rawItem.input)
+	                          : (rawItem.input && typeof rawItem.input === 'object' ? rawItem.input as Record<string, unknown> : undefined)),
 	                    })}\n\n`
 	                  ));
 	                }
 	              }
 
-	              if (itemType === 'function_call_output' && typeof rawItem.output === 'string') {
+	              if ((itemType === 'function_call_output' || itemType === 'custom_tool_call_output') && typeof rawItem.output === 'string') {
 	                controller.enqueue(encoder.encode(
 	                  `data: ${JSON.stringify({
 	                    type: 'tool_result',

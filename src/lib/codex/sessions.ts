@@ -78,6 +78,7 @@ export function invalidateCodexDiscoveredFleetCache() {
 export type RuntimeTailEntry = {
   id: string;
   kind: 'message' | 'event' | 'tool' | 'tool-output';
+  role?: 'user' | 'assistant' | 'system';
   label: string;
   text: string;
   timestampLabel?: string;
@@ -819,27 +820,37 @@ function summarizeTailFromJsonl(raw: string) {
       const role = String(payload.role ?? 'message');
       const phase = compactText(String(payload.phase ?? ''), 32);
       const text = extractTextParts((payload.content ?? []) as Array<Record<string, unknown>>).trim();
-      if (role !== 'assistant') continue;
+      if (role !== 'assistant' && role !== 'user') continue;
       if (!text) continue;
       entries.push({
         id: `${entries.length}-message`,
         kind: 'message',
         label: compactText(`${role}${phase ? ` • ${phase}` : ''}`, 40),
+        role: role === 'user' ? 'user' : 'assistant',
         text,
         timestampLabel,
-        thinking: pendingThinking || undefined,
+        thinking: role === 'assistant' ? (pendingThinking || undefined) : undefined,
       });
       pendingThinking = '';
       continue;
     }
 
-    if (type === 'response_item' && payload.type === 'function_call') {
+    if (
+      (type === 'response_item' && payload.type === 'function_call')
+      || (type === 'response_item' && payload.type === 'custom_tool_call')
+    ) {
       const name = compactText(String(payload.name ?? 'tool'), 40);
+      const rawToolInput = payload.type === 'custom_tool_call'
+        ? payload.input
+        : payload.arguments;
+      const toolText = typeof rawToolInput === 'string'
+        ? rawToolInput
+        : JSON.stringify(rawToolInput ?? '');
       entries.push({
         id: `${entries.length}-tool`,
         kind: 'tool',
         label: name || 'Tool call',
-        text: compactText(String(payload.arguments ?? ''), 500) || 'Tool invoked.',
+        text: toolText || 'Tool invoked.',
         timestampLabel,
       });
       continue;

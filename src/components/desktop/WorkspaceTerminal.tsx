@@ -705,7 +705,7 @@ function transcriptToolSignature(entry: MobileTranscriptEntry) {
 
 function mergeTranscriptEntries(current: MobileTranscriptEntry[], incoming: MobileTranscriptEntry[]) {
   const unusedCurrent = [...current];
-  return incoming.map((entry) => {
+  const mergedIncoming = incoming.map((entry) => {
     const incomingTools = transcriptToolSignature(entry);
     const matchIndex = unusedCurrent.findIndex((candidate) => (
       candidate.role === entry.role
@@ -727,6 +727,21 @@ function mergeTranscriptEntries(current: MobileTranscriptEntry[], incoming: Mobi
       toolCalls: entry.toolCalls ?? matched.toolCalls,
     };
   });
+  const latestIncomingTs = mergedIncoming.reduce((max, entry) => Math.max(max, entry.timestamp ?? 0), 0);
+  const trailingLocal = unusedCurrent
+    .filter((entry) => {
+      const ts = entry.timestamp ?? 0;
+      if (entry.id.startsWith('msg-')) return true;
+      if (entry.id.startsWith('stream:')) return true;
+      return latestIncomingTs > 0 && ts >= latestIncomingTs;
+    })
+    .filter((entry) => !mergedIncoming.some((candidate) => (
+      candidate.role === entry.role
+      && candidate.text.trim() === entry.text.trim()
+      && transcriptToolSignature(candidate) === transcriptToolSignature(entry)
+    )))
+    .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+  return [...mergedIncoming, ...trailingLocal];
 }
 
 const WorkspaceChatPane = memo(function WorkspaceChatPane({
@@ -852,7 +867,14 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
     setStreamingText('');
     liveToolCallsRef.current = [];
     setActiveToolCalls([]);
-    setActiveThinking(null);
+    setActiveThinking({
+      steps: [{
+        type: 'thinking',
+        label: 'Reasoning through the problem...',
+        status: 'active',
+      }],
+      thinking: '',
+    });
     setStreamMeta({});
 
     const userMsg: MobileTranscriptEntry = {
@@ -926,9 +948,13 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
       let accumulated = '';
       let buffer = '';
       let thinkingText = '';
-      const thinkingSteps: MobileTranscriptThinkingStep[] = [];
+      const thinkingSteps: MobileTranscriptThinkingStep[] = [{
+        type: 'thinking',
+        label: 'Reasoning through the problem...',
+        status: 'active',
+      }];
       const thinkingStartTime = Date.now();
-      let isThinking = false;
+      let isThinking = true;
       let tokens: { input: number; output: number } | undefined;
       let costUsd: number | undefined;
       let recalledFacts = 0;
@@ -1437,7 +1463,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                 isLive
               />
             ) : null}
-            {agentRunning && (streamingText || activeToolCalls.length > 0 || activeThinking) ? (
+            {agentRunning ? (
               <MessageBubble
                 message={{
                   id: `stream:${tabId}`,
@@ -2630,11 +2656,11 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     const tabCountRef = useRef(0);
     const pendingCliCommands = useRef<Map<string, string>>(new Map()); // tabId → command to run after session created
     const pendingRequestRef = useRef<Map<string, string>>(new Map()); // requestId → tabId
-    const initialCreatedRef = useRef(false);
     const restoredRef = useRef(false);
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const detectedPortsRef = useRef<Set<number>>(new Set()); // avoid duplicate detections
     const urlDetectionEnabledRef = useRef(false); // suppress during initial replay
+    const previousWsConnectedRef = useRef(false);
 
     // Persist tab state (debounced — saves 500ms after last change)
     const persistTabs = useCallback((currentTabs: TerminalTab[], currentActiveId: string) => {
@@ -2707,7 +2733,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       };
     }, []);
 
-    // Restore tabs on WS connect.
+    // Restore tabs on first WS connect for this page load.
     useEffect(() => {
       if (!termWsConnected || restoredRef.current) return;
       restoredRef.current = true;
@@ -2840,13 +2866,19 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       })();
     }, [createDefaultChatTab, createDefaultShellTab, defaultTab, requestTerminalForTab, sendTerminalAttach, stateScope, termWsConnected]);
 
-    // Reset restored flag when WS disconnects
+    // On reconnect, reattach existing terminal tabs without resetting chat state.
     useEffect(() => {
-      if (!termWsConnected) {
-        restoredRef.current = false;
-        initialCreatedRef.current = false;
+      const wasConnected = previousWsConnectedRef.current;
+      previousWsConnectedRef.current = termWsConnected;
+      if (!termWsConnected || !wasConnected || !restoredRef.current) {
+        return;
       }
-    }, [termWsConnected]);
+      for (const tab of tabsRef.current) {
+        if (tab.kind === 'terminal' && tab.tmuxSession) {
+          sendTerminalAttach(tab.tmuxSession, 120, 30);
+        }
+      }
+    }, [sendTerminalAttach, termWsConnected]);
 
     // Called when WS server confirms a new tmux session was created
     const handleSessionCreated = useCallback((sessionName: string, requestId?: string) => {
