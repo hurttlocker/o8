@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-25
 
+- `0981e99` feat: refine desktop dark mode theme
 - `39c7bb5` feat: migrate ide to fact-backed Rainwater recall
 - `e5b171e` fix: harden agent runtime workspace chat flow
 - `153b76e` feat: enrich workspace cli chat parity
