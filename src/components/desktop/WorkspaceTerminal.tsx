@@ -697,6 +697,38 @@ function upsertWorkspaceToolCall(
   return [...previous, next];
 }
 
+function transcriptToolSignature(entry: MobileTranscriptEntry) {
+  return (entry.toolCalls ?? [])
+    .map((tool) => `${tool.name}:${JSON.stringify(tool.args ?? {})}`)
+    .join('|');
+}
+
+function mergeTranscriptEntries(current: MobileTranscriptEntry[], incoming: MobileTranscriptEntry[]) {
+  const unusedCurrent = [...current];
+  return incoming.map((entry) => {
+    const incomingTools = transcriptToolSignature(entry);
+    const matchIndex = unusedCurrent.findIndex((candidate) => (
+      candidate.role === entry.role
+      && candidate.text.trim() === entry.text.trim()
+      && transcriptToolSignature(candidate) === incomingTools
+    ));
+    if (matchIndex < 0) return entry;
+    const [matched] = unusedCurrent.splice(matchIndex, 1);
+    return {
+      ...entry,
+      model: entry.model ?? matched.model,
+      tokens: entry.tokens ?? matched.tokens,
+      costUsd: entry.costUsd ?? matched.costUsd,
+      sources: entry.sources ?? matched.sources,
+      thinking: entry.thinking ?? matched.thinking,
+      thinkingSteps: entry.thinkingSteps ?? matched.thinkingSteps,
+      thinkingDurationMs: entry.thinkingDurationMs ?? matched.thinkingDurationMs,
+      recalledFacts: entry.recalledFacts ?? matched.recalledFacts,
+      toolCalls: entry.toolCalls ?? matched.toolCalls,
+    };
+  });
+}
+
 const WorkspaceChatPane = memo(function WorkspaceChatPane({
   tab,
   onUpdateMessages,
@@ -717,13 +749,23 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
+  const [liveAssistantId, setLiveAssistantId] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState('');
   const [activeToolCalls, setActiveToolCalls] = useState<MobileTranscriptToolCall[]>([]);
+  const [activeThinking, setActiveThinking] = useState<{ steps: MobileTranscriptThinkingStep[]; thinking: string } | null>(null);
+  const [streamMeta, setStreamMeta] = useState<{
+    tokens?: { input: number; output: number };
+    costUsd?: number;
+    sources?: MobileTranscriptSource[];
+    recalledFacts?: number;
+    thinkingDurationMs?: number;
+  }>({});
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [issuePickerOpen, setIssuePickerOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composeRef = useRef<HTMLTextAreaElement>(null);
   const liveToolCallsRef = useRef<MobileTranscriptToolCall[]>([]);
+  const messagesRef = useRef<MobileTranscriptEntry[]>([]);
   const stickToBottomRef = useRef(true);
   const handledDraftInjectionRef = useRef<string | null>(null);
   const messages = useMemo(() => tab.chatMessages ?? [], [tab.chatMessages]);
@@ -744,6 +786,10 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
     () => availableModels.find((model) => model.id === chatModel) ?? availableModels[0],
     [availableModels, chatModel],
   );
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   const scrollToBottom = useCallback((force = false) => {
     if (!scrollRef.current) return;
@@ -778,7 +824,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
       if (!res.ok) return;
       const data = await res.json() as { transcript?: MobileTranscriptEntry[] };
       if (Array.isArray(data.transcript)) {
-        onUpdateMessages(tabId, data.transcript);
+        onUpdateMessages(tabId, mergeTranscriptEntries(messagesRef.current, data.transcript));
         requestAnimationFrame(() => scrollToBottom(true));
       }
     } catch {
@@ -796,7 +842,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
     return () => clearInterval(id);
   }, [chatSessionKey, fetchTranscript]);
 
-  const sendText = useCallback(async (inputText: string) => {
+  const sendText = useCallback(async (inputText: string, options?: { baseMessages?: MobileTranscriptEntry[] }) => {
     const text = inputText.trim();
     if (!text || sending) return;
     stickToBottomRef.current = true;
@@ -806,6 +852,8 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
     setStreamingText('');
     liveToolCallsRef.current = [];
     setActiveToolCalls([]);
+    setActiveThinking(null);
+    setStreamMeta({});
 
     const userMsg: MobileTranscriptEntry = {
       id: `msg-${Date.now()}-user`,
@@ -814,7 +862,8 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
       timestamp: Date.now(),
       timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
-    const updated = [...messages, userMsg];
+    const baseMessages = options?.baseMessages ?? messagesRef.current;
+    const updated = [...baseMessages, userMsg];
     onUpdateMessages(tabId, updated);
     scrollToBottom(true);
 
@@ -854,6 +903,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
           toolCalls: [],
         },
       ];
+      setLiveAssistantId(assistantId);
       onUpdateMessages(tabId, nextTranscript);
 
       const res = await fetch(endpoint, {
@@ -875,6 +925,60 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
       const decoder = new TextDecoder();
       let accumulated = '';
       let buffer = '';
+      let thinkingText = '';
+      const thinkingSteps: MobileTranscriptThinkingStep[] = [];
+      const thinkingStartTime = Date.now();
+      let isThinking = false;
+      let tokens: { input: number; output: number } | undefined;
+      let costUsd: number | undefined;
+      let recalledFacts = 0;
+      const sources: MobileTranscriptSource[] = [];
+
+      const pushThinkingState = (forceLive = false) => {
+        if (thinkingSteps.length === 0 && !thinkingText) {
+          setActiveThinking(null);
+          return;
+        }
+        const steps = thinkingSteps.map((step) => ({ ...step }));
+        setActiveThinking({
+          steps: forceLive ? steps : steps.map((step) => ({ ...step, status: step.status === 'active' ? 'complete' : step.status })),
+          thinking: thinkingText,
+        });
+      };
+
+      const updateAssistantEntry = () => {
+        const thinkingDurationMs = (thinkingSteps.length > 0 || thinkingText)
+          ? Date.now() - thinkingStartTime
+          : undefined;
+        const uniqueSources = sources.filter((source, index, current) => current.findIndex((candidate) => (
+          candidate.title === source.title && candidate.url === source.url && candidate.path === source.path
+        )) === index);
+        setStreamMeta({
+          tokens,
+          costUsd,
+          sources: uniqueSources.length > 0 ? uniqueSources : undefined,
+          recalledFacts: recalledFacts > 0 ? recalledFacts : undefined,
+          thinkingDurationMs,
+        });
+        nextTranscript = nextTranscript.map((entry) => (
+          entry.id === assistantId
+            ? {
+                ...entry,
+                text: accumulated,
+                model: selectedModel.label,
+                tokens,
+                costUsd,
+                sources: uniqueSources.length > 0 ? uniqueSources : undefined,
+                recalledFacts: recalledFacts > 0 ? recalledFacts : undefined,
+                toolCalls: liveToolCallsRef.current.length > 0 ? [...liveToolCallsRef.current] : undefined,
+                thinking: thinkingText || undefined,
+                thinkingSteps: thinkingSteps.length > 0 ? thinkingSteps.map((step) => ({ ...step, status: step.status === 'active' ? 'complete' : step.status })) : undefined,
+                thinkingDurationMs,
+              }
+            : entry
+        ));
+        onUpdateMessages(tabId, nextTranscript);
+      };
 
       while (true) {
         const { done, value } = await reader.read();
@@ -891,32 +995,130 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
               type: string;
               text?: string;
               name?: string;
+              status?: 'calling' | 'running' | 'done';
+              args?: Record<string, unknown>;
+              preview?: string;
               sessionId?: string;
               threadId?: string;
+              inputTokens?: number;
+              outputTokens?: number;
+              costUsd?: number;
+              factCount?: number;
+              sources?: MobileTranscriptSource[];
             };
 
-            if (event.type === 'delta' && event.text) {
+            if ((event.type === 'delta' || event.type === 'content') && event.text) {
+              if (isThinking) {
+                isThinking = false;
+                thinkingSteps.forEach((step) => {
+                  if (step.status === 'active') step.status = 'complete';
+                });
+                pushThinkingState(true);
+              }
               accumulated += event.text;
               setStreamingText(accumulated);
-              nextTranscript = nextTranscript.map((entry) => (
-                entry.id === assistantId
-                  ? { ...entry, text: accumulated, toolCalls: liveToolCallsRef.current.length ? [...liveToolCallsRef.current] : undefined }
-                  : entry
-              ));
-              onUpdateMessages(tabId, nextTranscript);
+              updateAssistantEntry();
               scrollToBottom(false);
             }
 
-            if (event.type === 'tool' && event.name) {
-              const nextTools = nextWorkspaceToolCalls(liveToolCallsRef.current, event.name);
+            if (event.type === 'thinking') {
+              if (!isThinking) {
+                isThinking = true;
+                thinkingSteps.push({
+                  type: 'thinking',
+                  label: 'Reasoning through the problem...',
+                  status: 'active',
+                });
+              }
+              if (event.text) {
+                thinkingText += event.text;
+                const lines = event.text.split('\n').filter((candidate) => candidate.trim());
+                for (const candidate of lines) {
+                  const trimmed = candidate.trim();
+                  if (trimmed.length > 10 && (
+                    trimmed.startsWith('I need to')
+                    || trimmed.startsWith('Let me')
+                    || trimmed.startsWith('First,')
+                    || trimmed.startsWith('Now')
+                    || trimmed.startsWith('The ')
+                    || trimmed.startsWith('This ')
+                  )) {
+                    const active = thinkingSteps.find((step) => step.status === 'active');
+                    if (active) {
+                      active.label = trimmed.slice(0, 60) + (trimmed.length > 60 ? '...' : '');
+                    }
+                  }
+                }
+              }
+              pushThinkingState(true);
+            }
+
+            if ((event.type === 'tool' || event.type === 'tool_call') && event.name) {
+              const nextTool: MobileTranscriptToolCall = {
+                name: event.name,
+                status: event.status ?? 'running',
+                args: event.args,
+              };
+              const nextTools = upsertWorkspaceToolCall(liveToolCallsRef.current, nextTool);
               liveToolCallsRef.current = nextTools;
               setActiveToolCalls(nextTools);
-              nextTranscript = nextTranscript.map((entry) => (
-                entry.id === assistantId
-                  ? { ...entry, text: accumulated, toolCalls: nextTools }
-                  : entry
-              ));
-              onUpdateMessages(tabId, nextTranscript);
+              const nextStep = buildWorkspaceThinkingStep(nextTool);
+              const existingStep = thinkingSteps.find((step) => step.label === nextStep.label);
+              if (existingStep) {
+                existingStep.status = nextStep.status;
+                existingStep.detail = nextStep.detail;
+              } else {
+                thinkingSteps.push(nextStep);
+              }
+              pushThinkingState(true);
+              updateAssistantEntry();
+            }
+
+            if (event.type === 'tool_result') {
+              const lastTool = event.name
+                ? liveToolCallsRef.current.find((tool) => tool.name === event.name)
+                : liveToolCallsRef.current[liveToolCallsRef.current.length - 1];
+              if (lastTool) {
+                const nextTools = upsertWorkspaceToolCall(liveToolCallsRef.current, {
+                  ...lastTool,
+                  status: 'done',
+                  preview: event.preview ?? lastTool.preview,
+                });
+                liveToolCallsRef.current = nextTools;
+                setActiveToolCalls(nextTools);
+              }
+              const toolStep = [...thinkingSteps].reverse().find((step) => step.status === 'active' && step.type !== 'thinking');
+              if (toolStep) toolStep.status = 'complete';
+              pushThinkingState(true);
+              updateAssistantEntry();
+            }
+
+            if (event.type === 'usage') {
+              tokens = typeof event.inputTokens === 'number' || typeof event.outputTokens === 'number'
+                ? { input: event.inputTokens ?? 0, output: event.outputTokens ?? 0 }
+                : tokens;
+              if (typeof event.costUsd === 'number') {
+                costUsd = event.costUsd;
+              }
+              updateAssistantEntry();
+            }
+
+            if (event.type === 'memory_recall') {
+              recalledFacts = event.factCount ?? 0;
+              if (recalledFacts > 0) {
+                thinkingSteps.push({
+                  type: 'search',
+                  label: `Recalled ${recalledFacts} memor${recalledFacts === 1 ? 'y' : 'ies'} from Cortex`,
+                  status: 'complete',
+                });
+                pushThinkingState(true);
+                updateAssistantEntry();
+              }
+            }
+
+            if (event.type === 'sources' && Array.isArray(event.sources)) {
+              sources.splice(0, sources.length, ...event.sources);
+              updateAssistantEntry();
             }
 
             if (event.sessionId && chatRuntime === 'claude-code') {
@@ -927,32 +1129,34 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
             }
 
             if (event.type === 'done' || event.type === 'close') {
+              if (typeof event.inputTokens === 'number' || typeof event.outputTokens === 'number') {
+                tokens = {
+                  input: event.inputTokens ?? tokens?.input ?? 0,
+                  output: event.outputTokens ?? tokens?.output ?? 0,
+                };
+              }
+              if (typeof event.costUsd === 'number') {
+                costUsd = event.costUsd;
+              }
               if (event.text && !accumulated) {
                 accumulated = event.text;
-                nextTranscript = nextTranscript.map((entry) => (
-                  entry.id === assistantId
-                    ? { ...entry, text: accumulated, toolCalls: liveToolCallsRef.current.length ? [...liveToolCallsRef.current] : undefined }
-                    : entry
-                ));
-                onUpdateMessages(tabId, nextTranscript);
+                setStreamingText(accumulated);
               }
               const settledTools = liveToolCallsRef.current.map((tool) => ({ ...tool, status: 'done' as const }));
               if (settledTools.length > 0) {
                 liveToolCallsRef.current = settledTools;
                 setActiveToolCalls(settledTools);
-                nextTranscript = nextTranscript.map((entry) => (
-                  entry.id === assistantId ? { ...entry, toolCalls: settledTools } : entry
-                ));
-                onUpdateMessages(tabId, nextTranscript);
               }
+              thinkingSteps.forEach((step) => {
+                if (step.status === 'active') step.status = 'complete';
+              });
+              pushThinkingState(false);
+              updateAssistantEntry();
             }
 
             if (event.type === 'error' && event.text) {
               accumulated += `\n⚠️ ${event.text}`;
-              nextTranscript = nextTranscript.map((entry) => (
-                entry.id === assistantId ? { ...entry, text: accumulated } : entry
-              ));
-              onUpdateMessages(tabId, nextTranscript);
+              updateAssistantEntry();
             }
           } catch {
             // skip malformed SSE lines
@@ -980,10 +1184,13 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
     } finally {
       setSending(false);
       setAgentRunning(false);
+      setLiveAssistantId(null);
       setStreamingText('');
+      setActiveThinking(null);
+      setStreamMeta({});
       setTimeout(() => { void fetchTranscript(); }, 400);
     }
-  }, [chatRuntime, chatSessionKey, fetchTranscript, linkedIssue, messages, onUpdateMessages, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.repo?.localPath, tabId]);
+  }, [chatRuntime, chatSessionKey, fetchTranscript, linkedIssue, onUpdateMessages, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.repo?.localPath, tabId]);
 
   const handleSend = useCallback(async () => {
     const text = draft.trim();
@@ -1019,23 +1226,72 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
       id: message.id,
       role: message.role === 'system' || message.role === 'tool' ? 'assistant' : message.role,
       content: message.text,
-      model: message.role === 'assistant' ? selectedModel?.label : undefined,
+      model: message.model ?? (message.role === 'assistant' ? selectedModel?.label : undefined),
       timestamp: message.timestamp ?? Date.now(),
+      tokens: message.tokens,
+      costUsd: message.costUsd,
       toolCalls: message.toolCalls?.map((tool) => ({
         name: tool.name,
         status: tool.status ?? 'done',
         args: tool.args,
+        preview: tool.preview,
       })),
+      sources: message.sources,
+      thinking: message.thinking,
+      thinkingSteps: message.thinkingSteps,
+      thinkingDurationMs: message.thinkingDurationMs,
+      recalledFacts: message.recalledFacts,
       isError: /^error:/i.test(message.text.trim()),
     })),
     [messages, selectedModel],
   );
 
+  const visibleMessages = useMemo(
+    () => (agentRunning && liveAssistantId ? llmMessages.filter((message) => message.id !== liveAssistantId) : llmMessages),
+    [agentRunning, liveAssistantId, llmMessages],
+  );
+
   useEffect(() => {
     if (!scrollRef.current) return;
-    if (llmMessages.length === 0 && !streamingText && activeToolCalls.length === 0) return;
+    if (visibleMessages.length === 0 && !streamingText && activeToolCalls.length === 0) return;
     scrollToBottom();
-  }, [activeToolCalls.length, llmMessages.length, scrollToBottom, streamingText]);
+  }, [activeToolCalls.length, scrollToBottom, streamingText, visibleMessages.length]);
+
+  const handleRetry = useCallback((messageId: string) => {
+    const messageIndex = messagesRef.current.findIndex((entry) => entry.id === messageId);
+    if (messageIndex < 0) return;
+    const previousMessages = messagesRef.current.slice(0, messageIndex);
+    const lastUser = [...previousMessages].reverse().find((entry) => entry.role === 'user');
+    if (!lastUser) return;
+    const baseMessages = previousMessages.filter((entry) => entry.id !== lastUser.id);
+    onUpdateMessages(tabId, baseMessages);
+    void sendText(lastUser.text, { baseMessages });
+  }, [onUpdateMessages, sendText, tabId]);
+
+  const handleEdit = useCallback((messageId: string, content: string) => {
+    const messageIndex = messagesRef.current.findIndex((entry) => entry.id === messageId);
+    if (messageIndex < 0) return;
+    setDraft(content);
+    onUpdateMessages(tabId, messagesRef.current.slice(0, messageIndex));
+    requestAnimationFrame(() => composeRef.current?.focus());
+  }, [onUpdateMessages, tabId]);
+
+  const handleDelete = useCallback((messageId: string) => {
+    const current = messagesRef.current;
+    const messageIndex = current.findIndex((entry) => entry.id === messageId);
+    if (messageIndex < 0) return;
+    const message = current[messageIndex];
+    if (!message) return;
+    if (message.role === 'user' && current[messageIndex + 1]?.role === 'assistant') {
+      onUpdateMessages(tabId, current.filter((_, idx) => idx !== messageIndex && idx !== messageIndex + 1));
+      return;
+    }
+    if (message.role === 'assistant' && messageIndex > 0 && current[messageIndex - 1]?.role === 'user') {
+      onUpdateMessages(tabId, current.filter((_, idx) => idx !== messageIndex && idx !== messageIndex - 1));
+      return;
+    }
+    onUpdateMessages(tabId, current.filter((_, idx) => idx !== messageIndex));
+  }, [onUpdateMessages, tabId]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: '#ffffff', position: 'relative' }}>
@@ -1052,7 +1308,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
           background: '#ffffff',
         }}
       >
-        {llmMessages.length === 0 && !agentRunning ? (
+        {visibleMessages.length === 0 && !agentRunning ? (
           <div style={{
             display: 'flex',
             flexDirection: 'column',
@@ -1162,15 +1418,26 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 720, marginLeft: 'auto', marginRight: 'auto' }}>
-            {llmMessages.map((message, index) => (
+            {visibleMessages.map((message, index) => (
               <MessageBubble
                 key={message.id}
                 message={message}
-                isLast={index === llmMessages.length - 1 && !sending}
+                isLast={index === visibleMessages.length - 1 && !sending}
+                onRetry={message.role === 'assistant' ? () => handleRetry(message.id) : undefined}
+                onEdit={message.role === 'user' ? (content) => handleEdit(message.id, content) : undefined}
+                onDelete={() => handleDelete(message.id)}
                 onRunInTerminal={onRunInTerminal}
               />
             ))}
-            {agentRunning && (streamingText || activeToolCalls.length > 0) ? (
+            {agentRunning && activeThinking && activeThinking.steps.length > 0 ? (
+              <ChainOfThought
+                steps={activeThinking.steps}
+                thinking={activeThinking.thinking}
+                durationMs={streamMeta.thinkingDurationMs}
+                isLive
+              />
+            ) : null}
+            {agentRunning && (streamingText || activeToolCalls.length > 0 || activeThinking) ? (
               <MessageBubble
                 message={{
                   id: `stream:${tabId}`,
@@ -1178,10 +1445,15 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                   content: streamingText || 'Thinking…',
                   model: selectedModel.label,
                   timestamp: Date.now(),
+                  tokens: streamMeta.tokens,
+                  costUsd: streamMeta.costUsd,
+                  sources: streamMeta.sources,
+                  recalledFacts: streamMeta.recalledFacts,
                   toolCalls: activeToolCalls.map((tool) => ({
                     name: tool.name,
                     status: tool.status ?? 'running',
                     args: tool.args,
+                    preview: tool.preview,
                   })),
                 }}
                 isLast

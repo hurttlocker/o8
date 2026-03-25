@@ -15,6 +15,43 @@ interface SendRequest {
   model?: string;
 }
 
+function parseCodexArgs(raw: unknown) {
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : { input: parsed };
+  } catch {
+    return { input: trimmed };
+  }
+}
+
+function extractCodexMessageText(item: Record<string, unknown>) {
+  if (typeof item.text === 'string' && item.text.trim()) return item.text;
+  const content = Array.isArray(item.content) ? item.content as Array<Record<string, unknown>> : [];
+  return content
+    .filter((part) => part.type === 'output_text' || part.type === 'input_text')
+    .map((part) => String(part.text ?? ''))
+    .join(' ')
+    .trim();
+}
+
+function extractCodexReasoningText(item: Record<string, unknown>) {
+  const summary = Array.isArray(item.summary) ? item.summary as Array<Record<string, unknown>> : [];
+  return summary
+    .map((part) => {
+      if (typeof part.text === 'string') return part.text;
+      if (typeof part.summary_text === 'string') return part.summary_text;
+      return '';
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
 function shouldSuppressCodexStderrLine(line: string) {
   const trimmed = line.trim();
   if (!trimmed) return true;
@@ -74,48 +111,80 @@ export async function POST(req: NextRequest) {
       let fullResponse = '';
       let capturedThreadId = '';
 
-      child.stdout.on('data', (chunk: Buffer) => {
-        const text = chunk.toString();
+	      child.stdout.on('data', (chunk: Buffer) => {
+	        const text = chunk.toString();
 
-        for (const line of text.split('\n').filter(Boolean)) {
-          try {
-            const event = JSON.parse(line) as Record<string, unknown>;
+	        for (const line of text.split('\n').filter(Boolean)) {
+	          try {
+	            const event = JSON.parse(line) as Record<string, unknown>;
+	            const rawItem = (event.item ?? event.payload ?? {}) as Record<string, unknown>;
 
-            // Capture thread ID
-            if (event.type === 'thread.started' && event.thread_id) {
-              capturedThreadId = event.thread_id as string;
+	            // Capture thread ID
+	            if (event.type === 'thread.started' && event.thread_id) {
+	              capturedThreadId = event.thread_id as string;
               controller.enqueue(encoder.encode(
                 `data: ${JSON.stringify({ type: 'session', threadId: capturedThreadId })}\n\n`
               ));
             }
 
             // Agent message completed — the actual response text
-            if (event.type === 'item.completed') {
-              const item = event.item as { type?: string; text?: string; id?: string } | undefined;
-              if (item?.type === 'agent_message' && item.text) {
-                fullResponse += item.text;
-                controller.enqueue(encoder.encode(
-                  `data: ${JSON.stringify({ type: 'delta', text: item.text })}\n\n`
-                ));
-              }
+	            if (event.type === 'item.completed' || event.type === 'response_item') {
+	              const itemType = String(rawItem.type ?? '');
+	              const itemRole = String(rawItem.role ?? '');
+	              const messageText = extractCodexMessageText(rawItem);
+	              const reasoningText = extractCodexReasoningText(rawItem);
 
-              // Tool calls
-              if (item?.type === 'tool_call') {
-                const toolItem = item as unknown as { name?: string };
-                if (toolItem.name) {
-                  controller.enqueue(encoder.encode(
-                    `data: ${JSON.stringify({ type: 'tool', name: toolItem.name })}\n\n`
-                  ));
-                }
-              }
-            }
+	              if ((itemType === 'agent_message' || (itemType === 'message' && itemRole === 'assistant')) && messageText) {
+	                fullResponse += messageText;
+	                controller.enqueue(encoder.encode(
+	                  `data: ${JSON.stringify({ type: 'delta', text: messageText })}\n\n`
+	                ));
+	              }
 
-            // Turn completed — usage info
-            if (event.type === 'turn.completed') {
-              const usage = event.usage as { input_tokens?: number; output_tokens?: number } | undefined;
-              controller.enqueue(encoder.encode(
-                `data: ${JSON.stringify({
-                  type: 'done',
+	              if (itemType === 'reasoning' && reasoningText) {
+	                controller.enqueue(encoder.encode(
+	                  `data: ${JSON.stringify({ type: 'thinking', text: reasoningText })}\n\n`
+	                ));
+	              }
+
+	              if (itemType === 'tool_call' || itemType === 'function_call') {
+	                const toolName = typeof rawItem.name === 'string' ? rawItem.name : '';
+	                if (toolName) {
+	                  controller.enqueue(encoder.encode(
+	                    `data: ${JSON.stringify({
+	                      type: 'tool_call',
+	                      name: toolName,
+	                      status: 'running',
+	                      args: parseCodexArgs(rawItem.arguments),
+	                    })}\n\n`
+	                  ));
+	                }
+	              }
+
+	              if (itemType === 'function_call_output' && typeof rawItem.output === 'string') {
+	                controller.enqueue(encoder.encode(
+	                  `data: ${JSON.stringify({
+	                    type: 'tool_result',
+	                    name: typeof rawItem.name === 'string' ? rawItem.name : undefined,
+	                    preview: rawItem.output,
+	                  })}\n\n`
+	                ));
+	              }
+	            }
+
+	            // Turn completed — usage info
+	            if (event.type === 'turn.completed') {
+	              const usage = event.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+	              controller.enqueue(encoder.encode(
+	                `data: ${JSON.stringify({
+	                  type: 'usage',
+	                  inputTokens: usage?.input_tokens,
+	                  outputTokens: usage?.output_tokens,
+	                })}\n\n`
+	              ));
+	              controller.enqueue(encoder.encode(
+	                `data: ${JSON.stringify({
+	                  type: 'done',
                   text: fullResponse,
                   threadId: capturedThreadId || undefined,
                   inputTokens: usage?.input_tokens,

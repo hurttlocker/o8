@@ -125,7 +125,7 @@ function buildTranscript(entries: RuntimeTailEntry[]) {
         timestampLabel,
         toolCalls: pendingToolCalls.length > 0 ? pendingToolCalls : undefined,
         tokens: entry.tokens ?? pendingTokens,
-        thinking: entry.thinking ?? pendingThinking || undefined,
+        thinking: entry.thinking || pendingThinking || undefined,
         thinkingSteps: pendingToolCalls.length > 0 ? pendingToolCalls.map(buildToolThinkingStep) : undefined,
       });
       pendingThinking = '';
