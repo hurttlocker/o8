@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-25
 
+- `e5b171e` fix: harden agent runtime workspace chat flow
 - `153b76e` feat: enrich workspace cli chat parity
 - `2f2b0fc` feat: polish timeline and workspace chat surfaces
 - `9a5fc9b` fix: stabilize ide session selector
