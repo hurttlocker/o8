@@ -22,7 +22,7 @@
     "desktop:dev": "npm run predev:cleanup && concurrently -k -s first \"npm run dev\" \"npm run dev:ws\"",
     "tauri:dev": "cargo tauri dev",
     "tauri:build": "cargo tauri build",
-    "postinstall": "npx node-gyp rebuild --directory=node_modules/node-pty 2>/dev/null || true",
+    "postinstall": "node scripts/postinstall.mjs",
     "tauri:prebuild": "next build && node scripts/tauri-export.mjs"
   },
   "dependencies": {
@@ -38,6 +38,7 @@
     "@tauri-apps/plugin-shell": "^2.3.5",
     "@tauri-apps/plugin-store": "^2.4.2",
     "@tauri-apps/plugin-updater": "^2.10.0",
+    "@vscode/codicons": "^0.0.45",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-image": "^0.9.0",
     "@xterm/addon-search": "^0.16.0",
