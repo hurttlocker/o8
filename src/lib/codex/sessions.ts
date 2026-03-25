@@ -790,6 +790,7 @@ function summarizeTailFromJsonl(raw: string) {
       const role = String(payload.role ?? 'message');
       const phase = compactText(String(payload.phase ?? ''), 32);
       const text = extractTextParts((payload.content ?? []) as Array<Record<string, unknown>>).trim();
+      if (role !== 'assistant') continue;
       if (!text) continue;
       entries.push({
         id: `${entries.length}-message`,

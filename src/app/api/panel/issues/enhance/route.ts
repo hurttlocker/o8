@@ -1,35 +1,11 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { ensureGitHubIssues, fetchGitHubLabels, resolveRepoSlug } from '@/lib/github-broker';
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = 'gemini-2.0-flash';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-
-function getRepoLabels(repo: string): string[] {
-  try {
-    const output = execSync(
-      `gh label list --repo ${repo} --limit 30 --json name --jq '.[].name'`,
-      { encoding: 'utf-8', timeout: 8000 },
-    );
-    return output.trim().split('\n').filter(Boolean);
-  } catch {
-    return [];
-  }
-}
-
-function getRecentIssueTitles(repo: string): string[] {
-  try {
-    const output = execSync(
-      `gh issue list --repo ${repo} --limit 8 --json title --jq '.[].title'`,
-      { encoding: 'utf-8', timeout: 8000 },
-    );
-    return output.trim().split('\n').filter(Boolean);
-  } catch {
-    return [];
-  }
-}
 
 export async function POST(request: Request) {
   const body = await request.json();
@@ -49,10 +25,14 @@ export async function POST(request: Request) {
   }
 
   // Fetch repo context in parallel
-  const repoSlug = repo || '';
+  const repoSlug = await resolveRepoSlug(repo || null, '');
   const [labels, recentTitles] = await Promise.all([
-    Promise.resolve(getRepoLabels(repoSlug)),
-    Promise.resolve(getRecentIssueTitles(repoSlug)),
+    repoSlug ? fetchGitHubLabels(repoSlug, 30).catch(() => []) : Promise.resolve([]),
+    repoSlug
+      ? ensureGitHubIssues(repoSlug)
+          .then((result) => result.issues.slice(0, 8).map((issue) => issue.title))
+          .catch(() => [])
+      : Promise.resolve([]),
   ]);
 
   const systemPrompt = `You are a GitHub issue writer for a software project. Your job is to take rough ideas and turn them into well-structured GitHub issues.

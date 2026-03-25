@@ -58,6 +58,7 @@ export async function GET(request: NextRequest) {
       const groups = tail.groups ?? [];
 
       for (const group of groups) {
+        const pendingToolCalls: MobileTranscriptToolCall[] = [];
         // User prompt → user bubble
         const promptText = group.prompt?.trim();
         if (promptText) {
@@ -84,17 +85,23 @@ export async function GET(request: NextRequest) {
               id: entry.id,
               role: 'assistant',
               text,
+              toolCalls: pendingToolCalls.length > 0 ? [...pendingToolCalls] : undefined,
               timestampLabel: entry.timestampLabel,
             });
+            pendingToolCalls.length = 0;
           } else if (entry.kind === 'tool') {
-            chatTranscript.push({
-              id: entry.id,
-              role: 'assistant',
-              text: '',
-              toolCalls: [toolCallFromEntry(entry.label || 'exec_command', entry.text)],
-              timestampLabel: entry.timestampLabel,
-            });
+            pendingToolCalls.push(toolCallFromEntry(entry.label || 'exec_command', entry.text));
           }
+        }
+
+        if (pendingToolCalls.length > 0) {
+          chatTranscript.push({
+            id: `${group.id}-tool-batch`,
+            role: 'assistant',
+            text: '',
+            toolCalls: [...pendingToolCalls],
+            timestampLabel: group.finishedAtLabel ?? group.startedAtLabel,
+          });
         }
       }
 

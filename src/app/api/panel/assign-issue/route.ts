@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { execSync } from 'node:child_process';
+import { addLabelsToGitHubIssue, commentOnGitHubIssue, resolveRepoSlug } from '@/lib/github-broker';
 
 /**
  * POST /api/panel/assign-issue
@@ -18,23 +18,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Missing issue or agent' }, { status: 400 });
     }
 
-    const repoFlag = repo ? `--repo ${repo}` : '';
+    const repoSlug = await resolveRepoSlug(repo ?? null, '');
+    if (!repoSlug) {
+      return NextResponse.json({ error: 'Missing or invalid repo' }, { status: 400 });
+    }
 
     // Add a comment noting the assignment
     const comment = `🤖 Assigned to **${agent}** via Cortex IDE timeline drill-down.`;
     try {
-      execSync(
-        `gh issue comment ${issue} ${repoFlag} --body "${comment.replace(/"/g, '\\"')}" 2>/dev/null`,
-        { timeout: 10000 }
-      );
+      await commentOnGitHubIssue(repoSlug, issue, comment);
     } catch { /* comment failed, continue anyway */ }
 
     // Add label
     try {
-      execSync(
-        `gh issue edit ${issue} ${repoFlag} --add-label "agent:${agent.toLowerCase()}" 2>/dev/null`,
-        { timeout: 10000 }
-      );
+      await addLabelsToGitHubIssue(repoSlug, issue, [`agent:${String(agent).toLowerCase()}`]);
     } catch { /* label may not exist, that's ok */ }
 
     return NextResponse.json({

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { execSync } from 'child_process';
+import { existsSync } from 'fs';
+import os from 'os';
+import { listRepos } from '@/lib/repos/registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,21 +61,28 @@ export async function POST(req: NextRequest) {
 
   // Resolve repo to local path
   let localPath = '';
-  try {
-    const reposJson = execSync('cat ~/.openclaw/repos.json 2>/dev/null || echo "[]"', { encoding: 'utf-8' });
-    const repos = JSON.parse(reposJson);
-    const match = repos.find((r: { remoteUrl?: string; localPath?: string }) => 
-      r.remoteUrl?.includes(repo) || r.localPath?.includes(repo)
-    );
-    localPath = match?.localPath ?? '';
-  } catch { /* ignore */ }
+  if (typeof repo === 'string' && repo.trim() && existsSync(repo)) {
+    localPath = repo;
+  }
+
+  if (!localPath) {
+    try {
+      const repos = await listRepos();
+      const match = repos.find((entry) =>
+        entry.localPath === repo ||
+        entry.remoteUrl?.includes(repo) ||
+        entry.localPath.includes(repo),
+      );
+      localPath = match?.localPath ?? '';
+    } catch { /* ignore */ }
+  }
 
   // Fallback: check common paths
   if (!localPath) {
-    const home = process.env.HOME || require('os').homedir();
-    const repoName = repo.split('/').pop() || repo;
+    const home = process.env.HOME || os.homedir();
+    const repoName = String(repo).split('/').pop() || String(repo);
     const candidates = [
-      `process.cwd() + '/../'${repoName}`,
+      `${process.cwd()}/../${repoName}`,
       `${home}/${repoName}`,
       `${home}/code/${repoName}`,
     ];

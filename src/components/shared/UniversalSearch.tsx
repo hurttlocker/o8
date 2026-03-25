@@ -42,6 +42,7 @@ interface SearchResult {
 interface UniversalSearchProps {
   variant: 'desktop' | 'mobile';
   workspace?: string;
+  repo?: string;
   /** JSON stringified agents array from inventory */
   agentsJson?: string;
   onSelectSession?: (sessionKey: string) => void;
@@ -106,6 +107,7 @@ function searchAgentsLocally(query: string, agentsJson?: string): SearchResult[]
 export const UniversalSearch = memo(function UniversalSearch({
   variant,
   workspace,
+  repo,
   agentsJson,
   onSelectSession,
   onSelectIssue,
@@ -150,6 +152,7 @@ export const UniversalSearch = memo(function UniversalSearch({
       try {
         const params = new URLSearchParams({ q: query.trim() });
         if (workspace) params.set('workspace', workspace);
+        if (repo) params.set('repo', repo);
         // Note: agents are searched client-side to avoid oversized URLs
 
         const res = await fetch(`/api/panel/universal-search?${params.toString()}`);
@@ -179,7 +182,7 @@ export const UniversalSearch = memo(function UniversalSearch({
     }, 300);
 
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
-  }, [query, workspace, agentsJson]);
+  }, [query, workspace, repo, agentsJson]);
 
   // Handle result selection
   const handleSelect = useCallback((result: SearchResult) => {

@@ -42,6 +42,7 @@ import {
   XCircle,
   Zap,
   CheckCircle2,
+  type LucideIcon,
 } from 'lucide-react';
 import { MarkdownBody } from './MarkdownBody';
 import { RepoRegistrySection } from './RepoRegistrySection';
@@ -181,7 +182,7 @@ interface FileNode {
   children?: FileNode[];
 }
 
-type Tab = 'activity' | 'issues' | 'prs' | 'files' | 'ci' | 'deploy';
+type Tab = 'activity' | 'issues' | 'prs' | 'files' | 'ci';
 
 // ── Lightweight collection comparisons (replaces JSON.stringify deep compare) ──
 
@@ -411,6 +412,464 @@ function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
   });
 
   return groups;
+}
+
+function compactWorkspaceLabel(workspace: string | null | undefined) {
+  if (!workspace) return null;
+  const normalized = workspace.replace(/^\/Users\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~');
+  const parts = normalized.split('/').filter(Boolean);
+  if (parts.length <= 3) return normalized;
+  return `~/${parts.slice(-3).join('/')}`;
+}
+
+function SidebarSection({
+  title,
+  icon: Icon,
+  count,
+  summary,
+  accent,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  icon: LucideIcon;
+  count?: number | string | null;
+  summary?: string | null;
+  accent?: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  const tone = accent ?? '#2563eb';
+
+  return (
+    <div style={{ paddingLeft: 14, paddingRight: 14 }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          padding: '10px 12px',
+          borderRadius: 16,
+          border: open ? `1px solid ${tone}22` : '1px solid rgba(148, 163, 184, 0.12)',
+          background: open ? `${tone}0d` : 'rgba(255,255,255,0.56)',
+          color: 'var(--t-text)',
+          cursor: 'pointer',
+          fontFamily: '-apple-system, system-ui, sans-serif',
+          boxShadow: open ? '0 10px 24px rgba(15, 23, 42, 0.05)' : '0 6px 18px rgba(15, 23, 42, 0.035)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+        }}
+      >
+        <span
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 11,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: `${tone}14`,
+            color: tone,
+            flexShrink: 0,
+          }}
+        >
+          <Icon size={15} strokeWidth={2} />
+        </span>
+        <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em' }}>{title}</span>
+            {count !== null && count !== undefined ? (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: 22,
+                  height: 22,
+                  paddingLeft: 7,
+                  paddingRight: 7,
+                  borderRadius: 999,
+                  background: 'rgba(15, 23, 42, 0.06)',
+                  color: 'var(--t-text-secondary)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  fontFamily: '"SF Mono", ui-monospace, monospace',
+                  flexShrink: 0,
+                }}
+              >
+                {count}
+              </span>
+            ) : null}
+          </div>
+          {summary ? (
+            <div
+              style={{
+                marginTop: 3,
+                fontSize: 11,
+                lineHeight: 1.45,
+                color: 'var(--t-text-muted)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {summary}
+            </div>
+          ) : null}
+        </div>
+        <span style={{ color: 'var(--t-text-faint)', display: 'inline-flex', alignItems: 'center' }}>
+          {open ? <ChevronDown size={14} strokeWidth={2} /> : <ChevronRight size={14} strokeWidth={2} />}
+        </span>
+      </button>
+      {open ? (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ActivityDock({
+  count,
+  summary,
+  open,
+  onToggle,
+  children,
+}: {
+  count: number;
+  summary: string;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        flexShrink: 0,
+        paddingTop: 10,
+        paddingRight: 14,
+        paddingBottom: 14,
+        paddingLeft: 14,
+        background: 'linear-gradient(180deg, rgba(248,250,252,0), rgba(248,250,252,0.96) 22%)',
+      }}
+    >
+      <div
+        style={{
+          borderRadius: 22,
+          border: open ? '1px solid rgba(249, 115, 22, 0.18)' : '1px solid rgba(148, 163, 184, 0.12)',
+          background: open
+            ? 'linear-gradient(180deg, rgba(255,250,245,0.98), rgba(255,255,255,0.95))'
+            : 'rgba(255,255,255,0.82)',
+          boxShadow: open
+            ? '0 -18px 34px rgba(15, 23, 42, 0.08), 0 10px 20px rgba(249, 115, 22, 0.05)'
+            : '0 -8px 18px rgba(15, 23, 42, 0.04)',
+          backdropFilter: 'blur(22px)',
+          WebkitBackdropFilter: 'blur(22px)',
+          overflow: 'hidden',
+        }}
+      >
+        <button
+          type="button"
+          onClick={onToggle}
+          style={{
+            width: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            padding: '10px 14px 12px',
+            border: 'none',
+            background: 'transparent',
+            cursor: 'pointer',
+            color: 'var(--t-text)',
+            fontFamily: '-apple-system, system-ui, sans-serif',
+          }}
+        >
+          <span
+            style={{
+              alignSelf: 'center',
+              width: 42,
+              height: 4,
+              borderRadius: 999,
+              background: open ? 'rgba(249, 115, 22, 0.26)' : 'rgba(148, 163, 184, 0.32)',
+            }}
+          />
+          <span style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%' }}>
+            <span
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 12,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'rgba(249, 115, 22, 0.12)',
+                color: '#f97316',
+                flexShrink: 0,
+              }}
+            >
+              <Zap size={15} strokeWidth={2} />
+            </span>
+            <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em' }}>Activity</span>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: 22,
+                    height: 22,
+                    paddingLeft: 7,
+                    paddingRight: 7,
+                    borderRadius: 999,
+                    background: 'rgba(15, 23, 42, 0.06)',
+                    color: 'var(--t-text-secondary)',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                  }}
+                >
+                  {count}
+                </span>
+              </span>
+              <span
+                style={{
+                  display: 'block',
+                  marginTop: 4,
+                  fontSize: 11,
+                  lineHeight: 1.45,
+                  color: 'var(--t-text-muted)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {summary}
+              </span>
+            </span>
+            <span style={{ color: 'var(--t-text-faint)', display: 'inline-flex', alignItems: 'center' }}>
+              {open ? <ChevronDown size={14} strokeWidth={2} /> : <ChevronRight size={14} strokeWidth={2} />}
+            </span>
+          </span>
+        </button>
+
+        {open ? (
+          <div style={{ paddingRight: 12, paddingBottom: 12, paddingLeft: 12 }}>
+            <div
+              style={{
+                maxHeight: 340,
+                overflowY: 'auto',
+                borderRadius: 18,
+                border: '1px solid rgba(249, 115, 22, 0.12)',
+                background: 'rgba(255,255,255,0.72)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.8)',
+                scrollbarWidth: 'none',
+              } as React.CSSProperties}
+              className="hide-scrollbar"
+            >
+              {children}
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function WorkspaceHeroAction({
+  label,
+  icon,
+  onClick,
+  primary = false,
+}: {
+  label: string;
+  icon: React.ReactNode;
+  onClick?: () => void;
+  primary?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        minHeight: 34,
+        padding: primary ? '9px 12px' : '8px 11px',
+        borderRadius: 10,
+        border: primary ? '1px solid rgba(37, 99, 235, 0.16)' : '1px solid rgba(148, 163, 184, 0.14)',
+        background: primary ? 'linear-gradient(180deg, rgba(37,99,235,0.96), rgba(29,78,216,0.92))' : 'rgba(255,255,255,0.7)',
+        color: primary ? '#fff' : 'var(--t-text-secondary)',
+        fontSize: 11,
+        fontWeight: 700,
+        cursor: onClick ? 'pointer' : 'not-allowed',
+        opacity: onClick ? 1 : 0.45,
+        fontFamily: '-apple-system, system-ui, sans-serif',
+        boxShadow: primary ? '0 12px 24px rgba(37, 99, 235, 0.18)' : 'none',
+      }}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function WorkspaceHeroPill({
+  label,
+  tone = 'neutral',
+}: {
+  label: string;
+  tone?: 'neutral' | 'blue' | 'green';
+}) {
+  const palette = tone === 'blue'
+    ? { background: 'rgba(37, 99, 235, 0.08)', border: 'rgba(37, 99, 235, 0.14)', color: '#2563eb' }
+    : tone === 'green'
+      ? { background: 'rgba(22, 163, 74, 0.08)', border: 'rgba(22, 163, 74, 0.14)', color: '#15803d' }
+      : { background: 'rgba(15, 23, 42, 0.05)', border: 'rgba(148, 163, 184, 0.14)', color: 'var(--t-text-secondary)' };
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '4px 9px',
+        borderRadius: 999,
+        background: palette.background,
+        border: `1px solid ${palette.border}`,
+        color: palette.color,
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: '0.01em',
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function WorkspaceHero({
+  title,
+  subtitle,
+  repoSlug,
+  branch,
+  workspaceLabel,
+  changedFiles,
+  activeRuns,
+  onLaunch,
+  onOpenGitLog,
+  onOpenCI,
+}: {
+  title: string;
+  subtitle: string;
+  repoSlug?: string | null;
+  branch?: string | null;
+  workspaceLabel?: string | null;
+  changedFiles: number;
+  activeRuns: number;
+  onLaunch?: () => void;
+  onOpenGitLog?: () => void;
+  onOpenCI?: () => void;
+}) {
+  return (
+    <div style={{ paddingLeft: 14, paddingRight: 14, paddingBottom: 16 }}>
+      <div
+        style={{
+          position: 'relative',
+          overflow: 'hidden',
+          borderRadius: 22,
+          border: '1px solid rgba(37, 99, 235, 0.12)',
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(239,246,255,0.94))',
+          boxShadow: '0 24px 40px rgba(37, 99, 235, 0.08)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'radial-gradient(circle at top right, rgba(37,99,235,0.14), transparent 46%)',
+            pointerEvents: 'none',
+          }}
+        />
+        <div style={{ position: 'relative', padding: '18px 18px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <span
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 14,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'rgba(37, 99, 235, 0.1)',
+                color: '#2563eb',
+                flexShrink: 0,
+              }}
+            >
+              <FolderOpen size={18} strokeWidth={2.1} />
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: '#2563eb' }}>
+                Current Workspace
+              </div>
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 21,
+                  lineHeight: 1.05,
+                  fontWeight: 800,
+                  letterSpacing: '-0.03em',
+                  color: 'var(--t-text)',
+                }}
+              >
+                {title}
+              </div>
+              <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-muted)' }}>
+                {subtitle}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+            {repoSlug ? <WorkspaceHeroPill label={repoSlug} tone="blue" /> : null}
+            {branch ? <WorkspaceHeroPill label={branch} /> : null}
+            {workspaceLabel ? <WorkspaceHeroPill label={workspaceLabel} /> : null}
+            <WorkspaceHeroPill label={`${changedFiles} changed`} tone={changedFiles > 0 ? 'blue' : 'neutral'} />
+            <WorkspaceHeroPill label={`${activeRuns} active`} tone={activeRuns > 0 ? 'green' : 'neutral'} />
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
+            <WorkspaceHeroAction
+              label="Launch Agent"
+              icon={<PlayCircle size={13} strokeWidth={2} />}
+              onClick={onLaunch}
+              primary
+            />
+            <WorkspaceHeroAction
+              label="Git Log"
+              icon={<GitCommit size={13} strokeWidth={2} />}
+              onClick={onOpenGitLog}
+            />
+            <WorkspaceHeroAction
+              label="CI"
+              icon={<CheckCircle2 size={13} strokeWidth={2} />}
+              onClick={onOpenCI}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ── Agent Card (expandable, workspace-grouped) ──
@@ -3363,7 +3822,6 @@ const FileTree = memo(function FileTree({ tree, changedFiles, onSelectFile }: {
 
 const tabs: { id: Tab; icon: typeof Zap; label: string }[] = [
   { id: 'files', icon: Folder, label: 'Files' },
-  { id: 'deploy', icon: Globe, label: 'Deploy' },
 ];
 
 // ── Memory Tab — auto-opens canvas on mount ──
@@ -3415,6 +3873,10 @@ function MemoryTabContent({ onOpenMemory }: { onOpenMemory?: () => void }) {
 
 export const AgentPanel = memo(function AgentPanel({
   selectedRepo,
+  selectedRepoName,
+  selectedRepoBranch,
+  selectedRepoLocalPath,
+  onLaunchWorkspaceTask,
   onSelectSession,
   onSelectIssue,
   onSelectCommit,
@@ -3431,6 +3893,10 @@ export const AgentPanel = memo(function AgentPanel({
   lifecycleEvents,
 }: {
   selectedRepo?: string | null;
+  selectedRepoName?: string | null;
+  selectedRepoBranch?: string | null;
+  selectedRepoLocalPath?: string | null;
+  onLaunchWorkspaceTask?: (request: RepoTaskLaunchRequest) => Promise<void>;
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
   onSelectCommit?: (hash: string) => void;
@@ -3458,22 +3924,26 @@ export const AgentPanel = memo(function AgentPanel({
   const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
   const [fileFilter, setFileFilter] = useState<'all' | 'changes' | 'env'>('changes');
-  const [fileDropdownOpen, setFileDropdownOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<Tab>('files');
-  const [tabsExpanded, setTabsExpanded] = useState(true);
   const [filesHeight, setFilesHeight] = useState(240);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const [changesOpen, setChangesOpen] = useState(true);
   const [activityOpen, setActivityOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(true);
+  const [reposOpen, setReposOpen] = useState(true);
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
-  const [globalRepoDiff, setGlobalRepoDiff] = useState<{ additions: number; deletions: number } | null>(null);
-  const scopedRepo = selectedRepo ?? activeRepo;
+  const [launchIntentNonce, setLaunchIntentNonce] = useState(0);
+  const hasSelectedRepo = Boolean(selectedRepoLocalPath);
+  const scopedRepo = hasSelectedRepo ? (selectedRepo ?? null) : activeRepo;
 
   const launchRepoTask = useCallback(async (request: RepoTaskLaunchRequest) => {
+    if (onLaunchWorkspaceTask) {
+      await onLaunchWorkspaceTask(request);
+      return;
+    }
     const response = await fetch('/api/panel/repos');
     const data = await response.json() as {
       repos?: Array<{
@@ -3535,10 +4005,17 @@ export const AgentPanel = memo(function AgentPanel({
 
     onSelectSession?.(launchData.surfaceId);
     setTimeout(() => fetchNowRef.current(), 800);
-  }, [onSelectSession]);
+  }, [onLaunchWorkspaceTask, onSelectSession]);
 
   // Build workspace groups from agents
   const workspaceGroups = buildWorkspaceGroups(agents);
+  const inferredRepo = useMemo(() => {
+    const preferredGroup = workspaceGroups.find((group) => group.hasRunning && group.repo !== 'openclaw')
+      ?? workspaceGroups.find((group) => group.repo !== 'openclaw')
+      ?? null;
+    return preferredGroup?.repo ?? null;
+  }, [workspaceGroups]);
+  const effectiveScopedRepo = scopedRepo ?? inferredRepo;
 
   // Resolve workspace → GitHub repo when expanded group changes
   useEffect(() => {
@@ -3696,13 +4173,13 @@ export const AgentPanel = memo(function AgentPanel({
 
   // Fetch GitHub issues + PRs in a single effect (same dep + same cadence)
   useEffect(() => {
-    if (!scopedRepo) {
+    if (!effectiveScopedRepo) {
       setIssues([]);
       setPrs([]);
       return;
     }
 
-    const repoParam = scopedRepo ? `?repo=${encodeURIComponent(scopedRepo)}` : '';
+    const repoParam = effectiveScopedRepo ? `?repo=${encodeURIComponent(effectiveScopedRepo)}` : '';
     async function fetchGitHub() {
       const [issuesRes, prsRes] = await Promise.all([
         fetch(`/api/panel/issues${repoParam}`).catch(() => null),
@@ -3722,30 +4199,34 @@ export const AgentPanel = memo(function AgentPanel({
     void fetchGitHub();
     const id = setInterval(fetchGitHub, 60_000);
     return () => clearInterval(id);
-  }, [scopedRepo]);
+  }, [effectiveScopedRepo]);
 
   // Resolve repo → local path for file tree
   const [repoLocalPath, setRepoLocalPath] = useState<string | null>(null);
   useEffect(() => {
-    if (!scopedRepo) { setRepoLocalPath(null); return; }
+    if (selectedRepoLocalPath) {
+      setRepoLocalPath(selectedRepoLocalPath);
+      return;
+    }
+    if (!effectiveScopedRepo) { setRepoLocalPath(null); return; }
     fetch('/api/panel/repos')
       .then(r => r.json())
       .then(data => {
         const match = (data.repos ?? []).find((r: { remoteUrl?: string }) => {
           const url = (r.remoteUrl ?? '').replace(/\.git$/, '');
-          return url.endsWith(scopedRepo);
+          return url.endsWith(effectiveScopedRepo);
         });
         setRepoLocalPath(match?.localPath ?? null);
       })
       .catch(() => setRepoLocalPath(null));
-  }, [scopedRepo]);
+  }, [effectiveScopedRepo, selectedRepoLocalPath]);
 
   // Fetch file tree (re-fetch when repo or workspace changes)
   useEffect(() => {
     async function fetchFiles() {
       try {
         // V1: top header repo is the left-panel source of truth when selected.
-        const wsPath = selectedRepo ? repoLocalPath : (activeWorkspace ?? repoLocalPath);
+        const wsPath = hasSelectedRepo ? (selectedRepoLocalPath ?? repoLocalPath) : (activeWorkspace ?? repoLocalPath);
         const wsParam = wsPath ? `?workspace=${encodeURIComponent(wsPath)}` : '';
         const res = await fetch(`/api/panel/files${wsParam}`);
         if (!res.ok) return;
@@ -3759,20 +4240,66 @@ export const AgentPanel = memo(function AgentPanel({
     void fetchFiles();
     const id = setInterval(fetchFiles, 60_000);
     return () => clearInterval(id);
-  }, [activeWorkspace, repoLocalPath, selectedRepo]);
+  }, [activeWorkspace, hasSelectedRepo, repoLocalPath, selectedRepoLocalPath]);
+
+  const activeWorkspaceGroup = useMemo(
+    () => (expandedGroup ? workspaceGroups.find((group) => group.workspace === expandedGroup) ?? null : null),
+    [expandedGroup, workspaceGroups],
+  );
+  const activeRunsCount = useMemo(
+    () => agents.filter((agent) => ['running', 'watching', 'healthy'].includes(agent.status)).length,
+    [agents],
+  );
+  const reviewRunsCount = useMemo(
+    () => agents.filter((agent) => agent.workspaceStatus === 'in_review' || agent.status === 'reviewing').length,
+    [agents],
+  );
+  const preferredWorkspaceGroup = useMemo(
+    () => activeWorkspaceGroup
+      ?? (effectiveScopedRepo ? workspaceGroups.find((group) => group.repo === effectiveScopedRepo) ?? null : null)
+      ?? workspaceGroups[0]
+      ?? null,
+    [activeWorkspaceGroup, effectiveScopedRepo, workspaceGroups],
+  );
+  const currentScopePath = hasSelectedRepo
+    ? (selectedRepoLocalPath ?? repoLocalPath)
+    : (activeWorkspace ?? repoLocalPath);
+  const currentLaunchRepoPath = hasSelectedRepo ? (selectedRepoLocalPath ?? repoLocalPath) : repoLocalPath;
+  const heroTitle = hasSelectedRepo
+    ? (selectedRepoName ?? selectedRepoLocalPath?.split('/').pop() ?? 'Selected Repository')
+    : (preferredWorkspaceGroup?.displayName ?? (effectiveScopedRepo?.split('/').pop() ?? 'Workspace'));
+  const heroSubtitle = hasSelectedRepo
+    ? 'Pinned repository for browsing changes, launching agents, and opening workflow tools.'
+    : preferredWorkspaceGroup
+      ? `${preferredWorkspaceGroup.agents.length} connected surface${preferredWorkspaceGroup.agents.length === 1 ? '' : 's'} in the live workspace focus.`
+      : 'Select a repository or expand a workspace to make launch, changes, and activity explicit.';
+  const heroBranch = hasSelectedRepo
+    ? (selectedRepoBranch ?? null)
+    : (preferredWorkspaceGroup?.agents.find((agent) => agent.branch && !agent.branch.startsWith('surface/'))?.branch ?? null);
+  const heroWorkspaceLabel = compactWorkspaceLabel(currentScopePath);
+  const changesSummary = hasSelectedRepo
+    ? `${changedFiles.size} changed file${changedFiles.size === 1 ? '' : 's'} in ${selectedRepoName ?? 'the selected repo'}`
+    : preferredWorkspaceGroup
+      ? `${changedFiles.size} changed file${changedFiles.size === 1 ? '' : 's'} in ${preferredWorkspaceGroup.displayName}`
+      : 'Repository files and environment entry points.';
+  const latestEventSummary = events[0]?.title ?? 'Commits, issues, pull requests, and CI surface here.';
+  const filteredTree = fileFilter === 'changes'
+    ? filterTreeToChanged(fileTree, changedFiles)
+    : fileFilter === 'env'
+      ? filterTreeToEnv(fileTree)
+      : fileTree;
+  const launchIntent = launchIntentNonce > 0 && currentLaunchRepoPath
+    ? { repoPath: currentLaunchRepoPath, nonce: launchIntentNonce }
+    : null;
 
   return (
     <div style={{
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      overflow: 'auto',
-      scrollbarWidth: 'none',
-      msOverflowStyle: 'none',
-      WebkitOverflowScrolling: 'touch',
+      overflow: 'hidden',
       background: 'var(--t-bg-subtle)',
     } as React.CSSProperties}
-    className="hide-scrollbar"
     >
       {/* ── Titlebar spacer ── */}
       <div style={{
@@ -3781,590 +4308,279 @@ export const AgentPanel = memo(function AgentPanel({
         WebkitAppRegion: 'drag' as unknown as string,
       } as React.CSSProperties} />
 
-      {/* ── Tab Bar ── */}
-      <div style={{
-        display: 'flex',
-        gap: 2,
-        paddingTop: 8,
-        paddingRight: 14,
-        paddingBottom: 0,
-        paddingLeft: 14,
-        flexShrink: 0,
-        alignItems: 'center',
-      }}>
-        {tabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          const isFiles = tab.id === 'files';
-          return (
-            <div key={tab.id} style={{ flex: 1, position: 'relative' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  if (isFiles && isActive) {
-                    // Already on Files — toggle dropdown
-                    setFileDropdownOpen(v => !v);
-                  } else {
-                    setActiveTab(tab.id);
-                    if (!isFiles) setFileDropdownOpen(false);
-                  }
-                }}
-                style={{
-                  width: '100%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: isFiles && isActive ? 'space-between' : 'center',
-                  gap: 5,
-                  paddingTop: 8,
-                  paddingRight: isFiles && isActive ? 8 : 0,
-                  paddingBottom: 8,
-                  paddingLeft: isFiles && isActive ? 8 : 0,
-                  border: 'none',
-                  borderBottom: isActive ? '2px solid #ef4444' : '2px solid transparent',
-                  background: 'transparent',
-                  color: isActive ? 'var(--t-text)' : 'var(--t-text-muted)',
-                  fontSize: 12,
-                  fontWeight: isActive ? 600 : 400,
-                  cursor: 'pointer',
-                  transition: 'all 150ms ease',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                }}
-              >
-                <span style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  minWidth: 0,
-                }}>
-                  <Icon size={14} strokeWidth={isActive ? 2 : 1.5} />
-                  <span>{isFiles ? (fileFilter === 'changes' ? 'Changes' : fileFilter === 'env' ? 'Env' : tab.label) : tab.label}</span>
-                </span>
-                {isFiles && isActive ? (
-                  <ChevronDown size={10} strokeWidth={2} style={{
-                    transition: 'transform 150ms ease',
-                    transform: fileDropdownOpen ? 'rotate(180deg)' : 'none',
-                    opacity: 0.5,
-                  }} />
-                ) : null}
-              </button>
-              {/* Files filter dropdown */}
-              {isFiles && fileDropdownOpen ? (
-                <>
-                  {/* Backdrop */}
-                  <div
-                    onClick={() => setFileDropdownOpen(false)}
-                    style={{ position: 'fixed', inset: 0, zIndex: 99 }}
-                  />
-                  {/* Glass popover */}
-                  <div style={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: 0,
-                    marginTop: 4,
-                    minWidth: 150,
-                    borderRadius: 10,
-                    border: '1px solid rgba(255,255,255,0.18)',
-                    background: 'rgba(255,255,255,0.78)',
-                    backdropFilter: 'blur(24px) saturate(1.8)',
-                    WebkitBackdropFilter: 'blur(24px) saturate(1.8)',
-                    boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 1px 3px rgba(0,0,0,0.06)',
-                    overflow: 'hidden',
-                    zIndex: 100,
-                  }}>
-                    {[
-                      { id: 'all' as const, label: 'All Files' },
-                      { id: 'changes' as const, label: `Changes${changedFiles.size > 0 ? ` (${changedFiles.size})` : ''}` },
-                      { id: 'env' as const, label: 'Environments' },
-                    ].map((opt) => (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => {
-                          setFileFilter(opt.id);
-                          setFileDropdownOpen(false);
-                        }}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8,
-                          width: '100%',
-                          padding: '8px 12px',
-                          border: 'none',
-                          background: fileFilter === opt.id ? 'rgba(239,68,68,0.06)' : 'transparent',
-                          color: fileFilter === opt.id ? '#dc2626' : 'var(--t-text)',
-                          fontSize: 12,
-                          fontWeight: fileFilter === opt.id ? 600 : 400,
-                          cursor: 'pointer',
-                          fontFamily: '-apple-system, system-ui, sans-serif',
-                          textAlign: 'left',
-                        }}
-                        onMouseEnter={(e) => {
-                          if (fileFilter !== opt.id) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(0,0,0,0.03)';
-                        }}
-                        onMouseLeave={(e) => {
-                          (e.currentTarget as HTMLButtonElement).style.background = fileFilter === opt.id ? 'rgba(239,68,68,0.06)' : 'transparent';
-                        }}
-                      >
-                        <span style={{
-                          width: 14,
-                          textAlign: 'center',
-                          fontSize: 12,
-                          color: fileFilter === opt.id ? '#dc2626' : 'transparent',
-                        }}>✓</span>
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : null}
-            </div>
-          );
-        })}
-        <button
-          type="button"
-          onClick={() => setTabsExpanded(v => !v)}
-          style={{
-            padding: '4px 2px',
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            color: 'var(--t-text-muted)',
-            flexShrink: 0,
-            marginLeft: 4,
-            transform: tabsExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
-            transition: 'transform 150ms ease',
-          }}
-          title={tabsExpanded ? 'Collapse' : 'Expand'}
-        >
-          <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
-      </div>
-
-      {/* ── Scoped Context Label ── */}
-      {(selectedRepo || expandedGroup) ? (
-        <div style={{
-          paddingTop: 6,
-          paddingRight: 14,
-          paddingBottom: 4,
-          paddingLeft: 14,
-          fontSize: 11,
-          color: 'var(--t-text-muted)',
+      <div
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          scrollbarWidth: 'none',
+          msOverflowStyle: 'none',
+          WebkitOverflowScrolling: 'touch',
+          paddingTop: 2,
+          paddingBottom: 18,
           display: 'flex',
-          alignItems: 'center',
-          gap: 4,
-          borderTop: '1px solid var(--t-divider-subtle)',
-          marginTop: 4,
-        }}>
-          <span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>
-            {selectedRepo ? (selectedRepo.split('/').pop() ?? selectedRepo) : (workspaceGroups.find(g => g.workspace === expandedGroup)?.displayName ?? 'All')}
-          </span>
-          {scopedRepo ? (
-            <>
-              <span>·</span>
-              <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{scopedRepo}</span>
-              <button
-                type="button"
-                onClick={() => onOpenGitLog?.((selectedRepo ? repoLocalPath : activeWorkspace) ?? undefined)}
-                title="View git history"
-                style={{
-                  marginLeft: 'auto',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 3,
-                  paddingTop: 2,
-                  paddingRight: 6,
-                  paddingBottom: 2,
-                  paddingLeft: 6,
-                  borderRadius: 4,
-                  border: '1px solid var(--t-btn-secondary-border)',
-                  background: 'var(--t-panel-hover)',
-                  fontSize: 10,
-                  color: 'var(--t-text-secondary)',
-                  cursor: 'pointer',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                  fontWeight: 500,
-                }}
-              >
-                <GitCommit size={11} strokeWidth={2} />
-                Log
-              </button>
-              <button
-                type="button"
-                onClick={() => onOpenCI?.(scopedRepo)}
-                title="View CI / GitHub Actions"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 3,
-                  paddingTop: 2,
-                  paddingRight: 6,
-                  paddingBottom: 2,
-                  paddingLeft: 6,
-                  borderRadius: 4,
-                  border: '1px solid var(--t-btn-secondary-border)',
-                  background: 'var(--t-panel-hover)',
-                  fontSize: 10,
-                  color: 'var(--t-text-secondary)',
-                  cursor: 'pointer',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                  fontWeight: 500,
-                }}
-              >
-                <PlayCircle size={11} strokeWidth={2} />
-                CI
-              </button>
-            </>
-          ) : null}
-        </div>
-      ) : null}
+          flexDirection: 'column',
+          gap: 14,
+        } as React.CSSProperties}
+        className="hide-scrollbar"
+      >
+        <WorkspaceHero
+          title={heroTitle}
+          subtitle={heroSubtitle}
+          repoSlug={effectiveScopedRepo}
+          branch={heroBranch}
+          workspaceLabel={heroWorkspaceLabel}
+          changedFiles={changedFiles.size}
+          activeRuns={activeRunsCount}
+          onLaunch={currentLaunchRepoPath ? () => setLaunchIntentNonce((current) => current + 1) : undefined}
+          onOpenGitLog={currentScopePath ? () => onOpenGitLog?.(currentScopePath) : undefined}
+          onOpenCI={effectiveScopedRepo ? () => onOpenCI?.(effectiveScopedRepo) : undefined}
+        />
 
-      {/* ── Content Area (collapsible + resizable) ── */}
-      {tabsExpanded && (
-        <>
-          <div style={{
-            height: filesHeight,
-            overflowY: 'auto',
-            borderTop: expandedGroup ? 'none' : '1px solid var(--t-divider-subtle)',
-            marginTop: expandedGroup ? 0 : 4,
-            flexShrink: 0,
-          }}>
-            {activeTab === 'files' ? (
-              <FileTree
-                tree={fileFilter === 'changes' ? filterTreeToChanged(fileTree, changedFiles) : fileFilter === 'env' ? filterTreeToEnv(fileTree) : fileTree}
-                changedFiles={changedFiles}
-                onSelectFile={(path) => onSelectFile?.(path, (selectedRepo ? repoLocalPath : activeWorkspace) ?? undefined)}
-              />
-            ) : null}
-            {activeTab === 'deploy' ? <DeployList onOpenDeploy={onOpenDeploy} /> : null}
-          </div>
-          {/* Drag handle */}
+        <SidebarSection
+          title="Agents"
+          icon={Cpu}
+          count={inventoryLoading ? '...' : agents.length}
+          summary={inventoryLoading ? 'Loading live sessions...' : `${activeRunsCount} active · ${reviewRunsCount} in review`}
+          accent="#2563eb"
+          open={agentsOpen}
+          onToggle={() => setAgentsOpen((current) => !current)}
+        >
           <div
-            onMouseDown={(e) => {
-              e.preventDefault();
-              dragRef.current = { startY: e.clientY, startH: filesHeight };
-              const onMove = (ev: MouseEvent) => {
-                if (!dragRef.current) return;
-                const delta = ev.clientY - dragRef.current.startY;
-                setFilesHeight(Math.max(80, Math.min(600, dragRef.current.startH + delta)));
-              };
-              const onUp = () => {
-                dragRef.current = null;
-                document.removeEventListener('mousemove', onMove);
-                document.removeEventListener('mouseup', onUp);
-              };
-              document.addEventListener('mousemove', onMove);
-              document.addEventListener('mouseup', onUp);
-            }}
             style={{
-              height: 6,
-              cursor: 'row-resize',
-              background: 'transparent',
-              flexShrink: 0,
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
+              flexDirection: 'column',
+              gap: 10,
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'rgba(0,0,0,0.1) transparent',
             }}
           >
-            <div style={{
-              width: 32,
-              height: 3,
-              borderRadius: 2,
-              background: 'var(--t-divider)',
-              opacity: 0.5,
-            }} />
-          </div>
-        </>
-      )}
-
-      {/* ── Activity Dropdown (above agents, collapsed by default) ── */}
-      <div style={{ flexShrink: 0, paddingLeft: 14, paddingRight: 14, paddingTop: 4, paddingBottom: 0 }}>
-        <button
-          type="button"
-          onClick={() => setActivityOpen(!activityOpen)}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '8px 2px',
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            fontFamily: '-apple-system, system-ui, sans-serif',
-          }}
-        >
-          <Zap size={12} strokeWidth={2} color={activityOpen ? '#ef4444' : 'var(--t-text-muted)'} />
-          <span style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: activityOpen ? 'var(--t-text)' : 'var(--t-text-muted)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-          }}>
-            Activity
-          </span>
-          <span style={{
-            marginLeft: 'auto',
-            fontSize: 10,
-            color: 'var(--t-text-faint)',
-            display: 'flex', alignItems: 'center',
-          }}>
-            {activityOpen
-              ? <ChevronDown size={12} strokeWidth={2} />
-              : <ChevronRight size={12} strokeWidth={2} />
-            }
-          </span>
-        </button>
-        {activityOpen && (
-          <div style={{
-            maxHeight: 480,
-            overflowY: 'auto',
-            borderRadius: 10,
-            border: '1px solid var(--t-divider-subtle)',
-            background: 'var(--t-panel)',
-            marginBottom: 8,
-            scrollbarWidth: 'none',
-          } as React.CSSProperties}
-          className="hide-scrollbar"
-          >
-            <ActivityFeed
-              events={events}
-              commits={commits}
-              agents={agents}
-              onSelectSession={onSelectSession}
-              onSelectIssue={onSelectIssue}
-              onSelectCommit={onSelectCommit}
-              onSelectPR={onSelectPR}
-              onLaunchTask={(request) => {
-                void launchRepoTask(request).catch((error) => {
-                  window.alert(error instanceof Error ? error.message : 'Unable to launch repo task.');
-                });
-              }}
-              activeRepo={scopedRepo}
-              activeAgentKey={selectedRepo ? null : (expandedGroup ? agents.find(a => a.workspace === expandedGroup)?.sessionKey ?? null : null)}
-              refreshKey={activityRefreshKey}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* ── Agent Cards ── */}
-      <div style={{ flexShrink: 0, paddingLeft: 14, paddingRight: 14, paddingTop: 0, paddingBottom: 0 }}>
-        <button
-          type="button"
-          onClick={() => setAgentsOpen(!agentsOpen)}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '8px 2px',
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            fontFamily: '-apple-system, system-ui, sans-serif',
-          }}
-        >
-          <Cpu size={12} strokeWidth={2} color={agentsOpen ? '#ef4444' : 'var(--t-text-muted)'} />
-          <span style={{
-            fontSize: 11,
-            fontWeight: 700,
-            color: agentsOpen ? 'var(--t-text)' : 'var(--t-text-muted)',
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
-          }}>
-            Agents
-          </span>
-          <span style={{
-            fontSize: 10,
-            color: 'var(--t-text-faint)',
-            fontFamily: '"SF Mono", ui-monospace, monospace',
-          }}>
-            {inventoryLoading ? (
-              <span style={{
-                display: 'inline-flex',
-                width: 16,
-                height: 10,
-                borderRadius: 999,
-                background: 'linear-gradient(90deg, rgba(148,163,184,0.14), rgba(148,163,184,0.28), rgba(148,163,184,0.14))',
-              }} />
-            ) : agents.length}
-          </span>
-          <span style={{
-            marginLeft: 'auto',
-            fontSize: 10,
-            color: 'var(--t-text-faint)',
-            display: 'flex', alignItems: 'center',
-          }}>
-            {agentsOpen
-              ? <ChevronDown size={12} strokeWidth={2} />
-              : <ChevronRight size={12} strokeWidth={2} />
-            }
-          </span>
-        </button>
-      </div>
-      {/* Running agents ALWAYS visible — even when collapsed */}
-      {!agentsOpen && (() => {
-        const runningAgents = agents.filter(a =>
-          a.status === 'running' || a.status === 'watching' || a.status === 'healthy'
-        );
-        if (runningAgents.length === 0) return null;
-        return (
-          <div style={{
-            paddingLeft: 14, paddingRight: 14, paddingBottom: 8,
-            display: 'flex', flexDirection: 'column', gap: 2,
-          }}>
-            {runningAgents.map(agent => {
-              const nameLower = (agent.name || '').toLowerCase();
-              const modelLower = (agent.model || '').toLowerCase();
-              const isCodex = nameLower.includes('codex') || modelLower.includes('codex');
-              const isClaudeCode = nameLower.includes('claude code') || nameLower.includes('claude-code');
-              const displayName = isCodex ? 'Codex' : isClaudeCode ? 'Claude Code' : (agent.surfaceLabel || agent.name).replace(/\s*\(.*\)/, '').split(' ')[0];
-              const taskDesc = agent.currentTask || null;
-              const pr = agent.pr;
-              const diff = pr ? { add: pr.additions, del: pr.deletions } : agent.localDiff ? { add: agent.localDiff.additions, del: agent.localDiff.deletions } : null;
-              return (
-                <div
-                  key={agent.id}
-                  onClick={() => { if (agent.sessionKey && onSelectSession) onSelectSession(agent.sessionKey); }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    padding: '6px 8px', borderRadius: 6,
-                    background: 'rgba(34,197,94,0.04)',
-                    border: '1px solid rgba(34,197,94,0.1)',
-                    cursor: agent.sessionKey ? 'pointer' : 'default',
-                  }}
-                >
-                  <span style={{
-                    width: 6, height: 6, borderRadius: '50%',
-                    background: '#22c55e',
-                    boxShadow: '0 0 8px #22c55e',
-                    flexShrink: 0,
-                  }} />
-                  <span style={{
-                    fontSize: 11, fontWeight: 700, color: 'var(--t-text)',
-                    flexShrink: 0,
-                  }}>
-                    {displayName}
-                  </span>
-                  {agent.branch && !agent.branch.startsWith('surface/') && (
-                    <span style={{
-                      fontSize: 10, color: 'var(--t-text-muted)',
-                      fontFamily: '"SF Mono", ui-monospace, monospace',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      flex: 1,
-                    }}>
-                      {agent.branch}
-                    </span>
-                  )}
-                  {!agent.branch && <span style={{ flex: 1 }} />}
-                  <span style={{ fontSize: 10, fontWeight: 600, color: '#22c55e', flexShrink: 0 }}>
-                    Working…
-                  </span>
-                  {diff && (diff.add > 0 || diff.del > 0) ? (
-                    <span style={{
-                      fontSize: 9, fontWeight: 700,
-                      fontFamily: '"SF Mono", ui-monospace, monospace',
-                      display: 'flex', gap: 3, flexShrink: 0,
-                    }}>
-                      <span style={{ color: '#22c55e' }}>+{diff.add.toLocaleString()}</span>
-                      <span style={{ color: '#ef4444' }}>-{diff.del.toLocaleString()}</span>
-                    </span>
-                  ) : null}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })()}
-
-      {agentsOpen && (
-      <div style={{
-        flexShrink: 0,
-        paddingTop: 0,
-        paddingRight: 14,
-        paddingBottom: 8,
-        paddingLeft: 14,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 6,
-        scrollbarWidth: 'thin',
-        scrollbarColor: 'rgba(0,0,0,0.1) transparent',
-      } as React.CSSProperties}>
-        {fleetMeta?.mode === 'stale' && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 8,
-            padding: '8px 14px', margin: '0 0 8px',
-            borderRadius: 8,
-            background: 'rgba(245, 158, 11, 0.08)',
-            border: '1px solid rgba(245, 158, 11, 0.15)',
-            fontSize: 11, color: '#d97706', fontWeight: 500,
-          }}>
-            <span style={{ fontSize: 14 }}>⏳</span>
-            Showing cached data — gateway reconnecting…
-          </div>
-        )}
-        {inventoryLoading ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4 }}>
-            {[0, 1, 2].map((index) => (
-              <div
-                key={index}
-                style={{
-                  borderRadius: 18,
-                  border: '1px solid var(--t-panel-border)',
-                  background: 'rgba(255,255,255,0.76)',
-                  backdropFilter: 'blur(20px)',
-                  WebkitBackdropFilter: 'blur(20px)',
-                  boxShadow: 'var(--t-panel-shadow)',
-                  padding: '12px 12px 11px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 8,
-                }}
-              >
-                <div style={{ width: `${52 + index * 10}%`, height: 12, borderRadius: 999, background: 'rgba(148,163,184,0.18)' }} />
-                <div style={{ width: `${38 + index * 8}%`, height: 10, borderRadius: 999, background: 'rgba(148,163,184,0.12)' }} />
-                <div style={{ width: '100%', height: 6, borderRadius: 999, background: 'rgba(59,130,246,0.10)' }} />
+            {fleetMeta?.mode === 'stale' ? (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '10px 12px',
+                borderRadius: 16,
+                background: 'rgba(245, 158, 11, 0.08)',
+                border: '1px solid rgba(245, 158, 11, 0.15)',
+                fontSize: 11,
+                color: '#d97706',
+                fontWeight: 600,
+              }}>
+                <span style={{ fontSize: 13 }}>⏳</span>
+                Showing cached data while the gateway reconnects.
               </div>
-            ))}
+            ) : null}
+            {inventoryLoading ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {[0, 1, 2].map((index) => (
+                  <div
+                    key={index}
+                    style={{
+                      borderRadius: 18,
+                      border: '1px solid var(--t-panel-border)',
+                      background: 'rgba(255,255,255,0.8)',
+                      backdropFilter: 'blur(20px)',
+                      WebkitBackdropFilter: 'blur(20px)',
+                      boxShadow: 'var(--t-panel-shadow)',
+                      padding: '12px 12px 11px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                    }}
+                  >
+                    <div style={{ width: `${52 + index * 10}%`, height: 12, borderRadius: 999, background: 'rgba(148,163,184,0.18)' }} />
+                    <div style={{ width: `${38 + index * 8}%`, height: 10, borderRadius: 999, background: 'rgba(148,163,184,0.12)' }} />
+                    <div style={{ width: '100%', height: 6, borderRadius: 999, background: 'rgba(59,130,246,0.10)' }} />
+                  </div>
+                ))}
+              </div>
+            ) : workspaceGroups.length === 0 ? (
+              <div style={{
+                borderRadius: 18,
+                border: '1px solid rgba(148, 163, 184, 0.12)',
+                background: 'rgba(255,255,255,0.72)',
+                padding: '14px 16px',
+                fontSize: 13,
+                color: gatewayReachable && gatewayWarming ? '#2563eb' : 'var(--t-text-muted)',
+              }}>
+                {gatewayReachable && gatewayWarming ? 'OpenClaw connected, loading agents...' : 'No agents found.'}
+              </div>
+            ) : (
+              workspaceGroups.map((group) => (
+                <AgentCard
+                  key={group.workspace}
+                  group={group}
+                  expanded={expandedGroup === group.workspace}
+                  onToggle={() => setExpandedGroup(expandedGroup === group.workspace ? null : group.workspace)}
+                  onSelectSession={onSelectSession}
+                  onSelectPR={onSelectPR}
+                  onAgentKill={onAgentKill}
+                  onRetry={(agent) => {
+                    fetch('/api/runtime/launch', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        runtime: agent.model?.toLowerCase().includes('codex') ? 'codex' : 'claude-code',
+                        prompt: agent.currentTask || 'Resume previous work',
+                        cwd: agent.workspace,
+                      }),
+                    }).then(() => { setTimeout(() => fetchNowRef.current(), 2000); }).catch(() => {});
+                  }}
+                  lifecycleEvents={lifecycleEvents}
+                />
+              ))
+            )}
           </div>
-        ) : workspaceGroups.length === 0 ? (
-          <div style={{ fontSize: 13, color: gatewayReachable && gatewayWarming ? '#2563eb' : 'var(--t-text-muted)', padding: '8px 2px' }}>
-            {gatewayReachable && gatewayWarming ? 'OpenClaw connected, loading agents\u2026' : 'No agents found.'}
-          </div>
-        ) : (
-          workspaceGroups.map((group) => (
-            <AgentCard
-              key={group.workspace}
-              group={group}
-              expanded={expandedGroup === group.workspace}
-              onToggle={() => setExpandedGroup(expandedGroup === group.workspace ? null : group.workspace)}
-              onSelectSession={onSelectSession}
-              onSelectPR={onSelectPR}
-              onAgentKill={onAgentKill}
-              onRetry={(agent) => {
-                fetch('/api/runtime/launch', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    runtime: agent.model?.toLowerCase().includes('codex') ? 'codex' : 'claude-code',
-                    prompt: agent.currentTask || 'Resume previous work',
-                    cwd: agent.workspace,
-                  }),
-                }).then(() => { setTimeout(() => fetchNowRef.current(), 2000); }).catch(() => {});
-              }}
-              lifecycleEvents={lifecycleEvents}
-            />
-          ))
-        )}
-      </div>
-      )}
+        </SidebarSection>
 
-      <RepoRegistrySection
-        onLaunchComplete={() => { fetchNowRef.current(); }}
-        onSelectSession={onSelectSession}
-        onSelectPR={onSelectPR}
-      />
+        <SidebarSection
+          title="Changes"
+          icon={FolderOpen}
+          count={changedFiles.size}
+          summary={changesSummary}
+          accent="#1d4ed8"
+          open={changesOpen}
+          onToggle={() => setChangesOpen((current) => !current)}
+        >
+          <div
+            style={{
+              borderRadius: 18,
+              border: '1px solid rgba(148, 163, 184, 0.14)',
+              background: 'rgba(255,255,255,0.76)',
+              boxShadow: '0 12px 28px rgba(15, 23, 42, 0.045)',
+              backdropFilter: 'blur(20px)',
+              WebkitBackdropFilter: 'blur(20px)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                padding: '12px 12px 0',
+                flexWrap: 'wrap',
+              }}
+            >
+              {[
+                { id: 'changes' as const, label: `Changed${changedFiles.size > 0 ? ` (${changedFiles.size})` : ''}` },
+                { id: 'all' as const, label: 'All files' },
+                { id: 'env' as const, label: 'Env' },
+              ].map((option) => {
+                const active = fileFilter === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => setFileFilter(option.id)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      minHeight: 30,
+                      padding: '6px 10px',
+                      borderRadius: 999,
+                      border: active ? '1px solid rgba(37, 99, 235, 0.18)' : '1px solid rgba(148, 163, 184, 0.14)',
+                      background: active ? 'rgba(37, 99, 235, 0.08)' : 'rgba(255,255,255,0.58)',
+                      color: active ? '#2563eb' : 'var(--t-text-secondary)',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ height: filesHeight, overflowY: 'auto', marginTop: 10 }}>
+              <FileTree
+                tree={filteredTree}
+                changedFiles={changedFiles}
+                onSelectFile={(path) => onSelectFile?.(path, currentScopePath ?? undefined)}
+              />
+            </div>
+            <div
+              onMouseDown={(e) => {
+                e.preventDefault();
+                dragRef.current = { startY: e.clientY, startH: filesHeight };
+                const onMove = (ev: MouseEvent) => {
+                  if (!dragRef.current) return;
+                  const delta = ev.clientY - dragRef.current.startY;
+                  setFilesHeight(Math.max(140, Math.min(620, dragRef.current.startH + delta)));
+                };
+                const onUp = () => {
+                  dragRef.current = null;
+                  document.removeEventListener('mousemove', onMove);
+                  document.removeEventListener('mouseup', onUp);
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+              }}
+              style={{
+                height: 18,
+                cursor: 'row-resize',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <div style={{
+                width: 34,
+                height: 4,
+                borderRadius: 999,
+                background: 'rgba(148, 163, 184, 0.36)',
+              }} />
+            </div>
+          </div>
+        </SidebarSection>
+
+        <SidebarSection
+          title="Repositories"
+          icon={FolderOpen}
+          summary={currentLaunchRepoPath ? 'Current repository is pinned at the top of the list.' : 'Bring local repositories into Cortex and launch isolated work.'}
+          accent="#2563eb"
+          open={reposOpen}
+          onToggle={() => setReposOpen((current) => !current)}
+        >
+          <RepoRegistrySection
+            onLaunchComplete={() => { fetchNowRef.current(); }}
+            onSelectSession={onSelectSession}
+            onSelectPR={onSelectPR}
+            activeRepoLocalPath={currentLaunchRepoPath}
+            sectionOpen={reposOpen}
+            onSectionOpenChange={setReposOpen}
+            launchIntent={launchIntent}
+            hideHeader
+          />
+        </SidebarSection>
+      </div>
+
+      <ActivityDock
+        count={events.length}
+        summary={latestEventSummary}
+        open={activityOpen}
+        onToggle={() => setActivityOpen((current) => !current)}
+      >
+        <ActivityFeed
+          events={events}
+          commits={commits}
+          agents={agents}
+          onSelectSession={onSelectSession}
+          onSelectIssue={onSelectIssue}
+          onSelectCommit={onSelectCommit}
+          onSelectPR={onSelectPR}
+          onLaunchTask={(request) => {
+            void launchRepoTask(request).catch((error) => {
+              window.alert(error instanceof Error ? error.message : 'Unable to launch repo task.');
+            });
+          }}
+          activeRepo={effectiveScopedRepo}
+          activeAgentKey={hasSelectedRepo ? null : (expandedGroup ? agents.find(a => a.workspace === expandedGroup)?.sessionKey ?? null : null)}
+          refreshKey={activityRefreshKey}
+        />
+      </ActivityDock>
 
       {/* ── Issue Detail Modal ── */}
       {selectedIssue !== null ? (

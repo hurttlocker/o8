@@ -1,11 +1,14 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
 import {
   DEFAULT_GITHUB_REPO,
+  closeGitHubPullRequest,
+  commentOnGitHubPullRequest,
   fetchGitHubPullRequestComments,
   fetchGitHubPullRequestDetail,
+  mergeGitHubPullRequest,
+  reviewGitHubPullRequest,
   resolveRepoSlug,
 } from '@/lib/github-broker';
 
@@ -69,7 +72,7 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const repo = body.repo || DEFAULT_GITHUB_REPO;
+  const repo = await resolveRepoSlug(body.repo ?? null, DEFAULT_GITHUB_REPO);
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
     return NextResponse.json({ error: 'Invalid repo format' }, { status: 400 });
   }
@@ -78,10 +81,7 @@ export async function POST(
 
   try {
     if (action === 'approve') {
-      const cmd = comment
-        ? `gh pr review ${prNum} --repo ${repo} --approve --body ${JSON.stringify(comment)}`
-        : `gh pr review ${prNum} --repo ${repo} --approve`;
-      execSync(cmd, { encoding: 'utf-8', timeout: 15000 });
+      await reviewGitHubPullRequest(repo, prNum, { event: 'APPROVE', body: comment });
       return NextResponse.json({ ok: true, action: 'approved' });
     }
 
@@ -89,10 +89,7 @@ export async function POST(
       if (!comment) {
         return NextResponse.json({ error: 'Comment required for requesting changes' }, { status: 400 });
       }
-      execSync(
-        `gh pr review ${prNum} --repo ${repo} --request-changes --body ${JSON.stringify(comment)}`,
-        { encoding: 'utf-8', timeout: 15000 },
-      );
+      await reviewGitHubPullRequest(repo, prNum, { event: 'REQUEST_CHANGES', body: comment });
       return NextResponse.json({ ok: true, action: 'changes_requested' });
     }
 
@@ -100,26 +97,17 @@ export async function POST(
       if (!comment) {
         return NextResponse.json({ error: 'Comment body required' }, { status: 400 });
       }
-      execSync(
-        `gh pr comment ${prNum} --repo ${repo} --body ${JSON.stringify(comment)}`,
-        { encoding: 'utf-8', timeout: 15000 },
-      );
+      await commentOnGitHubPullRequest(repo, prNum, comment);
       return NextResponse.json({ ok: true, action: 'commented' });
     }
 
     if (action === 'merge') {
-      execSync(
-        `gh pr merge ${prNum} --repo ${repo} --squash --delete-branch`,
-        { encoding: 'utf-8', timeout: 30000 },
-      );
+      await mergeGitHubPullRequest(repo, prNum, { deleteBranch: true });
       return NextResponse.json({ ok: true, action: 'merged' });
     }
 
     if (action === 'close') {
-      execSync(
-        `gh pr close ${prNum} --repo ${repo}`,
-        { encoding: 'utf-8', timeout: 15000 },
-      );
+      await closeGitHubPullRequest(repo, prNum);
       return NextResponse.json({ ok: true, action: 'closed' });
     }
 
