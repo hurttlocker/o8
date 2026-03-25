@@ -3668,6 +3668,16 @@ export function AgentPanelChat({
     () => ((loading || connectionState !== 'connected' || stablePickerSessions.length > 0) ? 'Refreshing sessions…' : 'No IDE sessions yet'),
     [connectionState, loading, stablePickerSessions.length],
   );
+  const fallbackLiveSession = useMemo(
+    () => stablePickerSessions.find((session) => session.isCurrentSession) ?? stablePickerSessions[0] ?? null,
+    [stablePickerSessions],
+  );
+  const missingSelectedSession = Boolean(
+    selectedKey
+    && !selectedSession
+    && !loading
+    && stablePickerSessions.length > 0,
+  );
 
   // ── Derived header values ──
   const activeTitle = useMemo(() => {
@@ -4570,6 +4580,68 @@ export function AgentPanelChat({
           Reconnecting to gateway…
         </div>
       )}
+
+      {missingSelectedSession && fallbackLiveSession ? (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          justifyContent: 'space-between',
+          padding: '8px 12px',
+          background: 'rgba(239, 68, 68, 0.06)',
+          borderBottom: '1px solid rgba(239, 68, 68, 0.12)',
+          fontSize: 11,
+          color: '#b91c1c',
+          fontWeight: 600,
+          marginTop: !wsConnected ? 0 : headerOverlayHeight,
+        }}>
+          <span style={{ flex: 1, minWidth: 0, lineHeight: 1.45 }}>
+            The selected session is no longer live. Jump to {fallbackLiveSession.name} or refresh the workspace snapshot.
+          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <button
+              type="button"
+              onClick={() => handleSessionFocus(fallbackLiveSession.sessionKey)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                border: 'none',
+                borderRadius: 999,
+                background: 'rgba(185, 28, 28, 0.1)',
+                color: '#b91c1c',
+                padding: '4px 8px',
+                cursor: 'pointer',
+                fontSize: 10,
+                fontWeight: 700,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              Open live session
+            </button>
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                border: 'none',
+                borderRadius: 999,
+                background: 'rgba(185, 28, 28, 0.1)',
+                color: '#b91c1c',
+                padding: '4px 8px',
+                cursor: 'pointer',
+                fontSize: 10,
+                fontWeight: 700,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              Reload
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <DesktopTranscriptPane
         loading={loading}

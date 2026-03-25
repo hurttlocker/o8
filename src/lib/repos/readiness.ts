@@ -1,0 +1,166 @@
+import { execFile } from 'node:child_process';
+import { access } from 'node:fs/promises';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import type { RepoReadiness, RepoSetupConfig } from './types';
+
+interface RepoReadinessInput {
+  localPath: string;
+  defaultBranch: string;
+  setup: RepoSetupConfig;
+}
+
+const execFileAsync = promisify(execFile);
+const READINESS_CACHE_TTL_MS = 10_000;
+const readinessCache = new Map<string, { value: RepoReadiness; ts: number }>();
+
+async function pathExists(target: string) {
+  try {
+    await access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getCurrentBranch(repoPath: string, fallbackBranch: string) {
+  try {
+    const { stdout } = await execFileAsync('git', ['branch', '--show-current'], {
+      cwd: repoPath,
+      timeout: 5_000,
+    });
+    return stdout.trim() || fallbackBranch;
+  } catch {
+    return fallbackBranch;
+  }
+}
+
+async function hasDirtyWorktree(repoPath: string) {
+  try {
+    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+      cwd: repoPath,
+      timeout: 5_000,
+    });
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function findEnvFallback(repoPath: string, envFile: string) {
+  if (envFile === '.env') {
+    const localFallback = path.join(repoPath, '.env.local');
+    if (await pathExists(localFallback)) return '.env.local';
+  }
+  return null;
+}
+
+function readinessLabel(state: RepoReadiness['state']) {
+  switch (state) {
+    case 'ready':
+      return 'Ready';
+    case 'needs_setup':
+      return 'Needs setup';
+    case 'blocked':
+      return 'Blocked';
+    default:
+      return 'Unknown';
+  }
+}
+
+export async function getRepoReadiness(repo: RepoReadinessInput): Promise<RepoReadiness> {
+  const cacheKey = repo.localPath;
+  const cached = readinessCache.get(cacheKey);
+  if (cached && Date.now() - cached.ts < READINESS_CACHE_TTL_MS) {
+    return cached.value;
+  }
+
+  const currentBranch = await getCurrentBranch(repo.localPath, repo.defaultBranch || 'main');
+  const [dirty, packageJsonExists, nodeModulesExists, missingEnvFiles] = await Promise.all([
+    hasDirtyWorktree(repo.localPath),
+    pathExists(path.join(repo.localPath, 'package.json')),
+    pathExists(path.join(repo.localPath, 'node_modules')),
+    Promise.all(
+      (repo.setup.envMode === 'skip' ? [] : repo.setup.envFiles).map(async (file) => {
+        const exists = await pathExists(path.join(repo.localPath, file));
+        return exists ? null : file;
+      }),
+    ).then((files) => files.filter((file): file is string => Boolean(file))),
+  ]);
+
+  const onDefaultBranch = currentBranch ? currentBranch === repo.defaultBranch : null;
+  const hasRunnableContract = Boolean(repo.setup.devCommand || repo.setup.buildCommand);
+  const hasInstallContract = Boolean(repo.setup.installCommand);
+  const installLooksNeeded = Boolean(
+    packageJsonExists
+    && repo.setup.installOnCreateWorkspace
+    && repo.setup.installCommand
+    && !nodeModulesExists,
+  );
+
+  let state: RepoReadiness['state'] = 'unknown';
+  let summary = 'No saved repo setup contract yet.';
+  let nextAction: string | undefined;
+
+  const envFallbacks = new Map<string, string>();
+  await Promise.all(
+    missingEnvFiles.map(async (file) => {
+      const fallback = await findEnvFallback(repo.localPath, file);
+      if (fallback) envFallbacks.set(file, fallback);
+    }),
+  );
+
+  if (missingEnvFiles.length > 0) {
+    state = 'blocked';
+    const missingWithFallback = missingEnvFiles.filter((file) => envFallbacks.has(file));
+    if (missingWithFallback.length > 0) {
+      const file = missingWithFallback[0];
+      const fallback = envFallbacks.get(file);
+      summary = `Missing env file ${file}, but ${fallback} is present locally.`;
+      nextAction = `Copy ${fallback} to ${file}, or change the repo env mode before trusting runtime validation.`;
+    } else {
+      summary = `Missing env files: ${missingEnvFiles.join(', ')}.`;
+      nextAction = 'Restore the missing env files or change the repo env mode before trusting runtime validation.';
+    }
+  } else if (installLooksNeeded) {
+    state = 'needs_setup';
+    summary = `Dependencies still need setup with ${repo.setup.installCommand}.`;
+    nextAction = `Run ${repo.setup.installCommand} before treating this checkout as runnable.`;
+  } else if (hasRunnableContract) {
+    state = 'ready';
+    summary = `Runnable contract is saved on ${currentBranch}.${dirty ? ' Working tree has local changes.' : ''}`;
+    if (onDefaultBranch && dirty) {
+      nextAction = 'Prefer a worktree or branch before steering a larger change from the default branch.';
+    }
+  } else if (hasInstallContract) {
+    state = 'needs_setup';
+    summary = 'Install metadata is saved, but no dev/build command is configured yet.';
+    nextAction = 'Save a dev or build command so the IDE can verify this repo end to end.';
+  }
+
+  const value: RepoReadiness = {
+    state,
+    label: readinessLabel(state),
+    summary,
+    nextAction,
+    currentBranch,
+    onDefaultBranch,
+    dirty,
+    missingEnvFiles,
+  };
+
+  readinessCache.set(cacheKey, { value, ts: Date.now() });
+  return value;
+}
+
+export async function enrichRepoReadiness<T extends RepoReadinessInput>(repo: T): Promise<T & { readiness: RepoReadiness }> {
+  const readiness = await getRepoReadiness(repo);
+  return {
+    ...repo,
+    readiness,
+  };
+}
+
+export async function enrichRepoReadinessList<T extends RepoReadinessInput>(repos: T[]): Promise<Array<T & { readiness: RepoReadiness }>> {
+  return Promise.all(repos.map((repo) => enrichRepoReadiness(repo)));
+}

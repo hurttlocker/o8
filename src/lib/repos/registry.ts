@@ -289,6 +289,12 @@ export async function listRepos() {
   return store.repos;
 }
 
+export async function findRepoByLocalPath(localPath: string) {
+  const target = path.resolve(localPath);
+  const repos = await listRepos();
+  return repos.find((repo) => path.resolve(repo.localPath) === target) ?? null;
+}
+
 export async function validateRepo(localPath: string) {
   return inspectLocalRepo(localPath);
 }

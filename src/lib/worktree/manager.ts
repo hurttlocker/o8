@@ -14,7 +14,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
@@ -145,6 +145,8 @@ export class WorktreeManager {
       dirtyFiles: [],
       claudeManaged: false,
     };
+
+    await this.bootstrapEnvFiles(worktreePath, opts);
 
 
     // Run project setup unless skipped
@@ -281,6 +283,42 @@ export class WorktreeManager {
         timeout: 120_000,
       }).catch(() => { /* cargo may not be available */ });
     }
+  }
+
+  private async bootstrapEnvFiles(worktreePath: string, opts: CreateWorktreeOptions): Promise<void> {
+    const envMode = opts.envMode ?? 'copy';
+    if (envMode === 'skip') return;
+
+    const envFiles = opts.envFiles?.filter(Boolean) ?? ['.env', '.env.local'];
+    for (const envFile of envFiles) {
+      const targetPath = path.join(worktreePath, envFile);
+      if (await this.pathExists(targetPath)) continue;
+
+      const sourcePath = await this.resolveEnvBootstrapSource(envFile);
+      if (!sourcePath) continue;
+
+      try {
+        if (envMode === 'symlink') {
+          await symlink(sourcePath, targetPath);
+        } else {
+          await copyFile(sourcePath, targetPath);
+        }
+      } catch {
+        // Keep env bootstrap best-effort; missing env should show in readiness instead of killing creation.
+      }
+    }
+  }
+
+  private async resolveEnvBootstrapSource(envFile: string): Promise<string | null> {
+    const directSource = path.join(this.repoRoot, envFile);
+    if (await this.pathExists(directSource)) return directSource;
+
+    if (envFile === '.env') {
+      const localFallback = path.join(this.repoRoot, '.env.local');
+      if (await this.pathExists(localFallback)) return localFallback;
+    }
+
+    return null;
   }
 
   // ── Conflict Detection ──

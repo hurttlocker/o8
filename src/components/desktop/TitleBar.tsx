@@ -300,10 +300,13 @@ export function TitleBar({
     }
   }, []);
 
-  // ⌘K keyboard shortcut
+  // ⌘K / ⇧⌘P keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      const isCommandPaletteShortcut = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k';
+      const isShiftPaletteShortcut = (e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'p';
+
+      if (isCommandPaletteShortcut || isShiftPaletteShortcut) {
         e.preventDefault();
         setSearchExpanded(true);
       }
@@ -555,7 +558,7 @@ export function TitleBar({
         )}
         <div style={{
           width: '100%',
-          maxWidth: searchExpanded ? 640 : 280,
+          maxWidth: searchExpanded ? 640 : 320,
           transition: 'max-width 250ms cubic-bezier(0.32, 0.72, 0, 1)',
           position: 'relative',
         }}>
@@ -592,7 +595,7 @@ export function TitleBar({
               }}
             >
               <IconSearch />
-              <span>Search</span>
+              <span>Command Palette</span>
               <kbd style={{
                 fontSize: 10,
                 fontWeight: 500,

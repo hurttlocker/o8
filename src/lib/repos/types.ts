@@ -1,5 +1,18 @@
 export type RepoSetupEnvMode = 'copy' | 'symlink' | 'skip';
 
+export type RepoReadinessState = 'ready' | 'needs_setup' | 'blocked' | 'unknown';
+
+export interface RepoReadiness {
+  state: RepoReadinessState;
+  label: string;
+  summary: string;
+  nextAction?: string;
+  currentBranch: string | null;
+  onDefaultBranch: boolean | null;
+  dirty: boolean;
+  missingEnvFiles: string[];
+}
+
 export interface RepoSetupConfig {
   envMode: RepoSetupEnvMode;
   envFiles: string[];
@@ -20,6 +33,7 @@ export interface RepoRegistryEntry {
   addedAt: string;
   lastOpenedAt: string | null;
   setup: RepoSetupConfig;
+  readiness?: RepoReadiness;
 }
 
 export interface RepoRegistryStore {

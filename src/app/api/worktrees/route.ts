@@ -12,6 +12,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse, type NextRequest } from 'next/server';
 import { getWorktreeManager, getActiveWorktreeSummary } from '@/lib/worktree/launch';
+import type { RepoSetupEnvMode } from '@/lib/repos/types';
 
 const API_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
 
@@ -78,6 +79,8 @@ interface CreateBody {
   taskName: string;
   baseBranch?: string;
   skipSetup?: boolean;
+  envMode?: RepoSetupEnvMode;
+  envFiles?: string[];
 }
 
 export async function POST(req: NextRequest) {
@@ -105,6 +108,8 @@ export async function POST(req: NextRequest) {
       taskName: body.taskName,
       baseBranch: body.baseBranch,
       skipSetup: body.skipSetup,
+      envMode: body.envMode,
+      envFiles: body.envFiles,
     });
 
     return NextResponse.json({ worktree }, { status: 201 });

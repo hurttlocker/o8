@@ -10,7 +10,7 @@ import { AgentPanel } from '@/components/desktop/AgentPanel';
 // WorkspacesPanel merged into AgentPanel — unified agent+workspace view
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
 import { Canvas, type CanvasTab } from '@/components/desktop/Canvas';
-import { UniversalSearch } from '@/components/shared/UniversalSearch';
+import { UniversalSearch, type CommandPaletteAction, type CommandPaletteStateTone } from '@/components/shared/UniversalSearch';
 import { GraphExplorer3D } from '@/components/desktop/GraphExplorer3D';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { UpdateBanner } from '@/components/desktop/UpdateBanner';
@@ -21,11 +21,14 @@ import { NavRail, type NavSection } from '@/components/desktop/NavRail';
 import { ContextualPanel, type ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
-import { SettingsPage } from '@/components/desktop/SettingsPage';
+import { SettingsPage, type SettingsTab } from '@/components/desktop/SettingsPage';
 import { AnalyticsPage } from '@/components/desktop/AnalyticsPage';
 import { ThoughtsCard } from '@/components/desktop/ThoughtsCard';
 import { SetupWizard, type DetectionResult } from '@/components/desktop/SetupWizard';
-import type { RepoRegistryEntry } from '@/lib/repos/types';
+import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
+import type { WorktreeInfo } from '@/lib/worktree/types';
+import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
+import { deriveWorkflowStage, describeWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
 
 /** Normalize the flat API response into the shape SetupWizard expects. */
 function normalizeDetection(raw: Record<string, unknown>): DetectionResult {
@@ -80,6 +83,182 @@ function repoSlugFromRemote(remoteUrl?: string | null) {
   const url = (remoteUrl ?? '').replace(/\.git$/, '');
   const parts = url.split('/');
   return parts.length >= 2 ? `${parts[parts.length - 2]}/${parts[parts.length - 1]}` : null;
+}
+
+function shortenPath(value: string) {
+  const userPath = value.replace(/^\/Users\/[^/]+/, '~');
+  if (userPath !== value) return userPath;
+  return value.replace(/^\/home\/[^/]+/, '~');
+}
+
+interface PaletteAgentSummary {
+  id: string;
+  name: string;
+  status?: string;
+  currentTask?: string;
+  sessionKey: string;
+  alerts?: number;
+  isCurrentSession?: boolean;
+  lastEventAt?: string;
+  workspace?: string;
+  branch?: string;
+  workspaceStatus?: string;
+  lifecycleState?: string;
+  workflowStage?: WorkflowStageBadge | null;
+  runtime?: string;
+  repoReadiness?: RepoReadiness;
+  pr?: {
+    number: number;
+    title: string;
+    state?: 'open' | 'merged' | 'closed';
+    url?: string;
+  };
+  runtimeSurface?: {
+    lifecycle?: {
+      availability?: string;
+      summary?: string;
+    };
+    reviewContext?: {
+      repoSlug?: string | null;
+    };
+  };
+  worktree?: WorktreeInfo | null;
+}
+
+interface RepoWorktreeSummary {
+  worktrees: WorktreeInfo[];
+  conflicts: {
+    safe: boolean;
+    count: number;
+  };
+  totalDiskUsage: number;
+}
+
+function repoSlugFromAgent(agent?: PaletteAgentSummary | null) {
+  return agent?.runtimeSurface?.reviewContext?.repoSlug?.trim() || null;
+}
+
+function parseIssueNumber(value?: string | null) {
+  const match = value?.match(/\bIssue #(\d+)\b/i);
+  return match?.[1] ? Number(match[1]) : null;
+}
+
+function readinessTone(state?: RepoReadiness['state'] | null): CommandPaletteStateTone {
+  if (state === 'ready') return 'green';
+  if (state === 'needs_setup') return 'amber';
+  if (state === 'blocked') return 'red';
+  return 'slate';
+}
+
+function workflowTone(label?: string | null): CommandPaletteStateTone {
+  if (label === 'Merge ready') return 'green';
+  if (label === 'Working') return 'green';
+  if (label === 'Reviewing') return 'purple';
+  if (label === 'Waiting') return 'slate';
+  if (label === 'Blocked') return 'red';
+  return 'blue';
+}
+
+function paletteWorkflowLabel(agent: PaletteAgentSummary) {
+  const workflow = deriveWorkflowStage({
+    runtimeStatus: agent.status ?? null,
+    workspaceStatus: agent.workspaceStatus ?? null,
+    lifecycleState: agent.lifecycleState ?? null,
+    latestText: agent.currentTask ?? agent.runtimeSurface?.lifecycle?.summary ?? '',
+    lastActivityAt: agent.lastEventAt ? new Date(agent.lastEventAt).getTime() : null,
+    hasMessages: Boolean(agent.currentTask?.trim()),
+    readinessState: agent.repoReadiness?.state ?? null,
+  });
+
+  return workflow?.label ?? 'Ready';
+}
+
+function attentionRank(status: string) {
+  if (status === 'Needs setup') return 470;
+  if (status === 'Blocked') return 500;
+  if (status === 'Reviewing') return 420;
+  if (status === 'Merge ready') return 360;
+  if (status === 'Waiting') return 260;
+  if (status === 'Ready') return 180;
+  return 0;
+}
+
+function formatAttentionDetail(agent: PaletteAgentSummary) {
+  const stage = deriveWorkflowStage({
+    runtimeStatus: agent.status ?? null,
+    workspaceStatus: agent.workspaceStatus ?? null,
+    lifecycleState: agent.lifecycleState ?? null,
+    latestText: agent.currentTask ?? agent.runtimeSurface?.lifecycle?.summary ?? '',
+    lastActivityAt: agent.lastEventAt ? new Date(agent.lastEventAt).getTime() : null,
+    hasMessages: Boolean(agent.currentTask?.trim()),
+    readinessState: agent.repoReadiness?.state ?? null,
+  });
+  const guidance = describeWorkflowStage({
+    stage,
+    runtimeStatus: agent.status ?? null,
+    workspaceStatus: agent.workspaceStatus ?? null,
+    lifecycleState: agent.lifecycleState ?? null,
+    latestText: agent.currentTask ?? agent.runtimeSurface?.lifecycle?.summary ?? '',
+    lastActivityAt: agent.lastEventAt ? new Date(agent.lastEventAt).getTime() : null,
+    hasMessages: Boolean(agent.currentTask?.trim()),
+    readinessState: agent.repoReadiness?.state ?? null,
+    readinessSummary: agent.repoReadiness?.summary ?? null,
+    readinessNextAction: agent.repoReadiness?.nextAction ?? null,
+  });
+  return guidance.nextAction ? `${guidance.detail} ${guidance.nextAction}` : guidance.detail;
+}
+
+function repoReadinessDetail(entry: RepoRegistryEntry) {
+  if (!entry.readiness) {
+    return `Saved setup for ${entry.name} is not loaded yet.`;
+  }
+  return entry.readiness.nextAction
+    ? `${entry.readiness.summary} ${entry.readiness.nextAction}`
+    : entry.readiness.summary;
+}
+
+function formatBytes(value?: number | null) {
+  if (!value || value <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = value;
+  let unitIdx = 0;
+  while (size >= 1024 && unitIdx < units.length - 1) {
+    size /= 1024;
+    unitIdx += 1;
+  }
+  return `${size >= 10 || unitIdx === 0 ? Math.round(size) : size.toFixed(1)} ${units[unitIdx]}`;
+}
+
+function repoWorktreeDetail(summary: RepoWorktreeSummary | null) {
+  if (!summary) return 'No tracked worktrees yet.';
+  const activeCount = summary.worktrees.filter((worktree) => ['ready', 'active', 'setup', 'creating'].includes(worktree.status)).length;
+  const staleCount = summary.worktrees.filter((worktree) => worktree.status === 'stale').length;
+  const parts = [
+    `${summary.worktrees.length} worktree${summary.worktrees.length === 1 ? '' : 's'}`,
+    `${activeCount} active`,
+  ];
+  if (staleCount > 0) parts.push(`${staleCount} stale`);
+  if (summary.conflicts.count > 0) parts.push(`${summary.conflicts.count} conflict${summary.conflicts.count === 1 ? '' : 's'}`);
+  if (summary.totalDiskUsage > 0) parts.push(formatBytes(summary.totalDiskUsage));
+  return parts.join(' · ');
+}
+
+function worktreeStageLabel(status?: WorktreeInfo['status'] | null) {
+  if (status === 'creating' || status === 'setup' || status === 'cleaning') return 'Waiting';
+  if (status === 'stale') return 'Blocked';
+  if (status === 'ready') return 'Ready';
+  if (status === 'active') return 'Working';
+  if (status === 'merging') return 'Reviewing';
+  return 'Ready';
+}
+
+function worktreeStageTone(status?: WorktreeInfo['status'] | null): CommandPaletteStateTone {
+  if (status === 'creating' || status === 'setup' || status === 'cleaning') return 'amber';
+  if (status === 'stale') return 'red';
+  if (status === 'ready') return 'blue';
+  if (status === 'active') return 'green';
+  if (status === 'merging') return 'purple';
+  return 'blue';
 }
 import { LocalhostPreviewTabs } from '@/components/desktop/LocalhostPreviewTabs';
 import { TileContainer, type TileContentRegistry } from '@/components/desktop/TileContainer';
@@ -142,6 +321,7 @@ function DashboardInner() {
   const [showMemoryView, setShowMemoryView] = useState(false);
   const [alertTrayOpen, setAlertTrayOpen] = useState(false);
   const [activeNavSection, setActiveNavSection] = useState<NavSection>('agents');
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('connectors');
   const [searchOpen, setSearchOpen] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [chatVisible, setChatVisible] = useState(true);
@@ -200,6 +380,29 @@ function DashboardInner() {
     () => repoSlugFromRemote(globalRepoEntry?.remoteUrl),
     [globalRepoEntry],
   );
+  const [selectedRepoWorktrees, setSelectedRepoWorktrees] = useState<RepoWorktreeSummary | null>(null);
+  const [selectedRepoWorktreesLoading, setSelectedRepoWorktreesLoading] = useState(false);
+  const [selectedRepoWorktreeRefreshNonce, setSelectedRepoWorktreeRefreshNonce] = useState(0);
+
+  const refreshSelectedRepoWorktrees = useCallback(async () => {
+    if (!globalRepoEntry?.localPath) {
+      setSelectedRepoWorktrees(null);
+      return;
+    }
+    setSelectedRepoWorktreesLoading(true);
+    try {
+      const response = await fetch(`/api/worktrees?repo=${encodeURIComponent(globalRepoEntry.localPath)}`);
+      const data = await response.json() as RepoWorktreeSummary & { error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || 'Unable to load worktree summary.');
+      }
+      setSelectedRepoWorktrees(data);
+    } catch {
+      setSelectedRepoWorktrees(null);
+    } finally {
+      setSelectedRepoWorktreesLoading(false);
+    }
+  }, [globalRepoEntry?.localPath]);
 
   const loadRegisteredRepos = useCallback(async () => {
     const response = await fetch('/api/panel/repos');
@@ -301,6 +504,17 @@ function DashboardInner() {
       .catch(() => {});
   }, [globalRepoEntry]);
 
+  useEffect(() => {
+    void refreshSelectedRepoWorktrees();
+    if (!globalRepoEntry?.localPath) {
+      return;
+    }
+    const intervalId = window.setInterval(() => {
+      void refreshSelectedRepoWorktrees();
+    }, 30_000);
+    return () => window.clearInterval(intervalId);
+  }, [globalRepoEntry?.localPath, refreshSelectedRepoWorktrees, selectedRepoWorktreeRefreshNonce]);
+
   const handleOpenFolder = useCallback(async () => {
     let folderPath: string | null = null;
 
@@ -348,6 +562,89 @@ function DashboardInner() {
       window.alert(error instanceof Error ? error.message : 'Unable to open folder.');
     }
   }, [loadRegisteredRepos]);
+
+  const handleOpenSettingsTab = useCallback((tab: SettingsTab) => {
+    setShowMemoryView(false);
+    setSettingsInitialTab(tab);
+    setActiveNavSection('settings');
+  }, []);
+
+  const focusRepoSetup = useCallback((repoEntry: RepoRegistryEntry) => {
+    setGlobalRepoId(repoEntry.id);
+    setGlobalRepoBranch(repoEntry.defaultBranch || 'main');
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('cortex-global-repo-id', repoEntry.id);
+    }
+    setShowMemoryView(false);
+    setSidebarVisible(true);
+    setActiveNavSection('agents');
+
+    const dispatch = () => {
+      window.dispatchEvent(new CustomEvent(FOCUS_REPO_SETUP_EVENT, {
+        detail: {
+          repoId: repoEntry.id,
+          repoPath: repoEntry.localPath,
+        },
+      }));
+    };
+
+    if (sidebarVisible) {
+      dispatch();
+      return;
+    }
+
+    window.setTimeout(dispatch, 120);
+  }, [sidebarVisible]);
+
+  const handleFocusCurrentRepoSetup = useCallback(() => {
+    if (!globalRepoEntry) {
+      throw new Error('Select a repository before opening its setup profile.');
+    }
+    focusRepoSetup(globalRepoEntry);
+  }, [focusRepoSetup, globalRepoEntry]);
+
+  const openRepoWorkspaceModal = useCallback((repoEntry: RepoRegistryEntry) => {
+    setGlobalRepoId(repoEntry.id);
+    setGlobalRepoBranch(repoEntry.defaultBranch || 'main');
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('cortex-global-repo-id', repoEntry.id);
+    }
+    setShowMemoryView(false);
+    setSidebarVisible(true);
+    setActiveNavSection('agents');
+
+    const dispatch = () => {
+      window.dispatchEvent(new CustomEvent(OPEN_REPO_WORKSPACE_EVENT, {
+        detail: {
+          repoId: repoEntry.id,
+          repoPath: repoEntry.localPath,
+        },
+      }));
+    };
+
+    if (sidebarVisible) {
+      dispatch();
+      return;
+    }
+
+    window.setTimeout(dispatch, 120);
+  }, [sidebarVisible]);
+
+  const handleOpenRepoInDesktop = useCallback(async (editor: 'finder' | 'terminal') => {
+    if (!globalRepoEntry?.localPath) {
+      throw new Error('Select a repository before opening it outside Cortex.');
+    }
+
+    const response = await fetch('/api/panel/open-in', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ editor, repo: globalRepoEntry.localPath }),
+    });
+    const data = await response.json().catch(() => ({})) as { error?: string };
+    if (!response.ok) {
+      throw new Error(data.error || `Unable to open the repo in ${editor}.`);
+    }
+  }, [globalRepoEntry]);
   const [lifecycleEvents, setLifecycleEvents] = useState<Map<string, { state: string; exitCode?: number; ts: number }>>(new Map());
   const [desktopDraftInjection, setDesktopDraftInjection] = useState<{ id: string; text: string } | null>(null);
   const [thoughtsDraftInjection, setThoughtsDraftInjection] = useState<{ id: string; text: string } | null>(null);
@@ -1082,13 +1379,17 @@ function DashboardInner() {
       // keep default branch fallback
     }
 
+    const effectiveBranch = repoEntry.readiness?.currentBranch ?? currentBranch;
     const readinessLines = [
+      repoEntry.readiness
+        ? `Readiness: ${repoEntry.readiness.label} — ${repoEntry.readiness.summary}`
+        : 'Readiness: unknown',
       `Local checkout: ${repoEntry.localPath}`,
-      `Current branch: ${currentBranch}`,
+      `Current branch: ${effectiveBranch}`,
       `Default branch: ${repoEntry.defaultBranch}`,
-      currentBranch === repoEntry.defaultBranch
+      effectiveBranch === repoEntry.defaultBranch
         ? 'You are operating directly on the default branch right now.'
-        : `You are not on the default branch; the current local branch is ${currentBranch}.`,
+        : `You are not on the default branch; the current local branch is ${effectiveBranch}.`,
       repoEntry.setup.installCommand
         ? `Install command: ${repoEntry.setup.installCommand}${repoEntry.setup.installOnCreateWorkspace ? ' (saved as default setup)' : ''}`
         : 'Install command: none saved',
@@ -1101,6 +1402,9 @@ function DashboardInner() {
       repoEntry.setup.envFiles.length > 0
         ? `Env files: ${repoEntry.setup.envFiles.join(', ')} (mode: ${repoEntry.setup.envMode})`
         : 'Env files: none saved',
+      repoEntry.readiness?.nextAction
+        ? `Next readiness action: ${repoEntry.readiness.nextAction}`
+        : null,
     ];
 
     const prompt = request.kind === 'issue'
@@ -1198,10 +1502,679 @@ function DashboardInner() {
     document.addEventListener('mouseup', onUp);
   }, [rightWidth]);
 
-  const parsedAgents = useMemo(
-    () => JSON.parse(agentsJson) as Parameters<typeof ThoughtsCard>[0]['agents'],
-    [agentsJson],
+  const parsedAgents = useMemo(() => {
+    try {
+      return JSON.parse(agentsJson) as Parameters<typeof ThoughtsCard>[0]['agents'];
+    } catch {
+      return [] as Parameters<typeof ThoughtsCard>[0]['agents'];
+    }
+  }, [agentsJson]);
+
+  const paletteAgents = useMemo(() => parsedAgents as unknown as PaletteAgentSummary[], [parsedAgents]);
+  const selectedSessionAgent = useMemo(
+    () => paletteAgents.find((agent) => agent.sessionKey === activeSessionKey)
+      ?? paletteAgents.find((agent) => agent.isCurrentSession)
+      ?? null,
+    [activeSessionKey, paletteAgents],
   );
+  const scopedRepoAgents = useMemo(
+    () => paletteAgents.filter((agent) => {
+      const repoSlug = repoSlugFromAgent(agent);
+      return Boolean(globalRepo && repoSlug === globalRepo);
+    }),
+    [globalRepo, paletteAgents],
+  );
+  const currentReviewAgent = useMemo(() => {
+    const seen = new Set<string>();
+    const candidates = [selectedSessionAgent, ...scopedRepoAgents].filter((agent): agent is PaletteAgentSummary => {
+      if (!agent || seen.has(agent.sessionKey)) return false;
+      seen.add(agent.sessionKey);
+      return true;
+    });
+
+    return candidates.find((agent) => {
+      const repoSlug = repoSlugFromAgent(agent) || globalRepo;
+      return Boolean(repoSlug && agent.pr?.number && agent.pr.state !== 'closed');
+    }) ?? null;
+  }, [globalRepo, scopedRepoAgents, selectedSessionAgent]);
+  const currentIssueTarget = useMemo(() => {
+    const seen = new Set<string>();
+    const candidates = [selectedSessionAgent, ...scopedRepoAgents].filter((agent): agent is PaletteAgentSummary => {
+      if (!agent || seen.has(agent.sessionKey)) return false;
+      seen.add(agent.sessionKey);
+      return true;
+    });
+
+    for (const agent of candidates) {
+      const issueNumber = parseIssueNumber(agent.currentTask);
+      const repoSlug = repoSlugFromAgent(agent) || globalRepo;
+      if (issueNumber && repoSlug) {
+        return {
+          number: issueNumber,
+          repo: repoSlug,
+          title: agent.currentTask?.trim() || `Issue #${issueNumber}`,
+        };
+      }
+    }
+
+    return null;
+  }, [globalRepo, scopedRepoAgents, selectedSessionAgent]);
+  const selectedSessionWorktree = selectedSessionAgent?.worktree ?? null;
+  const staleSelectedRepoWorktrees = useMemo(
+    () => (selectedRepoWorktrees?.worktrees ?? []).filter((worktree) => worktree.status === 'stale'),
+    [selectedRepoWorktrees],
+  );
+  const paletteActions = useMemo<CommandPaletteAction[]>(() => {
+    const actions: CommandPaletteAction[] = [];
+    const workflowContextAgent = currentReviewAgent ?? selectedSessionAgent ?? scopedRepoAgents[0] ?? null;
+    const workflowContextStage = workflowContextAgent
+      ? deriveWorkflowStage({
+          runtimeStatus: workflowContextAgent.status ?? null,
+          workspaceStatus: workflowContextAgent.workspaceStatus ?? null,
+          lifecycleState: workflowContextAgent.lifecycleState ?? null,
+          latestText: workflowContextAgent.currentTask ?? workflowContextAgent.runtimeSurface?.lifecycle?.summary ?? '',
+          lastActivityAt: workflowContextAgent.lastEventAt ? new Date(workflowContextAgent.lastEventAt).getTime() : null,
+          hasMessages: Boolean(workflowContextAgent.currentTask?.trim()),
+          readinessState: workflowContextAgent.repoReadiness?.state ?? globalRepoEntry?.readiness?.state ?? null,
+        })
+      : deriveWorkflowStage({
+          readinessState: globalRepoEntry?.readiness?.state ?? null,
+          latestText: '',
+        });
+    const workflowContextGuidance = describeWorkflowStage({
+      stage: workflowContextStage,
+      runtimeStatus: workflowContextAgent?.status ?? null,
+      workspaceStatus: workflowContextAgent?.workspaceStatus ?? null,
+      lifecycleState: workflowContextAgent?.lifecycleState ?? null,
+      latestText: workflowContextAgent?.currentTask ?? workflowContextAgent?.runtimeSurface?.lifecycle?.summary ?? '',
+      lastActivityAt: workflowContextAgent?.lastEventAt ? new Date(workflowContextAgent.lastEventAt).getTime() : null,
+      hasMessages: Boolean(workflowContextAgent?.currentTask?.trim()),
+      readinessState: workflowContextAgent?.repoReadiness?.state ?? globalRepoEntry?.readiness?.state ?? null,
+      readinessSummary: workflowContextAgent?.repoReadiness?.summary ?? globalRepoEntry?.readiness?.summary ?? null,
+      readinessNextAction: workflowContextAgent?.repoReadiness?.nextAction ?? globalRepoEntry?.readiness?.nextAction ?? null,
+    });
+    const repoAttention = globalRepoEntries
+      .filter((entry) => entry.readiness?.state === 'blocked' || entry.readiness?.state === 'needs_setup')
+      .sort((a, b) => {
+        const aScore = attentionRank(a.readiness?.label ?? '');
+        const bScore = attentionRank(b.readiness?.label ?? '');
+        if (aScore !== bScore) return bScore - aScore;
+        return a.name.localeCompare(b.name);
+      })
+      .slice(0, 4);
+
+    for (const entry of repoAttention) {
+      actions.push({
+        id: `repo-attention:${entry.id}`,
+        category: 'attention',
+        title: `${entry.readiness?.label}: ${entry.name}`,
+        detail: repoReadinessDetail(entry),
+        stateLabel: entry.readiness?.label,
+        stateTone: readinessTone(entry.readiness?.state),
+        keywords: [entry.name, entry.localPath, entry.readiness?.summary ?? '', entry.readiness?.nextAction ?? ''],
+        priority: attentionRank(entry.readiness?.label ?? ''),
+        run: () => focusRepoSetup(entry),
+      });
+    }
+
+    const attentionCandidates = paletteAgents
+      .map((agent) => {
+        const status = paletteWorkflowLabel(agent);
+        return {
+          agent,
+          status,
+          score: attentionRank(status) + Math.min(agent.alerts ?? 0, 8) * 12,
+        };
+      })
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4);
+
+    for (const { agent, status, score } of attentionCandidates) {
+      actions.push({
+        id: `attention:${agent.sessionKey}`,
+        category: 'attention',
+        title: `${status}: ${agent.name}`,
+        detail: formatAttentionDetail(agent),
+        stateLabel: status,
+        stateTone: agent.repoReadiness
+          ? readinessTone(agent.repoReadiness.state)
+          : workflowTone(status),
+        keywords: [agent.sessionKey, agent.currentTask ?? '', repoSlugFromAgent(agent) ?? '', agent.workspace ?? '', status],
+        priority: score,
+        run: () => {
+          setSidebarVisible(true);
+          setActiveSessionKey(agent.sessionKey);
+        },
+      });
+    }
+
+    if (globalRepoEntry) {
+      const repoReadinessLabel = globalRepoEntry.readiness?.label;
+      const repoReadinessTone = readinessTone(globalRepoEntry.readiness?.state);
+      const repoReadinessSummary = repoReadinessDetail(globalRepoEntry);
+
+      actions.push({
+        id: 'workspace:launch-agent',
+        category: 'workspace',
+        title: 'Launch workspace agent',
+        detail: globalRepoEntry.readiness
+          ? `${repoReadinessLabel}: ${repoReadinessSummary}`
+          : `Start a fresh CLI session in ${globalRepoEntry.name}.`,
+        stateLabel: repoReadinessLabel,
+        stateTone: repoReadinessTone,
+        keywords: [globalRepoEntry.name, globalRepoEntry.localPath, globalRepo ?? '', 'launch', 'workspace', 'agent'],
+        priority: 320,
+        run: () => handleLaunchWorkspaceAgent({
+          repoPath: globalRepoEntry.localPath,
+          createNew: true,
+        }),
+      });
+
+      actions.push({
+        id: 'workspace:repo-setup',
+        category: 'workspace',
+        title: 'Open current repo setup',
+        detail: globalRepoEntry.readiness
+          ? repoReadinessSummary
+          : `Edit saved env, build, and dev commands for ${globalRepoEntry.name}.`,
+        stateLabel: repoReadinessLabel,
+        stateTone: repoReadinessTone,
+        keywords: [globalRepoEntry.name, 'repo setup', 'env', 'build', 'dev', 'profile'],
+        priority: 300,
+        run: handleFocusCurrentRepoSetup,
+      });
+
+      actions.push({
+        id: 'workspace:create-worktree',
+        category: 'workspace',
+        title: 'Create workspace worktree',
+        detail: selectedRepoWorktreesLoading
+          ? `Checking worktree health for ${globalRepoEntry.name}…`
+          : repoWorktreeDetail(selectedRepoWorktrees),
+        stateLabel: globalRepoEntry.readiness?.label ?? (selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe ? 'Blocked' : 'Ready'),
+        stateTone: globalRepoEntry.readiness
+          ? readinessTone(globalRepoEntry.readiness.state)
+          : selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe
+            ? 'red'
+            : 'blue',
+        keywords: ['create worktree', 'new workspace', 'workspace branch', globalRepoEntry.name],
+        priority: 298,
+        run: () => openRepoWorkspaceModal(globalRepoEntry),
+      });
+
+      if (selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe) {
+        actions.push({
+          id: 'workspace:review-worktree-conflicts',
+          category: 'attention',
+          title: `Blocked: ${globalRepoEntry.name} worktree conflicts`,
+          detail: `${selectedRepoWorktrees.conflicts.count} overlapping worktree file${selectedRepoWorktrees.conflicts.count === 1 ? '' : 's'} need operator attention before stacking more work.`,
+          stateLabel: 'Blocked',
+          stateTone: 'red',
+          keywords: ['worktree conflict', 'overlap', 'blocked', globalRepoEntry.name],
+          priority: 410,
+          run: () => focusRepoSetup(globalRepoEntry),
+        });
+      }
+
+      actions.push({
+        id: 'workspace:open-cli-surface',
+        category: 'workspace',
+        title: 'Open workspace CLI surface',
+        detail: `Focus the main workspace terminal for ${globalRepoEntry.name}.`,
+        stateLabel: 'Ready',
+        stateTone: 'blue',
+        keywords: ['workspace cli', 'workspace terminal', 'terminal', 'focus terminal'],
+        priority: 295,
+        run: async () => {
+          const target = await waitForWorkspaceTerminalTarget();
+          if (!target) {
+            throw new Error('No workspace CLI surface is available right now. Reload the workspace and try again.');
+          }
+        },
+      });
+
+      if (globalRepoEntry.readiness?.state === 'needs_setup' && globalRepoEntry.setup.installCommand) {
+        actions.push({
+          id: 'workspace:run-setup',
+          category: 'recovery',
+          title: `Run saved setup for ${globalRepoEntry.name}`,
+          detail: `Execute ${globalRepoEntry.setup.installCommand} in the operator terminal.`,
+          stateLabel: globalRepoEntry.readiness.label,
+          stateTone: readinessTone(globalRepoEntry.readiness.state),
+          keywords: [globalRepoEntry.setup.installCommand, 'install deps', 'setup', 'bootstrap', globalRepoEntry.name],
+          priority: 340,
+          run: () => {
+            handleRunInTerminal(`cd ${JSON.stringify(globalRepoEntry.localPath)} && ${globalRepoEntry.setup.installCommand}`);
+          },
+        });
+      }
+
+      if (selectedSessionWorktree?.path) {
+        actions.push({
+          id: 'workspace:finder-worktree',
+          category: 'workspace',
+          title: 'Open current worktree in Finder',
+          detail: `${selectedSessionWorktree.id} · ${selectedSessionWorktree.path}`,
+          stateLabel: worktreeStageLabel(selectedSessionWorktree.status),
+          stateTone: worktreeStageTone(selectedSessionWorktree.status),
+          keywords: [selectedSessionWorktree.id, selectedSessionWorktree.path, 'worktree', 'finder', 'workspace path'],
+          priority: 246,
+          run: async () => {
+            const response = await fetch('/api/panel/open-in', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ editor: 'finder', repo: selectedSessionWorktree.path }),
+            });
+            const data = await response.json().catch(() => ({})) as { error?: string };
+            if (!response.ok) {
+              throw new Error(data.error || 'Unable to open the current worktree in Finder.');
+            }
+          },
+        });
+
+        actions.push({
+          id: 'recovery:copy-worktree-path',
+          category: 'recovery',
+          title: 'Copy current worktree path',
+          detail: shortenPath(selectedSessionWorktree.path),
+          stateLabel: worktreeStageLabel(selectedSessionWorktree.status),
+          stateTone: worktreeStageTone(selectedSessionWorktree.status),
+          keywords: [selectedSessionWorktree.id, selectedSessionWorktree.path, 'copy worktree path', 'worktree'],
+          priority: 226,
+          run: async () => {
+            await navigator.clipboard.writeText(selectedSessionWorktree.path);
+          },
+        });
+      }
+
+      actions.push({
+        id: 'workspace:finder',
+        category: 'workspace',
+        title: 'Open current repo in Finder',
+        detail: shortenPath(globalRepoEntry.localPath),
+        keywords: [globalRepoEntry.localPath, 'finder', 'folder', 'open repo'],
+        priority: 250,
+        run: () => handleOpenRepoInDesktop('finder'),
+      });
+
+      actions.push({
+        id: 'workspace:terminal-app',
+        category: 'workspace',
+        title: 'Open current repo in Terminal',
+        detail: shortenPath(globalRepoEntry.localPath),
+        keywords: [globalRepoEntry.localPath, 'terminal app', 'open in terminal', 'open repo'],
+        priority: 248,
+        run: () => handleOpenRepoInDesktop('terminal'),
+      });
+
+      actions.push({
+        id: 'workspace:copy-path',
+        category: 'recovery',
+        title: 'Copy current repo path',
+        detail: shortenPath(globalRepoEntry.localPath),
+        keywords: [globalRepoEntry.localPath, 'copy path', 'cwd', 'repo path'],
+        priority: 220,
+        run: async () => {
+          await navigator.clipboard.writeText(globalRepoEntry.localPath);
+        },
+      });
+
+      if (staleSelectedRepoWorktrees.length > 0) {
+        actions.push({
+          id: 'recovery:prune-stale-worktrees',
+          category: 'recovery',
+          title: `Prune stale worktrees in ${globalRepoEntry.name}`,
+          detail: `${staleSelectedRepoWorktrees.length} stale worktree${staleSelectedRepoWorktrees.length === 1 ? '' : 's'} will be removed. ${repoWorktreeDetail(selectedRepoWorktrees)}`,
+          stateLabel: selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe ? 'Blocked' : 'Ready',
+          stateTone: selectedRepoWorktrees && !selectedRepoWorktrees.conflicts.safe ? 'red' : 'blue',
+          keywords: ['prune stale worktrees', 'cleanup worktrees', 'stale worktree', globalRepoEntry.name],
+          priority: 345,
+          run: async () => {
+            const confirmed = window.confirm(
+              `Prune ${staleSelectedRepoWorktrees.length} stale worktree${staleSelectedRepoWorktrees.length === 1 ? '' : 's'} for ${globalRepoEntry.name}?\n\nThis removes the stale worktree directories and their branches.`,
+            );
+            if (!confirmed) {
+              return;
+            }
+            const response = await fetch('/api/worktrees', {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ repo: globalRepoEntry.localPath, action: 'prune' }),
+            });
+            const data = await response.json().catch(() => ({})) as { error?: string };
+            if (!response.ok) {
+              throw new Error(data.error || 'Unable to prune stale worktrees.');
+            }
+            setSelectedRepoWorktreeRefreshNonce((current) => current + 1);
+          },
+        });
+      }
+    } else {
+      actions.push({
+        id: 'workspace:open-folder',
+        category: 'workspace',
+        title: 'Open folder',
+        detail: 'Register a local checkout and make it the active workspace.',
+        keywords: ['open folder', 'repo', 'workspace', 'register repo'],
+        priority: 320,
+        run: handleOpenFolder,
+      });
+
+      actions.push({
+        id: 'workspace:open-cli-surface-empty',
+        category: 'workspace',
+        title: 'Open workspace CLI surface',
+        detail: 'Focus the main workspace terminal even before a repo is selected.',
+        stateLabel: 'Ready',
+        stateTone: 'blue',
+        keywords: ['workspace cli', 'workspace terminal', 'terminal', 'focus terminal'],
+        priority: 260,
+        run: async () => {
+          const target = await waitForWorkspaceTerminalTarget();
+          if (!target) {
+            throw new Error('No workspace CLI surface is available right now. Reload the workspace and try again.');
+          }
+        },
+      });
+    }
+
+    if (globalRepoEntry) {
+      actions.push({
+        id: 'workspace:open-folder-anyway',
+        category: 'workspace',
+        title: 'Open another folder',
+        detail: 'Register or switch to a different local checkout.',
+        keywords: ['open folder', 'switch repo', 'add repo', 'workspace'],
+        priority: 180,
+        run: handleOpenFolder,
+      });
+    }
+
+    if (currentReviewAgent?.pr?.number) {
+      const reviewRepo = repoSlugFromAgent(currentReviewAgent) || globalRepo;
+      if (reviewRepo) {
+        const reviewReadiness = globalRepoEntry?.readiness ?? currentReviewAgent.repoReadiness ?? null;
+        const reviewStage = currentReviewAgent.workflowStage ?? deriveWorkflowStage({
+          runtimeStatus: currentReviewAgent.status ?? null,
+          workspaceStatus: currentReviewAgent.workspaceStatus ?? null,
+          lifecycleState: currentReviewAgent.lifecycleState ?? null,
+          latestText: currentReviewAgent.currentTask ?? '',
+          lastActivityAt: currentReviewAgent.lastEventAt ? new Date(currentReviewAgent.lastEventAt).getTime() : null,
+          hasMessages: Boolean(currentReviewAgent.currentTask?.trim()),
+          readinessState: reviewReadiness?.state ?? null,
+          prState: currentReviewAgent.pr.state ?? 'open',
+        });
+        const reviewGuidance = describeWorkflowStage({
+          stage: reviewStage,
+          runtimeStatus: currentReviewAgent.status ?? null,
+          workspaceStatus: currentReviewAgent.workspaceStatus ?? null,
+          lifecycleState: currentReviewAgent.lifecycleState ?? null,
+          latestText: currentReviewAgent.currentTask ?? '',
+          lastActivityAt: currentReviewAgent.lastEventAt ? new Date(currentReviewAgent.lastEventAt).getTime() : null,
+          hasMessages: Boolean(currentReviewAgent.currentTask?.trim()),
+          readinessState: reviewReadiness?.state ?? null,
+          readinessSummary: reviewReadiness?.summary ?? null,
+          readinessNextAction: reviewReadiness?.nextAction ?? null,
+          prState: currentReviewAgent.pr.state ?? 'open',
+        });
+        const reviewStateLabel = reviewStage?.label ?? reviewReadiness?.label ?? 'Reviewing';
+        const reviewStateTone = reviewStage ? workflowTone(reviewStage.label) : reviewReadiness ? readinessTone(reviewReadiness.state) : 'purple';
+        actions.push({
+          id: 'review:open-pr',
+          category: 'review',
+          title: `Open current PR #${currentReviewAgent.pr.number}`,
+          detail: reviewGuidance.nextAction ? `${currentReviewAgent.pr.title} · ${reviewGuidance.nextAction}` : currentReviewAgent.pr.title,
+          stateLabel: reviewStateLabel,
+          stateTone: reviewStateTone,
+          keywords: [reviewRepo, currentReviewAgent.pr.title, 'pull request', 'open pr', String(currentReviewAgent.pr.number)],
+          priority: 310,
+          run: () => handleSelectPR(currentReviewAgent.pr!.number, reviewRepo),
+        });
+
+        actions.push({
+          id: 'review:launch-pr',
+          category: 'review',
+          title: `Launch PR #${currentReviewAgent.pr.number} review`,
+          detail: reviewGuidance.nextAction ?? 'Open a CLI review lane with current repo readiness context.',
+          stateLabel: reviewStateLabel,
+          stateTone: reviewStateTone,
+          keywords: [reviewRepo, 'launch review', 'pr review', currentReviewAgent.pr.title],
+          priority: 290,
+          run: () => handleLaunchWorkspaceRepoTask({
+            kind: 'pr',
+            repo: reviewRepo,
+            number: currentReviewAgent.pr!.number,
+            title: currentReviewAgent.pr!.title,
+            branch: currentReviewAgent.branch,
+          }),
+        });
+
+        actions.push({
+          id: 'review:checks',
+          category: 'review',
+          title: 'Open current checks',
+          detail: reviewGuidance.detail,
+          stateLabel: reviewStateLabel,
+          stateTone: reviewStateTone,
+          keywords: [reviewRepo, 'checks', 'ci', 'status checks'],
+          priority: 280,
+          run: () => handleOpenCI(reviewRepo),
+        });
+
+        actions.push({
+          id: 'review:merge',
+          category: 'review',
+          title: `Merge current PR #${currentReviewAgent.pr.number}`,
+          detail: reviewGuidance.mergeDetail,
+          stateLabel: reviewStateLabel,
+          stateTone: reviewStateTone,
+          keywords: [reviewRepo, 'merge pr', 'merge pull request', currentReviewAgent.pr.title],
+          priority: 260,
+          disabled: !reviewGuidance.mergeAllowed,
+          unavailableReason: !reviewGuidance.mergeAllowed ? reviewGuidance.mergeDetail : undefined,
+          run: async () => {
+            const response = await fetch(`/api/panel/prs/${currentReviewAgent.pr!.number}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'merge', repo: reviewRepo }),
+            });
+            const data = await response.json().catch(() => ({})) as { error?: string };
+            if (!response.ok) {
+              throw new Error(data.error || 'Unable to merge the current pull request.');
+            }
+            handleSelectPR(currentReviewAgent.pr!.number, reviewRepo);
+          },
+        });
+      }
+    }
+
+    if (!currentReviewAgent?.pr?.number && globalRepo) {
+      actions.push({
+        id: 'review:checks-only',
+        category: 'review',
+        title: 'Open current checks',
+        detail: `Inspect the latest CI state for ${globalRepo}.`,
+        stateLabel: globalRepoEntry?.readiness?.label ?? 'Reviewing',
+        stateTone: globalRepoEntry?.readiness ? readinessTone(globalRepoEntry.readiness.state) : 'purple',
+        keywords: [globalRepo, 'checks', 'ci', 'status checks'],
+        priority: 240,
+        run: () => handleOpenCI(globalRepo),
+      });
+    }
+
+    if (currentIssueTarget) {
+      actions.push({
+        id: 'review:open-issue',
+        category: 'review',
+        title: `Open current issue #${currentIssueTarget.number}`,
+        detail: `${currentIssueTarget.repo} · ${currentIssueTarget.title}`,
+        stateLabel: globalRepoEntry?.readiness?.label ?? 'Working',
+        stateTone: globalRepoEntry?.readiness ? readinessTone(globalRepoEntry.readiness.state) : 'green',
+        keywords: [currentIssueTarget.repo, 'issue', currentIssueTarget.title, String(currentIssueTarget.number)],
+        priority: 275,
+        run: () => handleSelectIssue(currentIssueTarget.number, currentIssueTarget.repo),
+      });
+    }
+
+    actions.push({
+      id: 'settings:connectors',
+      category: 'settings',
+      title: 'Open connector settings',
+      detail: 'GitHub auth, broker status, and repo access.',
+      keywords: ['settings', 'connectors', 'github', 'broker'],
+      priority: 210,
+      run: () => handleOpenSettingsTab('connectors'),
+    });
+
+    actions.push({
+      id: 'settings:agents',
+      category: 'settings',
+      title: 'Open agent settings',
+      detail: 'Agent defaults, model choices, and runtime controls.',
+      keywords: ['settings', 'agents', 'models', 'runtime'],
+      priority: 205,
+      run: () => handleOpenSettingsTab('agents'),
+    });
+
+    actions.push({
+      id: 'settings:memory',
+      category: 'settings',
+      title: 'Open memory settings',
+      detail: 'Cortex memory, embeddings, and maintenance.',
+      keywords: ['settings', 'memory', 'cortex', 'embeddings'],
+      priority: 200,
+      run: () => handleOpenSettingsTab('memory'),
+    });
+
+    actions.push({
+      id: 'settings:appearance',
+      category: 'settings',
+      title: 'Open appearance settings',
+      detail: 'Theme and desktop shell behavior.',
+      keywords: ['settings', 'appearance', 'theme', 'nav rail'],
+      priority: 195,
+      run: () => handleOpenSettingsTab('appearance'),
+    });
+
+    actions.push({
+      id: 'recovery:setup',
+      category: 'recovery',
+      title: 'Rerun setup',
+      detail: 'Open the setup flow and recheck local tools and providers.',
+      stateLabel: wsStatus === 'disconnected' ? 'Blocked' : wsStatus === 'reconnecting' || wsStatus === 'connecting' ? 'Waiting' : undefined,
+      stateTone: wsStatus === 'disconnected' ? 'red' : wsStatus === 'reconnecting' || wsStatus === 'connecting' ? 'amber' : undefined,
+      keywords: ['rerun setup', 'setup wizard', 'doctor', 'recovery'],
+      priority: wsStatus === 'connected' ? 170 : 260,
+      run: () => setSetupWizardOpen(true),
+    });
+
+    if (wsStatus !== 'connected') {
+      actions.push({
+        id: 'recovery:workspace-bridge',
+        category: 'recovery',
+        title: wsStatus === 'disconnected' ? 'Workspace bridge disconnected' : 'Workspace bridge reconnecting',
+        detail: wsStatus === 'disconnected'
+          ? 'Saved tabs stay local, but live session updates are paused until the bridge comes back.'
+          : 'Live session updates are resyncing. Reload only if the workspace does not recover on its own.',
+        stateLabel: wsStatus === 'disconnected' ? 'Blocked' : 'Waiting',
+        stateTone: wsStatus === 'disconnected' ? 'red' : 'amber',
+        keywords: ['workspace bridge', 'disconnected', 'reconnecting', 'ws', 'reload workspace'],
+        priority: wsStatus === 'disconnected' ? 520 : 300,
+        run: () => window.location.reload(),
+      });
+    }
+
+    if (activeSessionKey && !selectedSessionAgent && paletteAgents.length > 0) {
+      const fallbackSession = paletteAgents.find((agent) => agent.isCurrentSession) ?? paletteAgents[0];
+      actions.push({
+        id: 'recovery:missing-session',
+        category: 'recovery',
+        title: 'Selected session is no longer live',
+        detail: 'The current chat selection fell out of the live inventory. Jump to a monitored session or reload the workspace snapshot.',
+        stateLabel: 'Blocked',
+        stateTone: 'red',
+        keywords: ['missing session', 'session unavailable', activeSessionKey].filter((keyword): keyword is string => Boolean(keyword)),
+        priority: 510,
+        run: () => {
+          if (fallbackSession) {
+            setActiveSessionKey(fallbackSession.sessionKey);
+            setChatVisible(true);
+            return;
+          }
+          window.location.reload();
+        },
+      });
+    }
+
+    actions.push({
+      id: 'recovery:restore',
+      category: 'recovery',
+      title: 'Restore workspace tabs',
+      detail: 'Reload the dashboard and reattach saved workspace tabs in place.',
+      keywords: ['restore session', 'restore tabs', 'reload workspace', 'recover'],
+      priority: wsStatus === 'connected' ? 160 : 250,
+      run: () => window.location.reload(),
+    });
+
+    actions.push({
+      id: 'workspace:archive-unavailable',
+      category: 'workspace',
+      title: 'Archive workspace',
+      detail: workflowContextGuidance.archiveDetail,
+      stateLabel: workflowContextStage?.label ?? 'Unavailable',
+      stateTone: workflowContextStage ? workflowTone(workflowContextStage.label) : 'slate',
+      keywords: ['archive workspace', 'archive lane', 'archive'],
+      priority: 12,
+      disabled: true,
+      unavailableReason: workflowContextGuidance.archiveUnavailableReason,
+      run: () => undefined,
+    });
+
+    actions.push({
+      id: 'workspace:resume-unavailable',
+      category: 'workspace',
+      title: 'Resume archived workspace',
+      detail: workflowContextGuidance.resumeDetail,
+      stateLabel: workflowContextStage?.label ?? 'Unavailable',
+      stateTone: workflowContextStage ? workflowTone(workflowContextStage.label) : 'slate',
+      keywords: ['resume workspace', 'resume archived workspace', 'resume'],
+      priority: 11,
+      disabled: true,
+      unavailableReason: workflowContextGuidance.resumeUnavailableReason,
+      run: () => undefined,
+    });
+
+    return actions;
+  }, [
+    activeSessionKey,
+    currentIssueTarget,
+    currentReviewAgent,
+    globalRepo,
+    globalRepoEntry,
+    globalRepoEntries,
+    handleFocusCurrentRepoSetup,
+    handleLaunchWorkspaceAgent,
+    handleLaunchWorkspaceRepoTask,
+    handleOpenFolder,
+    handleOpenRepoInDesktop,
+    handleOpenSettingsTab,
+    handleOpenCI,
+    handleRunInTerminal,
+    handleSelectIssue,
+    handleSelectPR,
+    openRepoWorkspaceModal,
+    paletteAgents,
+    focusRepoSetup,
+    selectedRepoWorktrees,
+    selectedRepoWorktreesLoading,
+    selectedSessionWorktree,
+    selectedSessionAgent,
+    scopedRepoAgents,
+    staleSelectedRepoWorktrees,
+    waitForWorkspaceTerminalTarget,
+    wsStatus,
+  ]);
 
   const tileRegistry = useMemo<TileContentRegistry>(() => ({
     workspace: {
@@ -1429,6 +2402,7 @@ function DashboardInner() {
             workspace={activeWorkspace}
             repo={globalRepo ?? undefined}
             agentsJson={agentsJson}
+            actions={paletteActions}
             onSelectSession={(sessionKey) => { setActiveSessionKey(sessionKey); onClose(); }}
             onSelectIssue={(num) => { handleSelectIssue(num); onClose(); }}
             onSelectFile={(filePath, line) => {
@@ -1542,6 +2516,7 @@ function DashboardInner() {
           selectedRepoName={globalRepoEntry?.name ?? null}
           selectedRepoBranch={globalRepoBranch}
           selectedRepoLocalPath={globalRepoEntry?.localPath ?? null}
+          selectedRepoReadiness={globalRepoEntry?.readiness ?? null}
           onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
           onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
           onSelectSession={handleSelectSession}
@@ -1594,7 +2569,7 @@ function DashboardInner() {
       }}>
         {activeNavSection === 'settings' && !showMemoryView && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
-            <SettingsPage />
+            <SettingsPage initialTab={settingsInitialTab} />
           </div>
         )}
 

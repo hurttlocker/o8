@@ -30,7 +30,13 @@ import type {
   ValidatedRepoCandidate,
 } from '@/lib/repos/types';
 import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
-import { FOCUS_REPO_SETUP_EVENT, type FocusRepoSetupDetail } from '@/lib/desktop/events';
+import {
+  FOCUS_REPO_SETUP_EVENT,
+  OPEN_REPO_WORKSPACE_EVENT,
+  type FocusRepoSetupDetail,
+  type OpenRepoWorkspaceDetail,
+} from '@/lib/desktop/events';
+import type { WorktreeInfo, WorktreeStatus } from '@/lib/worktree/types';
 
 interface JsonErrorShape {
   error?: string;
@@ -53,6 +59,15 @@ interface WorkspaceAgentLaunchRequest {
   label?: string;
 }
 
+interface RepoWorktreeSummary {
+  worktrees: WorktreeInfo[];
+  conflicts: {
+    safe: boolean;
+    count: number;
+  };
+  totalDiskUsage: number;
+}
+
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
 const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(37, 99, 235, 0.14))';
@@ -60,6 +75,16 @@ const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
 const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
 const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
+const THEME_SUCCESS_SOFT = 'rgba(34, 197, 94, 0.12)';
+const THEME_SUCCESS_BORDER = 'rgba(34, 197, 94, 0.18)';
+const THEME_SUCCESS_TEXT = '#4ade80';
+const THEME_DANGER_SOFT = 'rgba(239, 68, 68, 0.12)';
+const THEME_DANGER_BORDER = 'rgba(239, 68, 68, 0.2)';
+const THEME_DANGER_TEXT = '#f87171';
+const THEME_WORKTREE_SOFT = 'rgba(245, 158, 11, 0.12)';
+const THEME_WORKTREE_SOFT_STRONG = 'rgba(245, 158, 11, 0.18)';
+const THEME_WORKTREE_BORDER = 'rgba(245, 158, 11, 0.24)';
+const THEME_WORKTREE_TEXT = '#f6b24d';
 
 function formatRelativeTime(value: string | null) {
   if (!value) return 'Never';
@@ -87,6 +112,62 @@ function shortenPath(value: string) {
   const userPath = value.replace(/^\/Users\/[^/]+/, '~');
   if (userPath !== value) return userPath;
   return value.replace(/^\/home\/[^/]+/, '~');
+}
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return '0 B';
+  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GB`;
+  if (value >= 1024 ** 2) return `${Math.round(value / 1024 ** 2)} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${value} B`;
+}
+
+function worktreeStageTone(status?: WorktreeStatus | null) {
+  switch (status) {
+    case 'creating':
+      return {
+        label: 'Queued',
+        color: '#d97706',
+        background: 'rgba(245, 158, 11, 0.12)',
+        border: 'rgba(245, 158, 11, 0.2)',
+      };
+    case 'setup':
+    case 'cleaning':
+      return {
+        label: 'Waiting',
+        color: '#64748b',
+        background: 'rgba(148, 163, 184, 0.12)',
+        border: 'rgba(148, 163, 184, 0.2)',
+      };
+    case 'active':
+      return {
+        label: 'Working',
+        color: '#15803d',
+        background: 'rgba(34, 197, 94, 0.12)',
+        border: 'rgba(34, 197, 94, 0.2)',
+      };
+    case 'merging':
+      return {
+        label: 'Reviewing',
+        color: '#7c3aed',
+        background: 'rgba(124, 58, 237, 0.12)',
+        border: 'rgba(124, 58, 237, 0.2)',
+      };
+    case 'stale':
+      return {
+        label: 'Blocked',
+        color: '#dc2626',
+        background: 'rgba(239, 68, 68, 0.1)',
+        border: 'rgba(239, 68, 68, 0.18)',
+      };
+    default:
+      return {
+        label: 'Ready',
+        color: '#2563eb',
+        background: 'rgba(37, 99, 235, 0.12)',
+        border: 'rgba(37, 99, 235, 0.2)',
+      };
+  }
 }
 
 function sanitizeWorkspaceName(value: string) {
@@ -125,6 +206,25 @@ function pointWithinRect(rect: DOMRect, x: number, y: number) {
   return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
 }
 
+function resolveFloatingPanelPosition(anchorRect: DOMRect, width: number) {
+  const viewportWidth = typeof window !== 'undefined' ? window.innerWidth : 1440;
+  const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 900;
+  const margin = 16;
+
+  let left = anchorRect.right + 14;
+  if (left + width + margin > viewportWidth) {
+    left = Math.max(margin, anchorRect.left - width - 14);
+  }
+
+  let top = anchorRect.top;
+  const estimatedHeight = 240;
+  if (top + estimatedHeight + margin > viewportHeight) {
+    top = Math.max(margin, viewportHeight - estimatedHeight - margin);
+  }
+
+  return { left, top };
+}
+
 function defaultWorkspaceName(repoName: string) {
   const stamp = new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
   return `${repoName}-${stamp}`;
@@ -152,11 +252,11 @@ function normalizeSetupDraft(setup: RepoSetupConfig): RepoSetupConfig {
 function repoReadinessPalette(state?: RepoReadinessState) {
   switch (state) {
     case 'ready':
-      return { background: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.16)', color: '#15803d' };
+      return { background: THEME_SUCCESS_SOFT, border: THEME_SUCCESS_BORDER, color: THEME_SUCCESS_TEXT };
     case 'needs_setup':
-      return { background: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.18)', color: '#b45309' };
+      return { background: THEME_ACCENT_SOFT, border: THEME_ACCENT_BORDER, color: THEME_ACCENT };
     case 'blocked':
-      return { background: 'rgba(239,68,68,0.10)', border: 'rgba(239,68,68,0.18)', color: '#b91c1c' };
+      return { background: THEME_DANGER_SOFT, border: THEME_DANGER_BORDER, color: THEME_DANGER_TEXT };
     default:
       return { background: 'var(--t-divider-subtle)', border: 'var(--t-panel-border)', color: 'var(--t-text-secondary)' };
   }
@@ -484,9 +584,9 @@ function mergeRiskLabel(detail: RepoPreviewPullRequestDetail | null): {
   if (!detail) return { label: 'warming', color: '#64748b' };
   if (!detail.mergeable) return { label: 'conflicts', color: '#dc2626' };
   if (detail.checksStatus === 'failure') return { label: 'ci red', color: '#dc2626' };
-  if (detail.checksStatus === 'pending') return { label: 'checks pending', color: '#d97706' };
+  if (detail.checksStatus === 'pending') return { label: 'checks pending', color: THEME_ACCENT };
   if (detail.reviewDecision === 'CHANGES_REQUESTED') return { label: 'changes requested', color: '#dc2626' };
-  if (detail.reviewDecision === 'REVIEW_REQUIRED') return { label: 'review pending', color: '#2563eb' };
+  if (detail.reviewDecision === 'REVIEW_REQUIRED') return { label: 'review pending', color: THEME_ACCENT };
   return { label: 'merge ready', color: '#16a34a' };
 }
 
@@ -494,6 +594,7 @@ function RepoCard({
   repo,
   workspaceNotice,
   onLaunchAgent,
+  onOpenWorkspace,
   onOpenLaunchOptions,
   onOpenGitHub,
   onRemove,
@@ -509,6 +610,7 @@ function RepoCard({
   repo: RepoRegistryEntry;
   workspaceNotice: WorkspaceCreateResult | null;
   onLaunchAgent: (repo: RepoRegistryEntry) => void;
+  onOpenWorkspace: (repo: RepoRegistryEntry) => void;
   onOpenLaunchOptions: (repo: RepoRegistryEntry) => void;
   onOpenGitHub: (repo: RepoRegistryEntry) => void;
   onRemove: (repo: RepoRegistryEntry) => void;
@@ -531,9 +633,10 @@ function RepoCard({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [branches, setBranches] = useState<BranchInfo[]>([]);
   const [branchesLoading, setBranchesLoading] = useState(false);
-  const [branchMenuOpen, setBranchMenuOpen] = useState<string | null>(null);
   const [branchDeleting, setBranchDeleting] = useState<string | null>(null);
   const [branchDeleteConfirm, setBranchDeleteConfirm] = useState<string | null>(null);
+  const [hoveredBranchName, setHoveredBranchName] = useState<string | null>(null);
+  const [branchHoverRect, setBranchHoverRect] = useState<DOMRect | null>(null);
   const [createBranchOpen, setCreateBranchOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
   const [newBranchWorktree, setNewBranchWorktree] = useState(false);
@@ -551,8 +654,12 @@ function RepoCard({
   const [prPreviewLoaded, setPrPreviewLoaded] = useState(false);
   const [prPreviewDetail, setPrPreviewDetail] = useState<RepoPreviewPullRequestDetail | null>(null);
   const [prPreviewDetailLoading, setPrPreviewDetailLoading] = useState(false);
+  const [worktreeSummary, setWorktreeSummary] = useState<RepoWorktreeSummary | null>(null);
+  const [worktreeSummaryLoading, setWorktreeSummaryLoading] = useState(false);
   const hoverOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const branchHoverOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const branchHoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prFetchStartedRef = useRef(false);
 
   useEffect(() => {
@@ -728,6 +835,71 @@ function RepoCard({
       .catch(() => {});
   }, [repo.localPath]);
 
+  const refreshWorktreeSummary = useCallback(async () => {
+    setWorktreeSummaryLoading(true);
+    try {
+      const data = await requestJson<RepoWorktreeSummary>(`/api/worktrees?repo=${encodeURIComponent(repo.localPath)}`);
+      setWorktreeSummary(data);
+    } catch {
+      setWorktreeSummary(null);
+    } finally {
+      setWorktreeSummaryLoading(false);
+    }
+  }, [repo.localPath]);
+
+  const staleWorktrees = useMemo(
+    () => (worktreeSummary?.worktrees ?? []).filter((worktree) => worktree.status === 'stale'),
+    [worktreeSummary],
+  );
+
+  const handleCleanupWorktree = useCallback(async (worktree: WorktreeInfo) => {
+    const confirmed = window.confirm(
+      `Clean up ${worktree.branch}?\n\nThis removes the workspace directory and deletes the branch if possible.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      await requestJson('/api/worktrees', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repo: repo.localPath,
+          action: 'cleanup',
+          worktreeId: worktree.id,
+          force: worktree.status === 'stale',
+          deleteBranch: true,
+        }),
+      });
+      refreshBranches();
+      await refreshWorktreeSummary();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : `Unable to clean up ${worktree.branch}.`);
+    }
+  }, [refreshBranches, refreshWorktreeSummary, repo.localPath]);
+
+  const handlePruneStaleWorktrees = useCallback(async () => {
+    if (staleWorktrees.length === 0) return;
+    const confirmed = window.confirm(
+      `Prune ${staleWorktrees.length} stale workspace${staleWorktrees.length === 1 ? '' : 's'} for ${repo.name}?\n\nThis removes the stale worktree directories and their branches.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      await requestJson('/api/worktrees', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repo: repo.localPath,
+          action: 'prune',
+        }),
+      });
+      refreshBranches();
+      await refreshWorktreeSummary();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Unable to prune stale workspaces.');
+    }
+  }, [refreshBranches, refreshWorktreeSummary, repo.localPath, repo.name, staleWorktrees.length]);
+
   // Delete branch handler
   const handleDeleteBranch = useCallback(async (branchName: string, force?: boolean) => {
     setBranchDeleting(branchName);
@@ -745,11 +917,13 @@ function RepoCard({
         return;
       }
       setBranchDeleteConfirm(null);
-      setBranchMenuOpen(null);
+      setHoveredBranchName(null);
+      setBranchHoverRect(null);
       refreshBranches();
+      void refreshWorktreeSummary();
     } catch { /* silent */ }
     finally { setBranchDeleting(null); }
-  }, [repo.localPath, refreshBranches]);
+  }, [refreshBranches, refreshWorktreeSummary, repo.localPath]);
 
   // Create branch handler
   const handleCreateBranch = useCallback(async () => {
@@ -777,10 +951,13 @@ function RepoCard({
       setCreateBranchOpen(false);
       setNewBranchWorktree(false);
       refreshBranches();
+      if (newBranchWorktree) {
+        void refreshWorktreeSummary();
+      }
     } catch (err) {
       setNewBranchError(err instanceof Error ? err.message : 'Failed');
     } finally { setNewBranchCreating(false); }
-  }, [newBranchName, newBranchWorktree, repo.localPath, repo.defaultBranch, refreshBranches]);
+  }, [newBranchName, newBranchWorktree, refreshBranches, refreshWorktreeSummary, repo.localPath, repo.defaultBranch]);
 
   const githubUrl = useMemo(() => githubUrlFromRemote(repo.remoteUrl), [repo.remoteUrl]);
   const githubSlug = useMemo(() => githubSlugFromRemote(repo.remoteUrl), [repo.remoteUrl]);
@@ -827,6 +1004,8 @@ function RepoCard({
     return () => {
       if (hoverOpenTimerRef.current) clearTimeout(hoverOpenTimerRef.current);
       if (hoverCloseTimerRef.current) clearTimeout(hoverCloseTimerRef.current);
+      if (branchHoverOpenTimerRef.current) clearTimeout(branchHoverOpenTimerRef.current);
+      if (branchHoverCloseTimerRef.current) clearTimeout(branchHoverCloseTimerRef.current);
     };
   }, []);
 
@@ -858,6 +1037,41 @@ function RepoCard({
     }, 140);
   }, []);
 
+  const scheduleBranchHover = useCallback((branchName: string, element: HTMLDivElement, clientX: number, clientY: number) => {
+    const rect = element.getBoundingClientRect();
+    if (!pointWithinRect(rect, clientX, clientY)) return;
+
+    if (branchHoverCloseTimerRef.current) {
+      clearTimeout(branchHoverCloseTimerRef.current);
+      branchHoverCloseTimerRef.current = null;
+    }
+    if (branchHoverOpenTimerRef.current) clearTimeout(branchHoverOpenTimerRef.current);
+    branchHoverOpenTimerRef.current = setTimeout(() => {
+      setHoveredBranchName(branchName);
+      setBranchHoverRect(rect);
+      branchHoverOpenTimerRef.current = null;
+    }, 90);
+  }, []);
+
+  const holdBranchHover = useCallback(() => {
+    if (branchHoverCloseTimerRef.current) {
+      clearTimeout(branchHoverCloseTimerRef.current);
+      branchHoverCloseTimerRef.current = null;
+    }
+  }, []);
+
+  const closeBranchHover = useCallback(() => {
+    if (branchHoverOpenTimerRef.current) {
+      clearTimeout(branchHoverOpenTimerRef.current);
+      branchHoverOpenTimerRef.current = null;
+    }
+    if (branchHoverCloseTimerRef.current) clearTimeout(branchHoverCloseTimerRef.current);
+    branchHoverCloseTimerRef.current = setTimeout(() => {
+      setHoveredBranchName(null);
+      setBranchHoverRect(null);
+    }, 120);
+  }, []);
+
   const previewCheckCounts = useMemo(() => {
     const checks = prPreview[0]?.statusCheckRollup ?? [];
     return {
@@ -874,6 +1088,45 @@ function RepoCard({
     [prPreview],
   );
   const mergeRisk = useMemo(() => mergeRiskLabel(prPreviewDetail), [prPreviewDetail]);
+
+  useEffect(() => {
+    if (!expanded) return;
+    void refreshWorktreeSummary();
+  }, [expanded, refreshWorktreeSummary]);
+
+  useEffect(() => {
+    if (!expanded || !workspaceNotice) return;
+    void refreshWorktreeSummary();
+  }, [expanded, refreshWorktreeSummary, workspaceNotice]);
+
+  const worktreesByBranch = useMemo(
+    () => new Map((worktreeSummary?.worktrees ?? []).map((worktree) => [worktree.branch, worktree])),
+    [worktreeSummary],
+  );
+  const worktreeHealthBanner = useMemo(() => {
+    if (worktreeSummaryLoading) {
+      return {
+        tone: worktreeStageTone('setup'),
+        title: 'Checking workspace health',
+        detail: 'Refreshing isolated workspace status for this repo.',
+      };
+    }
+    if (worktreeSummary && worktreeSummary.conflicts.count > 0) {
+      return {
+        tone: worktreeStageTone('stale'),
+        title: 'Blocked',
+        detail: `${worktreeSummary.conflicts.count} overlapping worktree file${worktreeSummary.conflicts.count === 1 ? '' : 's'} need operator attention before stacking more work.`,
+      };
+    }
+    if (staleWorktrees.length > 0) {
+      return {
+        tone: worktreeStageTone('cleaning'),
+        title: 'Waiting',
+        detail: `${staleWorktrees.length} stale workspace${staleWorktrees.length === 1 ? '' : 's'} can be cleaned up now. ${worktreeSummary ? `${worktreeSummary.worktrees.length} tracked · ${formatBytes(worktreeSummary.totalDiskUsage)}.` : ''}`,
+      };
+    }
+    return null;
+  }, [staleWorktrees.length, worktreeSummary, worktreeSummaryLoading]);
 
   useEffect(() => {
     if (!githubSlug || !prPreview[0]?.number || prPreviewDetail || prPreviewDetailLoading) return;
@@ -918,6 +1171,26 @@ function RepoCard({
     }));
   }, []);
 
+  const handleOpenDesktopPath = useCallback(async (editor: 'finder' | 'terminal', targetPath: string) => {
+    try {
+      await requestJson('/api/panel/open-in', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ editor, repo: targetPath }),
+      });
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : `Unable to open ${shortenPath(targetPath)}.`);
+    }
+  }, []);
+
+  const handleCopyPath = useCallback(async (targetPath: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(targetPath);
+    } catch {
+      window.alert(`Unable to copy the ${label}.`);
+    }
+  }, []);
+
   const cardBackground = isActive
     ? 'linear-gradient(180deg, var(--t-panel) 0%, var(--t-panel-translucent) 100%)'
     : expanded
@@ -957,17 +1230,16 @@ function RepoCard({
       gap: 4,
       padding: compactLayout ? '1px 5px' : '1px 6px',
       borderRadius: 999,
-      background: 'rgba(34,197,94,0.06)',
-      border: '1px solid rgba(34,197,94,0.12)',
+      background: THEME_SUCCESS_SOFT,
+      border: `1px solid ${THEME_SUCCESS_BORDER}`,
       flexShrink: 0,
     }}>
       <span style={{
         width: 6, height: 6, borderRadius: '50%',
-        background: '#22c55e',
-        animation: 'agentCardPulse 2s ease-in-out infinite',
+        background: THEME_SUCCESS_TEXT,
       }} />
       <span style={{
-        fontSize: 10, fontWeight: 600, color: '#16a34a',
+        fontSize: 10, fontWeight: 600, color: THEME_SUCCESS_TEXT,
         fontFamily: '"SF Mono", ui-monospace, monospace',
       }}>
         {activePorts.length === 1 ? `:${activePorts[0]}` : `${activePorts.length} ports`}
@@ -984,7 +1256,6 @@ function RepoCard({
         borderRadius: 999,
         background: THEME_ACCENT_SOFT,
         border: `1px solid ${THEME_ACCENT_BORDER}`,
-        boxShadow: compactLayout ? `0 6px 16px ${THEME_ACCENT_RING}` : `0 8px 20px ${THEME_ACCENT_RING}`,
         flexShrink: 0,
       }}
     >
@@ -1021,6 +1292,7 @@ function RepoCard({
       {mergeRisk.label}
     </span>
   ) : null;
+  const readinessPalette = repo.readiness ? repoReadinessPalette(repo.readiness.state) : null;
   const readinessBadge = repo.readiness ? (
     <span
       style={{
@@ -1028,9 +1300,9 @@ function RepoCard({
         alignItems: 'center',
         padding: compactLayout ? '2px 7px' : '2px 8px',
         borderRadius: 999,
-        background: repoReadinessPalette(repo.readiness.state).background,
-        border: `1px solid ${repoReadinessPalette(repo.readiness.state).border}`,
-        color: repoReadinessPalette(repo.readiness.state).color,
+        background: readinessPalette?.background,
+        border: `1px solid ${readinessPalette?.border}`,
+        color: readinessPalette?.color,
         fontSize: 10,
         fontWeight: 700,
         letterSpacing: '0.04em',
@@ -1085,9 +1357,7 @@ function RepoCard({
         color: menuOpen ? THEME_ACCENT : 'var(--t-text-secondary)',
         cursor: 'pointer',
         flexShrink: 0,
-        boxShadow: menuOpen
-          ? `0 8px 18px ${THEME_ACCENT_RING}`
-          : '0 4px 10px rgba(15, 23, 42, 0.08)',
+        boxShadow: '0 4px 10px rgba(15, 23, 42, 0.08)',
         transition: 'all 140ms ease',
       }}
       onMouseEnter={(e) => {
@@ -1123,7 +1393,7 @@ function RepoCard({
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
         boxShadow: isActive
-          ? `0 18px 34px ${THEME_ACCENT_RING}`
+          ? '0 14px 28px rgba(15, 23, 42, 0.14)'
           : expanded
             ? 'var(--t-panel-shadow)'
             : '0 8px 18px rgba(15, 23, 42, 0.08)',
@@ -1400,13 +1670,14 @@ function RepoCard({
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 4,
-                padding: 0,
-                border: 'none',
-                background: 'transparent',
+                gap: 5,
+                padding: '4px 8px',
+                border: `1px solid ${THEME_ACCENT_BORDER}`,
+                borderRadius: 999,
+                background: THEME_ACCENT_SOFT,
                 color: THEME_ACCENT,
                 fontSize: 11,
-                fontWeight: 500,
+                fontWeight: 700,
                 cursor: 'pointer',
                 fontFamily: '-apple-system, system-ui, sans-serif',
               }}
@@ -1416,17 +1687,39 @@ function RepoCard({
             </button>
             <button
               type="button"
+              onClick={() => onOpenWorkspace(repo)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                padding: '4px 8px',
+                border: '1px solid var(--t-panel-border)',
+                borderRadius: 999,
+                background: 'var(--t-divider-subtle)',
+                color: 'var(--t-text-secondary)',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              <GitBranch size={11} strokeWidth={2} />
+              Create workspace
+            </button>
+            <button
+              type="button"
               onClick={() => onOpenLaunchOptions(repo)}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 4,
-                padding: 0,
-                border: 'none',
-                background: 'transparent',
-                color: 'var(--t-text-muted)',
+                gap: 5,
+                padding: '4px 8px',
+                border: '1px solid var(--t-panel-border)',
+                borderRadius: 999,
+                background: 'var(--t-divider-subtle)',
+                color: 'var(--t-text-secondary)',
                 fontSize: 11,
-                fontWeight: 500,
+                fontWeight: 600,
                 cursor: 'pointer',
                 fontFamily: '-apple-system, system-ui, sans-serif',
               }}
@@ -1543,27 +1836,29 @@ function RepoCard({
             return (
               <div style={{
                 margin: '4px 0',
-                padding: '6px 8px',
-                borderRadius: 8,
-                background: 'rgba(239,68,68,0.03)',
-                border: '1px solid rgba(239,68,68,0.10)',
+                padding: '8px 10px',
+                borderRadius: 10,
+                background: THEME_DANGER_SOFT,
+                border: `1px solid ${THEME_DANGER_BORDER}`,
               }}>
                 {conflicts.map((c) => (
                   <div key={c.branch} style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: 6,
-                    fontSize: 10,
-                    color: '#b91c1c',
+                    fontSize: 10.5,
+                    color: 'var(--t-text)',
                     fontWeight: 600,
                   }}>
-                    <AlertCircle size={11} strokeWidth={2} />
+                    <AlertCircle size={11} strokeWidth={2} style={{ color: THEME_DANGER_TEXT, flexShrink: 0 }} />
                     <span>
                       {c.agents.map(a => a.name).join(' + ')} both on <span style={{
                         fontFamily: '"SF Mono", ui-monospace, monospace',
-                        background: 'rgba(239,68,68,0.06)',
-                        padding: '0 3px',
-                        borderRadius: 3,
+                        background: 'rgba(255,255,255,0.06)',
+                        border: '1px solid rgba(255,255,255,0.08)',
+                        color: THEME_DANGER_TEXT,
+                        padding: '1px 5px',
+                        borderRadius: 999,
                       }}>{c.branch}</span>
                     </span>
                   </div>
@@ -1638,12 +1933,14 @@ function RepoCard({
               style={{
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 4,
+                gap: 6,
                 marginBottom: 8,
-                padding: '8px 10px',
-                borderRadius: 10,
-                border: `1px solid ${repoReadinessPalette(repo.readiness.state).border}`,
-                background: repoReadinessPalette(repo.readiness.state).background,
+                padding: '10px 12px',
+                borderRadius: 12,
+                border: `1px solid ${readinessPalette?.border}`,
+                background: repo.readiness.state === 'blocked'
+                  ? 'linear-gradient(180deg, rgba(239, 68, 68, 0.14) 0%, rgba(239, 68, 68, 0.08) 100%)'
+                  : readinessPalette?.background,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -1653,25 +1950,178 @@ function RepoCard({
                     fontWeight: 700,
                     letterSpacing: '0.06em',
                     textTransform: 'uppercase',
-                    color: repoReadinessPalette(repo.readiness.state).color,
+                    color: readinessPalette?.color,
                   }}
                 >
                   {repo.readiness.label}
                 </span>
                 {repo.readiness.currentBranch ? (
-                  <span style={{ fontSize: 11, color: 'var(--t-text-secondary)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                  <span style={{
+                    fontSize: 11,
+                    color: 'var(--t-text)',
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    padding: '2px 6px',
+                    borderRadius: 999,
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.08)',
+                  }}>
                     {repo.readiness.currentBranch}
                   </span>
                 ) : null}
               </div>
-              <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--t-text-secondary)' }}>
+              <div style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--t-text)' }}>
                 {repo.readiness.summary}
               </div>
               {repo.readiness.nextAction ? (
-                <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--t-text-muted)' }}>
+                <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--t-text-secondary)' }}>
                   {repo.readiness.nextAction}
                 </div>
               ) : null}
+              {repo.readiness.state !== 'ready' ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 2 }}>
+                  <button
+                    type="button"
+                    onClick={() => setSettingsOpen(true)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: 0,
+                      border: 'none',
+                      background: 'transparent',
+                      color: readinessPalette?.color,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                    }}
+                  >
+                    <Settings2 size={11} strokeWidth={2} />
+                    Open setup
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpenWorkspace(repo)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: 0,
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--t-text-secondary)',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                    }}
+                  >
+                    <GitBranch size={11} strokeWidth={2} />
+                    Create workspace anyway
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {worktreeHealthBanner ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                marginBottom: 8,
+                padding: '10px 12px',
+                borderRadius: 12,
+                border: `1px solid ${worktreeHealthBanner.tone.border}`,
+                background: worktreeHealthBanner.tone.background,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.06em',
+                    textTransform: 'uppercase',
+                    color: worktreeHealthBanner.tone.color,
+                  }}
+                >
+                  {worktreeHealthBanner.title}
+                </span>
+                {worktreeSummary && worktreeSummary.worktrees.length > 0 ? (
+                  <span style={{ fontSize: 11, color: 'var(--t-text-secondary)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                    {worktreeSummary.worktrees.length} tracked
+                  </span>
+                ) : null}
+              </div>
+              <div style={{ fontSize: 12, lineHeight: 1.45, color: 'var(--t-text)' }}>
+                {worktreeHealthBanner.detail}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                {staleWorktrees.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => { void handlePruneStaleWorktrees(); }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: 0,
+                      border: 'none',
+                      background: 'transparent',
+                      color: worktreeHealthBanner.tone.color,
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                    }}
+                  >
+                    <Trash2 size={11} strokeWidth={2} />
+                    Clean stale workspaces
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => { void handleOpenDesktopPath('finder', repo.localPath); }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: 0,
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--t-text-secondary)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                  }}
+                >
+                  <FolderOpen size={11} strokeWidth={2} />
+                  Open repo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void handleCopyPath(repo.localPath, 'repo path'); }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: 0,
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--t-text-secondary)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                  }}
+                >
+                  <ExternalLink size={11} strokeWidth={2} />
+                  Copy path
+                </button>
+              </div>
             </div>
           ) : null}
 
@@ -1680,11 +2130,48 @@ function RepoCard({
             {branchesLoading ? (
               <div style={{ fontSize: 11, color: 'var(--t-text-faint)', padding: '4px 0' }}>Loading branches…</div>
             ) : branches.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                 {branches.map((branch) => {
                   const branchAgents = agentsByBranch?.get(branch.name) ?? [];
-                  const visibleBranchAgents = compactLayout ? branchAgents.slice(0, 1) : branchAgents;
-                  const hiddenAgentCount = compactLayout ? Math.max(0, branchAgents.length - visibleBranchAgents.length) : 0;
+                  const isIdleWorktree = branch.isWorktree && branch.isStale;
+                  const isFreshWorktree = branch.isWorktree && !branch.isStale;
+                  const isCurrentBranch = branch.current;
+                  const worktree = worktreesByBranch.get(branch.name);
+                  const worktreeTone = branch.isWorktree
+                    ? worktreeStageTone(worktree?.status ?? (branch.isStale ? 'stale' : 'ready'))
+                    : null;
+                  const canOpenPr = Boolean(
+                    githubUrl
+                    && !branch.current
+                    && branch.name !== repo.defaultBranch
+                    && branch.ahead > 0,
+                  );
+                  const branchAgentLabel = branchAgents.length === 1
+                    ? branchAgents[0]?.name ?? null
+                    : branchAgents.length > 1
+                      ? `${branchAgents.length} agents`
+                      : null;
+                  const branchBaseBackground = isCurrentBranch
+                    ? 'rgba(34, 197, 94, 0.08)'
+                    : isIdleWorktree
+                      ? 'rgba(245, 158, 11, 0.10)'
+                      : isFreshWorktree
+                        ? 'rgba(255, 255, 255, 0.025)'
+                        : 'transparent';
+                  const branchBorder = isCurrentBranch
+                    ? `1px solid ${THEME_SUCCESS_BORDER}`
+                    : isIdleWorktree
+                      ? `1px solid ${THEME_WORKTREE_BORDER}`
+                      : isFreshWorktree
+                        ? '1px solid rgba(255,255,255,0.08)'
+                        : '1px solid transparent';
+                  const branchHoverBackground = isIdleWorktree
+                    ? 'rgba(245, 158, 11, 0.12)'
+                    : isFreshWorktree
+                      ? 'rgba(255, 255, 255, 0.04)'
+                      : isCurrentBranch
+                        ? 'rgba(34, 197, 94, 0.10)'
+                        : 'rgba(255, 255, 255, 0.04)';
                   return (
                   <div key={branch.name}>
                   <div
@@ -1693,17 +2180,27 @@ function RepoCard({
                         handleCheckout(branch.name);
                       }
                     }}
+                    onMouseEnter={(e) => {
+                      const target = e.currentTarget as HTMLDivElement;
+                      target.style.background = branchHoverBackground;
+                      scheduleBranchHover(branch.name, target, e.clientX, e.clientY);
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLDivElement).style.background = branchBaseBackground;
+                      closeBranchHover();
+                    }}
                   style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 6,
-                      padding: '5px 6px',
-                      borderRadius: 8,
+                      minHeight: 34,
+                      padding: '6px 8px',
+                      borderRadius: 10,
+                      background: branchBaseBackground,
+                      border: branchBorder,
                       cursor: branch.current ? 'default' : checkoutBusy ? 'wait' : 'pointer',
-                      transition: 'background 120ms ease',
+                      transition: 'background 120ms ease, border-color 120ms ease',
                     }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = THEME_ACCENT_SOFT; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
                   >
                     {/* Branch icon — colored by type */}
                     <GitBranch
@@ -1711,14 +2208,14 @@ function RepoCard({
                       strokeWidth={2}
                       style={{
                         flexShrink: 0,
-                        color: branch.current ? '#22c55e' : branch.isWorktree ? '#f59e0b' : 'var(--t-text-muted)',
+                        color: branch.current ? THEME_SUCCESS_TEXT : branch.isWorktree ? THEME_WORKTREE_TEXT : 'var(--t-text-muted)',
                       }}
                     />
                     {/* Branch name */}
                     <span style={{
                       fontSize: 12,
-                      fontWeight: branch.current ? 600 : 400,
-                      color: branch.current ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                      fontWeight: branch.current || branch.isWorktree ? 650 : 560,
+                      color: isIdleWorktree ? THEME_WORKTREE_TEXT : 'var(--t-text)',
                       fontFamily: '"SF Mono", ui-monospace, monospace',
                       flex: 1,
                       minWidth: 0,
@@ -1733,7 +2230,11 @@ function RepoCard({
                       <span style={{
                         fontSize: 9,
                         fontWeight: 700,
-                        color: '#22c55e',
+                        color: THEME_SUCCESS_TEXT,
+                        padding: '1px 6px',
+                        borderRadius: 999,
+                        background: THEME_SUCCESS_SOFT,
+                        border: `1px solid ${THEME_SUCCESS_BORDER}`,
                         textTransform: 'uppercase',
                         letterSpacing: '0.04em',
                         flexShrink: 0,
@@ -1741,63 +2242,20 @@ function RepoCard({
                         current
                       </span>
                     ) : null}
-                    {/* Agent indicators */}
-                    {visibleBranchAgents.map((agent) => (
-                      <span
-                        key={agent.sessionKey}
-                        title={agent.name}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 3,
-                          padding: '1px 5px',
-                          borderRadius: 4,
-                          background: `${agent.color}08`,
-                          border: `1px solid ${agent.color}18`,
-                          fontSize: 9,
-                          fontWeight: 600,
-                          color: agent.color,
-                          flexShrink: 0,
-                        }}
-                      >
-                        <span style={{
-                          width: 5, height: 5, borderRadius: '50%',
-                          background: agent.color,
-                          flexShrink: 0,
-                        }} />
-                        {agent.name}
-                      </span>
-                    ))}
-                    {hiddenAgentCount > 0 ? (
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          padding: '1px 5px',
-                          borderRadius: 4,
-                          background: 'rgba(99, 102, 241, 0.08)',
-                          border: '1px solid rgba(99, 102, 241, 0.12)',
-                          fontSize: 9,
-                          fontWeight: 700,
-                          color: '#4f46e5',
-                          flexShrink: 0,
-                        }}
-                      >
-                        +{hiddenAgentCount}
-                      </span>
-                    ) : null}
                     {/* Worktree badge */}
-                    {branch.isWorktree && !branch.current ? (
+                    {branch.isWorktree && !branch.current && worktreeTone ? (
                       <span style={{
                         fontSize: 9,
-                        fontWeight: 600,
-                        color: '#f59e0b',
-                        padding: '1px 5px',
-                        borderRadius: 4,
-                        background: 'rgba(245, 158, 11, 0.08)',
+                        fontWeight: 700,
+                        color: worktreeTone.color,
+                        padding: '1px 6px',
+                        borderRadius: 999,
+                        background: worktreeTone.background,
+                        border: `1px solid ${worktreeTone.border}`,
+                        letterSpacing: '0.03em',
                         flexShrink: 0,
                       }}>
-                        worktree
+                        {worktreeTone.label}
                       </span>
                     ) : null}
                     {/* Stale badge */}
@@ -1805,162 +2263,122 @@ function RepoCard({
                       <span style={{
                         fontSize: 9,
                         fontWeight: 600,
-                        color: '#d97706',
+                        color: isIdleWorktree ? THEME_WORKTREE_TEXT : 'var(--t-text-muted)',
                         padding: '1px 5px',
                         borderRadius: 4,
-                        background: 'rgba(217, 119, 6, 0.06)',
+                        background: isIdleWorktree ? THEME_WORKTREE_SOFT : 'var(--t-divider-subtle)',
+                        border: `1px solid ${isIdleWorktree ? THEME_WORKTREE_BORDER : 'var(--t-panel-border)'}`,
                         flexShrink: 0,
                       }}>
                         {branch.staleDays}d idle
                       </span>
                     ) : null}
-                    {/* Disk size for worktrees */}
-                    {!compactLayout && branch.diskSize ? (
-                      <span style={{
-                        fontSize: 9,
-                        color: 'var(--t-text-faint)',
-                        fontFamily: '"SF Mono", ui-monospace, monospace',
-                        flexShrink: 0,
-                      }}>
-                        {branch.diskSize}
-                      </span>
-                    ) : null}
-                    {/* Ahead/behind */}
-                    {!compactLayout && (branch.ahead > 0 || branch.behind > 0) ? (
+                    {branchAgentLabel ? (
                       <span style={{
                         fontSize: 9,
                         fontWeight: 600,
-                        color: 'var(--t-text-faint)',
-                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                        color: 'var(--t-text-secondary)',
+                        padding: '1px 6px',
+                        borderRadius: 999,
+                        background: 'var(--t-divider-subtle)',
+                        border: '1px solid var(--t-panel-border)',
                         flexShrink: 0,
                       }}>
-                        {branch.ahead > 0 ? `↑${branch.ahead}` : ''}{branch.behind > 0 ? `↓${branch.behind}` : ''}
+                        {branchAgentLabel}
                       </span>
                     ) : null}
-                    {/* Commit age */}
-                    <span style={{
-                      fontSize: 10,
-                      color: branch.isStale ? '#d97706' : 'var(--t-text-faint)',
-                      flexShrink: 0,
-                    }}>
-                      {branch.lastCommitAge}
-                    </span>
-                    {/* Open PR button — on feature branches with commits ahead */}
-                    {!compactLayout && !branch.current && branch.name !== repo.defaultBranch && branch.ahead > 0 ? (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          const ghUrl = githubUrlFromRemote(repo.remoteUrl);
-                          if (ghUrl) {
-                            window.open(`${ghUrl}/compare/${branch.name}?expand=1`, '_blank');
-                          }
-                        }}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 3,
-                          padding: '1px 6px',
-                          borderRadius: 4,
-                          border: `1px solid ${THEME_ACCENT_BORDER}`,
-                          background: THEME_ACCENT_SOFT,
-                          color: THEME_ACCENT,
-                          fontSize: 9,
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          flexShrink: 0,
-                        }}
-                        title={`Open PR for ${branch.name}`}
-                      >
-                        PR
-                      </button>
-                    ) : null}
-                    {/* Overflow menu — not on current/protected */}
-                    {!branch.current ? (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setBranchMenuOpen(branchMenuOpen === branch.name ? null : branch.name);
-                        }}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          width: 24,
-                          height: 24,
-                          borderRadius: 8,
-                          border: branchMenuOpen === branch.name ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
-                          background: branchMenuOpen === branch.name ? THEME_ACCENT_SOFT : THEME_BG_CARD,
-                          color: branchMenuOpen === branch.name ? THEME_ACCENT : 'var(--t-text-secondary)',
-                          cursor: 'pointer',
-                          flexShrink: 0,
-                          transition: 'all 120ms ease',
-                          boxShadow: '0 3px 8px rgba(15, 23, 42, 0.08)',
-                        }}
-                        onMouseEnter={(e) => {
-                          const target = e.currentTarget as HTMLButtonElement;
-                          if (branchMenuOpen !== branch.name) {
-                            target.style.background = THEME_ACCENT_SOFT;
-                            target.style.borderColor = THEME_ACCENT_BORDER;
-                            target.style.color = THEME_ACCENT;
-                          }
-                        }}
-                        onMouseLeave={(e) => {
-                          const target = e.currentTarget as HTMLButtonElement;
-                          if (branchMenuOpen !== branch.name) {
-                            target.style.background = THEME_BG_CARD;
-                            target.style.borderColor = 'var(--t-panel-border)';
-                            target.style.color = 'var(--t-text-secondary)';
-                          }
-                        }}
-                        aria-label={`Open branch actions for ${branch.name}`}
-                      >
-                        <OverflowDotsIcon color="currentColor" />
-                      </button>
-                    ) : null}
                   </div>
-                  {/* Branch overflow menu */}
-                  {branchMenuOpen === branch.name ? (
-                    <div style={{
-                      marginLeft: 30 + 6,
-                      marginBottom: 4,
-                      padding: '3px 0',
-                      borderRadius: 8,
-                      border: '1px solid var(--t-panel-border)',
-                      background: THEME_PANEL_GLASS,
-                      backdropFilter: 'blur(16px)',
-                      width: 'fit-content',
-                      minWidth: 120,
-                    }}>
-                      {[
-                        { label: 'Open PR', action: () => { setBranchMenuOpen(null); window.open(`${githubUrlFromRemote(repo.remoteUrl)}/compare/${branch.name}?expand=1`, '_blank'); } },
-                        { label: 'Delete', action: () => handleDeleteBranch(branch.name), danger: true },
-                      ].map((item) => (
-                        <button
-                          key={item.label}
-                          type="button"
-                          onClick={(e) => { e.stopPropagation(); item.action(); }}
-                          disabled={branchDeleting === branch.name}
-                          style={{
-                            display: 'block',
-                            width: '100%',
-                            padding: '5px 10px',
-                            border: 'none',
-                            background: 'transparent',
-                            color: item.danger ? '#dc2626' : 'var(--t-text)',
-                            fontSize: 11,
-                            fontWeight: 500,
-                            cursor: 'pointer',
-                            textAlign: 'left',
-                            fontFamily: '-apple-system, system-ui, sans-serif',
-                            opacity: branchDeleting === branch.name ? 0.5 : 1,
-                          }}
-                        >
-                          {branchDeleting === branch.name && item.danger ? 'Deleting…' : item.label}
-                        </button>
-                      ))}
-                    </div>
+                  {hoveredBranchName === branch.name && branchHoverRect && typeof document !== 'undefined' ? createPortal(
+                    <div
+                      onMouseEnter={holdBranchHover}
+                      onMouseLeave={closeBranchHover}
+                      style={{
+                        position: 'fixed',
+                        zIndex: 10000,
+                        width: 320,
+                        padding: '14px 15px 13px',
+                        borderRadius: 18,
+                        border: '1px solid var(--t-panel-border)',
+                        background: 'linear-gradient(180deg, rgba(68, 75, 85, 0.96), rgba(54, 60, 69, 0.94))',
+                        backdropFilter: 'blur(28px) saturate(1.2)',
+                        WebkitBackdropFilter: 'blur(28px) saturate(1.2)',
+                        boxShadow: '0 22px 56px rgba(0, 0, 0, 0.28), 0 8px 24px rgba(15, 23, 42, 0.12)',
+                        color: 'var(--t-text)',
+                        ...resolveFloatingPanelPosition(branchHoverRect, 320),
+                      }}
+                    >
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: worktreeTone?.color ?? (branch.current ? THEME_SUCCESS_TEXT : THEME_ACCENT) }}>
+                        {branch.isWorktree ? (worktreeTone?.label ?? 'Worktree') : branch.current ? 'Current Branch' : 'Branch'}
+                      </div>
+                      <div style={{ marginTop: 6, fontSize: 15, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--t-text)' }}>
+                        {branch.name}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', borderRadius: 999, padding: '3px 8px' }}>
+                          {branch.lastCommitAge}
+                        </span>
+                        {branch.ahead > 0 || branch.behind > 0 ? (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', borderRadius: 999, padding: '3px 8px', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                            {branch.ahead > 0 ? `↑${branch.ahead}` : ''}{branch.behind > 0 ? ` ↓${branch.behind}` : ''}
+                          </span>
+                        ) : null}
+                        {branch.diskSize ? (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', borderRadius: 999, padding: '3px 8px', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                            {branch.diskSize}
+                          </span>
+                        ) : null}
+                        {worktree ? (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: worktreeTone?.color ?? THEME_WORKTREE_TEXT, background: worktreeTone?.background ?? THEME_WORKTREE_SOFT, border: `1px solid ${worktreeTone?.border ?? THEME_WORKTREE_BORDER}`, borderRadius: 999, padding: '3px 8px' }}>
+                            {worktree.status === 'stale' ? 'Needs cleanup' : 'Workspace tracked'}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
+                        {branch.lastCommitMessage || (branch.current ? 'Current branch checked out in this repository.' : 'Click the row to switch to this branch.')}
+                      </div>
+                      {worktree?.path ? (
+                        <div style={{ marginTop: 8, fontSize: 10, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace', lineHeight: 1.5 }}>
+                          {shortenPath(worktree.path)}
+                        </div>
+                      ) : null}
+                      <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--t-divider-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>
+                          {branch.current ? 'Current branch' : 'Click row to switch'}
+                        </span>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          {worktree ? (
+                            <RepoActionButton
+                              label="Open workspace"
+                              icon={<FolderOpen size={12} strokeWidth={2} />}
+                              onClick={() => { void handleOpenDesktopPath('finder', worktree.path); }}
+                            />
+                          ) : null}
+                          {canOpenPr ? (
+                            <RepoActionButton
+                              label="Open PR"
+                              icon={<ExternalLink size={12} strokeWidth={2} />}
+                              onClick={() => window.open(`${githubUrl}/compare/${branch.name}?expand=1`, '_blank')}
+                              active
+                            />
+                          ) : null}
+                          {!branch.current ? (
+                            <RepoActionButton
+                              label={worktree?.status === 'stale' ? 'Clean up worktree' : branch.isWorktree ? 'Delete worktree' : 'Delete branch'}
+                              icon={<Trash2 size={12} strokeWidth={2} />}
+                              onClick={() => {
+                                if (worktree?.status === 'stale') {
+                                  void handleCleanupWorktree(worktree);
+                                  return;
+                                }
+                                handleDeleteBranch(branch.name);
+                              }}
+                              danger
+                            />
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>,
+                    document.body,
                   ) : null}
                   {/* Force delete confirmation */}
                   {branchDeleteConfirm === branch.name ? (
@@ -2020,12 +2438,12 @@ function RepoCard({
             <div style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: 6,
-              padding: '6px 6px',
-              marginTop: 2,
-              borderRadius: 8,
-              background: 'rgba(37,99,235,0.03)',
-              border: '1px solid rgba(37,99,235,0.08)',
+              gap: 8,
+              padding: '10px',
+              marginTop: 6,
+              borderRadius: 12,
+              background: 'var(--t-divider-subtle)',
+              border: '1px solid var(--t-panel-border)',
             }}>
               <input
                 value={newBranchName}
@@ -2035,23 +2453,29 @@ function RepoCard({
                 onKeyDown={(e) => { if (e.key === 'Enter') handleCreateBranch(); if (e.key === 'Escape') { setCreateBranchOpen(false); setNewBranchName(''); } }}
                 style={{
                   width: '100%',
-                  padding: '6px 8px',
-                  borderRadius: 6,
-                  border: '1px solid var(--t-btn-secondary-border)',
-                  background: 'rgba(255,255,255,0.7)',
+                  minHeight: 42,
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: '1px solid var(--t-input-border)',
+                  background: 'var(--t-input-bg)',
                   fontSize: 12,
                   fontFamily: '"SF Mono", ui-monospace, monospace',
                   outline: 'none',
                   color: 'var(--t-text)',
                 }}
               />
+              <div style={{ fontSize: 10, lineHeight: 1.45, color: 'var(--t-text-muted)' }}>
+                {newBranchWorktree
+                  ? `Create an isolated worktree from ${repo.defaultBranch}.`
+                  : `Create a branch from ${repo.defaultBranch}.`}
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 10, color: 'var(--t-text-secondary)' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 10, color: 'var(--t-text-secondary)' }}>
                   <input
                     type="checkbox"
                     checked={newBranchWorktree}
                     onChange={(e) => setNewBranchWorktree(e.currentTarget.checked)}
-                    style={{ accentColor: '#ef4444' }}
+                    style={{ accentColor: '#f59e0b' }}
                   />
                   Create worktree
                 </label>
@@ -2059,7 +2483,15 @@ function RepoCard({
                 <button
                   type="button"
                   onClick={() => { setCreateBranchOpen(false); setNewBranchName(''); setNewBranchError(null); }}
-                  style={{ fontSize: 10, color: 'var(--t-text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px' }}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    color: 'var(--t-text-secondary)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '4px 6px',
+                  }}
                 >
                   Cancel
                 </button>
@@ -2070,11 +2502,11 @@ function RepoCard({
                   style={{
                     fontSize: 10,
                     fontWeight: 700,
-                    color: '#fff',
-                    background: '#2563eb',
-                    border: 'none',
-                    borderRadius: 5,
-                    padding: '3px 8px',
+                    color: THEME_ACCENT,
+                    background: THEME_ACCENT_SOFT,
+                    border: `1px solid ${THEME_ACCENT_BORDER}`,
+                    borderRadius: 999,
+                    padding: '6px 10px',
                     cursor: newBranchCreating || !newBranchName.trim() ? 'not-allowed' : 'pointer',
                     opacity: newBranchCreating || !newBranchName.trim() ? 0.5 : 1,
                   }}
@@ -2202,7 +2634,15 @@ function RepoCard({
           {(() => {
             const staleBranches = branches.filter(b => b.isStale);
             if (staleBranches.length === 0) return null;
-            const totalDisk = staleBranches.filter(b => b.diskSize).map(b => b.diskSize!).join(' + ');
+            const idleWorktreeBranches = staleBranches.filter((branch) => branch.isWorktree);
+            const staleRegularBranches = staleBranches.filter((branch) => !branch.isWorktree);
+            const totalDisk = worktreeSummary?.totalDiskUsage
+              ? formatBytes(worktreeSummary.totalDiskUsage)
+              : staleBranches.filter((branch) => branch.diskSize).map((branch) => branch.diskSize!).join(' + ');
+            const hasIdleWorktree = idleWorktreeBranches.length > 0;
+            const summaryLabel = hasIdleWorktree
+              ? `${idleWorktreeBranches.length} idle worktree${idleWorktreeBranches.length > 1 ? 's' : ''}${staleRegularBranches.length > 0 ? ` · ${staleRegularBranches.length} stale branch${staleRegularBranches.length > 1 ? 'es' : ''}` : ''}`
+              : `${staleRegularBranches.length} stale branch${staleRegularBranches.length > 1 ? 'es' : ''}`;
             return (
               <div style={{
                 display: 'flex',
@@ -2211,18 +2651,22 @@ function RepoCard({
                 padding: '6px 8px',
                 marginTop: 4,
                 borderRadius: 8,
-                background: 'rgba(217, 119, 6, 0.04)',
-                border: '1px solid rgba(217, 119, 6, 0.1)',
+                background: hasIdleWorktree ? 'rgba(245, 158, 11, 0.08)' : 'var(--t-divider-subtle)',
+                border: hasIdleWorktree ? `1px solid ${THEME_WORKTREE_BORDER}` : '1px solid var(--t-panel-border)',
               }}>
-                <AlertCircle size={11} strokeWidth={2} style={{ color: '#d97706', flexShrink: 0 }} />
-                <span style={{ fontSize: 10, color: '#92400e', flex: 1 }}>
-                  {staleBranches.length} stale branch{staleBranches.length > 1 ? 'es' : ''}
+                <AlertCircle size={11} strokeWidth={2} style={{ color: hasIdleWorktree ? THEME_WORKTREE_TEXT : 'var(--t-text-secondary)', flexShrink: 0 }} />
+                <span style={{ fontSize: 10, color: hasIdleWorktree ? THEME_WORKTREE_TEXT : 'var(--t-text-secondary)', flex: 1, fontWeight: 600 }}>
+                  {summaryLabel}
                   {totalDisk ? ` · ${totalDisk}` : ''}
                 </span>
                 <button
                   type="button"
                   onClick={async (e) => {
                     e.stopPropagation();
+                    if (hasIdleWorktree) {
+                      await handlePruneStaleWorktrees();
+                      return;
+                    }
                     for (const sb of staleBranches) {
                       await handleDeleteBranch(sb.name, true);
                     }
@@ -2230,7 +2674,7 @@ function RepoCard({
                   style={{
                     fontSize: 10,
                     fontWeight: 600,
-                    color: '#d97706',
+                    color: hasIdleWorktree ? THEME_WORKTREE_TEXT : 'var(--t-text-secondary)',
                     background: 'none',
                     border: 'none',
                     cursor: 'pointer',
@@ -2239,7 +2683,7 @@ function RepoCard({
                     fontFamily: '-apple-system, system-ui, sans-serif',
                   }}
                 >
-                  Clean up
+                  {hasIdleWorktree ? 'Prune' : 'Clean up'}
                 </button>
               </div>
             );
@@ -2249,15 +2693,15 @@ function RepoCard({
           <div
             style={{
               fontSize: 10,
-              color: 'var(--t-text-faint)',
+              color: 'var(--t-text-muted)',
               fontFamily: '"SF Mono", ui-monospace, monospace',
               lineHeight: 1.6,
-              marginTop: 4,
+              marginTop: 6,
             }}
           >
-            <div>{shortenPath(repo.localPath)}</div>
+            <div style={{ color: 'var(--t-text-secondary)' }}>{shortenPath(repo.localPath)}</div>
             {repo.remoteUrl ? (
-              <div>{repo.remoteUrl.replace(/^https?:\/\//, '')}</div>
+              <div style={{ color: 'var(--t-text-faint)' }}>{repo.remoteUrl.replace(/^https?:\/\//, '')}</div>
             ) : null}
           </div>
         </div>
@@ -2632,6 +3076,7 @@ export function RepoRegistrySection({
       window.removeEventListener(FOCUS_REPO_SETUP_EVENT, handleFocusRepoSetup as EventListener);
     };
   }, [repos, setReposOpen]);
+
   const [launchError, setLaunchError] = useState<string | null>(null);
 
   const [removeTarget, setRemoveTarget] = useState<RepoRegistryEntry | null>(null);
@@ -2930,6 +3375,28 @@ export function RepoRegistrySection({
     setWorkspaceLoading(false);
   }, []);
 
+  useEffect(() => {
+    const handleOpenRepoWorkspace = (event: Event) => {
+      const detail = (event as CustomEvent<OpenRepoWorkspaceDetail>).detail;
+      if (!detail) return;
+      const targetRepo = repos.find((repo) => repo.id === detail.repoId || repo.localPath === detail.repoPath);
+      if (!targetRepo) return;
+      setReposOpen(true);
+      setExpandedRepoId(targetRepo.id);
+      openWorkspaceModal(targetRepo);
+      try {
+        sessionStorage.setItem('cortex-repo-expanded-id', targetRepo.id);
+      } catch {
+        // Ignore session storage failures and still reveal the repo.
+      }
+    };
+
+    window.addEventListener(OPEN_REPO_WORKSPACE_EVENT, handleOpenRepoWorkspace as EventListener);
+    return () => {
+      window.removeEventListener(OPEN_REPO_WORKSPACE_EVENT, handleOpenRepoWorkspace as EventListener);
+    };
+  }, [openWorkspaceModal, repos, setReposOpen]);
+
   const handleCreateWorkspace = useCallback(async () => {
     if (!workspaceRepo) return;
 
@@ -3200,6 +3667,7 @@ export function RepoRegistrySection({
                     window.alert(error instanceof Error ? error.message : 'Unable to launch workspace agent.');
                   });
                 }}
+                onOpenWorkspace={openWorkspaceModal}
                 onOpenLaunchOptions={openLaunchModal}
                 onOpenGitHub={handleOpenGitHub}
                 onRemove={setRemoveTarget}
