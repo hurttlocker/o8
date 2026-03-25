@@ -304,7 +304,7 @@ const TabContent = memo(function TabContent({
     case 'readme':
       return <ReadmeViewer workspace={tab.resourceId} />;
     case 'ci':
-      return <CIViewer repo={tab.meta?.repo} />;
+      return <CIViewer repo={tab.meta?.repo} initialRunId={tab.meta?.selectedRun ? parseInt(tab.meta.selectedRun, 10) : undefined} />;
     case 'new-issue':
       return <IssueCreator repo={tab.meta?.repo} />;
     case 'git-log':
@@ -2748,7 +2748,7 @@ function ciIcon(conclusion: string, status: string): string {
   return '○';
 }
 
-function CIViewer({ repo }: { repo?: string }) {
+function CIViewer({ repo, initialRunId }: { repo?: string; initialRunId?: number }) {
   const [runs, setRuns] = useState<CIRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRun, setSelectedRun] = useState<number | null>(null);
@@ -2764,13 +2764,18 @@ function CIViewer({ repo }: { repo?: string }) {
       .then(r => r.json())
       .then(data => {
         if (!cancelled) {
-          setRuns(data.runs ?? []);
+          const nextRuns = data.runs ?? [];
+          setRuns(nextRuns);
+          if (typeof initialRunId === 'number') {
+            const matchingRun = nextRuns.find((run: CIRun) => run.databaseId === initialRunId);
+            setSelectedRun(matchingRun ? initialRunId : null);
+          }
           setLoading(false);
         }
       })
       .catch(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [repo]);
+  }, [initialRunId, repo]);
 
   useEffect(() => {
     if (!selectedRun) { setRunDetail(null); setLogs(''); return; }
