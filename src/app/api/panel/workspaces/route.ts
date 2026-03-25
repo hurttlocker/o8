@@ -6,6 +6,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fetchGitHubPullRequestSummaries, normalizeRepoSlug } from '@/lib/github-broker';
 import { listRepos } from '@/lib/repos/registry';
+import { getRepoReadiness } from '@/lib/repos/readiness';
+import type { RepoReadiness } from '@/lib/repos/types';
+import { deriveWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
 
 // PR data cache — shared across requests, per repo
 const prCache = new Map<string, { prs: PRData[]; ts: number }>();
@@ -47,6 +50,8 @@ interface WorkspaceEntry {
   } | null;
   // Derived status
   status: 'in_progress' | 'in_review' | 'done' | 'idle' | 'cancelled';
+  readiness?: RepoReadiness;
+  workflowStage?: WorkflowStageBadge | null;
 }
 
 function deriveRepo(workspace: string): string {
@@ -180,11 +185,21 @@ export async function GET(req: Request) {
 
     const registeredRepos = await listRepos().catch(() => []);
     const repoSlugByName = new Map<string, string>();
+    const repoReadinessByName = new Map<string, RepoReadiness>();
     for (const entry of registeredRepos) {
       const slug = normalizeRepoSlug(entry.remoteUrl);
       if (!slug) continue;
       repoSlugByName.set(entry.name, slug);
     }
+    await Promise.all(
+      registeredRepos.map(async (entry) => {
+        try {
+          repoReadinessByName.set(entry.name, await getRepoReadiness(entry));
+        } catch {
+          // Keep readiness optional if git/fs checks fail.
+        }
+      }),
+    );
     const fallbackSlugMap: Record<string, string> = {
       'cortex': 'hurttlocker/cortex',
       'parasite-network': 'hurttlocker/parasite-network',
@@ -291,6 +306,14 @@ export async function GET(req: Request) {
           url: pr.url || `https://github.com/${ghRepo}/pull/${pr.number}`,
         } : null,
         status,
+        readiness: repoReadinessByName.get(repoName),
+        workflowStage: deriveWorkflowStage({
+          runtimeStatus: s.status,
+          workspaceStatus: status === 'in_review' ? 'in_review' : status === 'done' ? 'done' : null,
+          readinessState: repoReadinessByName.get(repoName)?.state ?? null,
+          prState: pr?.mergedAt ? 'merged' : pr?.state ?? null,
+          hasMessages: status !== 'idle',
+        }),
       });
     }
 

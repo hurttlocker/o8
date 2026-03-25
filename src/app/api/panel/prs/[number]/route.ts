@@ -11,6 +11,18 @@ import {
   reviewGitHubPullRequest,
   resolveRepoSlug,
 } from '@/lib/github-broker';
+import { listRepos } from '@/lib/repos/registry';
+import { getRepoReadiness } from '@/lib/repos/readiness';
+import { deriveWorkflowStage } from '@/lib/workflows/status';
+
+function normalizeRepoSlug(remoteUrl: string | null | undefined) {
+  if (!remoteUrl) return null;
+  const normalized = remoteUrl
+    .replace(/\.git$/, '')
+    .replace(/^git@github\.com:/, 'https://github.com/');
+  const match = normalized.match(/github\.com\/([^/]+\/[^/]+)$/);
+  return match?.[1] ?? null;
+}
 
 export async function GET(
   request: Request,
@@ -34,6 +46,19 @@ export async function GET(
       fetchGitHubPullRequestDetail(repo, prNum),
       fetchGitHubPullRequestComments(repo, prNum),
     ]);
+    const localRepo = (await listRepos().catch(() => []))
+      .find((entry) => normalizeRepoSlug(entry.remoteUrl) === repo) ?? null;
+    const readiness = localRepo ? await getRepoReadiness(localRepo).catch(() => null) : null;
+    const failedChecks = (pr.statusCheckRollup ?? []).filter((check) => check.conclusion && check.conclusion.toLowerCase() !== 'success').length;
+    const pendingChecks = (pr.statusCheckRollup ?? []).filter((check) => !check.conclusion || check.status?.toLowerCase() !== 'completed').length;
+    const requestedChanges = (commentsData.reviews ?? []).filter((review) => review.state?.toLowerCase() === 'changes_requested').length;
+    const workflowStage = deriveWorkflowStage({
+      prState: pr.state,
+      failedChecks,
+      pendingChecks,
+      requestedChanges,
+      readinessState: readiness?.state ?? null,
+    });
 
     const diffStat = pr.files
       .map((file) => `${file.path} | +${file.additions} -${file.deletions}`)
@@ -43,6 +68,8 @@ export async function GET(
       pr: {
         ...pr,
         resolvedRepo: repo,
+        readiness,
+        workflowStage,
         reviewComments: commentsData.comments,
         issueComments: commentsData.issueComments,
         diffStat,

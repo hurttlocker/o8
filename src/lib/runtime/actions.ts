@@ -1,6 +1,7 @@
 import type { AgentSummary } from '@/lib/fleet/types';
 import { continueOwnedCodexSession, interruptOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
 import { abortOpenClawSession, steerOpenClawSession } from '@/lib/openclaw/chat';
+import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime, type RuntimeId } from '@/lib/runtimes';
 import { linkSessionToWorktree, prepareLaunchWorktree } from '@/lib/worktree';
@@ -93,6 +94,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   }
 
   const supportsWorktrees = runtimeId === 'codex' || runtimeId === 'claude-code';
+  const repoEntry = supportsWorktrees ? await findRepoByLocalPath(repoPath).catch(() => null) : null;
   const launchWorktree = supportsWorktrees
     ? await prepareLaunchWorktree({
         repoRoot: repoPath,
@@ -101,6 +103,8 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
         baseBranch: payload.baseBranch?.trim() || undefined,
         isolate: payload.isolate,
         skipSetup: payload.skipSetup,
+        envMode: repoEntry?.setup.envMode,
+        envFiles: repoEntry?.setup.envFiles,
       })
     : null;
 

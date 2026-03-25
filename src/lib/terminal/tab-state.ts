@@ -3,6 +3,16 @@
  * Stored per workspace tile under ~/.cortex-ide/terminal-states/<scope>.json
  */
 
+import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+
+export interface PersistedChatCheckpoint {
+  id: string;
+  label: string;
+  createdAt: number;
+  sourceMessageId?: string;
+  messages: MobileTranscriptEntry[];
+}
+
 export interface PersistedTab {
   id: string;
   label: string;
@@ -14,6 +24,8 @@ export interface PersistedTab {
   chatRuntime?: 'codex' | 'claude-code' | 'openclaw'; // for kind='chat' (CLI Session)
   chatSessionKey?: string; // for kind='chat' (CLI Session)
   chatModel?: string;
+  chatContinueLatest?: boolean;
+  chatCheckpoints?: PersistedChatCheckpoint[];
   linkedIssue?: {
     repo: string;
     number: number;

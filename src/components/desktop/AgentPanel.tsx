@@ -52,6 +52,7 @@ import { formatModelLabel } from '@/lib/format';
 import type { RuntimeSurfaceSummary } from '@/lib/fleet/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { RepoReadiness } from '@/lib/repos/types';
+import { deriveWorkflowStage, describeWorkflowStage, pickDominantWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
 
 // ── Types ──
 
@@ -65,6 +66,7 @@ interface AgentDetail {
   status: string;
   currentTask: string;
   workspace: string;
+  repo?: string;
   sessionKey: string;
   lastEventAt: string;
   surfaceLabel: string;
@@ -86,6 +88,7 @@ interface AgentDetail {
   localDiff?: { additions: number; deletions: number; changedFiles: number };
   activity?: { coding: number; thinking: number; testing: number; idle: number };
   workspaceStatus?: 'in_progress' | 'in_review' | 'done' | 'idle' | 'cancelled';
+  workflowStage?: WorkflowStageBadge | null;
   tmuxSession?: string;
   runtimeSurface?: RuntimeSurfaceSummary;
   worktree?: WorktreeInfo;
@@ -882,6 +885,8 @@ function WorkspaceHero({
   repoSlug,
   branch,
   readiness,
+  workflowStage,
+  workflowNextAction,
   workspaceLabel,
   changedFiles,
   activeRuns,
@@ -895,6 +900,8 @@ function WorkspaceHero({
   repoSlug?: string | null;
   branch?: string | null;
   readiness?: RepoReadiness | null;
+  workflowStage?: WorkflowStageBadge | null;
+  workflowNextAction?: string | null;
   workspaceLabel?: string | null;
   changedFiles: number;
   activeRuns: number;
@@ -993,19 +1000,36 @@ function WorkspaceHero({
             {readiness ? (
               <WorkspaceHeroPill
                 label={readiness.label}
-                tone={readiness.state === 'blocked' ? 'red' : readiness.state === 'needs_setup' ? 'amber' : readiness.state === 'ready' ? 'green' : 'neutral'}
+                tone={readiness.state === 'blocked' ? 'red' : readiness.state === 'needs_setup' ? 'blue' : readiness.state === 'ready' ? 'green' : 'neutral'}
+                compact={compact}
+              />
+            ) : null}
+            {workflowStage ? (
+              <WorkspaceHeroPill
+                label={workflowStage.label}
+                tone={
+                  workflowStage.key === 'blocked'
+                    ? 'red'
+                    : workflowStage.key === 'waiting' || workflowStage.key === 'queued'
+                      ? 'amber'
+                      : workflowStage.key === 'working' || workflowStage.key === 'merge_ready'
+                        ? 'green'
+                        : workflowStage.key === 'reviewing'
+                          ? 'blue'
+                          : 'neutral'
+                }
                 compact={compact}
               />
             ) : null}
             <WorkspaceHeroPill label={`${changedFiles} changed`} tone={changedFiles > 0 ? 'blue' : 'neutral'} compact={compact} />
             <WorkspaceHeroPill label={`${activeRuns} active`} tone={activeRuns > 0 ? 'green' : 'neutral'} compact={compact} />
           </div>
-          {(workspaceLabel || readiness?.nextAction) ? (
+          {(workspaceLabel || workflowNextAction || readiness?.nextAction) ? (
             <div style={{ marginTop: compact ? 6 : 7, display: 'flex', flexDirection: 'column', gap: 6 }}>
               {workspaceLabel ? (
                 <WorkspaceHeroPill label={workspaceLabel} compact={compact} fullWidth />
               ) : null}
-              {readiness?.nextAction ? (
+              {(workflowNextAction || readiness?.nextAction) ? (
                 <div
                   style={{
                     fontSize: compact ? 10 : 11,
@@ -1013,7 +1037,7 @@ function WorkspaceHero({
                     color: 'var(--t-text-muted)',
                   }}
                 >
-                  {readiness.nextAction}
+                  {workflowNextAction || readiness?.nextAction}
                 </div>
               ) : null}
             </div>
@@ -1073,18 +1097,27 @@ const AgentCard = memo(function AgentCard({
   const isCompact = !expanded;
   const model = group.primaryModel;
   const ctx = group.bestContextPct > 0 ? { usedPercent: group.bestContextPct } : null;
-  const activeAgents = group.agents.filter((agent) => (
-    agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy'
-  ));
-  const reviewingAgents = group.agents.filter((agent) => agent.workspaceStatus === 'in_review' || agent.status === 'reviewing');
-  const blockedAgents = group.agents.filter((agent) => (
-    agent.lifecycleState === 'failed'
-    || agent.lifecycleState === 'killed'
-    || agent.status === 'error'
-    || agent.status === 'unhealthy'
-  ));
+  const agentStages = new Map(
+    group.agents.map((agent) => [agent.id, agent.workflowStage ?? deriveWorkflowStage({
+      runtimeStatus: agent.status,
+      workspaceStatus: agent.workspaceStatus,
+      lifecycleState: agent.lifecycleState,
+      latestText: agent.currentTask,
+      readinessState: agent.repoReadiness?.state ?? null,
+    })] as const),
+  );
+  const activeAgents = group.agents.filter((agent) => agentStages.get(agent.id)?.key === 'working');
+  const mergeReadyAgents = group.agents.filter((agent) => agentStages.get(agent.id)?.key === 'merge_ready');
+  const reviewingAgents = group.agents.filter((agent) => agentStages.get(agent.id)?.key === 'reviewing');
+  const waitingAgents = group.agents.filter((agent) => {
+    const key = agentStages.get(agent.id)?.key;
+    return key === 'waiting' || key === 'queued';
+  });
+  const blockedAgents = group.agents.filter((agent) => agentStages.get(agent.id)?.key === 'blocked');
   const primaryAgent = activeAgents[0]
+    ?? mergeReadyAgents[0]
     ?? reviewingAgents[0]
+    ?? waitingAgents[0]
     ?? group.agents.find((agent) => agent.currentTask?.trim())
     ?? group.agents[0]
     ?? null;
@@ -1110,15 +1143,23 @@ const AgentCard = memo(function AgentCard({
   );
   const chipTone = blockedAgents.length > 0
     ? '#ef4444'
-    : reviewingAgents.length > 0
+    : mergeReadyAgents.length > 0
+      ? '#16a34a'
+      : reviewingAgents.length > 0
       ? '#7c3aed'
+      : waitingAgents.length > 0
+        ? '#b45309'
       : activeAgents.length > 0
         ? '#16a34a'
         : '#64748b';
   const statusLabel = blockedAgents.length > 0
     ? `${blockedAgents.length} blocked`
-    : reviewingAgents.length > 0
+    : mergeReadyAgents.length > 0
+      ? `${mergeReadyAgents.length} merge ready`
+      : reviewingAgents.length > 0
       ? `${reviewingAgents.length} in review`
+      : waitingAgents.length > 0
+        ? `${waitingAgents.length} waiting`
       : activeAgents.length > 0
         ? `${activeAgents.length} active`
         : `${group.agents.length} idle`;
@@ -1548,22 +1589,26 @@ const AgentCard = memo(function AgentCard({
 
       {/* Expanded: status-grouped agent cards */}
       {expanded && (() => {
-        type AgentStatus = 'in_progress' | 'in_review' | 'stalled' | 'completed' | 'failed' | 'idle';
+        type AgentStatus = 'in_progress' | 'waiting' | 'in_review' | 'merge_ready' | 'stalled' | 'completed' | 'failed' | 'idle';
         const classify = (a: AgentDetail): AgentStatus => {
-          // Lifecycle state takes priority (from WS events)
-          if (a.lifecycleState === 'stalled') return 'stalled';
-          if (a.lifecycleState === 'completed') return 'completed';
-          if (a.lifecycleState === 'failed' || a.lifecycleState === 'killed') return 'failed';
-          // Use workspace status if available (PR-aware)
-          if (a.workspaceStatus === 'in_review') return 'in_review';
-          if (a.workspaceStatus === 'done') return 'completed';
-          if (a.status === 'running' || a.status === 'watching' || a.status === 'healthy') return 'in_progress';
+          const stage = agentStages.get(a.id);
+          if (stage?.key === 'blocked') {
+            if (a.lifecycleState === 'stalled') return 'stalled';
+            return 'failed';
+          }
+          if (stage?.key === 'merge_ready') return 'merge_ready';
+          if (stage?.key === 'reviewing') return 'in_review';
+          if (stage?.key === 'waiting' || stage?.key === 'queued') return 'waiting';
+          if (stage?.key === 'ready') return 'completed';
+          if (stage?.key === 'working') return 'in_progress';
           return 'idle';
         };
         const statusGroups: { key: AgentStatus; label: string; color: string; agents: AgentDetail[] }[] = [
           { key: 'in_progress', label: 'In Progress', color: '#2563eb', agents: [] },
-          { key: 'stalled', label: 'Stalled', color: '#f97316', agents: [] },
+          { key: 'waiting', label: 'Waiting', color: '#b45309', agents: [] },
           { key: 'in_review', label: 'In Review', color: '#f59e0b', agents: [] },
+          { key: 'merge_ready', label: 'Merge Ready', color: '#16a34a', agents: [] },
+          { key: 'stalled', label: 'Stalled', color: '#f97316', agents: [] },
           { key: 'failed', label: 'Failed', color: '#ef4444', agents: [] },
           { key: 'completed', label: 'Completed', color: '#22c55e', agents: [] },
           { key: 'idle', label: 'Idle', color: '#9ca3af', agents: [] },
@@ -1577,14 +1622,15 @@ const AgentCard = memo(function AgentCard({
           // Merge lifecycle events from WS into agent
           const lc = lifecycleEvents?.get(agent.tmuxSession ?? '') ?? lifecycleEvents?.get(agent.sessionKey ?? '');
           const lcState = lc?.state as AgentDetail['lifecycleState'] | undefined;
-
-          const isRunning = (agent.status === 'running' || agent.status === 'watching' || agent.status === 'healthy')
-            && lcState !== 'completed' && lcState !== 'failed' && lcState !== 'killed' && lcState !== 'stalled';
-          const isFailed = lcState === 'failed' || lcState === 'killed';
-          const isCompleted = lcState === 'completed';
+          const stage = agentStages.get(agent.id);
+          const isRunning = stage?.key === 'working';
+          const isFailed = stage?.key === 'blocked' && lcState !== 'stalled';
+          const isCompleted = stage?.key === 'ready';
           const isStalled = lcState === 'stalled';
-          const isReviewing = !isRunning && !isFailed && !isCompleted && !isStalled && (agent.status === 'reviewing' || classify(agent) === 'in_review');
-          const agentDot = isFailed ? '#ef4444' : isStalled ? '#f97316' : isCompleted ? '#22c55e' : isRunning ? '#22c55e' : isReviewing ? '#a78bfa' : '#9ca3af';
+          const isMergeReady = stage?.key === 'merge_ready';
+          const isReviewing = stage?.key === 'reviewing';
+          const isWaiting = stage?.key === 'waiting' || stage?.key === 'queued';
+          const agentDot = isFailed ? '#ef4444' : isStalled ? '#f97316' : isMergeReady ? '#16a34a' : isCompleted ? '#22c55e' : isRunning ? '#22c55e' : isReviewing ? '#a78bfa' : isWaiting ? '#b45309' : '#9ca3af';
 
           // Agent display info
           const isOpenClawGroup = group.repo === 'openclaw';
@@ -1603,7 +1649,7 @@ const AgentCard = memo(function AgentCard({
           const branch = agent.branch || null;
           const pr = agent.pr;
           const diff = pr ? { add: pr.additions, del: pr.deletions } : agent.localDiff ? { add: agent.localDiff.additions, del: agent.localDiff.deletions } : null;
-          const statusLabel = isRunning ? 'Working…' : isReviewing ? 'Reviewing…' : isStalled ? 'Stalled' : isFailed ? 'Failed' : isCompleted ? 'Done' : null;
+          const statusLabel = stage?.label ?? (isStalled ? 'Blocked' : null);
 
           return (
             <div
@@ -1618,17 +1664,17 @@ const AgentCard = memo(function AgentCard({
                 gap: 8,
                 padding: '8px 10px',
                 borderRadius: 8,
-                background: isRunning ? 'rgba(34,197,94,0.08)' : isReviewing ? 'rgba(167,139,250,0.08)' : 'transparent',
-                border: isRunning ? '1px solid rgba(34,197,94,0.18)' : isReviewing ? '1px solid rgba(167,139,250,0.18)' : '1px solid transparent',
+                background: isRunning || isMergeReady ? 'rgba(34,197,94,0.08)' : isReviewing ? 'rgba(167,139,250,0.08)' : isWaiting ? 'rgba(245,158,11,0.08)' : 'transparent',
+                border: isRunning || isMergeReady ? '1px solid rgba(34,197,94,0.18)' : isReviewing ? '1px solid rgba(167,139,250,0.18)' : isWaiting ? '1px solid rgba(245,158,11,0.18)' : '1px solid transparent',
                 cursor: agent.sessionKey ? 'pointer' : 'default',
                 transition: 'all 150ms ease',
                 animation: isRunning ? 'agentCardPulse 3s ease-in-out infinite' : 'none',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = isRunning ? 'rgba(34,197,94,0.12)' : isReviewing ? 'rgba(167,139,250,0.12)' : 'var(--t-hover)';
+                e.currentTarget.style.background = isRunning || isMergeReady ? 'rgba(34,197,94,0.12)' : isReviewing ? 'rgba(167,139,250,0.12)' : isWaiting ? 'rgba(245,158,11,0.12)' : 'var(--t-hover)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = isRunning ? 'rgba(34,197,94,0.08)' : isReviewing ? 'rgba(167,139,250,0.08)' : 'transparent';
+                e.currentTarget.style.background = isRunning || isMergeReady ? 'rgba(34,197,94,0.08)' : isReviewing ? 'rgba(167,139,250,0.08)' : isWaiting ? 'rgba(245,158,11,0.08)' : 'transparent';
               }}
             >
               {/* Status dot with glow / reviewing pulse */}
@@ -1652,7 +1698,7 @@ const AgentCard = memo(function AgentCard({
                   display: 'block',
                   width: 7, height: 7, borderRadius: '50%',
                   background: isReviewing ? 'linear-gradient(135deg, #f59e0b, #a78bfa)' : agentDot,
-                  boxShadow: isRunning ? `0 0 8px ${agentDot}` : isReviewing ? '0 0 8px rgba(167, 139, 250, 0.5)' : 'none',
+                  boxShadow: isRunning || isMergeReady ? `0 0 8px ${agentDot}` : isReviewing ? '0 0 8px rgba(167, 139, 250, 0.5)' : 'none',
                   animation: isReviewing ? 'reviewingBreathe 2.4s ease-in-out infinite' : 'none',
                 }} />
               </span>
@@ -1674,7 +1720,7 @@ const AgentCard = memo(function AgentCard({
                   {statusLabel && (
                     <span style={{
                       fontSize: 10, fontWeight: 600,
-                      color: isRunning ? '#22c55e' : isReviewing ? '#a78bfa' : isStalled ? '#f97316' : isFailed ? '#ef4444' : '#22c55e',
+                      color: isRunning || isMergeReady ? '#16a34a' : isReviewing ? '#a78bfa' : isStalled ? '#f97316' : isFailed ? '#ef4444' : '#22c55e',
                     }}>
                       {statusLabel}
                     </span>
@@ -4282,6 +4328,7 @@ export const AgentPanel = memo(function AgentPanel({
           localDiff: AgentDetail['localDiff'];
           workspaceStatus: AgentDetail['workspaceStatus'];
           repoReadiness?: RepoReadiness;
+          workflowStage?: WorkflowStageBadge | null;
         }>();
         if (wsRes?.ok) {
           const wsData = await wsRes.json();
@@ -4293,6 +4340,7 @@ export const AgentPanel = memo(function AgentPanel({
                 localDiff: ws.localDiff,
                 workspaceStatus: ws.status,
                 repoReadiness: ws.readiness,
+                workflowStage: ws.workflowStage ?? null,
               });
             }
           }
@@ -4335,6 +4383,7 @@ export const AgentPanel = memo(function AgentPanel({
             workspaceStatus: ws?.workspaceStatus ?? a.workspaceStatus,
             worktree: worktree ?? a.worktree,
             repoReadiness: ws?.repoReadiness ?? a.repoReadiness,
+            workflowStage: ws?.workflowStage ?? a.workflowStage,
           };
         });
 
@@ -4495,6 +4544,33 @@ export const AgentPanel = memo(function AgentPanel({
   const heroReadiness = hasSelectedRepo
     ? (selectedRepoReadiness ?? null)
     : (preferredWorkspaceGroup?.agents.find((agent) => agent.repoReadiness)?.repoReadiness ?? null);
+  const heroWorkflowStage = hasSelectedRepo
+    ? pickDominantWorkflowStage(
+        agents
+          .filter((agent) => agent.workspace === currentScopePath || agent.repo === selectedRepoName)
+          .map((agent) => agent.workflowStage ?? deriveWorkflowStage({
+            runtimeStatus: agent.status,
+            workspaceStatus: agent.workspaceStatus,
+            lifecycleState: agent.lifecycleState,
+            latestText: agent.currentTask,
+            readinessState: agent.repoReadiness?.state ?? selectedRepoReadiness?.state ?? null,
+          })),
+      )
+    : pickDominantWorkflowStage(
+        (preferredWorkspaceGroup?.agents ?? []).map((agent) => agent.workflowStage ?? deriveWorkflowStage({
+          runtimeStatus: agent.status,
+          workspaceStatus: agent.workspaceStatus,
+          lifecycleState: agent.lifecycleState,
+          latestText: agent.currentTask,
+          readinessState: agent.repoReadiness?.state ?? null,
+        })),
+      );
+  const heroWorkflowGuidance = describeWorkflowStage({
+    stage: heroWorkflowStage,
+    readinessState: heroReadiness?.state ?? null,
+    readinessSummary: heroReadiness?.summary ?? null,
+    readinessNextAction: heroReadiness?.nextAction ?? null,
+  });
   const heroWorkspaceLabel = compactWorkspaceLabel(currentScopePath);
   const changesSummary = hasSelectedRepo
     ? `${changedFiles.size} changed file${changedFiles.size === 1 ? '' : 's'} in ${selectedRepoName ?? 'the selected repo'}`
@@ -4548,6 +4624,8 @@ export const AgentPanel = memo(function AgentPanel({
           repoSlug={effectiveScopedRepo}
           branch={heroBranch}
           readiness={heroReadiness}
+          workflowStage={heroWorkflowStage}
+          workflowNextAction={heroWorkflowGuidance.nextAction ?? null}
           workspaceLabel={heroWorkspaceLabel}
           changedFiles={changedFiles.size}
           activeRuns={activeRunsCount}

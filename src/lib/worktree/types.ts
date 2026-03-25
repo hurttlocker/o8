@@ -5,6 +5,8 @@
  * Designed to generalize to IsolationProvider (containers, VMs) in 2028.
  */
 
+import type { RepoSetupEnvMode } from '@/lib/repos/types';
+
 export type WorktreeStatus = 'creating' | 'setup' | 'ready' | 'active' | 'stale' | 'merging' | 'cleaning';
 
 export type AgentType = 'claude-code' | 'codex' | (string & {});
@@ -69,6 +71,10 @@ export interface CreateWorktreeOptions {
   baseBranch?: string;
   /** Skip auto-setup (npm install, etc.) */
   skipSetup?: boolean;
+  /** How env files should be bootstrapped into the worktree */
+  envMode?: RepoSetupEnvMode;
+  /** Env files to copy/symlink when bootstrapping */
+  envFiles?: string[];
 }
 
 /**

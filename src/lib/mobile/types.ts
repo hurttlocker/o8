@@ -121,6 +121,7 @@ export interface MobileTranscriptThinkingStep {
   detail?: string;
 }
 
+// Shared transcript shape used across mobile history and runtime tails.
 export interface MobileTranscriptEntry {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';

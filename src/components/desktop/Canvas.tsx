@@ -73,6 +73,8 @@ import {
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
+import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
+import { deriveWorkflowStage, describeWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
 
 export type CanvasRepoTaskLaunchRequest =
   | { kind: 'issue'; repo: string; number: number; title: string; body?: string }
@@ -103,6 +105,53 @@ export interface CanvasProps {
   onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
   /** When embedded in ContextualPanel, hide the tab bar (parent manages tabs) */
   embedded?: boolean;
+}
+
+const THEME_ACCENT = 'var(--t-accent, #2563eb)';
+const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
+const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
+const REPLAY_CARD_BACKGROUND = 'linear-gradient(180deg, var(--t-panel-translucent) 0%, var(--t-bg-card, rgba(148, 163, 184, 0.08)) 100%)';
+
+function sessionReplayRuntimePalette(runtime?: string) {
+  switch (runtime) {
+    case 'OpenClaw':
+      return {
+        color: THEME_ACCENT,
+        background: THEME_ACCENT_SOFT,
+        border: THEME_ACCENT_BORDER,
+      };
+    case 'Codex':
+      return {
+        color: '#4ade80',
+        background: 'rgba(34, 197, 94, 0.12)',
+        border: 'rgba(34, 197, 94, 0.18)',
+      };
+    default:
+      return {
+        color: 'var(--t-text-secondary)',
+        background: 'var(--t-divider-subtle)',
+        border: 'var(--t-panel-border)',
+      };
+  }
+}
+
+function repoSlugFromRemote(remoteUrl: string | null | undefined) {
+  if (!remoteUrl) return null;
+  const match = remoteUrl.match(/github\.com[/:]([^/]+\/[^/.]+)(?:\.git)?$/i);
+  return match?.[1] ?? null;
+}
+
+function readinessTone(readiness?: RepoReadiness | null) {
+  switch (readiness?.state) {
+    case 'ready':
+      return { background: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.16)', color: '#15803d' };
+    case 'needs_setup':
+      return { background: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.18)', color: '#b45309' };
+    case 'blocked':
+      return { background: 'rgba(239,68,68,0.10)', border: 'rgba(239,68,68,0.18)', color: '#b91c1c' };
+    default:
+      return { background: 'rgba(148,163,184,0.12)', border: 'rgba(148,163,184,0.2)', color: '#475569' };
+  }
 }
 
 // ── Main Canvas ──
@@ -482,7 +531,11 @@ function TimelineExpanded() {
   }, []);
 
   const colors: Record<string, string> = {
-    coding: '#2563eb', thinking: '#93c5fd', testing: '#f59e0b', error: '#ef4444', idle: '#e5e7eb',
+    coding: THEME_ACCENT,
+    thinking: '#9aa8bd',
+    testing: '#d9a441',
+    error: '#ef4444',
+    idle: 'rgba(255, 255, 255, 0.14)',
   };
   const labels: Record<string, string> = {
     coding: 'CODING', thinking: 'THINKING', testing: 'TESTING', error: 'ERRORS', idle: 'IDLE',
@@ -567,12 +620,16 @@ function TimelineExpanded() {
   const contentColumns = isTight ? '1fr' : '1.15fr 0.85fr';
 
   return (
-    <div style={{
-      height: '100%',
-      overflow: 'auto',
-      padding: outerPadding,
-      background: 'var(--t-bg-gradient)',
-    }} ref={containerRef}>
+    <div
+      className="cortex-themed-scroll"
+      style={{
+        height: '100%',
+        overflow: 'auto',
+        padding: outerPadding,
+        background: 'var(--t-bg-gradient)',
+      }}
+      ref={containerRef}
+    >
       <div style={{ marginBottom: isCompact ? 14 : 20 }}>
         <h2 style={{ fontSize: titleSize, fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--t-text)', margin: 0 }}>
           Session Replay
@@ -635,19 +692,19 @@ function TimelineExpanded() {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <span style={{ padding: metricPillPadding, borderRadius: 999, background: 'rgba(37,99,235,0.08)', color: '#2563eb', fontSize: isCompact ? 10 : 11, fontWeight: 700 }}>
+                <span style={{ padding: metricPillPadding, borderRadius: 999, background: THEME_ACCENT_SOFT, border: `1px solid ${THEME_ACCENT_BORDER}`, color: THEME_ACCENT, fontSize: isCompact ? 10 : 11, fontWeight: 700 }}>
                   {timelineReplayDuration(totalMin)} total
                 </span>
-                <span style={{ padding: metricPillPadding, borderRadius: 999, background: 'rgba(15,23,42,0.05)', color: 'var(--t-text-secondary)', fontSize: isCompact ? 10 : 11, fontWeight: 700 }}>
+                <span style={{ padding: metricPillPadding, borderRadius: 999, background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', color: 'var(--t-text-secondary)', fontSize: isCompact ? 10 : 11, fontWeight: 700 }}>
                   {agentBreakdown.length} active lanes
                 </span>
-                <span style={{ padding: metricPillPadding, borderRadius: 999, background: 'rgba(22,163,74,0.08)', color: '#15803d', fontSize: isCompact ? 10 : 11, fontWeight: 700 }}>
+                <span style={{ padding: metricPillPadding, borderRadius: 999, background: 'rgba(34, 197, 94, 0.12)', border: '1px solid rgba(34, 197, 94, 0.18)', color: '#4ade80', fontSize: isCompact ? 10 : 11, fontWeight: 700 }}>
                   {liveSessions.length} live surfaces
                 </span>
               </div>
             </div>
 
-            <div style={{ height: summaryBarHeight, borderRadius: isCompact ? 8 : 10, overflow: 'hidden', display: 'flex', background: 'var(--t-timeline-bar)' }}>
+            <div style={{ height: summaryBarHeight, borderRadius: isCompact ? 8 : 10, overflow: 'hidden', display: 'flex', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)' }}>
               {segments.map((seg, i) => (
                 <div
                   key={`${seg.agent ?? 'unscoped'}:${seg.kind}:${seg.startMin}:${i}`}
@@ -655,7 +712,7 @@ function TimelineExpanded() {
                     width: `${(seg.durationMin / totalMin) * 100}%`,
                     height: '100%',
                     background: colors[seg.kind] || '#e5e7eb',
-                    borderRight: i < segments.length - 1 ? '1px solid rgba(255,255,255,0.3)' : 'none',
+                    borderRight: i < segments.length - 1 ? '1px solid rgba(255,255,255,0.08)' : 'none',
                   }}
                   title={`${labels[seg.kind] || seg.kind} · ${seg.agent ?? 'Unknown'} · ${timelineReplayDuration(seg.durationMin)} · ${timelineReplayTime(seg.startMin)}`}
                 />
@@ -696,19 +753,14 @@ function TimelineExpanded() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: isCompact ? 10 : 14 }}>
                 {agentBreakdown.map((entry) => {
                   const context = liveSessionContext.get(entry.agent);
-                  const runtimeTone = context?.runtime === 'OpenClaw'
-                    ? '#2563eb'
-                    : context?.runtime === 'Claude Code'
-                      ? '#8b5cf6'
-                      : context?.runtime === 'Codex'
-                        ? '#16a34a'
-                        : '#64748b';
+                  const runtimePalette = sessionReplayRuntimePalette(context?.runtime);
                   return (
                     <div key={entry.agent} style={{
                       borderRadius: isCompact ? 14 : 16,
-                      border: '1px solid var(--t-divider)',
+                      border: '1px solid var(--t-panel-border)',
                       padding: isCompact ? 12 : 16,
-                      background: 'rgba(255,255,255,0.64)',
+                      background: REPLAY_CARD_BACKGROUND,
+                      boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.03)',
                     }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                         <div style={{ minWidth: 0 }}>
@@ -725,16 +777,16 @@ function TimelineExpanded() {
                       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
                         {context ? (
                           <>
-                            <span style={{ fontSize: isCompact ? 9 : 10, fontWeight: 700, color: runtimeTone, background: `${runtimeTone}14`, border: `1px solid ${runtimeTone}24`, borderRadius: 999, padding: isCompact ? '2px 7px' : '3px 8px' }}>
+                            <span style={{ fontSize: isCompact ? 9 : 10, fontWeight: 700, color: runtimePalette.color, background: runtimePalette.background, border: `1px solid ${runtimePalette.border}`, borderRadius: 999, padding: isCompact ? '2px 7px' : '3px 8px' }}>
                               {context.runtime}
                             </span>
                             {context.location ? (
-                              <span style={{ fontSize: isCompact ? 9 : 10, fontWeight: 600, color: 'var(--t-text-secondary)', background: 'rgba(15,23,42,0.05)', border: '1px solid rgba(148,163,184,0.14)', borderRadius: 999, padding: isCompact ? '2px 7px' : '3px 8px', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                              <span style={{ fontSize: isCompact ? 9 : 10, fontWeight: 600, color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', borderRadius: 999, padding: isCompact ? '2px 7px' : '3px 8px', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
                                 {context.location}
                               </span>
                             ) : null}
                             {context.extra ? (
-                              <span style={{ fontSize: isCompact ? 9 : 10, fontWeight: 600, color: 'var(--t-text-muted)', background: 'rgba(15,23,42,0.05)', border: '1px solid rgba(148,163,184,0.14)', borderRadius: 999, padding: isCompact ? '2px 7px' : '3px 8px' }}>
+                              <span style={{ fontSize: isCompact ? 9 : 10, fontWeight: 600, color: 'var(--t-text-muted)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', borderRadius: 999, padding: isCompact ? '2px 7px' : '3px 8px' }}>
                                 {context.extra}
                               </span>
                             ) : null}
@@ -746,7 +798,7 @@ function TimelineExpanded() {
                         {context?.summary ?? 'No live session detail matched for this lane yet. The replay bar is still showing real recorded activity.'}
                       </div>
 
-                      <div style={{ height: isCompact ? 10 : 12, borderRadius: 999, overflow: 'hidden', display: 'flex', background: 'rgba(15,23,42,0.06)', marginTop: 10 }}>
+                      <div style={{ height: isCompact ? 10 : 12, borderRadius: 999, overflow: 'hidden', display: 'flex', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', marginTop: 10 }}>
                         {entry.segments.map((seg, i) => (
                           <div
                             key={`${entry.agent}:${seg.kind}:${seg.startMin}:${i}`}
@@ -799,14 +851,15 @@ function TimelineExpanded() {
                     const location = repoName
                       ? `${repoName}${session.branch ? ` · ${session.branch}` : ''}`
                       : timelineReplayWorkspace(session.workspace) ?? session.surfaceLabel ?? session.branch ?? 'unknown';
-                    const runtimeTone = runtime === 'OpenClaw' ? '#2563eb' : runtime === 'Claude Code' ? '#8b5cf6' : '#16a34a';
+                    const runtimePalette = sessionReplayRuntimePalette(runtime);
 
                     return (
                       <div key={session.sessionKey} style={{
                         borderRadius: isCompact ? 12 : 14,
-                        border: '1px solid var(--t-divider)',
+                        border: '1px solid var(--t-panel-border)',
                         padding: isCompact ? 12 : 14,
-                        background: 'rgba(255,255,255,0.64)',
+                        background: REPLAY_CARD_BACKGROUND,
+                        boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.03)',
                       }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                           <div style={{ minWidth: 0 }}>
@@ -817,7 +870,7 @@ function TimelineExpanded() {
                               {location}
                             </div>
                           </div>
-                          <span style={{ fontSize: isCompact ? 9 : 10, fontWeight: 700, color: runtimeTone, background: `${runtimeTone}14`, border: `1px solid ${runtimeTone}24`, borderRadius: 999, padding: isCompact ? '2px 7px' : '3px 8px', flexShrink: 0 }}>
+                          <span style={{ fontSize: isCompact ? 9 : 10, fontWeight: 700, color: runtimePalette.color, background: runtimePalette.background, border: `1px solid ${runtimePalette.border}`, borderRadius: 999, padding: isCompact ? '2px 7px' : '3px 8px', flexShrink: 0 }}>
                             {runtime}
                           </span>
                         </div>
@@ -900,6 +953,7 @@ const IssueViewer = memo(function IssueViewer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
+  const [localRepo, setLocalRepo] = useState<Pick<RepoRegistryEntry, 'name' | 'localPath' | 'readiness'> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -927,6 +981,25 @@ const IssueViewer = memo(function IssueViewer({
 
     return () => { cancelled = true; };
   }, [issueNumber]);
+
+  useEffect(() => {
+    if (!repo) {
+      setLocalRepo(null);
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/panel/repos')
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        const match = (data.repos ?? []).find((entry: RepoRegistryEntry) => repoSlugFromRemote(entry.remoteUrl) === repo);
+        setLocalRepo(match ? { name: match.name, localPath: match.localPath, readiness: match.readiness } : null);
+      })
+      .catch(() => {
+        if (!cancelled) setLocalRepo(null);
+      });
+    return () => { cancelled = true; };
+  }, [repo]);
 
   if (loading) {
     return (
@@ -1032,7 +1105,40 @@ const IssueViewer = memo(function IssueViewer({
             </div>
           )}
           {repo && onLaunchWorkspaceTask ? (
-            <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
+              {localRepo?.readiness ? (
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                    padding: '10px 12px',
+                    borderRadius: 12,
+                    border: `1px solid ${readinessTone(localRepo.readiness).border}`,
+                    background: readinessTone(localRepo.readiness).background,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: readinessTone(localRepo.readiness).color }}>
+                      {localRepo.name} · {localRepo.readiness.label}
+                    </span>
+                    {localRepo.readiness.currentBranch ? (
+                      <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                        {localRepo.readiness.currentBranch}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div style={{ fontSize: 12, lineHeight: 1.45, color: 'var(--t-text-secondary)' }}>
+                    {localRepo.readiness.summary}
+                  </div>
+                  {localRepo.readiness.nextAction ? (
+                    <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--t-text-muted)' }}>
+                      {localRepo.readiness.nextAction}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <button
                 type="button"
                 disabled={launching}
@@ -1064,6 +1170,7 @@ const IssueViewer = memo(function IssueViewer({
                 <Play size={13} />
                 {launching ? 'Launching…' : 'Launch In Workspace'}
               </button>
+              </div>
             </div>
           ) : null}
         </div>
@@ -3191,6 +3298,8 @@ interface PRDetail {
   issueComments: { id: number; body: string; user: string; created_at: string }[];
   diffStat: string;
   url: string;
+  readiness?: RepoReadiness | null;
+  workflowStage?: WorkflowStageBadge | null;
 }
 
 const prStateStyles: Record<string, { color: string; label: string; bg: string }> = {
@@ -3274,7 +3383,9 @@ function PRViewer({
   const [pr, setPr] = useState<PRDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [activeSection, setActiveSection] = useState<'overview' | 'files' | 'checks' | 'comments' | 'reviews'>('overview');
+  const [activeItemIndex, setActiveItemIndex] = useState(0);
   const [reviewComments, setReviewComments] = useState<{
     id: number; author: string; body: string; path: string;
     line: number | null; createdAt: string; diffHunk: string; inReplyTo: number | null;
@@ -3285,6 +3396,8 @@ function PRViewer({
   const [actionResult, setActionResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [addedContextKeys, setAddedContextKeys] = useState<Record<string, true>>({});
   const [hiddenCommentKeys, setHiddenCommentKeys] = useState<Record<string, true>>({});
+  const commentInputRef = useRef<HTMLInputElement>(null);
+  const [localRepo, setLocalRepo] = useState<Pick<RepoRegistryEntry, 'name' | 'localPath' | 'readiness'> | null>(null);
 
   const submitAction = useCallback(async (action: string, comment?: string) => {
     setActionLoading(action);
@@ -3324,6 +3437,8 @@ function PRViewer({
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setActionResult(null);
+    setReviewComments([]);
 
     const repoParam = repo ? `?repo=${encodeURIComponent(repo)}` : '';
     fetch(`/api/panel/prs/${prNumber}${repoParam}`)
@@ -3345,7 +3460,26 @@ function PRViewer({
       });
 
     return () => { cancelled = true; };
-  }, [prNumber]);
+  }, [prNumber, repo, reloadNonce]);
+
+  useEffect(() => {
+    if (!repo) {
+      setLocalRepo(null);
+      return;
+    }
+    let cancelled = false;
+    fetch('/api/panel/repos')
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        const match = (data.repos ?? []).find((entry: RepoRegistryEntry) => repoSlugFromRemote(entry.remoteUrl) === repo);
+        setLocalRepo(match ? { name: match.name, localPath: match.localPath, readiness: match.readiness } : null);
+      })
+      .catch(() => {
+        if (!cancelled) setLocalRepo(null);
+      });
+    return () => { cancelled = true; };
+  }, [repo]);
 
   // Fetch review comments when tab is activated
   useEffect(() => {
@@ -3375,33 +3509,412 @@ function PRViewer({
     setHiddenCommentKeys((current) => ({ ...current, [key]: true }));
   }, []);
 
+  const focusCommentComposer = useCallback(() => {
+    setActiveSection('comments');
+    requestAnimationFrame(() => {
+      commentInputRef.current?.focus();
+      commentInputRef.current?.select();
+    });
+  }, []);
+
+  const openPullRequestOnGitHub = useCallback(() => {
+    if (!repo) return;
+    window.open(`https://github.com/${repo}/pull/${prNumber}`, '_blank', 'noopener,noreferrer');
+  }, [prNumber, repo]);
+  const checkContextKey = useCallback((name?: string | null) => `check:${name ?? 'unknown'}`, []);
+
+  const currentChecks = pr?.statusCheckRollup ?? [];
+  const currentAllComments = pr
+    ? [
+        ...pr.issueComments.map((comment) => ({ ...comment, kind: 'comment' as const })),
+        ...pr.reviewComments.map((comment) => ({ ...comment, kind: 'review' as const })),
+      ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    : [];
+  const currentVisibleComments = currentAllComments.filter((comment) => !hiddenCommentKeys[`${comment.kind}:${comment.id}`]);
+  const currentVisibleReviewComments = reviewComments.filter((comment) => !hiddenCommentKeys[`review-thread:${comment.id}`]);
+  const activeSectionItemCount = activeSection === 'files'
+    ? (pr?.files?.length ?? 0)
+    : activeSection === 'checks'
+      ? currentChecks.length
+      : activeSection === 'comments'
+        ? currentVisibleComments.length
+        : activeSection === 'reviews'
+          ? currentVisibleReviewComments.length
+          : 0;
+
+  useEffect(() => {
+    setActiveItemIndex(0);
+  }, [activeSection]);
+
+  useEffect(() => {
+    setActiveItemIndex((current) => Math.min(current, Math.max(0, activeSectionItemCount - 1)));
+  }, [activeSectionItemCount]);
+
+  useEffect(() => {
+    if (activeSection === 'overview' || activeSectionItemCount === 0) return undefined;
+
+    const frame = requestAnimationFrame(() => {
+      const target = document.querySelector(
+        `[data-pr-section="${activeSection}"][data-pr-index="${activeItemIndex}"]`,
+      ) as HTMLElement | null;
+      target?.scrollIntoView({ block: 'nearest' });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [activeItemIndex, activeSection, activeSectionItemCount]);
+
+  const runSelectedItemAction = useCallback(async () => {
+    if (!pr) return;
+
+    if (activeSection === 'files') {
+      const selectedFile = pr.files?.[activeItemIndex];
+      if (!selectedFile) return;
+      await navigator.clipboard.writeText(selectedFile.path);
+      setActionResult({ type: 'success', message: `Copied ${selectedFile.path}` });
+      return;
+    }
+
+    if (activeSection === 'checks') {
+      const selectedCheck = currentChecks[activeItemIndex];
+      if (!selectedCheck) return;
+      if (selectedCheck.detailsUrl) {
+        window.open(selectedCheck.detailsUrl, '_blank', 'noopener,noreferrer');
+        return;
+      }
+      if (!onInjectChatContext) {
+        setActionResult({ type: 'error', message: 'No quick action is available for this check here.' });
+        return;
+      }
+      const checkName = selectedCheck.name || 'Unknown check';
+      const injectionKey = checkContextKey(selectedCheck.name);
+      if (addedContextKeys[injectionKey]) {
+        setActionResult({ type: 'success', message: `${checkName} is already in chat.` });
+        return;
+      }
+      injectPayload(
+        injectionKey,
+        formatCiCheckInjection({
+          prNumber: pr.number,
+          repo,
+          name: checkName,
+          status: selectedCheck.status,
+          conclusion: selectedCheck.conclusion,
+          detailsUrl: selectedCheck.detailsUrl,
+          startedAt: selectedCheck.startedAt,
+          completedAt: selectedCheck.completedAt,
+        }),
+      );
+      setActionResult({ type: 'success', message: `Added ${checkName} to chat.` });
+      return;
+    }
+
+    if (activeSection === 'comments') {
+      const selectedComment = currentVisibleComments[activeItemIndex];
+      if (!selectedComment) return;
+      if (!onInjectChatContext) {
+        setActionResult({ type: 'error', message: 'Chat injection is unavailable from this surface.' });
+        return;
+      }
+      const commentKey = `${selectedComment.kind}:${selectedComment.id}`;
+      if (addedContextKeys[commentKey]) {
+        setActionResult({ type: 'success', message: 'That comment is already in chat.' });
+        return;
+      }
+      injectPayload(
+        commentKey,
+        formatReviewCommentInjection({
+          prNumber: pr.number,
+          repo,
+          author: selectedComment.user,
+          body: selectedComment.body,
+          createdAt: selectedComment.created_at,
+          path: selectedComment.kind === 'review' ? (selectedComment as { path?: string }).path : undefined,
+        }),
+      );
+      setActionResult({ type: 'success', message: `Added ${selectedComment.user}'s comment to chat.` });
+      return;
+    }
+
+    if (activeSection === 'reviews') {
+      const selectedReviewComment = currentVisibleReviewComments[activeItemIndex];
+      if (!selectedReviewComment) return;
+      if (!onInjectChatContext) {
+        setActionResult({ type: 'error', message: 'Chat injection is unavailable from this surface.' });
+        return;
+      }
+      const reviewKey = `review-thread:${selectedReviewComment.id}`;
+      if (addedContextKeys[reviewKey]) {
+        setActionResult({ type: 'success', message: 'That review thread is already in chat.' });
+        return;
+      }
+      injectPayload(
+        reviewKey,
+        formatReviewCommentInjection({
+          prNumber: pr.number,
+          repo,
+          author: selectedReviewComment.author,
+          body: selectedReviewComment.body,
+          createdAt: selectedReviewComment.createdAt,
+          path: selectedReviewComment.path,
+          line: selectedReviewComment.line,
+        }),
+      );
+      setActionResult({ type: 'success', message: `Added ${selectedReviewComment.path} to chat.` });
+    }
+  }, [
+    activeItemIndex,
+    activeSection,
+    addedContextKeys,
+    currentChecks,
+    currentVisibleComments,
+    currentVisibleReviewComments,
+    checkContextKey,
+    injectPayload,
+    onInjectChatContext,
+    pr,
+    prNumber,
+    repo,
+  ]);
+
+  useEffect(() => {
+    if (!pr) return undefined;
+
+    const orderedSections: Array<'overview' | 'files' | 'checks' | 'comments' | 'reviews'> = ['overview', 'files', 'checks', 'comments', 'reviews'];
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTypingTarget = Boolean(
+        target && (
+          target.tagName === 'INPUT'
+          || target.tagName === 'TEXTAREA'
+          || target.isContentEditable
+        ),
+      );
+
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && pr.state === 'OPEN' && commentText.trim()) {
+        event.preventDefault();
+        void submitAction('comment', commentText);
+        return;
+      }
+
+      if (event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+
+      if (isTypingTarget) {
+        if (event.key === 'Escape' && target === commentInputRef.current) {
+          commentInputRef.current?.blur();
+        }
+        return;
+      }
+
+      if (/^[1-5]$/.test(event.key)) {
+        const section = orderedSections[Number(event.key) - 1];
+        if (section) {
+          event.preventDefault();
+          setActiveSection(section);
+        }
+        return;
+      }
+
+      if (event.key === '[' || event.key === ']') {
+        event.preventDefault();
+        const currentIndex = orderedSections.indexOf(activeSection);
+        const delta = event.key === '[' ? -1 : 1;
+        const nextIndex = Math.min(orderedSections.length - 1, Math.max(0, currentIndex + delta));
+        setActiveSection(orderedSections[nextIndex]);
+        return;
+      }
+
+      if (event.key.toLowerCase() === 'o' && repo) {
+        event.preventDefault();
+        openPullRequestOnGitHub();
+        return;
+      }
+
+      if ((event.key.toLowerCase() === 'j' || event.key === 'ArrowDown') && activeSection !== 'overview' && activeSectionItemCount > 0) {
+        event.preventDefault();
+        setActiveItemIndex((current) => Math.min(activeSectionItemCount - 1, current + 1));
+        return;
+      }
+
+      if ((event.key.toLowerCase() === 'k' || event.key === 'ArrowUp') && activeSection !== 'overview' && activeSectionItemCount > 0) {
+        event.preventDefault();
+        setActiveItemIndex((current) => Math.max(0, current - 1));
+        return;
+      }
+
+      if (event.key === 'Enter' && activeSection !== 'overview' && activeSectionItemCount > 0) {
+        event.preventDefault();
+        void runSelectedItemAction();
+        return;
+      }
+
+      if (pr.state !== 'OPEN') return;
+
+      if (event.key.toLowerCase() === 'c') {
+        event.preventDefault();
+        focusCommentComposer();
+        return;
+      }
+
+      if (actionLoading !== null) return;
+
+      if (event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        void submitAction('approve', commentText || undefined);
+        return;
+      }
+
+      if (event.key.toLowerCase() === 'r') {
+        event.preventDefault();
+        if (!commentText.trim()) {
+          focusCommentComposer();
+          return;
+        }
+        void submitAction('request-changes', commentText);
+        return;
+      }
+
+      if (event.key.toLowerCase() === 'm') {
+        event.preventDefault();
+        void submitAction('merge');
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    activeSection,
+    activeSectionItemCount,
+    actionLoading,
+    commentText,
+    focusCommentComposer,
+    openPullRequestOnGitHub,
+    pr,
+    repo,
+    runSelectedItemAction,
+    submitAction,
+  ]);
+
   if (loading) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading PR…</div>;
   }
 
   if (error || !pr) {
-    return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: '#ef4444' }}>Failed to load PR: {error || 'Unknown'}</div>;
+    return (
+      <div style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 14,
+        height: '100%',
+        padding: 24,
+        textAlign: 'center',
+      }}>
+        <div style={{ fontSize: 13, color: '#ef4444', lineHeight: 1.5 }}>
+          Failed to load PR: {error || 'Unknown'}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+          <button
+            type="button"
+            onClick={() => setReloadNonce((current) => current + 1)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '8px 12px',
+              borderRadius: 10,
+              border: '1px solid rgba(37, 99, 235, 0.18)',
+              background: 'rgba(37, 99, 235, 0.08)',
+              color: '#2563eb',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: 'pointer',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}
+          >
+            <RefreshCw size={12} strokeWidth={2.2} />
+            Retry
+          </button>
+          {repo ? (
+            <button
+              type="button"
+              onClick={() => window.open(`https://github.com/${repo}/pull/${prNumber}`, '_blank', 'noopener,noreferrer')}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '8px 12px',
+                borderRadius: 10,
+                border: '1px solid rgba(15, 23, 42, 0.1)',
+                background: 'var(--t-panel)',
+                color: 'var(--t-text)',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              <ExternalLink size={12} strokeWidth={2.2} />
+              Open on GitHub
+            </button>
+          ) : null}
+        </div>
+      </div>
+    );
   }
 
   const stateStyle = prStateStyles[pr.state] ?? { color: '#6b7280', label: pr.state, bg: 'rgba(0,0,0,0.04)' };
-  const allComments = [
-    ...pr.issueComments.map(c => ({ ...c, kind: 'comment' as const })),
-    ...pr.reviewComments.map(c => ({ ...c, kind: 'review' as const })),
-  ].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-
-  const ciChecks = pr.statusCheckRollup ?? [];
+  const allComments = currentAllComments;
+  const ciChecks = currentChecks;
   const passedChecks = ciChecks.filter(c => c.conclusion === 'SUCCESS' || c.conclusion === 'success').length;
 
-  const sections: { id: 'overview' | 'files' | 'checks' | 'comments' | 'reviews'; label: string; count?: number }[] = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'files', label: 'Files', count: pr.changedFiles },
-    { id: 'checks', label: 'Checks', count: ciChecks.length },
-    { id: 'comments', label: 'Comments', count: allComments.length },
-    { id: 'reviews', label: 'Reviews' },
+  const sections: { id: 'overview' | 'files' | 'checks' | 'comments' | 'reviews'; label: string; count?: number; shortcut: string }[] = [
+    { id: 'overview', label: 'Overview', shortcut: '1' },
+    { id: 'files', label: 'Files', count: pr.changedFiles, shortcut: '2' },
+    { id: 'checks', label: 'Checks', count: ciChecks.length, shortcut: '3' },
+    { id: 'comments', label: 'Comments', count: allComments.length, shortcut: '4' },
+    { id: 'reviews', label: 'Reviews', shortcut: '5' },
   ];
-  const visibleComments = allComments.filter((comment) => !hiddenCommentKeys[`${comment.kind}:${comment.id}`]);
-  const visibleReviewComments = reviewComments.filter((comment) => !hiddenCommentKeys[`review-thread:${comment.id}`]);
+  const visibleComments = currentVisibleComments;
+  const visibleReviewComments = currentVisibleReviewComments;
   const failedChecks = ciChecks.filter((check) => check.conclusion && check.conclusion.toLowerCase() !== 'success');
+  const pendingChecks = ciChecks.filter((check) => !check.conclusion || check.status?.toLowerCase() !== 'completed');
+  const requestedChangesCount = pr.reviews.filter((review) => review.state?.toLowerCase() === 'changes_requested').length;
+  const approvedCount = pr.reviews.filter((review) => review.state?.toLowerCase() === 'approved').length;
+  const reviewStage = pr.workflowStage ?? deriveWorkflowStage({
+    prState: pr.state,
+    requestedChanges: requestedChangesCount,
+    failedChecks: failedChecks.length,
+    pendingChecks: pendingChecks.length,
+    readinessState: pr.readiness?.state ?? localRepo?.readiness?.state ?? null,
+  });
+  const reviewGuidance = describeWorkflowStage({
+    stage: reviewStage,
+    prState: pr.state,
+    requestedChanges: requestedChangesCount,
+    approvedCount,
+    failedChecks: failedChecks.length,
+    pendingChecks: pendingChecks.length,
+    readinessState: pr.readiness?.state ?? localRepo?.readiness?.state ?? null,
+    readinessSummary: pr.readiness?.summary ?? localRepo?.readiness?.summary ?? null,
+    readinessNextAction: pr.readiness?.nextAction ?? localRepo?.readiness?.nextAction ?? null,
+  });
+  const reviewStatus = reviewStage
+    ? {
+        label: reviewStage.label,
+        detail: reviewGuidance.detail,
+        nextAction: reviewGuidance.nextAction,
+        tone: reviewStage.key === 'blocked'
+          ? { background: 'rgba(239,68,68,0.10)', border: 'rgba(239,68,68,0.18)', color: '#b91c1c' }
+          : reviewStage.key === 'waiting'
+            ? { background: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.18)', color: '#b45309' }
+            : reviewStage.key === 'merge_ready'
+              ? { background: 'rgba(34,197,94,0.10)', border: 'rgba(34,197,94,0.18)', color: '#15803d' }
+              : readinessTone(pr.readiness ?? localRepo?.readiness),
+      }
+    : null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -3471,6 +3984,65 @@ function PRViewer({
             Merged by {pr.mergedBy.login} {pr.mergedAt ? formatAge(pr.mergedAt) : ''}
           </div>
         ) : null}
+        {localRepo?.readiness ? (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+              marginTop: 10,
+              padding: '10px 12px',
+              borderRadius: 12,
+              border: `1px solid ${readinessTone(localRepo.readiness).border}`,
+              background: readinessTone(localRepo.readiness).background,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: readinessTone(localRepo.readiness).color }}>
+                {localRepo.name} · {localRepo.readiness.label}
+              </span>
+              {localRepo.readiness.currentBranch ? (
+                <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                  {localRepo.readiness.currentBranch}
+                </span>
+              ) : null}
+            </div>
+            <div style={{ fontSize: 12, lineHeight: 1.45, color: 'var(--t-text-secondary)' }}>
+              {localRepo.readiness.summary}
+            </div>
+            {localRepo.readiness.nextAction ? (
+              <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--t-text-muted)' }}>
+                {localRepo.readiness.nextAction}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {reviewStatus ? (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              marginTop: 10,
+              padding: '10px 12px',
+              borderRadius: 12,
+              border: `1px solid ${reviewStatus.tone.border}`,
+              background: reviewStatus.tone.background,
+            }}
+          >
+            <div style={{ fontSize: 11, fontWeight: 700, color: reviewStatus.tone.color }}>
+              {reviewStatus.label}
+            </div>
+            <div style={{ fontSize: 12, lineHeight: 1.45, color: 'var(--t-text-secondary)' }}>
+              {reviewStatus.detail}
+            </div>
+            {reviewStatus.nextAction ? (
+              <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--t-text-muted)' }}>
+                {reviewStatus.nextAction}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {/* Section tabs + actions row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginTop: 10 }}>
@@ -3493,8 +4065,17 @@ function PRViewer({
                 cursor: 'pointer',
                 fontFamily: '-apple-system, system-ui, sans-serif',
               }}
+              title={`Shortcut ${s.shortcut}`}
             >
               {s.label}{s.count !== undefined ? ` (${s.count})` : ''}
+              <span style={{
+                marginLeft: 6,
+                fontSize: 10,
+                fontWeight: 700,
+                color: activeSection === s.id ? '#1d4ed8' : 'var(--t-text-faint)',
+              }}>
+                {s.shortcut}
+              </span>
             </button>
           ))}
 
@@ -3526,6 +4107,7 @@ function PRViewer({
               >
                 <Check size={12} strokeWidth={2.5} />
                 Approve
+                <span style={{ fontSize: 10, opacity: 0.75 }}>A</span>
               </button>
               <button
                 type="button"
@@ -3554,11 +4136,13 @@ function PRViewer({
               >
                 <XCircle size={12} strokeWidth={2.5} />
                 Changes
+                <span style={{ fontSize: 10, opacity: 0.75 }}>R</span>
               </button>
               <button
                 type="button"
                 onClick={() => submitAction('merge')}
-                disabled={actionLoading !== null}
+                disabled={actionLoading !== null || !reviewGuidance.mergeAllowed}
+                title={!reviewGuidance.mergeAllowed ? reviewGuidance.mergeDetail : 'Merge this pull request'}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -3569,16 +4153,22 @@ function PRViewer({
                   paddingLeft: 8,
                   borderRadius: 8,
                   border: '1px solid rgba(139, 92, 246, 0.2)',
-                  background: actionLoading === 'merge' ? 'rgba(139,92,246,0.15)' : 'rgba(139,92,246,0.06)',
-                  color: '#8b5cf6',
+                  background: actionLoading === 'merge'
+                    ? 'rgba(139,92,246,0.15)'
+                    : !reviewGuidance.mergeAllowed
+                      ? 'rgba(148,163,184,0.12)'
+                      : 'rgba(139,92,246,0.06)',
+                  color: !reviewGuidance.mergeAllowed ? 'var(--t-text-muted)' : '#8b5cf6',
                   fontSize: 11,
                   fontWeight: 600,
-                  cursor: actionLoading ? 'wait' : 'pointer',
+                  cursor: actionLoading ? 'wait' : reviewGuidance.mergeAllowed ? 'pointer' : 'not-allowed',
                   fontFamily: '-apple-system, system-ui, sans-serif',
+                  opacity: reviewGuidance.mergeAllowed ? 1 : 0.7,
                 }}
               >
                 <GitMerge size={12} strokeWidth={2.5} />
                 Merge
+                <span style={{ fontSize: 10, opacity: 0.75 }}>M</span>
               </button>
             </>
           )}
@@ -3601,6 +4191,35 @@ function PRViewer({
             {actionResult.message}
           </div>
         )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+          {[
+            '1-5 sections',
+            '[ ] move lane',
+            activeSection !== 'overview' && activeSectionItemCount > 0 ? 'J/K move row' : null,
+            activeSection !== 'overview' && activeSectionItemCount > 0 ? 'Enter open/add' : null,
+            repo ? 'O GitHub' : null,
+            pr.state === 'OPEN' ? 'C/A/R/M review' : null,
+          ].filter((hint): hint is string => Boolean(hint)).map((hint) => (
+            <span
+              key={hint}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '3px 8px',
+                borderRadius: 999,
+                border: '1px solid rgba(148, 163, 184, 0.18)',
+                background: 'rgba(255,255,255,0.42)',
+                fontSize: 10,
+                fontWeight: 700,
+                color: 'var(--t-text-muted)',
+                letterSpacing: '0.03em',
+                textTransform: 'uppercase',
+              }}
+            >
+              {hint}
+            </span>
+          ))}
+        </div>
       </div>
 
       {/* Comment compose bar — for open PRs */}
@@ -3618,12 +4237,13 @@ function PRViewer({
           flexShrink: 0,
         }}>
           <input
+            ref={commentInputRef}
             type="text"
-            placeholder="Add a comment..."
+            placeholder="Add a comment… (C focuses, Cmd/Ctrl+Enter sends)"
             value={commentText}
             onChange={(e) => setCommentText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey && commentText.trim()) {
+              if (((e.metaKey || e.ctrlKey) || !e.shiftKey) && e.key === 'Enter' && commentText.trim()) {
                 e.preventDefault();
                 submitAction('comment', commentText);
               }
@@ -3664,12 +4284,13 @@ function PRViewer({
               cursor: commentText.trim() ? 'pointer' : 'default',
               fontFamily: '-apple-system, system-ui, sans-serif',
             }}
-          >
-            <Send size={11} />
-            Comment
-          </button>
-        </div>
-      )}
+            >
+              <Send size={11} />
+              Comment
+              <span style={{ fontSize: 10, opacity: 0.8 }}>⌘↵</span>
+            </button>
+          </div>
+        )}
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', paddingTop: 16, paddingRight: 20, paddingBottom: 16, paddingLeft: 20 }}>
@@ -3754,15 +4375,20 @@ function PRViewer({
         {activeSection === 'files' ? (
           <div>
             {pr.files?.length > 0 ? (
-              pr.files.map((file) => (
-                <div key={file.path} style={{
+              pr.files.map((file, index) => (
+                <div key={file.path} data-pr-section="files" data-pr-index={index} style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
                   paddingTop: 6,
+                  paddingRight: 10,
                   paddingBottom: 6,
+                  paddingLeft: 8,
+                  borderRadius: 10,
                   borderBottom: '1px solid var(--t-divider-subtle)',
                   fontSize: 13,
+                  background: activeItemIndex === index ? 'rgba(37,99,235,0.08)' : 'transparent',
+                  border: activeItemIndex === index ? '1px solid rgba(37,99,235,0.16)' : '1px solid transparent',
                 }}>
                   <FileText size={14} strokeWidth={1.8} style={{ color: 'var(--t-text-muted)', flexShrink: 0 }} />
                   <span style={{ flex: 1, color: 'var(--t-text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -3772,6 +4398,9 @@ function PRViewer({
                     {file.additions > 0 ? <span style={{ color: '#22c55e' }}>+{file.additions}</span> : null}
                     {file.deletions > 0 ? <span style={{ color: '#ef4444' }}>-{file.deletions}</span> : null}
                   </div>
+                  <span style={{ fontSize: 10, color: 'var(--t-text-faint)', flexShrink: 0 }}>
+                    ↵ copies path
+                  </span>
                 </div>
               ))
             ) : (
@@ -3829,6 +4458,7 @@ function PRViewer({
                   const passed = check.conclusion === 'SUCCESS' || check.conclusion === 'success';
                   const pending = check.status === 'IN_PROGRESS' || check.status === 'QUEUED' || check.status === 'PENDING';
                   const failed = !passed && !pending;
+                  const rowBackground = activeItemIndex === i ? 'rgba(37,99,235,0.08)' : 'transparent';
                   // Calculate duration
                   let duration = '';
                   if (check.startedAt && check.completedAt) {
@@ -3837,7 +4467,7 @@ function PRViewer({
                     else duration = `${Math.round(ms / 60_000)}m`;
                   }
                   return (
-                    <div key={i} style={{
+                    <div key={i} data-pr-section="checks" data-pr-index={i} style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: 10,
@@ -3845,10 +4475,18 @@ function PRViewer({
                       borderRadius: 8,
                       transition: 'background 120ms ease',
                       cursor: check.detailsUrl ? 'pointer' : 'default',
+                      background: rowBackground,
+                      border: activeItemIndex === i ? '1px solid rgba(37,99,235,0.16)' : '1px solid transparent',
                     }}
                     onClick={() => check.detailsUrl && window.open(check.detailsUrl, '_blank')}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'rgba(0,0,0,0.02)'; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+                    onMouseEnter={(e) => {
+                      if (activeItemIndex !== i) {
+                        (e.currentTarget as HTMLDivElement).style.background = 'rgba(0,0,0,0.02)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget as HTMLDivElement).style.background = rowBackground;
+                    }}
                     >
                       {/* Status icon */}
                       <span style={{
@@ -3893,10 +4531,10 @@ function PRViewer({
                       ) : null}
                       {!passed && onInjectChatContext ? (
                         <DesktopGlassActionChip
-                          icon={addedContextKeys[`check:${check.name}`] ? <Check size={12} strokeWidth={2.4} /> : <MessageSquare size={12} strokeWidth={2} />}
-                          label={addedContextKeys[`check:${check.name}`] ? 'Added' : 'Add to chat'}
+                          icon={addedContextKeys[checkContextKey(check.name)] ? <Check size={12} strokeWidth={2.4} /> : <MessageSquare size={12} strokeWidth={2} />}
+                          label={addedContextKeys[checkContextKey(check.name)] ? 'Added' : 'Add to chat'}
                           onClick={() => injectPayload(
-                            `check:${check.name}`,
+                            checkContextKey(check.name),
                             formatCiCheckInjection({
                               prNumber: pr.number,
                               repo,
@@ -3908,7 +4546,7 @@ function PRViewer({
                               completedAt: check.completedAt,
                             }),
                           )}
-                          disabled={Boolean(addedContextKeys[`check:${check.name}`])}
+                          disabled={Boolean(addedContextKeys[checkContextKey(check.name)])}
                         />
                       ) : null}
                     </div>
@@ -3950,13 +4588,19 @@ function PRViewer({
                     />
                   </div>
                 ) : null}
-              {visibleComments.map((comment) => {
+              {visibleComments.map((comment, index) => {
                 const commentKey = `${comment.kind}:${comment.id}`;
                 return (
-                <div key={`${comment.kind}-${comment.id}`} style={{
+                <div key={`${comment.kind}-${comment.id}`} data-pr-section="comments" data-pr-index={index} style={{
                   marginBottom: 16,
                   paddingBottom: 16,
+                  paddingLeft: 10,
+                  paddingRight: 10,
+                  paddingTop: 10,
+                  borderRadius: 12,
                   borderBottom: '1px solid var(--t-divider)',
+                  background: activeItemIndex === index ? 'rgba(37,99,235,0.08)' : 'transparent',
+                  border: activeItemIndex === index ? '1px solid rgba(37,99,235,0.14)' : '1px solid transparent',
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 12, flexWrap: 'wrap' }}>
                     <span style={{ fontWeight: 600, color: 'var(--t-text-strong)' }}>{comment.user}</span>
@@ -4058,7 +4702,9 @@ function PRViewer({
                         />
                       </div>
                     ) : null}
-                  {Array.from(threads.entries()).map(([path, comments]) => (
+                  {(() => {
+                    let reviewIndex = -1;
+                    return Array.from(threads.entries()).map(([path, comments]) => (
                   <div key={path} style={{ marginBottom: 20 }}>
                     {/* File path header */}
                     <div style={{
@@ -4084,12 +4730,20 @@ function PRViewer({
 
                     {/* Comments for this file */}
                     {comments.map((comment) => {
+                      reviewIndex += 1;
+                      const itemIndex = reviewIndex;
                       const commentKey = `review-thread:${comment.id}`;
                       return (
-                      <div key={comment.id} style={{
+                      <div key={comment.id} data-pr-section="reviews" data-pr-index={itemIndex} style={{
                         marginBottom: 12,
+                        paddingTop: 10,
+                        paddingRight: 10,
+                        paddingBottom: 10,
+                        borderRadius: 12,
                         paddingLeft: 16,
                         borderLeft: '2px solid rgba(139, 92, 246, 0.2)',
+                        background: activeItemIndex === itemIndex ? 'rgba(37,99,235,0.08)' : 'transparent',
+                        border: activeItemIndex === itemIndex ? '1px solid rgba(37,99,235,0.14)' : '1px solid transparent',
                       }}>
                         {/* Diff context */}
                         {comment.diffHunk ? (
@@ -4177,7 +4831,8 @@ function PRViewer({
                       );
                     })}
                   </div>
-                  ))}
+                    ));
+                  })()}
                   </>
                 );
               })()

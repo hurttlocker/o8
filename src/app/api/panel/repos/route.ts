@@ -9,6 +9,7 @@ import {
   updateRepo,
   validateRepo,
 } from '@/lib/repos/registry';
+import { enrichRepoReadiness, enrichRepoReadinessList } from '@/lib/repos/readiness';
 import { triggerScan, triggerScanIfStale, startChangePolling, stopChangePolling } from '@/lib/skeleton/autoscan';
 import { clearRepo as clearSkeletonCache } from '@/lib/skeleton/store';
 import type {
@@ -18,7 +19,7 @@ import type {
 
 export async function GET() {
   try {
-    const repos = await listRepos();
+    const repos = await enrichRepoReadinessList(await listRepos());
     return NextResponse.json({ repos });
   } catch (error) {
     return NextResponse.json(
@@ -44,14 +45,14 @@ export async function POST(request: Request) {
         if (!('localPath' in body) || !body.localPath?.trim()) {
           return NextResponse.json({ error: 'localPath is required.' }, { status: 400 });
         }
-        const repo = await validateRepo(body.localPath);
+        const repo = await enrichRepoReadiness(await validateRepo(body.localPath));
         return NextResponse.json({ repo });
       }
       case 'add': {
         if (!('localPath' in body) || !body.localPath?.trim()) {
           return NextResponse.json({ error: 'localPath is required.' }, { status: 400 });
         }
-        const repo = await addRepo(body.localPath);
+        const repo = await enrichRepoReadiness(await addRepo(body.localPath));
         // Auto-scan skeleton for newly added repo + start change polling
         triggerScan(repo.localPath);
         startChangePolling(repo.localPath);
@@ -65,7 +66,7 @@ export async function POST(request: Request) {
           setup: 'setup' in body ? body.setup : undefined,
           lastOpenedAt: 'lastOpenedAt' in body ? body.lastOpenedAt : undefined,
         });
-        return NextResponse.json({ repo });
+        return NextResponse.json({ repo: await enrichRepoReadiness(repo) });
       }
       case 'touch': {
         if (!('id' in body) || !body.id) {
@@ -77,7 +78,7 @@ export async function POST(request: Request) {
         );
         // Rescan skeleton if stale when repo is opened
         triggerScanIfStale(repo.localPath);
-        return NextResponse.json({ repo });
+        return NextResponse.json({ repo: await enrichRepoReadiness(repo) });
       }
       default:
         return NextResponse.json({ error: 'Unsupported action.' }, { status: 400 });
