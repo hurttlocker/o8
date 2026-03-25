@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-25
 
+- `cbf9aab` fix: tighten issue workflow launch path
 - `4eb6f75` fix: harden fresh installs on main
 - `ca06e24` feat: route workspace launches and github flows through broker
 
