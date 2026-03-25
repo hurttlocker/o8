@@ -981,6 +981,31 @@ function DashboardInner() {
     });
   }, [openCanvasTab]);
 
+  const handleTimelineMilestone = useCallback((milestone: {
+    kind: 'pr_review' | 'pr_blocked' | 'pr_merged' | 'ci_success' | 'ci_failure' | 'ci_running';
+    repo: string;
+    number?: number;
+    runId?: number;
+  }) => {
+    if (milestone.kind.startsWith('pr_') && typeof milestone.number === 'number') {
+      handleSelectPR(milestone.number, milestone.repo);
+      return;
+    }
+
+    if (milestone.kind.startsWith('ci_')) {
+      openCanvasTab({
+        id: typeof milestone.runId === 'number' ? `ci:${milestone.repo}:${milestone.runId}` : `ci:${milestone.repo}`,
+        kind: 'ci',
+        label: 'CI',
+        resourceId: milestone.repo,
+        meta: {
+          repo: milestone.repo,
+          ...(typeof milestone.runId === 'number' ? { selectedRun: String(milestone.runId) } : {}),
+        },
+      });
+    }
+  }, [handleSelectPR, openCanvasTab]);
+
   const handleCreateIssue = useCallback((repo?: string) => {
     openCanvasTab({
       id: `new-issue:${repo ?? 'default'}:${Date.now()}`,
@@ -1684,6 +1709,7 @@ function DashboardInner() {
       }}>
         <AgentPanelChat
           externalSessionKey={activeSessionKey}
+          onSelectSession={setActiveSessionKey}
           draftInjection={desktopDraftInjection}
           onOpenDiff={() => {
             openCanvasTab({
