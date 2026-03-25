@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Download, X, RefreshCw } from 'lucide-react';
+import { Download, RefreshCw } from 'lucide-react';
 
 interface UpdateInfo {
   version: string;
@@ -10,14 +10,13 @@ interface UpdateInfo {
 }
 
 const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000; // 30 minutes
-const UPDATE_ENDPOINT = 'https://github.com/hurttlocker/cortex-ide/releases/latest/download/latest.json';
-
 /**
  * UpdateBanner — shows a slim banner at the top of the dashboard when
- * a new version is available. On Tauri desktop, uses the native updater
- * to download + install. On web, links to the release page.
+ * a new version is available. On Tauri desktop, uses the native updater.
+ * We intentionally skip browser-only update fetches in local/web mode to
+ * avoid noisy CORS console failures against GitHub release assets.
  */
-export function UpdateBanner({ currentVersion }: { currentVersion: string }) {
+export function UpdateBanner() {
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [installing, setInstalling] = useState(false);
@@ -38,21 +37,13 @@ export function UpdateBanner({ currentVersion }: { currentVersion: string }) {
         return;
       }
 
-      // Fallback: check GitHub endpoint directly
-      const res = await fetch(UPDATE_ENDPOINT, { cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json() as { version?: string; notes?: string; pub_date?: string };
-      if (data.version && data.version !== currentVersion) {
-        setUpdate({
-          version: data.version,
-          notes: data.notes,
-          date: data.pub_date,
-        });
-      }
+      // Browser/dev mode: skip remote release polling.
+      // The desktop product path should use the Tauri updater instead.
+      return;
     } catch {
       // Silently fail — update checks are non-critical
     }
-  }, [currentVersion]);
+  }, []);
 
   useEffect(() => {
     // Check on mount after a short delay (don't block initial render)

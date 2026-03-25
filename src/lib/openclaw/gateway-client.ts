@@ -29,13 +29,14 @@ let cachedConfig: GatewayConfig | null = null;
 let configLoadedAt = 0;
 const CONFIG_MAX_AGE_MS = 30_000; // Re-read config every 30s (catches token changes, restarts)
 const REST_STATUS_TIMEOUT_MS = 3_000;
-const CLI_STATUS_TIMEOUT_MS = 30_000;
-const CLI_COLD_START_WAIT_MS = 500;
 const CLI_FRESH_MAX_AGE_MS = 5_000;
 const CLI_BACKOFF_BASE_MS = 5_000;
 const CLI_BACKOFF_MAX_MS = 120_000;
 const CLI_STATUS_ERROR_LOG_COOLDOWN_MS = 60_000;
+const WS_RPC_ERROR_LOG_COOLDOWN_MS = 60_000;
 let loggedStatusCompatibilityNote = false;
+let lastWsRpcErrorLogAt = 0;
+let wsRpcSuppressedCount = 0;
 
 // ── CLI circuit breaker + concurrency limiter (#140) ──
 
@@ -293,10 +294,15 @@ async function runStatusSnapshot(): Promise<Record<string, unknown>> {
       agents: { agents: agents ?? [] },
     };
   } catch (err) {
+    const now = Date.now();
     const message = (err as Error).message?.slice(0, 200) ?? 'unknown';
-    console.error(`[gateway-client] WS RPC failed (will try CLI fallback): ${message}`);
-    if (err instanceof Error && err.stack) {
-      console.error(`[gateway-client] Stack: ${err.stack.split('\n').slice(0, 3).join(' | ')}`);
+    if (now - lastWsRpcErrorLogAt >= WS_RPC_ERROR_LOG_COOLDOWN_MS) {
+      const suffix = wsRpcSuppressedCount > 0 ? ` (+${wsRpcSuppressedCount} suppressed)` : '';
+      console.warn(`[gateway-client] WS RPC failed for ${method}; using CLI fallback${suffix}: ${message}`);
+      lastWsRpcErrorLogAt = now;
+      wsRpcSuppressedCount = 0;
+    } else {
+      wsRpcSuppressedCount += 1;
     }
   }
 
@@ -351,7 +357,7 @@ export function prewarmGatewayStatusCache() {
   ensureCliRefreshLoop();
   void fetchGatewayReadiness().catch(() => null);
   if (!statusCache && !refreshPromise && Date.now() >= cliStatusRetryAfter) {
-    void refreshCliCache(CLI_STATUS_TIMEOUT_MS).catch(() => null);
+    void refreshCliCache().catch(() => null);
   }
 }
 
@@ -366,7 +372,7 @@ function scheduleGatewayStatusWarmup() {
   }
 }
 
-async function refreshCliCache(timeoutMs = CLI_STATUS_TIMEOUT_MS, force = false): Promise<void> {
+async function refreshCliCache(force = false): Promise<void> {
   if (!force && Date.now() < cliStatusRetryAfter) {
     return;
   }
@@ -668,7 +674,7 @@ async function gatewayRpcViaCli<T>(
       'openclaw',
       ['gateway', 'call', method, '--json', '--params', paramsJson],
       {
-        cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || require('os').homedir(),
+        cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || homedir(),
         maxBuffer: 10 * 1024 * 1024,
         timeout: timeoutMs,
         env: {
@@ -729,7 +735,7 @@ async function gatewayRpcViaFile<T>(
     const timer = setTimeout(() => reject(new Error('gatewayRpcViaFile timeout')), timeoutMs + 5000);
 
     const child = spawn(process.execPath, ['-e', inlineScript], {
-      cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || require('os').homedir(),
+      cwd: process.env.CORTEX_IDE_WORKSPACE_ROOT || process.env.HOME || homedir(),
       env: {
         ...process.env,
         PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
