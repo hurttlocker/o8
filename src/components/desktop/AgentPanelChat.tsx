@@ -1519,10 +1519,15 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                       const isSessionReviewing = !isSessionMainOpenClaw && !isRunning && session.status === 'reviewing';
                       const sDotColor = isSessionMainOpenClaw ? '#2563eb' : isRunning ? '#34c759' : isSessionReviewing ? '#a78bfa' : sessionPercent >= 75 ? '#ff9f0a' : '#8e8e93';
                       const rawName = session.name ?? session.sessionKey ?? session.id;
+                      const runtimeLabel = session.runtime === 'claude-code' ? 'Claude Code'
+                        : session.runtime === 'codex' ? 'Codex'
+                        : null;
                       const runtimeTag = session.runtime === 'claude-code' ? ' · Claude Code'
                         : session.runtime === 'codex' ? ' · Codex'
                         : '';
-                      const name = rawName + runtimeTag;
+                      const name = runtimeLabel && rawName.toLowerCase().includes(runtimeLabel.toLowerCase())
+                        ? rawName
+                        : rawName + runtimeTag;
                       const subtitle = sessionLocalFolderLabel(session)
                         ?? session.currentTask
                         ?? session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '')
