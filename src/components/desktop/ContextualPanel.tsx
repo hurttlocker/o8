@@ -49,6 +49,7 @@ export interface ContextualPanelProps {
   // Canvas tabs (issues, diffs, files, timeline — rendered as tabs alongside terminals)
   canvasTabs?: import('./Canvas').CanvasTab[];
   activeCanvasTabId?: string | null;
+  canvasRevealKey?: number;
   onSelectCanvasTab?: (tabId: string) => void;
   onCloseCanvasTab?: (tabId: string) => void;
   onInjectChatContext?: (payload: import('@/lib/chat/injection').AgentPanelChatInjectionPayload) => void;
@@ -355,6 +356,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       termWsConnected,
       canvasTabs,
       activeCanvasTabId,
+      canvasRevealKey,
       onSelectCanvasTab,
       onCloseCanvasTab,
       onInjectChatContext,
@@ -376,6 +378,13 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
     const addMenuRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => { tabsRef.current = tabs; }, [tabs]);
+
+    useEffect(() => {
+      if (!canvasRevealKey) return;
+      if (!activeCanvasTabId) return;
+      if (!canvasTabs?.some((tab) => tab.id === activeCanvasTabId)) return;
+      setActiveTabId('');
+    }, [activeCanvasTabId, canvasRevealKey, canvasTabs]);
 
     const createBottomTab = useCallback((agent: CliAgent, initialCommand?: string) => {
       tabCountRef.current += 1;

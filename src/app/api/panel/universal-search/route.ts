@@ -2,8 +2,10 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
+import os from 'node:os';
+import { ensureGitHubIssues, resolveRepoSlug } from '@/lib/github-broker';
 
-const HOME = process.env.HOME || require('os').homedir();
+const HOME = process.env.HOME || os.homedir();
 const CORTEX_BINARY = process.env.CORTEX_BINARY || `${HOME}/bin/cortex`;
 const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || `process.cwd()`;
 const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || '';
@@ -147,24 +149,27 @@ function searchMemory(query: string): UniversalResult[] {
   }
 }
 
-function searchIssues(query: string): UniversalResult[] {
-  const raw = execQuiet(
-    `cd "process.cwd()" && gh issue list --search "${query.replace(/"/g, '\\"')}" --json number,title,state,body --limit 8 2>/dev/null`,
-    { timeout: 5000 },
-  );
-  if (!raw) return [];
-  try {
-    const issues = JSON.parse(raw);
-    return (Array.isArray(issues) ? issues : []).map((i: { number: number; title: string; state: string; body?: string }) => ({
+async function searchIssues(query: string, repoLike?: string): Promise<UniversalResult[]> {
+  const repo = await resolveRepoSlug(repoLike ?? null, '');
+  if (!repo) return [];
+
+  const result = await ensureGitHubIssues(repo).catch(() => null);
+  if (!result) return [];
+
+  const lowerQuery = query.toLowerCase();
+  return result.issues
+    .filter((issue) => {
+      const haystack = `${issue.title}\n${issue.body}`.toLowerCase();
+      return haystack.includes(lowerQuery);
+    })
+    .slice(0, 8)
+    .map((issue) => ({
       kind: 'issue' as const,
-      title: `#${i.number} ${i.title}`,
-      detail: `${i.state} · ${(i.body ?? '').slice(0, 100)}`,
-      target: { issueNumber: i.number },
+      title: `#${issue.number} ${issue.title}`,
+      detail: `${issue.state} · ${issue.body.slice(0, 100)}`,
+      target: { issueNumber: issue.number },
       score: 0.75,
     }));
-  } catch {
-    return [];
-  }
 }
 
 function searchFiles(query: string, workspace?: string): UniversalResult[] {
@@ -236,6 +241,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const query = searchParams.get('q')?.trim();
   const workspace = searchParams.get('workspace') ?? undefined;
+  const repo = searchParams.get('repo') ?? undefined;
   const categories = searchParams.get('categories')?.split(',') ?? ['conversation', 'memory', 'issue', 'file', 'symbol'];
 
   if (!query || query.length < 2) {
@@ -248,7 +254,7 @@ export async function GET(request: Request) {
     const searches = await Promise.allSettled([
       categories.includes('conversation') ? searchConversations(query) : Promise.resolve([]),
       categories.includes('memory') ? Promise.resolve(searchMemory(query)) : Promise.resolve([]),
-      categories.includes('issue') ? Promise.resolve(searchIssues(query)) : Promise.resolve([]),
+      categories.includes('issue') ? searchIssues(query, repo) : Promise.resolve([]),
       categories.includes('file') ? Promise.resolve(searchFiles(query, workspace)) : Promise.resolve([]),
       categories.includes('symbol') ? Promise.resolve(searchSymbolsProvider(query, workspace)) : Promise.resolve([]),
     ]);

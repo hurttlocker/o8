@@ -1,9 +1,9 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { createGitHubIssue, resolveRepoSlug } from '@/lib/github-broker';
 
-const DEFAULT_REPO = process.env.GITHUB_REPO || '';
+const DEFAULT_REPO = process.env.GITHUB_REPO || process.env.CORTEX_IDE_REVIEW_REPO || '';
 
 export async function POST(request: Request) {
   const body = await request.json();
@@ -18,35 +18,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Title is required' }, { status: 400 });
   }
 
-  const repoSlug = repo || DEFAULT_REPO;
+  const repoSlug = await resolveRepoSlug(repo || null, DEFAULT_REPO);
   if (!/^[\w.-]+\/[\w.-]+$/.test(repoSlug)) {
     return NextResponse.json({ error: 'Invalid repo format' }, { status: 400 });
   }
 
   try {
-    const args = ['issue', 'create', '--repo', repoSlug, '--title', title.trim()];
-
-    if (description?.trim()) {
-      args.push('--body', description.trim());
-    }
-
-    if (labels && labels.length > 0) {
-      args.push('--label', labels.join(','));
-    }
-
-    const output = execSync(
-      `gh ${args.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ')}`,
-      { encoding: 'utf-8', timeout: 15000 },
-    );
-
-    // gh issue create outputs the URL of the created issue
-    const issueUrl = output.trim();
-    const issueNumber = parseInt(issueUrl.split('/').pop() ?? '0', 10);
+    const issue = await createGitHubIssue(repoSlug, {
+      title: title.trim(),
+      body: description?.trim() || '',
+      labels: labels?.filter(Boolean) ?? [],
+    });
 
     return NextResponse.json({
       ok: true,
-      url: issueUrl,
-      number: issueNumber,
+      url: issue.url,
+      number: issue.number,
       repo: repoSlug,
     });
   } catch (err) {

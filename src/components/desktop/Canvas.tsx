@@ -32,6 +32,7 @@ import {
   FilePlus,
   FileText,
   GitCommit,
+  GitPullRequest,
   GitMerge,
   Globe,
   Hexagon,
@@ -2301,16 +2302,55 @@ interface CIRun {
   displayTitle: string;
   event: string;
   headBranch: string;
+  headSha?: string;
   status: string;
   conclusion: string;
   createdAt: string;
   updatedAt: string;
   workflowName: string;
   url: string;
+  pullRequests?: { number: number; url: string }[];
 }
 
 interface CIRunDetail extends CIRun {
-  jobs: { name: string; status: string; conclusion: string; startedAt: string; completedAt: string }[];
+  jobs: {
+    databaseId: number;
+    name: string;
+    status: string;
+    conclusion: string;
+    startedAt: string;
+    completedAt: string;
+    url?: string;
+    checkRunId?: number | null;
+    annotations?: CIAnnotation[];
+  }[];
+  annotations: CIAnnotation[];
+  botComments: CIBotComment[];
+}
+
+interface CIAnnotation {
+  path: string;
+  startLine: number;
+  endLine: number;
+  level: string;
+  message: string;
+  title: string;
+  rawDetails: string;
+  blobUrl: string;
+  jobName?: string;
+  jobUrl?: string;
+}
+
+interface CIBotComment {
+  id: number;
+  prNumber: number;
+  kind: 'issue' | 'review';
+  author: string;
+  body: string;
+  createdAt: string;
+  path?: string;
+  line?: number | null;
+  url: string;
 }
 
 function ciColor(conclusion: string, status: string): string {
@@ -2482,9 +2522,46 @@ function CIViewer({ repo }: { repo?: string }) {
               <span>{runDetail.workflowName}</span>
               <span>·</span>
               <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{runDetail.headBranch}</span>
+              {runDetail.headSha ? (
+                <>
+                  <span>·</span>
+                  <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: 10 }}>{runDetail.headSha.slice(0, 7)}</span>
+                </>
+              ) : null}
               <span>·</span>
               <span>{runDetail.event}</span>
             </div>
+
+            {runDetail.pullRequests && runDetail.pullRequests.length > 0 ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t-text-secondary)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                  Related PRs
+                </div>
+                {runDetail.pullRequests.map((pr) => (
+                  <a
+                    key={pr.number}
+                    href={pr.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: '3px 8px',
+                      borderRadius: 99,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: '#2563eb',
+                      background: 'rgba(37,99,235,0.08)',
+                      textDecoration: 'none',
+                    }}
+                  >
+                    <GitPullRequest size={11} strokeWidth={2} />
+                    PR #{pr.number}
+                  </a>
+                ))}
+              </div>
+            ) : null}
 
             {/* Jobs */}
             {runDetail.jobs?.length > 0 ? (
@@ -2499,9 +2576,171 @@ function CIViewer({ repo }: { repo?: string }) {
                       <span style={{ color: jColor, fontWeight: 700 }}>{ciIcon(job.conclusion, job.status)}</span>
                       <span style={{ color: 'var(--t-text-strong)' }}>{job.name}</span>
                       <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{job.conclusion || job.status}</span>
+                      {job.annotations && job.annotations.length > 0 ? (
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: '#d97706',
+                          padding: '1px 6px',
+                          borderRadius: 99,
+                          background: 'rgba(217,119,6,0.08)',
+                        }}>
+                          {job.annotations.length} annotation{job.annotations.length === 1 ? '' : 's'}
+                        </span>
+                      ) : null}
                     </div>
                   );
                 })}
+              </div>
+            ) : null}
+
+            {runDetail.annotations?.length > 0 ? (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Annotations
+                  </div>
+                  <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>
+                    {runDetail.annotations.length} total
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {runDetail.annotations.map((annotation, index) => {
+                    const levelColor = annotation.level === 'failure'
+                      ? '#dc2626'
+                      : annotation.level === 'warning'
+                        ? '#d97706'
+                        : '#2563eb';
+                    const location = annotation.path
+                      ? `${annotation.path}${annotation.startLine ? `:${annotation.startLine}${annotation.endLine && annotation.endLine !== annotation.startLine ? `-${annotation.endLine}` : ''}` : ''}`
+                      : 'Unknown location';
+
+                    return (
+                      <div
+                        key={`${annotation.jobName ?? 'job'}:${annotation.path}:${annotation.startLine}:${index}`}
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: 10,
+                          border: '1px solid var(--t-divider-subtle)',
+                          background: 'var(--t-hover)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+                          <span style={{
+                            fontSize: 10,
+                            fontWeight: 700,
+                            color: levelColor,
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.05em',
+                          }}>
+                            {annotation.level}
+                          </span>
+                          {annotation.jobName ? (
+                            <span style={{ fontSize: 11, color: 'var(--t-text-secondary)', fontWeight: 600 }}>
+                              {annotation.jobName}
+                            </span>
+                          ) : null}
+                          <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                            {location}
+                          </span>
+                          {annotation.blobUrl ? (
+                            <a
+                              href={annotation.blobUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                marginLeft: 'auto',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                fontSize: 11,
+                                color: 'var(--t-text-secondary)',
+                                textDecoration: 'none',
+                              }}
+                            >
+                              <ExternalLink size={11} />
+                              Source
+                            </a>
+                          ) : null}
+                        </div>
+                        {annotation.title ? (
+                          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text-strong)', marginBottom: 4 }}>
+                            {annotation.title}
+                          </div>
+                        ) : null}
+                        <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--t-text)' }}>
+                          {annotation.message}
+                        </div>
+                        {annotation.rawDetails ? (
+                          <div style={{
+                            marginTop: 6,
+                            fontSize: 11,
+                            lineHeight: 1.5,
+                            color: 'var(--t-text-muted)',
+                            fontFamily: '"SF Mono", ui-monospace, monospace',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                          }}>
+                            {annotation.rawDetails}
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            {runDetail.botComments?.length > 0 ? (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Related Bot Comments
+                  </div>
+                  <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>
+                    {runDetail.botComments.length} found
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {runDetail.botComments.map((comment) => (
+                    <div
+                      key={`${comment.kind}:${comment.id}`}
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: 10,
+                        border: '1px solid var(--t-divider-subtle)',
+                        background: 'var(--t-panel-translucent)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 6 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--t-text-strong)' }}>{comment.author}</span>
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          color: comment.kind === 'review' ? '#8b5cf6' : '#2563eb',
+                          textTransform: 'uppercase',
+                          letterSpacing: '0.05em',
+                        }}>
+                          {comment.kind === 'review' ? 'review' : 'comment'}
+                        </span>
+                        <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>
+                          PR #{comment.prNumber}
+                        </span>
+                        {comment.path ? (
+                          <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                            {comment.path}{comment.line ? `:${comment.line}` : ''}
+                          </span>
+                        ) : null}
+                        <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--t-text-muted)' }}>
+                          {formatAge(comment.createdAt)}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, lineHeight: 1.6 }}>
+                        <MarkdownBody text={comment.body} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : null}
 

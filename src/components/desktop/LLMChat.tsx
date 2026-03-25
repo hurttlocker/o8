@@ -324,7 +324,7 @@ function ActionButton({ icon, label, active, activeColor, onClick }: {
   );
 }
 
-function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFork, onApplyToFile, onOpenInCanvas, onRunInTerminal }: MessageBubbleProps) {
+export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFork, onApplyToFile, onOpenInCanvas, onRunInTerminal }: MessageBubbleProps) {
   const [copied, setCopied] = useState(false);
   const [liked, setLiked] = useState<'up' | 'down' | null>(null);
   const [bookmarked, setBookmarked] = useState(false);
@@ -1878,7 +1878,7 @@ export default function LLMChat({ tabId, onOpenInCanvas, onRunInTerminal, onOpen
       }
 
       // Clean up content: strip tool narration lines the model adds before tool use
-      let cleanContent = fullContent
+      const cleanContent = fullContent
         .replace(/^I'll use the \w+ tool[^\n]*\n*/gm, '')
         .replace(/^I'll use the \w+ tool[^\n]*/gm, '')
         .replace(/^Let me use[^\n]*tool[^\n]*\n*/gm, '')

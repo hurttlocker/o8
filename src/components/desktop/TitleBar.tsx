@@ -12,6 +12,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import type { RepoRegistryEntry } from '@/lib/repos/types';
 
 // ── Inline SVG icons (Tauri webview doesn't reliably render Lucide React components) ──
 
@@ -70,11 +71,11 @@ function IconMessageSquare({ size = 16 }: { size?: number }) {
 
 interface TitleBarProps {
   renderSearch?: (onClose: () => void) => React.ReactNode;
-  globalRepo?: string | null;
   globalRepoBranch?: string;
-  repoList?: string[];
-  repoDisplayNames?: Record<string, string>;
-  onRepoChange?: (repo: string) => void;
+  selectedRepoEntry?: RepoRegistryEntry | null;
+  repoEntries?: RepoRegistryEntry[];
+  onRepoChange?: (repoId: string | null) => void;
+  onRepoRemove?: (repoId: string) => void;
   onOpenFolder?: () => void;
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
@@ -161,11 +162,11 @@ function TitleBarSep() {
 
 export function TitleBar({
   renderSearch,
-  globalRepo,
   globalRepoBranch = 'main',
-  repoList = [],
-  repoDisplayNames = {},
+  selectedRepoEntry = null,
+  repoEntries = [],
   onRepoChange,
+  onRepoRemove,
   onOpenFolder,
   sidebarVisible = true,
   onToggleSidebar,
@@ -179,6 +180,9 @@ export function TitleBar({
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const [openMenuOpen, setOpenMenuOpen] = useState(false);
   const [availableEditors, setAvailableEditors] = useState<{ id: string; name: string; available: boolean }[]>([]);
+  const selectedRepoPath = selectedRepoEntry?.localPath ?? '';
+  const selectedRepoName = selectedRepoEntry?.name ?? null;
+  const hasSelectedRepo = Boolean(selectedRepoEntry);
 
   // Fetch available editors on mount
   useEffect(() => {
@@ -188,6 +192,92 @@ export function TitleBar({
       .catch(() => {});
   }, []);
   const headerRef = useRef<HTMLElement>(null);
+
+  const renderRepoEntryRow = useCallback((repo: RepoRegistryEntry) => {
+    const isSelected = selectedRepoEntry?.id === repo.id;
+
+    return (
+      <div
+        key={repo.id}
+        style={{
+          display: 'flex',
+          alignItems: 'stretch',
+          background: isSelected ? 'rgba(239,68,68,0.06)' : 'transparent',
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => { onRepoChange?.(repo.id); setRepoPickerOpen(false); }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            flex: 1,
+            minWidth: 0,
+            padding: '8px 12px',
+            border: 'none',
+            background: 'transparent',
+            color: isSelected ? '#dc2626' : 'var(--t-text)',
+            fontSize: 12,
+            fontWeight: isSelected ? 600 : 400,
+            cursor: 'pointer',
+            fontFamily: '-apple-system, system-ui, sans-serif',
+            textAlign: 'left',
+          }}
+          onMouseEnter={(e) => {
+            if (!isSelected) e.currentTarget.style.background = 'rgba(0,0,0,0.03)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
+          }}
+        >
+          <span style={{ width: 14, textAlign: 'center', fontSize: 12, color: isSelected ? '#dc2626' : 'transparent' }}>✓</span>
+          <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{repo.name}</span>
+            <span
+              style={{
+                fontSize: 10,
+                color: 'var(--t-text-faint)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {repo.localPath}
+            </span>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            onRepoRemove?.(repo.id);
+            setRepoPickerOpen(false);
+          }}
+          title={`Remove ${repo.name} from Cortex`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 34,
+            border: 'none',
+            borderLeft: '1px solid rgba(0,0,0,0.05)',
+            background: 'transparent',
+            color: '#b91c1c',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 6h18" />
+            <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+            <path d="M10 11v6" />
+            <path d="M14 11v6" />
+          </svg>
+        </button>
+      </div>
+    );
+  }, [onRepoChange, onRepoRemove, selectedRepoEntry]);
 
   // Window drag — Tauri v2 startDragging API
   const handleMouseDown = useCallback(async (e: React.MouseEvent) => {
@@ -292,7 +382,7 @@ export function TitleBar({
         gap: 6,
       }}>
         {/* Repo picker pill */}
-        {globalRepo ? (
+        {hasSelectedRepo ? (
           <div style={{ position: 'relative', flexShrink: 0, ['WebkitAppRegion' as string]: 'no-drag' }} data-no-drag="">
             <button
               type="button"
@@ -324,7 +414,7 @@ export function TitleBar({
                 <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" fill="currentColor" opacity="0.4" />
               </svg>
               <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text)' }}>
-                {repoDisplayNames[globalRepo] ?? globalRepo.split('/').pop()}
+                {selectedRepoName}
               </span>
               <span style={{
                 fontSize: 10,
@@ -382,37 +472,30 @@ export function TitleBar({
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>
                     Open Folder…
                   </button>
-                  {repoList.length > 0 ? <div style={{ height: 1, background: 'var(--t-divider)', margin: '2px 0' }} /> : null}
-                  {repoList.map((repo) => (
-                    <button
-                      key={repo}
-                      type="button"
-                      onClick={() => { onRepoChange?.(repo); setRepoPickerOpen(false); }}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        width: '100%',
-                        padding: '8px 12px',
-                        border: 'none',
-                        background: globalRepo === repo ? 'rgba(239,68,68,0.06)' : 'transparent',
-                        color: globalRepo === repo ? '#dc2626' : 'var(--t-text)',
-                        fontSize: 12,
-                        fontWeight: globalRepo === repo ? 600 : 400,
-                        cursor: 'pointer',
-                        fontFamily: '-apple-system, system-ui, sans-serif',
-                        textAlign: 'left',
-                      }}
-                      onMouseEnter={(e) => { if (globalRepo !== repo) (e.currentTarget).style.background = 'rgba(0,0,0,0.03)'; }}
-                      onMouseLeave={(e) => { (e.currentTarget).style.background = globalRepo === repo ? 'rgba(239,68,68,0.06)' : 'transparent'; }}
-                    >
-                      <span style={{ width: 14, textAlign: 'center', fontSize: 12, color: globalRepo === repo ? '#dc2626' : 'transparent' }}>✓</span>
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" fill="currentColor" opacity="0.4" />
-                      </svg>
-                      {repoDisplayNames[repo] ?? repo.split('/').pop()}
-                    </button>
-                  ))}
+                  <div style={{ height: 1, background: 'var(--t-divider)', margin: '2px 0' }} />
+                  <button
+                    type="button"
+                    onClick={() => { onRepoChange?.(null); setRepoPickerOpen(false); }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      width: '100%',
+                      padding: '8px 12px',
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--t-text-muted)',
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: 'pointer',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <span style={{ width: 14, textAlign: 'center', fontSize: 12 }}>○</span>
+                    Clear Selection
+                  </button>
+                  {repoEntries.map(renderRepoEntryRow)}
                 </div>
               </>
             ) : null}
@@ -463,22 +546,8 @@ export function TitleBar({
                   >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg> Open Folder…
                   </button>
-                  {repoList.length > 0 && <div style={{ height: 1, background: 'var(--t-divider)', margin: '2px 0' }} />}
-                  {repoList.map((repo) => (
-                    <button
-                      key={repo}
-                      type="button"
-                      onClick={() => { onRepoChange?.(repo); setRepoPickerOpen(false); }}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-                        padding: '8px 12px', border: 'none', background: 'transparent',
-                        color: 'var(--t-text)', fontSize: 12, cursor: 'pointer',
-                        fontFamily: '-apple-system, system-ui, sans-serif', textAlign: 'left',
-                      }}
-                    >
-                      {repo.split('/').pop()}
-                    </button>
-                  ))}
+                  {repoEntries.length > 0 && <div style={{ height: 1, background: 'var(--t-divider)', margin: '2px 0' }} />}
+                  {repoEntries.map(renderRepoEntryRow)}
                 </div>
               </>
             )}
@@ -563,7 +632,7 @@ export function TitleBar({
       />
 
       {/* ── Open In button ── */}
-      {globalRepo ? (
+      {hasSelectedRepo ? (
         <div style={{ position: 'relative', flexShrink: 0, ['WebkitAppRegion' as string]: 'no-drag' }} data-no-drag="">
           <button
             type="button"
@@ -631,11 +700,11 @@ export function TitleBar({
                     key={item.id}
                     type="button"
                     onClick={() => {
-                      fetch('/api/panel/open-in', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ editor: item.id, repo: globalRepo }),
-                      });
+                        fetch('/api/panel/open-in', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ editor: item.id, repo: selectedRepoPath }),
+                        });
                       setOpenMenuOpen(false);
                     }}
                     style={{
@@ -666,7 +735,7 @@ export function TitleBar({
                         fetch('/api/panel/open-in', {
                           method: 'POST',
                           headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ editor: editor.id, repo: globalRepo }),
+                          body: JSON.stringify({ editor: editor.id, repo: selectedRepoPath }),
                         });
                         setOpenMenuOpen(false);
                       }}
@@ -696,7 +765,7 @@ export function TitleBar({
                 <button
                   type="button"
                   onClick={() => {
-                    navigator.clipboard.writeText(globalRepo ?? '');
+                    navigator.clipboard.writeText(selectedRepoPath);
                     setOpenMenuOpen(false);
                   }}
                   style={{
