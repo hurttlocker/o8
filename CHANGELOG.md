@@ -4,6 +4,10 @@ Development activity for Rainwater IDE.
 
 ---
 
+## 2026-03-25
+
+- `ca06e24` feat: route workspace launches and github flows through broker
+
 ## 2026-03-24
 
 - `b725dc6` fix: polish desktop session rail and model labels
