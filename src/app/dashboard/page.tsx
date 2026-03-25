@@ -108,6 +108,10 @@ import {
 import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
 
 const TILE_LAYOUT_STORAGE_KEY = 'cortex-ide:dashboard-tiles:v1';
+const DEFAULT_LEFT_PANEL_WIDTH = 332;
+const DEFAULT_RIGHT_PANEL_WIDTH = 468;
+const MIN_RIGHT_PANEL_WIDTH = 360;
+const MAX_RIGHT_PANEL_WIDTH = 600;
 
 export default function DashboardPage() {
   return (
@@ -124,8 +128,8 @@ export default function DashboardPage() {
 function DashboardInner() {
   const initialTileLayout = useMemo(() => createDefaultTileLayout(), []);
 
-  const [leftWidth, setLeftWidth] = useState(300);
-  const [rightWidth, setRightWidth] = useState(420);
+  const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_PANEL_WIDTH);
+  const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_PANEL_WIDTH);
   const [activeSessionKey, setActiveSessionKey] = useState<string | undefined>();
   const [liveOutputCollapsed, setLiveOutputCollapsed] = useState(false);
   const [dashTermSession, setDashTermSession] = useState<string | null>(null);
@@ -1184,7 +1188,7 @@ function DashboardInner() {
     const startX = e.clientX;
     const startW = rightWidth;
     const onMove = (ev: MouseEvent) => {
-      setRightWidth(Math.min(Math.max(startW + (startX - ev.clientX), 320), 600));
+      setRightWidth(Math.min(Math.max(startW + (startX - ev.clientX), MIN_RIGHT_PANEL_WIDTH), MAX_RIGHT_PANEL_WIDTH));
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);

@@ -69,6 +69,12 @@ type TranscriptGroup = {
   entries: MobileTranscriptEntry[];
 };
 
+type SessionPickerChipTone = 'blue' | 'green' | 'purple' | 'amber' | 'slate' | 'red';
+type SessionPickerChip = {
+  label: string;
+  tone: SessionPickerChipTone;
+};
+
 // ── Helpers ──
 
 function getAgentName(s: SessionSummary): string {
@@ -115,6 +121,164 @@ function sessionLocalFolderLabel(session: SessionSummary) {
   const tty = ttyMatch?.[1]?.trim();
   const folder = compactLine(cwd, cwd, 44);
   return tty ? `${folder} • ${tty}` : folder;
+}
+
+function sessionRuntimeLabel(session: SessionSummary) {
+  if (session.runtime === 'claude-code') return 'Claude Code';
+  if (session.runtime === 'codex') return 'Codex';
+  if (session.runtime === 'openclaw') return 'OpenClaw';
+  return 'Session';
+}
+
+function sessionRepoLabel(session: SessionSummary) {
+  const repoSlug = session.runtimeSurface?.reviewContext?.repoSlug?.split('/').pop()?.trim();
+  if (repoSlug) return repoSlug;
+  const cwd = session.runtimeSurface?.cwd?.trim() || session.workspace?.trim();
+  if (!cwd) return null;
+  const normalized = cwd.replace(/^~\//, '').replace(/\/+$/, '');
+  const parts = normalized.split('/').filter(Boolean);
+  return parts[parts.length - 1] ?? null;
+}
+
+function cleanBranchLabel(branch?: string | null) {
+  const trimmed = branch?.trim();
+  if (!trimmed || trimmed === 'unknown') return null;
+  return trimmed.replace(/^(feat|fix|batch|chore|refactor)\//, '');
+}
+
+function sessionTaskLabel(session?: SessionSummary) {
+  if (!session) return null;
+  const candidates = [
+    session.name,
+    session.currentTask,
+    session.activity?.headline,
+  ].filter((value): value is string => Boolean(value?.trim()));
+
+  for (const candidate of candidates) {
+    const issueMatch = candidate.match(/\bIssue #\d+\b/i);
+    if (issueMatch) return issueMatch[0].replace(/^issue/i, 'Issue');
+    const prMatch = candidate.match(/\bPR #\d+\b/i);
+    if (prMatch) return prMatch[0].replace(/^pr/i, 'PR');
+    if (/review/i.test(candidate)) return 'Review';
+  }
+
+  return null;
+}
+
+function isMeaningfulTaskLabel(label?: string | null) {
+  if (!label) return false;
+  return /\bIssue #\d+\b/i.test(label) || /\bPR #\d+\b/i.test(label) || /^Review$/i.test(label);
+}
+
+function sessionStateChip(session?: SessionSummary): SessionPickerChip | null {
+  if (!session) return null;
+  if (session.status === 'running') return { label: 'Working', tone: 'green' };
+  if (session.status === 'reviewing') return { label: 'Reviewing', tone: 'purple' };
+  if (session.status === 'waiting') return { label: 'Waiting', tone: 'slate' };
+  if (session.status === 'blocked' || session.status === 'failed') return { label: 'Blocked', tone: 'red' };
+  return { label: 'Ready', tone: 'blue' };
+}
+
+function sessionPickerTitle(session?: SessionSummary) {
+  if (!session) return 'Select session';
+  if (session.runtime === 'openclaw') {
+    return compactLine(session.name ?? 'OpenClaw', 'OpenClaw', 36);
+  }
+  const repoLabel = sessionRepoLabel(session);
+  const runtimeLabel = sessionRuntimeLabel(session);
+  return compactLine(repoLabel ? `${repoLabel} · ${runtimeLabel}` : runtimeLabel, runtimeLabel, 36);
+}
+
+function sessionHeaderTitle(session?: SessionSummary) {
+  if (!session) return 'Select session';
+  if (session.runtime === 'openclaw') {
+    return compactLine(session.name ?? 'OpenClaw', 'OpenClaw', 36);
+  }
+  const repoLabel = sessionRepoLabel(session);
+  if (repoLabel) return compactLine(repoLabel, repoLabel, 36);
+  return compactLine(sessionRuntimeLabel(session), 'Session', 36);
+}
+
+function sessionPickerSubtitle(session?: SessionSummary) {
+  if (!session) return '';
+  const branchLabel = cleanBranchLabel(session.branch);
+  if (branchLabel) return compactLine(branchLabel, branchLabel, 42);
+  const taskLabel = sessionTaskLabel(session);
+  if (taskLabel) return compactLine(taskLabel, taskLabel, 42);
+  const folderLabel = sessionLocalFolderLabel(session);
+  if (folderLabel) return compactLine(folderLabel, folderLabel, 42);
+  const taskSummary = session.currentTask?.trim();
+  if (taskSummary) return compactLine(taskSummary, taskSummary, 42);
+  return '';
+}
+
+function sessionPickerRowSubtitle(session: SessionSummary) {
+  const parts = [
+    sessionTaskLabel(session),
+    cleanBranchLabel(session.branch),
+  ].filter((value): value is string => Boolean(value));
+  if (parts.length > 0) return compactLine(parts.join(' · '), parts[0], 52);
+  return sessionLocalFolderLabel(session) ?? compactLine(session.currentTask, 'Session ready', 52);
+}
+
+function sessionPickerChips(session?: SessionSummary): SessionPickerChip[] {
+  if (!session) return [];
+  const chips: SessionPickerChip[] = [];
+  const taskLabel = sessionTaskLabel(session);
+  if (taskLabel && isMeaningfulTaskLabel(taskLabel)) chips.push({ label: taskLabel, tone: 'blue' });
+  chips.push({
+    label: sessionRuntimeLabel(session),
+    tone: session.runtime === 'claude-code' ? 'purple' : session.runtime === 'codex' ? 'green' : 'slate',
+  });
+  const state = sessionStateChip(session);
+  if (state) chips.push(state);
+  return chips;
+}
+
+function sessionChipStyles(tone: SessionPickerChipTone) {
+  switch (tone) {
+    case 'green':
+      return { color: '#15803d', background: 'rgba(34, 197, 94, 0.11)', border: '1px solid rgba(34, 197, 94, 0.16)' };
+    case 'purple':
+      return { color: '#7c3aed', background: 'rgba(167, 139, 250, 0.12)', border: '1px solid rgba(167, 139, 250, 0.18)' };
+    case 'amber':
+      return { color: '#b45309', background: 'rgba(245, 158, 11, 0.13)', border: '1px solid rgba(245, 158, 11, 0.18)' };
+    case 'red':
+      return { color: '#dc2626', background: 'rgba(239, 68, 68, 0.11)', border: '1px solid rgba(239, 68, 68, 0.16)' };
+    case 'slate':
+      return { color: '#475569', background: 'rgba(148, 163, 184, 0.12)', border: '1px solid rgba(148, 163, 184, 0.18)' };
+    case 'blue':
+    default:
+      return { color: '#2563eb', background: 'rgba(37, 99, 235, 0.10)', border: '1px solid rgba(37, 99, 235, 0.15)' };
+  }
+}
+
+function filterDesktopInboxSnapshot(snapshot: MobileInboxSnapshot, includeOpenClaw: boolean): MobileInboxSnapshot {
+  if (includeOpenClaw) return snapshot;
+
+  const sessions = snapshot.sessions.filter((session) => session.runtime !== 'openclaw');
+  const allowedSessionKeys = new Set(sessions.map((session) => session.sessionKey));
+  const items = snapshot.items.filter((item) => !item.sessionKey || allowedSessionKeys.has(item.sessionKey));
+  const alerts = items.filter((item) => item.kind === 'alert' && item.severity !== 'info').length;
+  const approvals = items.filter((item) => item.kind === 'approval').length;
+  const reviewItems = items.filter((item) => item.kind === 'review').length;
+  const activeRuns = sessions.filter((session) => ['running', 'reviewing', 'blocked', 'waiting', 'failed'].includes(session.status)).length;
+  const primarySessionKey = sessions.find((session) => session.sessionKey === snapshot.primarySessionKey)?.sessionKey
+    ?? sessions.find((session) => session.status === 'running' || session.status === 'reviewing')?.sessionKey
+    ?? sessions[0]?.sessionKey;
+
+  return {
+    ...snapshot,
+    primarySessionKey,
+    sessions,
+    items,
+    summary: {
+      alerts,
+      approvals,
+      reviewItems,
+      activeRuns,
+    },
+  };
 }
 
 function mediaHref(path: string): string {
@@ -1228,8 +1392,8 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
   projectGroups,
   selectedSession,
   activeTitle,
-  headerLabel,
   activeSubtitle,
+  activeChips,
   connectionDotColor,
   handleSessionFocus,
   expandedGroup,
@@ -1244,8 +1408,8 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
   projectGroups: ProjectGroup[];
   selectedSession: SessionSummary | undefined;
   activeTitle: string;
-  headerLabel: string;
   activeSubtitle: string;
+  activeChips: SessionPickerChip[];
   connectionDotColor: string;
   handleSessionFocus: (sessionId: string) => void;
   expandedGroup: string | null;
@@ -1262,8 +1426,8 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
-        gap: '10px',
-        padding: '12px 14px',
+        gap: '8px',
+        padding: '8px 10px',
         borderBottom: '1px solid rgba(255, 255, 255, 0.22)',
         background: 'linear-gradient(180deg, rgba(246,249,255,0.58), rgba(255,255,255,0.18))',
         backdropFilter: 'blur(24px) saturate(1.25)',
@@ -1280,12 +1444,12 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
+            gap: 8,
             width: '100%',
-            padding: '10px 12px',
+            padding: '7px 9px',
             margin: 0,
             border: pickerOpen ? '1px solid rgba(37, 99, 235, 0.18)' : '1px solid rgba(148, 163, 184, 0.14)',
-            borderRadius: 18,
+            borderRadius: 15,
             background: pickerOpen
               ? 'linear-gradient(180deg, rgba(255,255,255,0.99), rgba(239,246,255,0.95))'
               : 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.92))',
@@ -1312,7 +1476,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
           aria-label="Switch session"
           aria-expanded={pickerOpen}
         >
-          <span style={{ position: 'relative', width: 10, height: 10, flexShrink: 0 }}>
+          <span style={{ position: 'relative', width: 8, height: 8, flexShrink: 0 }}>
             {connectionDotColor === '#ff9f0a' && (
               <span style={{
                 position: 'absolute', inset: 0, borderRadius: '50%',
@@ -1322,63 +1486,99 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
             )}
             <span style={{
               position: 'relative', display: 'block',
-              width: 10, height: 10, borderRadius: '50%',
+              width: 8, height: 8, borderRadius: '50%',
               backgroundColor: connectionDotColor === '#ff9f0a' ? undefined : connectionDotColor,
               background: connectionDotColor === '#ff9f0a' ? 'linear-gradient(135deg, #f59e0b, #a78bfa)' : connectionDotColor,
-              boxShadow: connectionDotColor === '#34c759' ? '0 0 10px rgba(52, 199, 89, 0.4)'
-                : connectionDotColor === '#2563eb' ? '0 0 10px rgba(37, 99, 235, 0.34)'
-                : connectionDotColor === '#ff9f0a' ? '0 0 9px rgba(167, 139, 250, 0.42)'
+              boxShadow: connectionDotColor === '#34c759' ? '0 0 8px rgba(52, 199, 89, 0.35)'
+                : connectionDotColor === '#2563eb' ? '0 0 8px rgba(37, 99, 235, 0.28)'
+                : connectionDotColor === '#ff9f0a' ? '0 0 8px rgba(167, 139, 250, 0.38)'
                 : 'none',
               animation: connectionDotColor === '#ff9f0a' ? 'reviewingBreathe 2.4s ease-in-out infinite' : 'none',
             }} />
           </span>
-          <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
             <div style={{
-              fontSize: 15,
-              fontWeight: 700,
+              fontSize: 12.5,
+              fontWeight: 680,
               color: 'var(--t-text)',
               letterSpacing: '-0.02em',
-              lineHeight: 1.2,
+              lineHeight: 1.15,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
             }}>
               {activeTitle}
             </div>
-            <div style={{
-              fontSize: 11.5,
-              color: 'var(--t-text-muted)',
-              lineHeight: 1.3,
-              marginTop: 2,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}>
-              {headerLabel} · {activeSubtitle}
-            </div>
+            {activeSubtitle ? (
+              <div style={{
+                fontSize: 10,
+                color: 'var(--t-text-muted)',
+                lineHeight: 1.15,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {activeSubtitle}
+              </div>
+            ) : null}
           </div>
-          <span
-            style={{
-              width: 22,
-              height: 22,
-              borderRadius: 999,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: pickerOpen ? 'rgba(37, 99, 235, 0.08)' : 'rgba(15, 23, 42, 0.05)',
-              color: pickerOpen ? '#2563eb' : 'var(--t-text-faint)',
-              flexShrink: 0,
-            }}
-          >
-            <ChevronDown
-              size={13}
-              strokeWidth={2}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, marginLeft: 6 }}>
+            {activeChips.length > 0 ? (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                justifyContent: 'flex-end',
+                flexShrink: 0,
+              }}>
+                {activeChips.map((chip) => {
+                  const chipStyle = sessionChipStyles(chip.tone);
+                  return (
+                    <span
+                      key={`${chip.tone}:${chip.label}`}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 3,
+                        padding: '1px 6px',
+                        borderRadius: 999,
+                        fontSize: 9,
+                        fontWeight: 700,
+                        lineHeight: 1.15,
+                        letterSpacing: '-0.01em',
+                        whiteSpace: 'nowrap',
+                        ...chipStyle,
+                      }}
+                    >
+                      {chip.label}
+                    </span>
+                  );
+                })}
+              </div>
+            ) : null}
+            <span
               style={{
-                transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
-                transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                width: 18,
+                height: 18,
+                borderRadius: 999,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: pickerOpen ? 'rgba(37, 99, 235, 0.08)' : 'rgba(15, 23, 42, 0.05)',
+                color: pickerOpen ? '#2563eb' : 'var(--t-text-faint)',
+                flexShrink: 0,
               }}
-            />
-          </span>
+            >
+              <ChevronDown
+                size={12}
+                strokeWidth={2}
+                style={{
+                  transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
+                  transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                }}
+              />
+            </span>
+          </div>
         </button>
 
         {pickerOpen ? (
@@ -1405,7 +1605,9 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
             const isExpanded = expandedGroup === group.workspace;
             const isSingle = group.sessions.length === 1;
             const containsSelected = group.sessions.some((s) => s.sessionKey === selectedSession?.sessionKey);
-            const singleSessionFolder = isSingle ? sessionLocalFolderLabel(group.sessions[0]) : null;
+            const singleSession = isSingle ? group.sessions[0] : null;
+            const groupTitle = singleSession ? sessionPickerTitle(singleSession) : group.projectName;
+            const groupSubtitle = singleSession ? sessionPickerRowSubtitle(singleSession) : group.summary;
             const isGroupMainOpenClaw = group.sessions.some((s) => s.runtime === 'openclaw' && s.sessionKey === 'agent:main:main');
             const dotColor = isGroupMainOpenClaw
               ? '#2563eb'
@@ -1475,7 +1677,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                       color: containsSelected ? '#2563eb' : 'var(--t-text)',
                       lineHeight: 1.3,
                     }}>
-                      {group.projectName}
+                      {groupTitle}
                     </div>
                     <div style={{
                       fontSize: '12px',
@@ -1483,7 +1685,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                       lineHeight: 1.3,
                       marginTop: '1px',
                     }}>
-                      {singleSessionFolder ?? group.summary}
+                      {groupSubtitle}
                       {group.mostRecentTime ? ` · ${group.mostRecentTime}` : ''}
                     </div>
                   </div>
@@ -1518,21 +1720,8 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                       const isSessionMainOpenClaw = session.runtime === 'openclaw' && session.sessionKey === 'agent:main:main';
                       const isSessionReviewing = !isSessionMainOpenClaw && !isRunning && session.status === 'reviewing';
                       const sDotColor = isSessionMainOpenClaw ? '#2563eb' : isRunning ? '#34c759' : isSessionReviewing ? '#a78bfa' : sessionPercent >= 75 ? '#ff9f0a' : '#8e8e93';
-                      const rawName = session.name ?? session.sessionKey ?? session.id;
-                      const runtimeLabel = session.runtime === 'claude-code' ? 'Claude Code'
-                        : session.runtime === 'codex' ? 'Codex'
-                        : null;
-                      const runtimeTag = session.runtime === 'claude-code' ? ' · Claude Code'
-                        : session.runtime === 'codex' ? ' · Codex'
-                        : '';
-                      const name = runtimeLabel && rawName.toLowerCase().includes(runtimeLabel.toLowerCase())
-                        ? rawName
-                        : rawName + runtimeTag;
-                      const subtitle = sessionLocalFolderLabel(session)
-                        ?? session.currentTask
-                        ?? session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '')
-                        ?? session.sessionKey
-                        ?? '';
+                      const name = sessionPickerTitle(session);
+                      const subtitle = sessionPickerRowSubtitle(session);
 
                       return (
                         <button
@@ -3248,11 +3437,23 @@ export function AgentPanelChat({
   const transcriptRequestRef = useRef(0);
   const liveToolCallsRef = useRef<MobileTranscriptToolCall[]>([]);
   const approvalPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const initialInboxReadyRef = useRef(false);
+  const lastHeaderSessionRef = useRef<SessionSummary | null>(null);
 
   const selectedSession = useMemo(
     () => sessions.find(s => s.sessionKey === selectedKey),
     [sessions, selectedKey]
   );
+  const headerSession = useMemo(
+    () => selectedSession ?? (lastHeaderSessionRef.current?.sessionKey === selectedKey ? lastHeaderSessionRef.current : null),
+    [selectedKey, selectedSession],
+  );
+
+  useEffect(() => {
+    if (selectedSession) {
+      lastHeaderSessionRef.current = selectedSession;
+    }
+  }, [selectedSession]);
 
   useEffect(() => {
     if (selectedSession || sessions.length === 0) return;
@@ -3269,6 +3470,9 @@ export function AgentPanelChat({
   }, [selectedKey]);
 
   useEffect(() => subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled), []);
+  useEffect(() => {
+    initialInboxReadyRef.current = false;
+  }, [openClawBetaEnabled]);
 
   // ── WebSocket — real-time updates ──
   const wsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
@@ -3312,7 +3516,8 @@ export function AgentPanelChat({
       setActiveToolCalls([]);
     },
     onInboxUpdate: (data: Record<string, unknown>) => {
-      const inbox = data as unknown as MobileInboxSnapshot;
+      if (!initialInboxReadyRef.current) return;
+      const inbox = filterDesktopInboxSnapshot(data as unknown as MobileInboxSnapshot, openClawBetaEnabled);
       if (inbox?.sessions) {
         setSnapshot(inbox);
         setSessions(inbox.sessions);
@@ -3353,7 +3558,7 @@ export function AgentPanelChat({
         setDiffStats({ additions: d.additions, deletions: d.deletions ?? 0, files: d.files ?? 0 });
       }
     },
-  }), [selectedKey]);
+  }), [openClawBetaEnabled, selectedKey]);
 
   const {
     isConnected: wsConnected,
@@ -3389,48 +3594,28 @@ export function AgentPanelChat({
 
   // ── Derived header values ──
   const activeTitle = useMemo(() => {
-    if (!selectedSession) {
+    if (!headerSession) {
       if (selectedKey.startsWith('claude-code:')) return 'Claude Code';
       if (selectedKey.startsWith('codex:')) return 'Codex';
       return 'Select session';
     }
-    return compactLine(
-      selectedSession.isCurrentSession ? 'Q ↔ Mister live' : selectedSession.name ?? selectedSession.currentTask,
-      selectedSession.name ?? 'Current session',
-      30,
-    );
-  }, [selectedKey, selectedSession]);
+    return sessionHeaderTitle(headerSession);
+  }, [headerSession, selectedKey]);
 
   const activeSubtitle = useMemo(() => {
-    if (!selectedSession) {
-      return selectedKey ? compactLine(selectedKey, 'session', 42) : '';
+    if (!headerSession) {
+      return '';
     }
-    const raw = selectedSession as unknown as Record<string, unknown>;
-    const surface = raw.runtimeSurface as { repoSlug?: string; branch?: string } | undefined;
-    if (surface?.repoSlug) {
-      return compactLine(`/${surface.repoSlug}/${surface.branch ?? 'main'}`, selectedSession.sessionKey, 42);
-    }
-    return compactLine(selectedSession.sessionKey, 'session', 42);
-  }, [selectedKey, selectedSession]);
+    return sessionPickerSubtitle(headerSession);
+  }, [headerSession]);
+  const activeChips = useMemo(() => sessionPickerChips(headerSession ?? undefined), [headerSession]);
 
-  const headerLabel = useMemo(() => {
-    if (!selectedSession) {
-      if (selectedKey.startsWith('claude-code:')) return 'Claude Code';
-      if (selectedKey.startsWith('codex:')) return 'Codex';
-      return 'Session';
-    }
-    if (selectedSession.runtime === 'claude-code') return 'Claude Code';
-    if (selectedSession.runtime === 'codex') return 'Codex';
-    if (selectedSession.status === 'running') return 'Live';
-    return 'Session';
-  }, [selectedKey, selectedSession]);
-
-  const isMainOpenClaw = selectedSession?.runtime === 'openclaw' && selectedSession?.sessionKey === 'agent:main:main';
+  const isMainOpenClaw = headerSession?.runtime === 'openclaw' && headerSession?.sessionKey === 'agent:main:main';
   const connectionDotColor = isMainOpenClaw
     ? '#2563eb'
-    : selectedSession?.status === 'running'
+    : headerSession?.status === 'running'
       ? '#34c759'
-      : selectedSession?.status === 'reviewing'
+      : headerSession?.status === 'reviewing'
         ? '#ff9f0a'
         : '#8e8e93';
 
@@ -3471,9 +3656,10 @@ export function AgentPanelChat({
     try {
       const res = await fetch(appendOpenClawBetaQuery('/api/mobile/inbox', openClawBetaEnabled));
       if (!res.ok) return;
-      const data = (await res.json()) as MobileInboxSnapshot;
+      const data = filterDesktopInboxSnapshot((await res.json()) as MobileInboxSnapshot, openClawBetaEnabled);
       setSnapshot(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
       setSessions(prev => JSON.stringify(prev) === JSON.stringify(data.sessions) ? prev : data.sessions);
+      initialInboxReadyRef.current = true;
       const selectedStillExists = data.sessions.some((session) => session.sessionKey === selectedKey);
       if ((!selectedKey || !selectedStillExists) && data.sessions.length > 0) {
         const primary = data.sessions.find(s => s.isCurrentSession) ?? data.sessions[0];
@@ -4272,8 +4458,8 @@ export function AgentPanelChat({
             projectGroups={projectGroups}
             selectedSession={selectedSession}
             activeTitle={activeTitle}
-            headerLabel={headerLabel}
             activeSubtitle={activeSubtitle}
+            activeChips={activeChips}
             connectionDotColor={connectionDotColor}
             handleSessionFocus={handleSessionFocus}
             expandedGroup={expandedGroup}
