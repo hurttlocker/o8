@@ -281,6 +281,37 @@ function filterDesktopInboxSnapshot(snapshot: MobileInboxSnapshot, includeOpenCl
   };
 }
 
+function buildPickerFallbackSnapshot(sessions: SessionSummary[], selectedKey: string): MobileInboxSnapshot | null {
+  if (sessions.length === 0) return null;
+  return {
+    generatedAt: new Date().toISOString(),
+    mode: 'live',
+    sourceLabel: 'desktop-session-fallback',
+    primarySessionKey: sessions.find((session) => session.sessionKey === selectedKey)?.sessionKey ?? sessions[0]?.sessionKey,
+    sessions,
+    items: [],
+    summary: {
+      alerts: 0,
+      approvals: 0,
+      reviewItems: 0,
+      activeRuns: sessions.filter((session) => ['running', 'reviewing', 'blocked', 'waiting', 'failed'].includes(session.status)).length,
+    },
+  };
+}
+
+function composeFooterLeadLabel(session?: SessionSummary, statusOverride?: string) {
+  const taskLabel = sessionTaskLabel(session);
+  if (taskLabel && isMeaningfulTaskLabel(taskLabel)) return taskLabel;
+
+  const rawStatus = (statusOverride ?? session?.status ?? '').trim().toLowerCase();
+  if (rawStatus === 'reviewing') return 'Reviewing';
+  if (rawStatus === 'running') return 'Working';
+  if (rawStatus === 'waiting') return 'Waiting';
+  if (rawStatus === 'blocked' || rawStatus === 'failed') return 'Blocked';
+  if (rawStatus === 'idle') return 'Ready';
+  return null;
+}
+
 function mediaHref(path: string): string {
   return `/api/mobile/media?path=${encodeURIComponent(path)}`;
 }
@@ -1394,6 +1425,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
   activeTitle,
   activeSubtitle,
   activeChips,
+  emptyStateLabel,
   connectionDotColor,
   handleSessionFocus,
   expandedGroup,
@@ -1410,6 +1442,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
   activeTitle: string;
   activeSubtitle: string;
   activeChips: SessionPickerChip[];
+  emptyStateLabel: string;
   connectionDotColor: string;
   handleSessionFocus: (sessionId: string) => void;
   expandedGroup: string | null;
@@ -1601,6 +1634,22 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
               WebkitOverflowScrolling: 'touch',
             }}
           >
+            {projectGroups.length === 0 ? (
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: 76,
+                padding: '10px 12px',
+                borderRadius: 14,
+                color: 'var(--t-text-muted)',
+                fontSize: 12,
+                fontWeight: 500,
+                background: 'rgba(255,255,255,0.55)',
+              }}>
+                {emptyStateLabel}
+              </div>
+            ) : null}
             {projectGroups.map((group, gi) => {
             const isExpanded = expandedGroup === group.workspace;
             const isSingle = group.sessions.length === 1;
@@ -3333,14 +3382,28 @@ export const DesktopComposePane = memo(function DesktopComposePane({
           const rawPct = contextPercentOverride ?? ((selectedSession as unknown as Record<string, unknown>)?.context
             ? ((selectedSession as unknown as Record<string, unknown>).context as { usedPercent?: number })?.usedPercent
             : undefined);
-          const pct = typeof rawPct === 'number' ? Math.round(rawPct) : null;
+          const pct = typeof rawPct === 'number' && rawPct > 0 ? Math.round(rawPct) : null;
+          const leadLabel = composeFooterLeadLabel(selectedSession, statusOverride);
           const branchLabel = branchOverride ?? selectedSession?.branch;
-          const statusLabel = statusOverride ?? selectedSession?.status;
 
           return (
             <>
+              {leadLabel ? (
+                <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', fontWeight: 600 }}>
+                  {leadLabel}
+                </span>
+              ) : null}
+              {branchLabel ? (
+                <>
+                  {leadLabel ? <span style={{ color: 'var(--t-divider)' }}>·</span> : null}
+                  <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', fontWeight: 500 }}>
+                    {branchLabel}
+                  </span>
+                </>
+              ) : null}
               {pct !== null ? (
                 <>
+                  {(leadLabel || branchLabel) ? <span style={{ color: 'var(--t-divider)' }}>·</span> : null}
                   <span style={{
                     width: 6,
                     height: 6,
@@ -3348,28 +3411,8 @@ export const DesktopComposePane = memo(function DesktopComposePane({
                     background: pct >= 70 ? '#ef4444' : pct >= 50 ? '#f59e0b' : '#34c759',
                     flexShrink: 0,
                   }} />
-                  <span style={{
-                    fontSize: 12,
-                    color: 'var(--t-text-secondary)',
-                    fontWeight: 500,
-                  }}>
+                  <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', fontWeight: 500 }}>
                     {pct}% context
-                  </span>
-                </>
-              ) : null}
-              {branchLabel ? (
-                <>
-                  {pct !== null ? <span style={{ color: 'var(--t-divider)' }}>·</span> : null}
-                  <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', fontWeight: 500 }}>
-                    {branchLabel}
-                  </span>
-                </>
-              ) : null}
-              {statusLabel ? (
-                <>
-                  {(pct !== null || branchLabel) ? <span style={{ color: 'var(--t-divider)' }}>·</span> : null}
-                  <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', fontWeight: 500 }}>
-                    {statusLabel}
                   </span>
                 </>
               ) : null}
@@ -3391,6 +3434,7 @@ export function AgentPanelChat({
   onOpenFile,
   onOpenMermaid,
   onRunInTerminal,
+  onSelectSession,
   onWsStatusChange,
 }: {
   externalSessionKey?: string;
@@ -3399,6 +3443,7 @@ export function AgentPanelChat({
   onOpenFile?: (filePath: string, workspace?: string) => void;
   onOpenMermaid?: (code: string) => void;
   onRunInTerminal?: (command: string) => void;
+  onSelectSession?: (sessionKey: string) => void;
   onWsStatusChange?: (status: 'connected' | 'connecting' | 'reconnecting' | 'disconnected') => void;
 } = {}) {
   const [snapshot, setSnapshot] = useState<MobileInboxSnapshot | null>(null);
@@ -3439,6 +3484,8 @@ export function AgentPanelChat({
   const approvalPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const initialInboxReadyRef = useRef(false);
   const lastHeaderSessionRef = useRef<SessionSummary | null>(null);
+  const lastAppliedExternalSessionKeyRef = useRef('');
+  const lastNonEmptySessionsRef = useRef<SessionSummary[]>([]);
 
   const selectedSession = useMemo(
     () => sessions.find(s => s.sessionKey === selectedKey),
@@ -3454,6 +3501,12 @@ export function AgentPanelChat({
       lastHeaderSessionRef.current = selectedSession;
     }
   }, [selectedSession]);
+
+  useEffect(() => {
+    if (sessions.length > 0) {
+      lastNonEmptySessionsRef.current = sessions;
+    }
+  }, [sessions]);
 
   useEffect(() => {
     if (selectedSession || sessions.length === 0) return;
@@ -3517,6 +3570,7 @@ export function AgentPanelChat({
     },
     onInboxUpdate: (data: Record<string, unknown>) => {
       if (!initialInboxReadyRef.current) return;
+      if (!openClawBetaEnabled) return;
       const inbox = filterDesktopInboxSnapshot(data as unknown as MobileInboxSnapshot, openClawBetaEnabled);
       if (inbox?.sessions) {
         setSnapshot(inbox);
@@ -3587,9 +3641,24 @@ export function AgentPanelChat({
     };
   }, [selectedSession?.tmuxSession, sendTerminalAttach, sendTerminalDetach, supportsSlashTerminalRelay]);
 
+  const stablePickerSessions = useMemo(() => {
+    if (sessions.length > 0) return sessions;
+    if (loading || connectionState !== 'connected') return lastNonEmptySessionsRef.current;
+    return [];
+  }, [connectionState, loading, sessions]);
+
+  const pickerSnapshot = useMemo(
+    () => (snapshot && snapshot.sessions.length > 0 ? snapshot : buildPickerFallbackSnapshot(stablePickerSessions, selectedKey)),
+    [selectedKey, snapshot, stablePickerSessions],
+  );
+
   const projectGroups = useMemo(
-    () => snapshot ? buildProjectGroups(snapshot, selectedSession) : [],
-    [snapshot, selectedSession]
+    () => pickerSnapshot ? buildProjectGroups(pickerSnapshot, selectedSession) : [],
+    [pickerSnapshot, selectedSession]
+  );
+  const pickerEmptyStateLabel = useMemo(
+    () => ((loading || connectionState !== 'connected' || stablePickerSessions.length > 0) ? 'Refreshing sessions…' : 'No IDE sessions yet'),
+    [connectionState, loading, stablePickerSessions.length],
   );
 
   // ── Derived header values ──
@@ -4210,10 +4279,11 @@ export function AgentPanelChat({
 
   // ── External session key (from Agent Panel click) ──
   useEffect(() => {
-    if (externalSessionKey && externalSessionKey !== selectedKey) {
+    if (externalSessionKey && externalSessionKey !== lastAppliedExternalSessionKeyRef.current) {
+      lastAppliedExternalSessionKeyRef.current = externalSessionKey;
       setSelectedKey(externalSessionKey);
     }
-  }, [externalSessionKey, selectedKey]);
+  }, [externalSessionKey]);
 
   useEffect(() => {
     if (!draftInjection?.id) return;
@@ -4246,8 +4316,9 @@ export function AgentPanelChat({
     const session = sessions.find(s => s.sessionKey === sessionKey);
     if (session) {
       setSelectedKey(session.sessionKey);
+      onSelectSession?.(session.sessionKey);
     }
-  }, [sessions]);
+  }, [onSelectSession, sessions]);
 
   useEffect(() => {
     const session = sessions.find(s => s.sessionKey === selectedKey);
@@ -4269,6 +4340,12 @@ export function AgentPanelChat({
 
   // ── Init ──
   useEffect(() => { void fetchSessions(); }, [fetchSessions]);
+
+  useEffect(() => {
+    const ms = wsConnected ? 20_000 : 8_000;
+    const id = setInterval(() => void fetchSessions(), ms);
+    return () => clearInterval(id);
+  }, [fetchSessions, wsConnected]);
 
   useEffect(() => {
     if (selectedKey) {
@@ -4460,6 +4537,7 @@ export function AgentPanelChat({
             activeTitle={activeTitle}
             activeSubtitle={activeSubtitle}
             activeChips={activeChips}
+            emptyStateLabel={pickerEmptyStateLabel}
             connectionDotColor={connectionDotColor}
             handleSessionFocus={handleSessionFocus}
             expandedGroup={expandedGroup}
