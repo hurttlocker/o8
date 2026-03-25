@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-25
 
+- `7cbad1f` fix: trim agent card boilerplate
 - `98b98a8` fix: polish ide session picker state
 - `bf8d4e8` feat: scope agent surfaces to ide sessions
 - `24b8f99` fix: reduce dashboard update and gateway noise
