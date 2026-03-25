@@ -78,19 +78,6 @@ function mobileSessionPriority(agent: AgentSummary) {
   return 40;
 }
 
-function isLiveDiscoveredCodex(agent: AgentSummary) {
-  return agent.runtime === 'codex'
-    && agent.runtimeSurface?.ownership === 'discovered'
-    && agent.status === 'running'
-    && /live pid \d+/i.test(agent.runtimeSurface?.sourceLabel ?? '');
-}
-
-function isLiveClaudeCode(agent: AgentSummary) {
-  return agent.runtime === 'claude-code'
-    && agent.status === 'running'
-    && Boolean(agent.runtimeSurface?.capabilities.interrupt);
-}
-
 function shouldExposeMobileSession(agent: AgentSummary) {
   if (agent.runtime === 'openclaw') {
     return Boolean(agent.isCurrentSession)
@@ -98,14 +85,11 @@ function shouldExposeMobileSession(agent: AgentSummary) {
   }
 
   if (agent.runtime === 'codex') {
-    if (agent.runtimeSurface?.ownership === 'owned') {
-      return ['running', 'reviewing', 'waiting', 'failed'].includes(agent.status);
-    }
-    return isLiveDiscoveredCodex(agent);
+    return true;
   }
 
   if (agent.runtime === 'claude-code') {
-    return isLiveClaudeCode(agent);
+    return true;
   }
 
   return false;
@@ -126,7 +110,7 @@ function summarizeTranscript(text: string) {
   return normalized.length > 180 ? `${normalized.slice(0, 177)}…` : normalized;
 }
 
-let inboxCache: { snapshot: MobileInboxSnapshot; timestamp: number } | null = null;
+let inboxCache: { snapshot: MobileInboxSnapshot; timestamp: number; includeOpenClaw: boolean } | null = null;
 
 /** Invalidate the inbox cache — call after any mutation (steer/stop/launch/resume). */
 export function invalidateInboxCache() {
@@ -135,41 +119,45 @@ export function invalidateInboxCache() {
   inboxInflight = null;
   invalidateMobileBootstrapBroker();
 }
-let inboxInflight: { generation: number; promise: Promise<MobileInboxSnapshot> } | null = null;
+let inboxInflight: { generation: number; includeOpenClaw: boolean; promise: Promise<MobileInboxSnapshot> } | null = null;
 let inboxGeneration = 0;
 const INBOX_CACHE_TTL = 8000; // 8 seconds — generous idle TTL
 
-export async function getMobileInboxSnapshot(options: { fresh?: boolean } = {}): Promise<MobileInboxSnapshot> {
+export async function getMobileInboxSnapshot(options: { fresh?: boolean; includeOpenClaw?: boolean } = {}): Promise<MobileInboxSnapshot> {
   const fresh = options.fresh ?? false;
+  const includeOpenClaw = options.includeOpenClaw ?? true;
   const generation = inboxGeneration;
-  if (!fresh && inboxCache && Date.now() - inboxCache.timestamp < INBOX_CACHE_TTL) {
+  if (!fresh && inboxCache && inboxCache.includeOpenClaw === includeOpenClaw && Date.now() - inboxCache.timestamp < INBOX_CACHE_TTL) {
     return inboxCache.snapshot;
   }
 
   // Deduplicate: if a request is already in-flight, piggyback on it
-  if (!fresh && inboxInflight && inboxInflight.generation === generation) return inboxInflight.promise;
+  if (!fresh && inboxInflight && inboxInflight.generation === generation && inboxInflight.includeOpenClaw === includeOpenClaw) {
+    return inboxInflight.promise;
+  }
 
   const promise = (async () => {
     try {
-      const snapshot = await _fetchMobileInboxSnapshot({ fresh });
+      const snapshot = await _fetchMobileInboxSnapshot({ fresh, includeOpenClaw });
       if (generation === inboxGeneration) {
-        inboxCache = { snapshot, timestamp: Date.now() };
+        inboxCache = { snapshot, timestamp: Date.now(), includeOpenClaw };
       }
       return snapshot;
     } finally {
-      if (inboxInflight?.generation === generation) {
+      if (inboxInflight?.generation === generation && inboxInflight.includeOpenClaw === includeOpenClaw) {
         inboxInflight = null;
       }
     }
   })();
-  inboxInflight = { generation, promise };
+  inboxInflight = { generation, includeOpenClaw, promise };
   return promise;
 }
 
-async function _fetchMobileInboxSnapshot(options: { fresh?: boolean } = {}): Promise<MobileInboxSnapshot> {
+async function _fetchMobileInboxSnapshot(options: { fresh?: boolean; includeOpenClaw?: boolean } = {}): Promise<MobileInboxSnapshot> {
   const fresh = options.fresh ?? false;
+  const includeOpenClaw = options.includeOpenClaw ?? true;
 
-  const fleet = await getRuntimeInventorySnapshot({ fresh });
+  const fleet = await getRuntimeInventorySnapshot({ fresh, includeOpenClaw });
   const orderedSessions = fleet.agents
     .filter((agent) => (
       agent.runtime === 'openclaw'

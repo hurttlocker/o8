@@ -1463,6 +1463,42 @@ function ActivityIndicator({ tab }: { tab: TerminalTab }) {
   );
 }
 
+function parseWorkspaceTaskLabel(label: string) {
+  const issueMatch = label.match(/^Issue #(\d+)/i);
+  if (issueMatch?.[1]) {
+    return { kind: 'issue' as const, number: issueMatch[1] };
+  }
+  const prMatch = label.match(/^PR #(\d+)/i);
+  if (prMatch?.[1]) {
+    return { kind: 'pr' as const, number: prMatch[1] };
+  }
+  return null;
+}
+
+function inferWorkspaceTaskState(tab: TerminalTab) {
+  const messages = tab.chatMessages ?? [];
+  const latestAssistant = [...messages].reverse().find((entry) => entry.role === 'assistant' || entry.role === 'system');
+  const latestText = latestAssistant?.text?.toLowerCase() ?? '';
+  const ageMs = Date.now() - tab.lastActivity;
+
+  if ((tab.chatDraftInjection?.autoSend ?? false) && messages.length === 0) {
+    return { label: 'Queued', color: '#d97706', background: 'rgba(245, 158, 11, 0.12)' };
+  }
+  if (latestText && /(blocked|unable|failed|error|not ready|missing|broken)/.test(latestText)) {
+    return { label: 'Blocked', color: '#dc2626', background: 'rgba(239, 68, 68, 0.12)' };
+  }
+  if (latestText && /(ready for review|ready to merge|ready for merge|completed|complete\b|done\b|no file edits)/.test(latestText)) {
+    return { label: 'Ready', color: '#2563eb', background: 'rgba(37, 99, 235, 0.12)' };
+  }
+  if (messages.length > 0 && ageMs < 20_000) {
+    return { label: 'Working', color: '#16a34a', background: 'rgba(34, 197, 94, 0.12)' };
+  }
+  if (messages.length > 0) {
+    return { label: 'Waiting', color: '#64748b', background: 'rgba(148, 163, 184, 0.12)' };
+  }
+  return null;
+}
+
 const TabBar = memo(function TabBar({
   tabs,
   activeTabId,
@@ -1529,6 +1565,11 @@ const TabBar = memo(function TabBar({
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           const agent = CLI_AGENTS.find(a => a.id === tab.cliAgent);
+          const taskMeta = parseWorkspaceTaskLabel(tab.label);
+          const taskState = taskMeta ? inferWorkspaceTaskState(tab) : null;
+          const runtimeTag = tab.kind === 'chat'
+            ? (tab.chatRuntime === 'claude-code' ? 'Claude' : 'Codex')
+            : null;
           return (
             <button
               type="button"
@@ -1537,12 +1578,12 @@ const TabBar = memo(function TabBar({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
+                gap: 8,
                 paddingTop: 0,
                 paddingRight: 12,
                 paddingBottom: 0,
                 paddingLeft: 12,
-                height: '100%',
+                height: taskMeta ? 40 : '100%',
                 border: 'none',
                 borderRight: '1px solid #e2e8f0',
                 background: isActive ? '#ffffff' : 'transparent',
@@ -1569,7 +1610,51 @@ const TabBar = memo(function TabBar({
               ) : (
                 <AgentDot color={agent?.color ?? '#64748b'} />
               )}
-              <span>{tab.label}</span>
+              <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, gap: taskMeta ? 1 : 0 }}>
+                <span style={{
+                  maxWidth: 180,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontWeight: taskMeta ? 700 : undefined,
+                }}>
+                  {tab.label}
+                </span>
+                {taskMeta ? (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    {runtimeTag ? (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        padding: '1px 6px',
+                        borderRadius: 999,
+                        background: runtimeTag === 'Codex' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(139, 92, 246, 0.12)',
+                        color: runtimeTag === 'Codex' ? '#047857' : '#7c3aed',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.01em',
+                      }}>
+                        {runtimeTag}
+                      </span>
+                    ) : null}
+                    {taskState ? (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        padding: '1px 6px',
+                        borderRadius: 999,
+                        background: taskState.background,
+                        color: taskState.color,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.01em',
+                      }}>
+                        {taskState.label}
+                      </span>
+                    ) : null}
+                  </span>
+                ) : null}
+              </span>
               <ActivityIndicator tab={tab} />
               {tabs.length > 1 && (
                 <span

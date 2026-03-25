@@ -149,8 +149,10 @@ function getLocalDiffStats(workspace: string): { additions: number; deletions: n
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const url = new URL(req.url);
+    const includeOpenClaw = url.searchParams.get('includeOpenClaw') !== '0';
     // 1. Fetch agent sessions
     let sessions: Array<{
       name: string;
@@ -161,7 +163,7 @@ export async function GET() {
     }> = [];
 
     try {
-      const inboxRes = await fetch('http://localhost:3001/api/mobile/inbox', {
+      const inboxRes = await fetch(`http://localhost:3001/api/mobile/inbox?includeOpenClaw=${includeOpenClaw ? '1' : '0'}`, {
         signal: AbortSignal.timeout(8000),
       });
       if (inboxRes.ok) {

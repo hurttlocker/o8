@@ -70,6 +70,9 @@ import {
   formatReviewCommentInjection,
   type AgentPanelChatInjectionPayload,
 } from '@/lib/chat/injection';
+import type { AgentSummary } from '@/lib/fleet/types';
+import type { MobileInboxSnapshot } from '@/lib/mobile/types';
+import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 
 export type CanvasRepoTaskLaunchRequest =
   | { kind: 'issue'; repo: string; number: number; title: string; body?: string }
@@ -327,30 +330,155 @@ const TabContent = memo(function TabContent({
 
 // ── Timeline Expanded View ──
 
-function TimelineExpanded() {
-  const segments = useMemo(() => {
-    // Same mock data as SessionTimeline — will be shared data source later
-    const now = new Date();
-    const start = new Date(now); start.setHours(9, 0, 0, 0);
-    const elapsed = Math.max(0, Math.floor((now.getTime() - start.getTime()) / 60000));
-    if (elapsed === 0) return [];
+type ReplaySegment = {
+  kind: string;
+  startMin: number;
+  durationMin: number;
+  label?: string;
+  agent?: string;
+};
 
-    const segs: { kind: string; startMin: number; durationMin: number; label: string }[] = [];
-    let c = 0;
-    const add = (kind: string, dur: number, label: string) => {
-      const d = Math.min(dur, elapsed - c);
-      if (d > 0) { segs.push({ kind, startMin: c, durationMin: d, label }); c += d; }
+function timelineReplayDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
+function timelineReplayTime(minutesSinceAnchor: number): string {
+  const h = 6 + Math.floor(minutesSinceAnchor / 60);
+  const m = minutesSinceAnchor % 60;
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+function timelineReplayRuntimeLabel(runtime: string | null | undefined): string {
+  if (runtime === 'openclaw') return 'OpenClaw';
+  if (runtime === 'claude-code') return 'Claude Code';
+  if (runtime === 'codex') return 'Codex';
+  return runtime || 'Runtime';
+}
+
+function timelineReplayWorkspace(path: string | null | undefined): string | null {
+  if (!path || path === 'unknown') return null;
+  const normalized = path.replace(/^\/Users\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~');
+  const parts = normalized.split('/').filter(Boolean);
+  if (parts.length <= 4) return normalized;
+  return `~/${parts.slice(-4).join('/')}`;
+}
+
+function timelineReplayTask(task: string | null | undefined): string | null {
+  if (!task) return null;
+  return task
+    .replace(/^IDE-owned Codex session ready for the next input via resume\.?\s*/i, '')
+    .replace(/^Live Codex terminal verified via pid\/log mapping on s\d+\.\s*/i, '')
+    .replace(/^Live Codex terminal detected on s\d+\.\s*/i, '')
+    .replace(/^Existing OpenClaw session mirrored into the control plane\.?\s*/i, '')
+    .replace(/^Shared channel surface attached to the same OpenClaw runtime\.?\s*/i, '')
+    .replace(/^Recent automation surface; useful for visibility, not the primary operator lane\.?\s*/i, '')
+    .replace(/^Mirroring the live Q ↔ Mister conversation, not spawning a fresh session\.?\s*/i, '')
+    .trim();
+}
+
+function timelineReplayMatchesAgent(agentName: string, session: AgentSummary): boolean {
+  const key = session.sessionKey.toLowerCase();
+  const name = (session.name || '').toLowerCase();
+  if (agentName === 'Main') return session.runtime === 'openclaw' && key.startsWith('agent:main:');
+  if (agentName === 'Agent 2') return session.runtime === 'openclaw' && (key.startsWith('agent:ace:') || name.includes('ace'));
+  if (agentName === 'Agent 3') return session.runtime === 'openclaw' && (key.startsWith('agent:hawk:') || name.includes('hawk'));
+  if (agentName === 'codex') return session.runtime === 'codex';
+  const loweredAgent = agentName.toLowerCase();
+  return name.includes(loweredAgent) || key.includes(loweredAgent);
+}
+
+function timelineReplayPrimarySession(sessions: AgentSummary[]): AgentSummary | null {
+  if (sessions.length === 0) return null;
+  const statusWeight = (status: string) => {
+    switch (status) {
+      case 'running': return 4;
+      case 'reviewing': return 3;
+      case 'waiting': return 2;
+      case 'idle': return 1;
+      default: return 0;
+    }
+  };
+  return [...sessions].sort((a, b) => {
+    if (Boolean(a.isCurrentSession) !== Boolean(b.isCurrentSession)) return a.isCurrentSession ? -1 : 1;
+    const delta = statusWeight(b.status) - statusWeight(a.status);
+    if (delta !== 0) return delta;
+    return new Date(b.lastEventAt || 0).getTime() - new Date(a.lastEventAt || 0).getTime();
+  })[0] ?? null;
+}
+
+function TimelineExpanded() {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const [segments, setSegments] = useState<ReplaySegment[]>([]);
+  const [sessions, setSessions] = useState<AgentSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null);
+  const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
+
+  useEffect(() => subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled), []);
+
+  useEffect(() => {
+    let active = true;
+    const fetchReplay = async () => {
+      try {
+        if (segments.length === 0) setLoading(true);
+        setError(null);
+        const [timelineRes, inboxRes] = await Promise.all([
+          fetch(appendOpenClawBetaQuery('/api/panel/timeline', openClawBetaEnabled), { cache: 'no-store' }).catch(() => null),
+          fetch(appendOpenClawBetaQuery('/api/mobile/inbox', openClawBetaEnabled), { cache: 'no-store' }).catch(() => null),
+        ]);
+
+        if (timelineRes?.ok) {
+          const timelineData = await timelineRes.json() as { segments?: ReplaySegment[] };
+          if (active) {
+            setSegments(timelineData.segments ?? []);
+            setGeneratedAt(new Date().toISOString());
+          }
+        } else if (active) {
+          setSegments([]);
+        }
+
+        if (inboxRes?.ok) {
+          const inboxData = await inboxRes.json() as MobileInboxSnapshot;
+          if (active) setSessions(inboxData.sessions ?? []);
+        } else if (active) {
+          setSessions([]);
+        }
+      } catch (err) {
+        if (active) {
+          setError(err instanceof Error ? err.message : 'Unable to load session replay.');
+          setSegments([]);
+        }
+      } finally {
+        if (active) setLoading(false);
+      }
     };
-    add('thinking', 12, 'Boot + context load');
-    add('coding', 35, 'NavRail + TitleBar');
-    add('thinking', 5, 'Planning session timeline');
-    add('coding', 45, 'SessionTimeline + Canvas wiring');
-    add('testing', 15, 'Tauri drag verification');
-    add('coding', 25, 'Icon fixes + permissions');
-    add('error', 3, 'startDragging permission denied');
-    add('coding', 30, 'Timeline colors + expand');
-    if (c < elapsed) add('idle', elapsed - c, 'Idle');
-    return segs;
+
+    void fetchReplay();
+    const interval = setInterval(fetchReplay, 30_000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [openClawBetaEnabled]);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const nextWidth = entries[0]?.contentRect.width ?? 0;
+      setContainerWidth(nextWidth);
+    });
+    observer.observe(node);
+    setContainerWidth(node.getBoundingClientRect().width);
+    return () => observer.disconnect();
   }, []);
 
   const colors: Record<string, string> = {
@@ -361,205 +489,386 @@ function TimelineExpanded() {
   };
 
   const totalMin = segments.length > 0 ? segments[segments.length - 1].startMin + segments[segments.length - 1].durationMin : 0;
-  const fmtDur = (m: number) => { const h = Math.floor(m / 60); const mm = m % 60; return h > 0 ? `${h}h ${mm}m` : `${mm}m`; };
-  const fmtTime = (m: number) => { const h = 9 + Math.floor(m / 60); const mm = m % 60; const p = h >= 12 ? 'PM' : 'AM'; return `${h > 12 ? h - 12 : h}:${String(mm).padStart(2, '0')} ${p}`; };
+  const totals = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const segment of segments) map[segment.kind] = (map[segment.kind] || 0) + segment.durationMin;
+    return map;
+  }, [segments]);
 
-  // Aggregate by kind
-  const totals: Record<string, number> = {};
-  for (const s of segments) totals[s.kind] = (totals[s.kind] || 0) + s.durationMin;
+  const agentBreakdown = useMemo(() => {
+    const map = new Map<string, { agent: string; segments: ReplaySegment[]; totalMin: number; breakdown: Record<string, number> }>();
+    for (const segment of segments) {
+      const agent = segment.agent || 'Unscoped';
+      if (!map.has(agent)) map.set(agent, { agent, segments: [], totalMin: 0, breakdown: {} });
+      const entry = map.get(agent)!;
+      entry.segments.push(segment);
+      entry.totalMin += segment.durationMin;
+      entry.breakdown[segment.kind] = (entry.breakdown[segment.kind] || 0) + segment.durationMin;
+    }
+    return Array.from(map.values()).sort((a, b) => b.totalMin - a.totalMin);
+  }, [segments]);
 
-  // Mock chain-of-thought entries
-  const thoughts = [
-    { kind: 'thinking', text: 'Loading workspace context, reading AGENTS.md + MEMORY.md. Identifying current state of Cortex IDE desktop app.' },
-    { kind: 'coding', text: 'Building NavRail component — porting PlaygroundGlassNav from MisterADA. Framer-motion spring animation, hover expand 56px → 200px.' },
-    { kind: 'coding', text: 'Creating TitleBar — frosted glass, search pill with ⌘K, settings gear. Wiring sidebar/chat/bottom panel toggles.' },
-    { kind: 'testing', text: 'Verifying Tauri drag region. startDragging() permission denied — adding core:window:allow-start-dragging to capabilities.' },
-    { kind: 'coding', text: 'SessionTimeline V0 — color-coded activity bar with play button, legend, hover tooltips. Wired into dashboard.' },
-    { kind: 'error', text: 'Lucide icons not rendering in Tauri webview. Replaced with inline SVG elements.' },
-  ];
+  const liveSessionContext = useMemo(() => {
+    const contexts = new Map<string, {
+      runtime: string;
+      label: string;
+      location: string | null;
+      summary: string;
+      extra: string | null;
+    }>();
+
+    for (const agent of agentBreakdown) {
+      const matches = sessions.filter((session) => timelineReplayMatchesAgent(agent.agent, session));
+      const primary = timelineReplayPrimarySession(matches);
+      if (!primary) continue;
+
+      const repoSlug = primary.runtimeSurface?.reviewContext?.repoSlug || '';
+      const repoName = repoSlug.split('/')[1] || null;
+      const location = repoName
+        ? `${repoName}${primary.branch ? ` · ${primary.branch}` : ''}`
+        : timelineReplayWorkspace(primary.workspace) ?? primary.surfaceLabel ?? primary.branch ?? null;
+
+      contexts.set(agent.agent, {
+        runtime: timelineReplayRuntimeLabel(primary.runtime),
+        label: primary.surfaceLabel || primary.name || timelineReplayRuntimeLabel(primary.runtime),
+        location,
+        summary: timelineReplayTask(primary.currentTask) || primary.surfaceLabel || primary.name || 'No current task detail',
+        extra: matches.length > 1 ? `+${matches.length - 1} more live` : null,
+      });
+    }
+
+    return contexts;
+  }, [agentBreakdown, sessions]);
+
+  const liveSessions = useMemo(() => {
+    return [...sessions]
+      .filter((session) => ['running', 'reviewing', 'waiting'].includes(session.status) || session.isCurrentSession)
+      .sort((a, b) => {
+        if (Boolean(a.isCurrentSession) !== Boolean(b.isCurrentSession)) return a.isCurrentSession ? -1 : 1;
+        return new Date(b.lastEventAt || 0).getTime() - new Date(a.lastEventAt || 0).getTime();
+      })
+      .slice(0, 8);
+  }, [sessions]);
+
+  const recentSlices = useMemo(
+    () => [...segments].slice(-(containerWidth > 0 && containerWidth < 760 ? 6 : 10)).reverse(),
+    [containerWidth, segments],
+  );
+
+  const isTight = containerWidth > 0 && containerWidth < 1040;
+  const isCompact = containerWidth > 0 && containerWidth < 760;
+  const outerPadding = isCompact ? 14 : isTight ? 18 : 24;
+  const sectionPadding = isCompact ? 14 : isTight ? 16 : 20;
+  const sectionRadius = isCompact ? 16 : 18;
+  const titleSize = isCompact ? 18 : 20;
+  const introSize = isCompact ? 11 : 12;
+  const metricPillPadding = isCompact ? '5px 8px' : '6px 10px';
+  const summaryBarHeight = isCompact ? 32 : 40;
+  const contentColumns = isTight ? '1fr' : '1.15fr 0.85fr';
 
   return (
     <div style={{
       height: '100%',
       overflow: 'auto',
-      padding: 24,
+      padding: outerPadding,
       background: 'var(--t-bg-gradient)',
-    }}>
-      {/* Header */}
-      <div style={{ marginBottom: 20 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--t-text)', margin: 0 }}>
-          SESSION REPLAY: {fmtDur(totalMin)} TOTAL
+    }} ref={containerRef}>
+      <div style={{ marginBottom: isCompact ? 14 : 20 }}>
+        <h2 style={{ fontSize: titleSize, fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--t-text)', margin: 0 }}>
+          Session Replay
         </h2>
-        <p style={{ fontSize: 12, color: 'var(--t-text-muted)', marginTop: 4 }}>
-          {fmtTime(0)} — {fmtTime(totalMin)} · Today
+        <p style={{ fontSize: introSize, color: 'var(--t-text-muted)', marginTop: 6, lineHeight: 1.5, maxWidth: isCompact ? '100%' : 680 }}>
+          Real timeline aggregation from active app sessions and local runtimes. This view shows what is happening, where it is happening, and which surface is doing the work.
         </p>
       </div>
 
-      {/* Scrubber bar */}
-      <div style={{
-        background: 'var(--t-panel)',
-        borderRadius: 14,
-        padding: 20,
-        marginBottom: 16,
-        border: '1px solid var(--t-divider)',
-      }}>
-        {/* Progress bar */}
-        <div style={{ height: 4, borderRadius: 2, background: '#e5e7eb', marginBottom: 16, position: 'relative' }}>
-          <div style={{ height: '100%', borderRadius: 2, background: '#2563eb', width: '100%' }} />
-          <div style={{
-            position: 'absolute', right: -6, top: -4, width: 12, height: 12, borderRadius: 6,
-            background: '#2563eb', border: '2px solid var(--t-panel)', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-          }} />
-        </div>
-
-        {/* Segment bar */}
-        <div style={{ height: 32, borderRadius: 6, overflow: 'hidden', display: 'flex', background: 'var(--t-timeline-bar)' }}>
-          {segments.map((seg, i) => (
-            <div
-              key={i}
-              style={{
-                width: `${(seg.durationMin / totalMin) * 100}%`,
-                height: '100%',
-                background: colors[seg.kind] || '#e5e7eb',
-                borderRight: i < segments.length - 1 ? '1px solid rgba(255,255,255,0.3)' : 'none',
-                cursor: 'pointer',
-                transition: 'opacity 120ms',
-              }}
-              title={`${labels[seg.kind] || seg.kind}: ${fmtDur(seg.durationMin)} (${fmtTime(seg.startMin)})`}
-            />
-          ))}
-        </div>
-
-        {/* Legend */}
-        <div style={{ display: 'flex', gap: 20, marginTop: 12 }}>
-          {(['thinking', 'coding', 'testing', 'error'] as const).map((kind) => {
-            const t = totals[kind];
-            if (!t) return null;
-            return (
-              <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <div style={{ width: 10, height: 10, borderRadius: 2, background: colors[kind] }} />
-                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text)' }}>{labels[kind]}</span>
-                <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>({fmtDur(t)})</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Two-column: Code + Chain of Thought */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-        {/* Left — Recent Activity */}
+      {loading ? (
         <div style={{
           background: 'var(--t-panel)',
-          borderRadius: 14,
-          padding: 20,
+          borderRadius: sectionRadius,
+          padding: sectionPadding,
           border: '1px solid var(--t-divider)',
+          color: 'var(--t-text-muted)',
+          fontSize: 13,
         }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-            <h3 style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '0.04em', textTransform: 'uppercase', margin: 0 }}>
-              Recent Activity
-            </h3>
-            <span style={{ fontSize: 10, color: '#22c55e', fontWeight: 600, background: 'rgba(34,197,94,0.1)', padding: '2px 8px', borderRadius: 6 }}>
-              Active
-            </span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {segments.slice(-6).reverse().map((seg, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--t-divider-subtle)' }}>
-                <div style={{ width: 8, height: 8, borderRadius: 4, background: colors[seg.kind], flexShrink: 0 }} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--t-text)' }}>{seg.label}</div>
-                  <div style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{fmtTime(seg.startMin)} · {fmtDur(seg.durationMin)}</div>
-                </div>
-              </div>
-            ))}
-          </div>
+          Loading session replay…
         </div>
-
-        {/* Right — Agent Chain-of-Thought */}
+      ) : error ? (
+        <div style={{
+          background: 'rgba(239,68,68,0.08)',
+          borderRadius: sectionRadius,
+          padding: sectionPadding,
+          border: '1px solid rgba(239,68,68,0.18)',
+          color: '#b91c1c',
+          fontSize: 13,
+        }}>
+          {error}
+        </div>
+      ) : segments.length === 0 ? (
         <div style={{
           background: 'var(--t-panel)',
-          borderRadius: 14,
-          padding: 20,
+          borderRadius: sectionRadius,
+          padding: sectionPadding,
           border: '1px solid var(--t-divider)',
+          color: 'var(--t-text-muted)',
+          fontSize: 13,
         }}>
-          <h3 style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '0.04em', textTransform: 'uppercase', margin: '0 0 16px' }}>
-            Agent Reasoning — Chain of Thought
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {thoughts.map((t, i) => (
-              <div key={i} style={{
-                padding: '10px 14px',
-                borderRadius: 10,
-                background: t.kind === 'error' ? 'rgba(239,68,68,0.06)' : 'var(--t-hover)',
-                borderLeft: `3px solid ${colors[t.kind] || '#e5e7eb'}`,
-              }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: colors[t.kind], textTransform: 'uppercase', marginBottom: 4 }}>
-                  {labels[t.kind] || t.kind}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--t-text)', lineHeight: 1.5 }}>{t.text}</div>
-              </div>
-            ))}
-          </div>
+          No replay data is available yet. This surface only shows real session activity.
         </div>
-      </div>
-
-      {/* Agent Orchestration Panel */}
-      <div style={{
-        background: 'var(--t-panel)',
-        borderRadius: 14,
-        padding: 20,
-        border: '1px solid var(--t-divider)',
-      }}>
-        <h3 style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '0.04em', textTransform: 'uppercase', margin: '0 0 20px' }}>
-          Agent Orchestration
-        </h3>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', gap: 16, position: 'relative' }}>
-          {/* Connection line */}
+      ) : (
+        <>
           <div style={{
-            position: 'absolute', top: '50%', left: '15%', right: '15%', height: 2,
-            background: 'linear-gradient(90deg, #2563eb, #22c55e, #f59e0b)',
-            borderRadius: 1, zIndex: 0,
-          }} />
-          {/* Agent cards */}
-          {[
-            { name: 'MISTER', model: 'Opus', branch: 'main', pct: 75, status: 'ACTIVE', task: 'IDE Development', color: '#2563eb' },
-            { name: 'NIOT', model: 'Codex', branch: 'feat/cortex', pct: 40, status: 'CODING', task: 'Cortex Features', color: '#22c55e' },
-            { name: 'HAWK', model: 'Codex', branch: 'reviewing PR', pct: 90, status: 'REVIEWING', task: 'QA Validation', color: '#f59e0b' },
-          ].map((agent) => (
-            <div key={agent.name} style={{
+            background: 'var(--t-panel)',
+            borderRadius: sectionRadius,
+            padding: isCompact ? 16 : isTight ? 18 : 22,
+            marginBottom: isCompact ? 14 : 18,
+            border: '1px solid var(--t-divider)',
+            boxShadow: 'var(--t-panel-shadow)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12, marginBottom: isCompact ? 12 : 16, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--t-text-secondary)' }}>
+                  Today
+                </div>
+                <div style={{ marginTop: 4, fontSize: isCompact ? 16 : 18, fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--t-text)' }}>
+                  {timelineReplayTime(0)} → {timelineReplayTime(totalMin)}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ padding: metricPillPadding, borderRadius: 999, background: 'rgba(37,99,235,0.08)', color: '#2563eb', fontSize: isCompact ? 10 : 11, fontWeight: 700 }}>
+                  {timelineReplayDuration(totalMin)} total
+                </span>
+                <span style={{ padding: metricPillPadding, borderRadius: 999, background: 'rgba(15,23,42,0.05)', color: 'var(--t-text-secondary)', fontSize: isCompact ? 10 : 11, fontWeight: 700 }}>
+                  {agentBreakdown.length} active lanes
+                </span>
+                <span style={{ padding: metricPillPadding, borderRadius: 999, background: 'rgba(22,163,74,0.08)', color: '#15803d', fontSize: isCompact ? 10 : 11, fontWeight: 700 }}>
+                  {liveSessions.length} live surfaces
+                </span>
+              </div>
+            </div>
+
+            <div style={{ height: summaryBarHeight, borderRadius: isCompact ? 8 : 10, overflow: 'hidden', display: 'flex', background: 'var(--t-timeline-bar)' }}>
+              {segments.map((seg, i) => (
+                <div
+                  key={`${seg.agent ?? 'unscoped'}:${seg.kind}:${seg.startMin}:${i}`}
+                  style={{
+                    width: `${(seg.durationMin / totalMin) * 100}%`,
+                    height: '100%',
+                    background: colors[seg.kind] || '#e5e7eb',
+                    borderRight: i < segments.length - 1 ? '1px solid rgba(255,255,255,0.3)' : 'none',
+                  }}
+                  title={`${labels[seg.kind] || seg.kind} · ${seg.agent ?? 'Unknown'} · ${timelineReplayDuration(seg.durationMin)} · ${timelineReplayTime(seg.startMin)}`}
+                />
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', gap: isCompact ? 12 : 18, marginTop: isCompact ? 10 : 14, flexWrap: 'wrap' }}>
+              {(['thinking', 'coding', 'testing', 'error'] as const).map((kind) => {
+                const total = totals[kind];
+                if (!total) return null;
+                return (
+                  <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 999, background: colors[kind] }} />
+                    <span style={{ fontSize: isCompact ? 10 : 11, fontWeight: 700, color: 'var(--t-text)' }}>{labels[kind]}</span>
+                    <span style={{ fontSize: isCompact ? 10 : 11, color: 'var(--t-text-muted)' }}>{timelineReplayDuration(total)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: contentColumns, gap: isCompact ? 14 : 18, marginBottom: isCompact ? 14 : 18 }}>
+            <div style={{
               background: 'var(--t-panel)',
-              borderRadius: 14,
-              padding: '16px 20px',
+              borderRadius: sectionRadius,
+              padding: sectionPadding,
               border: '1px solid var(--t-divider)',
               boxShadow: 'var(--t-panel-shadow)',
-              zIndex: 1,
-              minWidth: 180,
-              textAlign: 'center',
             }}>
-              {/* Progress ring */}
-              <div style={{ position: 'relative', width: 56, height: 56, margin: '0 auto 10px' }}>
-                <svg width={56} height={56} viewBox="0 0 56 56" style={{ transform: 'rotate(-90deg)' }}>
-                  <circle cx="28" cy="28" r="24" fill="none" stroke="var(--t-timeline-bar)" strokeWidth="4" />
-                  <circle cx="28" cy="28" r="24" fill="none" stroke={agent.color} strokeWidth="4"
-                    strokeDasharray={`${(agent.pct / 100) * 150.8} 150.8`}
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: 'var(--t-text)' }}>
-                  {agent.pct}%
+              <div style={{ display: 'flex', alignItems: isCompact ? 'flex-start' : 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', marginBottom: isCompact ? 12 : 16 }}>
+                <h3 style={{ fontSize: isCompact ? 11 : 12, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '0.05em', textTransform: 'uppercase', margin: 0 }}>
+                  Replay Lanes
+                </h3>
+                <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontWeight: 600 }}>
+                  Generated {generatedAt ? formatAge(generatedAt) : 'just now'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: isCompact ? 10 : 14 }}>
+                {agentBreakdown.map((entry) => {
+                  const context = liveSessionContext.get(entry.agent);
+                  const runtimeTone = context?.runtime === 'OpenClaw'
+                    ? '#2563eb'
+                    : context?.runtime === 'Claude Code'
+                      ? '#8b5cf6'
+                      : context?.runtime === 'Codex'
+                        ? '#16a34a'
+                        : '#64748b';
+                  return (
+                    <div key={entry.agent} style={{
+                      borderRadius: isCompact ? 14 : 16,
+                      border: '1px solid var(--t-divider)',
+                      padding: isCompact ? 12 : 16,
+                      background: 'rgba(255,255,255,0.64)',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: isCompact ? 14 : 15, fontWeight: 800, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>{entry.agent}</div>
+                          <div style={{ fontSize: isCompact ? 10 : 11, color: 'var(--t-text-muted)', marginTop: 3 }}>
+                            {context?.label ?? 'Historical lane without a live matched surface'}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: isCompact ? 11 : 12, fontWeight: 700, color: 'var(--t-text-secondary)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                          {timelineReplayDuration(entry.totalMin)}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                        {context ? (
+                          <>
+                            <span style={{ fontSize: isCompact ? 9 : 10, fontWeight: 700, color: runtimeTone, background: `${runtimeTone}14`, border: `1px solid ${runtimeTone}24`, borderRadius: 999, padding: isCompact ? '2px 7px' : '3px 8px' }}>
+                              {context.runtime}
+                            </span>
+                            {context.location ? (
+                              <span style={{ fontSize: isCompact ? 9 : 10, fontWeight: 600, color: 'var(--t-text-secondary)', background: 'rgba(15,23,42,0.05)', border: '1px solid rgba(148,163,184,0.14)', borderRadius: 999, padding: isCompact ? '2px 7px' : '3px 8px', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                                {context.location}
+                              </span>
+                            ) : null}
+                            {context.extra ? (
+                              <span style={{ fontSize: isCompact ? 9 : 10, fontWeight: 600, color: 'var(--t-text-muted)', background: 'rgba(15,23,42,0.05)', border: '1px solid rgba(148,163,184,0.14)', borderRadius: 999, padding: isCompact ? '2px 7px' : '3px 8px' }}>
+                                {context.extra}
+                              </span>
+                            ) : null}
+                          </>
+                        ) : null}
+                      </div>
+
+                      <div style={{ marginTop: 8, fontSize: isCompact ? 11 : 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
+                        {context?.summary ?? 'No live session detail matched for this lane yet. The replay bar is still showing real recorded activity.'}
+                      </div>
+
+                      <div style={{ height: isCompact ? 10 : 12, borderRadius: 999, overflow: 'hidden', display: 'flex', background: 'rgba(15,23,42,0.06)', marginTop: 10 }}>
+                        {entry.segments.map((seg, i) => (
+                          <div
+                            key={`${entry.agent}:${seg.kind}:${seg.startMin}:${i}`}
+                            style={{
+                              width: `${(seg.durationMin / entry.totalMin) * 100}%`,
+                              height: '100%',
+                              background: colors[seg.kind] || '#e5e7eb',
+                            }}
+                            title={`${labels[seg.kind] || seg.kind} · ${timelineReplayDuration(seg.durationMin)} · ${timelineReplayTime(seg.startMin)}`}
+                          />
+                        ))}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: isCompact ? 8 : 12, flexWrap: 'wrap', marginTop: 8 }}>
+                        {(['coding', 'thinking', 'testing', 'error'] as const).map((kind) => {
+                          const minutes = entry.breakdown[kind];
+                          if (!minutes) return null;
+                          return (
+                            <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <div style={{ width: 6, height: 6, borderRadius: 999, background: colors[kind] }} />
+                              <span style={{ fontSize: isCompact ? 9 : 10, color: 'var(--t-text-muted)', fontWeight: 600 }}>
+                                {labels[kind]} {timelineReplayDuration(minutes)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <div style={{
+                background: 'var(--t-panel)',
+                borderRadius: sectionRadius,
+                padding: sectionPadding,
+                border: '1px solid var(--t-divider)',
+                boxShadow: 'var(--t-panel-shadow)',
+              }}>
+                <h3 style={{ fontSize: isCompact ? 11 : 12, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '0.05em', textTransform: 'uppercase', margin: `0 0 ${isCompact ? 12 : 16}px` }}>
+                  Live Surfaces
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: isCompact ? 10 : 12 }}>
+                  {liveSessions.map((session) => {
+                    const runtime = timelineReplayRuntimeLabel(session.runtime);
+                    const repoSlug = session.runtimeSurface?.reviewContext?.repoSlug || '';
+                    const repoName = repoSlug.split('/')[1] || null;
+                    const location = repoName
+                      ? `${repoName}${session.branch ? ` · ${session.branch}` : ''}`
+                      : timelineReplayWorkspace(session.workspace) ?? session.surfaceLabel ?? session.branch ?? 'unknown';
+                    const runtimeTone = runtime === 'OpenClaw' ? '#2563eb' : runtime === 'Claude Code' ? '#8b5cf6' : '#16a34a';
+
+                    return (
+                      <div key={session.sessionKey} style={{
+                        borderRadius: isCompact ? 12 : 14,
+                        border: '1px solid var(--t-divider)',
+                        padding: isCompact ? 12 : 14,
+                        background: 'rgba(255,255,255,0.64)',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: isCompact ? 12 : 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {session.name}
+                            </div>
+                            <div style={{ fontSize: isCompact ? 10 : 10.5, color: 'var(--t-text-muted)', marginTop: 3 }}>
+                              {location}
+                            </div>
+                          </div>
+                          <span style={{ fontSize: isCompact ? 9 : 10, fontWeight: 700, color: runtimeTone, background: `${runtimeTone}14`, border: `1px solid ${runtimeTone}24`, borderRadius: 999, padding: isCompact ? '2px 7px' : '3px 8px', flexShrink: 0 }}>
+                            {runtime}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: isCompact ? 10.5 : 11.5, lineHeight: 1.5, color: 'var(--t-text-secondary)', marginTop: 8 }}>
+                          {timelineReplayTask(session.currentTask) || 'No current task detail'}
+                        </div>
+                        <div style={{ fontSize: isCompact ? 9 : 10, color: 'var(--t-text-muted)', marginTop: 8 }}>
+                          {session.surfaceLabel || session.status} · {formatAge(session.lastEventAt)}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{agent.name}</div>
-              <div style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>({agent.model}) · {agent.branch}</div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: agent.color, marginTop: 6, textTransform: 'uppercase' }}>
-                {agent.status}
+
+              <div style={{
+                background: 'var(--t-panel)',
+                borderRadius: sectionRadius,
+                padding: sectionPadding,
+                border: '1px solid var(--t-divider)',
+                boxShadow: 'var(--t-panel-shadow)',
+              }}>
+                <h3 style={{ fontSize: isCompact ? 11 : 12, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '0.05em', textTransform: 'uppercase', margin: `0 0 ${isCompact ? 12 : 16}px` }}>
+                  Recent Slices
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: isCompact ? 8 : 10 }}>
+                  {recentSlices.map((segment, index) => (
+                    <div key={`${segment.agent ?? 'unscoped'}:${segment.kind}:${segment.startMin}:${index}`} style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      paddingBottom: isCompact ? 8 : 10,
+                      borderBottom: index < recentSlices.length - 1 ? '1px solid var(--t-divider-subtle)' : 'none',
+                    }}>
+                      <div style={{ width: 8, height: 8, borderRadius: 999, background: colors[segment.kind] || '#e5e7eb', flexShrink: 0 }} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: isCompact ? 11 : 12, fontWeight: 600, color: 'var(--t-text)' }}>
+                          {(labels[segment.kind] || segment.kind)} · {segment.agent ?? 'Unscoped'}
+                        </div>
+                        <div style={{ fontSize: isCompact ? 9.5 : 10.5, color: 'var(--t-text-muted)', marginTop: 2 }}>
+                          {timelineReplayTime(segment.startMin)} · {timelineReplayDuration(segment.durationMin)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div style={{ fontSize: 10, color: 'var(--t-text-secondary)' }}>{agent.task}</div>
             </div>
-          ))}
-        </div>
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
