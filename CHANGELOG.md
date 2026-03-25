@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-25
 
+- `24b8f99` fix: reduce dashboard update and gateway noise
 - `df3541c` fix: stabilize terminal attachments in dev
 - `cbf9aab` fix: tighten issue workflow launch path
 - `4eb6f75` fix: harden fresh installs on main
