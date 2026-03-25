@@ -330,7 +330,7 @@ function buildSummary(tools: DetectedTool[]): string {
   const openclaw = tools.find(t => t.id === 'openclaw');
   if (openclaw?.detected) {
     const agentCount = (openclaw.details?.agentCount as number) ?? 0;
-    parts.push(`OpenClaw connected (${agentCount} agents)`);
+    parts.push(`OpenClaw beta connected (${agentCount} agents)`);
   }
 
   const claudeCode = tools.find(t => t.id === 'claude-code');

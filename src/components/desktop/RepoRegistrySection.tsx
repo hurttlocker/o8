@@ -28,6 +28,7 @@ import type {
   RepoSetupEnvMode,
   ValidatedRepoCandidate,
 } from '@/lib/repos/types';
+import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 
 interface JsonErrorShape {
   error?: string;
@@ -40,12 +41,14 @@ interface WorkspaceCreateResult {
   baseBranch: string;
 }
 
-interface LaunchAgentResult {
-  surfaceId: string;
-  runtime: string;
-  note: string;
-  cwd: string;
-  worktree: WorkspaceCreateResult | null;
+interface WorkspaceAgentLaunchRequest {
+  repoPath: string;
+  runtime?: 'codex' | 'claude-code';
+  modelId?: string;
+  initialText?: string;
+  autoSend?: boolean;
+  createNew?: boolean;
+  label?: string;
 }
 
 function formatRelativeTime(value: string | null) {
@@ -387,6 +390,27 @@ function SetupModeButton({
   );
 }
 
+function OverflowDotsIcon({ color = 'currentColor' }: { color?: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color,
+        fontSize: 18,
+        lineHeight: 1,
+        fontWeight: 700,
+        letterSpacing: '-0.08em',
+        transform: 'translateY(-1px)',
+      }}
+    >
+      ...
+    </span>
+  );
+}
+
 interface BranchAgent {
   name: string;
   sessionKey: string;
@@ -447,6 +471,7 @@ function RepoCard({
   repo,
   workspaceNotice,
   onLaunchAgent,
+  onOpenLaunchOptions,
   onOpenGitHub,
   onRemove,
   onSaveSetup,
@@ -461,6 +486,7 @@ function RepoCard({
   repo: RepoRegistryEntry;
   workspaceNotice: WorkspaceCreateResult | null;
   onLaunchAgent: (repo: RepoRegistryEntry) => void;
+  onOpenLaunchOptions: (repo: RepoRegistryEntry) => void;
   onOpenGitHub: (repo: RepoRegistryEntry) => void;
   onRemove: (repo: RepoRegistryEntry) => void;
   onSaveSetup: (repoId: string, setup: RepoSetupConfig) => Promise<void>;
@@ -473,6 +499,7 @@ function RepoCard({
   isActive?: boolean;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuRect, setMenuRect] = useState<DOMRect | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draftSetup, setDraftSetup] = useState<RepoSetupConfig>(repo.setup);
   const [saving, setSaving] = useState(false);
@@ -999,22 +1026,50 @@ function RepoCard({
         {/* Overflow menu trigger */}
         <button
           type="button"
-          onClick={(e) => { e.stopPropagation(); setMenuOpen((v) => !v); }}
+          onClick={(e) => {
+            e.stopPropagation();
+            const rect = e.currentTarget.getBoundingClientRect();
+            setMenuRect(rect);
+            setMenuOpen((v) => !v);
+          }}
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: 24,
-            height: 24,
-            borderRadius: 6,
-            border: 'none',
-            background: menuOpen ? 'var(--t-divider-subtle)' : 'transparent',
-            color: 'var(--t-text-muted)',
+            width: 30,
+            height: 30,
+            borderRadius: 10,
+            border: menuOpen ? '1px solid rgba(37, 99, 235, 0.16)' : '1px solid rgba(148, 163, 184, 0.14)',
+            background: menuOpen
+              ? 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(239,246,255,0.92))'
+              : 'rgba(255,255,255,0.8)',
+            color: menuOpen ? '#2563eb' : 'var(--t-text-secondary)',
             cursor: 'pointer',
             flexShrink: 0,
+            boxShadow: menuOpen
+              ? '0 8px 18px rgba(37, 99, 235, 0.08)'
+              : '0 4px 10px rgba(15, 23, 42, 0.04)',
+            transition: 'all 140ms ease',
           }}
+          onMouseEnter={(e) => {
+            const target = e.currentTarget;
+            if (!menuOpen) {
+              target.style.background = 'rgba(255,255,255,0.96)';
+              target.style.borderColor = 'rgba(37, 99, 235, 0.14)';
+              target.style.color = '#2563eb';
+            }
+          }}
+          onMouseLeave={(e) => {
+            const target = e.currentTarget;
+            if (!menuOpen) {
+              target.style.background = 'rgba(255,255,255,0.8)';
+              target.style.borderColor = 'rgba(148, 163, 184, 0.14)';
+              target.style.color = 'var(--t-text-secondary)';
+            }
+          }}
+          aria-label={`Open actions for ${repo.name}`}
         >
-          <MoreHorizontal size={14} strokeWidth={2} />
+          <OverflowDotsIcon color="currentColor" />
         </button>
       </div>
 
@@ -1149,30 +1204,34 @@ function RepoCard({
       ) : null}
 
       {/* Overflow menu dropdown */}
-      {menuOpen ? (
-        <div
-          style={{
-            position: 'relative',
-          }}
-        >
+      {menuOpen && menuRect && typeof document !== 'undefined' ? createPortal(
+        <>
+          <div
+            onClick={() => setMenuOpen(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 9997,
+            }}
+          />
           <div
             style={{
-              position: 'absolute',
-              right: 4,
-              top: -4,
-              zIndex: 50,
-              minWidth: 160,
-              padding: '4px 0',
-              borderRadius: 10,
+              position: 'fixed',
+              top: Math.round(menuRect.bottom + 8),
+              left: Math.round(menuRect.right - 184),
+              zIndex: 9998,
+              minWidth: 184,
+              padding: '6px 0',
+              borderRadius: 14,
               border: '1px solid var(--t-panel-border)',
-              background: 'rgba(255, 255, 255, 0.95)',
+              background: 'rgba(255, 255, 255, 0.96)',
               backdropFilter: 'blur(20px)',
               WebkitBackdropFilter: 'blur(20px)',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.12)',
+              boxShadow: '0 14px 34px rgba(15,23,42,0.14), 0 4px 12px rgba(15,23,42,0.06)',
             }}
           >
             {[
-              { label: 'Launch Agent', icon: <PlayCircle size={12} strokeWidth={2} />, action: () => { onLaunchAgent(repo); setMenuOpen(false); } },
+              { label: 'Launch with options', icon: <PlayCircle size={12} strokeWidth={2} />, action: () => { onOpenLaunchOptions(repo); setMenuOpen(false); } },
               { label: 'Settings', icon: <Settings2 size={12} strokeWidth={2} />, action: () => { setSettingsOpen((v) => !v); setMenuOpen(false); } },
               ...(githubUrl ? [{ label: 'Open on GitHub', icon: <ExternalLink size={12} strokeWidth={2} />, action: () => { onOpenGitHub(repo); setMenuOpen(false); } }] : []),
               { label: 'Remove from Cortex', icon: <Trash2 size={12} strokeWidth={2} />, action: () => { onRemove(repo); setMenuOpen(false); }, danger: true },
@@ -1186,7 +1245,7 @@ function RepoCard({
                   alignItems: 'center',
                   gap: 8,
                   width: '100%',
-                  padding: '7px 12px',
+                  padding: '9px 14px',
                   border: 'none',
                   background: 'transparent',
                   color: (item as { danger?: boolean }).danger ? '#ef4444' : 'var(--t-text)',
@@ -1202,7 +1261,8 @@ function RepoCard({
               </button>
             ))}
           </div>
-        </div>
+        </>,
+        document.body,
       ) : null}
 
       {/* Expanded content */}
@@ -1229,6 +1289,26 @@ function RepoCard({
             >
               <PlayCircle size={11} strokeWidth={2} />
               Launch agent
+            </button>
+            <button
+              type="button"
+              onClick={() => onOpenLaunchOptions(repo)}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: 0,
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--t-text-muted)',
+                fontSize: 11,
+                fontWeight: 500,
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              <ChevronDown size={11} strokeWidth={2} />
+              Options
             </button>
             {/* Dev server Run/Stop */}
             {repo.setup.devCommand ? (
@@ -1617,21 +1697,36 @@ function RepoCard({
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          width: 20,
-                          height: 20,
-                          borderRadius: 4,
-                          border: 'none',
-                          background: branchMenuOpen === branch.name ? 'rgba(0,0,0,0.04)' : 'transparent',
-                          color: 'var(--t-text-muted)',
+                          width: 24,
+                          height: 24,
+                          borderRadius: 8,
+                          border: branchMenuOpen === branch.name ? '1px solid rgba(37, 99, 235, 0.14)' : '1px solid rgba(148, 163, 184, 0.12)',
+                          background: branchMenuOpen === branch.name ? 'rgba(37, 99, 235, 0.08)' : 'rgba(255,255,255,0.72)',
+                          color: branchMenuOpen === branch.name ? '#2563eb' : 'var(--t-text-secondary)',
                           cursor: 'pointer',
                           flexShrink: 0,
-                          opacity: 0.5,
-                          transition: 'opacity 120ms',
+                          transition: 'all 120ms ease',
+                          boxShadow: '0 3px 8px rgba(15, 23, 42, 0.03)',
                         }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '1'; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = '0.5'; }}
+                        onMouseEnter={(e) => {
+                          const target = e.currentTarget as HTMLButtonElement;
+                          if (branchMenuOpen !== branch.name) {
+                            target.style.background = 'rgba(255,255,255,0.96)';
+                            target.style.borderColor = 'rgba(37, 99, 235, 0.14)';
+                            target.style.color = '#2563eb';
+                          }
+                        }}
+                        onMouseLeave={(e) => {
+                          const target = e.currentTarget as HTMLButtonElement;
+                          if (branchMenuOpen !== branch.name) {
+                            target.style.background = 'rgba(255,255,255,0.72)';
+                            target.style.borderColor = 'rgba(148, 163, 184, 0.12)';
+                            target.style.color = 'var(--t-text-secondary)';
+                          }
+                        }}
+                        aria-label={`Open branch actions for ${branch.name}`}
                       >
-                        <MoreHorizontal size={12} strokeWidth={2} />
+                        <OverflowDotsIcon color="currentColor" />
                       </button>
                     ) : null}
                   </div>
@@ -2262,6 +2357,7 @@ export function RepoRegistrySection({
   onSelectSession,
   onSelectPR,
   onLaunchComplete,
+  onLaunchWorkspaceAgent,
   activeRepoLocalPath = null,
   sectionOpen,
   onSectionOpenChange,
@@ -2271,6 +2367,7 @@ export function RepoRegistrySection({
   onSelectSession?: (sessionKey: string) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
   onLaunchComplete?: () => void;
+  onLaunchWorkspaceAgent?: (request: WorkspaceAgentLaunchRequest) => Promise<void>;
   activeRepoLocalPath?: string | null;
   sectionOpen?: boolean;
   onSectionOpenChange?: (open: boolean) => void;
@@ -2312,19 +2409,25 @@ export function RepoRegistrySection({
   const [workspaceNotice, setWorkspaceNotice] = useState<Record<string, WorkspaceCreateResult>>({});
 
   const [launchRepo, setLaunchRepo] = useState<RepoRegistryEntry | null>(null);
-  const [launchRuntime, setLaunchRuntime] = useState<'codex' | 'claude-code' | 'openclaw'>('codex');
+  const [launchRuntime, setLaunchRuntime] = useState<'codex' | 'claude-code'>(() => {
+    if (typeof window === 'undefined') return 'codex';
+    try {
+      const saved = window.localStorage.getItem('cortex-workspace-launch-runtime');
+      return saved === 'claude-code' ? 'claude-code' : 'codex';
+    } catch {
+      return 'codex';
+    }
+  });
   const [launchTaskName, setLaunchTaskName] = useState('');
   const [launchPrompt, setLaunchPrompt] = useState('');
-  const [launchBaseBranch, setLaunchBaseBranch] = useState('');
-  const [launchUseSetup, setLaunchUseSetup] = useState(true);
   const [launchLoading, setLaunchLoading] = useState(false);
   const [launchError, setLaunchError] = useState<string | null>(null);
-  const [launchResult, setLaunchResult] = useState<LaunchAgentResult | null>(null);
-  const [launchIsolation, setLaunchIsolation] = useState<'main' | 'branch'>('main');
 
   const [removeTarget, setRemoveTarget] = useState<RepoRegistryEntry | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const handledLaunchIntentNonceRef = useRef<number | null>(null);
+  const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
 
   useEffect(() => {
     try {
@@ -2332,6 +2435,16 @@ export function RepoRegistrySection({
       else sessionStorage.removeItem('cortex-repo-expanded-id');
     } catch { /* ignore */ }
   }, [expandedRepoId]);
+
+  useEffect(() => subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled), []);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem('cortex-workspace-launch-runtime', launchRuntime);
+    } catch {
+      // ignore local preference persistence failures
+    }
+  }, [launchRuntime]);
 
   const loadRepos = useCallback(async () => {
     setLoading(true);
@@ -2346,6 +2459,18 @@ export function RepoRegistrySection({
     }
   }, []);
 
+  const touchRepo = useCallback(async (repo: RepoRegistryEntry) => {
+    const touched = await requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'touch', id: repo.id }),
+    });
+
+    setRepos((current) => sortRepoEntries(
+      current.map((entry) => (entry.id === repo.id ? touched.repo : entry)),
+    ));
+  }, []);
+
   useEffect(() => {
     void loadRepos();
   }, [loadRepos]);
@@ -2355,7 +2480,7 @@ export function RepoRegistrySection({
 
   useEffect(() => {
     function fetchAgentBranches() {
-      fetch('/api/panel/workspaces')
+      fetch(appendOpenClawBetaQuery('/api/panel/workspaces', openClawBetaEnabled))
         .then(r => r.json())
         .then((data: { workspaces?: { repo: string; branch: string; agentName: string; sessionKey: string; agentStatus: string }[] }) => {
           const map = new Map<string, Map<string, BranchAgent[]>>();
@@ -2389,7 +2514,7 @@ export function RepoRegistrySection({
     fetchAgentBranches();
     const id = setInterval(fetchAgentBranches, 30_000);
     return () => clearInterval(id);
-  }, []);
+  }, [openClawBetaEnabled]);
 
   // ── Port data for running indicators (#170) ──
   const [portsByRepo, setPortsByRepo] = useState<Map<string, number[]>>(new Map());
@@ -2503,91 +2628,76 @@ export function RepoRegistrySection({
 
   const openLaunchModal = useCallback((repo: RepoRegistryEntry) => {
     setLaunchRepo(repo);
-    setLaunchRuntime('codex');
-    setLaunchTaskName(defaultWorkspaceName(repo.name));
-    setLaunchPrompt(`Work on ${repo.name}. Start by reading CLAUDE.md and the relevant issue context, then implement the requested change.`);
-    setLaunchBaseBranch(repo.defaultBranch);
-    setLaunchUseSetup(repo.setup.installOnCreateWorkspace);
-    setLaunchIsolation('main');
+    setLaunchTaskName('');
+    setLaunchPrompt('');
     setLaunchError(null);
-    setLaunchResult(null);
   }, []);
 
   const closeLaunchModal = useCallback(() => {
     setLaunchRepo(null);
-    setLaunchRuntime('codex');
     setLaunchTaskName('');
     setLaunchPrompt('');
-    setLaunchBaseBranch('');
-    setLaunchUseSetup(true);
     setLaunchLoading(false);
     setLaunchError(null);
-    setLaunchResult(null);
   }, []);
+
+  const launchIntoWorkspace = useCallback(async (
+    repo: RepoRegistryEntry,
+    options?: {
+      runtime?: 'codex' | 'claude-code';
+      label?: string;
+      initialText?: string;
+      autoSend?: boolean;
+    },
+  ) => {
+    if (!onLaunchWorkspaceAgent) {
+      openLaunchModal(repo);
+      return;
+    }
+
+    await onLaunchWorkspaceAgent({
+      repoPath: repo.localPath,
+      runtime: options?.runtime,
+      label: options?.label,
+      initialText: options?.initialText,
+      autoSend: options?.autoSend,
+      createNew: true,
+    });
+
+    try {
+      await touchRepo(repo);
+    } catch {
+      // Repo recency is best-effort; do not fail the launch if touch misses.
+    }
+    onLaunchComplete?.();
+  }, [onLaunchComplete, onLaunchWorkspaceAgent, openLaunchModal, touchRepo]);
 
   const handleLaunchAgent = useCallback(async () => {
     if (!launchRepo) return;
-
-    const taskName = launchTaskName.trim();
-    const prompt = launchPrompt.trim();
-    if (!taskName) {
-      setLaunchError('Task name is required.');
-      return;
-    }
-    if (!prompt) {
-      setLaunchError('Launch prompt is required.');
-      return;
-    }
 
     setLaunchLoading(true);
     setLaunchError(null);
 
     try {
-      const data = await requestJson<LaunchAgentResult>('/api/runtime/launch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          runtime: launchRuntime,
-          repoPath: launchRepo.localPath,
-          prompt,
-          taskName,
-          baseBranch: launchIsolation === 'branch' ? (launchBaseBranch.trim() || undefined) : undefined,
-          skipSetup: launchIsolation === 'main' ? true : !launchUseSetup,
-          isolation: launchIsolation,
-        }),
+      await launchIntoWorkspace(launchRepo, {
+        runtime: launchRuntime,
+        label: launchTaskName.trim() || undefined,
+        initialText: launchPrompt.trim() || undefined,
+        autoSend: launchPrompt.trim().length > 0,
       });
-
-      setLaunchResult(data);
-
-      const touched = await requestJson<{ repo: RepoRegistryEntry }>('/api/panel/repos', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'touch', id: launchRepo.id }),
-      });
-
-      setRepos((current) => sortRepoEntries(
-        current.map((repo) => (repo.id === launchRepo.id ? touched.repo : repo)),
-      ));
-
-      onLaunchComplete?.();
-      if (data.surfaceId) {
-        onSelectSession?.(data.surfaceId);
-      }
+      closeLaunchModal();
     } catch (error) {
       setLaunchError(error instanceof Error ? error.message : 'Unable to launch agent.');
     } finally {
       setLaunchLoading(false);
     }
   }, [
-    launchBaseBranch,
-    launchIsolation,
     launchPrompt,
     launchRepo,
     launchRuntime,
     launchTaskName,
-    launchUseSetup,
-    onLaunchComplete,
-    onSelectSession,
+    closeLaunchModal,
+    launchIntoWorkspace,
   ]);
 
   const openWorkspaceModal = useCallback((repo: RepoRegistryEntry) => {
@@ -2698,8 +2808,10 @@ export function RepoRegistrySection({
 
   useEffect(() => {
     if (!launchIntent?.repoPath) return;
+    if (handledLaunchIntentNonceRef.current === launchIntent.nonce) return;
     const match = repos.find((repo) => repo.localPath === launchIntent.repoPath);
     if (!match) return;
+    handledLaunchIntentNonceRef.current = launchIntent.nonce;
     setReposOpen(true);
     setExpandedRepoId(match.id);
     openLaunchModal(match);
@@ -2870,7 +2982,12 @@ export function RepoRegistrySection({
                 key={repo.id}
                 repo={repo}
                 workspaceNotice={workspaceNotice[repo.id] ?? null}
-                onLaunchAgent={openLaunchModal}
+                onLaunchAgent={(targetRepo) => {
+                  void launchIntoWorkspace(targetRepo).catch((error) => {
+                    window.alert(error instanceof Error ? error.message : 'Unable to launch workspace agent.');
+                  });
+                }}
+                onOpenLaunchOptions={openLaunchModal}
                 onOpenGitHub={handleOpenGitHub}
                 onRemove={setRemoveTarget}
                 onSaveSetup={handleSaveSetup}
@@ -3293,7 +3410,7 @@ export function RepoRegistrySection({
         open={launchRepo !== null}
         onClose={closeLaunchModal}
         title={launchRepo ? `Launch Agent · ${launchRepo.name}` : 'Launch Agent'}
-        subtitle="Choose a runtime and task. The agent will start working immediately."
+        subtitle="Open a new workspace CLI tab with the runtime you want. Add a prompt only if you want the agent to start immediately."
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
@@ -3301,7 +3418,7 @@ export function RepoRegistrySection({
           </div>
           <select
             value={launchRuntime}
-            onChange={(event) => setLaunchRuntime(event.currentTarget.value as 'codex' | 'claude-code' | 'openclaw')}
+            onChange={(event) => setLaunchRuntime(event.currentTarget.value as 'codex' | 'claude-code')}
             style={{
               width: '100%',
               minHeight: 40,
@@ -3317,18 +3434,17 @@ export function RepoRegistrySection({
           >
             <option value="codex">Codex</option>
             <option value="claude-code">Claude Code</option>
-            <option value="openclaw">OpenClaw</option>
           </select>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
-            Task name
+            Tab label
           </div>
           <input
             value={launchTaskName}
             onChange={(event) => setLaunchTaskName(event.currentTarget.value)}
-            placeholder="cortex-issue-131"
+            placeholder="Optional"
             style={{
               width: '100%',
               minHeight: 40,
@@ -3346,13 +3462,13 @@ export function RepoRegistrySection({
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
-            Launch prompt
+            Initial prompt
           </div>
           <textarea
             value={launchPrompt}
             onChange={(event) => setLaunchPrompt(event.currentTarget.value)}
             rows={6}
-            placeholder="Describe the task for the agent."
+            placeholder="Optional. Leave blank to open a ready session and steer it yourself."
             style={{
               width: '100%',
               padding: '10px 12px',
@@ -3369,138 +3485,19 @@ export function RepoRegistrySection({
           />
         </div>
 
-        {launchRuntime === 'openclaw' ? (
-          <div
-            style={{
-              padding: 12,
-              borderRadius: 12,
-              border: '1px solid rgba(37, 99, 235, 0.12)',
-              background: 'rgba(239, 246, 255, 0.78)',
-              fontSize: 11,
-              lineHeight: 1.5,
-              color: '#1d4ed8',
-            }}
-          >
-            OpenClaw launch dispatches the task into the live mirrored session instead of creating a repo worktree. Base branch and setup controls do not apply on that lane.
-          </div>
-        ) : (
-          <>
-            {/* ── Isolation Mode — iOS Segmented Control ── */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
-                Isolation
-              </div>
-              <div style={{
-                display: 'flex',
-                padding: 2,
-                borderRadius: 10,
-                background: 'rgba(0, 0, 0, 0.04)',
-                gap: 0,
-              }}>
-                {(['main', 'branch'] as const).map((mode) => {
-                  const active = launchIsolation === mode;
-                  return (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => setLaunchIsolation(mode)}
-                      style={{
-                        flex: 1,
-                        padding: '7px 0',
-                        borderRadius: 8,
-                        border: 'none',
-                        background: active ? '#fff' : 'transparent',
-                        boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)' : 'none',
-                        color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
-                        fontSize: 12,
-                        fontWeight: active ? 600 : 500,
-                        cursor: 'pointer',
-                        transition: 'all 180ms cubic-bezier(0.32, 0.72, 0, 1)',
-                        fontFamily: '-apple-system, system-ui, sans-serif',
-                        letterSpacing: '-0.01em',
-                      }}
-                    >
-                      {mode === 'main' ? 'On current branch' : 'New branch'}
-                    </button>
-                  );
-                })}
-              </div>
-              <div style={{
-                fontSize: 10,
-                color: 'var(--t-text-faint)',
-                lineHeight: 1.4,
-                marginTop: 2,
-              }}>
-                {launchIsolation === 'main'
-                  ? 'Agent works directly on the current branch. Fast, no setup overhead.'
-                  : 'Agent gets an isolated worktree with its own branch. No conflicts with other work.'}
-              </div>
-            </div>
-
-            {/* ── Branch config (only shown for worktree isolation) ── */}
-            {launchIsolation === 'branch' ? (
-              <>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
-                    Base branch
-                  </div>
-                  <input
-                    value={launchBaseBranch}
-                    onChange={(event) => setLaunchBaseBranch(event.currentTarget.value)}
-                    placeholder="main"
-                    style={{
-                      width: '100%',
-                      minHeight: 40,
-                      padding: '10px 12px',
-                      borderRadius: 12,
-                      border: '1px solid var(--t-btn-secondary-border)',
-                      background: 'rgba(255, 255, 255, 0.55)',
-                      color: 'var(--t-text)',
-                      fontSize: 13,
-                      fontFamily: '"SF Mono", ui-monospace, monospace',
-                      outline: 'none',
-                    }}
-                  />
-                </div>
-
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    gap: 10,
-                    cursor: 'pointer',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={launchUseSetup}
-                    onChange={(event) => setLaunchUseSetup(event.currentTarget.checked)}
-                    style={{
-                      marginTop: 2,
-                      accentColor: '#ef4444',
-                    }}
-                  />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
-                      Run dependency setup in new worktree
-                    </div>
-                    <div
-                      style={{
-                        marginTop: 4,
-                        fontSize: 11,
-                        color: 'var(--t-text-muted)',
-                        lineHeight: 1.45,
-                        fontFamily: '"SF Mono", ui-monospace, monospace',
-                      }}
-                    >
-                      {launchRepo?.setup.installCommand ?? 'No install command detected'}
-                    </div>
-                  </div>
-                </label>
-              </>
-            ) : null}
-          </>
-        )}
+        <div
+          style={{
+            padding: 12,
+            borderRadius: 12,
+            border: '1px solid rgba(37, 99, 235, 0.12)',
+            background: 'rgba(239, 246, 255, 0.78)',
+            fontSize: 11,
+            lineHeight: 1.5,
+            color: '#1d4ed8',
+          }}
+        >
+          This opens a new workspace CLI tab in the middle panel. Use the primary Launch Agent button for the fastest path, and use this sheet only when you want to choose the runtime or pre-seed the task prompt.
+        </div>
 
         {launchError ? (
           <div
@@ -3522,57 +3519,6 @@ export function RepoRegistrySection({
           </div>
         ) : null}
 
-        {launchResult ? (
-          <div
-            style={{
-              padding: 12,
-              borderRadius: 12,
-              border: '1px solid rgba(34, 197, 94, 0.18)',
-              background: 'rgba(240, 253, 244, 0.85)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                fontSize: 12,
-                fontWeight: 700,
-                color: '#166534',
-              }}
-            >
-              <CheckCircle2 size={14} strokeWidth={2} />
-              Agent launched
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '92px 1fr', gap: '6px 10px', fontSize: 12 }}>
-              <span style={{ color: 'var(--t-text-muted)' }}>Runtime</span>
-              <span style={{ color: 'var(--t-text)', fontWeight: 600 }}>{launchResult.runtime}</span>
-              <span style={{ color: 'var(--t-text-muted)' }}>Surface</span>
-              <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace', wordBreak: 'break-all' }}>
-                {launchResult.surfaceId}
-              </span>
-              <span style={{ color: 'var(--t-text-muted)' }}>CWD</span>
-              <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace', wordBreak: 'break-all' }}>
-                {shortenPath(launchResult.cwd)}
-              </span>
-              {launchResult.worktree ? (
-                <>
-                  <span style={{ color: 'var(--t-text-muted)' }}>Worktree</span>
-                  <span style={{ color: 'var(--t-text)', fontFamily: '"SF Mono", ui-monospace, monospace', wordBreak: 'break-all' }}>
-                    {launchResult.worktree.branch}
-                  </span>
-                </>
-              ) : null}
-            </div>
-            <div style={{ fontSize: 11, lineHeight: 1.5, color: '#166534' }}>
-              {launchResult.note}
-            </div>
-          </div>
-        ) : null}
-
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
           <button
             type="button"
@@ -3590,7 +3536,7 @@ export function RepoRegistrySection({
               fontFamily: '-apple-system, system-ui, sans-serif',
             }}
           >
-            {launchResult ? 'Close' : 'Cancel'}
+            Cancel
           </button>
           <button
             type="button"
@@ -3610,7 +3556,7 @@ export function RepoRegistrySection({
               fontFamily: '-apple-system, system-ui, sans-serif',
             }}
           >
-            {launchLoading ? 'Launching…' : launchResult ? 'Launch Another' : 'Launch Agent'}
+            {launchLoading ? 'Launching…' : 'Launch Agent'}
           </button>
         </div>
       </GlassModal>

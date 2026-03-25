@@ -298,7 +298,7 @@ async function runStatusSnapshot(): Promise<Record<string, unknown>> {
     const message = (err as Error).message?.slice(0, 200) ?? 'unknown';
     if (now - lastWsRpcErrorLogAt >= WS_RPC_ERROR_LOG_COOLDOWN_MS) {
       const suffix = wsRpcSuppressedCount > 0 ? ` (+${wsRpcSuppressedCount} suppressed)` : '';
-      console.warn(`[gateway-client] WS RPC failed for ${method}; using CLI fallback${suffix}: ${message}`);
+      console.warn(`[gateway-client] WS RPC failed while building status snapshot; using CLI fallback${suffix}: ${message}`);
       lastWsRpcErrorLogAt = now;
       wsRpcSuppressedCount = 0;
     } else {

@@ -38,6 +38,7 @@ import type {
 } from '@/lib/mobile/types';
 import type { ProjectGroup } from '@/components/mobile/types';
 import { buildProjectGroups } from '@/components/mobile/utils';
+import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 import { CodeBlock } from './CodeBlock';
 import { DesktopToolCallStack } from './DesktopAgentMessage';
 import { DiffModal } from './DiffModal';
@@ -1253,19 +1254,21 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
   onOpenDiff?: () => void;
   setDiffOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
+  const diffIsActive = diffStats.files > 0;
+
   return (
     <header
       style={{
         position: 'relative',
         display: 'flex',
         alignItems: 'center',
-        gap: '12px',
-        padding: '14px 16px',
-        borderBottom: '1px solid var(--t-divider)',
-        background: 'var(--t-panel-translucent)',
-        backdropFilter: 'blur(20px) saturate(1.4)',
-        WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
-        flexShrink: 0,
+        gap: '10px',
+        padding: '12px 14px',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.22)',
+        background: 'linear-gradient(180deg, rgba(246,249,255,0.58), rgba(255,255,255,0.18))',
+        backdropFilter: 'blur(24px) saturate(1.25)',
+        WebkitBackdropFilter: 'blur(24px) saturate(1.25)',
+        boxShadow: '0 1px 0 rgba(255,255,255,0.42)',
         zIndex: 10,
       }}
     >
@@ -1279,18 +1282,33 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
             alignItems: 'center',
             gap: 10,
             width: '100%',
-            padding: '8px 12px',
+            padding: '10px 12px',
             margin: 0,
-            border: '1px solid var(--t-divider)',
-            borderRadius: 12,
-            background: pickerOpen ? 'var(--t-divider-subtle)' : 'var(--t-hover)',
+            border: pickerOpen ? '1px solid rgba(37, 99, 235, 0.18)' : '1px solid rgba(148, 163, 184, 0.14)',
+            borderRadius: 18,
+            background: pickerOpen
+              ? 'linear-gradient(180deg, rgba(255,255,255,0.99), rgba(239,246,255,0.95))'
+              : 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.92))',
             cursor: 'pointer',
             textAlign: 'left',
             WebkitTapHighlightColor: 'transparent',
-            transition: 'background 180ms ease, border-color 180ms ease',
+            transition: 'background 180ms ease, border-color 180ms ease, box-shadow 180ms ease',
+            boxShadow: pickerOpen
+              ? '0 10px 24px rgba(37, 99, 235, 0.07)'
+              : '0 6px 16px rgba(15, 23, 42, 0.035)',
           }}
-          onMouseEnter={(e) => { if (!pickerOpen) e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
-          onMouseLeave={(e) => { if (!pickerOpen) e.currentTarget.style.background = 'var(--t-hover)'; }}
+          onMouseEnter={(e) => {
+            if (!pickerOpen) {
+              e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,255,255,0.99), rgba(241,245,255,0.94))';
+              e.currentTarget.style.borderColor = 'rgba(37, 99, 235, 0.12)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!pickerOpen) {
+              e.currentTarget.style.background = 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.92))';
+              e.currentTarget.style.borderColor = 'rgba(148, 163, 184, 0.14)';
+            }
+          }}
           aria-label="Switch session"
           aria-expanded={pickerOpen}
         >
@@ -1307,20 +1325,20 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
               width: 10, height: 10, borderRadius: '50%',
               backgroundColor: connectionDotColor === '#ff9f0a' ? undefined : connectionDotColor,
               background: connectionDotColor === '#ff9f0a' ? 'linear-gradient(135deg, #f59e0b, #a78bfa)' : connectionDotColor,
-              boxShadow: connectionDotColor === '#34c759' ? '0 0 8px rgba(52, 199, 89, 0.5)'
-                : connectionDotColor === '#2563eb' ? '0 0 8px rgba(37, 99, 235, 0.5)'
-                : connectionDotColor === '#ff9f0a' ? '0 0 8px rgba(167, 139, 250, 0.5)'
+              boxShadow: connectionDotColor === '#34c759' ? '0 0 10px rgba(52, 199, 89, 0.4)'
+                : connectionDotColor === '#2563eb' ? '0 0 10px rgba(37, 99, 235, 0.34)'
+                : connectionDotColor === '#ff9f0a' ? '0 0 9px rgba(167, 139, 250, 0.42)'
                 : 'none',
               animation: connectionDotColor === '#ff9f0a' ? 'reviewingBreathe 2.4s ease-in-out infinite' : 'none',
             }} />
           </span>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{
-              fontSize: 14,
-              fontWeight: 600,
+              fontSize: 15,
+              fontWeight: 700,
               color: 'var(--t-text)',
-              letterSpacing: '-0.01em',
-              lineHeight: 1.3,
+              letterSpacing: '-0.02em',
+              lineHeight: 1.2,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -1331,7 +1349,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
               fontSize: 11.5,
               color: 'var(--t-text-muted)',
               lineHeight: 1.3,
-              marginTop: 1,
+              marginTop: 2,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -1339,31 +1357,44 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
               {headerLabel} · {activeSubtitle}
             </div>
           </div>
-          <ChevronDown
-            size={15}
-            strokeWidth={2}
+          <span
             style={{
+              width: 22,
+              height: 22,
+              borderRadius: 999,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: pickerOpen ? 'rgba(37, 99, 235, 0.08)' : 'rgba(15, 23, 42, 0.05)',
+              color: pickerOpen ? '#2563eb' : 'var(--t-text-faint)',
               flexShrink: 0,
-              color: 'var(--t-text-faint)',
-              transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
-              transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
             }}
-          />
+          >
+            <ChevronDown
+              size={13}
+              strokeWidth={2}
+              style={{
+                transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
+                transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+              }}
+            />
+          </span>
         </button>
 
         {pickerOpen ? (
           <div
             style={{
               position: 'absolute',
-              top: 'calc(100% + 8px)',
-              left: '-12px',
-              right: '-12px',
+              top: 'calc(100% + 6px)',
+              left: '-4px',
+              right: '-4px',
               zIndex: 100,
-              borderRadius: '14px',
-              background: 'var(--t-panel)',
-              backdropFilter: 'blur(40px) saturate(1.8)',
-              WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-              boxShadow: '0 20px 60px rgba(15, 23, 42, 0.18), 0 1px 3px rgba(15, 23, 42, 0.08)',
+              borderRadius: '18px',
+              border: '1px solid rgba(37, 99, 235, 0.12)',
+              background: 'linear-gradient(180deg, rgba(255,255,255,0.99), rgba(247,250,255,0.95))',
+              backdropFilter: 'blur(40px) saturate(1.6)',
+              WebkitBackdropFilter: 'blur(40px) saturate(1.6)',
+              boxShadow: '0 18px 44px rgba(15, 23, 42, 0.14), 0 6px 18px rgba(37, 99, 235, 0.05)',
               padding: '8px',
               maxHeight: '60vh',
               overflowY: 'auto',
@@ -1373,7 +1404,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
             {projectGroups.map((group, gi) => {
             const isExpanded = expandedGroup === group.workspace;
             const isSingle = group.sessions.length === 1;
-            const containsSelected = group.sessions.some((s) => s.id === selectedSession?.id);
+            const containsSelected = group.sessions.some((s) => s.sessionKey === selectedSession?.sessionKey);
             const singleSessionFolder = isSingle ? sessionLocalFolderLabel(group.sessions[0]) : null;
             const isGroupMainOpenClaw = group.sessions.some((s) => s.runtime === 'openclaw' && s.sessionKey === 'agent:main:main');
             const dotColor = isGroupMainOpenClaw
@@ -1390,7 +1421,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                   type="button"
                   onClick={() => {
                     if (isSingle) {
-                      handleSessionFocus(group.sessions[0].id);
+                      handleSessionFocus(group.sessions[0].sessionKey);
                       setPickerOpen(false);
                     } else {
                       setExpandedGroup(isExpanded ? null : group.workspace);
@@ -1403,7 +1434,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                     width: '100%',
                     padding: '10px 12px',
                     border: 'none',
-                    borderRadius: '10px',
+                    borderRadius: '12px',
                     background: containsSelected && !isExpanded
                       ? 'rgba(37, 99, 235, 0.08)'
                       : 'transparent',
@@ -1440,7 +1471,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{
                       fontSize: '14px',
-                      fontWeight: containsSelected ? 600 : 500,
+                      fontWeight: containsSelected ? 700 : 600,
                       color: containsSelected ? '#2563eb' : 'var(--t-text)',
                       lineHeight: 1.3,
                     }}>
@@ -1477,11 +1508,11 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                     marginLeft: '18px',
                     borderLeft: '2px solid rgba(37, 99, 235, 0.12)',
                     paddingLeft: '8px',
-                    marginTop: '2px',
+                    marginTop: '3px',
                     marginBottom: '4px',
                   }}>
                     {group.sessions.map((session) => {
-                      const isActive = session.id === selectedSession?.id;
+                      const isActive = session.sessionKey === selectedSession?.sessionKey;
                       const isRunning = session.status === 'running' || session.status === 'reviewing';
                       const sessionPercent = Math.round(session.context?.usedPercent ?? 0);
                       const isSessionMainOpenClaw = session.runtime === 'openclaw' && session.sessionKey === 'agent:main:main';
@@ -1500,10 +1531,10 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
 
                       return (
                         <button
-                          key={session.id}
+                          key={session.sessionKey}
                           type="button"
                           onClick={() => {
-                            handleSessionFocus(session.id);
+                            handleSessionFocus(session.sessionKey);
                             setPickerOpen(false);
                           }}
                           style={{
@@ -1594,25 +1625,43 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
           display: 'inline-flex',
           alignItems: 'center',
           gap: 6,
-          paddingTop: 6,
+          paddingTop: 7,
           paddingRight: 12,
-          paddingBottom: 6,
+          paddingBottom: 7,
           paddingLeft: 12,
           borderRadius: 999,
-          border: diffStats.files > 0 ? '1px solid rgba(37, 99, 235, 0.12)' : '1px solid var(--t-divider)',
-          background: diffStats.files > 0 ? 'rgba(37, 99, 235, 0.04)' : 'var(--t-hover)',
+          border: diffIsActive ? '1px solid rgba(37, 99, 235, 0.16)' : '1px solid rgba(148, 163, 184, 0.14)',
+          background: diffIsActive
+            ? 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(239,246,255,0.92))'
+            : 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.92))',
           color: 'var(--t-text-muted)',
           fontSize: 12,
-          fontWeight: 500,
+          fontWeight: 600,
           cursor: 'pointer',
           transition: 'all 150ms ease',
+          boxShadow: diffIsActive
+            ? '0 8px 18px rgba(37, 99, 235, 0.07)'
+            : '0 5px 14px rgba(15, 23, 42, 0.035)',
         }}
         aria-label="Open diff sheet"
       >
-        <span style={{ color: '#22c55e', fontWeight: 600 }}>+{diffStats.additions}</span>
-        <span style={{ color: '#ef4444', fontWeight: 600 }}>-{diffStats.deletions}</span>
-        <span style={{ color: 'var(--t-text-muted)' }}>{diffStats.files} file{diffStats.files !== 1 ? 's' : ''}</span>
-        <SlidersHorizontal size={13} strokeWidth={2} />
+        <span style={{ color: '#22c55e', fontSize: 13, fontWeight: 700 }}>+{diffStats.additions}</span>
+        <span style={{ color: '#ef4444', fontSize: 13, fontWeight: 700 }}>-{diffStats.deletions}</span>
+        <span style={{ color: 'var(--t-text-muted)', fontWeight: 600 }}>{diffStats.files} file{diffStats.files !== 1 ? 's' : ''}</span>
+        <span
+          style={{
+            width: 20,
+            height: 20,
+            borderRadius: 999,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: diffIsActive ? 'rgba(37, 99, 235, 0.08)' : 'rgba(15, 23, 42, 0.05)',
+            color: diffIsActive ? '#2563eb' : 'var(--t-text-muted)',
+          }}
+        >
+          <SlidersHorizontal size={11} strokeWidth={2} />
+        </span>
       </button>
     </header>
   );
@@ -1640,6 +1689,7 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   showScrollPill,
   scrollToBottom,
   getIsNewEntry,
+  topInset = 12,
 }: {
   loading: boolean;
   transcript: MobileTranscriptEntry[];
@@ -1662,6 +1712,7 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   showScrollPill: boolean;
   scrollToBottom: (force?: boolean) => void;
   getIsNewEntry: (entryId: string) => boolean;
+  topInset?: number;
 }) {
   const supportsLiveText = runtimeCapabilities.supportsLiveText;
   const supportsToolEvents = runtimeCapabilities.supportsToolEvents;
@@ -1699,7 +1750,10 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
         style={{
           flex: 1,
           overflowY: 'auto',
-          padding: '12px 14px',
+          paddingTop: topInset,
+          paddingRight: 14,
+          paddingBottom: 12,
+          paddingLeft: 14,
         }}
       >
         {loading ? (
@@ -3174,6 +3228,7 @@ export function AgentPanelChat({
   const [activeToolCalls, setActiveToolCalls] = useState<MobileTranscriptToolCall[]>([]);
   const [approvals, setApprovals] = useState<SidebarApproval[]>([]);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
+  const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
   // wsConnected is derived from the WS hook below
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -3194,11 +3249,21 @@ export function AgentPanelChat({
     [sessions, selectedKey]
   );
 
+  useEffect(() => {
+    if (selectedSession || sessions.length === 0) return;
+    const primary = sessions.find((session) => session.sessionKey === snapshot?.primarySessionKey) ?? sessions[0];
+    if (primary && primary.sessionKey !== selectedKey) {
+      setSelectedKey(primary.sessionKey);
+    }
+  }, [selectedKey, selectedSession, sessions, snapshot?.primarySessionKey]);
+
   const streamingTextRef = useRef('');
 
   useEffect(() => {
     selectedKeyRef.current = selectedKey;
   }, [selectedKey]);
+
+  useEffect(() => subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled), []);
 
   // ── WebSocket — real-time updates ──
   const wsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
@@ -3319,31 +3384,41 @@ export function AgentPanelChat({
 
   // ── Derived header values ──
   const activeTitle = useMemo(() => {
-    if (!selectedSession) return 'Select session';
+    if (!selectedSession) {
+      if (selectedKey.startsWith('claude-code:')) return 'Claude Code';
+      if (selectedKey.startsWith('codex:')) return 'Codex';
+      return 'Select session';
+    }
     return compactLine(
       selectedSession.isCurrentSession ? 'Q ↔ Mister live' : selectedSession.name ?? selectedSession.currentTask,
       selectedSession.name ?? 'Current session',
       30,
     );
-  }, [selectedSession]);
+  }, [selectedKey, selectedSession]);
 
   const activeSubtitle = useMemo(() => {
-    if (!selectedSession) return '';
+    if (!selectedSession) {
+      return selectedKey ? compactLine(selectedKey, 'session', 42) : '';
+    }
     const raw = selectedSession as unknown as Record<string, unknown>;
     const surface = raw.runtimeSurface as { repoSlug?: string; branch?: string } | undefined;
     if (surface?.repoSlug) {
       return compactLine(`/${surface.repoSlug}/${surface.branch ?? 'main'}`, selectedSession.sessionKey, 42);
     }
     return compactLine(selectedSession.sessionKey, 'session', 42);
-  }, [selectedSession]);
+  }, [selectedKey, selectedSession]);
 
   const headerLabel = useMemo(() => {
-    if (!selectedSession) return 'Session';
+    if (!selectedSession) {
+      if (selectedKey.startsWith('claude-code:')) return 'Claude Code';
+      if (selectedKey.startsWith('codex:')) return 'Codex';
+      return 'Session';
+    }
     if (selectedSession.runtime === 'claude-code') return 'Claude Code';
     if (selectedSession.runtime === 'codex') return 'Codex';
     if (selectedSession.status === 'running') return 'Live';
     return 'Session';
-  }, [selectedSession]);
+  }, [selectedKey, selectedSession]);
 
   const isMainOpenClaw = selectedSession?.runtime === 'openclaw' && selectedSession?.sessionKey === 'agent:main:main';
   const connectionDotColor = isMainOpenClaw
@@ -3389,7 +3464,7 @@ export function AgentPanelChat({
   // ── Fetch sessions ──
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch('/api/mobile/inbox');
+      const res = await fetch(appendOpenClawBetaQuery('/api/mobile/inbox', openClawBetaEnabled));
       if (!res.ok) return;
       const data = (await res.json()) as MobileInboxSnapshot;
       setSnapshot(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
@@ -3400,7 +3475,7 @@ export function AgentPanelChat({
         setSelectedKey(primary.sessionKey);
       }
     } catch { /* silent */ }
-  }, [selectedKey]);
+  }, [openClawBetaEnabled, selectedKey]);
 
   // ── Fetch transcript ──
   const fetchTranscript = useCallback(async (key: string) => {
@@ -3975,9 +4050,9 @@ export function AgentPanelChat({
     finally { setEnhancing(false); }
   }, [draft, enhancing]);
 
-  // ── Select session by id (for squad picker) ──
-  const handleSessionFocus = useCallback((sessionId: string) => {
-    const session = sessions.find(s => s.id === sessionId);
+  // ── Select session by session key (for session picker) ──
+  const handleSessionFocus = useCallback((sessionKey: string) => {
+    const session = sessions.find(s => s.sessionKey === sessionKey);
     if (session) {
       setSelectedKey(session.sessionKey);
     }
@@ -4108,6 +4183,8 @@ export function AgentPanelChat({
   const canSendToSelected = Boolean(selectedSession?.runtimeSurface?.capabilities.sendInput);
   const canInterruptSelected = Boolean(selectedSession?.runtimeSurface?.capabilities.interrupt && selectedSession?.status === 'running');
   const chatSendDisabled = !selectedKey || sending || !draft.trim() || !canSendToSelected;
+  const headerOverlayHeight = 86;
+  const headerScrollbarGutter = 12;
 
   return (
     <div
@@ -4172,23 +4249,36 @@ export function AgentPanelChat({
         }}
       />
 
-      <DesktopChatHeader
-        pickerRef={pickerRef}
-        pickerOpen={pickerOpen}
-        setPickerOpen={setPickerOpen}
-        projectGroups={projectGroups}
-        selectedSession={selectedSession}
-        activeTitle={activeTitle}
-        headerLabel={headerLabel}
-        activeSubtitle={activeSubtitle}
-        connectionDotColor={connectionDotColor}
-        handleSessionFocus={handleSessionFocus}
-        expandedGroup={expandedGroup}
-        setExpandedGroup={setExpandedGroup}
-        diffStats={diffStats}
-        onOpenDiff={onOpenDiff}
-        setDiffOpen={setDiffOpen}
-      />
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: headerScrollbarGutter,
+          zIndex: 20,
+          pointerEvents: 'none',
+        }}
+      >
+        <div style={{ pointerEvents: 'auto' }}>
+          <DesktopChatHeader
+            pickerRef={pickerRef}
+            pickerOpen={pickerOpen}
+            setPickerOpen={setPickerOpen}
+            projectGroups={projectGroups}
+            selectedSession={selectedSession}
+            activeTitle={activeTitle}
+            headerLabel={headerLabel}
+            activeSubtitle={activeSubtitle}
+            connectionDotColor={connectionDotColor}
+            handleSessionFocus={handleSessionFocus}
+            expandedGroup={expandedGroup}
+            setExpandedGroup={setExpandedGroup}
+            diffStats={diffStats}
+            onOpenDiff={onOpenDiff}
+            setDiffOpen={setDiffOpen}
+          />
+        </div>
+      </div>
 
       {!wsConnected && (
         <div style={{
@@ -4197,6 +4287,7 @@ export function AgentPanelChat({
           background: 'rgba(245, 158, 11, 0.06)',
           borderBottom: '1px solid rgba(245, 158, 11, 0.12)',
           fontSize: 11, color: '#d97706', fontWeight: 500,
+          marginTop: headerOverlayHeight,
         }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#d97706', animation: 'reviewingBreathe 2s ease-in-out infinite' }} />
           Reconnecting to gateway…
@@ -4225,6 +4316,7 @@ export function AgentPanelChat({
         showScrollPill={showScrollPill}
         scrollToBottom={scrollToBottom}
         getIsNewEntry={getIsNewEntry}
+        topInset={wsConnected ? headerOverlayHeight + 8 : 12}
       />
       {/* ── Resize Handle ── */}
       <div

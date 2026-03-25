@@ -12,6 +12,12 @@ import Image from 'next/image';
 import packageJson from '../../../package.json';
 import { useTheme } from '@/lib/theme/context';
 import { formatModelLabel } from '@/lib/format';
+import {
+  readNavRailHoverExpandEnabled,
+  subscribeNavRailHoverExpandEnabled,
+  writeNavRailHoverExpandEnabled,
+} from '@/lib/appearance/nav-rail';
+import { readOpenClawBetaEnabled, writeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 
 // ── Types ──
 
@@ -1117,6 +1123,7 @@ function GitHubTab({
 function OpenClawConnectionCard() {
   const [status, setStatus] = useState<OpenClawGatewayStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [enabled, setEnabled] = useState(() => readOpenClawBetaEnabled());
 
   useEffect(() => {
     let active = true;
@@ -1136,7 +1143,7 @@ function OpenClawConnectionCard() {
   const connected = status?.connected ?? false;
   const gatewayUrl = status?.gatewayUrl || '127.0.0.1:18789';
   const modeLabel = status?.mode === 'tailscale' ? 'Tailscale' : 'Local';
-  const statusLabel = connected ? 'Connected' : 'Disconnected';
+  const statusLabel = !enabled ? 'Beta Off' : connected ? 'Connected' : 'Disconnected';
 
   return (
     <div style={{
@@ -1164,15 +1171,28 @@ function OpenClawConnectionCard() {
         </div>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)' }}>OpenClaw Gateway</span>
+            <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--t-text)' }}>OpenClaw Connector</span>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '3px 8px',
+              borderRadius: 999,
+              background: 'rgba(245, 158, 11, 0.12)',
+              color: '#b45309',
+              fontSize: 11,
+              fontWeight: 700,
+            }}>
+              Beta
+            </span>
             <span style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: 6,
               padding: '3px 8px',
               borderRadius: 999,
-              background: connected ? 'rgba(34, 197, 94, 0.08)' : 'rgba(239, 68, 68, 0.08)',
-              color: connected ? '#166534' : '#b91c1c',
+              background: !enabled ? 'rgba(148, 163, 184, 0.14)' : connected ? 'rgba(34, 197, 94, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+              color: !enabled ? '#475569' : connected ? '#166534' : '#b91c1c',
               fontSize: 11,
               fontWeight: 700,
             }}>
@@ -1180,8 +1200,8 @@ function OpenClawConnectionCard() {
                 width: 8,
                 height: 8,
                 borderRadius: '50%',
-                background: connected ? '#22c55e' : '#ef4444',
-                boxShadow: connected ? '0 0 10px rgba(34, 197, 94, 0.35)' : 'none',
+                background: !enabled ? '#94a3b8' : connected ? '#22c55e' : '#ef4444',
+                boxShadow: enabled && connected ? '0 0 10px rgba(34, 197, 94, 0.35)' : 'none',
               }} />
               {statusLabel}
             </span>
@@ -1189,15 +1209,53 @@ function OpenClawConnectionCard() {
           <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 4, lineHeight: 1.45 }}>
             {loading
               ? 'Checking gateway connection…'
-              : connected
-                ? `Version ${normalizeVersion(status?.version, 'unknown')} · ${modeLabel} mode`
-                : 'Gateway not reachable. Run `openclaw gateway start`.'}
+              : !enabled
+                ? 'Optional beta connector for personal OpenClaw sessions. Turn it on only if you want those mirrored into the IDE.'
+                : connected
+                  ? `Version ${normalizeVersion(status?.version, 'unknown')} · ${modeLabel} mode`
+                  : 'Gateway not reachable. Run `openclaw gateway start`.'}
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => {
+            const next = !enabled;
+            setEnabled(next);
+            writeOpenClawBetaEnabled(next);
+          }}
+          style={{
+            minWidth: 122,
+            padding: '8px 12px',
+            borderRadius: 10,
+            border: enabled ? '1px solid rgba(245, 158, 11, 0.18)' : '1px solid var(--t-panel-border)',
+            background: enabled ? 'rgba(245, 158, 11, 0.08)' : 'var(--t-panel)',
+            color: enabled ? '#b45309' : 'var(--t-text-secondary)',
+            fontSize: 11,
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+        >
+          {enabled ? 'Disable Beta' : 'Enable Beta'}
+        </button>
       </div>
 
       {loading ? (
         <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Loading OpenClaw gateway details…</div>
+      ) : !enabled ? (
+        <div style={{
+          padding: 12,
+          borderRadius: 10,
+          background: 'rgba(148, 163, 184, 0.08)',
+          border: '1px solid rgba(148, 163, 184, 0.18)',
+          color: 'var(--t-text-secondary)',
+          fontSize: 12,
+          lineHeight: 1.5,
+        }}>
+          OpenClaw is hidden from runtime inventory, session pickers, and agent surfaces while this beta connector is off.
+          <div style={{ marginTop: 8, color: 'var(--t-text-muted)' }}>
+            Gateway status: {connected ? `reachable at ${gatewayUrl}` : `not connected (${gatewayUrl})`}
+          </div>
+        </div>
       ) : connected ? (
         <div style={{
           display: 'grid',
@@ -2191,7 +2249,28 @@ function APIKeysTab() {
     setLoading(false);
   }, []);
 
-  useEffect(() => { void loadKeys(); }, [loadKeys]);
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      try {
+        const res = await fetch('/api/v2/keys');
+        if (!active) return;
+        if (res.ok) {
+          const data = await res.json();
+          if (active) setProviders(data.providers);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const handleSave = useCallback(async (providerId: string) => {
     if (!keyInput.trim()) return;
@@ -2211,7 +2290,7 @@ function APIKeysTab() {
       } else {
         setFeedback({ provider: providerId, type: 'error', message: data.error || 'Failed to save' });
       }
-    } catch (err) {
+    } catch {
       setFeedback({ provider: providerId, type: 'error', message: 'Network error' });
     }
     setSaving(false);
@@ -3696,10 +3775,18 @@ function AppearanceTab() {
     if (typeof window === 'undefined') return 'smart';
     return (localStorage.getItem('cortex-ide-fleet-mode') as 'smart' | 'all') ?? 'smart';
   });
+  const [navRailHoverExpand, setNavRailHoverExpand] = useState(() => readNavRailHoverExpandEnabled());
+
+  useEffect(() => subscribeNavRailHoverExpandEnabled(setNavRailHoverExpand), []);
 
   const handleFleetModeChange = (mode: 'smart' | 'all') => {
     setFleetMode(mode);
     localStorage.setItem('cortex-ide-fleet-mode', mode);
+  };
+
+  const handleNavRailHoverExpandChange = (enabled: boolean) => {
+    setNavRailHoverExpand(enabled);
+    writeNavRailHoverExpandEnabled(enabled);
   };
 
   return (
@@ -3736,6 +3823,103 @@ function AppearanceTab() {
             />
           ))}
         </div>
+      </div>
+
+      <div style={{
+        background: 'var(--t-panel)',
+        borderRadius: 14,
+        padding: 24,
+        border: '1px solid var(--t-panel-border)',
+        boxShadow: 'var(--t-panel-shadow)',
+      }}>
+        <div style={{ marginBottom: 16 }}>
+          <h3 style={{ fontSize: 17, fontWeight: 700, color: 'var(--t-text)', margin: 0 }}>
+            Motion
+          </h3>
+          <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: '4px 0 0' }}>
+            Reduce movement in the shell without changing the underlying layout or actions.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          role="switch"
+          aria-checked={navRailHoverExpand}
+          onClick={() => handleNavRailHoverExpandChange(!navRailHoverExpand)}
+          style={{
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 16,
+            padding: '14px 16px',
+            borderRadius: 12,
+            border: navRailHoverExpand
+              ? '1.5px solid rgba(37, 99, 235, 0.22)'
+              : '1px solid var(--t-panel-border)',
+            background: navRailHoverExpand
+              ? 'rgba(37, 99, 235, 0.045)'
+              : 'rgba(248, 250, 252, 0.78)',
+            cursor: 'pointer',
+            textAlign: 'left',
+            transition: 'border-color 140ms ease, background 140ms ease, box-shadow 140ms ease',
+            boxShadow: navRailHoverExpand
+              ? '0 8px 24px rgba(37, 99, 235, 0.08)'
+              : 'none',
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)' }}>
+                Expand nav rail on hover
+              </span>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '3px 8px',
+                borderRadius: 999,
+                background: navRailHoverExpand ? 'rgba(37, 99, 235, 0.1)' : 'rgba(148, 163, 184, 0.14)',
+                color: navRailHoverExpand ? '#2563eb' : '#64748b',
+                fontSize: 11,
+                fontWeight: 700,
+              }}>
+                <span style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  background: navRailHoverExpand ? '#2563eb' : '#94a3b8',
+                }} />
+                {navRailHoverExpand ? 'On' : 'Off'}
+              </span>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 5, lineHeight: 1.45 }}>
+              When off, the left rail stays compact at all times and users open sections with clicks only.
+            </div>
+          </div>
+
+          <div style={{
+            width: 42,
+            height: 24,
+            borderRadius: 999,
+            background: navRailHoverExpand ? '#2563eb' : 'rgba(148, 163, 184, 0.34)',
+            position: 'relative',
+            flexShrink: 0,
+            boxShadow: navRailHoverExpand ? 'inset 0 0 0 1px rgba(37, 99, 235, 0.18)' : 'inset 0 0 0 1px rgba(148, 163, 184, 0.18)',
+            transition: 'background 140ms ease',
+          }}>
+            <span style={{
+              position: 'absolute',
+              top: 3,
+              left: navRailHoverExpand ? 21 : 3,
+              width: 18,
+              height: 18,
+              borderRadius: '50%',
+              background: '#fff',
+              boxShadow: '0 2px 8px rgba(15, 23, 42, 0.18)',
+              transition: 'left 140ms ease',
+            }} />
+          </div>
+        </button>
       </div>
 
       {/* Section: Fleet Display */}
@@ -4034,7 +4218,6 @@ export function SettingsPage() {
       <div style={{ flex: 1, minWidth: 0 }}>
         {activeTab === 'connectors' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            <OpenClawConnectionCard />
             <GitHubTab
               accounts={accounts}
               repos={repos}
@@ -4053,6 +4236,7 @@ export function SettingsPage() {
               onPollDeviceFlow={(flowId) => { void pollDeviceFlow(flowId); }}
               onCancelDeviceFlow={(flowId) => { void cancelDeviceFlow(flowId); }}
             />
+            <OpenClawConnectionCard />
           </div>
         )}
         {activeTab === 'api-keys' && (

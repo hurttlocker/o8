@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 import os from 'node:os';
 /* eslint-disable @typescript-eslint/no-explicit-any -- runtime JSONL payloads vary by provider and are normalized defensively */
@@ -215,8 +215,9 @@ function accumulateSegments(
   return segments;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const includeOpenClaw = req.nextUrl.searchParams.get('includeOpenClaw') !== '0';
     const now = new Date();
     // Use a rolling 24h window anchored to 6 AM. Before 6 AM, show yesterday's activity.
     const todayStart = new Date(now);
@@ -230,28 +231,30 @@ export async function GET() {
     const allSegments: TimelineSegment[] = [];
 
     // ── 1. OpenClaw sessions ──
-    const openclawFiles = execQuiet(`ls -t ${home}/.openclaw/agents/*/sessions/*.jsonl 2>/dev/null | head -15`);
-    for (const file of openclawFiles.split('\n').filter(Boolean)) {
-      const agentMatch = file.match(/agents\/([^/]+)\//);
-      const agentKey = agentMatch ? agentMatch[1] : 'unknown';
-      const agentDisplayNames: Record<string, string> = { main: 'Main', ace: 'Agent 2', hawk: 'Agent 3' };
-      const agent = agentDisplayNames[agentKey] || agentKey;
-      const lines = execQuiet(`tail -500 "${file}" 2>/dev/null`, { timeout: 10000 });
-      if (!lines) continue;
+    if (includeOpenClaw) {
+      const openclawFiles = execQuiet(`ls -t ${home}/.openclaw/agents/*/sessions/*.jsonl 2>/dev/null | head -15`);
+      for (const file of openclawFiles.split('\n').filter(Boolean)) {
+        const agentMatch = file.match(/agents\/([^/]+)\//);
+        const agentKey = agentMatch ? agentMatch[1] : 'unknown';
+        const agentDisplayNames: Record<string, string> = { main: 'Main', ace: 'Agent 2', hawk: 'Agent 3' };
+        const agent = agentDisplayNames[agentKey] || agentKey;
+        const lines = execQuiet(`tail -500 "${file}" 2>/dev/null`, { timeout: 10000 });
+        if (!lines) continue;
 
-      const openclawClassifier = (entry: any): SegmentKind => {
-        const inner = entry.message || {};
-        const role = inner.role || '';
-        const type = entry.type || '';
-        const content = typeof inner.content === 'string'
-          ? inner.content
-          : Array.isArray(inner.content)
-            ? inner.content.map((c: any) => (typeof c === 'string' ? c : c?.text || '')).join(' ')
-            : '';
-        return classifyMessage(role, content, type);
-      };
+        const openclawClassifier = (entry: any): SegmentKind => {
+          const inner = entry.message || {};
+          const role = inner.role || '';
+          const type = entry.type || '';
+          const content = typeof inner.content === 'string'
+            ? inner.content
+            : Array.isArray(inner.content)
+              ? inner.content.map((c: any) => (typeof c === 'string' ? c : c?.text || '')).join(' ')
+              : '';
+          return classifyMessage(role, content, type);
+        };
 
-      allSegments.push(...accumulateSegments(lines, todayStart, agent, openclawClassifier, (e) => e.timestamp));
+        allSegments.push(...accumulateSegments(lines, todayStart, agent, openclawClassifier, (e) => e.timestamp));
+      }
     }
 
     // ── 2. Claude Code sessions ──

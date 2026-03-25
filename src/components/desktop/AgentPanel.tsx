@@ -16,6 +16,7 @@ import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
 import { createPortal } from 'react-dom';
 import { BlueGlassActionButton, BlueGlassHoverCard, BlueGlassMetricPill, BlueGlassSparklineLane } from './BlueGlassHoverCard';
+import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 import {
   AlertCircle,
   BookOpen,
@@ -723,6 +724,41 @@ function WorkspaceHeroAction({
   );
 }
 
+function WorkspaceHeroOptionsButton({
+  onClick,
+}: {
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      aria-label="Launch options"
+      title="Launch options"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: 34,
+        minHeight: 34,
+        padding: 0,
+        borderRadius: 10,
+        border: '1px solid rgba(37, 99, 235, 0.16)',
+        background: 'rgba(255,255,255,0.76)',
+        color: '#2563eb',
+        fontSize: 11,
+        fontWeight: 700,
+        cursor: onClick ? 'pointer' : 'not-allowed',
+        opacity: onClick ? 1 : 0.45,
+        fontFamily: '-apple-system, system-ui, sans-serif',
+      }}
+    >
+      <ChevronDown size={14} strokeWidth={2.2} />
+    </button>
+  );
+}
+
 function WorkspaceHeroPill({
   label,
   tone = 'neutral',
@@ -765,6 +801,7 @@ function WorkspaceHero({
   changedFiles,
   activeRuns,
   onLaunch,
+  onLaunchOptions,
   onOpenGitLog,
   onOpenCI,
 }: {
@@ -776,6 +813,7 @@ function WorkspaceHero({
   changedFiles: number;
   activeRuns: number;
   onLaunch?: () => void;
+  onLaunchOptions?: () => void;
   onOpenGitLog?: () => void;
   onOpenCI?: () => void;
 }) {
@@ -849,12 +887,15 @@ function WorkspaceHero({
           </div>
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
-            <WorkspaceHeroAction
-              label="Launch Agent"
-              icon={<PlayCircle size={13} strokeWidth={2} />}
-              onClick={onLaunch}
-              primary
-            />
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <WorkspaceHeroAction
+                label="Launch Agent"
+                icon={<PlayCircle size={13} strokeWidth={2} />}
+                onClick={onLaunch}
+                primary
+              />
+              {onLaunchOptions ? <WorkspaceHeroOptionsButton onClick={onLaunchOptions} /> : null}
+            </div>
             <WorkspaceHeroAction
               label="Git Log"
               icon={<GitCommit size={13} strokeWidth={2} />}
@@ -3876,6 +3917,7 @@ export const AgentPanel = memo(function AgentPanel({
   selectedRepoName,
   selectedRepoBranch,
   selectedRepoLocalPath,
+  onLaunchWorkspaceAgent,
   onLaunchWorkspaceTask,
   onSelectSession,
   onSelectIssue,
@@ -3896,6 +3938,15 @@ export const AgentPanel = memo(function AgentPanel({
   selectedRepoName?: string | null;
   selectedRepoBranch?: string | null;
   selectedRepoLocalPath?: string | null;
+  onLaunchWorkspaceAgent?: (request: {
+    repoPath: string;
+    runtime?: 'codex' | 'claude-code';
+    modelId?: string;
+    initialText?: string;
+    autoSend?: boolean;
+    createNew?: boolean;
+    label?: string;
+  }) => Promise<void>;
   onLaunchWorkspaceTask?: (request: RepoTaskLaunchRequest) => Promise<void>;
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
@@ -3936,8 +3987,11 @@ export const AgentPanel = memo(function AgentPanel({
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
   const [launchIntentNonce, setLaunchIntentNonce] = useState(0);
+  const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
   const hasSelectedRepo = Boolean(selectedRepoLocalPath);
   const scopedRepo = hasSelectedRepo ? (selectedRepo ?? null) : activeRepo;
+
+  useEffect(() => subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled), []);
 
   const launchRepoTask = useCallback(async (request: RepoTaskLaunchRequest) => {
     if (onLaunchWorkspaceTask) {
@@ -4055,8 +4109,11 @@ export const AgentPanel = memo(function AgentPanel({
       try {
         // Fetch inventory, workspace enrichments, and registered repos in parallel
         const [invRes, wsRes, repoRes] = await Promise.all([
-          fetch(`/api/runtime/inventory?fleetMode=${typeof window !== 'undefined' ? localStorage.getItem('cortex-ide-fleet-mode') ?? 'smart' : 'smart'}`).catch(() => null),
-          fetch('/api/panel/workspaces').catch(() => null),
+          fetch(appendOpenClawBetaQuery(
+            `/api/runtime/inventory?fleetMode=${typeof window !== 'undefined' ? localStorage.getItem('cortex-ide-fleet-mode') ?? 'smart' : 'smart'}`,
+            openClawBetaEnabled,
+          )).catch(() => null),
+          fetch(appendOpenClawBetaQuery('/api/panel/workspaces', openClawBetaEnabled)).catch(() => null),
           fetch('/api/panel/repos').catch(() => null),
         ]);
 
@@ -4144,7 +4201,7 @@ export const AgentPanel = memo(function AgentPanel({
     const ms = wsConnected ? 60_000 : 30_000;
     const id = setInterval(fetchAll, ms);
     return () => { clearInterval(id); if (debounceTimer) clearTimeout(debounceTimer); };
-  }, [wsConnected]);
+  }, [openClawBetaEnabled, wsConnected]);
 
   // Fetch recent commits
   useEffect(() => {
@@ -4331,7 +4388,23 @@ export const AgentPanel = memo(function AgentPanel({
           workspaceLabel={heroWorkspaceLabel}
           changedFiles={changedFiles.size}
           activeRuns={activeRunsCount}
-          onLaunch={currentLaunchRepoPath ? () => setLaunchIntentNonce((current) => current + 1) : undefined}
+          onLaunch={currentLaunchRepoPath
+            ? () => {
+                if (!onLaunchWorkspaceAgent) return;
+                void onLaunchWorkspaceAgent({
+                  repoPath: currentLaunchRepoPath,
+                  createNew: true,
+                }).catch((error) => {
+                  window.alert(error instanceof Error ? error.message : 'Unable to launch workspace agent.');
+                });
+              }
+            : undefined}
+          onLaunchOptions={currentLaunchRepoPath
+            ? () => {
+                setReposOpen(true);
+                setLaunchIntentNonce((current) => current + 1);
+              }
+            : undefined}
           onOpenGitLog={currentScopePath ? () => onOpenGitLog?.(currentScopePath) : undefined}
           onOpenCI={effectiveScopedRepo ? () => onOpenCI?.(effectiveScopedRepo) : undefined}
         />
@@ -4548,6 +4621,7 @@ export const AgentPanel = memo(function AgentPanel({
             onLaunchComplete={() => { fetchNowRef.current(); }}
             onSelectSession={onSelectSession}
             onSelectPR={onSelectPR}
+            onLaunchWorkspaceAgent={onLaunchWorkspaceAgent}
             activeRepoLocalPath={currentLaunchRepoPath}
             sectionOpen={reposOpen}
             onSectionOpenChange={setReposOpen}

@@ -204,7 +204,7 @@ function resolveTmuxBinary() {
     return execSync('command -v tmux', {
       encoding: 'utf-8',
       timeout: 3000,
-      env: sanitizePtyEnv(),
+      env: sanitizePtyEnv() as NodeJS.ProcessEnv,
     }).trim() || 'tmux';
   } catch {
     return 'tmux';

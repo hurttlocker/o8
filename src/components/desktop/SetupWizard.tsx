@@ -89,7 +89,7 @@ function buildToolList(detection: DetectionResult): ToolDisplayInfo[] {
   return [
     {
       id: 'openclaw',
-      name: 'OpenClaw Gateway',
+      name: 'OpenClaw Connector (Beta)',
       detected: tools.openclaw.detected,
       version: tools.openclaw.version,
       detail: tools.openclaw.agentCount ? `${tools.openclaw.agentCount} agents` : undefined,
@@ -387,8 +387,8 @@ function getMissingActions(detection: DetectionResult): MissingToolAction[] {
   if (!tools.openclaw.detected) {
     actions.push({
       id: 'openclaw',
-      name: 'OpenClaw Gateway',
-      description: 'The agent orchestration gateway. Manages and monitors all your AI agents.',
+      name: 'OpenClaw Connector (Beta)',
+      description: 'Optional beta connector for mirroring personal OpenClaw sessions into the IDE.',
       command: 'npm i -g openclaw && openclaw gateway start',
       icon: <Layers size={16} strokeWidth={2} />,
     });
@@ -1003,8 +1003,8 @@ export const SetupWizard = memo(function SetupWizard({
             <MissingToolCard
               action={{
                 id: 'openclaw',
-                name: 'OpenClaw Gateway',
-                description: 'The orchestration layer that manages and monitors all your agents.',
+                name: 'OpenClaw Connector (Beta)',
+                description: 'Optional beta connector for mirroring personal OpenClaw sessions into the IDE.',
                 command: 'npm i -g openclaw && openclaw gateway start',
                 icon: <Layers size={16} strokeWidth={2} />,
               }}
