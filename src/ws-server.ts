@@ -101,7 +101,7 @@ interface GatewayConfig {
 }
 
 function loadGatewayConfig(): GatewayConfig {
-  const home = process.env.HOME ?? require('os').homedir();
+  const home = process.env.HOME ?? homedir();
   const configPath = join(home, '.openclaw', 'openclaw.json');
   try {
     const raw = readFileSync(configPath, 'utf-8');
@@ -157,6 +157,96 @@ interface TerminalAttachment {
 
 const terminalAttachments = new Map<string, TerminalAttachment>();
 const TERMINAL_BATCH_MS = 16; // batch PTY output every 16ms (60fps)
+
+function sanitizePtyEnv() {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === 'string') {
+      env[key] = value;
+    }
+  }
+  env.TERM = 'xterm-256color';
+  env.LANG = env.LANG || 'en_US.UTF-8';
+  env.LC_ALL = env.LC_ALL || 'en_US.UTF-8';
+  env.PATH = env.PATH || '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin';
+  return env;
+}
+
+function resolvePreferredShell() {
+  const candidates = [
+    process.env.SHELL,
+    '/bin/zsh',
+    '/bin/bash',
+    '/bin/sh',
+  ].filter((value): value is string => Boolean(value));
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+
+  return '/bin/sh';
+}
+
+function resolveTmuxBinary() {
+  const candidates = [
+    process.env.TMUX_BIN,
+    '/opt/homebrew/bin/tmux',
+    '/usr/local/bin/tmux',
+    '/usr/bin/tmux',
+    '/bin/tmux',
+  ].filter((value): value is string => Boolean(value));
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+
+  try {
+    return execSync('command -v tmux', {
+      encoding: 'utf-8',
+      timeout: 3000,
+      env: sanitizePtyEnv(),
+    }).trim() || 'tmux';
+  } catch {
+    return 'tmux';
+  }
+}
+
+function spawnTmuxAttachPty(
+  sessionName: string,
+  cols: number,
+  rows: number,
+) {
+  if (!pty) {
+    throw new Error('node-pty not available');
+  }
+
+  const tmuxBin = resolveTmuxBinary();
+  const env = sanitizePtyEnv();
+  const cwd = process.env.HOME ?? homedir() ?? '/tmp';
+
+  try {
+    console.log(`[ws-server] Spawning terminal directly: ${tmuxBin} attach-session -t ${sessionName}`);
+    return pty.spawn(tmuxBin, ['attach-session', '-t', sessionName], {
+      name: 'xterm-256color',
+      cols,
+      rows,
+      cwd,
+      env,
+    });
+  } catch (directError) {
+    const shell = resolvePreferredShell();
+    const shellCmd = `exec "${tmuxBin}" attach-session -t ${sessionName}`;
+    console.warn(`[ws-server] Direct tmux PTY spawn failed, falling back to shell wrapper: ${directError instanceof Error ? directError.message : String(directError)}`);
+    console.log(`[ws-server] Spawning terminal via shell: ${shellCmd}`);
+    return pty.spawn(shell, ['-l', '-c', shellCmd], {
+      name: 'xterm-256color',
+      cols,
+      rows,
+      cwd,
+      env,
+    });
+  }
+}
 
 // ── Gateway connection (singleton) ──
 
@@ -1382,17 +1472,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
 
   // Spawn a new PTY that attaches to the tmux session
   try {
-    // Spawn via login shell — node-pty's posix_spawnp can fail to find tmux directly
-    const shellCmd = `tmux attach-session -t ${sessionName}`;
-    console.log(`[ws-server] Spawning terminal: ${shellCmd}`);
-
-    const ptyProcess = pty.spawn('/bin/bash', ['-l', '-c', shellCmd], {
-      name: 'xterm-256color',
-      cols,
-      rows,
-      cwd: process.env.HOME ?? '/tmp',
-      env: { ...process.env, TERM: 'xterm-256color' } as Record<string, string>,
-    });
+    const ptyProcess = spawnTmuxAttachPty(sessionName, cols, rows);
 
     const now = Date.now();
     attachment = {
@@ -1922,7 +2002,7 @@ const reviewTargetHashes = new Map<string, string>();
 const REVIEW_POLL_INTERVAL_MS = 10_000;
 
 function shortHome(filePath: string) {
-  const home = process.env.HOME ?? require('os').homedir();
+  const home = process.env.HOME ?? homedir();
   return filePath.startsWith(`${home}/`) ? filePath.replace(`${home}/`, '~/') : filePath;
 }
 
