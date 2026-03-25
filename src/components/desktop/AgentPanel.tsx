@@ -51,6 +51,7 @@ import { WorktreeBadge } from '@/components/mobile/WorktreeBadge';
 import { formatModelLabel } from '@/lib/format';
 import type { RuntimeSurfaceSummary } from '@/lib/fleet/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
+import type { RepoReadiness } from '@/lib/repos/types';
 
 // ── Types ──
 
@@ -92,6 +93,7 @@ interface AgentDetail {
   lifecycleState?: 'active' | 'completed' | 'failed' | 'killed' | 'stalled';
   exitCode?: number;
   lifecycleTs?: number;
+  repoReadiness?: RepoReadiness;
 }
 
 interface EventEntry {
@@ -165,6 +167,14 @@ interface CIHoverDetail {
   failingJobs: Array<{ name: string; failingStep?: string | null }>;
   summaryLine: string | null;
 }
+
+const THEME_ACCENT = 'var(--t-accent, #2563eb)';
+const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
+const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(37, 99, 235, 0.14))';
+const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
+const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
+const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
+const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
 
 function mergeRiskLabel(detail: PRHoverDetail | null): { label: string; color: string } {
   if (!detail) return { label: 'warming', color: '#64748b' };
@@ -511,12 +521,12 @@ function SidebarSection({
           gap: 10,
           padding: '10px 12px',
           borderRadius: 16,
-          border: open ? `1px solid ${tone}22` : '1px solid rgba(148, 163, 184, 0.12)',
-          background: open ? `${tone}0d` : 'rgba(255,255,255,0.56)',
+          border: open ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
+          background: open ? THEME_ACCENT_SOFT : THEME_BG_CARD,
           color: 'var(--t-text)',
           cursor: 'pointer',
           fontFamily: '-apple-system, system-ui, sans-serif',
-          boxShadow: open ? '0 10px 24px rgba(15, 23, 42, 0.05)' : '0 6px 18px rgba(15, 23, 42, 0.035)',
+          boxShadow: open ? `0 10px 24px ${THEME_ACCENT_RING}` : '0 8px 18px rgba(15, 23, 42, 0.06)',
           backdropFilter: 'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
         }}
@@ -529,8 +539,8 @@ function SidebarSection({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: `${tone}14`,
-            color: tone,
+            background: open ? THEME_ACCENT_SOFT_STRONG : 'var(--t-divider-subtle)',
+            color: open ? THEME_ACCENT : tone,
             flexShrink: 0,
           }}
         >
@@ -550,7 +560,7 @@ function SidebarSection({
                   paddingLeft: 7,
                   paddingRight: 7,
                   borderRadius: 999,
-                  background: 'rgba(15, 23, 42, 0.06)',
+                  background: 'var(--t-divider-subtle)',
                   color: 'var(--t-text-secondary)',
                   fontSize: 11,
                   fontWeight: 700,
@@ -612,7 +622,7 @@ function ActivityDock({
         paddingRight: 14,
         paddingBottom: 14,
         paddingLeft: 14,
-        background: 'linear-gradient(180deg, rgba(248,250,252,0), rgba(248,250,252,0.96) 22%)',
+        background: 'linear-gradient(180deg, rgba(248,250,252,0), var(--t-bg) 22%)',
       }}
     >
       <div
@@ -620,11 +630,11 @@ function ActivityDock({
           borderRadius: 22,
           border: open ? '1px solid rgba(249, 115, 22, 0.18)' : '1px solid rgba(148, 163, 184, 0.12)',
           background: open
-            ? 'linear-gradient(180deg, rgba(255,250,245,0.98), rgba(255,255,255,0.95))'
-            : 'rgba(255,255,255,0.82)',
+            ? 'linear-gradient(180deg, rgba(249, 115, 22, 0.08), var(--t-panel-translucent))'
+            : 'var(--t-panel-translucent)',
           boxShadow: open
-            ? '0 -18px 34px rgba(15, 23, 42, 0.08), 0 10px 20px rgba(249, 115, 22, 0.05)'
-            : '0 -8px 18px rgba(15, 23, 42, 0.04)',
+            ? '0 -18px 34px rgba(15, 23, 42, 0.14), 0 10px 20px rgba(249, 115, 22, 0.06)'
+            : '0 -8px 18px rgba(15, 23, 42, 0.08)',
           backdropFilter: 'blur(22px)',
           WebkitBackdropFilter: 'blur(22px)',
           overflow: 'hidden',
@@ -723,8 +733,7 @@ function ActivityDock({
                 overflowY: 'auto',
                 borderRadius: 18,
                 border: '1px solid rgba(249, 115, 22, 0.12)',
-                background: 'rgba(255,255,255,0.72)',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.8)',
+                background: 'var(--t-panel-translucent)',
                 scrollbarWidth: 'none',
               } as React.CSSProperties}
               className="hide-scrollbar"
@@ -766,15 +775,15 @@ function WorkspaceHeroAction({
           ? compact ? '7px 10px' : '8px 12px'
           : compact ? '6px 9px' : '7px 11px',
         borderRadius: compact ? 8 : 10,
-        border: primary ? '1px solid rgba(37, 99, 235, 0.16)' : '1px solid rgba(148, 163, 184, 0.14)',
-        background: primary ? 'linear-gradient(180deg, rgba(37,99,235,0.96), rgba(29,78,216,0.92))' : 'rgba(255,255,255,0.7)',
+        border: primary ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
+        background: primary ? THEME_ACCENT : THEME_BG_CARD,
         color: primary ? '#fff' : 'var(--t-text-secondary)',
         fontSize: compact ? 9 : 11,
         fontWeight: 700,
         cursor: onClick ? 'pointer' : 'not-allowed',
         opacity: onClick ? 1 : 0.45,
         fontFamily: '-apple-system, system-ui, sans-serif',
-        boxShadow: primary ? (compact ? '0 8px 16px rgba(37, 99, 235, 0.15)' : '0 12px 24px rgba(37, 99, 235, 0.18)') : 'none',
+        boxShadow: primary ? (compact ? `0 8px 16px ${THEME_ACCENT_RING}` : `0 12px 24px ${THEME_ACCENT_RING}`) : 'none',
         whiteSpace: 'nowrap',
       }}
     >
@@ -806,9 +815,9 @@ function WorkspaceHeroOptionsButton({
         minHeight: compact ? 29 : 32,
         padding: 0,
         borderRadius: compact ? 8 : 10,
-        border: '1px solid rgba(37, 99, 235, 0.16)',
-        background: 'rgba(255,255,255,0.76)',
-        color: '#2563eb',
+        border: `1px solid ${THEME_ACCENT_BORDER}`,
+        background: THEME_BG_CARD,
+        color: THEME_ACCENT,
         fontSize: 11,
         fontWeight: 700,
         cursor: onClick ? 'pointer' : 'not-allowed',
@@ -828,15 +837,19 @@ function WorkspaceHeroPill({
   fullWidth = false,
 }: {
   label: string;
-  tone?: 'neutral' | 'blue' | 'green';
+  tone?: 'neutral' | 'blue' | 'green' | 'amber' | 'red';
   compact?: boolean;
   fullWidth?: boolean;
 }) {
   const palette = tone === 'blue'
-    ? { background: 'rgba(37, 99, 235, 0.08)', border: 'rgba(37, 99, 235, 0.14)', color: '#2563eb' }
+    ? { background: THEME_ACCENT_SOFT, border: THEME_ACCENT_BORDER, color: THEME_ACCENT }
     : tone === 'green'
-      ? { background: 'rgba(22, 163, 74, 0.08)', border: 'rgba(22, 163, 74, 0.14)', color: '#15803d' }
-      : { background: 'rgba(15, 23, 42, 0.05)', border: 'rgba(148, 163, 184, 0.14)', color: 'var(--t-text-secondary)' };
+      ? { background: 'rgba(22, 163, 74, 0.12)', border: 'rgba(34, 197, 94, 0.18)', color: '#15803d' }
+      : tone === 'amber'
+        ? { background: 'rgba(245, 158, 11, 0.12)', border: 'rgba(245, 158, 11, 0.2)', color: '#b45309' }
+        : tone === 'red'
+          ? { background: 'rgba(239, 68, 68, 0.12)', border: 'rgba(239, 68, 68, 0.2)', color: '#b91c1c' }
+      : { background: THEME_BG_CARD, border: 'var(--t-panel-border)', color: 'var(--t-text-secondary)' };
 
   return (
     <span
@@ -868,6 +881,7 @@ function WorkspaceHero({
   subtitle,
   repoSlug,
   branch,
+  readiness,
   workspaceLabel,
   changedFiles,
   activeRuns,
@@ -880,6 +894,7 @@ function WorkspaceHero({
   subtitle: string;
   repoSlug?: string | null;
   branch?: string | null;
+  readiness?: RepoReadiness | null;
   workspaceLabel?: string | null;
   changedFiles: number;
   activeRuns: number;
@@ -918,9 +933,9 @@ function WorkspaceHero({
           position: 'relative',
           overflow: 'hidden',
           borderRadius: 22,
-          border: '1px solid rgba(37, 99, 235, 0.12)',
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(239,246,255,0.94))',
-          boxShadow: '0 24px 40px rgba(37, 99, 235, 0.08)',
+          border: `1px solid ${THEME_ACCENT_BORDER}`,
+          background: 'linear-gradient(180deg, var(--t-panel) 0%, var(--t-panel-translucent) 100%)',
+          boxShadow: 'var(--t-panel-shadow)',
           backdropFilter: 'blur(20px)',
           WebkitBackdropFilter: 'blur(20px)',
         }}
@@ -929,7 +944,7 @@ function WorkspaceHero({
           style={{
             position: 'absolute',
             inset: 0,
-            background: 'radial-gradient(circle at top right, rgba(37,99,235,0.14), transparent 46%)',
+            background: `radial-gradient(circle at top right, ${THEME_ACCENT_RING}, transparent 46%)`,
             pointerEvents: 'none',
           }}
         />
@@ -943,15 +958,15 @@ function WorkspaceHero({
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                background: 'rgba(37, 99, 235, 0.1)',
-                color: '#2563eb',
+                background: THEME_ACCENT_SOFT_STRONG,
+                color: THEME_ACCENT,
                 flexShrink: 0,
               }}
             >
               <FolderOpen size={compact ? 16 : 18} strokeWidth={2.1} />
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: '#2563eb' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: THEME_ACCENT }}>
                 Current Workspace
               </div>
               <div
@@ -966,7 +981,7 @@ function WorkspaceHero({
               >
                 {title}
               </div>
-              <div style={{ marginTop: 4, fontSize: compact ? 10 : 12, lineHeight: compact ? 1.4 : 1.5, color: 'var(--t-text-muted)' }}>
+              <div style={{ marginTop: 4, fontSize: compact ? 10 : 12, lineHeight: compact ? 1.4 : 1.5, color: 'var(--t-text-secondary)' }}>
                 {subtitle}
               </div>
             </div>
@@ -975,12 +990,32 @@ function WorkspaceHero({
           <div style={{ display: 'flex', gap: compact ? 5 : 7, flexWrap: 'wrap', marginTop: compact ? 10 : 13 }}>
             {repoSlug ? <WorkspaceHeroPill label={repoSlug} tone="blue" compact={compact} /> : null}
             {branch ? <WorkspaceHeroPill label={branch} compact={compact} /> : null}
+            {readiness ? (
+              <WorkspaceHeroPill
+                label={readiness.label}
+                tone={readiness.state === 'blocked' ? 'red' : readiness.state === 'needs_setup' ? 'amber' : readiness.state === 'ready' ? 'green' : 'neutral'}
+                compact={compact}
+              />
+            ) : null}
             <WorkspaceHeroPill label={`${changedFiles} changed`} tone={changedFiles > 0 ? 'blue' : 'neutral'} compact={compact} />
             <WorkspaceHeroPill label={`${activeRuns} active`} tone={activeRuns > 0 ? 'green' : 'neutral'} compact={compact} />
           </div>
-          {workspaceLabel ? (
-            <div style={{ marginTop: compact ? 6 : 7 }}>
-              <WorkspaceHeroPill label={workspaceLabel} compact={compact} fullWidth />
+          {(workspaceLabel || readiness?.nextAction) ? (
+            <div style={{ marginTop: compact ? 6 : 7, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {workspaceLabel ? (
+                <WorkspaceHeroPill label={workspaceLabel} compact={compact} fullWidth />
+              ) : null}
+              {readiness?.nextAction ? (
+                <div
+                  style={{
+                    fontSize: compact ? 10 : 11,
+                    lineHeight: 1.45,
+                    color: 'var(--t-text-muted)',
+                  }}
+                >
+                  {readiness.nextAction}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -1113,14 +1148,14 @@ const AgentCard = memo(function AgentCard({
             ? 'alert'
             : null;
   const cardBackground = expanded
-    ? 'linear-gradient(180deg, rgba(255,255,255,0.97), rgba(244,248,255,0.93))'
+    ? 'linear-gradient(180deg, var(--t-panel) 0%, var(--t-panel-translucent) 100%)'
     : group.hasRunning
-      ? 'linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,251,255,0.91))'
-      : 'linear-gradient(180deg, rgba(255,255,255,0.93), rgba(248,250,252,0.90))';
+      ? 'linear-gradient(180deg, var(--t-panel-translucent) 0%, var(--t-bg-card, rgba(148, 163, 184, 0.08)) 100%)'
+      : 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
   const cardBorder = expanded
-    ? '1px solid rgba(37, 99, 235, 0.16)'
-    : '1px solid rgba(148, 163, 184, 0.16)';
-  const iconTint = group.hasRunning ? 'rgba(37, 99, 235, 0.10)' : 'rgba(15, 23, 42, 0.05)';
+    ? `1px solid ${THEME_ACCENT_BORDER}`
+    : '1px solid var(--t-panel-border)';
+  const iconTint = group.hasRunning ? THEME_ACCENT_SOFT : 'var(--t-divider-subtle)';
   const headerPadding = expanded ? '13px 14px 12px' : '10px 11px 9px';
   const iconBoxSize = expanded ? 36 : 30;
   const iconRadius = expanded ? 12 : 10;
@@ -1147,8 +1182,8 @@ const AgentCard = memo(function AgentCard({
       backdropFilter: 'blur(20px)',
       WebkitBackdropFilter: 'blur(20px)',
       boxShadow: expanded
-        ? '0 16px 32px rgba(15, 23, 42, 0.07)'
-        : '0 8px 18px rgba(15, 23, 42, 0.045)',
+        ? 'var(--t-panel-shadow)'
+        : '0 8px 18px rgba(15, 23, 42, 0.08)',
       transition: 'all 200ms ease',
       overflow: 'hidden',
     }}>
@@ -1168,13 +1203,12 @@ const AgentCard = memo(function AgentCard({
           height: iconBoxSize,
           borderRadius: iconRadius,
           background: iconTint,
-          border: '1px solid rgba(148, 163, 184, 0.10)',
+          border: '1px solid var(--t-panel-border)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: group.repo === 'openclaw' ? '#2563eb' : 'var(--t-text-secondary)',
+          color: group.repo === 'openclaw' ? THEME_ACCENT : 'var(--t-text-secondary)',
           flexShrink: 0,
-          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.75)',
         }}>
           {group.repo === 'openclaw' ? (
             <Monitor size={iconSize} strokeWidth={2} />
@@ -1201,11 +1235,11 @@ const AgentCard = memo(function AgentCard({
               <span style={{
                 fontSize: modelBadgeFontSize,
                 fontWeight: 700,
-                color: '#64748b',
+                color: 'var(--t-text-secondary)',
                 padding: modelBadgePadding,
                 borderRadius: 999,
-                background: 'rgba(148, 163, 184, 0.10)',
-                border: '1px solid rgba(148, 163, 184, 0.12)',
+                background: 'var(--t-divider-subtle)',
+                border: '1px solid var(--t-divider)',
                 maxWidth: isCompact ? 104 : 140,
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -1271,8 +1305,9 @@ const AgentCard = memo(function AgentCard({
                   alignItems: 'center',
                   padding: chipPadding,
                   borderRadius: 999,
-                  background: 'rgba(37, 99, 235, 0.08)',
-                  color: '#2563eb',
+                  background: THEME_ACCENT_SOFT,
+                  color: THEME_ACCENT,
+                  border: `1px solid ${THEME_ACCENT_BORDER}`,
                   fontSize: chipFontSize,
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -1288,8 +1323,9 @@ const AgentCard = memo(function AgentCard({
                 maxWidth: 112,
                 padding: chipPadding,
                 borderRadius: 999,
-                background: 'rgba(15, 23, 42, 0.05)',
-                color: '#475569',
+                background: THEME_BG_CARD,
+                border: '1px solid var(--t-panel-border)',
+                color: 'var(--t-text-secondary)',
                 fontSize: chipFontSize,
                 fontWeight: 700,
                 fontFamily: '"SF Mono", ui-monospace, monospace',
@@ -1308,8 +1344,9 @@ const AgentCard = memo(function AgentCard({
                 gap: 4,
                 padding: chipPadding,
                 borderRadius: 999,
-                background: 'rgba(15, 23, 42, 0.04)',
-                color: '#475569',
+                background: THEME_BG_CARD,
+                border: '1px solid var(--t-panel-border)',
+                color: 'var(--t-text-secondary)',
                 fontSize: chipFontSize,
                 fontWeight: 700,
                 fontFamily: '"SF Mono", ui-monospace, monospace',
@@ -1327,9 +1364,9 @@ const AgentCard = memo(function AgentCard({
                   alignItems: 'center',
                   padding: chipPadding,
                   borderRadius: 999,
-                  background: 'rgba(255,255,255,0.72)',
-                  border: '1px solid rgba(148, 163, 184, 0.12)',
-                  color: '#64748b',
+                  background: THEME_BG_CARD,
+                  border: '1px solid var(--t-panel-border)',
+                  color: 'var(--t-text-secondary)',
                   fontSize: chipFontSize,
                   fontWeight: 700,
                   flexShrink: 0,
@@ -1348,8 +1385,9 @@ const AgentCard = memo(function AgentCard({
                   alignItems: 'center',
                   padding: chipPadding,
                   borderRadius: 999,
-                  background: 'rgba(37, 99, 235, 0.08)',
-                  color: '#2563eb',
+                  background: THEME_ACCENT_SOFT,
+                  color: THEME_ACCENT,
+                  border: `1px solid ${THEME_ACCENT_BORDER}`,
                   fontSize: chipFontSize,
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -1365,8 +1403,9 @@ const AgentCard = memo(function AgentCard({
                 maxWidth: 92,
                 padding: chipPadding,
                 borderRadius: 999,
-                background: 'rgba(15, 23, 42, 0.05)',
-                color: '#475569',
+                background: THEME_BG_CARD,
+                border: '1px solid var(--t-panel-border)',
+                color: 'var(--t-text-secondary)',
                 fontSize: chipFontSize,
                 fontWeight: 700,
                 fontFamily: '"SF Mono", ui-monospace, monospace',
@@ -1384,8 +1423,9 @@ const AgentCard = memo(function AgentCard({
                 gap: 3,
                 padding: chipPadding,
                 borderRadius: 999,
-                background: 'rgba(15, 23, 42, 0.04)',
-                color: '#475569',
+                background: THEME_BG_CARD,
+                border: '1px solid var(--t-panel-border)',
+                color: 'var(--t-text-secondary)',
                 fontSize: chipFontSize,
                 fontWeight: 700,
                 fontFamily: '"SF Mono", ui-monospace, monospace',
@@ -1400,9 +1440,9 @@ const AgentCard = memo(function AgentCard({
                 alignItems: 'center',
                 padding: chipPadding,
                 borderRadius: 999,
-                background: 'rgba(255,255,255,0.72)',
-                border: '1px solid rgba(148, 163, 184, 0.12)',
-                color: '#64748b',
+                background: THEME_BG_CARD,
+                border: '1px solid var(--t-panel-border)',
+                color: 'var(--t-text-secondary)',
                 fontSize: chipFontSize,
                 fontWeight: 700,
                 flexShrink: 0,
@@ -1432,9 +1472,9 @@ const AgentCard = memo(function AgentCard({
                 alignItems: 'center',
                 padding: chipPadding,
                 borderRadius: 999,
-                background: 'rgba(255,255,255,0.72)',
-                border: '1px solid rgba(148, 163, 184, 0.12)',
-                color: '#64748b',
+                background: THEME_BG_CARD,
+                border: '1px solid var(--t-panel-border)',
+                color: 'var(--t-text-secondary)',
                 fontSize: chipFontSize,
                 fontWeight: 700,
                 flexShrink: 0,
@@ -1474,9 +1514,8 @@ const AgentCard = memo(function AgentCard({
             minWidth: metricMinWidth,
             padding: metricPadding,
             borderRadius: expanded ? 14 : 12,
-            background: ctx ? `${metricTone}10` : 'rgba(15, 23, 42, 0.04)',
-            border: `1px solid ${ctx ? `${metricTone}20` : 'rgba(148, 163, 184, 0.12)'}`,
-            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.7)',
+            background: ctx ? `${metricTone}12` : THEME_BG_CARD,
+            border: `1px solid ${ctx ? `${metricTone}24` : 'var(--t-panel-border)'}`,
             textAlign: 'right',
           }}>
             <div style={{
@@ -1579,17 +1618,17 @@ const AgentCard = memo(function AgentCard({
                 gap: 8,
                 padding: '8px 10px',
                 borderRadius: 8,
-                background: isRunning ? 'rgba(34,197,94,0.04)' : isReviewing ? 'rgba(167,139,250,0.04)' : 'transparent',
-                border: isRunning ? '1px solid rgba(34,197,94,0.12)' : isReviewing ? '1px solid rgba(167,139,250,0.12)' : '1px solid transparent',
+                background: isRunning ? 'rgba(34,197,94,0.08)' : isReviewing ? 'rgba(167,139,250,0.08)' : 'transparent',
+                border: isRunning ? '1px solid rgba(34,197,94,0.18)' : isReviewing ? '1px solid rgba(167,139,250,0.18)' : '1px solid transparent',
                 cursor: agent.sessionKey ? 'pointer' : 'default',
                 transition: 'all 150ms ease',
                 animation: isRunning ? 'agentCardPulse 3s ease-in-out infinite' : 'none',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = isRunning ? 'rgba(34,197,94,0.08)' : 'rgba(0,0,0,0.02)';
+                e.currentTarget.style.background = isRunning ? 'rgba(34,197,94,0.12)' : isReviewing ? 'rgba(167,139,250,0.12)' : 'var(--t-hover)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = isRunning ? 'rgba(34,197,94,0.04)' : 'transparent';
+                e.currentTarget.style.background = isRunning ? 'rgba(34,197,94,0.08)' : isReviewing ? 'rgba(167,139,250,0.08)' : 'transparent';
               }}
             >
               {/* Status dot with glow / reviewing pulse */}
@@ -1706,8 +1745,8 @@ const AgentCard = memo(function AgentCard({
                       if (agent.tmuxSession) onAgentKill?.(agent.tmuxSession, 'SIGTERM');
                     }}
                     style={{
-                      padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(0,0,0,0.06)',
-                      background: 'rgba(0,0,0,0.03)', color: 'var(--t-text-muted)',
+                      padding: '4px 10px', borderRadius: 6, border: '1px solid var(--t-panel-border)',
+                      background: THEME_BG_CARD, color: 'var(--t-text-muted)',
                       fontSize: 10, fontWeight: 600, cursor: 'pointer',
                       fontFamily: 'inherit', lineHeight: '14px',
                     }}
@@ -1725,7 +1764,8 @@ const AgentCard = memo(function AgentCard({
                     cursor: pr ? 'pointer' : 'default',
                     padding: '2px 6px',
                     borderRadius: 5,
-                    background: 'rgba(0,0,0,0.03)',
+                    background: THEME_BG_CARD,
+                    border: '1px solid var(--t-panel-border)',
                     marginTop: 1,
                   }}
                 >
@@ -3827,7 +3867,7 @@ function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
   const hasChangedChild = node.type === 'dir' && hasChangedDescendant(node, changedFiles);
 
   if (node.type === 'file') {
-    const iconColor = isChanged ? '#3b82f6' : getFileIconColor(node.name);
+    const iconColor = isChanged ? THEME_ACCENT : getFileIconColor(node.name);
     return (
       <div
         onClick={() => onSelectFile?.(node.path)}
@@ -3840,7 +3880,7 @@ function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
           paddingBottom: 4,
           paddingLeft: 14 + depth * 16,
           fontSize: 12,
-          color: isChanged ? '#2563eb' : 'var(--t-text-secondary)',
+          color: isChanged ? THEME_ACCENT : 'var(--t-text-secondary)',
           fontWeight: isChanged ? 500 : 400,
           fontFamily: '"SF Mono", ui-monospace, monospace',
           cursor: 'pointer',
@@ -3854,7 +3894,7 @@ function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
             width: 6,
             height: 6,
             borderRadius: 3,
-            background: '#3b82f6',
+            background: THEME_ACCENT,
             flexShrink: 0,
             marginLeft: 'auto',
           }} />
@@ -3878,14 +3918,14 @@ function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
           paddingLeft: 14 + depth * 16,
           fontSize: 12,
           fontWeight: 500,
-          color: hasChangedChild ? '#1e40af' : 'var(--t-text)',
+          color: hasChangedChild ? THEME_ACCENT : 'var(--t-text)',
           cursor: 'pointer',
           transition: 'color 100ms',
         }}
       >
         {open
-          ? <FolderOpen size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: hasChangedChild ? '#3b82f6' : folderColor }} />
-          : <Folder size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: hasChangedChild ? '#3b82f6' : folderColor }} />
+          ? <FolderOpen size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: hasChangedChild ? THEME_ACCENT : folderColor }} />
+          : <Folder size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: hasChangedChild ? THEME_ACCENT : folderColor }} />
         }
         {node.name}
         {open
@@ -3897,7 +3937,7 @@ function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
             width: 6,
             height: 6,
             borderRadius: 3,
-            background: '#3b82f6',
+            background: THEME_ACCENT,
             flexShrink: 0,
           }} />
         ) : null}
@@ -4021,6 +4061,7 @@ export const AgentPanel = memo(function AgentPanel({
   selectedRepoName,
   selectedRepoBranch,
   selectedRepoLocalPath,
+  selectedRepoReadiness,
   onLaunchWorkspaceAgent,
   onLaunchWorkspaceTask,
   onSelectSession,
@@ -4042,6 +4083,7 @@ export const AgentPanel = memo(function AgentPanel({
   selectedRepoName?: string | null;
   selectedRepoBranch?: string | null;
   selectedRepoLocalPath?: string | null;
+  selectedRepoReadiness?: RepoReadiness | null;
   onLaunchWorkspaceAgent?: (request: {
     repoPath: string;
     runtime?: 'codex' | 'claude-code';
@@ -4234,12 +4276,24 @@ export const AgentPanel = memo(function AgentPanel({
         }
 
         // Parse workspace data
-        const wsMap = new Map<string, { branch: string; pr: AgentDetail['pr']; localDiff: AgentDetail['localDiff']; workspaceStatus: AgentDetail['workspaceStatus'] }>();
+        const wsMap = new Map<string, {
+          branch: string;
+          pr: AgentDetail['pr'];
+          localDiff: AgentDetail['localDiff'];
+          workspaceStatus: AgentDetail['workspaceStatus'];
+          repoReadiness?: RepoReadiness;
+        }>();
         if (wsRes?.ok) {
           const wsData = await wsRes.json();
           for (const ws of wsData.workspaces ?? []) {
             if (ws.sessionKey) {
-              wsMap.set(ws.sessionKey, { branch: ws.branch, pr: ws.pr, localDiff: ws.localDiff, workspaceStatus: ws.status });
+              wsMap.set(ws.sessionKey, {
+                branch: ws.branch,
+                pr: ws.pr,
+                localDiff: ws.localDiff,
+                workspaceStatus: ws.status,
+                repoReadiness: ws.readiness,
+              });
             }
           }
         }
@@ -4280,6 +4334,7 @@ export const AgentPanel = memo(function AgentPanel({
             localDiff: ws?.localDiff || a.localDiff,
             workspaceStatus: ws?.workspaceStatus ?? a.workspaceStatus,
             worktree: worktree ?? a.worktree,
+            repoReadiness: ws?.repoReadiness ?? a.repoReadiness,
           };
         });
 
@@ -4437,6 +4492,9 @@ export const AgentPanel = memo(function AgentPanel({
   const heroBranch = hasSelectedRepo
     ? (selectedRepoBranch ?? null)
     : (preferredWorkspaceGroup?.agents.find((agent) => agent.branch && !agent.branch.startsWith('surface/'))?.branch ?? null);
+  const heroReadiness = hasSelectedRepo
+    ? (selectedRepoReadiness ?? null)
+    : (preferredWorkspaceGroup?.agents.find((agent) => agent.repoReadiness)?.repoReadiness ?? null);
   const heroWorkspaceLabel = compactWorkspaceLabel(currentScopePath);
   const changesSummary = hasSelectedRepo
     ? `${changedFiles.size} changed file${changedFiles.size === 1 ? '' : 's'} in ${selectedRepoName ?? 'the selected repo'}`
@@ -4489,6 +4547,7 @@ export const AgentPanel = memo(function AgentPanel({
           subtitle={heroSubtitle}
           repoSlug={effectiveScopedRepo}
           branch={heroBranch}
+          readiness={heroReadiness}
           workspaceLabel={heroWorkspaceLabel}
           changedFiles={changedFiles.size}
           activeRuns={activeRunsCount}
@@ -4545,7 +4604,30 @@ export const AgentPanel = memo(function AgentPanel({
                 fontWeight: 600,
               }}>
                 <span style={{ fontSize: 13 }}>⏳</span>
-                Showing cached data while the gateway reconnects.
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  Showing cached session state while the gateway reconnects. Live updates resume automatically.
+                </span>
+                <button
+                  type="button"
+                  onClick={() => window.location.reload()}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    border: 'none',
+                    borderRadius: 999,
+                    background: 'rgba(217, 119, 6, 0.12)',
+                    color: '#b45309',
+                    padding: '4px 8px',
+                    cursor: 'pointer',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    flexShrink: 0,
+                  }}
+                >
+                  Reload
+                </button>
               </div>
             ) : null}
             {inventoryLoading ? (
@@ -4556,7 +4638,7 @@ export const AgentPanel = memo(function AgentPanel({
                     style={{
                       borderRadius: 18,
                       border: '1px solid var(--t-panel-border)',
-                      background: 'rgba(255,255,255,0.8)',
+                      background: THEME_PANEL_GLASS,
                       backdropFilter: 'blur(20px)',
                       WebkitBackdropFilter: 'blur(20px)',
                       boxShadow: 'var(--t-panel-shadow)',
@@ -4566,20 +4648,20 @@ export const AgentPanel = memo(function AgentPanel({
                       gap: 8,
                     }}
                   >
-                    <div style={{ width: `${52 + index * 10}%`, height: 12, borderRadius: 999, background: 'rgba(148,163,184,0.18)' }} />
-                    <div style={{ width: `${38 + index * 8}%`, height: 10, borderRadius: 999, background: 'rgba(148,163,184,0.12)' }} />
-                    <div style={{ width: '100%', height: 6, borderRadius: 999, background: 'rgba(59,130,246,0.10)' }} />
+                    <div style={{ width: `${52 + index * 10}%`, height: 12, borderRadius: 999, background: 'var(--t-divider-strong)' }} />
+                    <div style={{ width: `${38 + index * 8}%`, height: 10, borderRadius: 999, background: 'var(--t-divider)' }} />
+                    <div style={{ width: '100%', height: 6, borderRadius: 999, background: THEME_ACCENT_SOFT }} />
                   </div>
                 ))}
               </div>
             ) : workspaceGroups.length === 0 ? (
               <div style={{
                 borderRadius: 18,
-                border: '1px solid rgba(148, 163, 184, 0.12)',
-                background: 'rgba(255,255,255,0.72)',
+                border: '1px solid var(--t-panel-border)',
+                background: THEME_PANEL_GLASS,
                 padding: '14px 16px',
                 fontSize: 13,
-                color: gatewayReachable && gatewayWarming ? '#2563eb' : 'var(--t-text-muted)',
+                color: gatewayReachable && gatewayWarming ? THEME_ACCENT : 'var(--t-text-muted)',
               }}>
                 {gatewayReachable && gatewayWarming ? 'OpenClaw connected, loading agents...' : 'No agents found.'}
               </div>
@@ -4644,9 +4726,9 @@ export const AgentPanel = memo(function AgentPanel({
           <div
             style={{
               borderRadius: 18,
-              border: '1px solid rgba(148, 163, 184, 0.14)',
-              background: 'rgba(255,255,255,0.76)',
-              boxShadow: '0 12px 28px rgba(15, 23, 42, 0.045)',
+              border: '1px solid var(--t-panel-border)',
+              background: THEME_PANEL_GLASS,
+              boxShadow: 'var(--t-panel-shadow)',
               backdropFilter: 'blur(20px)',
               WebkitBackdropFilter: 'blur(20px)',
               overflow: 'hidden',
@@ -4678,9 +4760,9 @@ export const AgentPanel = memo(function AgentPanel({
                       minHeight: 30,
                       padding: '6px 10px',
                       borderRadius: 999,
-                      border: active ? '1px solid rgba(37, 99, 235, 0.18)' : '1px solid rgba(148, 163, 184, 0.14)',
-                      background: active ? 'rgba(37, 99, 235, 0.08)' : 'rgba(255,255,255,0.58)',
-                      color: active ? '#2563eb' : 'var(--t-text-secondary)',
+                      border: active ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
+                      background: active ? THEME_ACCENT_SOFT : THEME_BG_CARD,
+                      color: active ? THEME_ACCENT : 'var(--t-text-secondary)',
                       fontSize: 11,
                       fontWeight: 700,
                       cursor: 'pointer',
@@ -4692,7 +4774,16 @@ export const AgentPanel = memo(function AgentPanel({
                 );
               })}
             </div>
-            <div style={{ height: filesHeight, overflowY: 'auto', marginTop: 10 }}>
+            <div
+              className="cortex-dark-scroll"
+              style={{
+                height: filesHeight,
+                overflowY: 'auto',
+                marginTop: 10,
+                scrollbarWidth: 'thin',
+                scrollbarColor: 'var(--t-divider-strong) transparent',
+              }}
+            >
               <FileTree
                 tree={filteredTree}
                 changedFiles={changedFiles}
@@ -4728,7 +4819,7 @@ export const AgentPanel = memo(function AgentPanel({
                 width: 34,
                 height: 4,
                 borderRadius: 999,
-                background: 'rgba(148, 163, 184, 0.36)',
+                background: 'var(--t-divider-strong)',
               }} />
             </div>
           </div>
@@ -4782,6 +4873,23 @@ export const AgentPanel = memo(function AgentPanel({
         @keyframes reviewingRing {
           0% { transform: scale(1); opacity: 0.6; }
           100% { transform: scale(2.8); opacity: 0; }
+        }
+        .cortex-dark-scroll::-webkit-scrollbar {
+          width: 10px;
+        }
+        .cortex-dark-scroll::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .cortex-dark-scroll::-webkit-scrollbar-thumb {
+          background: var(--t-divider-strong);
+          border-radius: 999px;
+          border: 2px solid transparent;
+          background-clip: padding-box;
+        }
+        .cortex-dark-scroll::-webkit-scrollbar-thumb:hover {
+          background: var(--t-text-faint);
+          border: 2px solid transparent;
+          background-clip: padding-box;
         }
       `}</style>
     </div>

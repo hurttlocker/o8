@@ -29,11 +29,19 @@ export function useTheme() {
 }
 
 const STORAGE_KEY = 'cortex-theme';
+const LEGACY_THEME_IDS: Record<string, string> = {
+  chocolate: 'dark',
+};
+
+function normalizeThemeId(themeId: string | null) {
+  if (!themeId) return null;
+  return LEGACY_THEME_IDS[themeId] ?? themeId;
+}
 
 function readStoredThemeId() {
   if (typeof window === 'undefined') return 'light';
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = normalizeThemeId(localStorage.getItem(STORAGE_KEY));
     return saved && themes.find((theme) => theme.id === saved) ? saved : 'light';
   } catch {
     return 'light';
@@ -76,10 +84,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }, [themeId]);
 
   const setTheme = useCallback((id: string) => {
-    const theme = themes.find(t => t.id === id);
+    const normalizedId = normalizeThemeId(id);
+    if (!normalizedId) return;
+    const theme = themes.find(t => t.id === normalizedId);
     if (!theme) return;
-    setThemeId(id);
-    localStorage.setItem(STORAGE_KEY, id);
+    setThemeId(normalizedId);
+    localStorage.setItem(STORAGE_KEY, normalizedId);
     applyThemeVars(theme, true);
   }, []);
 

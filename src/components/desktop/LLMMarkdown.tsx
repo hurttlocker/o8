@@ -11,22 +11,28 @@
 import React, { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { Copy, Check, ChevronDown, ChevronRight, FileCode, PanelRight, Play } from 'lucide-react';
 
+const THEME_ACCENT = 'var(--t-accent, #2563eb)';
+const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
+const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
+const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
+const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
+
 // ── Syntax Highlighting ──
 
-// Token colors (One Dark inspired, light bg friendly)
+// Token colors tuned for the dark graphite shell while staying usable on light.
 const SYN = {
-  keyword: '#8250df',    // purple — const, let, function, if, return, import, export
-  string: '#0a3069',     // dark blue — "string", 'string', `template`
-  number: '#0550ae',     // blue — 42, 3.14, 0xff
-  comment: '#6e7781',    // grey — // comment, /* comment */
-  type: '#953800',       // orange — types, interfaces
-  fn: '#8250df',         // purple — function names
-  prop: '#0550ae',       // blue — object properties
-  tag: '#116329',        // green — HTML/JSX tags
-  attr: '#0550ae',       // blue — attributes
-  punct: '#24292f',      // dark — brackets, semicolons
-  builtin: '#cf222e',    // red — true, false, null, undefined, this
-  operator: '#cf222e',   // red — =, +, -, *, &&, ||
+  keyword: '#c792ea',
+  string: '#a5d6ff',
+  number: '#7cc6fe',
+  comment: '#8b96a5',
+  type: '#ffcb6b',
+  fn: '#82aaff',
+  prop: '#89ddff',
+  tag: '#7ee787',
+  attr: '#79c0ff',
+  punct: '#d8dee9',
+  builtin: '#ff7b72',
+  operator: '#f78c6c',
 };
 
 function highlightCode(code: string, lang: string): React.ReactNode[] {
@@ -218,8 +224,8 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
       marginBottom: 8,
       borderRadius: 10,
       overflow: 'hidden',
-      border: '1px solid #e2e8f0',
-      background: '#f8fafc',
+      border: '1px solid var(--t-panel-border)',
+      background: THEME_PANEL_GLASS,
     }}>
       {/* Header bar */}
       <div style={{
@@ -230,13 +236,13 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
         paddingBottom: 4,
         paddingLeft: 12,
         paddingRight: 8,
-        background: '#f1f5f9',
-        borderBottom: '1px solid #e2e8f0',
+        background: THEME_BG_CARD,
+        borderBottom: '1px solid var(--t-divider)',
       }}>
         <span style={{
           fontSize: 11,
           fontWeight: 600,
-          color: '#64748b',
+          color: 'var(--t-text-secondary)',
           fontFamily: '"SF Mono", ui-monospace, monospace',
         }}>
           {lang || (isShell ? 'shell' : 'text')}
@@ -255,14 +261,14 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
             border: 'none',
             borderRadius: 5,
             background: 'transparent',
-            color: copied ? '#10b981' : '#94a3b8',
+            color: copied ? '#10b981' : 'var(--t-text-muted)',
             fontSize: 11,
             cursor: 'pointer',
             fontFamily: '-apple-system, system-ui, sans-serif',
             transition: 'color 150ms, background 150ms',
           }}
-          onMouseEnter={(e) => { if (!copied) { (e.currentTarget).style.background = '#e2e8f0'; (e.currentTarget).style.color = '#475569'; } }}
-          onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; if (!copied) (e.currentTarget).style.color = '#94a3b8'; }}
+          onMouseEnter={(e) => { if (!copied) { (e.currentTarget).style.background = THEME_BG_CARD; (e.currentTarget).style.color = 'var(--t-text-secondary)'; } }}
+          onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; if (!copied) (e.currentTarget).style.color = 'var(--t-text-muted)'; }}
         >
           {copied ? <Check size={12} /> : <Copy size={12} />}
           {copied ? 'Copied' : 'Copy'}
@@ -290,14 +296,14 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
               border: 'none',
               borderRadius: 5,
               background: 'transparent',
-              color: applied ? '#10b981' : '#94a3b8',
+              color: applied ? '#10b981' : 'var(--t-text-muted)',
               fontSize: 11,
               cursor: 'pointer',
               fontFamily: '-apple-system, system-ui, sans-serif',
               transition: 'color 150ms, background 150ms',
             }}
-            onMouseEnter={(e) => { if (!applied) { (e.currentTarget).style.background = '#e2e8f0'; (e.currentTarget).style.color = '#3b82f6'; } }}
-            onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; if (!applied) (e.currentTarget).style.color = '#94a3b8'; }}
+            onMouseEnter={(e) => { if (!applied) { (e.currentTarget).style.background = THEME_BG_CARD; (e.currentTarget).style.color = THEME_ACCENT; } }}
+            onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; if (!applied) (e.currentTarget).style.color = 'var(--t-text-muted)'; }}
           >
             {applied ? <Check size={12} /> : <FileCode size={12} />}
             {applied ? 'Applied' : 'Apply'}
@@ -320,14 +326,14 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
               border: 'none',
               borderRadius: 5,
               background: 'transparent',
-              color: '#94a3b8',
+              color: 'var(--t-text-muted)',
               fontSize: 11,
               cursor: 'pointer',
               fontFamily: '-apple-system, system-ui, sans-serif',
               transition: 'color 150ms, background 150ms',
             }}
-            onMouseEnter={(e) => { (e.currentTarget).style.background = '#e2e8f0'; (e.currentTarget).style.color = '#3b82f6'; }}
-            onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; (e.currentTarget).style.color = '#94a3b8'; }}
+            onMouseEnter={(e) => { (e.currentTarget).style.background = THEME_BG_CARD; (e.currentTarget).style.color = THEME_ACCENT; }}
+            onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; (e.currentTarget).style.color = 'var(--t-text-muted)'; }}
           >
             <PanelRight size={12} />
             Canvas
@@ -356,14 +362,14 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
               border: 'none',
               borderRadius: 5,
               background: 'transparent',
-              color: ran ? '#10b981' : '#94a3b8',
+              color: ran ? '#10b981' : 'var(--t-text-muted)',
               fontSize: 11,
               cursor: 'pointer',
               fontFamily: '-apple-system, system-ui, sans-serif',
               transition: 'color 150ms, background 150ms',
             }}
-            onMouseEnter={(e) => { if (!ran) { (e.currentTarget).style.background = '#dcfce7'; (e.currentTarget).style.color = '#16a34a'; } }}
-            onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; if (!ran) (e.currentTarget).style.color = '#94a3b8'; }}
+            onMouseEnter={(e) => { if (!ran) { (e.currentTarget).style.background = 'rgba(34, 197, 94, 0.12)'; (e.currentTarget).style.color = '#4ade80'; } }}
+            onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; if (!ran) (e.currentTarget).style.color = 'var(--t-text-muted)'; }}
           >
             {ran ? <Check size={12} /> : <Play size={12} fill="currentColor" />}
             {ran ? 'Sent' : 'Run'}
@@ -381,7 +387,7 @@ const CodeBlock = memo(function CodeBlock({ code, lang, onApplyToFile, onOpenInC
         lineHeight: 1.6,
         fontFamily: '"SF Mono", ui-monospace, "Cascadia Code", monospace',
         overflowX: 'auto',
-        color: '#334155',
+        color: 'var(--t-text-secondary)',
         tabSize: 2,
       }}>
         {lang && !isMermaid ? highlightCode(code, lang) : code}
@@ -436,7 +442,7 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
       marginBottom: 8,
       borderRadius: 10,
       overflow: 'hidden',
-      border: '1px solid #e2e8f0',
+      border: '1px solid var(--t-panel-border)',
     }}>
       <button
         type="button"
@@ -450,10 +456,10 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
           paddingBottom: 6,
           paddingLeft: 12,
           paddingRight: 12,
-          background: '#f1f5f9',
+          background: THEME_BG_CARD,
           border: 'none',
-          borderBottom: collapsed ? 'none' : '1px solid #e2e8f0',
-          color: '#64748b',
+          borderBottom: collapsed ? 'none' : '1px solid var(--t-divider)',
+          color: 'var(--t-text-secondary)',
           fontSize: 11,
           fontWeight: 600,
           cursor: 'pointer',
@@ -472,7 +478,7 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
             paddingBottom: 16,
             paddingLeft: 16,
             paddingRight: 16,
-            background: 'white',
+            background: THEME_PANEL_GLASS,
             display: 'flex',
             justifyContent: 'center',
             overflow: 'auto',
@@ -490,11 +496,11 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
                 fontSize: 12,
                 lineHeight: 1.5,
                 fontFamily: '"SF Mono", ui-monospace, monospace',
-                background: '#fef2f2',
+                background: 'rgba(127, 29, 29, 0.18)',
                 borderRadius: 6,
                 overflowX: 'auto',
-                color: '#334155',
-                border: '1px solid #fecaca',
+                color: 'var(--t-text-secondary)',
+                border: '1px solid rgba(239, 68, 68, 0.24)',
               }}>
                 {code}
               </pre>
@@ -502,7 +508,7 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
           ) : svg ? (
             <div dangerouslySetInnerHTML={{ __html: svg }} style={{ maxWidth: '100%' }} />
           ) : (
-            <div style={{ color: '#94a3b8', fontSize: 12 }}>Rendering diagram...</div>
+            <div style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>Rendering diagram...</div>
           )}
         </div>
       )}
@@ -540,9 +546,9 @@ function renderTable(headerLine: string, alignLine: string, rows: string[]): Rea
                 paddingLeft: 12,
                 paddingRight: 12,
                 textAlign: aligns[i] || 'left',
-                borderBottom: '2px solid #e2e8f0',
+                borderBottom: '2px solid var(--t-divider)',
                 fontWeight: 600,
-                color: '#1e293b',
+                color: 'var(--t-text)',
                 whiteSpace: 'nowrap',
               }}>
                 {h}
@@ -560,8 +566,8 @@ function renderTable(headerLine: string, alignLine: string, rows: string[]): Rea
                   paddingLeft: 12,
                   paddingRight: 12,
                   textAlign: aligns[ci] || 'left',
-                  borderBottom: '1px solid #f1f5f9',
-                  color: '#475569',
+                  borderBottom: '1px solid var(--t-divider-subtle)',
+                  color: 'var(--t-text-secondary)',
                 }}>
                   {renderInline(cell)}
                 </td>
@@ -615,7 +621,7 @@ function renderInline(text: string): React.ReactNode {
           href={match[5]}
           target="_blank"
           rel="noopener noreferrer"
-          style={{ color: '#3b82f6', textDecoration: 'none' }}
+          style={{ color: THEME_ACCENT, textDecoration: 'none' }}
           onMouseEnter={(e) => { (e.currentTarget).style.textDecoration = 'underline'; }}
           onMouseLeave={(e) => { (e.currentTarget).style.textDecoration = 'none'; }}
         >
@@ -630,12 +636,12 @@ function renderInline(text: string): React.ReactNode {
       parts.push(<em key={`i-${match.index}`}>{match[7]}</em>);
     } else if (match[8]) {
       // Strikethrough
-      parts.push(<s key={`s-${match.index}`} style={{ color: '#94a3b8' }}>{match[8]}</s>);
+      parts.push(<s key={`s-${match.index}`} style={{ color: 'var(--t-text-muted)' }}>{match[8]}</s>);
     } else if (match[9]) {
       // Inline code
       parts.push(
         <code key={`c-${match.index}`} style={{
-          background: '#f1f5f9',
+          background: THEME_BG_CARD,
           paddingTop: 1,
           paddingBottom: 1,
           paddingLeft: 5,
@@ -643,7 +649,7 @@ function renderInline(text: string): React.ReactNode {
           borderRadius: 4,
           fontSize: '0.9em',
           fontFamily: '"SF Mono", ui-monospace, monospace',
-          color: '#e11d48',
+          color: 'var(--t-text-strong)',
         }}>
           {match[9]}
         </code>
@@ -669,8 +675,8 @@ function renderInline(text: string): React.ReactNode {
               width: 16,
               height: 16,
               borderRadius: '50%',
-              background: '#eff6ff',
-              color: '#3b82f6',
+              background: THEME_ACCENT_SOFT,
+              color: THEME_ACCENT,
               fontSize: 9,
               fontWeight: 700,
               cursor: 'pointer',
@@ -678,23 +684,23 @@ function renderInline(text: string): React.ReactNode {
               marginLeft: 1,
               marginRight: 1,
               lineHeight: 1,
-              border: '1px solid #bfdbfe',
+              border: `1px solid ${THEME_ACCENT_BORDER}`,
               transition: 'all 100ms',
               position: 'relative' as const,
               top: -4,
             }}
             onMouseEnter={(e) => {
-              (e.currentTarget).style.background = '#3b82f6';
+              (e.currentTarget).style.background = THEME_ACCENT;
               (e.currentTarget).style.color = 'white';
-              (e.currentTarget).style.borderColor = '#3b82f6';
+              (e.currentTarget).style.borderColor = THEME_ACCENT;
               // Show tooltip
               const tooltip = (e.currentTarget.parentElement as HTMLElement)?.querySelector('[data-cite-tooltip]') as HTMLElement;
               if (tooltip) tooltip.style.display = 'block';
             }}
             onMouseLeave={(e) => {
-              (e.currentTarget).style.background = '#eff6ff';
-              (e.currentTarget).style.color = '#3b82f6';
-              (e.currentTarget).style.borderColor = '#bfdbfe';
+              (e.currentTarget).style.background = THEME_ACCENT_SOFT;
+              (e.currentTarget).style.color = THEME_ACCENT;
+              (e.currentTarget).style.borderColor = THEME_ACCENT_BORDER;
               const tooltip = (e.currentTarget.parentElement as HTMLElement)?.querySelector('[data-cite-tooltip]') as HTMLElement;
               if (tooltip) tooltip.style.display = 'none';
             }}
@@ -714,12 +720,12 @@ function renderInline(text: string): React.ReactNode {
               paddingBottom: 6,
               paddingLeft: 10,
               paddingRight: 10,
-              background: 'white',
-              border: '1px solid #e2e8f0',
+              background: THEME_PANEL_GLASS,
+              border: '1px solid var(--t-panel-border)',
               borderRadius: 8,
-              boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+              boxShadow: 'var(--t-panel-shadow)',
               fontSize: 11,
-              color: '#475569',
+              color: 'var(--t-text-secondary)',
               whiteSpace: 'nowrap' as const,
               zIndex: 50,
               pointerEvents: 'none' as const,
@@ -787,12 +793,12 @@ export function renderLLMMarkdown(text: string, opts?: {
           <div key={`think-${i}`} style={{
             fontSize: 12,
             fontStyle: 'italic',
-            color: '#94a3b8',
+            color: 'var(--t-text-muted)',
             lineHeight: 1.5,
             paddingTop: 6,
             paddingBottom: 6,
             paddingLeft: 12,
-            borderLeft: '2px solid #e2e8f0',
+            borderLeft: '2px solid var(--t-divider)',
             marginTop: 4,
             marginBottom: 8,
             animation: 'llmFadeIn 200ms ease-out',
@@ -808,7 +814,7 @@ export function renderLLMMarkdown(text: string, opts?: {
                 display: 'inline-block',
                 width: 2,
                 height: 12,
-                background: '#94a3b8',
+                background: 'var(--t-text-muted)',
                 marginLeft: 2,
                 verticalAlign: 'text-bottom',
                 animation: 'llmDot 1s ease-in-out infinite',
@@ -869,7 +875,7 @@ export function renderLLMMarkdown(text: string, opts?: {
 
     // Horizontal rule
     if (/^(-{3,}|\*{3,}|_{3,})$/.test(line.trim())) {
-      nodes.push(<hr key={`hr-${i}`} style={{ border: 'none', borderTop: '1px solid #e2e8f0', marginTop: 12, marginBottom: 12 }} />);
+      nodes.push(<hr key={`hr-${i}`} style={{ border: 'none', borderTop: '1px solid var(--t-divider)', marginTop: 12, marginBottom: 12 }} />);
       i++;
       continue;
     }
@@ -878,15 +884,15 @@ export function renderLLMMarkdown(text: string, opts?: {
     if (line.startsWith('> ')) {
       nodes.push(
         <div key={`q-${i}`} style={{
-          borderLeft: '3px solid #3b82f6',
+          borderLeft: `3px solid ${THEME_ACCENT}`,
           paddingTop: 4,
           paddingBottom: 4,
           paddingLeft: 12,
           paddingRight: 0,
           marginTop: 4,
           marginBottom: 4,
-          color: '#475569',
-          background: '#f8fafc',
+          color: 'var(--t-text-secondary)',
+          background: THEME_BG_CARD,
           borderRadius: '0 6px 6px 0',
           fontSize: 13,
           lineHeight: 1.5,
@@ -900,19 +906,19 @@ export function renderLLMMarkdown(text: string, opts?: {
 
     // Headings
     if (line.startsWith('#### ')) {
-      nodes.push(<div key={`h4-${i}`} style={{ fontSize: 13, fontWeight: 600, marginTop: 12, marginBottom: 4, color: '#1e293b' }}>{renderInline(line.slice(5))}</div>);
+      nodes.push(<div key={`h4-${i}`} style={{ fontSize: 13, fontWeight: 600, marginTop: 12, marginBottom: 4, color: 'var(--t-text)' }}>{renderInline(line.slice(5))}</div>);
       i++; continue;
     }
     if (line.startsWith('### ')) {
-      nodes.push(<div key={`h3-${i}`} style={{ fontSize: 14, fontWeight: 600, marginTop: 14, marginBottom: 4, color: '#1e293b' }}>{renderInline(line.slice(4))}</div>);
+      nodes.push(<div key={`h3-${i}`} style={{ fontSize: 14, fontWeight: 600, marginTop: 14, marginBottom: 4, color: 'var(--t-text)' }}>{renderInline(line.slice(4))}</div>);
       i++; continue;
     }
     if (line.startsWith('## ')) {
-      nodes.push(<div key={`h2-${i}`} style={{ fontSize: 16, fontWeight: 600, marginTop: 16, marginBottom: 4, color: '#0f172a' }}>{renderInline(line.slice(3))}</div>);
+      nodes.push(<div key={`h2-${i}`} style={{ fontSize: 16, fontWeight: 600, marginTop: 16, marginBottom: 4, color: 'var(--t-text-strong)' }}>{renderInline(line.slice(3))}</div>);
       i++; continue;
     }
     if (line.startsWith('# ')) {
-      nodes.push(<div key={`h1-${i}`} style={{ fontSize: 18, fontWeight: 700, marginTop: 18, marginBottom: 6, color: '#0f172a' }}>{renderInline(line.slice(2))}</div>);
+      nodes.push(<div key={`h1-${i}`} style={{ fontSize: 18, fontWeight: 700, marginTop: 18, marginBottom: 6, color: 'var(--t-text-strong)' }}>{renderInline(line.slice(2))}</div>);
       i++; continue;
     }
 
@@ -921,7 +927,7 @@ export function renderLLMMarkdown(text: string, opts?: {
     if (olMatch) {
       nodes.push(
         <div key={`ol-${i}`} style={{ display: 'flex', gap: 8, marginLeft: 4, fontSize: 14, lineHeight: 1.6 }}>
-          <span style={{ color: '#94a3b8', flexShrink: 0, fontWeight: 500, minWidth: 16, textAlign: 'right' }}>{olMatch[1]}.</span>
+          <span style={{ color: 'var(--t-text-muted)', flexShrink: 0, fontWeight: 500, minWidth: 16, textAlign: 'right' }}>{olMatch[1]}.</span>
           <span>{renderInline(olMatch[2])}</span>
         </div>
       );
@@ -932,7 +938,7 @@ export function renderLLMMarkdown(text: string, opts?: {
     if (line.match(/^[-*+]\s+/)) {
       nodes.push(
         <div key={`ul-${i}`} style={{ display: 'flex', gap: 8, marginLeft: 4, fontSize: 14, lineHeight: 1.6 }}>
-          <span style={{ color: '#94a3b8', flexShrink: 0 }}>•</span>
+          <span style={{ color: 'var(--t-text-muted)', flexShrink: 0 }}>•</span>
           <span>{renderInline(line.replace(/^[-*+]\s+/, ''))}</span>
         </div>
       );
@@ -947,7 +953,7 @@ export function renderLLMMarkdown(text: string, opts?: {
 
     // Regular paragraph
     nodes.push(
-      <div key={`p-${i}`} style={{ fontSize: 14, lineHeight: 1.7, color: '#1e293b' }}>
+      <div key={`p-${i}`} style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--t-text)' }}>
         {renderInline(line)}
       </div>
     );
@@ -962,8 +968,8 @@ export function renderLLMMarkdown(text: string, opts?: {
         marginBottom: 8,
         borderRadius: 10,
         overflow: 'hidden',
-        border: '1px solid #e2e8f0',
-        background: '#f8fafc',
+        border: '1px solid var(--t-panel-border)',
+        background: THEME_PANEL_GLASS,
       }}>
         <div style={{
           display: 'flex',
@@ -973,13 +979,13 @@ export function renderLLMMarkdown(text: string, opts?: {
           paddingBottom: 4,
           paddingLeft: 12,
           paddingRight: 8,
-          background: '#f1f5f9',
-          borderBottom: '1px solid #e2e8f0',
+          background: THEME_BG_CARD,
+          borderBottom: '1px solid var(--t-divider)',
         }}>
           <span style={{
             fontSize: 11,
             fontWeight: 600,
-            color: '#64748b',
+            color: 'var(--t-text-secondary)',
             fontFamily: '"SF Mono", ui-monospace, monospace',
           }}>
             {codeLang || 'code'}
@@ -989,14 +995,14 @@ export function renderLLMMarkdown(text: string, opts?: {
             alignItems: 'center',
             gap: 4,
             fontSize: 10,
-            color: '#3b82f6',
+            color: THEME_ACCENT,
             fontWeight: 500,
           }}>
             <span style={{
               width: 6,
               height: 6,
               borderRadius: '50%',
-              background: '#3b82f6',
+              background: THEME_ACCENT,
               animation: 'llmDot 1s ease-in-out infinite',
             }} />
             streaming
@@ -1012,7 +1018,7 @@ export function renderLLMMarkdown(text: string, opts?: {
           lineHeight: 1.6,
           fontFamily: '"SF Mono", ui-monospace, "Cascadia Code", monospace',
           overflowX: 'auto',
-          color: '#334155',
+          color: 'var(--t-text-secondary)',
           tabSize: 2,
         }}>
           {codeLang ? highlightCode(codeContent, codeLang) : codeContent}
@@ -1020,7 +1026,7 @@ export function renderLLMMarkdown(text: string, opts?: {
             display: 'inline-block',
             width: 2,
             height: 16,
-            background: '#3b82f6',
+            background: THEME_ACCENT,
             marginLeft: 1,
             verticalAlign: 'text-bottom',
             animation: 'llmDot 1s ease-in-out infinite',

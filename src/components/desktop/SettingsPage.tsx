@@ -66,7 +66,7 @@ interface GitHubDeviceFlowState {
 
 type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
-type SettingsTab = 'connectors' | 'agents' | 'api-keys' | 'memory' | 'appearance' | 'about';
+export type SettingsTab = 'connectors' | 'agents' | 'api-keys' | 'memory' | 'appearance' | 'about';
 
 interface OpenClawGatewayStatus {
   connected: boolean;
@@ -78,6 +78,12 @@ interface OpenClawGatewayStatus {
   mode?: string;
   uptime?: string | null;
 }
+
+const THEME_ACCENT = 'var(--t-accent, #2563eb)';
+const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
+const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(37, 99, 235, 0.14))';
+const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
+const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
 
 function normalizeVersion(value?: string | null, fallback = '—') {
   if (!value) return fallback;
@@ -231,14 +237,15 @@ function TabButton({ label, icon, active, onClick }: {
         width: '100%',
         padding: '10px 14px',
         borderRadius: 10,
-        border: 'none',
-        background: active ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
-        color: active ? '#2563eb' : 'var(--t-text-secondary)',
+        border: active ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid transparent',
+        background: active ? THEME_ACCENT_SOFT : 'transparent',
+        color: active ? THEME_ACCENT : 'var(--t-text-secondary)',
         fontSize: 13,
         fontWeight: active ? 600 : 500,
         cursor: 'pointer',
         textAlign: 'left',
-        transition: 'background 120ms, color 120ms',
+        transition: 'background 120ms, color 120ms, border-color 120ms, box-shadow 120ms',
+        boxShadow: active ? `0 10px 24px ${THEME_ACCENT_RING}` : 'none',
       }}
     >
       {icon}
@@ -257,8 +264,8 @@ function ScopeBadge({ scope }: { scope: string }) {
       borderRadius: 6,
       fontSize: 10,
       fontWeight: 600,
-      background: 'rgba(37, 99, 235, 0.08)',
-      color: '#2563eb',
+      background: THEME_ACCENT_SOFT,
+      color: THEME_ACCENT,
       letterSpacing: '0.01em',
     }}>
       {scope}
@@ -2078,13 +2085,13 @@ function ThemePreviewCard({ theme, active, onSelect }: {
         position: 'relative',
         width: 200,
         padding: 0,
-        border: active ? '2px solid #2563eb' : '2px solid var(--t-panel-border)',
+        border: active ? `2px solid ${THEME_ACCENT}` : '2px solid var(--t-panel-border)',
         borderRadius: 16,
-        background: 'var(--t-panel)',
+        background: 'var(--t-panel-translucent)',
         cursor: 'pointer',
         overflow: 'hidden',
-        transition: 'border-color 200ms, box-shadow 200ms',
-        boxShadow: active ? '0 0 0 3px rgba(37, 99, 235, 0.15)' : 'var(--t-panel-shadow)',
+        transition: 'border-color 200ms, box-shadow 200ms, transform 200ms',
+        boxShadow: active ? `0 0 0 3px ${THEME_ACCENT_RING}` : 'var(--t-panel-shadow)',
       }}
     >
       {/* Mini dashboard preview */}
@@ -2201,7 +2208,7 @@ function ThemePreviewCard({ theme, active, onSelect }: {
             width: 20,
             height: 20,
             borderRadius: 10,
-            background: '#2563eb',
+            background: THEME_ACCENT,
             display: 'grid',
             placeItems: 'center',
             flexShrink: 0,
@@ -3854,16 +3861,16 @@ function AppearanceTab() {
             padding: '14px 16px',
             borderRadius: 12,
             border: navRailHoverExpand
-              ? '1.5px solid rgba(37, 99, 235, 0.22)'
+              ? `1.5px solid ${THEME_ACCENT_BORDER}`
               : '1px solid var(--t-panel-border)',
             background: navRailHoverExpand
-              ? 'rgba(37, 99, 235, 0.045)'
-              : 'rgba(248, 250, 252, 0.78)',
+              ? THEME_ACCENT_SOFT
+              : 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
             cursor: 'pointer',
             textAlign: 'left',
             transition: 'border-color 140ms ease, background 140ms ease, box-shadow 140ms ease',
             boxShadow: navRailHoverExpand
-              ? '0 8px 24px rgba(37, 99, 235, 0.08)'
+              ? `0 10px 28px ${THEME_ACCENT_RING}`
               : 'none',
           }}
         >
@@ -3878,8 +3885,8 @@ function AppearanceTab() {
                 gap: 6,
                 padding: '3px 8px',
                 borderRadius: 999,
-                background: navRailHoverExpand ? 'rgba(37, 99, 235, 0.1)' : 'rgba(148, 163, 184, 0.14)',
-                color: navRailHoverExpand ? '#2563eb' : '#64748b',
+                background: navRailHoverExpand ? THEME_ACCENT_SOFT_STRONG : 'var(--t-divider-subtle)',
+                color: navRailHoverExpand ? THEME_ACCENT : 'var(--t-text-secondary)',
                 fontSize: 11,
                 fontWeight: 700,
               }}>
@@ -3887,7 +3894,7 @@ function AppearanceTab() {
                   width: 7,
                   height: 7,
                   borderRadius: '50%',
-                  background: navRailHoverExpand ? '#2563eb' : '#94a3b8',
+                  background: navRailHoverExpand ? THEME_ACCENT : 'var(--t-text-muted)',
                 }} />
                 {navRailHoverExpand ? 'On' : 'Off'}
               </span>
@@ -3901,10 +3908,10 @@ function AppearanceTab() {
             width: 42,
             height: 24,
             borderRadius: 999,
-            background: navRailHoverExpand ? '#2563eb' : 'rgba(148, 163, 184, 0.34)',
+            background: navRailHoverExpand ? THEME_ACCENT : 'var(--t-divider-strong)',
             position: 'relative',
             flexShrink: 0,
-            boxShadow: navRailHoverExpand ? 'inset 0 0 0 1px rgba(37, 99, 235, 0.18)' : 'inset 0 0 0 1px rgba(148, 163, 184, 0.18)',
+            boxShadow: navRailHoverExpand ? `inset 0 0 0 1px ${THEME_ACCENT_BORDER}` : 'inset 0 0 0 1px var(--t-divider)',
             transition: 'background 140ms ease',
           }}>
             <span style={{
@@ -3914,8 +3921,8 @@ function AppearanceTab() {
               width: 18,
               height: 18,
               borderRadius: '50%',
-              background: '#fff',
-              boxShadow: '0 2px 8px rgba(15, 23, 42, 0.18)',
+              background: 'var(--t-text-strong)',
+              boxShadow: '0 2px 8px rgba(15, 23, 42, 0.28)',
               transition: 'left 140ms ease',
             }} />
           </div>
@@ -3959,19 +3966,20 @@ function AppearanceTab() {
                 display: 'flex', alignItems: 'flex-start', gap: 12,
                 padding: '12px 14px', borderRadius: 10,
                 border: fleetMode === option.id
-                  ? '1.5px solid var(--t-accent, #2563eb)'
+                  ? `1.5px solid ${THEME_ACCENT_BORDER}`
                   : '1px solid var(--t-panel-border)',
                 background: fleetMode === option.id
-                  ? 'rgba(37, 99, 235, 0.04)'
-                  : 'transparent',
+                  ? THEME_ACCENT_SOFT
+                  : 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
                 cursor: 'pointer',
                 transition: 'all 120ms ease',
+                boxShadow: fleetMode === option.id ? `0 10px 24px ${THEME_ACCENT_RING}` : 'none',
               }}
             >
               <div style={{
                 width: 16, height: 16, borderRadius: '50%', flexShrink: 0, marginTop: 1,
                 border: fleetMode === option.id
-                  ? '5px solid var(--t-accent, #2563eb)'
+                  ? `5px solid ${THEME_ACCENT}`
                   : '2px solid var(--t-text-muted)',
                 background: fleetMode === option.id ? 'var(--t-panel)' : 'transparent',
                 transition: 'all 120ms ease',
@@ -3994,8 +4002,8 @@ function AppearanceTab() {
 
 // ── Main Settings Page ──
 
-export function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('connectors');
+export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: SettingsTab }) {
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<GitHubAccount[]>([]);
   const [repos, setRepos] = useState<GitHubRepo[]>([]);
@@ -4005,6 +4013,10 @@ export function SettingsPage() {
   const [deviceFlow, setDeviceFlow] = useState<GitHubDeviceFlowState | null>(null);
   const [actionBusy, setActionBusy] = useState<GitHubActionKind | null>(null);
   const [actionNote, setActionNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   // Fetch GitHub status on mount
   const loadGitHubStatus = useCallback(async (showRefreshState = false) => {

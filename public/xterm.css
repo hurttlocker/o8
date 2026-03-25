@@ -41,6 +41,8 @@
     user-select: none;
     -ms-user-select: none;
     -webkit-user-select: none;
+    background-color: var(--t-panel, #30353c);
+    color-scheme: dark;
 }
 
 .xterm.focus,
@@ -92,8 +94,12 @@
 
 .xterm .xterm-viewport {
     /* On OS X this is required in order for the scroll bar to appear fully opaque */
-    background-color: #000;
+    background-color: var(--t-panel, #30353c);
     overflow-y: scroll;
+    scrollbar-width: thin;
+    scrollbar-color: var(--t-divider-strong, rgba(255,255,255,0.16)) transparent;
+    color-scheme: dark;
+    scrollbar-gutter: stable;
     cursor: default;
     position: absolute;
     right: 0;
@@ -102,14 +108,42 @@
     bottom: 0;
 }
 
+.xterm .xterm-viewport::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-track {
+    background: var(--t-panel, #30353c);
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-thumb {
+    background: var(--t-divider-strong, rgba(255,255,255,0.16));
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
+    background: var(--t-text-faint, rgba(255,255,255,0.3));
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+.xterm .xterm-viewport::-webkit-scrollbar-corner {
+    background: var(--t-panel, #30353c);
+}
+
 .xterm .xterm-screen {
     position: relative;
+    background-color: var(--t-panel, #30353c);
 }
 
 .xterm .xterm-screen canvas {
     position: absolute;
     left: 0;
     top: 0;
+    background-color: var(--t-panel, #30353c);
 }
 
 .xterm .xterm-scroll-area {
