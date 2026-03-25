@@ -1350,7 +1350,7 @@ function DashboardInner() {
       overflow: 'hidden',
     }}>
       {/* ── Update Banner ── */}
-      <UpdateBanner currentVersion="0.1.0" />
+      <UpdateBanner />
 
       {/* ── Title Bar ── */}
       <TitleBar
