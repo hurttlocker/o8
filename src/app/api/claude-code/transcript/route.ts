@@ -182,8 +182,14 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     return NextResponse.json(
-      { transcript: [], error: err instanceof Error ? err.message : 'unknown' },
-      { status: 500 },
+      {
+        transcript: [],
+        error: err instanceof Error ? err.message : 'unknown',
+        pending: true,
+      },
+      {
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      },
     );
   }
 }

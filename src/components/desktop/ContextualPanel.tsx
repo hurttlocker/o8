@@ -9,7 +9,7 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type React from 'react';
-import { Canvas } from './Canvas';
+import { Canvas, type CanvasRepoTaskLaunchRequest } from './Canvas';
 
 // ── CLI Agents (terminal only, no chat modes) ──
 
@@ -46,6 +46,7 @@ export interface ContextualPanelProps {
   sendTerminalDetach: (sessionName: string) => void;
   sendAgentKill: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
   termWsConnected: boolean;
+  selectedRepo?: string | null;
   // Canvas tabs (issues, diffs, files, timeline — rendered as tabs alongside terminals)
   canvasTabs?: import('./Canvas').CanvasTab[];
   activeCanvasTabId?: string | null;
@@ -54,6 +55,7 @@ export interface ContextualPanelProps {
   onCloseCanvasTab?: (tabId: string) => void;
   onInjectChatContext?: (payload: import('@/lib/chat/injection').AgentPanelChatInjectionPayload) => void;
   onSelectCommit?: (hash: string) => void;
+  onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
   onClose: () => void;
 }
 
@@ -354,6 +356,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       sendTerminalResize,
       sendTerminalDetach,
       termWsConnected,
+      selectedRepo,
       canvasTabs,
       activeCanvasTabId,
       canvasRevealKey,
@@ -361,6 +364,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       onCloseCanvasTab,
       onInjectChatContext,
       onSelectCommit,
+      onLaunchWorkspaceTask,
       onClose,
     },
     ref,
@@ -383,7 +387,8 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       if (!canvasRevealKey) return;
       if (!activeCanvasTabId) return;
       if (!canvasTabs?.some((tab) => tab.id === activeCanvasTabId)) return;
-      setActiveTabId('');
+      const timer = window.setTimeout(() => setActiveTabId(''), 0);
+      return () => window.clearTimeout(timer);
     }, [activeCanvasTabId, canvasRevealKey, canvasTabs]);
 
     const createBottomTab = useCallback((agent: CliAgent, initialCommand?: string) => {
@@ -811,8 +816,10 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
               activeTabId={activeCanvasTabId}
               onSelectTab={(id) => onSelectCanvasTab?.(id)}
               onCloseTab={(id) => onCloseCanvasTab?.(id)}
+              selectedRepo={selectedRepo}
               onInjectChatContext={onInjectChatContext}
               onSelectCommit={onSelectCommit}
+              onLaunchWorkspaceTask={onLaunchWorkspaceTask}
               embedded
             />
           </div>
