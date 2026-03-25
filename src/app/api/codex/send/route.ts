@@ -15,6 +15,14 @@ interface SendRequest {
   model?: string;
 }
 
+function shouldSuppressCodexStderrLine(line: string) {
+  const trimmed = line.trim();
+  if (!trimmed) return true;
+  if (trimmed.includes('failed to stat skills entry') && trimmed.includes('/.codex/skills/')) return true;
+  if (trimmed.includes('rmcp::transport::worker') && trimmed.includes('Connection refused')) return true;
+  return false;
+}
+
 /**
  * POST /api/codex/send
  *
@@ -122,11 +130,11 @@ export async function POST(req: NextRequest) {
       });
 
       child.stderr.on('data', (chunk: Buffer) => {
-        const errText = chunk.toString().trim();
-        // Filter out MCP connection errors (noisy but non-fatal)
-        if (errText && !errText.includes('rmcp::transport') && !errText.includes('worker quit')) {
+        const errLines = chunk.toString().split('\n').map((line) => line.trim()).filter(Boolean);
+        const visibleLines = errLines.filter((line) => !shouldSuppressCodexStderrLine(line));
+        if (visibleLines.length > 0) {
           controller.enqueue(encoder.encode(
-            `data: ${JSON.stringify({ type: 'error', text: errText })}\n\n`
+            `data: ${JSON.stringify({ type: 'error', text: visibleLines.join('\n') })}\n\n`
           ));
         }
       });

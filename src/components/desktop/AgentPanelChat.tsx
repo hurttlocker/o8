@@ -1618,7 +1618,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
   );
 });
 
-const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
+export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   loading,
   transcript,
   currentAgentName,
@@ -2762,10 +2762,15 @@ const ThinkingXray = memo(function ThinkingXray({
   );
 });
 
-const DesktopComposePane = memo(function DesktopComposePane({
+export const DesktopComposePane = memo(function DesktopComposePane({
   pendingFiles,
   removePendingFile,
   selectedSession,
+  modelOverride,
+  branchOverride,
+  statusOverride,
+  contextPercentOverride,
+  allowAttachments = true,
   composeRef,
   draft,
   setDraft,
@@ -2788,6 +2793,11 @@ const DesktopComposePane = memo(function DesktopComposePane({
   pendingFiles: { name: string; mimeType: string; content: string; preview?: string }[];
   removePendingFile: (idx: number) => void;
   selectedSession: SessionSummary | undefined;
+  modelOverride?: string;
+  branchOverride?: string;
+  statusOverride?: string;
+  contextPercentOverride?: number;
+  allowAttachments?: boolean;
   composeRef: React.RefObject<HTMLTextAreaElement | null>;
   draft: string;
   setDraft: React.Dispatch<React.SetStateAction<string>>;
@@ -2885,7 +2895,7 @@ const DesktopComposePane = memo(function DesktopComposePane({
 
       <div className="remodex-compose-surface">
         <ThinkingXray
-          model={sessionDisplayModel(selectedSession)}
+          model={modelOverride ?? sessionDisplayModel(selectedSession)}
           agentRunning={agentRunning}
           streamingText={streamingText}
         />
@@ -2964,14 +2974,16 @@ const DesktopComposePane = memo(function DesktopComposePane({
         ) : null}
 
         <div className="remodex-compose-row">
-          <button
-            type="button"
-            className="remodex-compose-chip remodex-compose-chip-icon"
-            aria-label="Attach"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <Plus size={16} strokeWidth={2.2} />
-          </button>
+          {allowAttachments ? (
+            <button
+              type="button"
+              className="remodex-compose-chip remodex-compose-chip-icon"
+              aria-label="Attach"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Plus size={16} strokeWidth={2.2} />
+            </button>
+          ) : null}
           {draft.trim().length >= 3 ? (
             <button
               type="button"
@@ -3070,37 +3082,52 @@ const DesktopComposePane = memo(function DesktopComposePane({
         border: '1px solid var(--t-divider-subtle)',
       }}>
         {(() => {
-          const pct = Math.round((selectedSession as unknown as Record<string, unknown>)?.context
-            ? ((selectedSession as unknown as Record<string, unknown>).context as { usedPercent?: number })?.usedPercent ?? 0
-            : 0);
-          const tone = pct >= 70 ? '#ef4444' : pct >= 50 ? '#f59e0b' : '#34c759';
+          const rawPct = contextPercentOverride ?? ((selectedSession as unknown as Record<string, unknown>)?.context
+            ? ((selectedSession as unknown as Record<string, unknown>).context as { usedPercent?: number })?.usedPercent
+            : undefined);
+          const pct = typeof rawPct === 'number' ? Math.round(rawPct) : null;
+          const branchLabel = branchOverride ?? selectedSession?.branch;
+          const statusLabel = statusOverride ?? selectedSession?.status;
+
           return (
             <>
-              <span style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: tone,
-                flexShrink: 0,
-              }} />
-              <span style={{
-                fontSize: 12,
-                color: 'var(--t-text-secondary)',
-                fontWeight: 500,
-              }}>
-                {pct}% context
-              </span>
+              {pct !== null ? (
+                <>
+                  <span style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    background: pct >= 70 ? '#ef4444' : pct >= 50 ? '#f59e0b' : '#34c759',
+                    flexShrink: 0,
+                  }} />
+                  <span style={{
+                    fontSize: 12,
+                    color: 'var(--t-text-secondary)',
+                    fontWeight: 500,
+                  }}>
+                    {pct}% context
+                  </span>
+                </>
+              ) : null}
+              {branchLabel ? (
+                <>
+                  {pct !== null ? <span style={{ color: 'var(--t-divider)' }}>·</span> : null}
+                  <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', fontWeight: 500 }}>
+                    {branchLabel}
+                  </span>
+                </>
+              ) : null}
+              {statusLabel ? (
+                <>
+                  {(pct !== null || branchLabel) ? <span style={{ color: 'var(--t-divider)' }}>·</span> : null}
+                  <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', fontWeight: 500 }}>
+                    {statusLabel}
+                  </span>
+                </>
+              ) : null}
             </>
           );
         })()}
-        <span style={{ color: 'var(--t-divider)' }}>·</span>
-        <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', fontWeight: 500 }}>
-          {selectedSession?.branch ?? 'branch unknown'}
-        </span>
-        <span style={{ color: 'var(--t-divider)' }}>·</span>
-        <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', fontWeight: 500 }}>
-          {selectedSession?.status ?? 'idle'}
-        </span>
       </div>
     </div>
   );

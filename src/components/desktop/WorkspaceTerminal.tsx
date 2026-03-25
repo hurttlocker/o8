@@ -2,10 +2,10 @@
 /* eslint-disable @next/next/no-img-element -- terminal image previews intentionally use raw panel-served URLs */
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio } from 'lucide-react';
-import { ChatBubble } from './ChatBubble';
-import LLMChat from './LLMChat';
+import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio, ArrowUp, Square } from 'lucide-react';
+import LLMChat, { MessageBubble, type LLMMessage } from './LLMChat';
 import { saveTabState, loadTabState, checkAliveSessions, type PersistedTabState } from '@/lib/terminal/tab-state';
+import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import {
   type DetectedLocalhostPreview,
   PREVIEW_HOST_MESSAGE_SOURCE,
@@ -27,14 +27,9 @@ export interface TerminalTab {
   // Chat-specific fields
   chatRuntime?: 'codex' | 'claude-code' | 'openclaw';
   chatSessionKey?: string; // OpenClaw session key or CLI session ID
-  chatMessages?: ChatMessage[];
-}
-
-export interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  timestamp: number;
+  chatModel?: string;
+  chatDraftInjection?: { id: string; text: string; autoSend?: boolean };
+  chatMessages?: MobileTranscriptEntry[];
 }
 
 type LocalhostPreview = DetectedLocalhostPreview;
@@ -56,6 +51,23 @@ export interface TerminalTabHandle {
   setTermExited: (sessionName: string) => void;
   onSessionCreated: (sessionName: string, requestId?: string) => boolean;
   clearDetectedPreview: (port: number) => void;
+  openCliChatSession: (options: {
+    runtime?: 'codex' | 'claude-code';
+    repo?: RegisteredRepo;
+    modelId?: string;
+    initialText?: string;
+    autoSend?: boolean;
+    createNew?: boolean;
+    label?: string;
+  }) => string;
+  injectIntoCliChat: (text: string, options?: {
+    runtime?: 'codex' | 'claude-code';
+    repo?: RegisteredRepo;
+    modelId?: string;
+    autoSend?: boolean;
+    createNew?: boolean;
+    label?: string;
+  }) => string;
 }
 
 interface WorkspaceTerminalProps {
@@ -87,6 +99,30 @@ interface RegisteredRepo {
   remoteUrl?: string;
 }
 
+interface WorkspaceCliModelOption {
+  id: string;
+  label: string;
+  color: string;
+}
+
+const CLAUDE_CLI_MODELS: WorkspaceCliModelOption[] = [
+  { id: 'claude-opus-4-6', label: 'Opus 4.6', color: '#8b5cf6' },
+  { id: 'claude-sonnet-4-5', label: 'Sonnet 4.5', color: '#8b5cf6' },
+  { id: 'claude-haiku-4-5', label: 'Haiku 4.5', color: '#8b5cf6' },
+];
+
+const CODEX_CLI_MODELS: WorkspaceCliModelOption[] = [
+  { id: 'gpt-5.4', label: 'GPT-5.4', color: '#10b981' },
+  { id: 'gpt-4o', label: 'GPT-4o', color: '#10b981' },
+];
+
+const CLI_SUGGESTED_PROMPTS = [
+  { icon: '💡', text: 'Summarize the current repo state', description: 'Quickly orient this CLI session to the local checkout' },
+  { icon: '🔍', text: 'Find the files related to the current bug', description: 'Search the repo and point me to the likely change surface' },
+  { icon: '🧪', text: 'Tell me what tests I should run next', description: 'Use the current branch and recent changes as context' },
+  { icon: '📝', text: 'Explain what changed on this branch', description: 'Read the local diff and summarize the work in progress' },
+];
+
 /** Small colored dot for tab/picker items */
 function AgentDot({ color, size = 8 }: { color: string; size?: number }) {
   return (
@@ -98,6 +134,122 @@ function AgentDot({ color, size = 8 }: { color: string; size?: number }) {
       background: color,
       flexShrink: 0,
     }} />
+  );
+}
+
+function WorkspaceCliModelPicker({
+  selected,
+  models,
+  disabled,
+  onSelect,
+}: {
+  selected: WorkspaceCliModelOption;
+  models: WorkspaceCliModelOption[];
+  disabled: boolean;
+  onSelect: (modelId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
+  const [dropPos, setDropPos] = useState({ bottom: 0, right: 0 });
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (btnRef.current?.contains(e.target as Node)) return;
+      if (dropRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !btnRef.current) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    setDropPos({
+      bottom: window.innerHeight - rect.top + 6,
+      right: window.innerWidth - rect.right,
+    });
+  }, [open]);
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => !disabled && setOpen(!open)}
+        disabled={disabled}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          paddingTop: 6,
+          paddingBottom: 6,
+          paddingLeft: 10,
+          paddingRight: 10,
+          borderRadius: 999,
+          background: '#ffffff',
+          border: '1px solid #e2e8f0',
+          fontSize: 12,
+          fontWeight: 600,
+          color: '#475569',
+          cursor: disabled ? 'default' : 'pointer',
+          opacity: disabled ? 0.6 : 1,
+        }}
+      >
+        <span style={{ width: 6, height: 6, borderRadius: '50%', background: selected.color }} />
+        {selected.label}
+        <ChevronDown size={11} style={{ color: '#94a3b8', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 150ms ease' }} />
+      </button>
+
+      {open && (
+        <div
+          ref={dropRef}
+          style={{
+            position: 'fixed',
+            bottom: dropPos.bottom,
+            right: dropPos.right,
+            zIndex: 9999,
+            minWidth: 220,
+            background: 'white',
+            border: '1px solid #e2e8f0',
+            borderRadius: 12,
+            overflow: 'hidden',
+            boxShadow: '0 -8px 40px rgba(0, 0, 0, 0.12)',
+          }}
+        >
+          {models.map((model) => (
+            <button
+              key={model.id}
+              type="button"
+              onClick={() => { onSelect(model.id); setOpen(false); }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                width: '100%',
+                paddingTop: 8,
+                paddingBottom: 8,
+                paddingLeft: 12,
+                paddingRight: 12,
+                border: 'none',
+                background: model.id === selected.id ? '#f8fafc' : 'transparent',
+                color: '#1e293b',
+                fontSize: 13,
+                cursor: 'pointer',
+                textAlign: 'left',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = '#f1f5f9'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = model.id === selected.id ? '#f8fafc' : 'transparent'; }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: model.color, flexShrink: 0 }} />
+              <span style={{ fontWeight: 500 }}>{model.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -497,41 +649,126 @@ function PreviewToolbar({ preview, selectionEnabled, onToggleSelection, onRefres
 
 /* ── Workspace Chat Pane ── */
 
-const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessages, onUpdateSessionKey }: {
+function nextWorkspaceToolCalls(previous: MobileTranscriptToolCall[], toolName: string): MobileTranscriptToolCall[] {
+  const existingIndex = previous.findIndex((tool) => tool.name === toolName);
+  if (existingIndex >= 0) {
+    return previous.map((tool, index) => (index === existingIndex ? { ...tool, status: 'running' } : tool));
+  }
+  return [...previous, { name: toolName, status: 'running' }];
+}
+
+const WorkspaceChatPane = memo(function WorkspaceChatPane({
+  tab,
+  onUpdateMessages,
+  onUpdateSessionKey,
+  onRunInTerminal,
+  onSelectModel,
+  onConsumeDraftInjection,
+}: {
   tab: TerminalTab;
-  onUpdateMessages: (tabId: string, messages: ChatMessage[]) => void;
+  onUpdateMessages: (tabId: string, messages: MobileTranscriptEntry[]) => void;
   onUpdateSessionKey: (tabId: string, sessionKey: string) => void;
+  onRunInTerminal?: (command: string) => void;
+  onSelectModel: (tabId: string, modelId: string) => void;
+  onConsumeDraftInjection: (tabId: string, injectionId: string) => void;
 }) {
-  const [input, setInput] = useState('');
+  const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
-  const [streaming, setStreaming] = useState(false);
+  const [agentRunning, setAgentRunning] = useState(false);
+  const [streamingText, setStreamingText] = useState('');
+  const [activeToolCalls, setActiveToolCalls] = useState<MobileTranscriptToolCall[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const composeRef = useRef<HTMLTextAreaElement>(null);
+  const liveToolCallsRef = useRef<MobileTranscriptToolCall[]>([]);
+  const stickToBottomRef = useRef(true);
+  const handledDraftInjectionRef = useRef<string | null>(null);
   const messages = useMemo(() => tab.chatMessages ?? [], [tab.chatMessages]);
   const tabId = tab.id;
   const chatRuntime = tab.chatRuntime;
   const chatSessionKey = tab.chatSessionKey;
+  const chatModel = tab.chatModel;
+  const runtimeLabels = useMemo(
+    () => ({ 'codex': 'Codex', 'claude-code': 'Claude Code', 'openclaw': 'OpenClaw' } as const),
+    [],
+  );
+  const availableModels = useMemo(
+    () => chatRuntime === 'claude-code' ? CLAUDE_CLI_MODELS : CODEX_CLI_MODELS,
+    [chatRuntime],
+  );
+  const selectedModel = useMemo(
+    () => availableModels.find((model) => model.id === chatModel) ?? availableModels[0],
+    [availableModels, chatModel],
+  );
 
-  // Auto-scroll to bottom
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  const scrollToBottom = useCallback((force = false) => {
+    if (!scrollRef.current) return;
+    if (!force && !stickToBottomRef.current) return;
+    requestAnimationFrame(() => {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    });
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    if (!scrollRef.current) return;
+    const el = scrollRef.current;
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distFromBottom < 80;
+  }, []);
+
+  const fetchTranscript = useCallback(async () => {
+    if (!chatRuntime || !chatSessionKey) return;
+    if (chatRuntime !== 'codex' && chatRuntime !== 'claude-code') return;
+    try {
+      const prefixedKey = chatRuntime === 'codex'
+        ? `codex:${chatSessionKey}`
+        : `claude-code:${chatSessionKey}`;
+      const endpoint = chatRuntime === 'codex'
+        ? `/api/codex/transcript?sessionKey=${encodeURIComponent(prefixedKey)}&limit=80`
+        : `/api/claude-code/transcript?sessionKey=${encodeURIComponent(prefixedKey)}&limit=80`;
+      const res = await fetch(endpoint);
+      if (!res.ok) return;
+      const data = await res.json() as { transcript?: MobileTranscriptEntry[] };
+      if (Array.isArray(data.transcript)) {
+        onUpdateMessages(tabId, data.transcript);
+        requestAnimationFrame(() => scrollToBottom(true));
+      }
+    } catch {
+      // silent
     }
-  }, [messages.length, streaming]);
+  }, [chatRuntime, chatSessionKey, onUpdateMessages, scrollToBottom, tabId]);
 
-  const handleSend = useCallback(async () => {
-    const text = input.trim();
+  useEffect(() => {
+    void fetchTranscript();
+  }, [fetchTranscript]);
+
+  useEffect(() => {
+    if (!chatSessionKey) return;
+    const id = setInterval(() => { void fetchTranscript(); }, 30_000);
+    return () => clearInterval(id);
+  }, [chatSessionKey, fetchTranscript]);
+
+  const sendText = useCallback(async (inputText: string) => {
+    const text = inputText.trim();
     if (!text || sending) return;
-    setInput('');
+    stickToBottomRef.current = true;
     setSending(true);
+    setAgentRunning(true);
+    setStreamingText('');
+    liveToolCallsRef.current = [];
+    setActiveToolCalls([]);
 
-    const userMsg: ChatMessage = {
+    const userMsg: MobileTranscriptEntry = {
       id: `msg-${Date.now()}-user`,
       role: 'user',
-      content: text,
+      text,
       timestamp: Date.now(),
+      timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
     const updated = [...messages, userMsg];
-      onUpdateMessages(tabId, updated);
+    onUpdateMessages(tabId, updated);
+    scrollToBottom(true);
 
     try {
       let endpoint = '';
@@ -539,28 +776,27 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
 
       if (chatRuntime === 'claude-code') {
         endpoint = '/api/claude-code/send';
-        body = { message: text, sessionId: chatSessionKey };
+        body = { message: text, sessionId: chatSessionKey, cwd: tab.repo?.localPath, model: selectedModel?.id };
       } else if (chatRuntime === 'codex') {
         endpoint = '/api/codex/send';
-        body = { message: text, threadId: chatSessionKey };
+        body = { message: text, threadId: chatSessionKey, cwd: tab.repo?.localPath, model: selectedModel?.id };
       } else {
-        // OpenClaw — use gateway send
-        endpoint = '/api/panel/chat/send';
-        body = { sessionKey: chatSessionKey || 'agent:main:main', message: text };
+        throw new Error('OpenClaw workspace sessions are no longer supported here.');
       }
 
-      setStreaming(true);
-
-      // Create placeholder assistant message for streaming
       const assistantId = `msg-${Date.now()}-assistant`;
-      const assistantMsg: ChatMessage = {
-        id: assistantId,
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-      };
-      let withAssistant = [...updated, assistantMsg];
-      onUpdateMessages(tabId, withAssistant);
+      let nextTranscript: MobileTranscriptEntry[] = [
+        ...updated,
+        {
+          id: assistantId,
+          role: 'assistant',
+          text: '',
+          timestamp: Date.now(),
+          timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          toolCalls: [],
+        },
+      ];
+      onUpdateMessages(tabId, nextTranscript);
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -568,604 +804,491 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({ tab, onUpdateMessage
         body: JSON.stringify(body),
       });
 
-      if (!res.ok) {
-        const errText = await res.text();
-        withAssistant = withAssistant.map((m) =>
-          m.id === assistantId ? { ...m, content: `Error ${res.status}: ${errText}` } : m
+      if (!res.ok || !res.body) {
+        const errText = await res.text().catch(() => res.statusText);
+        onUpdateMessages(
+          tabId,
+          nextTranscript.map((entry) => entry.id === assistantId ? { ...entry, text: `Error: ${errText || res.statusText}` } : entry),
         );
-        onUpdateMessages(tabId, withAssistant);
         return;
       }
 
-      if (res.body) {
-        // Stream SSE response
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let accumulated = '';
-        let buffer = '';
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = '';
+      let buffer = '';
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
 
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-          for (const line of lines) {
-            if (!line.startsWith('data: ')) continue;
-            try {
-              const event = JSON.parse(line.slice(6)) as {
-                type: string;
-                text?: string;
-                name?: string;
-                sessionId?: string;
-              };
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const event = JSON.parse(line.slice(6)) as {
+              type: string;
+              text?: string;
+              name?: string;
+              sessionId?: string;
+              threadId?: string;
+            };
 
-              if (event.type === 'delta' && event.text) {
-                accumulated += event.text;
-                withAssistant = withAssistant.map((m) =>
-                  m.id === assistantId ? { ...m, content: accumulated } : m
-                );
-                onUpdateMessages(tabId, withAssistant);
+            if (event.type === 'delta' && event.text) {
+              accumulated += event.text;
+              setStreamingText(accumulated);
+              nextTranscript = nextTranscript.map((entry) => (
+                entry.id === assistantId
+                  ? { ...entry, text: accumulated, toolCalls: liveToolCallsRef.current.length ? [...liveToolCallsRef.current] : undefined }
+                  : entry
+              ));
+              onUpdateMessages(tabId, nextTranscript);
+              scrollToBottom(false);
+            }
+
+            if (event.type === 'tool' && event.name) {
+              const nextTools = nextWorkspaceToolCalls(liveToolCallsRef.current, event.name);
+              liveToolCallsRef.current = nextTools;
+              setActiveToolCalls(nextTools);
+              nextTranscript = nextTranscript.map((entry) => (
+                entry.id === assistantId
+                  ? { ...entry, text: accumulated, toolCalls: nextTools }
+                  : entry
+              ));
+              onUpdateMessages(tabId, nextTranscript);
+            }
+
+            if (event.sessionId && chatRuntime === 'claude-code') {
+              onUpdateSessionKey(tabId, event.sessionId);
+            }
+            if (event.threadId && chatRuntime === 'codex') {
+              onUpdateSessionKey(tabId, event.threadId);
+            }
+
+            if (event.type === 'done' || event.type === 'close') {
+              if (event.text && !accumulated) {
+                accumulated = event.text;
+                nextTranscript = nextTranscript.map((entry) => (
+                  entry.id === assistantId
+                    ? { ...entry, text: accumulated, toolCalls: liveToolCallsRef.current.length ? [...liveToolCallsRef.current] : undefined }
+                    : entry
+                ));
+                onUpdateMessages(tabId, nextTranscript);
               }
-
-              if (event.type === 'tool' && event.name) {
-                accumulated += `\n🔧 *${event.name}*\n`;
-                withAssistant = withAssistant.map((m) =>
-                  m.id === assistantId ? { ...m, content: accumulated } : m
-                );
-                onUpdateMessages(tabId, withAssistant);
+              const settledTools = liveToolCallsRef.current.map((tool) => ({ ...tool, status: 'done' as const }));
+              if (settledTools.length > 0) {
+                liveToolCallsRef.current = settledTools;
+                setActiveToolCalls(settledTools);
+                nextTranscript = nextTranscript.map((entry) => (
+                  entry.id === assistantId ? { ...entry, toolCalls: settledTools } : entry
+                ));
+                onUpdateMessages(tabId, nextTranscript);
               }
+            }
 
-              // Capture session ID for conversation continuity
-              if (event.sessionId && chatRuntime === 'claude-code') {
-                onUpdateSessionKey(tabId, event.sessionId);
-              }
-
-              if (event.type === 'done' || event.type === 'close') {
-                if (event.text && !accumulated) {
-                  accumulated = event.text;
-                  withAssistant = withAssistant.map((m) =>
-                    m.id === assistantId ? { ...m, content: accumulated } : m
-                  );
-                  onUpdateMessages(tabId, withAssistant);
-                }
-              }
-            } catch { /* skip malformed lines */ }
+            if (event.type === 'error' && event.text) {
+              accumulated += `\n⚠️ ${event.text}`;
+              nextTranscript = nextTranscript.map((entry) => (
+                entry.id === assistantId ? { ...entry, text: accumulated } : entry
+              ));
+              onUpdateMessages(tabId, nextTranscript);
+            }
+          } catch {
+            // skip malformed SSE lines
           }
         }
+      }
 
-        // If nothing accumulated, show fallback
-        if (!accumulated) {
-          withAssistant = withAssistant.map((m) =>
-            m.id === assistantId ? { ...m, content: 'No response received' } : m
-          );
-          onUpdateMessages(tabId, withAssistant);
-        }
-      } else {
-        // Non-streaming fallback
-        const data = await res.json();
-        withAssistant = withAssistant.map((m) =>
-          m.id === assistantId ? { ...m, content: data.response ?? data.message ?? data.text ?? 'No response' } : m
+      if (!accumulated) {
+        onUpdateMessages(
+          tabId,
+          nextTranscript.map((entry) => entry.id === assistantId ? { ...entry, text: 'No response received' } : entry),
         );
-        onUpdateMessages(tabId, withAssistant);
       }
     } catch (err) {
-      const errorMsg: ChatMessage = {
-        id: `msg-${Date.now()}-error`,
-        role: 'assistant',
-        content: `Error: ${err instanceof Error ? err.message : 'Failed to send'}`,
-        timestamp: Date.now(),
-      };
-      onUpdateMessages(tabId, [...updated, errorMsg]);
+      onUpdateMessages(tabId, [
+        ...updated,
+        {
+          id: `msg-${Date.now()}-error`,
+          role: 'assistant',
+          text: `Error: ${err instanceof Error ? err.message : 'Failed to send'}`,
+          timestamp: Date.now(),
+          timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
     } finally {
       setSending(false);
-      setStreaming(false);
+      setAgentRunning(false);
+      setStreamingText('');
+      setTimeout(() => { void fetchTranscript(); }, 400);
     }
-  }, [input, sending, messages, tabId, chatRuntime, chatSessionKey, onUpdateMessages, onUpdateSessionKey]);
+  }, [chatRuntime, chatSessionKey, fetchTranscript, messages, onUpdateMessages, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.repo?.localPath, tabId]);
 
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const searchRef = useRef<HTMLInputElement>(null);
-  const [showSlashMenu, setShowSlashMenu] = useState(false);
-  const [slashFilter, setSlashFilter] = useState('');
-  const [showAttachMenu, setShowAttachMenu] = useState(false);
-  const [slashSelected, setSlashSelected] = useState(0);
-  const composeRef = useRef<HTMLDivElement>(null);
+  const handleSend = useCallback(async () => {
+    const text = draft.trim();
+    if (!text || sending) return;
+    setDraft('');
+    await sendText(text);
+  }, [draft, sendText, sending]);
 
-  // Slash commands
-  const SLASH_COMMANDS = useMemo(() => [
-    { cmd: '/help', desc: 'Show available commands' },
-    { cmd: '/compact', desc: 'Compact conversation history' },
-    { cmd: '/clear', desc: 'Clear terminal output' },
-    { cmd: '/cost', desc: 'Show token usage' },
-    { cmd: '/status', desc: 'Show agent status' },
-    { cmd: '/review', desc: 'Review current changes' },
-    { cmd: '/diff', desc: 'Show working diff' },
-    { cmd: '/test', desc: 'Run tests' },
-    { cmd: '/plan', desc: 'Create implementation plan' },
-  ], []);
-
-  const filteredSlash = useMemo(() => {
-    if (!slashFilter) return SLASH_COMMANDS;
-    return SLASH_COMMANDS.filter(c => c.cmd.includes(slashFilter.toLowerCase()));
-  }, [slashFilter, SLASH_COMMANDS]);
-
-  // Close attach menu on outside click
   useEffect(() => {
-    if (!showAttachMenu) return;
-    const handler = (e: MouseEvent) => {
-      if (composeRef.current && !composeRef.current.contains(e.target as Node)) {
-        setShowAttachMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [showAttachMenu]);
+    const injection = tab.chatDraftInjection;
+    if (!injection?.id) return;
+    if (handledDraftInjectionRef.current === injection.id) return;
+    handledDraftInjectionRef.current = injection.id;
+    stickToBottomRef.current = true;
 
-  // ⌘F to open search
+    if (injection.autoSend) {
+      setDraft('');
+      void sendText(injection.text);
+      requestAnimationFrame(() => composeRef.current?.focus());
+    } else {
+      setDraft((prev) => prev.trim()
+        ? `${prev.trimEnd()}\n\n${injection.text}\n\n`
+        : `${injection.text}\n\n`);
+      requestAnimationFrame(() => composeRef.current?.focus());
+    }
+
+    onConsumeDraftInjection(tabId, injection.id);
+  }, [onConsumeDraftInjection, sendText, tab.chatDraftInjection, tabId]);
+
+  const runtimeLabel = runtimeLabels[tab.chatRuntime ?? 'openclaw'];
+  const llmMessages = useMemo<LLMMessage[]>(
+    () => messages.map((message) => ({
+      id: message.id,
+      role: message.role === 'system' || message.role === 'tool' ? 'assistant' : message.role,
+      content: message.text,
+      model: message.role === 'assistant' ? selectedModel?.label : undefined,
+      timestamp: message.timestamp ?? Date.now(),
+      toolCalls: message.toolCalls?.map((tool) => ({
+        name: tool.name,
+        status: tool.status ?? 'done',
+        args: tool.args,
+      })),
+      isError: /^error:/i.test(message.text.trim()),
+    })),
+    [messages, selectedModel],
+  );
+
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
-        e.preventDefault();
-        setSearchOpen(v => !v);
-        setTimeout(() => searchRef.current?.focus(), 50);
-      }
-      if (e.key === 'Escape' && searchOpen) {
-        setSearchOpen(false);
-        setSearchQuery('');
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [searchOpen]);
-
-  const filteredMessages = useMemo(() => {
-    if (!searchQuery.trim()) return messages;
-    const q = searchQuery.toLowerCase();
-    return messages.filter(m => m.content.toLowerCase().includes(q));
-  }, [messages, searchQuery]);
-
-  const runtimeLabels = { 'codex': 'Codex', 'claude-code': 'Claude Code', 'openclaw': 'OpenClaw' };
-  const runtimeColors = { 'codex': '#10b981', 'claude-code': '#8b5cf6', 'openclaw': '#ef4444' };
-  const runtimeModels = { 'codex': 'GPT-5.4', 'claude-code': 'Opus 4.6', 'openclaw': 'Opus 4.6' };
-  const runtimeThinking = { 'codex': 'High', 'claude-code': 'high', 'openclaw': 'high' };
+    if (!scrollRef.current) return;
+    if (llmMessages.length === 0 && !streamingText && activeToolCalls.length === 0) return;
+    scrollToBottom();
+  }, [activeToolCalls.length, llmMessages.length, scrollToBottom, streamingText]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#ffffff' }}>
-      {/* Header bar */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '8px 16px',
-        borderBottom: '1px solid #e2e8f0',
-        flexShrink: 0,
-      }}>
-        <span style={{
-          width: 8, height: 8, borderRadius: '50%',
-          background: runtimeColors[tab.chatRuntime ?? 'openclaw'],
-          flexShrink: 0,
-        }} />
-        <span style={{
-          fontSize: 13, fontWeight: 600,
-          color: '#0f172a',
-          fontFamily: '-apple-system, system-ui, sans-serif',
-        }}>
-          {runtimeLabels[tab.chatRuntime ?? 'openclaw']}
-        </span>
-        {tab.repo ? (
-          <span style={{
-            fontSize: 11, color: '#94a3b8',
-            fontFamily: '"SF Mono", ui-monospace, monospace',
-          }}>
-            {tab.repo.name}
-          </span>
-        ) : null}
-      </div>
-
-      {/* Search bar (⌘F) */}
-      {searchOpen && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '6px 16px',
-          borderBottom: '1px solid #e2e8f0',
-          background: '#f8fafc',
-          flexShrink: 0,
-        }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8" />
-            <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          </svg>
-          <input
-            ref={searchRef}
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.currentTarget.value)}
-            placeholder="Search messages…"
-            style={{
-              flex: 1, border: 'none', background: 'transparent',
-              fontSize: 13, outline: 'none', color: '#0f172a',
-              fontFamily: '-apple-system, system-ui, sans-serif',
-            }}
-          />
-          {searchQuery && (
-            <span style={{ fontSize: 11, color: '#64748b', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-              {filteredMessages.length} result{filteredMessages.length !== 1 ? 's' : ''}
-            </span>
-          )}
-          <button
-            type="button"
-            onClick={() => { setSearchOpen(false); setSearchQuery(''); }}
-            style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              width: 20, height: 20, borderRadius: 4,
-              border: 'none', background: 'rgba(0,0,0,0.05)',
-              cursor: 'pointer', color: '#64748b', fontSize: 11,
-            }}
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* Messages area */}
-      <div ref={scrollRef} style={{
-        flex: 1,
-        overflowY: 'auto',
-        padding: '16px 24px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 16,
-      }}>
-        {(searchQuery ? filteredMessages : messages).length === 0 ? (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: '#ffffff' }}>
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          paddingTop: llmMessages.length === 0 && !agentRunning ? 0 : 24,
+          paddingBottom: 24,
+          paddingLeft: 24,
+          paddingRight: 24,
+          background: '#ffffff',
+        }}
+      >
+        {llmMessages.length === 0 && !agentRunning ? (
           <div style={{
-            flex: 1,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 8,
-            color: '#94a3b8',
+            height: '100%',
+            gap: 32,
+            animation: 'llmFadeIn 400ms ease-out',
           }}>
-            {searchQuery ? (
-              <>
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-                <span style={{ fontSize: 14, fontWeight: 500 }}>No results for &quot;{searchQuery}&quot;</span>
-              </>
-            ) : (
-              <>
-                <TerminalIcon size={32} strokeWidth={1} />
-                <span style={{ fontSize: 14, fontWeight: 500 }}>
-                  Start a conversation with {runtimeLabels[tab.chatRuntime ?? 'openclaw']}
-                </span>
-                <span style={{ fontSize: 12 }}>
-                  Messages are scoped to this workspace tab
-                </span>
-              </>
-            )}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 8,
+            }}>
+              <div style={{
+                width: 48,
+                height: 48,
+                borderRadius: 14,
+                background: 'linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                boxShadow: '0 4px 16px rgba(59, 130, 246, 0.2)',
+              }}>
+                <MessageSquare size={24} style={{ color: 'white' }} />
+              </div>
+              <div style={{
+                fontSize: 24,
+                fontWeight: 600,
+                color: '#0f172a',
+                letterSpacing: '-0.02em',
+              }}>
+                {(() => {
+                  const h = new Date().getHours();
+                  const greeting = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+                  return `${greeting}. What can I help you build?`;
+                })()}
+              </div>
+              <div style={{
+                fontSize: 14,
+                color: '#94a3b8',
+                textAlign: 'center',
+                maxWidth: 420,
+                lineHeight: '1.5',
+              }}>
+                Chat with {selectedModel.label} — scoped to this {runtimeLabel} session{tab.repo ? ` in ${tab.repo.name}` : ''}.
+              </div>
+            </div>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, 1fr)',
+              gap: 10,
+              maxWidth: 560,
+              width: '100%',
+            }}>
+              {CLI_SUGGESTED_PROMPTS.map((prompt, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => {
+                    setDraft(prompt.text);
+                    setTimeout(() => composeRef.current?.focus(), 50);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 10,
+                    paddingTop: 14,
+                    paddingBottom: 14,
+                    paddingLeft: 14,
+                    paddingRight: 14,
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 12,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 150ms ease',
+                    animation: `llmFadeIn 400ms ease-out ${100 + i * 50}ms both`,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = '#3b82f6';
+                    e.currentTarget.style.background = '#f0f9ff';
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                    e.currentTarget.style.boxShadow = '0 2px 8px rgba(59, 130, 246, 0.08)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = '#e2e8f0';
+                    e.currentTarget.style.background = '#f8fafc';
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                >
+                  <span style={{ fontSize: 18, lineHeight: '1', flexShrink: 0 }}>{prompt.icon}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: '#1e293b', lineHeight: '1.3' }}>
+                      {prompt.text}
+                    </span>
+                    <span style={{ fontSize: 11, color: '#94a3b8', lineHeight: '1.4' }}>
+                      {prompt.description}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         ) : (
-          (searchQuery ? filteredMessages : messages).map((msg: ChatMessage) => (
-            <ChatBubble
-              key={msg.id}
-              message={msg}
-              runtimeColor={runtimeColors[tab.chatRuntime ?? 'openclaw']}
-            />
-          ))
-        )}
-        {streaming ? (
-          <div style={{
-            display: 'flex',
-            gap: 4,
-            padding: '10px 14px',
-            borderRadius: '14px 14px 14px 4px',
-            background: '#f1f5f9',
-            width: 'fit-content',
-          }}>
-            <span style={{ animation: 'pulse 1.5s ease-in-out infinite', width: 6, height: 6, borderRadius: '50%', background: '#94a3b8' }} />
-            <span style={{ animation: 'pulse 1.5s ease-in-out 0.2s infinite', width: 6, height: 6, borderRadius: '50%', background: '#94a3b8' }} />
-            <span style={{ animation: 'pulse 1.5s ease-in-out 0.4s infinite', width: 6, height: 6, borderRadius: '50%', background: '#94a3b8' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 720, marginLeft: 'auto', marginRight: 'auto' }}>
+            {llmMessages.map((message, index) => (
+              <MessageBubble
+                key={message.id}
+                message={message}
+                isLast={index === llmMessages.length - 1 && !sending}
+                onRunInTerminal={onRunInTerminal}
+              />
+            ))}
+            {agentRunning && (streamingText || activeToolCalls.length > 0) ? (
+              <MessageBubble
+                message={{
+                  id: `stream:${tabId}`,
+                  role: 'assistant',
+                  content: streamingText || 'Thinking…',
+                  model: selectedModel.label,
+                  timestamp: Date.now(),
+                  toolCalls: activeToolCalls.map((tool) => ({
+                    name: tool.name,
+                    status: tool.status ?? 'running',
+                    args: tool.args,
+                  })),
+                }}
+                isLast
+                onRunInTerminal={onRunInTerminal}
+              />
+            ) : null}
           </div>
-        ) : null}
+        )}
       </div>
 
-      {/* Compose bar */}
-      <div ref={composeRef} style={{
-        padding: '10px 16px',
-        borderTop: '1px solid #e2e8f0',
-        flexShrink: 0,
-        position: 'relative',
+      <div style={{
+        paddingTop: 12,
+        paddingBottom: 16,
+        paddingLeft: 24,
+        paddingRight: 24,
+        borderTop: '1px solid #f1f5f9',
+        background: '#ffffff',
       }}>
-        {/* Slash command popover — drops DOWN into message area */}
-        {showSlashMenu && filteredSlash.length > 0 && (
-          <div style={{
-            position: 'absolute',
-            top: '100%',
-            left: 16, right: 16,
-            marginTop: 4,
-            borderRadius: 10,
-            background: 'rgba(255,255,255,0.75)',
-            backdropFilter: 'blur(40px) saturate(1.8)',
-            WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-            border: '1px solid rgba(255,255,255,0.3)',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)',
-            overflow: 'hidden',
-            zIndex: 100,
-          }}>
-            {filteredSlash.map((cmd, i) => (
-              <button
-                key={cmd.cmd}
-                type="button"
-                onClick={() => {
-                  setInput(cmd.cmd + ' ');
-                  setShowSlashMenu(false);
-                  setSlashFilter('');
-                }}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  width: '100%',
-                  padding: '8px 14px',
-                  border: 'none',
-                  background: i === slashSelected ? 'rgba(37,99,235,0.08)' : 'transparent',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                  transition: 'background 80ms ease',
-                }}
-                onMouseEnter={() => setSlashSelected(i)}
-              >
-                <span style={{
-                  fontSize: 13, fontWeight: 600, color: '#0f172a',
-                  fontFamily: '"SF Mono", ui-monospace, monospace',
-                  minWidth: 80,
-                }}>
-                  {cmd.cmd}
-                </span>
-                <span style={{ fontSize: 12, color: '#64748b' }}>
-                  {cmd.desc}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Attach popover (glass) — drops DOWN */}
-        {showAttachMenu && (
-          <div style={{
-            position: 'absolute',
-            top: '100%',
-            left: 16,
-            marginTop: 4,
-            borderRadius: 10,
-            background: 'rgba(255,255,255,0.75)',
-            backdropFilter: 'blur(40px) saturate(1.8)',
-            WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-            border: '1px solid rgba(255,255,255,0.3)',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 2px 8px rgba(0,0,0,0.06)',
-            overflow: 'hidden',
-            zIndex: 100,
-            minWidth: 180,
-          }}>
-            {[
-              { icon: 'M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48', label: 'Attach file' },
-              { icon: 'M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z M12 13m-4 0a4 4 0 1 0 8 0a4 4 0 1 0-8 0', label: 'Attach image' },
-              { icon: 'M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2 M9 2h6v4H9z', label: 'Paste from clipboard' },
-              { icon: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8', label: 'Add context file' },
-            ].map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onClick={() => setShowAttachMenu(false)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 10,
-                  width: '100%',
-                  padding: '8px 14px',
-                  border: 'none',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                  transition: 'background 80ms ease',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.04)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d={item.icon} />
-                </svg>
-                <span style={{ fontSize: 13, fontWeight: 500, color: '#0f172a' }}>
-                  {item.label}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Input row */}
         <div style={{
-          display: 'flex', gap: 8, alignItems: 'flex-end',
+          maxWidth: 720,
+          marginLeft: 'auto',
+          marginRight: 'auto',
+          border: '1px solid #e2e8f0',
+          borderRadius: 18,
+          background: '#fafafa',
+          transition: 'border-color 200ms, box-shadow 200ms',
+          overflow: 'hidden',
         }}>
           <div style={{
-            flex: 1,
-            borderRadius: 12,
-            border: '1px solid #e2e8f0',
-            background: '#f8fafc',
-            overflow: 'hidden',
-            transition: 'border-color 150ms ease',
+            paddingTop: 14,
+            paddingBottom: 8,
+            paddingLeft: 18,
+            paddingRight: 18,
           }}>
             <textarea
-              value={input}
+              ref={composeRef}
+              value={draft}
               onChange={(e) => {
-                const val = e.currentTarget.value;
-                setInput(val);
-                // Auto-resize
+                setDraft(e.currentTarget.value);
                 e.currentTarget.style.height = 'auto';
-                e.currentTarget.style.height = Math.min(e.currentTarget.scrollHeight, 120) + 'px';
-                // Slash command detection
-                if (val === '/') {
-                  setShowSlashMenu(true);
-                  setSlashFilter('');
-                  setSlashSelected(0);
-                } else if (val.startsWith('/') && !val.includes(' ')) {
-                  setShowSlashMenu(true);
-                  setSlashFilter(val);
-                  setSlashSelected(0);
-                } else {
-                  setShowSlashMenu(false);
-                }
+                e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, 200)}px`;
               }}
               onKeyDown={(e) => {
-                if (showSlashMenu) {
-                  if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    setSlashSelected(s => Math.min(s + 1, filteredSlash.length - 1));
-                    return;
-                  }
-                  if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    setSlashSelected(s => Math.max(s - 1, 0));
-                    return;
-                  }
-                  if (e.key === 'Enter' || e.key === 'Tab') {
-                    e.preventDefault();
-                    if (filteredSlash[slashSelected]) {
-                      setInput(filteredSlash[slashSelected].cmd + ' ');
-                      setShowSlashMenu(false);
-                      setSlashFilter('');
-                    }
-                    return;
-                  }
-                  if (e.key === 'Escape') {
-                    e.preventDefault();
-                    setShowSlashMenu(false);
-                    return;
-                  }
-                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  handleSend();
+                  void handleSend();
                 }
               }}
-              placeholder={`Message ${runtimeLabels[tab.chatRuntime ?? 'openclaw']}… (/ for commands)`}
-              disabled={sending}
+              placeholder={`Message ${runtimeLabel}...`}
               rows={1}
               style={{
                 width: '100%',
-                padding: '10px 14px',
                 border: 'none',
-                background: 'transparent',
-                fontSize: 13,
-                fontFamily: '-apple-system, system-ui, sans-serif',
                 outline: 'none',
-                color: '#0f172a',
+                background: 'transparent',
+                color: '#1e293b',
+                fontSize: 14,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                lineHeight: '1.5',
                 resize: 'none',
-                lineHeight: 1.5,
-                maxHeight: 120,
+                minHeight: 24,
+                maxHeight: 200,
+                boxSizing: 'border-box',
               }}
             />
           </div>
-          <button
-            type="button"
-            onClick={handleSend}
-            disabled={sending || !input.trim()}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 36,
-              height: 36,
-              borderRadius: 10,
-              border: 'none',
-              background: input.trim() ? runtimeColors[tab.chatRuntime ?? 'openclaw'] : '#e2e8f0',
-              color: input.trim() ? '#ffffff' : '#94a3b8',
-              cursor: input.trim() ? 'pointer' : 'default',
-              transition: 'all 150ms ease',
-              flexShrink: 0,
-              marginBottom: 2,
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="22" y1="2" x2="11" y2="13" />
-              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-            </svg>
-          </button>
-        </div>
-        {/* Bottom row: model + thinking + attach + search */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          paddingTop: 6, paddingLeft: 2,
-          fontSize: 11, color: '#64748b',
-        }}>
-          {/* Model indicator */}
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 3,
-            fontWeight: 600, fontSize: 11,
+
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingTop: 4,
+            paddingBottom: 10,
+            paddingLeft: 14,
+            paddingRight: 10,
           }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-            {runtimeModels[tab.chatRuntime ?? 'openclaw']}
-          </span>
-          <span style={{ color: '#e2e8f0' }}>·</span>
-          {/* Thinking level */}
-          <span style={{
-            display: 'inline-flex', alignItems: 'center', gap: 3,
-            fontWeight: 600, fontSize: 11, color: '#f59e0b',
-          }}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
-              <path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z" />
-              <path d="M9 21h6" />
-            </svg>
-            {runtimeThinking[tab.chatRuntime ?? 'openclaw']}
-          </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <button
+                type="button"
+                disabled
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 30,
+                  height: 30,
+                  borderRadius: 8,
+                  border: 'none',
+                  background: 'transparent',
+                  color: '#cbd5e1',
+                  cursor: 'default',
+                }}
+                title="Attachments coming soon"
+              >
+                <Plus size={16} />
+              </button>
+              <span style={{
+                fontSize: 10,
+                color: '#cbd5e1',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}>
+                CLI session
+              </span>
+            </div>
 
-          <span style={{ flex: 1 }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <WorkspaceCliModelPicker
+                selected={selectedModel}
+                models={availableModels}
+                disabled={sending}
+                onSelect={(modelId) => onSelectModel(tabId, modelId)}
+              />
+              <span style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: agentRunning ? '#22c55e' : '#d1d5db',
+              }} />
 
-          {/* Attach button (opens glass popover) */}
-          <button
-            type="button"
-            onClick={() => setShowAttachMenu(v => !v)}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              padding: '2px 8px',
-              borderRadius: 5,
-              border: '1px solid #e2e8f0',
-              background: showAttachMenu ? 'rgba(0,0,0,0.06)' : '#f1f5f9',
-              cursor: 'pointer', color: '#64748b',
-              fontSize: 10, fontWeight: 600,
-              fontFamily: '-apple-system, system-ui, sans-serif',
-              transition: 'all 120ms ease',
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0,0,0,0.06)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = showAttachMenu ? 'rgba(0,0,0,0.06)' : '#f1f5f9'; }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Attach
-          </button>
-
-          {/* ⌘F search */}
-          <kbd
-            onClick={() => { setSearchOpen(true); setTimeout(() => searchRef.current?.focus(), 50); }}
-            style={{
-              fontSize: 9, fontWeight: 500,
-              padding: '1px 4px', borderRadius: 3,
-              border: '1px solid #e2e8f0',
-              background: '#f1f5f9',
-              color: '#94a3b8',
-              cursor: 'pointer',
-              fontFamily: '-apple-system, system-ui, sans-serif',
-            }}
-          >
-            ⌘F
-          </kbd>
+              {agentRunning ? (
+                <button
+                  type="button"
+                  disabled
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 32,
+                    height: 32,
+                    border: 'none',
+                    borderRadius: 10,
+                    background: '#ef4444',
+                    color: '#ffffff',
+                    cursor: 'default',
+                    flexShrink: 0,
+                  }}
+                >
+                  <Square size={14} />
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void handleSend()}
+                  disabled={!draft.trim() || sending}
+                  title="Send message (Enter)"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 32,
+                    height: 32,
+                    border: 'none',
+                    borderRadius: 10,
+                    background: draft.trim() ? '#1e293b' : '#e2e8f0',
+                    color: draft.trim() ? '#ffffff' : '#94a3b8',
+                    cursor: draft.trim() ? 'pointer' : 'default',
+                    flexShrink: 0,
+                    transition: 'all 150ms',
+                  }}
+                >
+                  <ArrowUp size={16} />
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1355,7 +1478,7 @@ const TabBar = memo(function TabBar({
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onNewTab: (agentId: string, repo?: RegisteredRepo) => void;
-  onNewChatTab: (runtime: 'codex' | 'claude-code' | 'openclaw', repo?: RegisteredRepo) => void;
+  onNewChatTab: (runtime: 'codex' | 'claude-code', repo?: RegisteredRepo) => void;
   onNewLLMChatTab: () => void;
   onRegisterRepo?: (localPath: string) => void;
 }) {
@@ -1747,7 +1870,6 @@ const TabBar = memo(function TabBar({
               {([
                 { id: 'codex' as const, label: 'Codex', color: '#10b981' },
                 { id: 'claude-code' as const, label: 'Claude Code', color: '#8b5cf6' },
-                { id: 'openclaw' as const, label: 'OpenClaw', color: '#ef4444' },
               ]).map((rt) => (
                 <button
                   type="button"
@@ -2040,6 +2162,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             tmuxSession: t.tmuxSession ?? undefined,
             chatRuntime: t.chatRuntime,
             chatSessionKey: t.chatSessionKey,
+            chatModel: t.chatModel,
           })),
           savedAt: new Date().toISOString(),
         };
@@ -2139,6 +2262,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                 tmuxSession: null,
                 chatRuntime: st.chatRuntime,
                 chatSessionKey: st.chatSessionKey,
+                chatModel: st.chatModel,
                 createdAt: now,
                 lastActivity: now,
                 chatMessages: [],
@@ -2252,6 +2376,89 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       return claimed;
     }, []);
 
+    const openWorkspaceCliChatSession = useCallback((options: {
+      runtime?: 'codex' | 'claude-code';
+      repo?: RegisteredRepo;
+      modelId?: string;
+      initialText?: string;
+      autoSend?: boolean;
+      createNew?: boolean;
+      label?: string;
+    }) => {
+      let resolvedTabId = '';
+      const runtimeLabels = { codex: 'Codex', 'claude-code': 'Claude Code' } as const;
+      const activeTab = tabsRef.current.find((tab) => tab.id === activeTabId);
+      const resolvedRuntime = options.runtime
+        ?? (activeTab?.kind === 'chat' && (activeTab.chatRuntime === 'codex' || activeTab.chatRuntime === 'claude-code')
+          ? activeTab.chatRuntime
+          : (options.createNew ? 'codex' : 'claude-code'));
+
+      setTabs((prev) => {
+        const activeExisting = prev.find((tab) => (
+          tab.id === activeTabId
+          && tab.kind === 'chat'
+          && tab.chatRuntime === resolvedRuntime
+          && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+        ));
+
+        const matchingExisting = options.createNew
+          ? null
+          : activeExisting ?? prev.find((tab) => (
+              tab.kind === 'chat'
+              && tab.chatRuntime === resolvedRuntime
+              && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+            ));
+
+        const injection = options.initialText
+          ? {
+              id: `workspace-chat-injection-${Date.now()}`,
+              text: options.initialText,
+              autoSend: options.autoSend,
+            }
+          : undefined;
+
+        if (matchingExisting) {
+          resolvedTabId = matchingExisting.id;
+          return prev.map((tab) => (
+            tab.id === matchingExisting.id
+              ? {
+                  ...tab,
+                  label: options.label ?? tab.label,
+                  chatModel: options.modelId ?? tab.chatModel,
+                  chatDraftInjection: injection ?? tab.chatDraftInjection,
+                }
+              : tab
+          ));
+        }
+
+        tabCountRef.current += 1;
+        resolvedTabId = `chat-${tabCountRef.current}`;
+        const now = Date.now();
+        const baseLabel = options.repo ? `${runtimeLabels[resolvedRuntime]} · ${options.repo.name}` : runtimeLabels[resolvedRuntime];
+        const newTab: TerminalTab = {
+          id: resolvedTabId,
+          label: options.label ?? baseLabel,
+          kind: 'chat',
+          tmuxSession: null,
+          chatRuntime: resolvedRuntime,
+          chatSessionKey: undefined,
+          chatModel: options.modelId ?? (resolvedRuntime === 'claude-code' ? CLAUDE_CLI_MODELS[0].id : CODEX_CLI_MODELS[0].id),
+          chatDraftInjection: injection,
+          repo: options.repo,
+          createdAt: now,
+          lastActivity: now,
+          chatMessages: [],
+        };
+        return [...prev, newTab];
+      });
+
+      if (resolvedTabId) {
+        setActiveTabId(resolvedTabId);
+      }
+
+      return resolvedTabId;
+    }, [activeTabId]);
+
     // Route terminal events to the correct tab's XtermPanel
     useImperativeHandle(ref, () => ({
       writeToTerminal: (sessionName: string, data: string) => {
@@ -2319,7 +2526,17 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         detectedPortsRef.current.delete(port);
         setPreviews((prev) => prev.filter((preview) => preview.port !== port));
       },
-    }), [handleSessionCreated, onPreviewDetected]);
+      openCliChatSession: (options) => openWorkspaceCliChatSession(options),
+      injectIntoCliChat: (text, options) => openWorkspaceCliChatSession({
+        runtime: options?.runtime,
+        repo: options?.repo,
+        modelId: options?.modelId,
+        initialText: text,
+        autoSend: options?.autoSend ?? false,
+        createNew: options?.createNew ?? false,
+        label: options?.label,
+      }),
+    }), [handleSessionCreated, onPreviewDetected, openWorkspaceCliChatSession]);
 
     // Auto-register a folder so it shows in the picker next time
     const handleRegisterRepo = useCallback((localPath: string) => {
@@ -2362,10 +2579,10 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       requestTerminalForTab(tabId, pendingCliCommands.current.get(tabId));
     }, [requestTerminalForTab]);
 
-    const handleNewChatTab = useCallback((runtime: 'codex' | 'claude-code' | 'openclaw', repo?: RegisteredRepo) => {
+    const handleNewChatTab = useCallback((runtime: 'codex' | 'claude-code', repo?: RegisteredRepo) => {
       tabCountRef.current += 1;
       const tabId = `chat-${tabCountRef.current}`;
-      const runtimeLabels = { 'codex': 'Codex', 'claude-code': 'Claude Code', 'openclaw': 'OpenClaw' };
+      const runtimeLabels = { 'codex': 'Codex', 'claude-code': 'Claude Code' };
       const label = repo ? `${runtimeLabels[runtime]} · ${repo.name}` : runtimeLabels[runtime];
       const now = Date.now();
       const newTab: TerminalTab = {
@@ -2374,6 +2591,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         kind: 'chat',
         tmuxSession: null,
         chatRuntime: runtime,
+        chatModel: runtime === 'claude-code' ? CLAUDE_CLI_MODELS[0].id : CODEX_CLI_MODELS[0].id,
         repo,
         createdAt: now,
         lastActivity: now,
@@ -2399,7 +2617,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       setActiveTabId(tabId);
     }, []);
 
-    const handleUpdateChatMessages = useCallback((tabId: string, messages: ChatMessage[]) => {
+    const handleUpdateChatMessages = useCallback((tabId: string, messages: MobileTranscriptEntry[]) => {
       setTabs(prev => prev.map(t =>
         t.id === tabId ? { ...t, chatMessages: messages, lastActivity: Date.now() } : t
       ));
@@ -2410,6 +2628,51 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         t.id === tabId ? { ...t, chatSessionKey: sessionKey } : t
       ));
     }, []);
+
+    const handleUpdateChatModel = useCallback((tabId: string, modelId: string) => {
+      setTabs(prev => prev.map(t =>
+        t.id === tabId ? { ...t, chatModel: modelId } : t
+      ));
+    }, []);
+
+    const handleConsumeChatDraftInjection = useCallback((tabId: string, injectionId: string) => {
+      setTabs(prev => prev.map((tab) => (
+        tab.id === tabId && tab.chatDraftInjection?.id === injectionId
+          ? { ...tab, chatDraftInjection: undefined }
+          : tab
+      )));
+    }, []);
+
+    const handleRunCommandInTerminal = useCallback((command: string) => {
+      const shellTab = tabs.find(t => t.kind === 'terminal' && t.tmuxSession);
+      if (shellTab?.tmuxSession) {
+        sendTerminalInput(shellTab.tmuxSession, command + '\n');
+        return;
+      }
+
+      const pendingShell = tabs.find(t => t.kind === 'terminal' && !t.tmuxSession);
+      if (pendingShell) {
+        pendingCliCommands.current.set(pendingShell.id, command);
+        setActiveTabId(pendingShell.id);
+        return;
+      }
+
+      tabCountRef.current += 1;
+      const nextTabId = `tab-${tabCountRef.current}`;
+      const now = Date.now();
+      const newTab: TerminalTab = {
+        id: nextTabId,
+        label: 'Terminal',
+        kind: 'terminal',
+        tmuxSession: null,
+        cliAgent: 'shell',
+        createdAt: now,
+        lastActivity: now,
+      };
+      setTabs(prev => [...prev, newTab]);
+      setActiveTabId(nextTabId);
+      requestTerminalForTab(nextTabId, command);
+    }, [requestTerminalForTab, sendTerminalInput, tabs]);
 
     const handleCloseTab = useCallback((tabId: string) => {
       setTabs(prev => {
@@ -2602,36 +2865,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                     });
                     setActiveTabId(historyTabId);
                   }}
-                  onRunInTerminal={(command: string) => {
-                    // Find the first terminal tab with a tmux session
-                    const shellTab = tabs.find(t => t.kind === 'terminal' && t.tmuxSession);
-                    if (shellTab?.tmuxSession) {
-                      sendTerminalInput(shellTab.tmuxSession, command + '\n');
-                    } else {
-                      const pendingShell = tabs.find(t => t.kind === 'terminal' && !t.tmuxSession);
-                      if (pendingShell) {
-                        pendingCliCommands.current.set(pendingShell.id, command);
-                        setActiveTabId(pendingShell.id);
-                        return;
-                      }
-
-                      tabCountRef.current += 1;
-                      const tabId = `tab-${tabCountRef.current}`;
-                      const now = Date.now();
-                      const newTab: TerminalTab = {
-                        id: tabId,
-                        label: 'Terminal',
-                        kind: 'terminal',
-                        tmuxSession: null,
-                        cliAgent: 'shell',
-                        createdAt: now,
-                        lastActivity: now,
-                      };
-                      setTabs(prev => [...prev, newTab]);
-                      setActiveTabId(tabId);
-                      requestTerminalForTab(tabId, command);
-                    }
-                  }}
+                  onRunInTerminal={handleRunCommandInTerminal}
                 />
               </div>
             ) : tab.kind === 'chat' ? (
@@ -2639,11 +2873,16 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                 flex: 1,
                 display: tab.id === activeTabId ? 'flex' : 'none',
                 flexDirection: 'column',
+                height: '100%',
+                minHeight: 0,
               }}>
                 <WorkspaceChatPane
                   tab={tab}
                   onUpdateMessages={handleUpdateChatMessages}
                   onUpdateSessionKey={handleUpdateChatSessionKey}
+                  onRunInTerminal={handleRunCommandInTerminal}
+                  onSelectModel={handleUpdateChatModel}
+                  onConsumeDraftInjection={handleConsumeChatDraftInjection}
                 />
               </div>
             ) : tab.tmuxSession ? (

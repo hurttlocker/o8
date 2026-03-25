@@ -454,6 +454,9 @@ function RepoCard({
   onSelectBranch,
   agentsByBranch,
   activePorts,
+  expanded,
+  onToggle,
+  isActive = false,
 }: {
   repo: RepoRegistryEntry;
   workspaceNotice: WorkspaceCreateResult | null;
@@ -465,29 +468,10 @@ function RepoCard({
   onSelectBranch?: (branch: string, repoPath: string) => void;
   agentsByBranch?: Map<string, BranchAgent[]>;
   activePorts?: number[];
+  expanded: boolean;
+  onToggle: () => void;
+  isActive?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(() => {
-    if (typeof window === 'undefined') return false;
-    try {
-      const stored = sessionStorage.getItem('cortex-repo-expanded');
-      if (stored) {
-        const set = JSON.parse(stored) as string[];
-        return set.includes(repo.id);
-      }
-    } catch { /* ignore */ }
-    return false;
-  });
-
-  // Persist expanded state
-  useEffect(() => {
-    try {
-      const stored = sessionStorage.getItem('cortex-repo-expanded');
-      const set = new Set<string>(stored ? JSON.parse(stored) : []);
-      if (expanded) set.add(repo.id);
-      else set.delete(repo.id);
-      sessionStorage.setItem('cortex-repo-expanded', JSON.stringify([...set]));
-    } catch { /* ignore */ }
-  }, [expanded, repo.id]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draftSetup, setDraftSetup] = useState<RepoSetupConfig>(repo.setup);
@@ -843,18 +827,44 @@ function RepoCard({
     }));
   }, []);
 
+  const cardBackground = isActive
+    ? 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(239,246,255,0.94))'
+    : expanded
+      ? 'linear-gradient(180deg, rgba(255,255,255,0.97), rgba(248,250,252,0.93))'
+      : 'rgba(255, 255, 255, 0.8)';
+  const cardBorder = isActive
+    ? '1px solid rgba(37, 99, 235, 0.18)'
+    : expanded
+      ? '1px solid rgba(148, 163, 184, 0.2)'
+      : '1px solid rgba(148, 163, 184, 0.14)';
+
   return (
-    <div style={{ borderBottom: '1px solid var(--t-divider-subtle)', position: 'relative' }}>
+    <div
+      style={{
+        position: 'relative',
+        borderRadius: 18,
+        border: cardBorder,
+        background: cardBackground,
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        boxShadow: isActive
+          ? '0 18px 34px rgba(37, 99, 235, 0.08)'
+          : expanded
+            ? '0 14px 30px rgba(15, 23, 42, 0.06)'
+            : '0 8px 18px rgba(15, 23, 42, 0.04)',
+        overflow: 'hidden',
+      }}
+    >
       {/* Compact header row — Conductor style */}
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           gap: 8,
-          padding: '8px 4px',
+          padding: '12px 14px',
           cursor: 'pointer',
         }}
-        onClick={() => setExpanded((v) => !v)}
+        onClick={onToggle}
         onMouseEnter={(event) => schedulePreviewHover(event.currentTarget as HTMLDivElement, event.clientX, event.clientY)}
         onMouseLeave={closePreviewHover}
       >
@@ -864,7 +874,7 @@ function RepoCard({
         <span
           style={{
             fontSize: 13,
-            fontWeight: 600,
+            fontWeight: 700,
             color: 'var(--t-text)',
             letterSpacing: '-0.01em',
             flex: 1,
@@ -876,6 +886,26 @@ function RepoCard({
         >
           {repo.name}
         </span>
+        {isActive ? (
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '3px 9px',
+              borderRadius: 999,
+              background: 'rgba(37, 99, 235, 0.08)',
+              border: '1px solid rgba(37, 99, 235, 0.14)',
+              color: '#2563eb',
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase',
+              flexShrink: 0,
+            }}
+          >
+            Current
+          </span>
+        ) : null}
         {/* Running port indicator */}
         {activePorts && activePorts.length > 0 ? (
           <span style={{
@@ -1145,7 +1175,7 @@ function RepoCard({
               { label: 'Launch Agent', icon: <PlayCircle size={12} strokeWidth={2} />, action: () => { onLaunchAgent(repo); setMenuOpen(false); } },
               { label: 'Settings', icon: <Settings2 size={12} strokeWidth={2} />, action: () => { setSettingsOpen((v) => !v); setMenuOpen(false); } },
               ...(githubUrl ? [{ label: 'Open on GitHub', icon: <ExternalLink size={12} strokeWidth={2} />, action: () => { onOpenGitHub(repo); setMenuOpen(false); } }] : []),
-              { label: 'Remove', icon: <Trash2 size={12} strokeWidth={2} />, action: () => { onRemove(repo); setMenuOpen(false); }, danger: true },
+              { label: 'Remove from Cortex', icon: <Trash2 size={12} strokeWidth={2} />, action: () => { onRemove(repo); setMenuOpen(false); }, danger: true },
             ].map((item) => (
               <button
                 key={item.label}
@@ -1177,9 +1207,9 @@ function RepoCard({
 
       {/* Expanded content */}
       {expanded ? (
-        <div style={{ padding: '0 4px 8px 28px' }}>
+        <div style={{ padding: '6px 14px 16px 44px' }}>
           {/* Primary actions row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
             <button
               type="button"
               onClick={() => onLaunchAgent(repo)}
@@ -1270,6 +1300,30 @@ function RepoCard({
                 </button>
               )
             ) : null}
+            <div style={{ flex: 1 }} />
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemove(repo);
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                padding: 0,
+                border: 'none',
+                background: 'transparent',
+                color: '#b91c1c',
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              <Trash2 size={11} strokeWidth={2} />
+              Remove from Cortex
+            </button>
           </div>
 
           {/* Multi-agent conflict warning */}
@@ -2208,15 +2262,38 @@ export function RepoRegistrySection({
   onSelectSession,
   onSelectPR,
   onLaunchComplete,
+  activeRepoLocalPath = null,
+  sectionOpen,
+  onSectionOpenChange,
+  launchIntent,
+  hideHeader = false,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
   onLaunchComplete?: () => void;
+  activeRepoLocalPath?: string | null;
+  sectionOpen?: boolean;
+  onSectionOpenChange?: (open: boolean) => void;
+  launchIntent?: { repoPath: string | null; nonce: number } | null;
+  hideHeader?: boolean;
 } = {}) {
   const [repos, setRepos] = useState<RepoRegistryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [reposOpen, setReposOpen] = useState(true);
+  const [reposOpenInternal, setReposOpenInternal] = useState(true);
+  const reposOpen = sectionOpen ?? reposOpenInternal;
+  const setReposOpen = useCallback((next: boolean) => {
+    if (onSectionOpenChange) onSectionOpenChange(next);
+    else setReposOpenInternal(next);
+  }, [onSectionOpenChange]);
+  const [expandedRepoId, setExpandedRepoId] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      return sessionStorage.getItem('cortex-repo-expanded-id');
+    } catch {
+      return null;
+    }
+  });
 
   const [addOpen, setAddOpen] = useState(false);
   const [repoPathInput, setRepoPathInput] = useState('');
@@ -2248,6 +2325,13 @@ export function RepoRegistrySection({
   const [removeTarget, setRemoveTarget] = useState<RepoRegistryEntry | null>(null);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      if (expandedRepoId) sessionStorage.setItem('cortex-repo-expanded-id', expandedRepoId);
+      else sessionStorage.removeItem('cortex-repo-expanded-id');
+    } catch { /* ignore */ }
+  }, [expandedRepoId]);
 
   const loadRepos = useCallback(async () => {
     setLoading(true);
@@ -2597,80 +2681,106 @@ export function RepoRegistrySection({
     }
   }, [removeTarget]);
 
+  const activeRepoEntry = useMemo(
+    () => repos.find((repo) => repo.localPath === activeRepoLocalPath) ?? null,
+    [activeRepoLocalPath, repos],
+  );
+
+  const orderedRepos = useMemo(() => {
+    if (!activeRepoEntry) return repos;
+    return [activeRepoEntry, ...repos.filter((repo) => repo.id !== activeRepoEntry.id)];
+  }, [activeRepoEntry, repos]);
+
+  useEffect(() => {
+    if (!activeRepoEntry) return;
+    setExpandedRepoId((current) => current ?? activeRepoEntry.id);
+  }, [activeRepoEntry]);
+
+  useEffect(() => {
+    if (!launchIntent?.repoPath) return;
+    const match = repos.find((repo) => repo.localPath === launchIntent.repoPath);
+    if (!match) return;
+    setReposOpen(true);
+    setExpandedRepoId(match.id);
+    openLaunchModal(match);
+  }, [launchIntent?.nonce, launchIntent?.repoPath, openLaunchModal, repos, setReposOpen]);
+
   const branchPreview = useMemo(() => getWorkspaceBranchPreview(workspaceName), [workspaceName]);
 
   return (
     <>
-      <div style={{ flexShrink: 0, paddingLeft: 14, paddingRight: 14, paddingTop: 0, paddingBottom: 0 }}>
-        <button
-          type="button"
-          onClick={() => setReposOpen((current) => !current)}
-          style={{
-            width: '100%',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '8px 2px',
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            fontFamily: '-apple-system, system-ui, sans-serif',
-          }}
-        >
-          <FolderOpen size={12} strokeWidth={2} color={reposOpen ? '#ef4444' : 'var(--t-text-muted)'} />
-          <span
+      {!hideHeader ? (
+        <div style={{ flexShrink: 0, paddingLeft: 14, paddingRight: 14, paddingTop: 0, paddingBottom: 0 }}>
+          <button
+            type="button"
+            onClick={() => setReposOpen(!reposOpen)}
             style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: reposOpen ? 'var(--t-text)' : 'var(--t-text-muted)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-            }}
-          >
-            Repositories
-          </span>
-          <span
-            style={{
-              fontSize: 10,
-              color: 'var(--t-text-faint)',
-              fontFamily: '"SF Mono", ui-monospace, monospace',
-            }}
-          >
-            {loading ? (
-              <span style={{
-                display: 'inline-flex',
-                width: 16,
-                height: 10,
-                borderRadius: 999,
-                background: 'linear-gradient(90deg, rgba(148,163,184,0.14), rgba(148,163,184,0.28), rgba(148,163,184,0.14))',
-              }} />
-            ) : repos.length}
-          </span>
-          <span
-            style={{
-              marginLeft: 'auto',
-              fontSize: 10,
-              color: 'var(--t-text-faint)',
+              width: '100%',
               display: 'flex',
               alignItems: 'center',
+              gap: 6,
+              padding: '8px 2px',
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              fontFamily: '-apple-system, system-ui, sans-serif',
             }}
           >
-            {reposOpen ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
-          </span>
-        </button>
-      </div>
+            <FolderOpen size={12} strokeWidth={2} color={reposOpen ? '#ef4444' : 'var(--t-text-muted)'} />
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: reposOpen ? 'var(--t-text)' : 'var(--t-text-muted)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+              }}
+            >
+              Repositories
+            </span>
+            <span
+              style={{
+                fontSize: 10,
+                color: 'var(--t-text-faint)',
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+              }}
+            >
+              {loading ? (
+                <span style={{
+                  display: 'inline-flex',
+                  width: 16,
+                  height: 10,
+                  borderRadius: 999,
+                  background: 'linear-gradient(90deg, rgba(148,163,184,0.14), rgba(148,163,184,0.28), rgba(148,163,184,0.14))',
+                }} />
+              ) : repos.length}
+            </span>
+            <span
+              style={{
+                marginLeft: 'auto',
+                fontSize: 10,
+                color: 'var(--t-text-faint)',
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              {reposOpen ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
+            </span>
+          </button>
+        </div>
+      ) : null}
 
       {reposOpen ? (
         <div
           style={{
             flexShrink: 0,
             paddingTop: 0,
-            paddingRight: 14,
+            paddingRight: hideHeader ? 0 : 14,
             paddingBottom: 8,
-            paddingLeft: 14,
+            paddingLeft: hideHeader ? 0 : 14,
             display: 'flex',
             flexDirection: 'column',
-            gap: 8,
+            gap: 12,
           }}
         >
           {/* Compact repo list — no top button, Add is at bottom */}
@@ -2755,7 +2865,7 @@ export function RepoRegistrySection({
           ) : null}
 
           {!loading && !loadError ? (
-            repos.map((repo) => (
+            orderedRepos.map((repo) => (
               <RepoCard
                 key={repo.id}
                 repo={repo}
@@ -2771,6 +2881,9 @@ export function RepoRegistrySection({
                 }}
                 agentsByBranch={agentBranchMap.get(repo.name)}
                 activePorts={portsByRepo.get(repo.name)}
+                expanded={expandedRepoId === repo.id}
+                onToggle={() => setExpandedRepoId((current) => current === repo.id ? null : repo.id)}
+                isActive={repo.localPath === activeRepoLocalPath}
               />
             ))
           ) : null}

@@ -1,5 +1,5 @@
 'use client';
-/* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/exhaustive-deps -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
+/* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { DesktopWebSocketProvider, useSharedDesktopWs, type WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
@@ -25,6 +25,7 @@ import { SettingsPage } from '@/components/desktop/SettingsPage';
 import { AnalyticsPage } from '@/components/desktop/AnalyticsPage';
 import { ThoughtsCard } from '@/components/desktop/ThoughtsCard';
 import { SetupWizard, type DetectionResult } from '@/components/desktop/SetupWizard';
+import type { RepoRegistryEntry } from '@/lib/repos/types';
 
 /** Normalize the flat API response into the shape SetupWizard expects. */
 function normalizeDetection(raw: Record<string, unknown>): DetectionResult {
@@ -184,19 +185,23 @@ function DashboardInner() {
   }, []);
 
   // Global repo state (shared between TitleBar and AgentPanel)
-  const [globalRepo, setGlobalRepo] = useState<string | null>(null);
+  const [globalRepoId, setGlobalRepoId] = useState<string | null>(null);
   const [globalRepoBranch, setGlobalRepoBranch] = useState<string>('main');
-  const [globalRepoList, setGlobalRepoList] = useState<string[]>([]);
-  // No hardcoded repos — start empty, user adds repos
-  const REPO_DISPLAY: Record<string, string> = {};
+  const [globalRepoEntries, setGlobalRepoEntries] = useState<RepoRegistryEntry[]>([]);
+  const globalRepoEntry = useMemo(
+    () => globalRepoEntries.find((repo) => repo.id === globalRepoId) ?? null,
+    [globalRepoEntries, globalRepoId],
+  );
+  const globalRepo = useMemo(
+    () => repoSlugFromRemote(globalRepoEntry?.remoteUrl),
+    [globalRepoEntry],
+  );
 
   const loadRegisteredRepos = useCallback(async () => {
     const response = await fetch('/api/panel/repos');
-    const data = await response.json() as { repos?: Array<{ remoteUrl?: string }> };
-    const repos = (data.repos ?? [])
-      .map((repo) => repoSlugFromRemote(repo.remoteUrl))
-      .filter((repo): repo is string => Boolean(repo));
-    setGlobalRepoList(repos);
+    const data = await response.json() as { repos?: RepoRegistryEntry[] };
+    const repos = data.repos ?? [];
+    setGlobalRepoEntries(repos);
     return repos;
   }, []);
 
@@ -204,39 +209,93 @@ function DashboardInner() {
   useEffect(() => {
     loadRegisteredRepos()
       .then((repos) => {
-        // Only restore if user previously selected one
-        const saved = typeof window !== 'undefined' ? sessionStorage.getItem('cortex-global-repo') : null;
-        if (saved && repos.includes(saved)) setGlobalRepo(saved);
+        const savedId = typeof window !== 'undefined' ? sessionStorage.getItem('cortex-global-repo-id') : null;
+        if (savedId && repos.some((repo) => repo.id === savedId)) {
+          setGlobalRepoId(savedId);
+        }
         // Otherwise leave null — show "Open Folder" prompt
       })
       .catch(() => {
-        setGlobalRepoList([]);
+        setGlobalRepoEntries([]);
       });
   }, [loadRegisteredRepos]);
 
-  // Fetch branch when globalRepo changes
-  useEffect(() => {
-    if (!globalRepo) return;
-    if (typeof window !== 'undefined') sessionStorage.setItem('cortex-global-repo', globalRepo);
-    fetch('/api/panel/repos')
-      .then(r => r.json())
-      .then(data => {
-        const repo = (data.repos ?? []).find((r: { remoteUrl?: string }) => {
-          const url = (r.remoteUrl ?? '').replace(/\.git$/, '');
-          return url.includes(globalRepo);
-        });
-        if (repo?.localPath) {
-          fetch(`/api/panel/branches?path=${encodeURIComponent(repo.localPath)}`)
-            .then(r => r.json())
-            .then(bData => {
-              const current = (bData.branches ?? []).find((b: { current: boolean }) => b.current);
-              if (current) setGlobalRepoBranch(current.name);
-            })
-            .catch(() => {});
+  const handleSelectRegisteredRepo = useCallback(async (repoId: string | null) => {
+    setGlobalRepoId(repoId);
+    if (!repoId) {
+      setGlobalRepoBranch('main');
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('cortex-global-repo-id');
+      }
+      return;
+    }
+
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('cortex-global-repo-id', repoId);
+    }
+
+    const selected = globalRepoEntries.find((repo) => repo.id === repoId) ?? null;
+    if (!selected) return;
+
+    setGlobalRepoBranch(selected.defaultBranch || 'main');
+
+    void fetch('/api/panel/repos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'touch', id: repoId }),
+    })
+      .then(async (response) => {
+        const data = await response.json() as { repo?: RepoRegistryEntry };
+        if (data.repo) {
+          setGlobalRepoEntries((current) => {
+            const next = current.map((repo) => (repo.id === data.repo?.id ? data.repo : repo));
+            return next;
+          });
         }
       })
+      .catch(() => null);
+  }, [globalRepoEntries]);
+
+  const handleRemoveRegisteredRepo = useCallback(async (repoId: string) => {
+    const target = globalRepoEntries.find((repo) => repo.id === repoId);
+    if (!target) return;
+
+    const confirmed = window.confirm(
+      `Remove ${target.name} from Cortex?\n\nThis only removes it from the local repo list. It does not delete the folder on disk.`,
+    );
+    if (!confirmed) return;
+
+    const response = await fetch('/api/panel/repos', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: repoId }),
+    });
+    const data = await response.json() as { error?: string };
+    if (!response.ok) {
+      throw new Error(data.error ?? 'Unable to remove repository.');
+    }
+
+    setGlobalRepoEntries((current) => current.filter((repo) => repo.id !== repoId));
+    if (globalRepoId === repoId) {
+      setGlobalRepoId(null);
+      setGlobalRepoBranch('main');
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('cortex-global-repo-id');
+      }
+    }
+  }, [globalRepoEntries, globalRepoId]);
+
+  // Fetch branch when selected repo changes
+  useEffect(() => {
+    if (!globalRepoEntry?.localPath) return;
+    fetch(`/api/panel/branches?path=${encodeURIComponent(globalRepoEntry.localPath)}`)
+      .then(r => r.json())
+      .then(bData => {
+        const current = (bData.branches ?? []).find((b: { current: boolean; name: string }) => b.current);
+        if (current?.name) setGlobalRepoBranch(current.name);
+      })
       .catch(() => {});
-  }, [globalRepo]);
+  }, [globalRepoEntry]);
 
   const handleOpenFolder = useCallback(async () => {
     let folderPath: string | null = null;
@@ -265,21 +324,21 @@ function DashboardInner() {
       });
       const data = await response.json() as {
         error?: string;
-        repo?: { remoteUrl?: string | null; defaultBranch?: string | null; name?: string | null };
+        repo?: RepoRegistryEntry;
       };
 
       if (!response.ok || !data.repo) {
         throw new Error(data.error ?? 'Unable to add repository.');
       }
 
-      await loadRegisteredRepos();
-
-      const nextRepo = repoSlugFromRemote(data.repo.remoteUrl);
-      if (nextRepo) {
-        setGlobalRepo(nextRepo);
-      }
+      const repos = await loadRegisteredRepos();
+      const selected = repos.find((repo) => repo.id === data.repo?.id) ?? data.repo;
+      setGlobalRepoId(selected.id);
       if (data.repo.defaultBranch) {
         setGlobalRepoBranch(data.repo.defaultBranch);
+      }
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('cortex-global-repo-id', selected.id);
       }
     } catch (error) {
       window.alert(error instanceof Error ? error.message : 'Unable to open folder.');
@@ -319,6 +378,23 @@ function DashboardInner() {
       }
     }
     return contextualPanelHandlesRef.current.values().next().value ?? null;
+  }, [activeTileId]);
+
+  const getPreferredWorkspaceTerminalTarget = useCallback((preferredTileId?: string | null) => {
+    if (preferredTileId) {
+      const preferredHandle = workspaceTerminalHandlesRef.current.get(preferredTileId);
+      if (preferredHandle) {
+        return { tileId: preferredTileId, handle: preferredHandle };
+      }
+    }
+    if (activeTileId) {
+      const activeHandle = workspaceTerminalHandlesRef.current.get(activeTileId);
+      if (activeHandle) {
+        return { tileId: activeTileId, handle: activeHandle };
+      }
+    }
+    const firstEntry = workspaceTerminalHandlesRef.current.entries().next().value as [string, TerminalTabHandle] | undefined;
+    return firstEntry ? { tileId: firstEntry[0], handle: firstEntry[1] } : null;
   }, [activeTileId]);
 
   // Terminal WS hook — routes events to WorkspaceTerminal + ContextualPanel
@@ -605,6 +681,31 @@ function DashboardInner() {
     return result.newTileId;
   }, [findInsertionTarget, findWorkspaceTarget, tileLayout, workspacePreviews]);
 
+  const waitForWorkspaceTerminalTarget = useCallback(async (preferredTileId?: string | null) => {
+    const initial = getPreferredWorkspaceTerminalTarget(preferredTileId);
+    if (initial) {
+      setActiveTileId(initial.tileId);
+      return initial;
+    }
+
+    const ensuredTileId = ensureTileKind('terminal', {
+      preferredKinds: ['terminal', 'workspace'],
+      direction: 'vertical',
+      ratio: 0.58,
+    });
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
+      const target = getPreferredWorkspaceTerminalTarget((ensuredTileId ?? preferredTileId) ?? undefined);
+      if (target) {
+        setActiveTileId(target.tileId);
+        return target;
+      }
+    }
+
+    return null;
+  }, [ensureTileKind, getPreferredWorkspaceTerminalTarget]);
+
   const toggleContextualPanelTile = useCallback(() => {
     const existingLeaf = findLeafByContentKind(tileLayout.root, 'contextual-panel');
     if (existingLeaf) {
@@ -681,6 +782,7 @@ function DashboardInner() {
   // ── Canvas tab state ──
   const [canvasTabs, setCanvasTabs] = useState<CanvasTab[]>([]);
   const [activeCanvasTabId, setActiveCanvasTabId] = useState<string | null>(null);
+  const [canvasRevealKey, setCanvasRevealKey] = useState(0);
 
   const openCanvasTab = useCallback((tab: CanvasTab) => {
     // Canvas tabs open inside the ContextualPanel (bottom panel)
@@ -700,6 +802,7 @@ function DashboardInner() {
       return [...prev, tab];
     });
     setActiveCanvasTabId(tab.id);
+    setCanvasRevealKey((current) => current + 1);
   }, [ensureTileKind]);
 
   const closeCanvasTab = useCallback((tabId: string) => {
@@ -799,9 +902,24 @@ function DashboardInner() {
       setThoughtsDraftInjection(nextInjection);
       return;
     }
-    setChatVisible(true);
-    setDesktopDraftInjection(nextInjection);
-  }, [hasThoughtsTile, thoughtsOpen]);
+    void (async () => {
+      const workspaceTarget = await waitForWorkspaceTerminalTarget();
+      if (workspaceTarget) {
+        workspaceTarget.handle.injectIntoCliChat(payload.text, {
+          repo: globalRepoEntry
+            ? {
+                name: globalRepoEntry.name,
+                localPath: globalRepoEntry.localPath,
+                remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
+              }
+            : undefined,
+        });
+        return;
+      }
+      setChatVisible(true);
+      setDesktopDraftInjection(nextInjection);
+    })();
+  }, [globalRepoEntry, hasThoughtsTile, thoughtsOpen, waitForWorkspaceTerminalTarget]);
 
   // ── Feed agent data to alert engine + search ──
   const handleAgentsUpdate = useCallback((agents: unknown[]) => {
@@ -868,6 +986,111 @@ function DashboardInner() {
       meta: repo ? { repo } : undefined,
     });
   }, [openCanvasTab]);
+
+  const handleLaunchWorkspaceRepoTask = useCallback(async (request: {
+    kind: 'issue' | 'pr';
+    repo: string;
+    number: number;
+    title: string;
+    body?: string;
+    branch?: string;
+  }) => {
+    const response = await fetch('/api/panel/repos');
+    const data = await response.json() as { repos?: RepoRegistryEntry[] };
+    const repoEntry = (data.repos ?? []).find((repo) => repoSlugFromRemote(repo.remoteUrl) === request.repo);
+
+    if (!repoEntry) {
+      throw new Error(`No local checkout is registered for ${request.repo}. Open the repo locally before launching work there.`);
+    }
+
+    setGlobalRepoId(repoEntry.id);
+    setGlobalRepoBranch(repoEntry.defaultBranch || 'main');
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('cortex-global-repo-id', repoEntry.id);
+    }
+
+    void fetch('/api/panel/repos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'touch', id: repoEntry.id }),
+    }).catch(() => null);
+
+    const workspaceTarget = await waitForWorkspaceTerminalTarget();
+    if (!workspaceTarget) {
+      throw new Error('No workspace terminal is available to launch the CLI session.');
+    }
+
+    let currentBranch = repoEntry.defaultBranch || 'main';
+    try {
+      const branchResponse = await fetch(`/api/panel/branches?path=${encodeURIComponent(repoEntry.localPath)}`);
+      const branchData = await branchResponse.json() as { branches?: Array<{ name: string; current: boolean }> };
+      const current = (branchData.branches ?? []).find((branch) => branch.current);
+      if (current?.name) currentBranch = current.name;
+    } catch {
+      // keep default branch fallback
+    }
+
+    const readinessLines = [
+      `Local checkout: ${repoEntry.localPath}`,
+      `Current branch: ${currentBranch}`,
+      `Default branch: ${repoEntry.defaultBranch}`,
+      currentBranch === repoEntry.defaultBranch
+        ? 'You are operating directly on the default branch right now.'
+        : `You are not on the default branch; the current local branch is ${currentBranch}.`,
+      repoEntry.setup.installCommand
+        ? `Install command: ${repoEntry.setup.installCommand}${repoEntry.setup.installOnCreateWorkspace ? ' (saved as default setup)' : ''}`
+        : 'Install command: none saved',
+      repoEntry.setup.buildCommand
+        ? `Build command: ${repoEntry.setup.buildCommand}${repoEntry.setup.runBuildOnCreateWorkspace ? ' (saved for bootstrap)' : ''}`
+        : 'Build command: none saved',
+      repoEntry.setup.devCommand
+        ? `Dev command: ${repoEntry.setup.devCommand}${repoEntry.setup.defaultPort ? ` on port ${repoEntry.setup.defaultPort}` : ''}`
+        : 'Dev command: none saved',
+      repoEntry.setup.envFiles.length > 0
+        ? `Env files: ${repoEntry.setup.envFiles.join(', ')} (mode: ${repoEntry.setup.envMode})`
+        : 'Env files: none saved',
+    ];
+
+    const prompt = request.kind === 'issue'
+      ? [
+          `Work on GitHub issue #${request.number} in ${request.repo}: ${request.title}.`,
+          'Use this workspace CLI session as the operator surface.',
+          'Start by using the issue context included below and inspecting the current local repo state.',
+          'Do not rely on `gh issue view`, GitHub GraphQL, or other remote issue fetches unless the provided issue context is clearly missing something critical.',
+          'Before coding, establish whether this repo is actually runnable from this checkout using the saved setup/dev commands and the current branch state below.',
+          'If the repo is not ready, say exactly what is missing or broken before you implement anything.',
+          'Implement the smallest correct fix, validate it with focused checks, and do not claim success unless the relevant path actually works end to end.',
+          'If a runtime/dev-server blocker prevents validation, stop and report the blocker explicitly instead of assuming the feature works.',
+          `Repo readiness context:\n${readinessLines.join('\n')}`,
+          request.body ? `Issue context:\n${request.body}` : null,
+        ].filter(Boolean).join('\n\n')
+      : [
+          `Review GitHub PR #${request.number} in ${request.repo}: ${request.title}.`,
+          `Head branch: ${request.branch ?? 'unknown'}.`,
+          'Use this workspace CLI session as the review surface.',
+          'Before signing off, establish whether this checkout is runnable and note any setup/runtime blockers using the readiness context below.',
+          'Read the PR context and changed files, validate the change locally, identify risks or regressions, and state clearly if the branch cannot be verified end to end.',
+          `Repo readiness context:\n${readinessLines.join('\n')}`,
+        ].join('\n\n');
+
+    const taskLabel = request.kind === 'issue'
+      ? `Issue #${request.number}`
+      : `PR #${request.number} review`;
+
+    workspaceTarget.handle.openCliChatSession({
+      runtime: undefined,
+      repo: {
+        name: repoEntry.name,
+        localPath: repoEntry.localPath,
+        remoteUrl: repoEntry.remoteUrl ?? undefined,
+      },
+      modelId: undefined,
+      initialText: prompt,
+      autoSend: true,
+      createNew: true,
+      label: taskLabel,
+    });
+  }, [waitForWorkspaceTerminalTarget]);
 
   const handleSelectFile = useCallback((filePath: string, workspace?: string) => {
     const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
@@ -1076,6 +1299,7 @@ function DashboardInner() {
           termWsConnected={termWsConnected}
           canvasTabs={canvasTabs}
           activeCanvasTabId={activeCanvasTabId}
+          canvasRevealKey={canvasRevealKey}
           onSelectCanvasTab={setActiveCanvasTabId}
           onCloseCanvasTab={closeCanvasTab}
           onInjectChatContext={handleAgentPanelChatInjection}
@@ -1086,6 +1310,7 @@ function DashboardInner() {
     },
   }), [
     activeCanvasTabId,
+    canvasRevealKey,
     canvasTabs,
     closeCanvasTab,
     handleClosePreviewTileItem,
@@ -1125,11 +1350,15 @@ function DashboardInner() {
 
       {/* ── Title Bar ── */}
       <TitleBar
-        globalRepo={globalRepo}
         globalRepoBranch={globalRepoBranch}
-        repoList={globalRepoList}
-        repoDisplayNames={REPO_DISPLAY}
-        onRepoChange={setGlobalRepo}
+        selectedRepoEntry={globalRepoEntry}
+        repoEntries={globalRepoEntries}
+        onRepoChange={handleSelectRegisteredRepo}
+        onRepoRemove={(repoId) => {
+          void handleRemoveRegisteredRepo(repoId).catch((error) => {
+            window.alert(error instanceof Error ? error.message : 'Unable to remove repository.');
+          });
+        }}
         onOpenFolder={handleOpenFolder}
         sidebarVisible={sidebarVisible}
         onToggleSidebar={() => setSidebarVisible(v => !v)}
@@ -1142,6 +1371,7 @@ function DashboardInner() {
           <UniversalSearch
             variant="desktop"
             workspace={activeWorkspace}
+            repo={globalRepo ?? undefined}
             agentsJson={agentsJson}
             onSelectSession={(sessionKey) => { setActiveSessionKey(sessionKey); onClose(); }}
             onSelectIssue={(num) => { handleSelectIssue(num); onClose(); }}
@@ -1253,6 +1483,10 @@ function DashboardInner() {
       }}>
         <AgentPanel
           selectedRepo={globalRepo}
+          selectedRepoName={globalRepoEntry?.name ?? null}
+          selectedRepoBranch={globalRepoBranch}
+          selectedRepoLocalPath={globalRepoEntry?.localPath ?? null}
+          onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
           onSelectSession={handleSelectSession}
           onSelectIssue={handleSelectIssue}
           onSelectCommit={handleSelectCommit}

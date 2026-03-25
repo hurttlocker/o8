@@ -13,6 +13,7 @@ export interface PersistedTab {
   tmuxSession?: string; // last known tmux session name (may still be alive)
   chatRuntime?: 'codex' | 'claude-code' | 'openclaw'; // for kind='chat' (CLI Session)
   chatSessionKey?: string; // for kind='chat' (CLI Session)
+  chatModel?: string;
 }
 
 export interface PersistedTabState {

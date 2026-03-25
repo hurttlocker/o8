@@ -2,10 +2,10 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
-
-// Response cache — workspace list with PR data is expensive (gh CLI calls)
-let workspacesCache: { data: unknown; ts: number } | null = null;
-const WORKSPACES_CACHE_TTL_MS = 30_000; // 30s — workspaces change slowly
+import os from 'node:os';
+import path from 'node:path';
+import { fetchGitHubPullRequestSummaries, normalizeRepoSlug } from '@/lib/github-broker';
+import { listRepos } from '@/lib/repos/registry';
 
 // PR data cache — shared across requests, per repo
 const prCache = new Map<string, { prs: PRData[]; ts: number }>();
@@ -15,13 +15,14 @@ interface PRData {
   number: number;
   title: string;
   state: string;
-  author: { login: string };
+  author: { login: string } | null;
   headRefName: string;
   additions: number;
   deletions: number;
   changedFiles: number;
   createdAt: string;
-  mergedAt?: string;
+  mergedAt?: string | null;
+  url: string;
 }
 
 interface WorkspaceEntry {
@@ -72,18 +73,17 @@ function deriveRepo(workspace: string): string {
 // Map OpenClaw agent session keys to the repos they actively work on
 // This is how the agent cards show the correct repo's diff
 function getAgentActiveRepo(sessionKey: string): { repo: string; path: string } | null {
-  const HOME = process.env.HOME || require('os').homedir();
   // Agent → repo mapping is auto-detected from the workspace root.
   // Falls back to process.cwd() when CORTEX_IDE_WORKSPACE_ROOT is not set.
   const workspaceRoot = process.env.CORTEX_IDE_WORKSPACE_ROOT || process.cwd();
   const map: Record<string, { repo: string; path: string }> = {
-    'agent:main:main': { repo: require('path').basename(workspaceRoot), path: workspaceRoot },
+    'agent:main:main': { repo: path.basename(workspaceRoot), path: workspaceRoot },
   };
   return map[sessionKey] || null;
 }
 
 function resolveWorkspacePath(workspace: string): string {
-  return workspace.replace(/^~/, process.env.HOME || require('os').homedir());
+  return workspace.replace(/^~/, process.env.HOME || os.homedir());
 }
 
 // Resolve current git branch for a path
@@ -149,18 +149,6 @@ function getLocalDiffStats(workspace: string): { additions: number; deletions: n
   }
 }
 
-function ghOwnerRepo(repoName: string): string {
-  // Map local repo dir names to GitHub owner/repo
-  const map: Record<string, string> = {
-    'cortex-ide': '',
-    'cortex': 'hurttlocker/cortex',
-    'parasite-network': 'hurttlocker/parasite-network',
-    'spear-production': 'LavonTMCQ/spear-production',
-    'mybeautifulwife': 'LavonTMCQ/mybeautifulwife',
-  };
-  return map[repoName] || '';
-}
-
 export async function GET() {
   try {
     // 1. Fetch agent sessions
@@ -188,6 +176,20 @@ export async function GET() {
       }
     } catch { /* silent */ }
 
+    const registeredRepos = await listRepos().catch(() => []);
+    const repoSlugByName = new Map<string, string>();
+    for (const entry of registeredRepos) {
+      const slug = normalizeRepoSlug(entry.remoteUrl);
+      if (!slug) continue;
+      repoSlugByName.set(entry.name, slug);
+    }
+    const fallbackSlugMap: Record<string, string> = {
+      'cortex': 'hurttlocker/cortex',
+      'parasite-network': 'hurttlocker/parasite-network',
+      'spear-production': 'LavonTMCQ/spear-production',
+      'mybeautifulwife': 'LavonTMCQ/mybeautifulwife',
+    };
+
     // 2. Collect unique repos from sessions + agent active repos
     const repoSet = new Set<string>();
     for (const s of sessions) {
@@ -200,25 +202,19 @@ export async function GET() {
     // 3. Fetch PRs for each repo
     const prsByBranch = new Map<string, PRData & { ghRepo: string }>();
     for (const repoName of repoSet) {
-      const ghRepo = ghOwnerRepo(repoName);
+      const ghRepo = repoSlugByName.get(repoName) ?? fallbackSlugMap[repoName] ?? '';
       if (!ghRepo) continue;
 
       try {
-        // Use PR cache to avoid hammering GitHub API on every page load
         const cached = prCache.get(ghRepo);
         let prs: PRData[];
         if (cached && (Date.now() - cached.ts) < PR_CACHE_TTL_MS) {
           prs = cached.prs;
         } else {
-          const openJson = execSync(
-            `gh pr list --repo ${ghRepo} --state open --limit 20 --json number,title,state,author,headRefName,additions,deletions,changedFiles,createdAt`,
-            { encoding: 'utf-8', timeout: 10000 },
-          );
-          const mergedJson = execSync(
-            `gh pr list --repo ${ghRepo} --state merged --limit 10 --json number,title,state,author,headRefName,additions,deletions,changedFiles,createdAt`,
-            { encoding: 'utf-8', timeout: 10000 },
-          );
-          prs = [...JSON.parse(openJson), ...JSON.parse(mergedJson)] as PRData[];
+          prs = await fetchGitHubPullRequestSummaries(ghRepo, {
+            states: ['open', 'closed'],
+            limitPerState: 20,
+          }) as PRData[];
           prCache.set(ghRepo, { prs, ts: Date.now() });
         }
         for (const pr of prs) {
@@ -247,16 +243,15 @@ export async function GET() {
         branchName = resolveGitBranch(activeRepo.path);
       }
       const pr = prsByBranch.get(`${repoName}:${branchName}`) || null;
-      const ghRepo = ghOwnerRepo(repoName);
 
       // Derive status
       const isRunning = s.status === 'running' || s.status === 'watching' || s.status === 'healthy';
       let status: WorkspaceEntry['status'];
-      if (pr?.state === 'MERGED') {
+      if (pr?.mergedAt) {
         status = 'done';
-      } else if (pr?.state === 'CLOSED') {
+      } else if (pr?.state.toLowerCase() === 'closed') {
         status = 'cancelled';
-      } else if (pr?.state === 'OPEN') {
+      } else if (pr?.state.toLowerCase() === 'open') {
         status = 'in_review';
       } else if (isRunning) {
         status = 'in_progress';
@@ -272,6 +267,7 @@ export async function GET() {
         if (!repoName || repoName === 'clawd') repoName = activeRepo.repo;
       }
       const localDiff = (!pr && repoName !== 'clawd') ? getLocalDiffStats(diffWorkspace) : null;
+      const ghRepo = repoSlugByName.get(repoName) ?? fallbackSlugMap[repoName] ?? '';
       // Activity classification removed — top timeline handles this
 
       workspaces.push({
@@ -289,8 +285,8 @@ export async function GET() {
           additions: pr.additions,
           deletions: pr.deletions,
           changedFiles: pr.changedFiles,
-          state: pr.state === 'MERGED' ? 'merged' : pr.state === 'CLOSED' ? 'closed' : 'open',
-          url: `https://github.com/${ghRepo}/pull/${pr.number}`,
+          state: pr.mergedAt ? 'merged' : pr.state.toLowerCase() === 'closed' ? 'closed' : 'open',
+          url: pr.url || `https://github.com/${ghRepo}/pull/${pr.number}`,
         } : null,
         status,
       });
