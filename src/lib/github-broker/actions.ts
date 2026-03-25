@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { githubInstallationFetch } from './auth';
+import { upsertGitHubIssue } from './store';
 
 function buildGitHubError(response: Response, bodyText: string) {
   const reset = response.headers.get('x-ratelimit-reset');
@@ -64,10 +65,41 @@ export async function createGitHubIssue(
   });
 
   const issue = await parseGitHubJson<{
+    id: number;
     number: number;
-    html_url: string;
     title?: string | null;
+    state?: string | null;
+    body?: string | null;
+    html_url: string;
+    created_at?: string | null;
+    updated_at?: string | null;
+    closed_at?: string | null;
+    comments?: number | null;
+    user?: { login?: string | null } | null;
+    assignees?: Array<{ login?: string | null }> | null;
+    labels?: Array<{ name?: string | null; color?: string | null }> | null;
   }>(response);
+
+  upsertGitHubIssue({
+    issueId: issue.id,
+    repoFullName,
+    number: issue.number,
+    title: issue.title ?? input.title,
+    state: issue.state ?? 'open',
+    author: issue.user?.login ? { login: issue.user.login } : null,
+    assignees: (issue.assignees ?? [])
+      .map((assignee) => assignee.login ? { login: assignee.login } : null)
+      .filter((assignee): assignee is { login: string } => Boolean(assignee)),
+    labels: (issue.labels ?? [])
+      .map((label) => label.name ? { name: label.name, color: label.color ?? '000000' } : null)
+      .filter((label): label is { name: string; color: string } => Boolean(label)),
+    comments: issue.comments ?? 0,
+    body: issue.body ?? input.body ?? '',
+    url: issue.html_url,
+    createdAt: issue.created_at ?? '',
+    updatedAt: issue.updated_at ?? issue.created_at ?? '',
+    closedAt: issue.closed_at ?? null,
+  });
 
   return {
     number: issue.number,

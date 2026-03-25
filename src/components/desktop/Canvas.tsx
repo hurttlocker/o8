@@ -37,6 +37,7 @@ import {
   Globe,
   Hexagon,
   MessageSquare,
+  Play,
   Plus,
   Radio,
   RotateCcw,
@@ -70,6 +71,10 @@ import {
   type AgentPanelChatInjectionPayload,
 } from '@/lib/chat/injection';
 
+export type CanvasRepoTaskLaunchRequest =
+  | { kind: 'issue'; repo: string; number: number; title: string; body?: string }
+  | { kind: 'pr'; repo: string; number: number; title: string; branch?: string };
+
 // ── Tab Types ──
 
 export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'git-log' | 'image' | 'deploy' | 'memory' | 'welcome' | 'timeline' | 'mermaid' | 'preview';
@@ -89,8 +94,10 @@ export interface CanvasProps {
   activeTabId: string | null;
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
+  selectedRepo?: string | null;
   onSelectCommit?: (hash: string) => void;
   onInjectChatContext?: (payload: AgentPanelChatInjectionPayload) => void;
+  onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
   /** When embedded in ContextualPanel, hide the tab bar (parent manages tabs) */
   embedded?: boolean;
 }
@@ -102,8 +109,10 @@ export const Canvas = memo(function Canvas({
   activeTabId,
   onSelectTab,
   onCloseTab,
+  selectedRepo,
   onSelectCommit,
   onInjectChatContext,
+  onLaunchWorkspaceTask,
   embedded,
 }: CanvasProps) {
   const activeTab = tabs.find((t) => t.id === activeTabId) || null;
@@ -216,7 +225,13 @@ export const Canvas = memo(function Canvas({
         flexDirection: 'column',
       }}>
         {activeTab ? (
-          <TabContent tab={activeTab} onSelectCommit={onSelectCommit} onInjectChatContext={onInjectChatContext} />
+          <TabContent
+            tab={activeTab}
+            selectedRepo={selectedRepo}
+            onSelectCommit={onSelectCommit}
+            onInjectChatContext={onInjectChatContext}
+            onLaunchWorkspaceTask={onLaunchWorkspaceTask}
+          />
         ) : (
           <CanvasEmpty />
         )}
@@ -253,16 +268,26 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
 
 const TabContent = memo(function TabContent({
   tab,
+  selectedRepo,
   onSelectCommit,
   onInjectChatContext,
+  onLaunchWorkspaceTask,
 }: {
   tab: CanvasTab;
+  selectedRepo?: string | null;
   onSelectCommit?: (hash: string) => void;
   onInjectChatContext?: (payload: AgentPanelChatInjectionPayload) => void;
+  onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
 }) {
   switch (tab.kind) {
     case 'issue':
-      return <IssueViewer issueNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} />;
+      return (
+        <IssueViewer
+          issueNumber={parseInt(tab.resourceId, 10)}
+          repo={tab.meta?.repo ?? selectedRepo ?? undefined}
+          onLaunchWorkspaceTask={onLaunchWorkspaceTask}
+        />
+      );
     case 'transcript':
       return <TranscriptViewer sessionKey={tab.resourceId} />;
     case 'file':
@@ -553,10 +578,19 @@ interface IssueDetail {
   url: string;
 }
 
-const IssueViewer = memo(function IssueViewer({ issueNumber, repo }: { issueNumber: number; repo?: string }) {
+const IssueViewer = memo(function IssueViewer({
+  issueNumber,
+  repo,
+  onLaunchWorkspaceTask,
+}: {
+  issueNumber: number;
+  repo?: string;
+  onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
+}) {
   const [detail, setDetail] = useState<IssueDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [launching, setLaunching] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -688,6 +722,41 @@ const IssueViewer = memo(function IssueViewer({ issueNumber, repo }: { issueNumb
               ))}
             </div>
           )}
+          {repo && onLaunchWorkspaceTask ? (
+            <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+              <button
+                type="button"
+                disabled={launching}
+                onClick={() => {
+                  setLaunching(true);
+                  void onLaunchWorkspaceTask({
+                    kind: 'issue',
+                    repo,
+                    number: detail.number,
+                    title: detail.title,
+                    body: detail.body,
+                  }).finally(() => setLaunching(false));
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  height: 32,
+                  padding: '0 12px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(37, 99, 235, 0.18)',
+                  background: 'rgba(37, 99, 235, 0.08)',
+                  color: launching ? '#94a3b8' : '#1d4ed8',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: launching ? 'default' : 'pointer',
+                }}
+              >
+                <Play size={13} />
+                {launching ? 'Launching…' : 'Launch In Workspace'}
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
 

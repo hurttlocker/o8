@@ -1297,6 +1297,7 @@ function DashboardInner() {
           sendTerminalDetach={sendTerminalDetach}
           sendAgentKill={sendAgentKill}
           termWsConnected={termWsConnected}
+          selectedRepo={globalRepo ?? null}
           canvasTabs={canvasTabs}
           activeCanvasTabId={activeCanvasTabId}
           canvasRevealKey={canvasRevealKey}
@@ -1304,6 +1305,7 @@ function DashboardInner() {
           onCloseCanvasTab={closeCanvasTab}
           onInjectChatContext={handleAgentPanelChatInjection}
           onSelectCommit={handleSelectCommit}
+          onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
           onClose={() => handleCloseTile(tileId)}
         />
       ),
@@ -1313,9 +1315,11 @@ function DashboardInner() {
     canvasRevealKey,
     canvasTabs,
     closeCanvasTab,
+    globalRepo,
     handleClosePreviewTileItem,
     handleCloseTile,
     handleAgentPanelChatInjection,
+    handleLaunchWorkspaceRepoTask,
     handlePreviewDetected,
     handlePreviewSelection,
     handleSelectCommit,
