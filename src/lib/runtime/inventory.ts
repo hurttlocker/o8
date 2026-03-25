@@ -33,6 +33,27 @@ function shortenHomePath(filePath: string) {
   return home && filePath.startsWith(home) ? `~${filePath.slice(home.length)}` : filePath;
 }
 
+function defaultRuntimeDisplayName(runtime: AgentRuntime['id']) {
+  return runtime === 'claude-code' ? 'Claude Code' : runtime === 'codex' ? 'Codex' : String(runtime);
+}
+
+function repoLabelFromSession(session: RuntimeSession, workspace: string) {
+  const repoSlug = session.repoSlug?.split('/').pop()?.trim();
+  if (repoSlug) return repoSlug;
+  const clean = workspace.replace(/^~\//, '').replace(/\/+$/, '');
+  const parts = clean.split('/').filter(Boolean);
+  return parts[parts.length - 1] || null;
+}
+
+function decorateRuntimeDisplayName(runtime: AgentRuntime['id'], displayName: string, session: RuntimeSession, workspace: string) {
+  const runtimeName = defaultRuntimeDisplayName(runtime);
+  if (displayName.trim().toLowerCase() !== runtimeName.toLowerCase()) {
+    return displayName;
+  }
+  const repoLabel = repoLabelFromSession(session, workspace);
+  return repoLabel ? `${repoLabel} · ${runtimeName}` : runtimeName;
+}
+
 function runtimeSourceLabel(runtime: AgentRuntime, session: RuntimeSession) {
   if (runtime.id === 'codex') {
     return session.ownership === 'owned'
@@ -57,7 +78,8 @@ function mapRuntimeSessionToAgent(
   const contextUsed = Math.max(0, Math.min(100, session.contextUsedPercent ?? 0));
   const workspace = shortenHomePath(overrides?.repoPath ?? session.cwd);
   const alerts = Number(session.status === 'failed') + Number(contextUsed >= 75);
-  const displayName = overrides?.label?.trim() || session.displayName;
+  const rawDisplayName = overrides?.label?.trim() || session.displayName;
+  const displayName = decorateRuntimeDisplayName(runtime.id, rawDisplayName, session, workspace);
   const model = overrides?.model || session.model || runtime.displayName;
 
   return {

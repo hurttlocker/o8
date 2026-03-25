@@ -47,6 +47,9 @@ function mapAgentToSession(
   const status = (['running', 'idle', 'waiting', 'reviewing', 'failed'].includes(agent.status)
     ? agent.status
     : 'idle') as RuntimeSession['status'];
+  const lifecycleTime = surface?.lifecycle?.lastRunFinishedAt ?? surface?.lifecycle?.lastRunStartedAt;
+  const parsedLastActivity = lifecycleTime ? new Date(lifecycleTime) : new Date(agent.lastEventAt);
+  const lastActivityAt = Number.isNaN(parsedLastActivity.getTime()) ? new Date() : parsedLastActivity;
 
   return {
     sessionKey: agent.sessionKey,
@@ -63,7 +66,7 @@ function mapAgentToSession(
       canInterrupt: surface?.capabilities?.interrupt ?? false,
       canReviewDiffs: surface?.capabilities?.diffContext ?? false,
     },
-    lastActivityAt: new Date(agent.lastEventAt),
+    lastActivityAt,
     initialTask: agent.currentTask,
     model: agent.model,
     lifecycle: surface?.lifecycle ? {

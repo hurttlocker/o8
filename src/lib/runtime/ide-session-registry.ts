@@ -50,6 +50,36 @@ function scoreLabel(label: string) {
   return 2;
 }
 
+function runtimeDisplayName(runtime: 'codex' | 'claude-code') {
+  return runtime === 'codex' ? 'Codex' : 'Claude Code';
+}
+
+function repoDisplayName(repoName?: string, repoPath?: string) {
+  if (repoName?.trim()) return repoName.trim();
+  if (repoPath?.trim()) return path.basename(repoPath.trim());
+  return null;
+}
+
+function decorateLabel(runtime: 'codex' | 'claude-code', label: string, repoName?: string, repoPath?: string) {
+  const trimmed = label.trim();
+  const runtimeName = runtimeDisplayName(runtime);
+  if (!trimmed) {
+    const repoLabel = repoDisplayName(repoName, repoPath);
+    return repoLabel ? `${repoLabel} · ${runtimeName}` : runtimeName;
+  }
+
+  if (/^issue #\d+/i.test(trimmed) || /^pr #\d+/i.test(trimmed)) {
+    return trimmed;
+  }
+
+  if (trimmed.toLowerCase() === runtimeName.toLowerCase()) {
+    const repoLabel = repoDisplayName(repoName, repoPath);
+    return repoLabel ? `${repoLabel} · ${runtimeName}` : runtimeName;
+  }
+
+  return trimmed;
+}
+
 export function listIdeRuntimeSessions(): IdeRuntimeSessionDescriptor[] {
   if (!existsSync(TERMINAL_STATE_DIR)) return [];
 
@@ -72,7 +102,7 @@ export function listIdeRuntimeSessions(): IdeRuntimeSessionDescriptor[] {
         const next: IdeRuntimeSessionDescriptor = {
           runtimeId: tab.chatRuntime,
           sessionKey,
-          label: tab.label?.trim() || (tab.chatRuntime === 'codex' ? 'Codex' : 'Claude Code'),
+          label: decorateLabel(tab.chatRuntime, tab.label?.trim() || runtimeDisplayName(tab.chatRuntime), tab.repoName, tab.repoPath),
           model: tab.chatModel,
           repoName: tab.repoName,
           repoPath: tab.repoPath,
