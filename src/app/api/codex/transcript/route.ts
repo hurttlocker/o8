@@ -54,6 +54,17 @@ function buildTranscript(entries: RuntimeTailEntry[]) {
   let pendingToolCalls: MobileTranscriptToolCall[] = [];
   let pendingTokens: { input: number; output: number } | undefined;
 
+  const shouldSkipUserText = (text: string) => {
+    const lower = text.toLowerCase();
+    return (
+      lower.includes('# agents.md instructions')
+      || lower.includes('<environment_context>')
+      || lower.includes('<permissions instructions>')
+      || lower.includes('<skills_instructions>')
+      || lower.includes('<collaboration_mode>')
+    );
+  };
+
   const flushPendingTools = (timestampLabel?: string) => {
     if (pendingToolCalls.length === 0) return;
     transcript.push({
@@ -116,6 +127,23 @@ function buildTranscript(entries: RuntimeTailEntry[]) {
     }
 
     if (entry.kind === 'message') {
+      if (entry.role === 'user') {
+        if (shouldSkipUserText(text)) {
+          pendingThinking = '';
+          pendingTokens = undefined;
+          continue;
+        }
+        flushPendingTools(timestampLabel);
+        transcript.push({
+          id: entry.id,
+          role: 'user',
+          text: text,
+          timestampLabel,
+        });
+        pendingThinking = '';
+        pendingTokens = undefined;
+        continue;
+      }
       const assistantText = text;
       if (!assistantText && pendingToolCalls.length === 0) continue;
       transcript.push({
