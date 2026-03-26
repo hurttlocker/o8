@@ -70,6 +70,7 @@ import {
   formatReviewCommentInjection,
   type AgentPanelChatInjectionPayload,
 } from '@/lib/chat/injection';
+import { useTheme } from '@/lib/theme/context';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
@@ -1317,6 +1318,7 @@ function getMonacoLanguage(path: string): string {
 }
 
 const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath: string; workspace?: string }) {
+  const { themeId } = useTheme();
   const [content, setContent] = useState<string | null>(null);
   const [editContent, setEditContent] = useState<string>('');
   const [diff, setDiff] = useState<string>('');
@@ -1950,7 +1952,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
             height="100%"
             language={getMonacoLanguage(filePath)}
             value={editContent}
-            theme="cortex-frost"
+            theme={themeId === 'dark' ? 'cortex-graphite' : 'cortex-frost'}
             onChange={(value) => {
               if (editing && value !== undefined) {
                 setEditContent(value);
@@ -1959,37 +1961,37 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
             }}
             onMount={handleEditorMount}
             beforeMount={(monaco) => {
-              // Dark theme matching our zinc UI
-              monaco.editor.defineTheme('cortex-dark', {
+              // Graphite dark theme — soft shell gray, not Monaco black
+              monaco.editor.defineTheme('cortex-graphite', {
                 base: 'vs-dark',
                 inherit: true,
                 rules: [
-                  { token: 'comment', foreground: '5c6370', fontStyle: 'italic' },
-                  { token: 'keyword', foreground: 'c678dd' },
-                  { token: 'string', foreground: '98c379' },
-                  { token: 'number', foreground: 'd19a66' },
-                  { token: 'type', foreground: 'e5c07b' },
-                  { token: 'variable', foreground: 'e06c75' },
-                  { token: 'function', foreground: '61afef' },
+                  { token: 'comment', foreground: '8f99a6', fontStyle: 'italic' },
+                  { token: 'keyword', foreground: '9db5ff' },
+                  { token: 'string', foreground: '7fd6b7' },
+                  { token: 'number', foreground: 'f1b57f' },
+                  { token: 'type', foreground: 'd6c48f' },
+                  { token: 'variable', foreground: 'f2a8b8' },
+                  { token: 'function', foreground: '8fc0ff' },
                 ],
                 colors: {
-                  'editor.background': '#09090b',
-                  'editor.foreground': '#e4e4e7',
-                  'editor.lineHighlightBackground': '#18181b',
-                  'editor.selectionBackground': '#2563eb33',
-                  'editorLineNumber.foreground': '#3f3f46',
-                  'editorLineNumber.activeForeground': '#71717a',
-                  'editor.inactiveSelectionBackground': '#2563eb1a',
-                  'editorCursor.foreground': '#2563eb',
-                  'editorGutter.background': '#09090b',
-                  'editorWidget.background': '#18181b',
-                  'editorWidget.border': '#27272a',
-                  'input.background': '#18181b',
-                  'input.border': '#27272a',
-                  'focusBorder': '#2563eb',
-                  'minimap.background': '#09090b',
-                  'scrollbarSlider.background': '#27272a80',
-                  'scrollbarSlider.hoverBackground': '#3f3f4680',
+                  'editor.background': '#3d434b',
+                  'editor.foreground': '#eef3f8',
+                  'editor.lineHighlightBackground': '#49515b',
+                  'editor.selectionBackground': '#7aa2ff33',
+                  'editorLineNumber.foreground': '#8893a0',
+                  'editorLineNumber.activeForeground': '#dbe4ee',
+                  'editor.inactiveSelectionBackground': '#7aa2ff1f',
+                  'editorCursor.foreground': '#7aa2ff',
+                  'editorGutter.background': '#3d434b',
+                  'editorWidget.background': '#444b55',
+                  'editorWidget.border': '#65707d',
+                  'input.background': '#343a42',
+                  'input.border': '#65707d',
+                  'focusBorder': '#7aa2ff',
+                  'minimap.background': '#3d434b',
+                  'scrollbarSlider.background': '#65707d88',
+                  'scrollbarSlider.hoverBackground': '#7b879488',
                 },
               });
 

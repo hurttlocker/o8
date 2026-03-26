@@ -4,6 +4,19 @@
  */
 
 if (typeof window !== 'undefined') {
+  const isMonacoCancellation = (value: unknown) => {
+    const error = value as { message?: string; name?: string; code?: string } | null;
+    return Boolean(
+      error
+      && (
+        error.message === 'Canceled'
+        || error.name === 'Canceled'
+        || error.name === 'CancellationError'
+        || error.code === 'Canceled'
+      )
+    );
+  };
+
   // Polyfill ClipboardItem
   if (typeof globalThis.ClipboardItem === 'undefined') {
     (globalThis as Record<string, unknown>).ClipboardItem = class ClipboardItem {
@@ -21,39 +34,81 @@ if (typeof window !== 'undefined') {
   if (!navigator.clipboard) {
     Object.defineProperty(navigator, 'clipboard', {
       value: {
-        writeText: async (_text: string) => {},
+        writeText: async () => {},
         readText: async () => '',
-        write: async (_data: unknown[]) => {},
+        write: async () => {},
         read: async () => [],
       },
       configurable: true,
     });
   }
 
-  // Patch clipboard.write to handle missing ClipboardItem gracefully
-  const origWrite = navigator.clipboard.write?.bind(navigator.clipboard);
-  if (origWrite) {
-    navigator.clipboard.write = async (data: ClipboardItems) => {
-      try {
-        return await origWrite(data);
-      } catch {
-        // Silently fail — Monaco's clipboard service calls this speculatively
-        return undefined as never;
+  // Override clipboard.write with a safe implementation so Monaco's speculative
+  // WebKit clipboard workaround cannot surface CancellationError in dev overlay.
+  const origWriteText = navigator.clipboard.writeText?.bind(navigator.clipboard);
+  navigator.clipboard.write = async (data: ClipboardItems) => {
+    try {
+      const items = Array.from(data as unknown as Iterable<{ getType?: (type: string) => Promise<Blob | string> }>);
+      for (const item of items) {
+        if (!item || typeof item.getType !== 'function') continue;
+        try {
+          const payload = await item.getType('text/plain');
+          const text = payload instanceof Blob ? await payload.text() : String(payload ?? '');
+          if (origWriteText && text) {
+            try {
+              await origWriteText(text);
+            } catch {
+              // Ignore clipboard permission failures in Monaco's speculative path.
+            }
+          }
+          break;
+        } catch (error) {
+          if (isMonacoCancellation(error)) {
+            return undefined as never;
+          }
+        }
       }
+      return undefined as never;
+    } catch {
+      // Silently fail — Monaco's clipboard service calls this speculatively
+      return undefined as never;
     };
-  }
-}
+  };
 
-// Suppress Monaco's internal cancellation errors (async.js cancel → clipboardService)
-if (typeof window !== 'undefined') {
+  const existingOnUnhandledRejection = window.onunhandledrejection;
+  window.onunhandledrejection = (event) => {
+    if (isMonacoCancellation(event.reason)) {
+      event.preventDefault();
+      return true;
+    }
+    return existingOnUnhandledRejection ? existingOnUnhandledRejection.call(window, event) : false;
+  };
+
+  const existingReportError = globalThis.reportError?.bind(globalThis);
+  globalThis.reportError = (error: unknown) => {
+    if (isMonacoCancellation(error)) {
+      return;
+    }
+    existingReportError?.(error);
+  };
+
   const origAddEventListener = window.addEventListener.bind(window);
   window.addEventListener = (type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions) => {
-    if (type === 'unhandledrejection') {
+    if (type === 'unhandledrejection' || type === 'error') {
       const wrappedListener = (event: Event) => {
-        const reason = (event as PromiseRejectionEvent).reason;
-        if (reason?.message === 'Canceled' || reason?.name === 'Canceled') {
-          event.preventDefault();
-          return;
+        if (type === 'unhandledrejection') {
+          const reason = (event as PromiseRejectionEvent).reason;
+          if (isMonacoCancellation(reason)) {
+            event.preventDefault();
+            return;
+          }
+        }
+        if (type === 'error') {
+          const errorEvent = event as ErrorEvent;
+          if (isMonacoCancellation(errorEvent.error) || isMonacoCancellation(errorEvent.message)) {
+            event.preventDefault();
+            return;
+          }
         }
         if (typeof listener === 'function') listener(event);
         else listener.handleEvent(event);
