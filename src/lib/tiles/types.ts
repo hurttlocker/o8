@@ -15,6 +15,7 @@ export interface WorkspaceTileContent {
 
 export interface TerminalTileContent {
   kind: 'terminal';
+  repoPath?: string | null;
 }
 
 export interface PreviewTileContent {
@@ -24,6 +25,7 @@ export interface PreviewTileContent {
 
 export interface CanvasTileContent {
   kind: 'canvas';
+  repoPath?: string | null;
 }
 
 export interface ThoughtsTileContent {

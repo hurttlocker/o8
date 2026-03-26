@@ -134,8 +134,42 @@ interface RepoWorktreeSummary {
   totalDiskUsage: number;
 }
 
+interface CanvasTileState {
+  tabs: CanvasTab[];
+  activeTabId: string | null;
+  revealKey: number;
+}
+
 function repoSlugFromAgent(agent?: PaletteAgentSummary | null) {
   return agent?.runtimeSurface?.reviewContext?.repoSlug?.trim() || null;
+}
+
+function findTerminalLeafByRepoPath(node: TileLayout['root'], repoPath: string): TileLeafNode | null {
+  if (node.type === 'leaf') {
+    return node.content.kind === 'terminal' && node.content.repoPath === repoPath ? node : null;
+  }
+  return findTerminalLeafByRepoPath(node.children[0], repoPath) ?? findTerminalLeafByRepoPath(node.children[1], repoPath);
+}
+
+function findUnscopedTerminalLeaf(node: TileLayout['root']): TileLeafNode | null {
+  if (node.type === 'leaf') {
+    return node.content.kind === 'terminal' && !node.content.repoPath ? node : null;
+  }
+  return findUnscopedTerminalLeaf(node.children[0]) ?? findUnscopedTerminalLeaf(node.children[1]);
+}
+
+function findCanvasLeafByRepoPath(node: TileLayout['root'], repoPath: string): TileLeafNode | null {
+  if (node.type === 'leaf') {
+    return node.content.kind === 'canvas' && node.content.repoPath === repoPath ? node : null;
+  }
+  return findCanvasLeafByRepoPath(node.children[0], repoPath) ?? findCanvasLeafByRepoPath(node.children[1], repoPath);
+}
+
+function findUnscopedCanvasLeaf(node: TileLayout['root']): TileLeafNode | null {
+  if (node.type === 'leaf') {
+    return node.content.kind === 'canvas' && !node.content.repoPath ? node : null;
+  }
+  return findUnscopedCanvasLeaf(node.children[0]) ?? findUnscopedCanvasLeaf(node.children[1]);
 }
 
 function parseIssueNumber(value?: string | null) {
@@ -316,6 +350,7 @@ function DashboardInner() {
   const terminalRef = useRef<TerminalHandle>(null);
   const workspaceTerminalHandlesRef = useRef<Map<string, TerminalTabHandle>>(new Map());
   const contextualPanelHandlesRef = useRef<Map<string, ContextualPanelHandle>>(new Map());
+  const canvasStateByTileIdRef = useRef<Record<string, CanvasTileState>>({});
   const [agentsJson, setAgentsJson] = useState('[]');
   const [activeWorkspace, setActiveWorkspace] = useState<string | undefined>();
   const [showMemoryView, setShowMemoryView] = useState(false);
@@ -376,6 +411,24 @@ function DashboardInner() {
     () => globalRepoEntries.find((repo) => repo.id === globalRepoId) ?? null,
     [globalRepoEntries, globalRepoId],
   );
+  const workspaceTerminalPreferredRepo = useMemo(() => {
+    const source =
+      globalRepoEntry
+      ?? (activeWorkspace
+        ? globalRepoEntries.find((repo) => (
+          activeWorkspace === repo.localPath
+          || activeWorkspace.startsWith(`${repo.localPath}/`)
+        )) ?? null
+        : null)
+      ?? (globalRepoEntries.length === 1 ? globalRepoEntries[0] : null);
+    return source ? {
+      name: source.name,
+      localPath: source.localPath,
+      branch: source.readiness?.currentBranch ?? (globalRepoEntry?.id === source.id ? globalRepoBranch : source.defaultBranch),
+      readiness: source.readiness ?? null,
+      ...(source.remoteUrl ? { remoteUrl: source.remoteUrl } : {}),
+    } : null;
+  }, [activeWorkspace, globalRepoBranch, globalRepoEntries, globalRepoEntry]);
   const globalRepo = useMemo(
     () => repoSlugFromRemote(globalRepoEntry?.remoteUrl),
     [globalRepoEntry],
@@ -681,22 +734,276 @@ function DashboardInner() {
     return contextualPanelHandlesRef.current.values().next().value ?? null;
   }, [activeTileId]);
 
-  const getPreferredWorkspaceTerminalTarget = useCallback((preferredTileId?: string | null) => {
+  const findInsertionTarget = useCallback((preferredKinds: TileContentKind[]): TileLeafNode => {
+    const activeTile = activeTileId ? findTile(tileLayout.root, activeTileId) : null;
+    if (activeTile?.type === 'leaf' && preferredKinds.includes(activeTile.content.kind)) {
+      return activeTile;
+    }
+    for (const kind of preferredKinds) {
+      const matchingLeaf = findLeafByContentKind(tileLayout.root, kind);
+      if (matchingLeaf) {
+        return matchingLeaf;
+      }
+    }
+    if (activeTile?.type === 'leaf') {
+      return activeTile;
+    }
+    return getFirstLeaf(tileLayout.root);
+  }, [activeTileId, tileLayout.root]);
+
+  const findWorkspaceTarget = useCallback((): TileLeafNode | null => {
+    const activeTile = activeTileId ? findTile(tileLayout.root, activeTileId) : null;
+    if (activeTile?.type === 'leaf' && activeTile.content.kind === 'workspace') {
+      return activeTile;
+    }
+    return findLeafByContentKind(tileLayout.root, 'workspace');
+  }, [activeTileId, tileLayout.root]);
+
+  const setTerminalTileRepoScope = useCallback((tileId: string, repoPath: string | null) => {
+    setTileLayout((current) => {
+      const tile = findTile(current.root, tileId);
+      if (tile?.type !== 'leaf' || tile.content.kind !== 'terminal') {
+        return current;
+      }
+      const nextRepoPath = repoPath ?? null;
+      if ((tile.content.repoPath ?? null) === nextRepoPath) {
+        return current;
+      }
+      return {
+        ...current,
+        root: replaceTileContent(current.root, tileId, {
+          kind: 'terminal',
+          repoPath: nextRepoPath,
+        }),
+      };
+    });
+  }, []);
+
+  const findPreferredWorkspaceTerminalTileId = useCallback((repoPath?: string | null, preferredTileId?: string | null) => {
+    const normalizedRepoPath = repoPath ?? null;
     if (preferredTileId) {
-      const preferredHandle = workspaceTerminalHandlesRef.current.get(preferredTileId);
-      if (preferredHandle) {
-        return { tileId: preferredTileId, handle: preferredHandle };
+      const preferredTile = findTile(tileLayout.root, preferredTileId);
+      if (preferredTile?.type === 'leaf' && preferredTile.content.kind === 'terminal') {
+        const preferredRepoPath = preferredTile.content.repoPath ?? null;
+        if (!normalizedRepoPath || preferredRepoPath === normalizedRepoPath || preferredRepoPath === null) {
+          return preferredTileId;
+        }
       }
     }
+
+    if (normalizedRepoPath) {
+      const matchingLeaf = findTerminalLeafByRepoPath(tileLayout.root, normalizedRepoPath);
+      if (matchingLeaf) {
+        return matchingLeaf.id;
+      }
+    }
+
     if (activeTileId) {
-      const activeHandle = workspaceTerminalHandlesRef.current.get(activeTileId);
-      if (activeHandle) {
-        return { tileId: activeTileId, handle: activeHandle };
+      const activeTile = findTile(tileLayout.root, activeTileId);
+      if (activeTile?.type === 'leaf' && activeTile.content.kind === 'terminal') {
+        const activeRepoPath = activeTile.content.repoPath ?? null;
+        if (!normalizedRepoPath || activeRepoPath === normalizedRepoPath || activeRepoPath === null) {
+          return activeTileId;
+        }
       }
     }
+
+    if (normalizedRepoPath) {
+      const unscopedLeaf = findUnscopedTerminalLeaf(tileLayout.root);
+      if (unscopedLeaf) {
+        return unscopedLeaf.id;
+      }
+      return null;
+    }
+
     const firstEntry = workspaceTerminalHandlesRef.current.entries().next().value as [string, TerminalTabHandle] | undefined;
-    return firstEntry ? { tileId: firstEntry[0], handle: firstEntry[1] } : null;
-  }, [activeTileId]);
+    return firstEntry?.[0] ?? null;
+  }, [activeTileId, tileLayout.root]);
+
+  const getPreferredWorkspaceTerminalTarget = useCallback((repoPath?: string | null, preferredTileId?: string | null) => {
+    const targetTileId = findPreferredWorkspaceTerminalTileId(repoPath, preferredTileId);
+    if (!targetTileId) return null;
+    const handle = workspaceTerminalHandlesRef.current.get(targetTileId);
+    return handle ? { tileId: targetTileId, handle } : null;
+  }, [findPreferredWorkspaceTerminalTileId]);
+
+  const ensureWorkspaceTerminalTile = useCallback((repoPath?: string | null, preferredTileId?: string | null) => {
+    const normalizedRepoPath = repoPath ?? null;
+    const preferredTile = findPreferredWorkspaceTerminalTileId(normalizedRepoPath, preferredTileId);
+    if (preferredTile) {
+      if (normalizedRepoPath) {
+        setTerminalTileRepoScope(preferredTile, normalizedRepoPath);
+      }
+      setActiveTileId(preferredTile);
+      return preferredTile;
+    }
+
+    const workspaceTarget = findWorkspaceTarget();
+    if (workspaceTarget) {
+      setTileLayout((current) => ({
+        ...current,
+        root: replaceTileContent(current.root, workspaceTarget.id, {
+          kind: 'terminal',
+          repoPath: normalizedRepoPath,
+        }),
+      }));
+      setActiveTileId(workspaceTarget.id);
+      return workspaceTarget.id;
+    }
+
+    const targetLeaf = findInsertionTarget(['terminal', 'workspace']);
+    const result = splitTile(
+      tileLayout.root,
+      targetLeaf.id,
+      'vertical',
+      {
+        kind: 'terminal',
+        repoPath: normalizedRepoPath,
+      },
+      0.58,
+    );
+    if (!result.newTileId) {
+      return null;
+    }
+    setTileLayout((current) => ({
+      ...current,
+      root: result.root,
+    }));
+    setActiveTileId(result.newTileId);
+    return result.newTileId;
+  }, [findInsertionTarget, findPreferredWorkspaceTerminalTileId, findWorkspaceTarget, setTerminalTileRepoScope, tileLayout.root]);
+
+  const setCanvasTileRepoScope = useCallback((tileId: string, repoPath: string | null) => {
+    setTileLayout((current) => {
+      const tile = findTile(current.root, tileId);
+      if (tile?.type !== 'leaf' || tile.content.kind !== 'canvas') {
+        return current;
+      }
+      const nextRepoPath = repoPath ?? null;
+      if ((tile.content.repoPath ?? null) === nextRepoPath) {
+        return current;
+      }
+      return {
+        ...current,
+        root: replaceTileContent(current.root, tileId, {
+          kind: 'canvas',
+          repoPath: nextRepoPath,
+        }),
+      };
+    });
+  }, []);
+
+  const findPreferredCanvasTileId = useCallback((repoPath?: string | null, preferredTileId?: string | null) => {
+    const normalizedRepoPath = repoPath ?? null;
+    if (preferredTileId) {
+      const preferredTile = findTile(tileLayout.root, preferredTileId);
+      if (preferredTile?.type === 'leaf' && preferredTile.content.kind === 'canvas') {
+        const preferredRepoPath = preferredTile.content.repoPath ?? null;
+        if (!normalizedRepoPath || preferredRepoPath === normalizedRepoPath || preferredRepoPath === null) {
+          return preferredTileId;
+        }
+      }
+    }
+
+    if (normalizedRepoPath) {
+      const matchingLeaf = findCanvasLeafByRepoPath(tileLayout.root, normalizedRepoPath);
+      if (matchingLeaf) {
+        return matchingLeaf.id;
+      }
+    }
+
+    if (activeTileId) {
+      const activeTile = findTile(tileLayout.root, activeTileId);
+      if (activeTile?.type === 'leaf' && activeTile.content.kind === 'canvas') {
+        const activeRepoPath = activeTile.content.repoPath ?? null;
+        if (!normalizedRepoPath || activeRepoPath === normalizedRepoPath || activeRepoPath === null) {
+          return activeTileId;
+        }
+      }
+    }
+
+    if (normalizedRepoPath) {
+      const unscopedLeaf = findUnscopedCanvasLeaf(tileLayout.root);
+      const unscopedState = unscopedLeaf ? canvasStateByTileIdRef.current[unscopedLeaf.id] : null;
+      if (unscopedLeaf && (!unscopedState || unscopedState.tabs.length === 0)) {
+        return unscopedLeaf.id;
+      }
+      return null;
+    }
+
+    const existingLeaf = findUnscopedCanvasLeaf(tileLayout.root);
+    return existingLeaf?.id ?? null;
+  }, [activeTileId, tileLayout.root]);
+
+  const ensureCanvasTile = useCallback((repoPath?: string | null, preferredTileId?: string | null) => {
+    const normalizedRepoPath = repoPath ?? null;
+    const preferredTile = findPreferredCanvasTileId(normalizedRepoPath, preferredTileId);
+    if (preferredTile) {
+      if (normalizedRepoPath) {
+        setCanvasTileRepoScope(preferredTile, normalizedRepoPath);
+      }
+      setActiveTileId(preferredTile);
+      return preferredTile;
+    }
+
+    const workspaceTarget = findWorkspaceTarget();
+    if (workspaceTarget) {
+      setTileLayout((current) => ({
+        ...current,
+        root: replaceTileContent(current.root, workspaceTarget.id, {
+          kind: 'canvas',
+          repoPath: normalizedRepoPath,
+        }),
+      }));
+      setActiveTileId(workspaceTarget.id);
+      return workspaceTarget.id;
+    }
+
+    const repoTerminalLeaf = normalizedRepoPath
+      ? findTerminalLeafByRepoPath(tileLayout.root, normalizedRepoPath)
+      : null;
+    if (repoTerminalLeaf) {
+      const result = splitTile(
+        tileLayout.root,
+        repoTerminalLeaf.id,
+        'horizontal',
+        {
+          kind: 'canvas',
+          repoPath: normalizedRepoPath,
+        },
+        0.62,
+      );
+      if (result.newTileId) {
+        setTileLayout((current) => ({
+          ...current,
+          root: result.root,
+        }));
+        setActiveTileId(result.newTileId);
+        return result.newTileId;
+      }
+    }
+
+    const targetLeaf = findInsertionTarget(['terminal', 'canvas', 'preview', 'workspace']);
+    const result = splitTile(
+      tileLayout.root,
+      targetLeaf.id,
+      'horizontal',
+      {
+        kind: 'canvas',
+        repoPath: normalizedRepoPath,
+      },
+      0.62,
+    );
+    if (!result.newTileId) {
+      return null;
+    }
+    setTileLayout((current) => ({
+      ...current,
+      root: result.root,
+    }));
+    setActiveTileId(result.newTileId);
+    return result.newTileId;
+  }, [findInsertionTarget, findPreferredCanvasTileId, findWorkspaceTarget, setCanvasTileRepoScope, tileLayout.root]);
 
   // Terminal WS hook — routes events to WorkspaceTerminal + ContextualPanel
   const terminalWsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
@@ -829,31 +1136,6 @@ function DashboardInner() {
     [tileLayout.root],
   );
 
-  const findInsertionTarget = useCallback((preferredKinds: TileContentKind[]): TileLeafNode => {
-    const activeTile = activeTileId ? findTile(tileLayout.root, activeTileId) : null;
-    if (activeTile?.type === 'leaf' && preferredKinds.includes(activeTile.content.kind)) {
-      return activeTile;
-    }
-    for (const kind of preferredKinds) {
-      const matchingLeaf = findLeafByContentKind(tileLayout.root, kind);
-      if (matchingLeaf) {
-        return matchingLeaf;
-      }
-    }
-    if (activeTile?.type === 'leaf') {
-      return activeTile;
-    }
-    return getFirstLeaf(tileLayout.root);
-  }, [activeTileId, tileLayout.root]);
-
-  const findWorkspaceTarget = useCallback((): TileLeafNode | null => {
-    const activeTile = activeTileId ? findTile(tileLayout.root, activeTileId) : null;
-    if (activeTile?.type === 'leaf' && activeTile.content.kind === 'workspace') {
-      return activeTile;
-    }
-    return findLeafByContentKind(tileLayout.root, 'workspace');
-  }, [activeTileId, tileLayout.root]);
-
   const handleCloseTile = useCallback((tileId: string) => {
     // Never close the WorkspaceTerminal tile
     const tile = findTile(tileLayout.root, tileId);
@@ -870,6 +1152,14 @@ function DashboardInner() {
       ...tileLayout,
       root: result.root,
     });
+    if (tile?.type === 'leaf' && tile.content.kind === 'canvas') {
+      setCanvasStateByTileId((prev) => {
+        if (!prev[tileId]) return prev;
+        const next = { ...prev };
+        delete next[tileId];
+        return next;
+      });
+    }
     const nextActive = getFirstLeaf(result.root).id;
     if (activeTileId === tileId || (activeTileId && !findTile(result.root, activeTileId))) {
       setActiveTileId(nextActive);
@@ -889,7 +1179,12 @@ function DashboardInner() {
     const sourceTile = findTile(tileLayout.root, tileId);
     const sourceKind = sourceTile?.type === 'leaf' ? sourceTile.content.kind : 'workspace';
     const newKind = sourceKind === 'contextual-panel' ? 'contextual-panel' : 'terminal';
-    const result = splitTile(tileLayout.root, tileId, direction, createTileContent(newKind), ratio);
+    const nextContent = sourceTile?.type === 'leaf'
+      && sourceTile.content.kind === 'terminal'
+      && newKind === 'terminal'
+      ? { kind: 'terminal' as const, repoPath: sourceTile.content.repoPath ?? null }
+      : createTileContent(newKind);
+    const result = splitTile(tileLayout.root, tileId, direction, nextContent, ratio);
     if (!result.newTileId) {
       return;
     }
@@ -982,30 +1277,34 @@ function DashboardInner() {
     return result.newTileId;
   }, [findInsertionTarget, findWorkspaceTarget, tileLayout, workspacePreviews]);
 
-  const waitForWorkspaceTerminalTarget = useCallback(async (preferredTileId?: string | null) => {
-    const initial = getPreferredWorkspaceTerminalTarget(preferredTileId);
+  const waitForWorkspaceTerminalTarget = useCallback(async (options?: { repoPath?: string | null; preferredTileId?: string | null }) => {
+    const repoPath = options?.repoPath ?? null;
+    const preferredTileId = options?.preferredTileId ?? null;
+    const initial = getPreferredWorkspaceTerminalTarget(repoPath, preferredTileId);
     if (initial) {
+      if (repoPath) {
+        setTerminalTileRepoScope(initial.tileId, repoPath);
+      }
       setActiveTileId(initial.tileId);
       return initial;
     }
 
-    const ensuredTileId = ensureTileKind('terminal', {
-      preferredKinds: ['terminal', 'workspace'],
-      direction: 'vertical',
-      ratio: 0.58,
-    });
+    const ensuredTileId = ensureWorkspaceTerminalTile(repoPath, preferredTileId);
 
     for (let attempt = 0; attempt < 8; attempt += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 50));
-      const target = getPreferredWorkspaceTerminalTarget((ensuredTileId ?? preferredTileId) ?? undefined);
+      const target = getPreferredWorkspaceTerminalTarget(repoPath, (ensuredTileId ?? preferredTileId) ?? undefined);
       if (target) {
+        if (repoPath) {
+          setTerminalTileRepoScope(target.tileId, repoPath);
+        }
         setActiveTileId(target.tileId);
         return target;
       }
     }
 
     return null;
-  }, [ensureTileKind, getPreferredWorkspaceTerminalTarget]);
+  }, [ensureWorkspaceTerminalTile, getPreferredWorkspaceTerminalTarget, setTerminalTileRepoScope]);
 
   const toggleContextualPanelTile = useCallback(() => {
     const existingLeaf = findLeafByContentKind(tileLayout.root, 'contextual-panel');
@@ -1080,43 +1379,158 @@ function DashboardInner() {
     });
   }, [tileLayout, workspacePreviews]);
 
-  // ── Canvas tab state ──
-  const [canvasTabs, setCanvasTabs] = useState<CanvasTab[]>([]);
-  const [activeCanvasTabId, setActiveCanvasTabId] = useState<string | null>(null);
-  const [canvasRevealKey, setCanvasRevealKey] = useState(0);
+  // ── Repo/global inspector tab state ──
+  const [canvasStateByTileId, setCanvasStateByTileId] = useState<Record<string, CanvasTileState>>({});
+
+  useEffect(() => {
+    canvasStateByTileIdRef.current = canvasStateByTileId;
+  }, [canvasStateByTileId]);
+
+  const resolveCanvasTabRepoPath = useCallback((tab: CanvasTab) => {
+    if (tab.kind === 'timeline' || tab.kind === 'memory' || tab.kind === 'welcome' || tab.kind === 'mermaid') {
+      return null;
+    }
+
+    const repoSlug = tab.meta?.repo ?? null;
+    if (repoSlug) {
+      const matchedRepo = globalRepoEntries.find((repo) => repoSlugFromRemote(repo.remoteUrl) === repoSlug);
+      if (matchedRepo) {
+        return matchedRepo.localPath;
+      }
+    }
+
+    const workspacePath = tab.meta?.workspace ?? (tab.kind === 'readme' || tab.kind === 'git-log' ? tab.resourceId : null);
+    if (workspacePath) {
+      const matchedRepo = globalRepoEntries.find((repo) => (
+        workspacePath === repo.localPath
+        || workspacePath.startsWith(`${repo.localPath}/`)
+      ));
+      if (matchedRepo) {
+        return matchedRepo.localPath;
+      }
+    }
+
+    switch (tab.kind) {
+      case 'issue':
+      case 'pr':
+      case 'file':
+      case 'diff':
+      case 'commit':
+      case 'readme':
+      case 'ci':
+      case 'new-issue':
+      case 'git-log':
+      case 'image':
+        return globalRepoEntry?.localPath ?? null;
+      default:
+        return null;
+    }
+  }, [globalRepoEntries, globalRepoEntry]);
+
+  const openCanvasInInspectorTile = useCallback((tab: CanvasTab, repoPath: string | null) => {
+    const existingTileEntry = Object.entries(canvasStateByTileId).find(([, state]) => (
+      state.tabs.some((entry) => entry.id === tab.id)
+    ));
+    if (existingTileEntry) {
+      const [existingTileId, existingState] = existingTileEntry;
+      if (repoPath) {
+        setCanvasTileRepoScope(existingTileId, repoPath);
+      }
+      setActiveTileId(existingTileId);
+      setCanvasStateByTileId((prev) => ({
+        ...prev,
+        [existingTileId]: {
+          ...existingState,
+          activeTabId: tab.id,
+          revealKey: existingState.revealKey + 1,
+        },
+      }));
+      return;
+    }
+
+    const targetTileId = ensureCanvasTile(repoPath);
+    if (!targetTileId) {
+      return;
+    }
+
+    setCanvasStateByTileId((prev) => {
+      const current = prev[targetTileId] ?? { tabs: [], activeTabId: null, revealKey: 0 };
+      const existingIndex = current.tabs.findIndex((entry) => entry.id === tab.id);
+      const nextTabs = existingIndex >= 0
+        ? current.tabs
+        : [...current.tabs, tab];
+
+      return {
+        ...prev,
+        [targetTileId]: {
+          tabs: nextTabs,
+          activeTabId: tab.id,
+          revealKey: current.revealKey + 1,
+        },
+      };
+    });
+  }, [canvasStateByTileId, ensureCanvasTile, setCanvasTileRepoScope]);
 
   const openCanvasTab = useCallback((tab: CanvasTab) => {
-    // Canvas tabs open inside the ContextualPanel (bottom panel)
-    ensureTileKind('contextual-panel', {
-      direction: 'horizontal',
-      preferredKinds: ['terminal', 'preview'],
-      ratio: 0.68,
+    const repoPath = resolveCanvasTabRepoPath(tab);
+    if (repoPath) {
+      const repoEntry = globalRepoEntries.find((repo) => repo.localPath === repoPath) ?? null;
+      void (async () => {
+        const workspaceTarget = await waitForWorkspaceTerminalTarget({ repoPath });
+        if (workspaceTarget) {
+          workspaceTarget.handle.openInspectorTab(tab, {
+            repo: repoEntry ? {
+              name: repoEntry.name,
+              localPath: repoEntry.localPath,
+              branch: repoEntry.readiness?.currentBranch ?? repoEntry.defaultBranch,
+              readiness: repoEntry.readiness ?? null,
+              remoteUrl: repoEntry.remoteUrl ?? undefined,
+            } : undefined,
+          });
+          return;
+        }
+        openCanvasInInspectorTile(tab, repoPath);
+      })();
+      return;
+    }
+
+    openCanvasInInspectorTile(tab, null);
+  }, [globalRepoEntries, openCanvasInInspectorTile, resolveCanvasTabRepoPath, waitForWorkspaceTerminalTarget]);
+
+  const closeCanvasTab = useCallback((tileId: string, tabId: string) => {
+    setCanvasStateByTileId((prev) => {
+      const current = prev[tileId];
+      if (!current) return prev;
+      const nextTabs = current.tabs.filter((entry) => entry.id !== tabId);
+      if (nextTabs.length === 0) {
+        const next = { ...prev };
+        delete next[tileId];
+        return next;
+      }
+      return {
+        ...prev,
+        [tileId]: {
+          ...current,
+          tabs: nextTabs,
+          activeTabId: current.activeTabId === tabId ? nextTabs[nextTabs.length - 1]?.id ?? null : current.activeTabId,
+        },
+      };
     });
-    console.log('[Canvas] openCanvasTab called:', tab.kind, tab.id);
-    setCanvasTabs((prev) => {
-      const existing = prev.find((t) => t.id === tab.id);
-      if (existing) {
-        console.log('[Canvas] tab already exists, just activating');
+  }, []);
+
+  const selectCanvasTab = useCallback((tileId: string, tabId: string) => {
+    setCanvasStateByTileId((prev) => {
+      const current = prev[tileId];
+      if (!current || current.activeTabId === tabId) {
         return prev;
       }
-      console.log('[Canvas] adding new tab, total:', prev.length + 1);
-      return [...prev, tab];
-    });
-    setActiveCanvasTabId(tab.id);
-    setCanvasRevealKey((current) => current + 1);
-  }, [ensureTileKind]);
-
-  const closeCanvasTab = useCallback((tabId: string) => {
-    setCanvasTabs((prev) => {
-      const next = prev.filter((t) => t.id !== tabId);
-      // If we closed the active tab, activate the last remaining tab
-      setActiveCanvasTabId((currentActive) => {
-        if (currentActive === tabId) {
-          return next.length > 0 ? next[next.length - 1].id : null;
-        }
-        return currentActive;
-      });
-      return next;
+      return {
+        ...prev,
+        [tileId]: {
+          ...current,
+          activeTabId: tabId,
+        },
+      };
     });
   }, []);
 
@@ -1204,13 +1618,17 @@ function DashboardInner() {
       return;
     }
     void (async () => {
-      const workspaceTarget = await waitForWorkspaceTerminalTarget();
+      const workspaceTarget = await waitForWorkspaceTerminalTarget({
+        repoPath: globalRepoEntry?.localPath ?? null,
+      });
       if (workspaceTarget) {
         workspaceTarget.handle.injectIntoCliChat(payload.text, {
           repo: globalRepoEntry
             ? {
                 name: globalRepoEntry.name,
                 localPath: globalRepoEntry.localPath,
+                branch: globalRepoEntry.readiness?.currentBranch ?? globalRepoBranch,
+                readiness: globalRepoEntry.readiness ?? null,
                 remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
               }
             : undefined,
@@ -1220,7 +1638,7 @@ function DashboardInner() {
       setChatVisible(true);
       setDesktopDraftInjection(nextInjection);
     })();
-  }, [globalRepoEntry, hasThoughtsTile, thoughtsOpen, waitForWorkspaceTerminalTarget]);
+  }, [globalRepoBranch, globalRepoEntry, hasThoughtsTile, thoughtsOpen, waitForWorkspaceTerminalTarget]);
 
   // ── Feed agent data to alert engine + search ──
   const handleAgentsUpdate = useCallback((agents: unknown[]) => {
@@ -1316,7 +1734,9 @@ function DashboardInner() {
       body: JSON.stringify({ action: 'touch', id: repoEntry.id }),
     }).catch(() => null);
 
-    const workspaceTarget = await waitForWorkspaceTerminalTarget();
+    const workspaceTarget = await waitForWorkspaceTerminalTarget({
+      repoPath: repoEntry.localPath,
+    });
     if (!workspaceTarget) {
       throw new Error('No workspace terminal is available to launch the CLI session.');
     }
@@ -1326,6 +1746,8 @@ function DashboardInner() {
       repo: {
         name: repoEntry.name,
         localPath: repoEntry.localPath,
+        branch: repoEntry.readiness?.currentBranch ?? repoEntry.defaultBranch,
+        readiness: repoEntry.readiness ?? null,
         remoteUrl: repoEntry.remoteUrl ?? undefined,
       },
       modelId: request.modelId,
@@ -1364,7 +1786,9 @@ function DashboardInner() {
       body: JSON.stringify({ action: 'touch', id: repoEntry.id }),
     }).catch(() => null);
 
-    const workspaceTarget = await waitForWorkspaceTerminalTarget();
+    const workspaceTarget = await waitForWorkspaceTerminalTarget({
+      repoPath: repoEntry.localPath,
+    });
     if (!workspaceTarget) {
       throw new Error('No workspace terminal is available to launch the CLI session.');
     }
@@ -1438,6 +1862,8 @@ function DashboardInner() {
       repo: {
         name: repoEntry.name,
         localPath: repoEntry.localPath,
+        branch: repoEntry.readiness?.currentBranch ?? repoEntry.defaultBranch,
+        readiness: repoEntry.readiness ?? null,
         remoteUrl: repoEntry.remoteUrl ?? undefined,
       },
       modelId: undefined,
@@ -1727,7 +2153,9 @@ function DashboardInner() {
         keywords: ['workspace cli', 'workspace terminal', 'terminal', 'focus terminal'],
         priority: 295,
         run: async () => {
-          const target = await waitForWorkspaceTerminalTarget();
+          const target = await waitForWorkspaceTerminalTarget({
+            repoPath: globalRepoEntry.localPath,
+          });
           if (!target) {
             throw new Error('No workspace CLI surface is available right now. Reload the workspace and try again.');
           }
@@ -2179,7 +2607,7 @@ function DashboardInner() {
   const tileRegistry = useMemo<TileContentRegistry>(() => ({
     workspace: {
       label: 'Workspace',
-      description: 'Empty workspace pane that will pick up the next canvas, preview, or terminal panel you open.',
+      description: 'Empty repo workspace pane that will pick up the next terminal or inspector surface you open.',
       render: ({ active }) => (
         <div style={{
           display: 'flex',
@@ -2226,7 +2654,7 @@ function DashboardInner() {
             color: 'rgba(226,232,240,0.72)',
             marginBottom: 16,
           }}>
-            Split first, then open a preview, issue, or bottom terminal. Cortex will route it into the active workspace pane automatically.
+            Split first, then open a repo surface. Cortex will route the next workspace terminal or inspector into this pane automatically.
           </div>
           <button
             type="button"
@@ -2252,26 +2680,61 @@ function DashboardInner() {
       ),
     },
     terminal: {
-      label: 'Workspace Terminal',
+      label: 'Workspace',
       description: 'Multi-tab terminal and chat workspace for active sessions.',
       singleton: true,
+      hideHeader: true,
       // closable determined dynamically in TileContainer (last terminal is protected)
-      render: ({ tileId }) => (
-        <WorkspaceTerminal
-          ref={(handle) => registerWorkspaceTerminalHandle(tileId, handle)}
-          stateScope={tileId}
-          defaultTab={tileId === 'tile-root' ? 'llm-chat' : 'terminal'}
-          sendTerminalCreate={sendTerminalCreate}
-          sendTerminalAttach={sendTerminalAttach}
-          sendTerminalInput={sendTerminalInput}
-          sendTerminalResize={sendTerminalResize}
-          sendTerminalDetach={sendTerminalDetach}
-          termWsConnected={termWsConnected}
-          onPreviewDetected={handlePreviewDetected}
-          onPreviewSelection={handlePreviewSelection}
-          showPreviewPane={false}
-        />
-      ),
+      render: ({ tileId, content }) => {
+        const tileRepoEntry = content.kind === 'terminal' && content.repoPath
+          ? globalRepoEntries.find((repo) => repo.localPath === content.repoPath) ?? null
+          : null;
+        const tilePreferredRepo = tileRepoEntry ? {
+          name: tileRepoEntry.name,
+          localPath: tileRepoEntry.localPath,
+          branch: tileRepoEntry.readiness?.currentBranch ?? tileRepoEntry.defaultBranch,
+          readiness: tileRepoEntry.readiness ?? null,
+          ...(tileRepoEntry.remoteUrl ? { remoteUrl: tileRepoEntry.remoteUrl } : {}),
+        } : workspaceTerminalPreferredRepo;
+
+        return (
+          <WorkspaceTerminal
+            ref={(handle) => registerWorkspaceTerminalHandle(tileId, handle)}
+            stateScope={tileId}
+            defaultTab={tileId === 'tile-root' ? 'llm-chat' : 'terminal'}
+            preferredRepo={tilePreferredRepo}
+            onRepoScopeChange={(repoPath) => setTerminalTileRepoScope(tileId, repoPath)}
+            onLaunchRepoAgent={(repo) => {
+              void handleLaunchWorkspaceAgent({
+                repoPath: repo.localPath,
+                createNew: true,
+              }).catch((error) => {
+                window.alert(error instanceof Error ? error.message : 'Unable to launch workspace agent.');
+              });
+            }}
+            onOpenRepoGitLog={(repo) => handleOpenGitLog(repo.localPath)}
+            onOpenRepoCI={(repo) => {
+              const repoSlug = repoSlugFromRemote(repo.remoteUrl);
+              if (repoSlug) handleOpenCI(repoSlug);
+            }}
+            onInjectChatContext={handleAgentPanelChatInjection}
+            onSelectCommit={handleSelectCommit}
+            onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
+            onSplitVertical={() => handleSplitTile(tileId, 'vertical')}
+            onSplitHorizontal={() => handleSplitTile(tileId, 'horizontal')}
+            onCloseTile={() => handleCloseTile(tileId)}
+            sendTerminalCreate={sendTerminalCreate}
+            sendTerminalAttach={sendTerminalAttach}
+            sendTerminalInput={sendTerminalInput}
+            sendTerminalResize={sendTerminalResize}
+            sendTerminalDetach={sendTerminalDetach}
+            termWsConnected={termWsConnected}
+            onPreviewDetected={handlePreviewDetected}
+            onPreviewSelection={handlePreviewSelection}
+            showPreviewPane={false}
+          />
+        );
+      },
     },
     preview: {
       label: 'Preview',
@@ -2287,12 +2750,28 @@ function DashboardInner() {
         />
       ),
     },
-    // Legacy — canvas tabs now render inside ContextualPanel
     canvas: {
-      label: 'Canvas (Legacy)',
-      description: 'Redirects to ContextualPanel',
-      singleton: true,
-      render: () => <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-faint)' }}>Canvas merged into Contextual Panel</div>,
+      label: 'Inspector',
+      description: 'Repo or global inspector surface for diffs, issues, PRs, and session replay.',
+      render: ({ tileId, content }) => {
+        const tileState = canvasStateByTileId[tileId] ?? { tabs: [], activeTabId: null, revealKey: 0 };
+        const tileRepoEntry = content.kind === 'canvas' && content.repoPath
+          ? globalRepoEntries.find((repo) => repo.localPath === content.repoPath) ?? null
+          : null;
+
+        return (
+          <Canvas
+            tabs={tileState.tabs}
+            activeTabId={tileState.activeTabId}
+            onSelectTab={(tabId) => selectCanvasTab(tileId, tabId)}
+            onCloseTab={(tabId) => closeCanvasTab(tileId, tabId)}
+            selectedRepo={repoSlugFromRemote(tileRepoEntry?.remoteUrl) ?? null}
+            onInjectChatContext={handleAgentPanelChatInjection}
+            onSelectCommit={handleSelectCommit}
+            onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
+          />
+        );
+      },
     },
     thoughts: {
       label: 'Thoughts',
@@ -2309,9 +2788,10 @@ function DashboardInner() {
       ),
     },
     'contextual-panel': {
-      label: 'Contextual Panel',
-      description: 'Single focused terminal with a CLI picker for quick command execution.',
+      label: 'Global Terminal',
+      description: 'Global operator shell for scratch commands, quick command execution, and non-repo-specific utilities.',
       singleton: true,
+      hideHeader: true,
       render: ({ tileId }) => (
         <ContextualPanel
           ref={(handle) => registerContextualPanelHandle(tileId, handle)}
@@ -2322,36 +2802,34 @@ function DashboardInner() {
           sendTerminalDetach={sendTerminalDetach}
           sendAgentKill={sendAgentKill}
           termWsConnected={termWsConnected}
-          selectedRepo={globalRepo ?? null}
-          canvasTabs={canvasTabs}
-          activeCanvasTabId={activeCanvasTabId}
-          canvasRevealKey={canvasRevealKey}
-          onSelectCanvasTab={setActiveCanvasTabId}
-          onCloseCanvasTab={closeCanvasTab}
-          onInjectChatContext={handleAgentPanelChatInjection}
-          onSelectCommit={handleSelectCommit}
-          onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
+          onSplitVertical={() => handleSplitTile(tileId, 'vertical')}
+          onSplitHorizontal={() => handleSplitTile(tileId, 'horizontal')}
           onClose={() => handleCloseTile(tileId)}
         />
       ),
     },
   }), [
-    activeCanvasTabId,
-    canvasRevealKey,
-    canvasTabs,
+    canvasStateByTileId,
     closeCanvasTab,
-    globalRepo,
+    globalRepoEntries,
+    workspaceTerminalPreferredRepo,
     handleClosePreviewTileItem,
     handleCloseTile,
+    handleSplitTile,
     handleAgentPanelChatInjection,
     handleLaunchWorkspaceRepoTask,
     handlePreviewDetected,
     handlePreviewSelection,
+    handleLaunchWorkspaceAgent,
     handleSelectCommit,
     handleSelectPreviewTile,
+    handleOpenCI,
+    handleOpenGitLog,
     parsedAgents,
     registerContextualPanelHandle,
     registerWorkspaceTerminalHandle,
+    selectCanvasTab,
+    setTerminalTileRepoScope,
     sendAgentKill,
     sendTerminalAttach,
     sendTerminalCreate,

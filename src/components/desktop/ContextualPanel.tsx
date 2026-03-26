@@ -1,15 +1,18 @@
 'use client';
 
 /**
- * ContextualPanel — interactive terminal in the bottom contextual panel.
+ * ContextualPanel — global operator terminal in the bottom panel.
  *
- * Single tmux session with CLI agent picker (Shell, Claude Code, Codex, etc.).
- * Replaces LiveOutput when no canvas tabs are open.
+ * This surface stays unscoped on purpose:
+ * - scratch shell work
+ * - quick command execution
+ * - general operator utilities
+ *
+ * Repo-owned inspectors and task surfaces belong in repo-scoped workspace panes.
  */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type React from 'react';
-import { Canvas, type CanvasRepoTaskLaunchRequest } from './Canvas';
 import { useTheme } from '@/lib/theme/context';
 
 // ── CLI Agents (terminal only, no chat modes) ──
@@ -47,16 +50,8 @@ export interface ContextualPanelProps {
   sendTerminalDetach: (sessionName: string) => void;
   sendAgentKill: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
   termWsConnected: boolean;
-  selectedRepo?: string | null;
-  // Canvas tabs (issues, diffs, files, timeline — rendered as tabs alongside terminals)
-  canvasTabs?: import('./Canvas').CanvasTab[];
-  activeCanvasTabId?: string | null;
-  canvasRevealKey?: number;
-  onSelectCanvasTab?: (tabId: string) => void;
-  onCloseCanvasTab?: (tabId: string) => void;
-  onInjectChatContext?: (payload: import('@/lib/chat/injection').AgentPanelChatInjectionPayload) => void;
-  onSelectCommit?: (hash: string) => void;
-  onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
+  onSplitVertical?: () => void;
+  onSplitHorizontal?: () => void;
   onClose: () => void;
 }
 
@@ -99,6 +94,26 @@ function PlusIcon({ size = 14 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
       <path d="M12 5v14" />
       <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+function SplitVerticalIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 4v16" />
+      <path d="M6 7v10" />
+      <path d="M18 7v10" />
+    </svg>
+  );
+}
+
+function SplitHorizontalIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M4 12h16" />
+      <path d="M7 6h10" />
+      <path d="M7 18h10" />
     </svg>
   );
 }
@@ -368,15 +383,8 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       sendTerminalResize,
       sendTerminalDetach,
       termWsConnected,
-      selectedRepo,
-      canvasTabs,
-      activeCanvasTabId,
-      canvasRevealKey,
-      onSelectCanvasTab,
-      onCloseCanvasTab,
-      onInjectChatContext,
-      onSelectCommit,
-      onLaunchWorkspaceTask,
+      onSplitVertical,
+      onSplitHorizontal,
       onClose,
     },
     ref,
@@ -394,14 +402,6 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
     const addMenuRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => { tabsRef.current = tabs; }, [tabs]);
-
-    useEffect(() => {
-      if (!canvasRevealKey) return;
-      if (!activeCanvasTabId) return;
-      if (!canvasTabs?.some((tab) => tab.id === activeCanvasTabId)) return;
-      const timer = window.setTimeout(() => setActiveTabId(''), 0);
-      return () => window.clearTimeout(timer);
-    }, [activeCanvasTabId, canvasRevealKey, canvasTabs]);
 
     const createBottomTab = useCallback((agent: CliAgent, initialCommand?: string) => {
       tabCountRef.current += 1;
@@ -568,11 +568,11 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
         overflow: 'hidden',
         background: 'var(--t-bg-subtle)',
       }}>
-        {/* Header bar — matches Canvas tab bar */}
+        {/* Header bar — single-line global operator chrome */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 10,
           height: 36,
           flexShrink: 0,
           background: 'var(--t-panel-translucent)',
@@ -584,6 +584,27 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
           position: 'relative',
           zIndex: 30,
         } as React.CSSProperties}>
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            flexShrink: 0,
+            minWidth: 0,
+            paddingRight: 10,
+            borderRight: '1px solid var(--t-divider)',
+          }}>
+            <TerminalIcon size={13} />
+            <span style={{
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: '-0.01em',
+              color: 'var(--t-text)',
+              whiteSpace: 'nowrap',
+            }}>
+              Global Terminal
+            </span>
+          </div>
+
           <div style={{
             display: 'flex',
             alignItems: 'center',
@@ -602,7 +623,6 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                   type="button"
                   onClick={() => {
                     setActiveTabId(tab.id);
-                    onSelectCanvasTab?.(''); // deselect canvas tabs
                   }}
                   style={{
                     display: 'inline-flex',
@@ -653,55 +673,6 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
               );
             })}
 
-            {/* Canvas tabs (issues, diffs, files, timeline) */}
-            {canvasTabs && canvasTabs.length > 0 && (
-              <>
-                <div style={{ width: 1, height: 16, background: 'var(--t-divider)', flexShrink: 0 }} />
-                {canvasTabs.map((ct) => {
-                  const isActive = ct.id === activeCanvasTabId && !activeTabId;
-                  return (
-                    <button
-                      key={ct.id}
-                      type="button"
-                      onClick={() => {
-                        setActiveTabId(''); // deselect terminal tabs
-                        onSelectCanvasTab?.(ct.id);
-                      }}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        height: 28,
-                        paddingTop: 0,
-                        paddingRight: 10,
-                        paddingBottom: 0,
-                        paddingLeft: 10,
-                        borderRadius: 8,
-                        border: 'none',
-                        background: isActive ? 'var(--t-panel)' : 'transparent',
-                        boxShadow: isActive ? 'var(--t-panel-shadow)' : 'none',
-                        color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
-                        cursor: 'pointer',
-                        flexShrink: 0,
-                      }}
-                    >
-                      <span style={{ fontSize: 12, fontWeight: isActive ? 600 : 500, whiteSpace: 'nowrap' }}>
-                        {ct.label}
-                      </span>
-                      <span
-                        onClick={(e) => { e.stopPropagation(); onCloseCanvasTab?.(ct.id); }}
-                        style={{
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          width: 16, height: 16, borderRadius: 4, color: 'var(--t-text-muted)',
-                        }}
-                      >
-                        <XIcon size={10} />
-                      </span>
-                    </button>
-                  );
-                })}
-              </>
-            )}
           </div>
 
           <div ref={addMenuRef} style={{ position: 'relative', flexShrink: 0 }}>
@@ -793,11 +764,60 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
             )}
           </div>
 
-          {/* Close button */}
+          {onSplitVertical && (
+            <button
+              type="button"
+              onClick={onSplitVertical}
+              aria-label="Split vertically"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 28,
+                height: 28,
+                borderRadius: 8,
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--t-text-secondary)',
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <SplitVerticalIcon />
+            </button>
+          )}
+
+          {onSplitHorizontal && (
+            <button
+              type="button"
+              onClick={onSplitHorizontal}
+              aria-label="Split horizontally"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 28,
+                height: 28,
+                borderRadius: 8,
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--t-text-secondary)',
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <SplitHorizontalIcon />
+            </button>
+          )}
+
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close terminal panel"
+            aria-label="Close global terminal"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -820,26 +840,9 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
           </button>
         </div>
 
-        {/* Canvas content — shown when a canvas tab is active */}
-        {!activeTabId && activeCanvasTabId && canvasTabs && canvasTabs.length > 0 && (
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
-            <Canvas
-              tabs={canvasTabs}
-              activeTabId={activeCanvasTabId}
-              onSelectTab={(id) => onSelectCanvasTab?.(id)}
-              onCloseTab={(id) => onCloseCanvasTab?.(id)}
-              selectedRepo={selectedRepo}
-              onInjectChatContext={onInjectChatContext}
-              onSelectCommit={onSelectCommit}
-              onLaunchWorkspaceTask={onLaunchWorkspaceTask}
-              embedded
-            />
-          </div>
-        )}
-
-        {/* Terminal body — always rendered, hidden when canvas tab is active */}
+        {/* Terminal body */}
         {tabs.length > 0 ? (
-          <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: activeTabId ? 'flex' : 'none', flexDirection: 'column' }}>
+          <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             {tabs.map((tab) => (
               tab.tmuxSession ? (
                 <BottomXtermPanel

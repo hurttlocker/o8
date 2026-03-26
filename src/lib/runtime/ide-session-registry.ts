@@ -1,5 +1,3 @@
-import 'server-only';
-
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';

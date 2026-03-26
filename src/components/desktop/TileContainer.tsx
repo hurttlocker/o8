@@ -19,6 +19,8 @@ export interface TileContentDefinition<TContent extends TileContent = TileConten
   singleton?: boolean;
   /** If false, the tile cannot be closed by the user. Default: true */
   closable?: boolean;
+  /** When true, the surface renders its own header chrome. */
+  hideHeader?: boolean;
 }
 
 export type TileContentRegistry = Record<TileContentKind, TileContentDefinition>;
@@ -251,14 +253,16 @@ function TileLeafView({
         backgroundColor: 'var(--t-panel)',
       }}
     >
-      <TileHeader
-        label={definition?.label ?? 'Tile'}
-        active={active}
-        canClose={canClose}
-        onSplitVertical={() => onSplitTile(node.id, 'vertical')}
-        onSplitHorizontal={() => onSplitTile(node.id, 'horizontal')}
-        onClose={() => onCloseTile(node.id)}
-      />
+      {!definition?.hideHeader && (
+        <TileHeader
+          label={definition?.label ?? 'Tile'}
+          active={active}
+          canClose={canClose}
+          onSplitVertical={() => onSplitTile(node.id, 'vertical')}
+          onSplitHorizontal={() => onSplitTile(node.id, 'horizontal')}
+          onClose={() => onCloseTile(node.id)}
+        />
+      )}
 
       <div style={{
         display: 'flex',
