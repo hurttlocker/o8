@@ -28,6 +28,12 @@ export function createTileContent(kind: TileContentKind): TileContent {
   if (kind === 'preview') {
     return { kind, selectedPreviewId: null };
   }
+  if (kind === 'terminal') {
+    return { kind, repoPath: null };
+  }
+  if (kind === 'canvas') {
+    return { kind, repoPath: null };
+  }
   return { kind };
 }
 
@@ -292,6 +298,28 @@ function isTileNode(value: unknown): value is TileNode {
 
 function normalizeNode(node: TileNode): TileNode {
   if (isTileLeafNode(node)) {
+    if (node.content.kind === 'terminal') {
+      return {
+        ...node,
+        content: {
+          kind: 'terminal',
+          repoPath: typeof node.content.repoPath === 'string' && node.content.repoPath.trim()
+            ? node.content.repoPath
+            : null,
+        },
+      };
+    }
+    if (node.content.kind === 'canvas') {
+      return {
+        ...node,
+        content: {
+          kind: 'canvas',
+          repoPath: typeof node.content.repoPath === 'string' && node.content.repoPath.trim()
+            ? node.content.repoPath
+            : null,
+        },
+      };
+    }
     if (node.content.kind === 'preview') {
       return {
         ...node,
@@ -324,7 +352,6 @@ function migrateNode(node: any): any {
   if (!node) return node;
   if (node.type === 'leaf' && node.content) {
     const KIND_MAP: Record<string, string> = {
-      'canvas': 'contextual-panel',
       'bottom-terminal': 'contextual-panel',
     };
     if (KIND_MAP[node.content.kind]) {
