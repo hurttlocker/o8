@@ -4,6 +4,10 @@ Development activity for Rainwater IDE.
 
 ---
 
+## 2026-03-26
+
+- `6cf89a7` feat: route repo surfaces into workspace tabs
+
 ## 2026-03-25
 
 - `a9be887` fix: avoid repo card border style warning
