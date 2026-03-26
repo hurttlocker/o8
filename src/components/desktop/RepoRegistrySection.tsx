@@ -1191,16 +1191,7 @@ function RepoCard({
     }
   }, []);
 
-  const cardBackground = isActive
-    ? 'linear-gradient(180deg, var(--t-panel) 0%, var(--t-panel-translucent) 100%)'
-    : expanded
-      ? 'linear-gradient(180deg, var(--t-panel-translucent) 0%, var(--t-bg-card, rgba(148, 163, 184, 0.08)) 100%)'
-      : 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
-  const cardBorder = isActive
-    ? `1px solid ${THEME_ACCENT_BORDER}`
-    : expanded
-      ? '1px solid var(--t-divider-strong)'
-      : '1px solid var(--t-panel-border)';
+  const cardBackground = isActive || expanded ? 'rgba(255,255,255,0.02)' : 'transparent';
   const compactLayout = cardWidth > 0 && cardWidth < 320;
 
   const currentBadge = isActive ? (
@@ -1387,16 +1378,20 @@ function RepoCard({
       ref={cardRef}
       style={{
         position: 'relative',
-        borderRadius: 18,
-        border: cardBorder,
+        borderRadius: 0,
         background: cardBackground,
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-        boxShadow: isActive
-          ? '0 14px 28px rgba(15, 23, 42, 0.14)'
-          : expanded
-            ? 'var(--t-panel-shadow)'
-            : '0 8px 18px rgba(15, 23, 42, 0.08)',
+        borderTopWidth: 0,
+        borderRightWidth: 0,
+        borderBottomWidth: 1,
+        borderLeftWidth: 0,
+        borderTopStyle: 'solid',
+        borderRightStyle: 'solid',
+        borderBottomStyle: 'solid',
+        borderLeftStyle: 'solid',
+        borderTopColor: 'transparent',
+        borderRightColor: 'transparent',
+        borderBottomColor: 'var(--t-divider-subtle)',
+        borderLeftColor: 'transparent',
         overflow: 'hidden',
       }}
     >
@@ -1406,7 +1401,7 @@ function RepoCard({
           display: 'flex',
           flexDirection: 'column',
           gap: compactLayout ? 8 : 0,
-          padding: compactLayout ? '11px 12px 10px' : '12px 14px',
+          padding: compactLayout ? '11px 0 10px' : '12px 0',
           cursor: 'pointer',
         }}
         onClick={onToggle}
@@ -1661,7 +1656,7 @@ function RepoCard({
 
       {/* Expanded content */}
       {expanded ? (
-        <div style={{ padding: compactLayout ? '8px 12px 14px 24px' : '6px 14px 16px 44px' }}>
+        <div style={{ padding: compactLayout ? '8px 0 14px 20px' : '6px 0 16px 28px' }}>
           {/* Primary actions row */}
           <div style={{ display: 'flex', alignItems: 'center', columnGap: compactLayout ? 10 : 12, rowGap: 8, flexWrap: compactLayout ? 'wrap' : 'nowrap', marginBottom: compactLayout ? 12 : 10 }}>
             <button
@@ -3572,24 +3567,19 @@ export function RepoRegistrySection({
             paddingLeft: hideHeader ? 0 : 14,
             display: 'flex',
             flexDirection: 'column',
-            gap: 12,
+            gap: 0,
           }}
         >
           {/* Compact repo list — no top button, Add is at bottom */}
 
           {loading ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, paddingTop: 4 }}>
               {[0, 1, 2].map((index) => (
                 <div
                   key={index}
                   style={{
-                    borderRadius: 14,
-                    border: '1px solid var(--t-panel-border)',
-                    background: THEME_PANEL_GLASS,
-                    backdropFilter: 'blur(20px)',
-                    WebkitBackdropFilter: 'blur(20px)',
-                    boxShadow: 'var(--t-panel-shadow)',
-                    padding: '12px 12px 10px',
+                    borderBottom: '1px solid var(--t-divider-subtle)',
+                    padding: '12px 0 10px',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 8,
@@ -3605,10 +3595,8 @@ export function RepoRegistrySection({
           {loadError ? (
             <div
               style={{
-                padding: 12,
-                borderRadius: 14,
-                border: '1px solid rgba(239, 68, 68, 0.16)',
-                background: 'rgba(254, 242, 242, 0.9)',
+                padding: '12px 0',
+                borderBottom: '1px solid rgba(239, 68, 68, 0.16)',
                 display: 'flex',
                 alignItems: 'flex-start',
                 gap: 8,
@@ -3624,13 +3612,8 @@ export function RepoRegistrySection({
           {!loading && !loadError && repos.length === 0 ? (
             <div
               style={{
-                padding: 14,
-                borderRadius: 14,
-                border: '1px solid var(--t-panel-border)',
-                background: THEME_PANEL_GLASS,
-                backdropFilter: 'blur(20px)',
-                WebkitBackdropFilter: 'blur(20px)',
-                boxShadow: 'var(--t-panel-shadow)',
+                padding: '14px 0',
+                borderBottom: '1px solid var(--t-divider-subtle)',
               }}
             >
               <div
@@ -3699,8 +3682,9 @@ export function RepoRegistrySection({
                 display: 'flex',
                 alignItems: 'center',
                 gap: 6,
-                padding: '6px 4px',
+                padding: '10px 0 6px',
                 border: 'none',
+                borderTop: '1px solid var(--t-divider-subtle)',
                 background: 'transparent',
                 color: 'var(--t-text-secondary)',
                 fontSize: 11,
