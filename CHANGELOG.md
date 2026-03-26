@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-25
 
+- `a9be887` fix: avoid repo card border style warning
 - `ec9aee4` feat: tighten workflow lifecycle and operator recovery
 - `0981e99` feat: refine desktop dark mode theme
 - `39c7bb5` feat: migrate ide to fact-backed Rainwater recall
