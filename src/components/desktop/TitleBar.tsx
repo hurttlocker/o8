@@ -12,6 +12,7 @@
  */
 
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 
 // ── Inline SVG icons (Tauri webview doesn't reliably render Lucide React components) ──
@@ -21,22 +22,6 @@ function IconPanelLeft({ size = 16 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
       <rect width="18" height="18" x="3" y="3" rx="2" />
       <path d="M9 3v18" />
-    </svg>
-  );
-}
-
-function IconChevronLeft({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="m15 18-6-6 6-6" />
-    </svg>
-  );
-}
-
-function IconChevronRight({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="m9 18 6-6-6-6" />
     </svg>
   );
 }
@@ -67,22 +52,38 @@ function IconMessageSquare({ size = 16 }: { size?: number }) {
   );
 }
 
+function IconDelta({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 5 18.5 18H5.5L12 5Z" />
+      <path d="M8.5 14h7" />
+    </svg>
+  );
+}
+
+function IconPanelRightCollapse({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="3" y="4" width="18" height="16" rx="3" />
+      <path d="M16 4v16" />
+      <path d="m10 9 3 3-3 3" />
+    </svg>
+  );
+}
+
 // ── Types ──
 
 interface TitleBarProps {
   renderSearch?: (onClose: () => void) => React.ReactNode;
-  globalRepoBranch?: string;
   selectedRepoEntry?: RepoRegistryEntry | null;
-  repoEntries?: RepoRegistryEntry[];
-  onRepoChange?: (repoId: string | null) => void;
-  onRepoRemove?: (repoId: string) => void;
-  onOpenFolder?: () => void;
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
   bottomPanelVisible?: boolean;
   onToggleBottomPanel?: () => void;
   chatVisible?: boolean;
   onToggleChat?: () => void;
+  workspacePanelVisible?: boolean;
+  onToggleWorkspacePanel?: () => void;
   wsStatus?: 'connected' | 'connecting' | 'reconnecting' | 'disconnected';
 }
 
@@ -144,17 +145,105 @@ function TitleBarButton({
   );
 }
 
-// ── Separator ──
+function RightPanelMorphButton({
+  chatVisible,
+  workspacePanelVisible,
+  onToggleChat,
+  onToggleWorkspacePanel,
+}: {
+  chatVisible: boolean;
+  workspacePanelVisible: boolean;
+  onToggleChat?: () => void;
+  onToggleWorkspacePanel?: () => void;
+}) {
+  const panelOpen = chatVisible || workspacePanelVisible;
+  const state: 'collapsed' | 'chat' | 'review' = !panelOpen
+    ? 'collapsed'
+    : chatVisible
+      ? 'chat'
+      : 'review';
+  const label = state === 'collapsed'
+    ? 'Open agent chat'
+    : state === 'chat'
+      ? 'Open review panel'
+      : 'Minimize right panel';
+  const handleClick = state === 'collapsed'
+    ? onToggleChat
+    : onToggleWorkspacePanel;
 
-function TitleBarSep() {
   return (
-    <div style={{
-      width: 1,
-      height: 16,
-      background: 'var(--t-divider)',
-      margin: '0 4px',
-      flexShrink: 0,
-    }} />
+    <motion.button
+      type="button"
+      aria-label={label}
+      onClick={handleClick}
+      initial={false}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 32,
+        height: 32,
+        padding: 0,
+        border: 'none',
+        borderRadius: 8,
+        background: panelOpen ? 'var(--t-panel-active)' : 'transparent',
+        color: panelOpen ? 'var(--t-text)' : 'var(--t-text-secondary)',
+        cursor: 'pointer',
+        flexShrink: 0,
+        WebkitTapHighlightColor: 'transparent',
+        transition: 'background 140ms ease, color 140ms ease',
+        ['WebkitAppRegion' as string]: 'no-drag',
+      }}
+      onMouseEnter={(e) => {
+        if (!panelOpen) {
+          e.currentTarget.style.background = 'var(--t-hover)';
+        }
+      }}
+      onMouseLeave={(e) => {
+        if (!panelOpen) {
+          e.currentTarget.style.background = 'transparent';
+        }
+      }}
+    >
+      <span style={{ position: 'relative', width: 16, height: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+        <motion.span
+          initial={false}
+          animate={{
+            opacity: state === 'chat' ? 1 : 0,
+            scale: state === 'chat' ? 1 : 0.72,
+            rotate: state === 'chat' ? 0 : -12,
+          }}
+          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          style={{ position: 'absolute', inset: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <IconMessageSquare />
+        </motion.span>
+        <motion.span
+          initial={false}
+          animate={{
+            opacity: state === 'review' ? 1 : 0,
+            scale: state === 'review' ? 1 : 0.72,
+            rotate: state === 'review' ? 0 : state === 'chat' ? 12 : -12,
+          }}
+          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          style={{ position: 'absolute', inset: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <IconDelta />
+        </motion.span>
+        <motion.span
+          initial={false}
+          animate={{
+            opacity: state === 'collapsed' ? 1 : 0,
+            scale: state === 'collapsed' ? 1 : 0.72,
+            rotate: state === 'collapsed' ? 0 : 12,
+          }}
+          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          style={{ position: 'absolute', inset: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          <IconPanelRightCollapse />
+        </motion.span>
+      </span>
+    </motion.button>
   );
 }
 
@@ -162,26 +251,21 @@ function TitleBarSep() {
 
 export function TitleBar({
   renderSearch,
-  globalRepoBranch = 'main',
   selectedRepoEntry = null,
-  repoEntries = [],
-  onRepoChange,
-  onRepoRemove,
-  onOpenFolder,
   sidebarVisible = true,
   onToggleSidebar,
   bottomPanelVisible = true,
   onToggleBottomPanel,
   chatVisible = true,
   onToggleChat,
+  workspacePanelVisible = false,
+  onToggleWorkspacePanel,
   wsStatus = 'connecting',
 }: TitleBarProps) {
   const [searchExpanded, setSearchExpanded] = useState(false);
-  const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const [openMenuOpen, setOpenMenuOpen] = useState(false);
   const [availableEditors, setAvailableEditors] = useState<{ id: string; name: string; available: boolean }[]>([]);
   const selectedRepoPath = selectedRepoEntry?.localPath ?? '';
-  const selectedRepoName = selectedRepoEntry?.name ?? null;
   const hasSelectedRepo = Boolean(selectedRepoEntry);
 
   // Fetch available editors on mount
@@ -192,92 +276,6 @@ export function TitleBar({
       .catch(() => {});
   }, []);
   const headerRef = useRef<HTMLElement>(null);
-
-  const renderRepoEntryRow = useCallback((repo: RepoRegistryEntry) => {
-    const isSelected = selectedRepoEntry?.id === repo.id;
-
-    return (
-      <div
-        key={repo.id}
-        style={{
-          display: 'flex',
-          alignItems: 'stretch',
-          background: isSelected ? 'rgba(239,68,68,0.06)' : 'transparent',
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => { onRepoChange?.(repo.id); setRepoPickerOpen(false); }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            flex: 1,
-            minWidth: 0,
-            padding: '8px 12px',
-            border: 'none',
-            background: 'transparent',
-            color: isSelected ? '#dc2626' : 'var(--t-text)',
-            fontSize: 12,
-            fontWeight: isSelected ? 600 : 400,
-            cursor: 'pointer',
-            fontFamily: '-apple-system, system-ui, sans-serif',
-            textAlign: 'left',
-          }}
-          onMouseEnter={(e) => {
-            if (!isSelected) e.currentTarget.style.background = 'rgba(0,0,0,0.03)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent';
-          }}
-        >
-          <span style={{ width: 14, textAlign: 'center', fontSize: 12, color: isSelected ? '#dc2626' : 'transparent' }}>✓</span>
-          <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{repo.name}</span>
-            <span
-              style={{
-                fontSize: 10,
-                color: 'var(--t-text-faint)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {repo.localPath}
-            </span>
-          </div>
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            onRepoRemove?.(repo.id);
-            setRepoPickerOpen(false);
-          }}
-          title={`Remove ${repo.name} from Cortex`}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 34,
-            border: 'none',
-            borderLeft: '1px solid rgba(0,0,0,0.05)',
-            background: 'transparent',
-            color: '#b91c1c',
-            cursor: 'pointer',
-            flexShrink: 0,
-          }}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M3 6h18" />
-            <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
-            <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-            <path d="M10 11v6" />
-            <path d="M14 11v6" />
-          </svg>
-        </button>
-      </div>
-    );
-  }, [onRepoChange, onRepoRemove, selectedRepoEntry]);
 
   // Window drag — Tauri v2 startDragging API
   const handleMouseDown = useCallback(async (e: React.MouseEvent) => {
@@ -345,11 +343,26 @@ export function TitleBar({
       <div style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 2,
+        gap: 8,
         flexShrink: 0,
       }}>
         {/* Spacer for macOS traffic lights (close/minimize/maximize) */}
         <div style={{ width: 78, flexShrink: 0 }} />
+
+        {/* Live dot */}
+        <div
+          title={wsStatus === 'connected' ? 'Live — WebSocket connected' : wsStatus === 'reconnecting' ? 'Reconnecting…' : wsStatus === 'connecting' ? 'Connecting…' : 'Disconnected'}
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: '50%',
+            background: wsStatus === 'connected' ? '#34c759'
+              : wsStatus === 'reconnecting' || wsStatus === 'connecting' ? '#ff9f0a'
+              : '#ff3b30',
+            flexShrink: 0,
+            transition: 'background 300ms ease',
+          }}
+        />
 
         {/* Sidebar toggle */}
         <TitleBarButton
@@ -358,204 +371,16 @@ export function TitleBar({
           onClick={onToggleSidebar}
           active={sidebarVisible}
         />
-
-        <TitleBarSep />
-
-        {/* Back */}
-        <TitleBarButton
-          icon={<IconChevronLeft />}
-          label="Go back"
-          onClick={() => window.history.back()}
-        />
-
-        {/* Forward */}
-        <TitleBarButton
-          icon={<IconChevronRight />}
-          label="Go forward"
-          onClick={() => window.history.forward()}
-        />
       </div>
 
-      {/* ── Center — Repo Picker + Search ── */}
+      {/* ── Center — Search ── */}
       <div style={{
         flex: 1,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 6,
+        gap: 0,
       }}>
-        {/* Repo picker pill */}
-        {hasSelectedRepo ? (
-          <div style={{ position: 'relative', flexShrink: 0, ['WebkitAppRegion' as string]: 'no-drag' }} data-no-drag="">
-            <button
-              type="button"
-              onClick={() => setRepoPickerOpen(v => !v)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '5px 10px',
-                borderRadius: 8,
-                border: '1px solid var(--t-search-border)',
-                background: 'var(--t-search-bg)',
-                backdropFilter: 'blur(12px)',
-                cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
-                transition: 'background 150ms ease, border-color 150ms ease',
-                whiteSpace: 'nowrap',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--t-hover)';
-                e.currentTarget.style.borderColor = 'var(--t-input-border)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'var(--t-search-bg)';
-                e.currentTarget.style.borderColor = 'var(--t-search-border)';
-              }}
-            >
-              <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
-                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z" fill="currentColor" opacity="0.4" />
-              </svg>
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text)' }}>
-                {selectedRepoName}
-              </span>
-              <span style={{
-                fontSize: 10,
-                color: 'var(--t-text-muted)',
-                fontFamily: '"SF Mono", ui-monospace, monospace',
-                padding: '1px 5px',
-                borderRadius: 4,
-                background: 'var(--t-kbd-bg, rgba(0,0,0,0.04))',
-              }}>
-                {globalRepoBranch}
-              </span>
-              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4 }}>
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-
-            {/* Repo picker dropdown */}
-            {repoPickerOpen ? (
-              <>
-                <div onClick={() => setRepoPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 9998 }} />
-                <div style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  marginTop: 6,
-                  minWidth: 200,
-                  borderRadius: 10,
-                  border: '1px solid rgba(255,255,255,0.3)',
-                  background: 'rgba(255,255,255,0.75)',
-                  backdropFilter: 'blur(40px) saturate(1.8)',
-                  WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-                  boxShadow: '0 12px 48px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)',
-                  overflow: 'hidden',
-                  zIndex: 9999,
-                }}>
-                  <button
-                    type="button"
-                    onClick={() => { onOpenFolder?.(); setRepoPickerOpen(false); }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      width: '100%',
-                      padding: '8px 12px',
-                      border: 'none',
-                      background: 'transparent',
-                      color: 'var(--t-text)',
-                      fontSize: 12,
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                      fontFamily: '-apple-system, system-ui, sans-serif',
-                      textAlign: 'left',
-                    }}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>
-                    Open Folder…
-                  </button>
-                  <div style={{ height: 1, background: 'var(--t-divider)', margin: '2px 0' }} />
-                  <button
-                    type="button"
-                    onClick={() => { onRepoChange?.(null); setRepoPickerOpen(false); }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      width: '100%',
-                      padding: '8px 12px',
-                      border: 'none',
-                      background: 'transparent',
-                      color: 'var(--t-text-muted)',
-                      fontSize: 12,
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                      fontFamily: '-apple-system, system-ui, sans-serif',
-                      textAlign: 'left',
-                    }}
-                  >
-                    <span style={{ width: 14, textAlign: 'center', fontSize: 12 }}>○</span>
-                    Clear Selection
-                  </button>
-                  {repoEntries.map(renderRepoEntryRow)}
-                </div>
-              </>
-            ) : null}
-          </div>
-        ) : (
-          <div style={{ position: 'relative', flexShrink: 0, ['WebkitAppRegion' as string]: 'no-drag' }} data-no-drag="">
-            <button
-              type="button"
-              onClick={() => setRepoPickerOpen(v => !v)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '5px 10px',
-                borderRadius: 8,
-                border: '1px solid var(--t-search-border)',
-                background: 'var(--t-search-bg)',
-                backdropFilter: 'blur(12px)',
-                cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>
-              <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--t-text-muted)' }}>
-                Open Folder
-              </span>
-            </button>
-            {repoPickerOpen && (
-              <>
-                <div onClick={() => setRepoPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 9998 }} />
-                <div style={{
-                  position: 'absolute', top: '100%', left: 0, marginTop: 6, minWidth: 220,
-                  borderRadius: 10, border: '1px solid rgba(255,255,255,0.3)',
-                  background: 'rgba(255,255,255,0.75)', backdropFilter: 'blur(40px) saturate(1.8)',
-                  WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-                  boxShadow: '0 12px 48px rgba(0,0,0,0.12)', overflow: 'hidden', zIndex: 9999,
-                }}>
-                  <button
-                    type="button"
-                    onClick={() => { onOpenFolder?.(); setRepoPickerOpen(false); }}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-                      padding: '8px 12px', border: 'none', background: 'transparent',
-                      color: 'var(--t-text)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
-                      fontFamily: '-apple-system, system-ui, sans-serif', textAlign: 'left',
-                    }}
-                  >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg> Open Folder…
-                  </button>
-                  {repoEntries.length > 0 && <div style={{ height: 1, background: 'var(--t-divider)', margin: '2px 0' }} />}
-                  {repoEntries.map(renderRepoEntryRow)}
-                </div>
-              </>
-            )}
-          </div>
-        )}
         <div style={{
           width: '100%',
           maxWidth: searchExpanded ? 640 : 320,
@@ -617,22 +442,6 @@ export function TitleBar({
           )}
         </div>
       </div>
-
-      {/* ── Live dot ── */}
-      <div
-        title={wsStatus === 'connected' ? 'Live — WebSocket connected' : wsStatus === 'reconnecting' ? 'Reconnecting…' : wsStatus === 'connecting' ? 'Connecting…' : 'Disconnected'}
-        style={{
-          width: 7,
-          height: 7,
-          borderRadius: '50%',
-          background: wsStatus === 'connected' ? '#34c759'
-            : wsStatus === 'reconnecting' || wsStatus === 'connecting' ? '#ff9f0a'
-            : '#ff3b30',
-          flexShrink: 0,
-          transition: 'background 300ms ease',
-          marginRight: 2,
-        }}
-      />
 
       {/* ── Open In button ── */}
       {hasSelectedRepo ? (
@@ -813,12 +622,11 @@ export function TitleBar({
           active={bottomPanelVisible}
         />
 
-        {/* Chat panel toggle */}
-        <TitleBarButton
-          icon={<IconMessageSquare />}
-          label="Toggle chat"
-          onClick={onToggleChat}
-          active={chatVisible}
+        <RightPanelMorphButton
+          chatVisible={chatVisible}
+          workspacePanelVisible={workspacePanelVisible}
+          onToggleChat={onToggleChat}
+          onToggleWorkspacePanel={onToggleWorkspacePanel}
         />
 
       </div>
