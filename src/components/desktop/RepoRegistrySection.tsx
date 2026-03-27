@@ -7,6 +7,7 @@ import {
   ArrowRight,
   AlertCircle,
   CheckCircle2,
+  Copy,
   ExternalLink,
   FolderOpen,
   GitBranch,
@@ -597,7 +598,6 @@ function RepoCard({
   workspaceNotice,
   onLaunchAgent,
   onOpenWorkspace,
-  onOpenLaunchOptions,
   onOpenGitHub,
   onRemove,
   onSaveSetup,
@@ -615,7 +615,6 @@ function RepoCard({
   workspaceNotice: WorkspaceCreateResult | null;
   onLaunchAgent: (repo: RepoRegistryEntry) => void;
   onOpenWorkspace: (repo: RepoRegistryEntry) => void;
-  onOpenLaunchOptions: (repo: RepoRegistryEntry) => void;
   onOpenGitHub: (repo: RepoRegistryEntry) => void;
   onRemove: (repo: RepoRegistryEntry) => void;
   onSaveSetup: (repoId: string, setup: RepoSetupConfig) => Promise<void>;
@@ -1390,6 +1389,7 @@ function RepoCard({
     .filter((value): value is string => Boolean(value))
     .slice(0, 3)
     .join(' · ');
+  const repoHeaderLeadingInset = 19;
   const showHeaderHover = hoveringHeader && (
     prPreviewLoading
     || prPreview.length > 0
@@ -1486,7 +1486,7 @@ function RepoCard({
             minWidth: 0,
           }}
         >
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ flex: 1, minWidth: 0, paddingLeft: repoHeaderLeadingInset }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
               <span
                 style={{
@@ -1705,10 +1705,9 @@ function RepoCard({
             }}
           >
             {[
-              { label: 'Launch with options', icon: <PlayCircle size={12} strokeWidth={2} />, action: () => { onOpenLaunchOptions(repo); setMenuOpen(false); } },
-              { label: 'Create workspace', icon: <Plus size={12} strokeWidth={2} />, action: () => { onOpenWorkspace(repo); setMenuOpen(false); } },
-              { label: 'Settings', icon: <Settings2 size={12} strokeWidth={2} />, action: () => { setSettingsOpen((v) => !v); setMenuOpen(false); } },
               ...(githubUrl ? [{ label: 'Open on GitHub', icon: <ExternalLink size={12} strokeWidth={2} />, action: () => { onOpenGitHub(repo); setMenuOpen(false); } }] : []),
+              { label: 'Open folder', icon: <FolderOpen size={12} strokeWidth={2} />, action: () => { void handleOpenDesktopPath('finder', repo.localPath); setMenuOpen(false); } },
+              { label: 'Copy repo path', icon: <Copy size={12} strokeWidth={2} />, action: () => { void handleCopyPath(repo.localPath, 'repo path'); setMenuOpen(false); } },
               { label: 'Remove from Cortex', icon: <Trash2 size={12} strokeWidth={2} />, action: () => { onRemove(repo); setMenuOpen(false); }, danger: true },
             ].map((item) => (
               <button
@@ -2913,6 +2912,7 @@ export function RepoRegistrySection({
   onSectionOpenChange,
   launchIntent,
   workspaceIntent,
+  addIntent,
   hideHeader = false,
 }: {
   onSelectSession?: (sessionKey: string) => void;
@@ -2925,6 +2925,7 @@ export function RepoRegistrySection({
   onSectionOpenChange?: (open: boolean) => void;
   launchIntent?: { repoPath: string | null; nonce: number } | null;
   workspaceIntent?: { repoPath: string | null; nonce: number } | null;
+  addIntent?: { nonce: number } | null;
   hideHeader?: boolean;
 } = {}) {
   const [repos, setRepos] = useState<RepoRegistryEntry[]>([]);
@@ -3003,6 +3004,7 @@ export function RepoRegistrySection({
   const [removeError, setRemoveError] = useState<string | null>(null);
   const handledLaunchIntentNonceRef = useRef<number | null>(null);
   const handledWorkspaceIntentNonceRef = useRef<number | null>(null);
+  const handledAddIntentNonceRef = useRef<number | null>(null);
   const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
 
   useEffect(() => {
@@ -3134,6 +3136,15 @@ export function RepoRegistrySection({
 
   const resetAddModal = useCallback(() => {
     setAddOpen(false);
+    setRepoPathInput('');
+    setValidationError(null);
+    setValidationResult(null);
+    setValidating(false);
+    setAdding(false);
+  }, []);
+
+  const openAddModal = useCallback(() => {
+    setAddOpen(true);
     setRepoPathInput('');
     setValidationError(null);
     setValidationResult(null);
@@ -3447,6 +3458,14 @@ export function RepoRegistrySection({
     openWorkspaceModal(match);
   }, [openWorkspaceModal, repos, setReposOpen, workspaceIntent?.nonce, workspaceIntent?.repoPath]);
 
+  useEffect(() => {
+    if (!addIntent?.nonce) return;
+    if (handledAddIntentNonceRef.current === addIntent.nonce) return;
+    handledAddIntentNonceRef.current = addIntent.nonce;
+    setReposOpen(true);
+    openAddModal();
+  }, [addIntent?.nonce, openAddModal, setReposOpen]);
+
   const branchPreview = useMemo(() => getWorkspaceBranchPreview(workspaceName), [workspaceName]);
 
   return (
@@ -3516,7 +3535,7 @@ export function RepoRegistrySection({
             gap: 0,
           }}
         >
-          {/* Compact repo list — no top button, Add is at bottom */}
+          {/* Compact repo list */}
 
           {loading ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 0, paddingTop: 4 }}>
@@ -3597,7 +3616,6 @@ export function RepoRegistrySection({
                   });
                 }}
                 onOpenWorkspace={openWorkspaceModal}
-                onOpenLaunchOptions={openLaunchModal}
                 onOpenGitHub={handleOpenGitHub}
                 onRemove={setRemoveTarget}
                 onSaveSetup={handleSaveSetup}
@@ -3617,47 +3635,6 @@ export function RepoRegistrySection({
             ))
           ) : null}
 
-          {/* Compact footer — Add repository */}
-          {!loading ? (
-            <button
-              type="button"
-              onClick={() => {
-                setAddOpen(true);
-                setValidationError(null);
-                setValidationResult(null);
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                minHeight: 38,
-                marginTop: 10,
-                padding: hideHeader ? '0 14px' : '0 12px',
-                border: 'none',
-                background: 'transparent',
-                color: 'var(--t-text-secondary)',
-                fontSize: 12,
-                fontWeight: 500,
-                cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
-                borderRadius: 14,
-                transition: 'background 140ms ease, border-color 140ms ease',
-              }}
-              onMouseEnter={(event) => {
-                const target = event.currentTarget;
-                target.style.background = 'var(--t-panel-hover)';
-                target.style.color = 'var(--t-text)';
-              }}
-              onMouseLeave={(event) => {
-                const target = event.currentTarget;
-                target.style.background = 'transparent';
-                target.style.color = 'var(--t-text-secondary)';
-              }}
-            >
-              <FolderOpen size={14} strokeWidth={2} />
-              Add repository
-            </button>
-          ) : null}
         </div>
       ) : null}
 
