@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { readFile, stat } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type {
@@ -18,7 +19,7 @@ const FALLBACK_ACTIVE_ISSUE_NUMBER = Number.parseInt(process.env.CORTEX_IDE_ACTI
 const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
 
 function shortenPath(path: string) {
-  return path.replace(require('os').homedir() + '/', '~/');
+  return path.replace(os.homedir() + '/', '~/');
 }
 
 // Cache changed files list for 30 seconds to avoid re-running git commands per file click
@@ -28,12 +29,19 @@ const CHANGED_FILES_CACHE_TTL_MS = 30_000;
 
 // Full snapshot cache — prevents repeated git/gh spawns from mobile inbox and API routes
 const REVIEW_SNAPSHOT_TTL_MS = 20_000;
-let _reviewSnapshotCache: { snapshot: WorkflowReviewSnapshot; cachedAt: number } | null = null;
-let _reviewSnapshotInflight: Promise<WorkflowReviewSnapshot> | null = null;
+const _reviewSnapshotCache = new Map<string, { snapshot: WorkflowReviewSnapshot; cachedAt: number }>();
+const _reviewSnapshotInflight = new Map<string, Promise<WorkflowReviewSnapshot>>();
+
+export interface WorkspaceReviewSnapshotOptions {
+  fresh?: boolean;
+  workspacePath?: string | null;
+  repoSlug?: string | null;
+  allowFallbackPullRequests?: boolean;
+}
 
 export function invalidateReviewSnapshotCache() {
-  _reviewSnapshotCache = null;
-  _reviewSnapshotInflight = null;
+  _reviewSnapshotCache.clear();
+  _reviewSnapshotInflight.clear();
 }
 
 async function getCachedChangedFiles(): Promise<ReviewChangedFile[]> {
@@ -56,6 +64,15 @@ function parseJson<T>(raw: string, fallback: T) {
   }
 }
 
+function normalizeRepoSlug(remoteUrl: string | null | undefined) {
+  if (!remoteUrl) return null;
+  const normalized = remoteUrl
+    .replace(/\.git$/, '')
+    .replace(/^git@github\.com:/, 'https://github.com/');
+  const match = normalized.match(/github\.com\/([^/]+\/[^/]+)$/);
+  return match?.[1] ?? null;
+}
+
 function normalizeReviewDecision(value?: string | null) {
   if (!value) return null;
   return value.toLowerCase();
@@ -73,40 +90,6 @@ function parseLinkedIssueNumbers(body?: string) {
   }
 
   return Array.from(seen).sort((left, right) => right - left);
-}
-
-async function loadIssueSummaries(issueNumbers: number[]) {
-  const unique = Array.from(new Set(issueNumbers)).filter((value) => Number.isFinite(value));
-
-  if (!unique.length) {
-    return [] as ReviewIssueSummary[];
-  }
-
-  const issues = await Promise.all(
-    unique.map(async (issueNumber) => {
-      const raw = await tryRunFile('gh', [
-        'issue',
-        'view',
-        String(issueNumber),
-        '--repo',
-        REVIEW_REPO_SLUG,
-        '--json',
-        'number,title,url,state',
-      ]);
-
-      return parseJson<ReviewIssueSummary | undefined>(raw, undefined);
-    }),
-  );
-
-  return issues
-    .filter((issue): issue is ReviewIssueSummary => Boolean(issue))
-    .sort((left, right) => {
-      if (left.state !== right.state) {
-        if (left.state === 'OPEN') return -1;
-        if (right.state === 'OPEN') return 1;
-      }
-      return right.number - left.number;
-    });
 }
 
 interface PullRequestFileSummary {
@@ -289,24 +272,24 @@ function parseReviewPath(reviewPath: string) {
   };
 }
 
-function resolveRepoFile(relativePath: string) {
-  const repoRoot = path.resolve(REVIEW_REPO_ROOT);
-  const nextPath = path.resolve(repoRoot, relativePath);
+function resolveRepoFile(relativePath: string, repoRoot = REVIEW_REPO_ROOT) {
+  const resolvedRoot = path.resolve(repoRoot);
+  const nextPath = path.resolve(resolvedRoot, relativePath);
 
-  if (nextPath !== repoRoot && !nextPath.startsWith(`${repoRoot}${path.sep}`)) {
+  if (nextPath !== resolvedRoot && !nextPath.startsWith(`${resolvedRoot}${path.sep}`)) {
     throw new Error('Requested review file path escapes the repo root.');
   }
 
   return nextPath;
 }
 
-async function fileTouchedAt(reviewPath: string) {
+async function fileTouchedAt(reviewPath: string, repoRoot = REVIEW_REPO_ROOT) {
   try {
     const { currentPath } = parseReviewPath(reviewPath);
     if (!currentPath) {
       return 0;
     }
-    const target = resolveRepoFile(currentPath);
+    const target = resolveRepoFile(currentPath, repoRoot);
     const details = await stat(target);
     return details.mtimeMs;
   } catch {
@@ -314,11 +297,11 @@ async function fileTouchedAt(reviewPath: string) {
   }
 }
 
-async function sortChangedFilesByTouchedAt(changedFiles: ReviewChangedFile[]) {
+async function sortChangedFilesByTouchedAt(changedFiles: ReviewChangedFile[], repoRoot = REVIEW_REPO_ROOT) {
   const withTouchedAt = await Promise.all(
     changedFiles.map(async (file) => ({
       file,
-      touchedAt: await fileTouchedAt(file.path),
+      touchedAt: await fileTouchedAt(file.path, repoRoot),
     })),
   );
 
@@ -474,7 +457,7 @@ async function loadPullRequestFileDetail(pullRequestNumber: number, reviewPath: 
   } satisfies MobileReviewFileDetail;
 }
 
-function parseWorktrees(raw: string) {
+function parseWorktrees(raw: string, currentRoot = REVIEW_REPO_ROOT) {
   const worktrees: ReviewWorktreeSummary[] = [];
   const records = raw
     .split(/\n\s*\n/g)
@@ -482,7 +465,7 @@ function parseWorktrees(raw: string) {
     .filter(Boolean);
 
   for (const record of records) {
-    let path = '';
+    let worktreePath = '';
     let branch: string | undefined;
     let head: string | undefined;
     let isBare = false;
@@ -491,7 +474,7 @@ function parseWorktrees(raw: string) {
     let prunableReason: string | undefined;
 
     for (const line of record.split('\n')) {
-      if (line.startsWith('worktree ')) path = line.replace('worktree ', '').trim();
+      if (line.startsWith('worktree ')) worktreePath = line.replace('worktree ', '').trim();
       if (line.startsWith('branch ')) branch = line.replace('branch refs/heads/', '').trim();
       if (line.startsWith('HEAD ')) head = line.replace('HEAD ', '').trim().slice(0, 7);
       if (line === 'bare') isBare = true;
@@ -500,13 +483,13 @@ function parseWorktrees(raw: string) {
       if (line.startsWith('prunable')) prunableReason = line.replace(/^prunable\s*/, '').trim() || 'prunable';
     }
 
-    if (!path) continue;
+    if (!worktreePath) continue;
 
     worktrees.push({
-      path: shortenPath(path),
+      path: shortenPath(worktreePath),
       branch,
       head,
-      isCurrent: path === REVIEW_REPO_ROOT,
+      isCurrent: path.resolve(worktreePath) === path.resolve(currentRoot),
       isBare,
       isDetached,
       lockedReason,
@@ -554,27 +537,62 @@ export async function getReviewFileDetail(reviewPath: string): Promise<MobileRev
   throw new Error('Requested file is no longer part of the live review surface.');
 }
 
-export async function getWorkspaceReviewSnapshot(options: { fresh?: boolean } = {}): Promise<WorkflowReviewSnapshot> {
-  const fresh = options.fresh ?? false;
-  const now = Date.now();
-  if (!fresh && _reviewSnapshotCache && now - _reviewSnapshotCache.cachedAt < REVIEW_SNAPSHOT_TTL_MS) {
-    return _reviewSnapshotCache.snapshot;
-  }
-  if (!fresh && _reviewSnapshotInflight) return _reviewSnapshotInflight;
-
-  _reviewSnapshotInflight = _fetchWorkspaceReviewSnapshot().then((snapshot) => {
-    _reviewSnapshotCache = { snapshot, cachedAt: Date.now() };
-    return snapshot;
-  }).finally(() => {
-    _reviewSnapshotInflight = null;
-  });
-  return _reviewSnapshotInflight;
+function reviewSnapshotCacheKey(options: WorkspaceReviewSnapshotOptions) {
+  return [
+    path.resolve(options.workspacePath || REVIEW_REPO_ROOT),
+    options.repoSlug || REVIEW_REPO_SLUG || '',
+    options.allowFallbackPullRequests === false ? 'strict' : 'fallback',
+  ].join('::');
 }
 
-async function _fetchWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapshot> {
+export async function getWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOptions = {}): Promise<WorkflowReviewSnapshot> {
+  const fresh = options.fresh ?? false;
+  const cacheKey = reviewSnapshotCacheKey(options);
+  const now = Date.now();
+  const cached = _reviewSnapshotCache.get(cacheKey);
+  if (!fresh && cached && now - cached.cachedAt < REVIEW_SNAPSHOT_TTL_MS) {
+    return cached.snapshot;
+  }
+  if (!fresh) {
+    const inflight = _reviewSnapshotInflight.get(cacheKey);
+    if (inflight) return inflight;
+  }
+
+  const request = _fetchWorkspaceReviewSnapshot(options).then((snapshot) => {
+    _reviewSnapshotCache.set(cacheKey, { snapshot, cachedAt: Date.now() });
+    return snapshot;
+  }).finally(() => {
+    _reviewSnapshotInflight.delete(cacheKey);
+  });
+
+  _reviewSnapshotInflight.set(cacheKey, request);
+  return request;
+}
+
+async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOptions = {}): Promise<WorkflowReviewSnapshot> {
+  const repoRoot = path.resolve(options.workspacePath || REVIEW_REPO_ROOT);
+  const allowFallbackPullRequests = options.allowFallbackPullRequests !== false;
   const warnings: string[] = [];
 
-  const branchStatusRaw = await tryRunFile('git', ['status', '--branch', '--porcelain=v2']);
+  const runInContext = async (command: string, args: string[]) => {
+    const { stdout } = await execFileAsync(command, args, {
+      cwd: repoRoot,
+      maxBuffer: 4 * 1024 * 1024,
+    });
+    return stdout.trim();
+  };
+  const tryRunInContext = async (command: string, args: string[]) => {
+    try {
+      return await runInContext(command, args);
+    } catch {
+      return '';
+    }
+  };
+
+  const remoteUrl = options.repoSlug ? null : await tryRunInContext('git', ['remote', 'get-url', 'origin']);
+  const repoSlug = options.repoSlug || normalizeRepoSlug(remoteUrl) || REVIEW_REPO_SLUG;
+
+  const branchStatusRaw = await tryRunInContext('git', ['status', '--branch', '--porcelain=v2']);
   const { branch, upstream, ahead, behind } = parseBranchStatus(branchStatusRaw);
 
   const [
@@ -587,56 +605,72 @@ async function _fetchWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapshot> 
     branchPrsRaw,
     fallbackPrsRaw,
   ] = await Promise.all([
-    tryRunFile('git', ['diff', '--name-status', '--relative', '-M', 'HEAD']),
-    tryRunFile('git', ['diff', '--numstat', '--relative', '-M', 'HEAD']),
-    tryRunFile('git', ['ls-files', '--others', '--exclude-standard']),
-    tryRunFile('git', ['diff', '--stat=120', '--relative', 'HEAD']),
-    tryRunFile('git', ['log', '--oneline', '-5']),
-    tryRunFile('git', ['worktree', 'list', '--porcelain']),
-    tryRunFile('gh', [
-      'pr',
-      'list',
-      '--repo',
-      REVIEW_REPO_SLUG,
-      '--state',
-      'open',
-      '--head',
-      branch,
-      '--json',
-      'number,title,url,headRefName,baseRefName,isDraft,reviewDecision,state,body',
-    ]),
-    tryRunFile('gh', [
-      'pr',
-      'list',
-      '--repo',
-      REVIEW_REPO_SLUG,
-      '--state',
-      'open',
-      '--limit',
-      '3',
-      '--json',
-      'number,title,url,headRefName,baseRefName,isDraft,reviewDecision,state,body',
-    ]),
+    tryRunInContext('git', ['diff', '--name-status', '--relative', '-M', 'HEAD']),
+    tryRunInContext('git', ['diff', '--numstat', '--relative', '-M', 'HEAD']),
+    tryRunInContext('git', ['ls-files', '--others', '--exclude-standard']),
+    tryRunInContext('git', ['diff', '--stat=120', '--relative', 'HEAD']),
+    tryRunInContext('git', ['log', '--oneline', '-5']),
+    tryRunInContext('git', ['worktree', 'list', '--porcelain']),
+    repoSlug
+      ? tryRunInContext('gh', [
+          'pr',
+          'list',
+          '--repo',
+          repoSlug,
+          '--state',
+          'open',
+          '--head',
+          branch,
+          '--json',
+          'number,title,url,headRefName,baseRefName,isDraft,reviewDecision,state,body',
+        ])
+      : Promise.resolve(''),
+    repoSlug && allowFallbackPullRequests
+      ? tryRunInContext('gh', [
+          'pr',
+          'list',
+          '--repo',
+          repoSlug,
+          '--state',
+          'open',
+          '--limit',
+          '6',
+          '--json',
+          'number,title,url,headRefName,baseRefName,isDraft,reviewDecision,state,body',
+        ])
+      : Promise.resolve(''),
   ]);
 
   const parsedFiles = parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw);
-  const localChangedFiles = await sortChangedFilesByTouchedAt(parsedFiles);
-  // Refresh the cache with the latest sorted list
+  const localChangedFiles = await sortChangedFilesByTouchedAt(parsedFiles, repoRoot);
   _cachedChangedFiles = localChangedFiles;
   _cachedChangedFilesAt = Date.now();
   const recentCommits = recentCommitsRaw ? recentCommitsRaw.split('\n').filter(Boolean) : [];
-  const worktrees = parseWorktrees(worktreesRaw);
+  const worktrees = parseWorktrees(worktreesRaw, repoRoot);
 
   const branchPullRequests = parseJson<ReviewPullRequestSummary[]>(branchPrsRaw, []);
   const fallbackPullRequests = parseJson<ReviewPullRequestSummary[]>(fallbackPrsRaw, []);
+  const selectedPullRequests = branchPullRequests.length
+    ? branchPullRequests
+    : allowFallbackPullRequests
+      ? fallbackPullRequests
+      : [];
 
-  const pullRequests = (branchPullRequests.length ? branchPullRequests : fallbackPullRequests).map((pullRequest) => ({
+  const pullRequests = selectedPullRequests.map((pullRequest) => ({
     ...pullRequest,
     reviewDecision: normalizeReviewDecision(pullRequest.reviewDecision),
     linkedIssueNumbers: parseLinkedIssueNumbers(pullRequest.body),
   }));
 
-  const pullRequestFiles = pullRequests[0] ? await loadPullRequestFiles(pullRequests[0].number) : [];
+  const pullRequestFiles = pullRequests[0] && repoSlug
+    ? parseJson<PullRequestFileSummary[]>(
+        await tryRunInContext('gh', [
+          'api',
+          `repos/${repoSlug}/pulls/${pullRequests[0].number}/files?per_page=100`,
+        ]),
+        [],
+      )
+    : [];
   const pullRequestChangedFiles = pullRequestFiles.length
     ? parsePullRequestChangedFiles(JSON.stringify(pullRequestFiles))
     : [];
@@ -648,12 +682,27 @@ async function _fetchWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapshot> 
       : 'Working tree clean.';
 
   const linkedIssueNumbers = pullRequests.flatMap((pullRequest) => pullRequest.linkedIssueNumbers ?? []);
-  const activeIssues = await loadIssueSummaries(
-    linkedIssueNumbers.length ? linkedIssueNumbers : [FALLBACK_ACTIVE_ISSUE_NUMBER],
-  );
+  const activeIssues = repoSlug
+    ? (await Promise.all(
+        (linkedIssueNumbers.length ? linkedIssueNumbers : [FALLBACK_ACTIVE_ISSUE_NUMBER])
+          .filter((value, index, list) => Number.isFinite(value) && list.indexOf(value) === index)
+          .map(async (issueNumber) => {
+            const raw = await tryRunInContext('gh', [
+              'issue',
+              'view',
+              String(issueNumber),
+              '--repo',
+              repoSlug,
+              '--json',
+              'number,title,url,state',
+            ]);
+            return parseJson<ReviewIssueSummary | undefined>(raw, undefined);
+          }),
+      )).filter((issue): issue is ReviewIssueSummary => Boolean(issue))
+    : [];
   const activeIssue = activeIssues[0];
 
-  if (!activeIssues.length) {
+  if (repoSlug && !activeIssues.length) {
     warnings.push(
       linkedIssueNumbers.length
         ? 'Unable to load the linked GitHub issues for the current review lane.'
@@ -671,8 +720,8 @@ async function _fetchWorkspaceReviewSnapshot(): Promise<WorkflowReviewSnapshot> 
 
   return {
     generatedAt: new Date().toISOString(),
-    repoSlug: REVIEW_REPO_SLUG,
-    repoPath: shortenPath(REVIEW_REPO_ROOT),
+    repoSlug,
+    repoPath: shortenPath(repoRoot),
     branch,
     upstream,
     ahead,
