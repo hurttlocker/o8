@@ -31,57 +31,9 @@ import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
+import { hasAnyUsableSetupPath, normalizeSetupDetection } from '@/lib/setup/detection';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import { deriveWorkflowStage, describeWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
-
-/** Normalize the flat API response into the shape SetupWizard expects. */
-function normalizeDetection(raw: Record<string, unknown>): DetectionResult {
-  const toolsArray = (raw.tools ?? []) as Array<{ id: string; detected: boolean; version?: string; path?: string; details?: Record<string, unknown> }>;
-  const findTool = (id: string) => toolsArray.find(t => t.id === id);
-
-  const mkTool = (id: string) => {
-    const t = findTool(id);
-    return {
-      detected: t?.detected ?? false,
-      version: t?.version,
-      path: t?.path,
-      ...(t?.details ?? {}),
-    };
-  };
-
-  // Build apiKeys array from the api-keys tool details
-  const apiKeysTool = findTool('api-keys');
-  const rawProviders = (apiKeysTool?.details?.providers ?? []) as Array<string | { provider: string; configured: boolean }>;
-  const apiKeys = rawProviders.map(p => {
-    if (typeof p === 'string') return { provider: p, configured: true };
-    return { provider: p.provider, configured: p.configured };
-  });
-
-  return {
-    tools: {
-      openclaw: {
-        ...mkTool('openclaw'),
-        // Config exists with version/agents = detected, even if HTTP probe was slow
-        detected: (findTool('openclaw')?.detected) || Boolean(findTool('openclaw')?.version) || Boolean(findTool('openclaw')?.details?.configFound),
-        agentCount: (findTool('openclaw')?.details?.agentCount as number) ?? 0,
-      },
-      codex: { ...mkTool('codex'), threads: (findTool('codex')?.details?.threads as number) ?? 0 },
-      claudeCode: { ...mkTool('claude-code'), recentSessions: (findTool('claude-code')?.details?.recentSessions as number) ?? 0 },
-      gemini: mkTool('gemini'),
-      cortex: { ...mkTool('cortex'), facts: (findTool('cortex')?.details?.facts as number) ?? 0, memories: (findTool('cortex')?.details?.memories as number) ?? 0 },
-      ollama: { ...mkTool('ollama'), hasEmbeddingModel: (findTool('ollama')?.details?.hasEmbeddingModel as boolean) ?? false },
-    } as DetectionResult['tools'],
-    apiKeys,
-    hasAnything: Boolean(raw.hasAnything),
-    hasAgentSurface: Boolean(raw.hasAgentSurface),
-    hasCliAgent: Boolean(raw.hasCliAgent),
-    hasApiKey: Boolean(raw.hasApiKey),
-    hasMemory: Boolean(raw.hasMemory),
-    hasEmbeddings: Boolean(raw.hasEmbeddings),
-    recommendedPath: String(raw.recommendedPath ?? 'full-wizard'),
-    summary: String(raw.summary ?? ''),
-  };
-}
 
 function repoSlugFromRemote(remoteUrl?: string | null) {
   const url = (remoteUrl ?? '').replace(/\.git$/, '');
@@ -513,26 +465,40 @@ function DashboardInner() {
       try {
         const configRes = await fetch('/api/setup/config');
         if (!configRes.ok) return;
-        const config = await configRes.json();
-        if (config.completedAt) return; // Already completed setup
+        const config = await configRes.json() as { completedAt?: string | null; setupComplete?: boolean };
+        if (config.setupComplete) return;
         const detectRes = await fetch('/api/setup/detect');
         if (!detectRes.ok) return;
         const rawDetection = await detectRes.json() as Record<string, unknown>;
-        // Normalize: API returns tools as array, wizard expects named object + apiKeys array
-        const detection = normalizeDetection(rawDetection);
+        const detection = normalizeSetupDetection(rawDetection);
+        if (config.completedAt && hasAnyUsableSetupPath(detection)) {
+          await fetch('/api/setup/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              setupComplete: true,
+              completedAt: config.completedAt ?? new Date().toISOString(),
+            }),
+          }).catch(() => {});
+          return;
+        }
         setSetupDetection(detection);
         setSetupWizardOpen(true);
       } catch { /* silent — don't block dashboard */ }
     })();
   }, []);
 
-  const handleSetupComplete = useCallback(async () => {
+  const handleSetupComplete = useCallback(async (setupComplete: boolean) => {
     setSetupWizardOpen(false);
+    if (!setupComplete) return;
     try {
       await fetch('/api/setup/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completedAt: new Date().toISOString() }),
+        body: JSON.stringify({
+          setupComplete: true,
+          completedAt: new Date().toISOString(),
+        }),
       });
     } catch { /* silent */ }
   }, []);
@@ -705,11 +671,17 @@ function DashboardInner() {
     setChatVisible(true);
     setRightPanelMode('workspace');
     setWorkspaceSidePanelView(view);
-    setWorkspaceSidePanelRepoPath(repo?.localPath ?? globalRepoEntry?.localPath ?? null);
+    setWorkspaceSidePanelRepoPath(
+      repo?.localPath
+      ?? activeWorkspace
+      ?? workspaceTerminalPreferredRepo?.localPath
+      ?? globalRepoEntry?.localPath
+      ?? null,
+    );
     setWorkspaceSidePanelPullRequestNumber(view === 'review' ? options?.pullRequestNumber ?? null : null);
     setWorkspaceSidePanelCompactReview(view === 'review' ? Boolean(options?.compactReview) : false);
     setWorkspaceSidePanelActivationKey((value) => value + 1);
-  }, [globalRepoEntry]);
+  }, [activeWorkspace, globalRepoEntry, workspaceTerminalPreferredRepo?.localPath]);
 
   useEffect(() => {
     if (workspaceSidePanelView === 'diff' || workspaceSidePanelView === 'review') {
@@ -2036,8 +2008,32 @@ function DashboardInner() {
     const nextView = workspaceSidePanelView === 'review' || workspaceSidePanelView === 'diff'
       ? workspaceSidePanelView
       : lastWorkspacePanelViewRef.current;
-    openWorkspaceSidePanel(nextView, workspaceSidePanelRepo);
-  }, [chatVisible, openWorkspaceSidePanel, rightPanelMode, workspaceSidePanelRepo, workspaceSidePanelView]);
+    openWorkspaceSidePanel(
+      nextView,
+      workspaceSidePanelPullRequestNumber
+        ? workspaceSidePanelRepo
+        : (
+            getWorkspaceSidePanelRepoByPath(
+              activeSurfaceRepoPath
+              ?? activeWorkspace
+              ?? workspaceTerminalPreferredRepo?.localPath
+              ?? null,
+            )
+            ?? workspaceSidePanelRepo
+          ),
+    );
+  }, [
+    activeSurfaceRepoPath,
+    activeWorkspace,
+    chatVisible,
+    getWorkspaceSidePanelRepoByPath,
+    openWorkspaceSidePanel,
+    rightPanelMode,
+    workspaceSidePanelPullRequestNumber,
+    workspaceSidePanelRepo,
+    workspaceSidePanelView,
+    workspaceTerminalPreferredRepo,
+  ]);
 
   useEffect(() => {
     if (rightPanelMode !== 'workspace') return;

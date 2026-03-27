@@ -1,6 +1,6 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useMemo, useState } from 'react';
 import {
   Check,
   FileCode2,
@@ -9,6 +9,7 @@ import {
   Globe,
   Image as ImageIcon,
   Search,
+  Sparkles,
   TerminalSquare,
   Wrench,
 } from 'lucide-react';
@@ -17,11 +18,17 @@ import { MessageActions } from './MessageActions';
 import type {
   MobileTranscriptEntry,
   MobileTranscriptMedia,
+  MobileTranscriptRuntimeEvent,
   MobileTranscriptToolCall,
 } from '@/lib/mobile/types';
+import {
+  sanitizeDesktopToolCalls,
+  sanitizeDesktopTranscriptEntry,
+} from '@/lib/chat/desktop-transcript-sanitizer';
 
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
+const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
 
 interface DesktopAgentMessageProps {
@@ -167,6 +174,11 @@ function ToolIcon({ tool }: { tool: MobileTranscriptToolCall }) {
 }
 
 export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscriptToolCall[] }) {
+  const sanitizedToolCalls = useMemo(
+    () => sanitizeDesktopToolCalls(toolCalls) ?? [],
+    [toolCalls],
+  );
+
   return (
     <div style={{
       display: 'flex',
@@ -175,7 +187,7 @@ export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscrip
       width: '100%',
       maxWidth: '92%',
     }}>
-      {toolCalls.map((tool, index) => (
+      {sanitizedToolCalls.map((tool, index) => (
         <div
           key={`${tool.name}-${index}`}
           style={{
@@ -263,6 +275,278 @@ export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscrip
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function RuntimeEventIcon({ event }: { event: MobileTranscriptRuntimeEvent }) {
+  if (event.kind === 'command') return <TerminalSquare size={14} strokeWidth={2} />;
+  if (event.kind === 'task') return <Wrench size={14} strokeWidth={2} />;
+  return <Sparkles size={14} strokeWidth={2} />;
+}
+
+function runtimeKindLabel(kind: MobileTranscriptRuntimeEvent['kind']) {
+  if (kind === 'command') return 'command';
+  if (kind === 'task') return 'background task';
+  if (kind === 'handoff') return 'handoff';
+  return 'runtime';
+}
+
+export function DesktopRuntimeEventCard({ event }: { event: MobileTranscriptRuntimeEvent }) {
+  const [expanded, setExpanded] = useState(false);
+  const detailLines = [
+    event.commandMessage && event.commandMessage !== event.commandName ? event.commandMessage : undefined,
+    event.commandArgs ? `Args: ${event.commandArgs}` : undefined,
+    event.outputLabel ? `Output: ${event.outputLabel}` : undefined,
+    ...(event.rawPreviewLines ?? []),
+  ].filter(Boolean) as string[];
+  const hasDetails = Boolean(event.action || detailLines.length > 0 || event.changedFiles?.length);
+
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+      width: '100%',
+      maxWidth: '92%',
+      padding: '10px 12px',
+      background: THEME_PANEL_GLASS,
+      border: '1px solid var(--t-panel-border)',
+      borderRadius: 12,
+      boxShadow: 'var(--t-panel-shadow)',
+    }}>
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+      }}>
+        <span style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 24,
+          height: 24,
+          borderRadius: 8,
+          background: THEME_ACCENT_SOFT,
+          color: THEME_ACCENT,
+          flexShrink: 0,
+        }}>
+          <RuntimeEventIcon event={event} />
+        </span>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{
+            fontSize: 12,
+            fontWeight: 700,
+            color: 'var(--t-text)',
+            letterSpacing: '-0.01em',
+          }}>
+            {event.title}
+          </div>
+          <div style={{
+            marginTop: 2,
+            fontSize: 11,
+            color: 'var(--t-text-secondary)',
+            lineHeight: 1.45,
+          }}>
+            {event.summary}
+          </div>
+        </div>
+      </div>
+
+      <div style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 6,
+      }}>
+        <span style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          padding: '3px 8px',
+          borderRadius: 999,
+          background: THEME_ACCENT_SOFT,
+          color: THEME_ACCENT,
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '0.02em',
+          textTransform: 'uppercase',
+        }}>
+          {runtimeKindLabel(event.kind)}
+        </span>
+        {event.status ? (
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '3px 8px',
+            borderRadius: 999,
+            background: 'rgba(37, 99, 235, 0.10)',
+            color: '#2563eb',
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+          }}>
+            {event.status}
+          </span>
+        ) : null}
+        {event.outputLabel ? (
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '3px 8px',
+            borderRadius: 999,
+            background: THEME_BG_CARD,
+            color: 'var(--t-text-secondary)',
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.02em',
+          }}>
+            {event.outputLabel}
+          </span>
+        ) : null}
+        {event.source ? (
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '3px 8px',
+            borderRadius: 999,
+            background: 'var(--t-divider-subtle)',
+            color: 'var(--t-text-secondary)',
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.02em',
+          }}>
+            {event.source}
+          </span>
+        ) : null}
+        {event.changedFiles?.length ? (
+          <span style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '3px 8px',
+            borderRadius: 999,
+            background: THEME_BG_CARD,
+            color: 'var(--t-text-secondary)',
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: '0.02em',
+          }}>
+            {event.changedFiles.length} file{event.changedFiles.length !== 1 ? 's' : ''}
+          </span>
+        ) : null}
+        {hasDetails ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '3px 8px',
+              borderRadius: 999,
+              border: '1px solid var(--t-panel-border)',
+              background: expanded ? THEME_ACCENT_SOFT : THEME_BG_CARD,
+              color: expanded ? THEME_ACCENT : 'var(--t-text-secondary)',
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.02em',
+              cursor: 'pointer',
+            }}
+          >
+            {expanded ? 'Hide details' : 'View details'}
+          </button>
+        ) : null}
+      </div>
+
+      {expanded && hasDetails ? (
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          padding: '10px 12px',
+          borderRadius: 12,
+          background: THEME_BG_CARD,
+          border: '1px solid var(--t-panel-border)',
+        }}>
+          {event.action ? (
+            <div>
+              <div style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: 'var(--t-text-muted)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+                marginBottom: 4,
+              }}>
+                Delivery
+              </div>
+              <div style={{
+                fontSize: 11,
+                color: 'var(--t-text-secondary)',
+                lineHeight: 1.5,
+              }}>
+                {event.action}
+              </div>
+            </div>
+          ) : null}
+
+          {event.changedFiles?.length ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: 'var(--t-text-muted)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+              }}>
+                Changed Files
+              </div>
+              {event.changedFiles.map((filePath) => (
+                <div
+                  key={filePath}
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--t-text-secondary)',
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {filePath}
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {detailLines.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: 'var(--t-text-muted)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+              }}>
+                Details
+              </div>
+              <div style={{
+                padding: '8px 10px',
+                borderRadius: 10,
+                background: THEME_PANEL_GLASS,
+                border: '1px solid var(--t-panel-border)',
+                fontSize: 11,
+                lineHeight: 1.5,
+                color: 'var(--t-text-secondary)',
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}>
+                {detailLines.join('\n')}
+              </div>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -396,12 +680,14 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   onOpenInCanvas,
   onRunInTerminal,
 }: DesktopAgentMessageProps) {
-  const isUser = entry.role === 'user';
-  const hasText = Boolean(entry.text.trim());
-  const hasMedia = Boolean(entry.media?.length);
-  const hasToolCalls = Boolean(entry.toolCalls?.length);
+  const sanitizedEntry = useMemo(() => sanitizeDesktopTranscriptEntry(entry), [entry]);
+  const isUser = sanitizedEntry.role === 'user';
+  const hasText = Boolean(sanitizedEntry.text.trim());
+  const hasMedia = Boolean(sanitizedEntry.media?.length);
+  const hasToolCalls = Boolean(sanitizedEntry.toolCalls?.length);
+  const hasRuntimeEvent = Boolean(sanitizedEntry.runtimeEvent);
 
-  if (entry.role === 'system' && entry.text.toLowerCase().includes('compaction')) {
+  if (sanitizedEntry.role === 'system' && sanitizedEntry.text.toLowerCase().includes('compaction')) {
     return (
       <div style={{
         display: 'inline-flex',
@@ -431,7 +717,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         alignItems: 'flex-end',
         gap: 8,
       }}>
-        {hasMedia ? <MediaGrid media={entry.media ?? []} tint="user" /> : null}
+        {hasMedia ? <MediaGrid media={sanitizedEntry.media ?? []} tint="user" /> : null}
         {hasText ? (
           <div style={{
             maxWidth: '82%',
@@ -446,16 +732,16 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
             lineHeight: 1.55,
             letterSpacing: '-0.01em',
           }}>
-            {entry.text}
+            {sanitizedEntry.text}
           </div>
         ) : null}
-        {entry.timestampLabel ? (
+        {sanitizedEntry.timestampLabel ? (
           <span style={{
             fontSize: 10,
             color: 'var(--t-text-faint)',
             paddingRight: 4,
           }}>
-            {entry.timestampLabel}
+            {sanitizedEntry.timestampLabel}
           </span>
         ) : null}
       </div>
@@ -470,20 +756,22 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       gap: 8,
       animation: isLast ? 'llmFadeIn 180ms ease-out' : undefined,
     }}>
+      {hasRuntimeEvent ? <DesktopRuntimeEventCard event={sanitizedEntry.runtimeEvent!} /> : null}
+
       {hasText ? (
         <div style={{
           maxWidth: '92%',
-          color: entry.role === 'system' ? '#475569' : '#0f172a',
+          color: sanitizedEntry.role === 'system' ? '#475569' : '#0f172a',
           fontSize: 14,
           lineHeight: 1.65,
           wordBreak: 'break-word',
-          padding: entry.role === 'system' ? '10px 12px' : 0,
-          borderRadius: entry.role === 'system' ? 12 : 0,
-          background: entry.role === 'system' ? 'rgba(248, 250, 252, 0.98)' : 'transparent',
-          border: entry.role === 'system' ? '1px solid rgba(226, 232, 240, 0.95)' : 'none',
-          boxShadow: entry.role === 'system' ? '0 8px 20px rgba(15, 23, 42, 0.04)' : 'none',
+          padding: sanitizedEntry.role === 'system' ? '10px 12px' : 0,
+          borderRadius: sanitizedEntry.role === 'system' ? 12 : 0,
+          background: sanitizedEntry.role === 'system' ? 'rgba(248, 250, 252, 0.98)' : 'transparent',
+          border: sanitizedEntry.role === 'system' ? '1px solid rgba(226, 232, 240, 0.95)' : 'none',
+          boxShadow: sanitizedEntry.role === 'system' ? '0 8px 20px rgba(15, 23, 42, 0.04)' : 'none',
         }}>
-          {renderLLMMarkdown(entry.text, {
+          {renderLLMMarkdown(sanitizedEntry.text, {
             onApplyToFile,
             onOpenInCanvas,
             onRunInTerminal,
@@ -491,22 +779,22 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         </div>
       ) : null}
 
-      {hasMedia ? <MediaGrid media={entry.media ?? []} tint="assistant" /> : null}
-      {hasToolCalls ? <DesktopToolCallStack toolCalls={entry.toolCalls ?? []} /> : null}
+      {hasMedia ? <MediaGrid media={sanitizedEntry.media ?? []} tint="assistant" /> : null}
+      {hasToolCalls ? <DesktopToolCallStack toolCalls={sanitizedEntry.toolCalls ?? []} /> : null}
 
-      {entry.role === 'assistant' && hasText ? (
+      {sanitizedEntry.role === 'assistant' && hasText ? (
         <div style={{ width: '100%', maxWidth: '92%' }}>
-          <MessageActions messageId={entry.id} messageText={entry.text} />
+          <MessageActions messageId={sanitizedEntry.id} messageText={sanitizedEntry.text} />
         </div>
       ) : null}
 
-      {entry.timestampLabel ? (
+      {sanitizedEntry.timestampLabel ? (
         <span style={{
           fontSize: 10,
           color: 'var(--t-text-faint)',
           paddingLeft: 2,
         }}>
-          {entry.timestampLabel}
+          {sanitizedEntry.timestampLabel}
         </span>
       ) : null}
     </div>

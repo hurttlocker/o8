@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import {
   Check,
@@ -17,6 +17,11 @@ import {
   MessageSquare,
   Sparkles,
 } from 'lucide-react';
+import {
+  evaluateSetupCompletion,
+  normalizeSetupDetection,
+  type SetupCompletionGoal,
+} from '@/lib/setup/detection';
 
 // ── Types ──
 
@@ -572,16 +577,17 @@ function PathChoiceCard({
 
 // ── API key inline input ──
 
-function ApiKeyInput({ onSave }: { onSave: (provider: string, key: string) => void }) {
+function ApiKeyInput({ onSave }: { onSave: (provider: string, key: string) => Promise<void> | void }) {
   const [provider, setProvider] = useState('anthropic');
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const providers = [
-    { id: 'anthropic', name: 'Anthropic', env: 'ANTHROPIC_API_KEY', prefix: 'sk-ant-' },
-    { id: 'openai', name: 'OpenAI', env: 'OPENAI_API_KEY', prefix: 'sk-' },
-    { id: 'google', name: 'Google AI', env: 'GOOGLE_AI_API_KEY', prefix: 'AI' },
+    { id: 'anthropic', name: 'Anthropic', prefix: 'sk-ant-' },
+    { id: 'openai', name: 'OpenAI', prefix: 'sk-' },
+    { id: 'google', name: 'Google AI', prefix: 'AI' },
   ];
 
   const current = providers.find((p) => p.id === provider)!;
@@ -589,10 +595,14 @@ function ApiKeyInput({ onSave }: { onSave: (provider: string, key: string) => vo
   const handleSave = async () => {
     if (!apiKey.trim()) return;
     setSaving(true);
+    setError(null);
     try {
-      onSave(current.env, apiKey.trim());
+      await onSave(current.id, apiKey.trim());
       setSaved(true);
+      setApiKey('');
       setTimeout(() => setSaved(false), 2000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to save API key.');
     } finally {
       setSaving(false);
     }
@@ -661,6 +671,11 @@ function ApiKeyInput({ onSave }: { onSave: (provider: string, key: string) => vo
           style={{ padding: '8px 16px', fontSize: 12 }}
         />
       </div>
+      {error ? (
+        <div style={{ fontSize: 11, color: '#dc2626', lineHeight: 1.4 }}>
+          {error}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -672,17 +687,24 @@ export const SetupWizard = memo(function SetupWizard({
   onComplete,
 }: {
   detection: DetectionResult;
-  onComplete: () => void;
+  onComplete: (setupComplete: boolean) => void;
 }) {
   const mode = useMemo(() => deriveWizardMode(detection), [detection]);
-  const toolList = useMemo(() => buildToolList(detection), [detection]);
-  const missingActions = useMemo(() => getMissingActions(detection), [detection]);
+  const [liveDetection, setLiveDetection] = useState(detection);
+  const toolList = useMemo(() => buildToolList(liveDetection), [liveDetection]);
+  const missingActions = useMemo(() => getMissingActions(liveDetection), [liveDetection]);
 
   const [step, setStep] = useState(0);
   const [entering, setEntering] = useState(true);
   const [fullWizardPath, setFullWizardPath] = useState<FullWizardPath | null>(null);
   const [skippedSteps, setSkippedSteps] = useState<string[]>([]);
   const [animDirection, setAnimDirection] = useState<'forward' | 'back'>('forward');
+  const [rechecking, setRechecking] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLiveDetection(detection);
+  }, [detection]);
 
   useEffect(() => {
     setEntering(true);
@@ -709,6 +731,183 @@ export const SetupWizard = memo(function SetupWizard({
   const skipStep = useCallback((stepId: string) => {
     setSkippedSteps((prev) => [...prev, stepId]);
   }, []);
+
+  const handleDismiss = useCallback(() => {
+    onComplete(false);
+  }, [onComplete]);
+
+  const handleSuccessComplete = useCallback(() => {
+    onComplete(true);
+  }, [onComplete]);
+
+  const completionGoal = useMemo<SetupCompletionGoal | null>(() => {
+    if (mode === 'quick-setup') return 'quick-setup';
+    if (mode !== 'full-wizard') return null;
+    if (fullWizardPath === 'agents') return 'agents';
+    if (fullWizardPath === 'chat') return 'chat';
+    return null;
+  }, [fullWizardPath, mode]);
+
+  const completionState = useMemo(() => {
+    if (!completionGoal) return null;
+    return evaluateSetupCompletion(liveDetection, completionGoal);
+  }, [completionGoal, liveDetection]);
+
+  const recheckSetup = useCallback(async () => {
+    setRechecking(true);
+    setSetupError(null);
+    try {
+      const response = await fetch('/api/setup/detect', {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+      });
+      if (!response.ok) {
+        throw new Error('Unable to recheck setup right now.');
+      }
+      const raw = await response.json() as Record<string, unknown>;
+      setLiveDetection(normalizeSetupDetection(raw));
+    } catch (err) {
+      setSetupError(err instanceof Error ? err.message : 'Unable to recheck setup right now.');
+    } finally {
+      setRechecking(false);
+    }
+  }, []);
+
+  const saveProviderKey = useCallback(async (provider: string, key: string) => {
+    const response = await fetch('/api/v2/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider, key }),
+    });
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    if (!response.ok) {
+      throw new Error(payload?.error || 'Unable to save API key.');
+    }
+    await recheckSetup();
+  }, [recheckSetup]);
+
+  const renderCompletionStep = useCallback((status: NonNullable<typeof completionState>) => {
+    if (status.complete) {
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center' }}>
+          <div style={{
+            width: 56,
+            height: 56,
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 8px 24px rgba(34,197,94,0.3)',
+          }}>
+            <Check size={28} strokeWidth={3} color="#fff" />
+          </div>
+
+          <div style={{ textAlign: 'center' }}>
+            <div style={{
+              fontSize: 22,
+              fontWeight: 800,
+              color: '#0f172a',
+              letterSpacing: '-0.03em',
+              marginBottom: 6,
+            }}>
+              {status.title}
+            </div>
+            <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.6)', lineHeight: 1.6 }}>
+              {status.description}
+            </div>
+          </div>
+
+          <GlassButton label="Open Dashboard" onClick={handleSuccessComplete} icon={<Zap size={16} strokeWidth={2} />} />
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <div style={{
+            width: 56,
+            height: 56,
+            borderRadius: '50%',
+            background: 'linear-gradient(135deg, rgba(249,115,22,0.16), rgba(245,158,11,0.22))',
+            color: '#c2410c',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 10px 24px rgba(249,115,22,0.14)',
+          }}>
+            <X size={26} strokeWidth={2.5} />
+          </div>
+        </div>
+
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            fontSize: 20,
+            fontWeight: 800,
+            color: '#0f172a',
+            letterSpacing: '-0.03em',
+            marginBottom: 6,
+          }}>
+            {status.title}
+          </div>
+          <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.62)', lineHeight: 1.6 }}>
+            {status.description}
+          </div>
+        </div>
+
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          padding: '14px 16px',
+          borderRadius: 14,
+          background: 'rgba(255,255,255,0.52)',
+          border: '1px solid rgba(249,115,22,0.18)',
+        }}>
+          {status.missing.map((item) => (
+            <div
+              key={item}
+              style={{
+                display: 'flex',
+                gap: 8,
+                alignItems: 'flex-start',
+                fontSize: 12,
+                color: '#7c2d12',
+                lineHeight: 1.5,
+              }}
+            >
+              <span style={{ color: '#f97316', marginTop: 1 }}>•</span>
+              <span>{item}</span>
+            </div>
+          ))}
+        </div>
+
+        {setupError ? (
+          <div style={{ fontSize: 12, color: '#dc2626', textAlign: 'center', lineHeight: 1.5 }}>
+            {setupError}
+          </div>
+        ) : null}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+          {mode === 'full-wizard' ? (
+            <GlassButton label="Back" variant="ghost" onClick={goBack} />
+          ) : (
+            <span />
+          )}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <GlassButton
+              label={rechecking ? 'Checking…' : 'Recheck setup'}
+              variant="secondary"
+              onClick={() => { void recheckSetup(); }}
+              disabled={rechecking}
+            />
+            <GlassButton label="Open dashboard anyway" variant="ghost" onClick={handleDismiss} />
+          </div>
+        </div>
+      </div>
+    );
+  }, [goBack, handleDismiss, handleSuccessComplete, mode, recheckSetup, rechecking, setupError]);
 
   // ── Step content renderers ──
 
@@ -743,12 +942,12 @@ export const SetupWizard = memo(function SetupWizard({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
         <GlassButton
           label="Get Started"
-          onClick={onComplete}
+          onClick={handleSuccessComplete}
           icon={<Zap size={16} strokeWidth={2} />}
         />
         <button
           onClick={() => {
-            onComplete();
+            handleSuccessComplete();
             // Settings will be available from NavRail
           }}
           style={{
@@ -795,7 +994,7 @@ export const SetupWizard = memo(function SetupWizard({
 
           <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
             <GlassButton label="Set up missing tools" onClick={goForward} icon={<ChevronRight size={16} strokeWidth={2} />} />
-            <GlassButton label="Skip all" variant="ghost" onClick={onComplete} />
+            <GlassButton label="Skip all" variant="ghost" onClick={handleDismiss} />
           </div>
         </div>
       );
@@ -839,13 +1038,8 @@ export const SetupWizard = memo(function SetupWizard({
             {remaining.map((action) =>
               action.id === 'api-keys' ? (
                 <div key={action.id}>
-                  <ApiKeyInput onSave={(env, key) => {
-                    // Save to .env.local via settings API
-                    fetch('/api/setup/config', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ [`env_${env}`]: key }),
-                    }).catch(() => {});
+                  <ApiKeyInput onSave={async (provider, key) => {
+                    await saveProviderKey(provider, key);
                     skipStep(action.id);
                   }} />
                   <button
@@ -884,39 +1078,7 @@ export const SetupWizard = memo(function SetupWizard({
     }
 
     // Step 2: Ready
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center' }}>
-        <div style={{
-          width: 56,
-          height: 56,
-          borderRadius: '50%',
-          background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: '0 8px 24px rgba(34,197,94,0.3)',
-        }}>
-          <Check size={28} strokeWidth={3} color="#fff" />
-        </div>
-
-        <div style={{ textAlign: 'center' }}>
-          <div style={{
-            fontSize: 22,
-            fontWeight: 800,
-            color: '#0f172a',
-            letterSpacing: '-0.03em',
-            marginBottom: 6,
-          }}>
-            You{"'"}re Ready
-          </div>
-          <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.6)', lineHeight: 1.6 }}>
-            Cortex IDE is set up. You can always configure more in Settings.
-          </div>
-        </div>
-
-        <GlassButton label="Open Dashboard" onClick={onComplete} icon={<Zap size={16} strokeWidth={2} />} />
-      </div>
-    );
+    return completionState ? renderCompletionStep(completionState) : null;
   };
 
   const renderFullWizardStep = () => {
@@ -968,7 +1130,7 @@ export const SetupWizard = memo(function SetupWizard({
               label="Continue"
               onClick={() => {
                 if (fullWizardPath === 'explore') {
-                  onComplete();
+                  handleDismiss();
                 } else {
                   goForward();
                 }
@@ -1057,13 +1219,7 @@ export const SetupWizard = memo(function SetupWizard({
             </div>
           </div>
 
-          <ApiKeyInput onSave={(env, key) => {
-            fetch('/api/setup/config', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ [`env_${env}`]: key }),
-            }).catch(() => {});
-          }} />
+          <ApiKeyInput onSave={saveProviderKey} />
 
           <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between' }}>
             <GlassButton label="Back" variant="ghost" onClick={goBack} />
@@ -1122,39 +1278,7 @@ export const SetupWizard = memo(function SetupWizard({
     }
 
     // Step 3: Ready
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center' }}>
-        <div style={{
-          width: 56,
-          height: 56,
-          borderRadius: '50%',
-          background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: '0 8px 24px rgba(34,197,94,0.3)',
-        }}>
-          <Check size={28} strokeWidth={3} color="#fff" />
-        </div>
-
-        <div style={{ textAlign: 'center' }}>
-          <div style={{
-            fontSize: 22,
-            fontWeight: 800,
-            color: '#0f172a',
-            letterSpacing: '-0.03em',
-            marginBottom: 6,
-          }}>
-            You{"'"}re Ready
-          </div>
-          <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.6)', lineHeight: 1.6 }}>
-            Cortex IDE is set up and ready to go. You can always fine-tune settings later.
-          </div>
-        </div>
-
-        <GlassButton label="Open Dashboard" onClick={onComplete} icon={<Zap size={16} strokeWidth={2} />} />
-      </div>
-    );
+    return completionState ? renderCompletionStep(completionState) : null;
   };
 
   const renderCurrentStep = () => {
@@ -1192,7 +1316,7 @@ export const SetupWizard = memo(function SetupWizard({
       } as CSSProperties}>
         {/* Skip button (top right) */}
         <button
-          onClick={onComplete}
+          onClick={handleDismiss}
           style={{
             position: 'absolute',
             top: 14,

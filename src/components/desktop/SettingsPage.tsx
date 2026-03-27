@@ -1311,6 +1311,13 @@ function AboutTab() {
     if (typeof navigator !== 'undefined' && navigator.platform) return navigator.platform;
     return '—';
   });
+  const repoUrl = 'https://github.com/hurttlocker/cortex-ide';
+  const aboutLinks = [
+    { label: 'GitHub Repository', href: repoUrl },
+    { label: 'Latest Release', href: `${repoUrl}/releases/latest` },
+    { label: 'Issue Tracker', href: `${repoUrl}/issues` },
+  ];
+  const showDevTools = process.env.NODE_ENV !== 'production';
 
   useEffect(() => {
     let active = true;
@@ -1374,7 +1381,7 @@ function AboutTab() {
           </span>
         </div>
         <p style={{ fontSize: 13, color: 'var(--t-text-secondary)', margin: '0 0 18px', lineHeight: 1.5 }}>
-          Built with Next.js + Tauri · Powered by Cortex Memory
+          Local-first control plane for running, supervising, and reviewing coding agents.
         </p>
 
         <div style={{
@@ -1405,88 +1412,98 @@ function AboutTab() {
       }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', marginBottom: 6 }}>Links</div>
         <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: '0 0 14px', lineHeight: 1.5 }}>
-          Links will be added before production release.
+          Verified public endpoints for the Cortex IDE desktop release and repository.
         </p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-          {['GitHub', 'Documentation', 'Discord Community'].map((label) => (
-            <span key={label} style={{
-              padding: '8px 12px',
-              borderRadius: 10,
-              border: '1px solid var(--t-panel-border)',
-              background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
-              color: 'var(--t-text-secondary)',
-              fontSize: 12,
-              fontWeight: 600,
-            }}>
-              {label}
-            </span>
+          {aboutLinks.map((link) => (
+            <a
+              key={link.label}
+              href={link.href}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '8px 12px',
+                borderRadius: 10,
+                border: '1px solid var(--t-panel-border)',
+                background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
+                color: 'var(--t-text-secondary)',
+                fontSize: 12,
+                fontWeight: 600,
+                textDecoration: 'none',
+              }}
+            >
+              {link.label}
+            </a>
           ))}
         </div>
       </div>
 
-      {/* Dev Tools — not shipped to production */}
-      <div style={{
-        background: 'var(--t-panel)',
-        borderRadius: 14,
-        border: '1px dashed rgba(239, 68, 68, 0.3)',
-        padding: 24,
-      }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', marginBottom: 4 }}>Dev Tools</div>
-        <p style={{ fontSize: 11, color: 'var(--t-text-muted)', margin: '0 0 14px' }}>Internal testing — will not ship to users.</p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          <button
-            type="button"
-            onClick={async () => {
-              await fetch('/api/setup/config', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ setupComplete: false, completedAt: null }),
-              });
-              window.location.href = '/dashboard';
-            }}
-            style={{
-              padding: '8px 14px', borderRadius: 10,
-              border: '1px solid rgba(37, 99, 235, 0.3)',
-              background: 'rgba(37, 99, 235, 0.06)',
-              color: '#2563eb', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-            }}
-          >
-            ▸ Run Setup Wizard
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              const res = await fetch('/api/setup/detect');
-              const data = await res.json();
-              alert(JSON.stringify(data, null, 2));
-            }}
-            style={{
-              padding: '8px 14px', borderRadius: 10,
-              border: '1px solid var(--t-panel-border)',
-              background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
-              color: 'var(--t-text)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
-            }}
-          >
-            ▸ View Detection
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              const res = await fetch('/api/cortex/seed/status');
-              const data = await res.json();
-              alert(JSON.stringify(data, null, 2));
-            }}
-            style={{
-              padding: '8px 14px', borderRadius: 10,
-              border: '1px solid var(--t-panel-border)',
-              background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
-              color: 'var(--t-text)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
-            }}
-          >
-            ▸ Seed Status
-          </button>
+      {showDevTools && (
+        <div style={{
+          background: 'var(--t-panel)',
+          borderRadius: 14,
+          border: '1px dashed rgba(239, 68, 68, 0.3)',
+          padding: 24,
+        }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', marginBottom: 4 }}>Dev Tools</div>
+          <p style={{ fontSize: 11, color: 'var(--t-text-muted)', margin: '0 0 14px' }}>Internal testing — hidden from production builds.</p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <button
+              type="button"
+              onClick={async () => {
+                await fetch('/api/setup/config', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ setupComplete: false, completedAt: null }),
+                });
+                window.location.href = '/dashboard';
+              }}
+              style={{
+                padding: '8px 14px', borderRadius: 10,
+                border: '1px solid rgba(37, 99, 235, 0.3)',
+                background: 'rgba(37, 99, 235, 0.06)',
+                color: '#2563eb', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              ▸ Run Setup Wizard
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                const res = await fetch('/api/setup/detect');
+                const data = await res.json();
+                alert(JSON.stringify(data, null, 2));
+              }}
+              style={{
+                padding: '8px 14px', borderRadius: 10,
+                border: '1px solid var(--t-panel-border)',
+                background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
+                color: 'var(--t-text)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
+              }}
+            >
+              ▸ View Detection
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                const res = await fetch('/api/cortex/seed/status');
+                const data = await res.json();
+                alert(JSON.stringify(data, null, 2));
+              }}
+              style={{
+                padding: '8px 14px', borderRadius: 10,
+                border: '1px solid var(--t-panel-border)',
+                background: 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
+                color: 'var(--t-text)', fontSize: 12, fontWeight: 500, cursor: 'pointer',
+              }}
+            >
+              ▸ Seed Status
+            </button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -2895,6 +2912,40 @@ function CortexMemoryTab() {
   const recallMaxResults = config?.recallMaxResults ?? 7;
   const recallTokenBudget = config?.recallTokenBudget ?? 800;
   const recallMinConfidence = config?.recallMinConfidence ?? 0.3;
+  const saveNoteIsSuccess = saveNote === 'Saved' || saveNote.endsWith('complete');
+  const maintenanceActions: Array<{
+    id: string;
+    label: string;
+    desc: string;
+    cmd: string;
+    requiresConfirmation?: boolean;
+  }> = [
+    {
+      id: 'cleanup',
+      label: 'Cleanup',
+      desc: 'Permanently remove garbage memories and headless facts that pollute recall.',
+      cmd: 'cleanup',
+      requiresConfirmation: true,
+    },
+    {
+      id: 'lifecycle',
+      label: 'Lifecycle',
+      desc: 'Apply decay, promote, and conflict resolution policies.',
+      cmd: 'lifecycle run',
+    },
+    {
+      id: 'conflicts',
+      label: 'Find Conflicts',
+      desc: 'Detect contradictory facts.',
+      cmd: 'conflicts --limit 10',
+    },
+    {
+      id: 'optimize',
+      label: 'Optimize DB',
+      desc: 'VACUUM and ANALYZE the database.',
+      cmd: 'optimize',
+    },
+  ];
 
   return (
     <div style={{
@@ -3290,7 +3341,7 @@ function CortexMemoryTab() {
         {saveNote && (
           <div style={{
             fontSize: 12,
-            color: saveNote === 'Saved' ? '#10b981' : '#ef4444',
+            color: saveNoteIsSuccess ? '#10b981' : '#ef4444',
             marginTop: 8,
           }}>
             {saveNote}
@@ -3334,19 +3385,26 @@ function CortexMemoryTab() {
         <p style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)', margin: '0 0 12px', lineHeight: '1.4' }}>
           Run maintenance tasks to keep your memory healthy and search quality high.
         </p>
+        <p style={{ fontSize: 11, color: '#c2410c', margin: '0 0 12px', lineHeight: '1.5' }}>
+          Cleanup permanently deletes garbage memories and headless facts. It is useful when recall is noisy, but it cannot be undone.
+        </p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {[
-            { id: 'cleanup', label: 'Cleanup', desc: 'Remove garbage memories and headless facts', cmd: 'cleanup' },
-            { id: 'lifecycle', label: 'Lifecycle', desc: 'Apply decay, promote, and conflict resolution policies', cmd: 'lifecycle run' },
-            { id: 'conflicts', label: 'Find Conflicts', desc: 'Detect contradictory facts', cmd: 'conflicts --limit 10' },
-            { id: 'optimize', label: 'Optimize DB', desc: 'VACUUM and ANALYZE the database', cmd: 'optimize' },
-          ].map(action => (
+          {maintenanceActions.map(action => (
             <button
               key={action.id}
               type="button"
               title={action.desc}
               disabled={actionRunning !== null}
               onClick={async () => {
+                if (action.requiresConfirmation) {
+                  const confirmed = window.confirm(
+                    'Cleanup permanently removes garbage memories and headless facts from Cortex Memory.\n\nImpact: recall and search will stop surfacing those noisy or orphaned fragments, and the change cannot be undone.\n\nRun cleanup now?',
+                  );
+                  if (!confirmed) {
+                    return;
+                  }
+                }
+
                 setActionRunning(action.id);
                 try {
                   const res = await fetch('/api/v2/cortex/action', {
@@ -3354,13 +3412,18 @@ function CortexMemoryTab() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ command: action.cmd }),
                   });
-                  if (res.ok) {
-                    setSaveNote(`${action.label} complete`);
-                    setTimeout(() => setSaveNote(''), 3000);
-                    void loadConfig();
+                  if (!res.ok) {
+                    throw new Error(`${action.label} failed`);
                   }
-                } catch { /* ignore */ }
-                setActionRunning(null);
+                  setSaveNote(`${action.label} complete`);
+                  setTimeout(() => setSaveNote(''), 3000);
+                  void loadConfig();
+                } catch {
+                  setSaveNote(`${action.label} failed`);
+                  setTimeout(() => setSaveNote(''), 3000);
+                } finally {
+                  setActionRunning(null);
+                }
               }}
               style={{
                 display: 'flex',
@@ -3386,8 +3449,8 @@ function CortexMemoryTab() {
           ))}
         </div>
         {saveNote && (
-          <div style={{ fontSize: 12, color: '#10b981', marginTop: 8, fontWeight: 500 }}>
-            ✓ {saveNote}
+          <div style={{ fontSize: 12, color: saveNoteIsSuccess ? '#10b981' : '#ef4444', marginTop: 8, fontWeight: 500 }}>
+            {saveNoteIsSuccess ? '✓' : '!'} {saveNote}
           </div>
         )}
       </div>
