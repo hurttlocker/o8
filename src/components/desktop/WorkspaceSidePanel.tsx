@@ -28,8 +28,6 @@ import { BlueGlassActionButton, BlueGlassHoverCard } from './BlueGlassHoverCard'
 import {
   formatCiCheckBatchInjection,
   formatCiCheckInjection,
-  formatDeployBatchInjection,
-  formatDeployContextInjection,
   formatReviewCommentBatchInjection,
   formatReviewCommentInjection,
   type AgentPanelChatInjectionPayload,
@@ -1587,115 +1585,6 @@ const ReviewTab = memo(function ReviewTab({
       </ReviewSection>
 
       <ReviewSection
-        title="Deploy"
-        actions={
-          <>
-            {deployments.length > 0 && onInjectChatContext ? (
-              <ContextActionChip
-                icon={<MessageSquare size={11} strokeWidth={2} />}
-                label={addedContextKeys[`deploys:${repo?.name ?? 'repo'}`] ? 'Added' : 'Add deploys'}
-                onClick={() => injectPayload(
-                  `deploys:${repo?.name ?? 'repo'}`,
-                  formatDeployBatchInjection(
-                    repo?.name,
-                    repoSlug ?? undefined,
-                    deployments.slice(0, 4).map((deployment) => ({
-                      project: repo?.name,
-                      repo: repoSlug ?? undefined,
-                      environment: deployment.environment,
-                      state: deployment.state,
-                      url: deployment.url,
-                      sha: deployment.sha,
-                      createdAt: deployment.createdAt,
-                      target: deployment.target,
-                      commitMessage: deployment.commitMessage,
-                    })),
-                  ),
-                )}
-                disabled={Boolean(addedContextKeys[`deploys:${repo?.name ?? 'repo'}`])}
-              />
-            ) : null}
-            {onOpenDeploy ? (
-              <ContextActionChip
-                icon={<ArrowRight size={11} strokeWidth={2} />}
-                label="Open deploys"
-                onClick={() => onOpenDeploy(repo?.name)}
-              />
-            ) : null}
-          </>
-        }
-      >
-        {deployLoading && deployments.length === 0 ? (
-          <EmptySectionState>Loading deploy state…</EmptySectionState>
-        ) : deployments.length === 0 ? (
-          <EmptySectionState>No deploy information is available yet.</EmptySectionState>
-        ) : (
-          deployments.slice(0, 5).map((deployment) => {
-            const key = `deploy:${deployment.id}`;
-            const healthy = /ready|success/i.test(deployment.state);
-            const pending = /queued|building|pending|in_progress/i.test(deployment.state);
-            const tone = healthy
-              ? { color: '#15803d', bg: 'rgba(34,197,94,0.10)' }
-              : pending
-                ? { color: '#b45309', bg: 'rgba(245,158,11,0.10)' }
-                : { color: '#b91c1c', bg: 'rgba(239,68,68,0.10)' };
-            return (
-              <ContextObjectCard key={deployment.id} itemKind="deploy" itemId={deployment.id}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                  <span style={{ display: 'inline-flex', width: 20, height: 20, borderRadius: 999, alignItems: 'center', justifyContent: 'center', background: tone.bg, color: tone.color, flexShrink: 0 }}>
-                    {healthy ? <CheckCircle2 size={12} strokeWidth={2.2} /> : pending ? <Clock size={12} strokeWidth={2.2} /> : <Globe size={12} strokeWidth={2.2} />}
-                  </span>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{deployment.label}</div>
-                      <span style={{ display: 'inline-flex', padding: '2px 7px', borderRadius: 999, background: tone.bg, color: tone.color, fontSize: 10, fontWeight: 700 }}>
-                        {deployment.state}
-                      </span>
-                    </div>
-                    <div style={{ marginTop: 4, display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--t-text-muted)' }}>
-                      {deployment.environment ? <span>{deployment.environment}</span> : null}
-                      {deployment.sha ? <span>{deployment.sha}</span> : null}
-                      {deployment.createdAt ? <span>{formatAge(deployment.createdAt)}</span> : null}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                    {onInjectChatContext ? (
-                      <ContextActionChip
-                        icon={<MessageSquare size={11} strokeWidth={2} />}
-                        label={addedContextKeys[key] ? 'Added' : 'Add'}
-                        onClick={() => injectPayload(
-                          key,
-                          formatDeployContextInjection({
-                            project: repo?.name,
-                            repo: repoSlug ?? undefined,
-                            environment: deployment.environment,
-                            state: deployment.state,
-                            url: deployment.url,
-                            sha: deployment.sha,
-                            createdAt: deployment.createdAt,
-                            target: deployment.target,
-                            commitMessage: deployment.commitMessage,
-                          }),
-                        )}
-                        disabled={Boolean(addedContextKeys[key])}
-                      />
-                    ) : null}
-                    {deployment.url ? (
-                      <ContextActionChip
-                        icon={<ExternalLink size={11} strokeWidth={2} />}
-                        label="Open"
-                        onClick={() => window.open(deployment.url, '_blank', 'noopener,noreferrer')}
-                      />
-                    ) : null}
-                  </div>
-                </div>
-              </ContextObjectCard>
-            );
-          })
-        )}
-      </ReviewSection>
-
-      <ReviewSection
         title="Comments"
         actions={
           <>
@@ -1880,6 +1769,64 @@ const ReviewTab = memo(function ReviewTab({
             </div>
           </ContextObjectCard>
         )) : null}
+      </ReviewSection>
+
+      <ReviewSection
+        title="Deploy"
+        actions={onOpenDeploy ? (
+          <ContextActionChip
+            icon={<ArrowRight size={11} strokeWidth={2} />}
+            label="Open deploys"
+            onClick={() => onOpenDeploy(repo?.name)}
+          />
+        ) : undefined}
+      >
+        {deployLoading && deployments.length === 0 ? (
+          <EmptySectionState>Loading deploy state…</EmptySectionState>
+        ) : deployments.length === 0 ? (
+          <EmptySectionState>No deploy information is available yet.</EmptySectionState>
+        ) : (
+          deployments.slice(0, 5).map((deployment) => {
+            const healthy = /ready|success/i.test(deployment.state);
+            const pending = /queued|building|pending|in_progress/i.test(deployment.state);
+            const tone = healthy
+              ? { color: '#15803d', bg: 'rgba(34,197,94,0.10)' }
+              : pending
+                ? { color: '#b45309', bg: 'rgba(245,158,11,0.10)' }
+                : { color: '#b91c1c', bg: 'rgba(239,68,68,0.10)' };
+            return (
+              <ContextObjectCard key={deployment.id} itemKind="deploy" itemId={deployment.id}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <span style={{ display: 'inline-flex', width: 20, height: 20, borderRadius: 999, alignItems: 'center', justifyContent: 'center', background: tone.bg, color: tone.color, flexShrink: 0 }}>
+                    {healthy ? <CheckCircle2 size={12} strokeWidth={2.2} /> : pending ? <Clock size={12} strokeWidth={2.2} /> : <Globe size={12} strokeWidth={2.2} />}
+                  </span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{deployment.label}</div>
+                      <span style={{ display: 'inline-flex', padding: '2px 7px', borderRadius: 999, background: tone.bg, color: tone.color, fontSize: 10, fontWeight: 700 }}>
+                        {deployment.state}
+                      </span>
+                    </div>
+                    <div style={{ marginTop: 4, display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--t-text-muted)' }}>
+                      {deployment.environment ? <span>{deployment.environment}</span> : null}
+                      {deployment.sha ? <span>{deployment.sha}</span> : null}
+                      {deployment.createdAt ? <span>{formatAge(deployment.createdAt)}</span> : null}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, justifyContent: 'flex-end' }}>
+                    {deployment.url ? (
+                      <ContextIconButton
+                        icon={<ExternalLink size={11} strokeWidth={2} />}
+                        label="Open deploy"
+                        onClick={() => window.open(deployment.url, '_blank', 'noopener,noreferrer')}
+                      />
+                    ) : null}
+                  </div>
+                </div>
+              </ContextObjectCard>
+            );
+          })
+        )}
       </ReviewSection>
     </div>
   );
