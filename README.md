@@ -119,3 +119,5 @@ This keeps the current control-plane architecture intact while giving the produc
 Drafted on 2026-03-11.
 Execution started on 2026-03-11 with a real desktop shell, mobile remote preview, fleet state model, runtime adapter contract, and an Electron desktop wrapper for the control plane.
 Private repo only for now.
+
+Disposable PR for review comment / add-to-chat verification.
