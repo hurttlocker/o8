@@ -3279,7 +3279,6 @@ function DashboardInner() {
             onOpenFile={(filePath, repo) => handleSelectFile(filePath, repo?.localPath)}
             onInjectChatContext={(payload, repo) => injectPayloadIntoRepoChat(payload, repo)}
             onOpenPullRequest={handleSelectPR}
-            onOpenDeploy={handleOpenDeploy}
           />
         )}
       </div>}

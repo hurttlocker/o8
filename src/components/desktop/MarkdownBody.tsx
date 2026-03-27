@@ -115,8 +115,8 @@ function InlineImage({ src, alt }: { src: string; alt: string }) {
 // ── Inline rendering ──
 
 function renderInline(text: string): React.ReactNode {
-  // Handle images, bold, inline code, and links
-  const parts = text.split(/(!\[[^\]]*\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g);
+  // Handle images, bold, italic, inline code, and links
+  const parts = text.split(/(!\[[^\]]*\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|\*[^*\n]+\*|_[^_\n]+_|\[[^\]]+\]\([^)]+\))/g);
   return parts.map((part, i) => {
     // Images: ![alt](url)
     const imgMatch = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
@@ -143,6 +143,10 @@ function renderInline(text: string): React.ReactNode {
     if (part.startsWith('**') && part.endsWith('**')) {
       return <strong key={i} style={{ fontWeight: 600 }}>{part.slice(2, -2)}</strong>;
     }
+    if (((part.startsWith('*') && part.endsWith('*')) || (part.startsWith('_') && part.endsWith('_')))
+      && !(part.startsWith('**') && part.endsWith('**'))) {
+      return <em key={i} style={{ fontStyle: 'italic' }}>{part.slice(1, -1)}</em>;
+    }
     // Links: [text](url)
     const linkMatch = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
     if (linkMatch) {
@@ -166,13 +170,25 @@ function renderInline(text: string): React.ReactNode {
 
 interface MarkdownBodyProps {
   text: string;
+  compact?: boolean;
 }
 
-export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyProps) {
+export const MarkdownBody = memo(function MarkdownBody({ text, compact = false }: MarkdownBodyProps) {
   const lines = text.split('\n');
   const elements: React.ReactNode[] = [];
   let i = 0;
   let key = 0;
+
+  const headingThreeSize = compact ? '0.88rem' : '0.95rem';
+  const headingTwoSize = compact ? '0.96rem' : '1.05rem';
+  const headingOneSize = compact ? '1.04rem' : '1.2rem';
+  const bodySize = compact ? '0.84rem' : '0.9rem';
+  const bodyLineHeight = compact ? 1.6 : 1.7;
+  const blockMargin = compact ? '8px 0' : '12px 0';
+  const tableFontSize = compact ? '0.8rem' : '0.85rem';
+  const tableHeaderFontSize = compact ? '0.7rem' : '0.75rem';
+  const tableCellPaddingY = compact ? 6 : 8;
+  const tableCellPaddingX = compact ? 10 : 14;
 
   while (i < lines.length) {
     const line = lines[i];
@@ -197,11 +213,11 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
     if (line.startsWith('### ')) {
       elements.push(
         <h4 key={key++} style={{
-          fontSize: '0.95rem',
+          fontSize: headingThreeSize,
           fontWeight: 700,
           color: 'var(--t-text-strong)',
-          marginTop: 20,
-          marginBottom: 8,
+          marginTop: compact ? 14 : 20,
+          marginBottom: compact ? 6 : 8,
           letterSpacing: '-0.01em',
         }}>
           {renderInline(line.slice(4))}
@@ -213,11 +229,11 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
     if (line.startsWith('## ')) {
       elements.push(
         <h3 key={key++} style={{
-          fontSize: '1.05rem',
+          fontSize: headingTwoSize,
           fontWeight: 700,
           color: 'var(--t-text-strong)',
-          marginTop: 24,
-          marginBottom: 10,
+          marginTop: compact ? 16 : 24,
+          marginBottom: compact ? 8 : 10,
           letterSpacing: '-0.01em',
         }}>
           {renderInline(line.slice(3))}
@@ -229,11 +245,11 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
     if (line.startsWith('# ')) {
       elements.push(
         <h2 key={key++} style={{
-          fontSize: '1.2rem',
+          fontSize: headingOneSize,
           fontWeight: 700,
           color: 'var(--t-text-strong)',
-          marginTop: 28,
-          marginBottom: 12,
+          marginTop: compact ? 18 : 28,
+          marginBottom: compact ? 8 : 12,
           letterSpacing: '-0.02em',
         }}>
           {renderInline(line.slice(2))}
@@ -249,8 +265,8 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
         <hr key={key++} style={{
           border: 'none',
           borderTop: '1px solid var(--t-divider)',
-          marginTop: 16,
-          marginBottom: 16,
+          marginTop: compact ? 10 : 16,
+          marginBottom: compact ? 10 : 16,
         }} />
       );
       i++;
@@ -266,17 +282,17 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
       }
       elements.push(
         <blockquote key={key++} style={{
-          margin: '12px 0',
-          paddingTop: 8,
-          paddingRight: 16,
-          paddingBottom: 8,
-          paddingLeft: 16,
+          margin: blockMargin,
+          paddingTop: compact ? 6 : 8,
+          paddingRight: compact ? 12 : 16,
+          paddingBottom: compact ? 6 : 8,
+          paddingLeft: compact ? 12 : 16,
           borderLeft: '3px solid #ef4444',
           background: 'rgba(239, 68, 68, 0.04)',
           borderRadius: '0 8px 8px 0',
           color: 'var(--t-text-secondary)',
-          fontSize: '0.9rem',
-          lineHeight: 1.6,
+          fontSize: bodySize,
+          lineHeight: bodyLineHeight,
         }}>
           {quoteLines.map((ql, qi) => (
             <div key={qi}>{renderInline(ql)}</div>
@@ -295,10 +311,10 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
       }
       elements.push(
         <ul key={key++} style={{
-          margin: '8px 0',
+          margin: compact ? '6px 0' : '8px 0',
           paddingLeft: 20,
-          fontSize: '0.9rem',
-          lineHeight: 1.7,
+          fontSize: bodySize,
+          lineHeight: bodyLineHeight,
           color: 'var(--t-text)',
         }}>
           {items.map((item) => (
@@ -318,10 +334,10 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
       }
       elements.push(
         <ol key={key++} style={{
-          margin: '8px 0',
+          margin: compact ? '6px 0' : '8px 0',
           paddingLeft: 20,
-          fontSize: '0.9rem',
-          lineHeight: 1.7,
+          fontSize: bodySize,
+          lineHeight: bodyLineHeight,
           color: 'var(--t-text)',
         }}>
           {items.map((item) => (
@@ -349,8 +365,8 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
         elements.push(
           <div key={key++} style={{
             overflowX: 'auto',
-            margin: '12px 0',
-            borderRadius: 12,
+            margin: blockMargin,
+            borderRadius: compact ? 10 : 12,
             border: '1px solid var(--t-divider)',
             backgroundColor: 'var(--t-panel-translucent)',
             boxShadow: 'var(--t-panel-shadow)',
@@ -358,22 +374,22 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
             <table style={{
               width: '100%',
               borderCollapse: 'collapse',
-              fontSize: '0.85rem',
+              fontSize: tableFontSize,
             }}>
               <thead>
                 <tr>
                   {headerCells.map((cell, ci) => (
                     <th key={ci} style={{
                       textAlign: 'left',
-                      paddingTop: 10,
-                      paddingRight: 14,
-                      paddingBottom: 10,
-                      paddingLeft: 14,
+                      paddingTop: compact ? 7 : 10,
+                      paddingRight: tableCellPaddingX,
+                      paddingBottom: compact ? 7 : 10,
+                      paddingLeft: tableCellPaddingX,
                       fontWeight: 600,
                       color: 'var(--t-text-secondary)',
                       textTransform: 'uppercase',
                       letterSpacing: '0.04em',
-                      fontSize: '0.75rem',
+                      fontSize: tableHeaderFontSize,
                       borderBottom: '2px solid var(--t-divider)',
                       whiteSpace: 'nowrap',
                     }}>
@@ -391,10 +407,10 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
                     }}>
                       {cells.map((cell, ci) => (
                         <td key={ci} style={{
-                          paddingTop: 8,
-                          paddingRight: 14,
-                          paddingBottom: 8,
-                          paddingLeft: 14,
+                          paddingTop: tableCellPaddingY,
+                          paddingRight: tableCellPaddingX,
+                          paddingBottom: tableCellPaddingY,
+                          paddingLeft: tableCellPaddingX,
                           color: 'var(--t-text)',
                         }}>
                           {renderInline(cell)}
@@ -421,11 +437,11 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
       }
       elements.push(
         <ul key={key++} style={{
-          margin: '8px 0',
+          margin: compact ? '6px 0' : '8px 0',
           paddingLeft: 4,
           listStyle: 'none',
-          fontSize: '0.9rem',
-          lineHeight: 1.7,
+          fontSize: bodySize,
+          lineHeight: bodyLineHeight,
         }}>
           {items.map((item) => (
             <li key={item.idx} style={{
@@ -486,9 +502,9 @@ export const MarkdownBody = memo(function MarkdownBody({ text }: MarkdownBodyPro
     // Regular paragraph
     elements.push(
       <p key={key++} style={{
-        margin: '6px 0',
-        fontSize: '0.9rem',
-        lineHeight: 1.7,
+        margin: compact ? '4px 0' : '6px 0',
+        fontSize: bodySize,
+        lineHeight: bodyLineHeight,
         color: 'var(--t-text)',
       }}>
         {renderInline(line)}

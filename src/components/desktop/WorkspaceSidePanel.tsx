@@ -25,6 +25,7 @@ import {
 import type { ReviewChangedFile, ReviewPullRequestSummary, ReviewWorktreeSummary, WorkflowReviewSnapshot } from '@/lib/fleet/types';
 import type { RepoReadiness } from '@/lib/repos/types';
 import { BlueGlassActionButton, BlueGlassHoverCard } from './BlueGlassHoverCard';
+import { MarkdownBody } from './MarkdownBody';
 import {
   formatCiCheckBatchInjection,
   formatCiCheckInjection,
@@ -1011,12 +1012,10 @@ const ReviewTab = memo(function ReviewTab({
   repo,
   onInjectChatContext,
   onOpenPullRequest,
-  onOpenDeploy,
 }: {
   repo: WorkspaceSidePanelRepo | null;
   onInjectChatContext?: (payload: AgentPanelChatInjectionPayload, repo: WorkspaceSidePanelRepo | null) => void;
   onOpenPullRequest?: (prNumber: number, repo?: string) => void;
-  onOpenDeploy?: (project?: string) => void;
 }) {
   const [snapshot, setSnapshot] = useState<WorkflowReviewSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1028,6 +1027,7 @@ const ReviewTab = memo(function ReviewTab({
   const [detailLoading, setDetailLoading] = useState(false);
   const [deployments, setDeployments] = useState<WorkspaceDeploymentItem[]>([]);
   const [deployLoading, setDeployLoading] = useState(false);
+  const [deployExpanded, setDeployExpanded] = useState(false);
   const [prDetail, setPrDetail] = useState<WorkspacePullRequestDetail | null>(null);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [addedContextKeys, setAddedContextKeys] = useState<Record<string, boolean>>({});
@@ -1626,17 +1626,38 @@ const ReviewTab = memo(function ReviewTab({
                 <div style={{ padding: '0 2px', fontSize: 10, fontWeight: 700, color: 'var(--t-text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>General</div>
                 {issueComments.slice(0, 4).map((comment) => {
                   const key = `issue-comment:${comment.id}`;
+                  const isBot = /\[bot\]$/i.test(comment.user);
                   return (
-                    <ContextObjectCard key={comment.id} itemKind="issue-comment" itemId={String(comment.id)}>
+                    <ContextObjectCard
+                      key={comment.id}
+                      itemKind="issue-comment"
+                      itemId={String(comment.id)}
+                      style={{ padding: '7px 8px', borderRadius: 9 }}
+                    >
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                        <MessageSquare size={14} strokeWidth={1.8} style={{ color: 'var(--t-text-secondary)', marginTop: 2, flexShrink: 0 }} />
+                        <MessageSquare size={13} strokeWidth={1.8} style={{ color: 'var(--t-text-secondary)', marginTop: 2, flexShrink: 0 }} />
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{comment.user}</div>
-                            <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{formatAge(comment.created_at)}</span>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t-text)' }}>{comment.user}</div>
+                            {isBot ? (
+                              <span style={{
+                                display: 'inline-flex',
+                                padding: '1px 6px',
+                                borderRadius: 999,
+                                background: 'var(--t-hover)',
+                                color: 'var(--t-text-faint)',
+                                fontSize: 8,
+                                fontWeight: 700,
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.04em',
+                              }}>
+                                Bot
+                              </span>
+                            ) : null}
+                            <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{formatAge(comment.created_at)}</span>
                           </div>
-                          <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.55, color: 'var(--t-text-secondary)', whiteSpace: 'pre-wrap' }}>
-                            {comment.body.trim() || 'No comment body'}
+                          <div style={{ marginTop: 6, padding: '6px 8px', borderRadius: 10, background: 'var(--t-hover)' }}>
+                            <MarkdownBody text={comment.body.trim() || 'No comment body'} compact />
                           </div>
                         </div>
                         {currentPullRequest && onInjectChatContext ? (
@@ -1669,21 +1690,28 @@ const ReviewTab = memo(function ReviewTab({
                 {inlineCommentsByPath.slice(0, 6).map(([path, comments]) => {
                   const threadKey = `review-thread:${path}`;
                   return (
-                    <ContextObjectCard key={path} itemKind="review-thread" itemId={path}>
+                    <ContextObjectCard
+                      key={path}
+                      itemKind="review-thread"
+                      itemId={path}
+                      style={{ padding: '7px 8px', borderRadius: 9 }}
+                    >
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                        <FileText size={14} strokeWidth={1.8} style={{ color: getFileIconColor(path.split('/').pop() || path), marginTop: 2, flexShrink: 0 }} />
+                        <FileText size={13} strokeWidth={1.8} style={{ color: getFileIconColor(path.split('/').pop() || path), marginTop: 2, flexShrink: 0 }} />
                         <div style={{ minWidth: 0, flex: 1 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{path}</div>
-                            <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{comments.length} comment{comments.length === 1 ? '' : 's'}</span>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t-text)' }}>{path}</div>
+                            <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{comments.length} comment{comments.length === 1 ? '' : 's'}</span>
                           </div>
                           <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
                             {comments.slice(0, 2).map((comment) => (
-                              <div key={comment.id} style={{ fontSize: 11, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
+                              <div key={comment.id} style={{ fontSize: 10, color: 'var(--t-text-secondary)', lineHeight: 1.45 }}>
                                 <span style={{ fontWeight: 700, color: 'var(--t-text)' }}>{comment.author}</span>
                                 {comment.line ? ` · L${comment.line}` : ''}
                                 {` · ${formatAge(comment.createdAt)}`}
-                                <div style={{ marginTop: 2, whiteSpace: 'pre-wrap' }}>{comment.body.trim() || 'No comment body'}</div>
+                                <div style={{ marginTop: 4, padding: '6px 8px', borderRadius: 10, background: 'var(--t-hover)' }}>
+                                  <MarkdownBody text={comment.body.trim() || 'No comment body'} compact />
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -1773,15 +1801,57 @@ const ReviewTab = memo(function ReviewTab({
 
       <ReviewSection
         title="Deploy"
-        actions={onOpenDeploy ? (
-          <ContextActionChip
-            icon={<ArrowRight size={11} strokeWidth={2} />}
-            label="Open deploys"
-            onClick={() => onOpenDeploy(repo?.name)}
-          />
-        ) : undefined}
+        actions={
+          <button
+            type="button"
+            onClick={() => setDeployExpanded((value) => !value)}
+            aria-label={deployExpanded ? 'Collapse deployments' : 'Expand deployments'}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 26,
+              height: 26,
+              borderRadius: 8,
+              border: '1px solid var(--t-btn-secondary-border)',
+              background: 'var(--t-btn-secondary-bg)',
+              color: 'var(--t-text)',
+              cursor: 'pointer',
+              flexShrink: 0,
+              boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06)',
+            }}
+          >
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 12,
+                height: 12,
+                lineHeight: 0,
+                color: 'var(--t-text-secondary)',
+              }}
+            >
+              {deployExpanded ? <ChevronDown size={12} strokeWidth={2.2} /> : <ChevronRight size={12} strokeWidth={2.2} />}
+            </span>
+          </button>
+        }
       >
-        {deployLoading && deployments.length === 0 ? (
+        {!deployExpanded ? (
+          <div
+            style={{
+              padding: '2px 2px 0',
+              fontSize: 11,
+              color: 'var(--t-text-muted)',
+            }}
+          >
+            {deployments.length > 0
+              ? `${deployments.length} deployment${deployments.length === 1 ? '' : 's'}`
+              : deployLoading
+                ? 'Loading deploy state…'
+                : 'No deploy information yet'}
+          </div>
+        ) : deployLoading && deployments.length === 0 ? (
           <EmptySectionState>Loading deploy state…</EmptySectionState>
         ) : deployments.length === 0 ? (
           <EmptySectionState>No deploy information is available yet.</EmptySectionState>
@@ -1839,7 +1909,6 @@ export function WorkspaceSidePanel({
   onOpenFile,
   onInjectChatContext,
   onOpenPullRequest,
-  onOpenDeploy,
 }: {
   view: WorkspaceSidePanelView;
   repo: WorkspaceSidePanelRepo | null;
@@ -1847,7 +1916,6 @@ export function WorkspaceSidePanel({
   onOpenFile: (path: string, repo: WorkspaceSidePanelRepo | null) => void;
   onInjectChatContext?: (payload: AgentPanelChatInjectionPayload, repo: WorkspaceSidePanelRepo | null) => void;
   onOpenPullRequest?: (prNumber: number, repo?: string) => void;
-  onOpenDeploy?: (project?: string) => void;
 }) {
   const [activeTab, setActiveTab] = useState<WorkspacePanelTabId>(() => view === 'review' ? 'review' : 'changes');
 
@@ -1935,7 +2003,6 @@ export function WorkspaceSidePanel({
           repo={repo}
           onInjectChatContext={onInjectChatContext}
           onOpenPullRequest={onOpenPullRequest}
-          onOpenDeploy={onOpenDeploy}
         />
       ) : null}
     </div>
