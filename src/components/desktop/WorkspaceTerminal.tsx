@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- terminal image previews intentionally use raw panel-served URLs */
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
-import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio, ArrowUp, ArrowDown, Square, AlertCircle, RotateCcw, PlayCircle, GitCommit, CheckCircle2 } from 'lucide-react';
+import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio, ArrowUp, ArrowDown, Square, AlertCircle, RotateCcw, GitCommit, CheckCircle2 } from 'lucide-react';
 import LLMChat, { ChainOfThought, MessageBubble, type LLMMessage } from './LLMChat';
 import { IssueLinkPickerModal, buildLinkedIssueContext, type LinkedIssueRef } from './IssueLinkPicker';
 import { Canvas, type CanvasRepoTaskLaunchRequest, type CanvasTab } from './Canvas';
@@ -35,7 +35,9 @@ export interface TerminalTab {
   chatModel?: string;
   chatContinueLatest?: boolean;
   chatDraftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string };
+  llmDraftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string };
   chatMessages?: MobileTranscriptEntry[];
+  llmSummary?: string | null;
   chatCheckpoints?: PersistedChatCheckpoint[];
   linkedIssue?: LinkedIssueRef | null;
   canvasTab?: CanvasTab;
@@ -78,6 +80,7 @@ export interface TerminalTabHandle {
     autoSend?: boolean;
     createNew?: boolean;
     label?: string;
+    targetSessionKey?: string;
   }) => string;
   openWorkspaceDiff: () => void;
   openInspectorTab: (tab: CanvasTab, options?: { repo?: RegisteredRepo; createNew?: boolean }) => string;
@@ -87,9 +90,11 @@ interface WorkspaceTerminalProps {
   stateScope: string;
   defaultTab: 'llm-chat' | 'terminal';
   preferredRepo?: RegisteredRepo | null;
+  availableRepos?: RegisteredRepo[];
   onActiveChatSessionChange?: (sessionKey: string | null) => void;
   onChatSessionsChange?: (sessions: MobileInboxSnapshot['sessions']) => void;
   onRepoScopeChange?: (repoPath: string | null) => void;
+  onSelectRepoScope?: (repo: RegisteredRepo) => void;
   onLaunchRepoAgent?: (repo: RegisteredRepo) => void | Promise<void>;
   onOpenRepoGitLog?: (repo: RegisteredRepo) => void;
   onOpenRepoCI?: (repo: RegisteredRepo) => void;
@@ -99,6 +104,7 @@ interface WorkspaceTerminalProps {
   onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
   onSplitVertical?: () => void;
   onSplitHorizontal?: () => void;
+  canCloseTile?: boolean;
   onCloseTile?: () => void;
   sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
@@ -138,6 +144,16 @@ function repoSlugFromRemote(remoteUrl?: string | null) {
   if (!remoteUrl) return null;
   const match = remoteUrl.match(/github\.com[/:]([^/]+\/[^/.]+)(?:\.git)?$/i);
   return match?.[1] ?? null;
+}
+
+function formatWorkspaceChatSessionKey(
+  runtime?: 'codex' | 'claude-code' | 'openclaw' | 'chat',
+  sessionKey?: string | null,
+) {
+  if (!runtime || !sessionKey) return null;
+  if (runtime === 'chat') return `llm-chat:${sessionKey}`;
+  if (runtime !== 'codex' && runtime !== 'claude-code') return sessionKey;
+  return `${runtime}:${sessionKey}`;
 }
 
 function SplitVerticalIcon({ size = 12 }: { size?: number }) {
@@ -287,6 +303,130 @@ function AgentDot({ color, size = 8 }: { color: string; size?: number }) {
       background: color,
       flexShrink: 0,
     }} />
+  );
+}
+
+function CortexMarkIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      style={{ display: 'block', flexShrink: 0 }}
+    >
+      <path
+        d="M17.7 6.6a7.1 7.1 0 1 0 0 10.8"
+        stroke="#ec4899"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+      <circle cx="16.8" cy="6.1" r="1.55" fill="#ec4899" />
+      <circle cx="18.2" cy="12" r="1.35" fill="#ec4899" />
+      <circle cx="16.8" cy="17.9" r="1.55" fill="#ec4899" />
+      <circle cx="8.3" cy="6.9" r="1.15" fill="#f472b6" opacity="0.95" />
+      <circle cx="6.6" cy="12" r="1.05" fill="#f472b6" opacity="0.85" />
+      <circle cx="8.3" cy="17.1" r="1.15" fill="#f472b6" opacity="0.95" />
+    </svg>
+  );
+}
+
+function ClaudeTabIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      style={{ display: 'block', flexShrink: 0 }}
+    >
+      <rect
+        x="2.5"
+        y="2.5"
+        width="19"
+        height="19"
+        rx="5.25"
+        fill="#e97a4d"
+        stroke="rgba(255,255,255,0.22)"
+        strokeWidth="1"
+      />
+      <path
+        d="M12 5.8v12.4M6.75 7.8l10.5 8.4M17.25 7.8 6.75 16.2M8.5 5.95 15.5 18.05M15.5 5.95 8.5 18.05"
+        stroke="#fff"
+        strokeWidth="1.95"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="1.6" fill="#fff" />
+    </svg>
+  );
+}
+
+function CodexTabIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      style={{ display: 'block', flexShrink: 0 }}
+    >
+      <path
+        d="M12 4.9 16.9 7.7 16.9 13.25 12 16.05 7.1 13.25 7.1 7.7 12 4.9Z"
+        stroke="#b7c3d4"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 8.1 14.95 9.8 14.95 13.2 12 14.9 9.05 13.2 9.05 9.8 12 8.1Z"
+        fill="#d8e1ec"
+        opacity="0.96"
+      />
+      <path
+        d="M7.1 7.7 12 10.45 16.9 7.7"
+        stroke="#b7c3d4"
+        strokeWidth="1.55"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M12 10.45V16.05"
+        stroke="#8ea3bd"
+        strokeWidth="1.55"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function OpenClawTabIcon({ size = 13 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      style={{ display: 'block', flexShrink: 0 }}
+    >
+      <path
+        d="M12 2.7 19 5.3v6.15c0 4.95-3.45 8.3-7 9.85-3.55-1.55-7-4.9-7-9.85V5.3L12 2.7Z"
+        stroke="#7aa2ff"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8.45 12.4c.55-1.8 1.55-2.95 3.55-3.95M12.05 16.15c.45-1.95 1.55-3.45 3.35-4.95"
+        stroke="#7aa2ff"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
   );
 }
 
@@ -2142,59 +2282,6 @@ const PreviewPane = memo(function PreviewPane({ previews, onElementSelect, onRef
 });
 
 /** Format elapsed time: 0s → 59s, 1m → 59m, 1h → 99h */
-function formatElapsed(ms: number): string {
-  const secs = Math.floor(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  const mins = Math.floor(secs / 60);
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  return `${hrs}h`;
-}
-
-/** Live activity dot + elapsed time for a tab */
-function ActivityIndicator({ tab }: { tab: TerminalTab }) {
-  const [now, setNow] = useState(() => tab.createdAt);
-
-  // Tick every second for elapsed time
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const elapsed = now - tab.createdAt;
-  const timeSinceActivity = now - tab.lastActivity;
-  const isActive = timeSinceActivity < 3000; // active if output in last 3s
-
-  return (
-    <span style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: 4,
-      marginLeft: 2,
-    }}>
-      {/* Activity dot */}
-      <span style={{
-        width: 6,
-        height: 6,
-        borderRadius: '50%',
-        background: isActive ? '#22c55e' : '#cbd5e1',
-        transition: 'background 300ms',
-        animation: isActive ? 'pulse-dot 1.5s ease-in-out infinite' : 'none',
-        flexShrink: 0,
-      }} />
-      {/* Elapsed time */}
-      <span style={{
-        fontSize: 10,
-        color: '#94a3b8',
-        fontWeight: 400,
-        fontVariantNumeric: 'tabular-nums',
-      }}>
-        {formatElapsed(elapsed)}
-      </span>
-    </span>
-  );
-}
-
 function parseWorkspaceTaskLabel(label: string) {
   const issueMatch = label.match(/^Issue #(\d+)/i);
   if (issueMatch?.[1]) {
@@ -2218,6 +2305,59 @@ function inferWorkspaceTaskState(tab: TerminalTab) {
   });
 }
 
+function summarizeWorkspaceTabText(value?: string | null, maxWords = 3) {
+  const trimmed = value?.replace(/\s+/g, ' ').trim() ?? '';
+  if (!trimmed) return null;
+  const words = trimmed
+    .toLowerCase()
+    .split(' ')
+    .map((word) => word.trim())
+    .filter(Boolean)
+    .slice(0, maxWords);
+  return words.length > 0 ? words.join(' ') : null;
+}
+
+function describeWorkspaceChatTab(tab: TerminalTab) {
+  if (tab.kind !== 'chat' && tab.kind !== 'llm-chat') return null;
+  const latestDraft = tab.kind === 'chat'
+    ? (tab.chatDraftInjection?.text ?? null)
+    : (tab.llmDraftInjection?.text ?? null);
+  const fullSummary = (tab.kind === 'llm-chat'
+    ? (tab.llmSummary ?? latestDraft ?? null)
+    : (() => {
+        const messages = tab.chatMessages ?? [];
+        const latestUser = [...messages].reverse().find((entry) => (
+          entry.role === 'user'
+          && entry.text.trim()
+          && !/^(hi|hey|hello)\b/i.test(entry.text.trim())
+        ));
+        const latestAssistant = [...messages].reverse().find((entry) => (
+          (entry.role === 'assistant' || entry.role === 'system')
+          && entry.text.trim()
+        ));
+        return latestUser?.text ?? latestDraft ?? latestAssistant?.text ?? null;
+      })()
+  )?.replace(/\s+/g, ' ').trim() ?? null;
+  const summary = summarizeWorkspaceTabText(fullSummary, 3);
+  const repoLabel = tab.repo?.localPath ? tab.repo.localPath.split('/').pop() : null;
+  const detailParts = [tab.repo?.branch ?? null, repoLabel].filter((value): value is string => Boolean(value));
+  return {
+    fullSummary,
+    summary,
+    detail: detailParts.join(' · ') || null,
+  };
+}
+
+function workspaceTabPrimaryLabel(tab: TerminalTab, chatTabMeta: ReturnType<typeof describeWorkspaceChatTab>) {
+  if (tab.kind === 'llm-chat') {
+    return chatTabMeta?.summary ?? 'new chat';
+  }
+  if (tab.kind === 'chat') {
+    return chatTabMeta?.summary ?? 'new task';
+  }
+  return tab.label;
+}
+
 function workspaceInspectorIcon(kind?: CanvasTab['kind']) {
   switch (kind) {
     case 'diff':
@@ -2228,7 +2368,7 @@ function workspaceInspectorIcon(kind?: CanvasTab['kind']) {
     case 'ci':
       return <AlertCircle size={12} style={{ color: '#f59e0b' }} />;
     case 'pr':
-      return <CheckCircle2 size={12} style={{ color: '#8b5cf6' }} />;
+      return <CheckCircle2 size={12} style={{ color: THEME_ACCENT }} />;
     case 'file':
     case 'image':
     case 'readme':
@@ -2236,77 +2376,6 @@ function workspaceInspectorIcon(kind?: CanvasTab['kind']) {
     default:
       return <GitCommit size={12} style={{ color: '#94a3b8' }} />;
   }
-}
-
-function repoReadinessTone(readiness?: RepoReadiness | null) {
-  if (readiness?.state === 'blocked') {
-    return {
-      background: 'rgba(239, 68, 68, 0.12)',
-      color: '#b91c1c',
-      border: 'rgba(239, 68, 68, 0.2)',
-    };
-  }
-  if (readiness?.state === 'needs_setup') {
-    return {
-      background: 'rgba(245, 158, 11, 0.12)',
-      color: '#b45309',
-      border: 'rgba(245, 158, 11, 0.2)',
-    };
-  }
-  if (readiness?.state === 'ready') {
-    return {
-      background: 'rgba(22, 163, 74, 0.12)',
-      color: '#15803d',
-      border: 'rgba(34, 197, 94, 0.18)',
-    };
-  }
-  return {
-    background: 'var(--t-divider-subtle)',
-    color: 'var(--t-text-secondary)',
-    border: 'var(--t-panel-border)',
-  };
-}
-
-function RepoScopeActionButton({
-  label,
-  icon,
-  onClick,
-  primary = false,
-}: {
-  label: string;
-  icon: React.ReactNode;
-  onClick?: () => void;
-  primary?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!onClick}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
-        minHeight: 26,
-        padding: primary ? '0 10px' : '0 9px',
-        borderRadius: 999,
-        border: primary ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
-        background: primary ? THEME_ACCENT_SOFT : THEME_BG_CARD,
-        color: primary ? THEME_ACCENT : 'var(--t-text-secondary)',
-        cursor: onClick ? 'pointer' : 'default',
-        opacity: onClick ? 1 : 0.45,
-        fontSize: 11,
-        fontWeight: 700,
-        letterSpacing: '-0.01em',
-        fontFamily: '-apple-system, system-ui, sans-serif',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  );
 }
 
 const TabBar = memo(function TabBar({
@@ -2379,15 +2448,21 @@ const TabBar = memo(function TabBar({
           const agent = CLI_AGENTS.find(a => a.id === tab.cliAgent);
           const taskMeta = parseWorkspaceTaskLabel(tab.label);
           const taskState = taskMeta ? inferWorkspaceTaskState(tab) : null;
+          const chatTabMeta = describeWorkspaceChatTab(tab);
           const checkpointCount = tab.kind === 'chat' ? (tab.chatCheckpoints?.length ?? 0) : 0;
-          const runtimeTag = tab.kind === 'chat'
-            ? (tab.chatRuntime === 'claude-code' ? 'Claude' : 'Codex')
-            : null;
+          const primaryLabel = workspaceTabPrimaryLabel(tab, chatTabMeta);
+          const showSecondaryRow = Boolean(tab.kind !== 'chat' && tab.kind !== 'llm-chat' && (taskMeta || checkpointCount > 0));
+          const tabTitle = [
+            tab.label,
+            chatTabMeta?.fullSummary,
+            chatTabMeta?.detail,
+          ].filter((value): value is string => Boolean(value)).join(' — ');
           return (
             <button
               type="button"
               key={tab.id}
               onClick={() => onSelectTab(tab.id)}
+              title={tabTitle || tab.label}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -2396,14 +2471,14 @@ const TabBar = memo(function TabBar({
                 paddingRight: 12,
                 paddingBottom: 0,
                 paddingLeft: 12,
-                height: taskMeta ? 40 : '100%',
+                height: '100%',
                 border: 'none',
                 borderRight: '1px solid var(--t-divider)',
                 background: isActive ? 'var(--t-panel-translucent)' : 'transparent',
                 color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: isActive ? 600 : 400,
-                fontFamily: 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
                 transition: 'background 100ms, color 100ms',
@@ -2411,13 +2486,17 @@ const TabBar = memo(function TabBar({
               }}
             >
               {tab.kind === 'llm-chat' ? (
-                <MessageSquare size={12} style={{ color: THEME_ACCENT }} />
+                <CortexMarkIcon />
               ) : tab.kind === 'chat' ? (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={
-                  tab.chatRuntime === 'codex' ? '#10b981' : tab.chatRuntime === 'claude-code' ? '#8b5cf6' : '#ef4444'
-                } strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
+                tab.chatRuntime === 'codex' ? (
+                  <CodexTabIcon />
+                ) : tab.chatRuntime === 'claude-code' ? (
+                  <ClaudeTabIcon />
+                ) : tab.chatRuntime === 'openclaw' ? (
+                  <OpenClawTabIcon />
+                ) : (
+                  <CortexMarkIcon />
+                )
               ) : tab.kind === 'canvas' ? (
                 workspaceInspectorIcon(tab.canvasTab?.kind)
               ) : tab.cliAgent === 'shell' ? (
@@ -2427,31 +2506,16 @@ const TabBar = memo(function TabBar({
               )}
               <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, gap: taskMeta ? 1 : 0 }}>
                 <span style={{
-                  maxWidth: 180,
+                  maxWidth: 220,
                   overflow: 'hidden',
-                  textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
-                  fontWeight: taskMeta ? 700 : undefined,
+                  fontWeight: taskMeta || chatTabMeta?.summary ? 600 : undefined,
+                  letterSpacing: '-0.01em',
                 }}>
-                  {tab.label}
+                  {primaryLabel}
                 </span>
-                {taskMeta || checkpointCount > 0 ? (
+                {showSecondaryRow ? (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                    {runtimeTag ? (
-                      <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        padding: '1px 6px',
-                        borderRadius: 999,
-                        background: runtimeTag === 'Codex' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(139, 92, 246, 0.12)',
-                    color: runtimeTag === 'Codex' ? '#047857' : '#7c3aed',
-                    fontSize: 10,
-                    fontWeight: 700,
-                        letterSpacing: '0.01em',
-                      }}>
-                        {runtimeTag}
-                      </span>
-                    ) : null}
                     {taskMeta && taskState ? (
                       <span style={{
                         display: 'inline-flex',
@@ -2485,7 +2549,6 @@ const TabBar = memo(function TabBar({
                   </span>
                 ) : null}
               </span>
-              <ActivityIndicator tab={tab} />
               {tabs.length > 1 && (
                 <span
                   onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}
@@ -2521,33 +2584,48 @@ const TabBar = memo(function TabBar({
         })}
       </div>
 
-      {/* + Button with CLI picker */}
+      {/* Launch button */}
       <div ref={pickerRef} style={{ position: 'relative', flexShrink: 0 }}>
         <button
           type="button"
           onClick={() => setPickerOpen(!pickerOpen)}
+          aria-label="Launch agent"
+          title="Launch agent"
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 4,
-            height: '100%',
-            paddingTop: 0,
-            paddingRight: 10,
-            paddingBottom: 0,
-            paddingLeft: 10,
+            width: 26,
+            height: 26,
+            marginTop: 4,
+            marginRight: 8,
+            borderRadius: 7,
             border: 'none',
-            background: 'transparent',
-            color: 'var(--t-text-muted)',
-            fontSize: 12,
+            background: pickerOpen ? THEME_ACCENT_SOFT : 'transparent',
+            color: THEME_ACCENT,
             cursor: 'pointer',
-            transition: 'color 100ms',
+            flexShrink: 0,
+            boxShadow: 'none',
+            transition: 'background 100ms, color 100ms',
           }}
-          onMouseEnter={(e) => { (e.target as HTMLElement).style.color = THEME_ACCENT; }}
-          onMouseLeave={(e) => { (e.target as HTMLElement).style.color = 'var(--t-text-muted)'; }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = THEME_ACCENT_SOFT;
+          }}
+          onMouseLeave={(e) => {
+            if (!pickerOpen) {
+              e.currentTarget.style.background = 'transparent';
+            }
+          }}
         >
-          <Plus size={14} />
-          <ChevronDown size={10} />
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            aria-hidden="true"
+            style={{ display: 'block', flexShrink: 0 }}
+          >
+            <path d="M3.2 2.4L9 6L3.2 9.6V2.4Z" fill="currentColor" />
+          </svg>
         </button>
 
         {/* Picker dropdown */}
@@ -3041,16 +3119,18 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       stateScope,
       defaultTab,
       preferredRepo = null,
+      availableRepos = [],
       onActiveChatSessionChange,
       onChatSessionsChange,
       onRepoScopeChange,
-      onLaunchRepoAgent,
+      onSelectRepoScope,
       onOpenRepoDiff,
       onInjectChatContext,
       onSelectCommit,
       onLaunchWorkspaceTask,
       onSplitVertical,
       onSplitHorizontal,
+      canCloseTile = false,
       onCloseTile,
       sendTerminalCreate,
       sendTerminalAttach,
@@ -3067,8 +3147,10 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     const [tabs, setTabs] = useState<TerminalTab[]>([]);
     const [activeTabId, setActiveTabId] = useState<string>('');
     const [previews, setPreviews] = useState<LocalhostPreview[]>([]);
+    const [repoPickerOpen, setRepoPickerOpen] = useState(false);
     const tabsRef = useRef<TerminalTab[]>([]);
     const panelRefs = useRef<Map<string, XtermPanelHandle>>(new Map());
+    const repoPickerRef = useRef<HTMLDivElement>(null);
     const tabCountRef = useRef(0);
     const pendingCliCommands = useRef<Map<string, string>>(new Map()); // tabId → command to run after session created
     const pendingRequestRef = useRef<Map<string, string>>(new Map()); // requestId → tabId
@@ -3078,6 +3160,10 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     const urlDetectionEnabledRef = useRef(false); // suppress during initial replay
     const previousWsConnectedRef = useRef(false);
     const reportedRepoScopeRef = useRef<string | null | undefined>(undefined);
+    const chatSessionsChangeRef = useRef(onChatSessionsChange);
+    const activeChatSessionChangeRef = useRef(onActiveChatSessionChange);
+    const reportedChatSessionsSignatureRef = useRef<string>('');
+    const reportedActiveChatSessionKeyRef = useRef<string | null>(null);
     const visibleTabs = useMemo(
       () => tabs.filter((tab) => !(tab.kind === 'canvas' && tab.canvasTab?.kind === 'ci')),
       [tabs],
@@ -3090,13 +3176,74 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     );
 
     useEffect(() => {
+      chatSessionsChangeRef.current = onChatSessionsChange;
+      activeChatSessionChangeRef.current = onActiveChatSessionChange;
+    }, [onActiveChatSessionChange, onChatSessionsChange]);
+
+    useEffect(() => {
+      if (!repoPickerOpen) return;
+      const handlePointerDown = (event: MouseEvent) => {
+        if (repoPickerRef.current && !repoPickerRef.current.contains(event.target as Node)) {
+          setRepoPickerOpen(false);
+        }
+      };
+      document.addEventListener('mousedown', handlePointerDown);
+      return () => document.removeEventListener('mousedown', handlePointerDown);
+    }, [repoPickerOpen]);
+
+    useEffect(() => {
+      const preferredLocalPath = preferredRepo?.localPath ?? '';
+      const preferredBranch = preferredRepo?.branch ?? 'main';
       const nextSessions: MobileInboxSnapshot['sessions'] = visibleTabs
-        .filter((tab) => tab.kind === 'chat' && (tab.chatRuntime === 'codex' || tab.chatRuntime === 'claude-code') && tab.chatSessionKey)
+        .filter((tab) => (
+          (tab.kind === 'chat' && (tab.chatRuntime === 'codex' || tab.chatRuntime === 'claude-code') && tab.chatSessionKey)
+          || tab.kind === 'llm-chat'
+        ))
         .map((tab) => {
+          if (tab.kind === 'llm-chat') {
+            const prefixedKey = formatWorkspaceChatSessionKey('chat', tab.id) ?? tab.id;
+            return {
+              id: prefixedKey,
+              name: tab.label,
+              squadId: 'workspace',
+              runtime: 'chat',
+              model: 'Workspace Chat',
+              status: tab.id === effectiveActiveTabId ? 'running' : 'idle',
+              currentTask: '',
+              workspace: tab.repo?.localPath ?? preferredLocalPath,
+              branch: tab.repo?.branch ?? preferredBranch,
+              sessionKey: prefixedKey,
+              approvalStatus: 'none',
+              lastEventAt: new Date(tab.lastActivity).toISOString(),
+              context: { usedPercent: 0, trend: 'stable' as const },
+              alerts: 0,
+              surfaceLabel: tab.label,
+              isCurrentSession: tab.id === effectiveActiveTabId,
+              runtimeSurface: {
+                id: prefixedKey,
+                runtime: 'chat',
+                kind: 'chat-session',
+                ownership: 'owned',
+                title: tab.label,
+                cwd: tab.repo?.localPath ?? preferredLocalPath,
+                branch: tab.repo?.branch ?? preferredBranch,
+                sourceLabel: 'Workspace chat tab',
+                capabilities: {
+                  attach: false,
+                  readTail: true,
+                  sendInput: true,
+                  interrupt: false,
+                  resize: false,
+                  diffContext: true,
+                  reviewContext: true,
+                },
+                reviewContext: undefined,
+              },
+            };
+          }
+
           const runtime = tab.chatRuntime as 'codex' | 'claude-code';
-          const prefixedKey = runtime === 'codex'
-            ? `codex:${tab.chatSessionKey}`
-            : `claude-code:${tab.chatSessionKey}`;
+          const prefixedKey = formatWorkspaceChatSessionKey(runtime, tab.chatSessionKey) ?? tab.chatSessionKey!;
           const repoSlug = repoSlugFromRemote(tab.repo?.remoteUrl);
           const latestMessage = [...(tab.chatMessages ?? [])].reverse().find((entry) => entry.role === 'assistant' || entry.role === 'user');
           return {
@@ -3107,8 +3254,8 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             model: tab.chatModel ?? (runtime === 'claude-code' ? 'claude-code' : 'codex'),
             status: tab.id === effectiveActiveTabId ? 'running' : 'idle',
             currentTask: latestMessage?.text?.trim() ?? '',
-            workspace: tab.repo?.localPath ?? preferredRepo?.localPath ?? '',
-            branch: tab.repo?.branch ?? preferredRepo?.branch ?? 'main',
+            workspace: tab.repo?.localPath ?? preferredLocalPath,
+            branch: tab.repo?.branch ?? preferredBranch,
             sessionKey: prefixedKey,
             approvalStatus: 'none',
             lastEventAt: new Date(tab.lastActivity).toISOString(),
@@ -3122,8 +3269,8 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
               kind: 'chat-session',
               ownership: 'owned',
               title: tab.label,
-              cwd: tab.repo?.localPath ?? preferredRepo?.localPath,
-              branch: tab.repo?.branch ?? preferredRepo?.branch ?? undefined,
+              cwd: tab.repo?.localPath ?? preferredLocalPath,
+              branch: tab.repo?.branch ?? preferredBranch,
               sourceLabel: 'Workspace chat tab',
               capabilities: {
                 attach: false,
@@ -3136,31 +3283,34 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
               },
               reviewContext: repoSlug ? {
                 repoSlug,
-                branch: tab.repo?.branch ?? preferredRepo?.branch ?? undefined,
+                branch: tab.repo?.branch ?? preferredBranch,
               } : undefined,
             },
           };
         });
-      onChatSessionsChange?.(nextSessions);
-
-      const activeChat = nextSessions.find((session) => session.isCurrentSession) ?? nextSessions[0] ?? null;
-      onActiveChatSessionChange?.(activeChat?.sessionKey ?? null);
-    }, [effectiveActiveTabId, onActiveChatSessionChange, onChatSessionsChange, preferredRepo, visibleTabs]);
-
-    useEffect(() => {
-      const activeTab = visibleTabs.find((tab) => tab.id === effectiveActiveTabId) ?? null;
-      const activeChatTab = activeTab?.kind === 'chat' && activeTab.chatRuntime && activeTab.chatSessionKey
-        ? activeTab
-        : visibleTabs.find((tab) => tab.kind === 'chat' && tab.chatRuntime && tab.chatSessionKey) ?? null;
-      if (!activeChatTab || !activeChatTab.chatRuntime || !activeChatTab.chatSessionKey) {
-        onActiveChatSessionChange?.(null);
-        return;
+      const nextSessionsSignature = JSON.stringify(nextSessions.map((session) => ({
+        sessionKey: session.sessionKey,
+        status: session.status,
+        name: session.name,
+        currentTask: session.currentTask,
+        workspace: session.workspace,
+        branch: session.branch,
+        lastEventAt: session.lastEventAt,
+      })));
+      if (reportedChatSessionsSignatureRef.current !== nextSessionsSignature) {
+        reportedChatSessionsSignatureRef.current = nextSessionsSignature;
+        chatSessionsChangeRef.current?.(nextSessions);
       }
-      const prefixedKey = activeChatTab.chatRuntime === 'codex'
-        ? `codex:${activeChatTab.chatSessionKey}`
-        : `claude-code:${activeChatTab.chatSessionKey}`;
-      onActiveChatSessionChange?.(prefixedKey);
-    }, [effectiveActiveTabId, onActiveChatSessionChange, visibleTabs]);
+      const activeChat = nextSessions.find((session) => session.isCurrentSession)
+        ?? nextSessions.find((session) => session.sessionKey === reportedActiveChatSessionKeyRef.current)
+        ?? nextSessions[0]
+        ?? null;
+      const nextActiveSessionKey = activeChat?.sessionKey ?? null;
+      if (nextSessions.some((session) => session.isCurrentSession) && reportedActiveChatSessionKeyRef.current !== nextActiveSessionKey) {
+        reportedActiveChatSessionKeyRef.current = nextActiveSessionKey;
+        activeChatSessionChangeRef.current?.(nextActiveSessionKey);
+      }
+    }, [effectiveActiveTabId, preferredRepo?.branch, preferredRepo?.localPath, visibleTabs]);
 
     // Persist tab state (debounced — saves 500ms after last change)
     const persistTabs = useCallback((currentTabs: TerminalTab[], currentActiveId: string) => {
@@ -3454,16 +3604,30 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       autoSend?: boolean;
       createNew?: boolean;
       label?: string;
+      targetSessionKey?: string;
     }) => {
       let resolvedTabId = '';
       const runtimeLabels = { codex: 'Codex', 'claude-code': 'Claude Code' } as const;
       const activeTab = tabsRef.current.find((tab) => tab.id === activeTabId);
+      const targetRuntime = options.targetSessionKey?.startsWith('codex:')
+        ? 'codex'
+        : options.targetSessionKey?.startsWith('claude-code:')
+          ? 'claude-code'
+          : null;
       const resolvedRuntime = options.runtime
+        ?? targetRuntime
         ?? (activeTab?.kind === 'chat' && (activeTab.chatRuntime === 'codex' || activeTab.chatRuntime === 'claude-code')
           ? activeTab.chatRuntime
           : (options.createNew ? 'codex' : 'claude-code'));
 
       setTabs((prev) => {
+        const targetedExisting = options.createNew || !options.targetSessionKey
+          ? null
+          : prev.find((tab) => (
+              tab.kind === 'chat'
+              && formatWorkspaceChatSessionKey(tab.chatRuntime, tab.chatSessionKey) === options.targetSessionKey
+              && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+            ));
         const activeExisting = prev.find((tab) => (
           tab.id === activeTabId
           && tab.kind === 'chat'
@@ -3473,7 +3637,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
 
         const matchingExisting = options.createNew
           ? null
-          : activeExisting ?? prev.find((tab) => (
+          : targetedExisting
+            ?? activeExisting
+            ?? prev.find((tab) => (
               tab.kind === 'chat'
               && tab.chatRuntime === resolvedRuntime
               && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
@@ -3522,6 +3688,88 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           createdAt: now,
           lastActivity: now,
           chatMessages: [],
+        };
+        return [...prev, newTab];
+      });
+
+      if (resolvedTabId) {
+        setActiveTabId(resolvedTabId);
+      }
+
+      return resolvedTabId;
+    }, [activeTabId]);
+
+    const openWorkspaceLlmChatSession = useCallback((options: {
+      repo?: RegisteredRepo;
+      initialText?: string;
+      draftReason?: string;
+      autoSend?: boolean;
+      createNew?: boolean;
+      label?: string;
+      targetSessionKey?: string;
+    }) => {
+      let resolvedTabId = '';
+      const targetTabId = options.targetSessionKey?.startsWith('llm-chat:')
+        ? options.targetSessionKey.slice('llm-chat:'.length)
+        : null;
+
+      setTabs((prev) => {
+        const activeExisting = prev.find((tab) => (
+          tab.id === activeTabId
+          && tab.kind === 'llm-chat'
+          && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+        ));
+        const targetedExisting = options.createNew || !targetTabId
+          ? null
+          : prev.find((tab) => (
+              tab.kind === 'llm-chat'
+              && tab.id === targetTabId
+              && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+            ));
+        const matchingExisting = options.createNew
+          ? null
+          : targetedExisting
+            ?? activeExisting
+            ?? prev.find((tab) => (
+              tab.kind === 'llm-chat'
+              && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+            ));
+
+        const injection = options.initialText
+          ? {
+              id: `workspace-llm-injection-${Date.now()}`,
+              text: options.initialText,
+              reason: options.draftReason,
+              autoSend: options.autoSend,
+            }
+          : undefined;
+
+        if (matchingExisting) {
+          resolvedTabId = matchingExisting.id;
+          return prev.map((tab) => (
+            tab.id === matchingExisting.id
+              ? {
+                  ...tab,
+                  label: options.label ?? tab.label,
+                  llmDraftInjection: injection ?? tab.llmDraftInjection,
+                }
+              : tab
+          ));
+        }
+
+        tabCountRef.current += 1;
+        resolvedTabId = `llm-${tabCountRef.current}`;
+        const now = Date.now();
+        const newTab: TerminalTab = {
+          id: resolvedTabId,
+          label: options.label ?? 'Chat',
+          kind: 'llm-chat',
+          tmuxSession: null,
+          repo: options.repo,
+          linkedIssue: null,
+          llmDraftInjection: injection,
+          createdAt: now,
+          lastActivity: now,
         };
         return [...prev, newTab];
       });
@@ -3675,22 +3923,36 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         setPreviews((prev) => prev.filter((preview) => preview.port !== port));
       },
       openCliChatSession: (options) => openWorkspaceCliChatSession(options),
-      injectIntoCliChat: (text, options) => openWorkspaceCliChatSession({
-        runtime: options?.runtime,
-        repo: options?.repo,
-        modelId: options?.modelId,
-        initialText: text,
-        autoSend: options?.autoSend ?? false,
-        createNew: options?.createNew ?? false,
-        label: options?.label,
-      }),
+      injectIntoCliChat: (text, options) => (
+        options?.targetSessionKey?.startsWith('llm-chat:')
+          ? openWorkspaceLlmChatSession({
+              repo: options?.repo,
+              initialText: text,
+              autoSend: options?.autoSend ?? false,
+              createNew: options?.createNew ?? false,
+              label: options?.label,
+              draftReason: options?.draftReason,
+              targetSessionKey: options?.targetSessionKey,
+            })
+          : openWorkspaceCliChatSession({
+              runtime: options?.runtime,
+              repo: options?.repo,
+              modelId: options?.modelId,
+              initialText: text,
+              autoSend: options?.autoSend ?? false,
+              createNew: options?.createNew ?? false,
+              label: options?.label,
+              draftReason: options?.draftReason,
+              targetSessionKey: options?.targetSessionKey,
+            })
+      ),
       openWorkspaceDiff: () => {
         const activeWorkspaceTab = tabsRef.current.find((tab) => tab.id === activeTabId);
         const repo = activeWorkspaceTab?.repo ?? tabsRef.current.find((tab) => tab.repo)?.repo ?? preferredRepo ?? null;
         onOpenRepoDiff?.(repo);
       },
       openInspectorTab: (canvasTab, options) => openWorkspaceInspectorTab(canvasTab, options),
-    }), [activeTabId, handleSessionCreated, onOpenRepoDiff, onPreviewDetected, openWorkspaceCliChatSession, openWorkspaceInspectorTab, preferredRepo]);
+    }), [activeTabId, handleSessionCreated, onOpenRepoDiff, onPreviewDetected, openWorkspaceCliChatSession, openWorkspaceInspectorTab, openWorkspaceLlmChatSession, preferredRepo]);
 
     // Auto-register a folder so it shows in the picker next time
     const handleRegisterRepo = useCallback((localPath: string) => {
@@ -3782,6 +4044,20 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       ));
     }, []);
 
+    const handleUpdateLlmSummary = useCallback((tabId: string, summary: string | null) => {
+      setTabs(prev => {
+        let changed = false;
+        const next = prev.map((tab) => {
+          if (tab.id !== tabId || tab.llmSummary === summary) {
+            return tab;
+          }
+          changed = true;
+          return { ...tab, llmSummary: summary };
+        });
+        return changed ? next : prev;
+      });
+    }, []);
+
     const handleUpdateChatSessionKey = useCallback((tabId: string, sessionKey: string) => {
       setTabs(prev => prev.map(t =>
         t.id === tabId ? { ...t, chatSessionKey: sessionKey } : t
@@ -3869,6 +4145,14 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       setTabs(prev => prev.map((tab) => (
         tab.id === tabId && tab.chatDraftInjection?.id === injectionId
           ? { ...tab, chatDraftInjection: undefined }
+          : tab
+      )));
+    }, []);
+
+    const handleConsumeLlmDraftInjection = useCallback((tabId: string, injectionId: string) => {
+      setTabs(prev => prev.map((tab) => (
+        tab.id === tabId && tab.llmDraftInjection?.id === injectionId
+          ? { ...tab, llmDraftInjection: undefined }
           : tab
       )));
     }, []);
@@ -3966,10 +4250,6 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     );
     const activeCheckpoint = activeTab?.kind === 'chat' ? activeTab.chatCheckpoints?.[0] : null;
 
-    useEffect(() => {
-      onActiveChatSessionChange?.(activeTab?.kind === 'chat' ? activeTab.chatSessionKey ?? null : null);
-    }, [activeTab, onActiveChatSessionChange]);
-
     const handleDragStart = useCallback((e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
@@ -4006,33 +4286,22 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     }, [preferredRepo, visibleTabs]);
     const paneHasMixedRepos = paneRepoPaths.length > 1;
     const activeRepo = activeTab?.repo ?? visibleTabs.find((tab) => tab.repo)?.repo ?? preferredRepo ?? null;
+    const headerRepo = preferredRepo ?? activeRepo ?? null;
     const activeRepoDetails = useMemo(() => {
-      if (!activeRepo) return null;
-      const preferredMatch = preferredRepo?.localPath === activeRepo.localPath ? preferredRepo : null;
+      if (!headerRepo) return null;
+      const preferredMatch = preferredRepo?.localPath === headerRepo.localPath ? preferredRepo : null;
       return {
-        branch: activeRepo.branch ?? preferredMatch?.branch ?? null,
-        readiness: activeRepo.readiness ?? preferredMatch?.readiness ?? null,
-        remoteUrl: activeRepo.remoteUrl ?? preferredMatch?.remoteUrl,
+        branch: headerRepo.branch ?? preferredMatch?.branch ?? null,
+        readiness: headerRepo.readiness ?? preferredMatch?.readiness ?? null,
+        remoteUrl: headerRepo.remoteUrl ?? preferredMatch?.remoteUrl,
       };
-    }, [activeRepo, preferredRepo]);
-    const activeTaskState = activeTab?.kind === 'chat'
-      ? inferWorkspaceTaskState(activeTab)
-      : activeTab && parseWorkspaceTaskLabel(activeTab.label)
-        ? inferWorkspaceTaskState(activeTab)
-        : null;
-    const showPaneWorkflowChip = Boolean(
-      activeTaskState
-      && activeTaskState.label.trim().toLowerCase() !== (activeRepoDetails?.readiness?.label.trim().toLowerCase() ?? ''),
-    );
-    const repoScopedTabCount = activeRepo
-      ? tabs.filter((tab) => {
-          if (tab.repo?.localPath) return tab.repo.localPath === activeRepo.localPath;
-          return Boolean(preferredRepo?.localPath && preferredRepo.localPath === activeRepo.localPath);
-        }).length
-      : 0;
-
+    }, [headerRepo, preferredRepo]);
+    const selectableRepos = useMemo(() => {
+      if (availableRepos.length > 0) return availableRepos;
+      return preferredRepo ? [preferredRepo] : [];
+    }, [availableRepos, preferredRepo]);
     useEffect(() => {
-      const nextRepoScope = activeRepo?.localPath ?? preferredRepo?.localPath ?? null;
+      const nextRepoScope = preferredRepo?.localPath ?? activeRepo?.localPath ?? null;
       if (reportedRepoScopeRef.current === nextRepoScope) {
         return;
       }
@@ -4168,15 +4437,15 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           </div>
         ) : null}
 
-        {(activeRepo || paneHasMixedRepos) ? (
+        {(headerRepo || paneHasMixedRepos) ? (
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
               gap: 12,
-              minHeight: 44,
-              padding: '6px 12px',
+              minHeight: 38,
+              padding: '5px 12px',
               borderBottom: '1px solid var(--t-divider-subtle)',
               background: 'var(--t-chrome)',
               flexShrink: 0,
@@ -4185,33 +4454,38 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  lineHeight: 1.15,
-                  letterSpacing: '-0.02em',
-                  color: 'var(--t-text)',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {activeRepo?.name ?? 'Mixed workspace'}
-              </div>
-              <div
-                style={{
-                  marginTop: 2,
-                  fontSize: 10,
+                  fontSize: 11,
                   lineHeight: 1.2,
-                  color: 'var(--t-text-faint)',
+                  color: paneHasMixedRepos ? 'var(--t-text-secondary)' : 'var(--t-text-faint)',
+                  fontWeight: paneHasMixedRepos ? 600 : 500,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                 }}
               >
-                {activeRepo
-                  ? `${shortenPath(activeRepo.localPath)}${paneHasMixedRepos ? ` · ${paneRepoPaths.length} repos in this pane` : ''}`
-                  : `${paneRepoPaths.length} repos across these tabs`}
+                {paneHasMixedRepos
+                  ? `${paneRepoPaths.length} repos in this pane`
+                  : headerRepo
+                    ? shortenPath(headerRepo.localPath)
+                    : `${paneRepoPaths.length} repos across these tabs`}
               </div>
+              {paneHasMixedRepos && headerRepo ? (
+                <div
+                  style={{
+                    marginTop: 2,
+                    fontSize: 10,
+                    lineHeight: 1.2,
+                    color: 'var(--t-text-faint)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {headerRepo
+                    ? `${shortenPath(headerRepo.localPath)} · ${paneRepoPaths.length} repos in this pane`
+                  : `${paneRepoPaths.length} repos across these tabs`}
+                </div>
+              ) : null}
             </div>
             <div
               style={{
@@ -4224,88 +4498,118 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                {activeRepo ? (
-                  <RepoScopeActionButton
-                    label="Launch Agent"
-                    icon={<PlayCircle size={12} strokeWidth={2} />}
-                    primary
-                    onClick={onLaunchRepoAgent ? () => { void onLaunchRepoAgent(activeRepo); } : undefined}
-                  />
-                ) : null}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                {activeRepoDetails?.branch ? (
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      padding: '2px 7px',
-                      borderRadius: 999,
-                      background: 'var(--t-divider-subtle)',
-                      color: 'var(--t-text-secondary)',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: '0.01em',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {activeRepoDetails.branch}
-                  </span>
-                ) : null}
-                {activeRepoDetails?.readiness ? (
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      padding: '2px 7px',
-                      borderRadius: 999,
-                      background: repoReadinessTone(activeRepoDetails.readiness).background,
-                      color: repoReadinessTone(activeRepoDetails.readiness).color,
-                      border: `1px solid ${repoReadinessTone(activeRepoDetails.readiness).border}`,
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: '0.01em',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {activeRepoDetails.readiness.label}
-                  </span>
-                ) : null}
-                {showPaneWorkflowChip && activeTaskState ? (
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      padding: '2px 7px',
-                      borderRadius: 999,
-                      background: activeTaskState.background,
-                      color: activeTaskState.color,
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: '0.01em',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {activeTaskState.label}
-                  </span>
-                ) : null}
-                {repoScopedTabCount > 0 ? (
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      padding: '2px 7px',
-                      borderRadius: 999,
-                      background: 'var(--t-divider-subtle)',
-                      color: 'var(--t-text-secondary)',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: '0.01em',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {repoScopedTabCount} tab{repoScopedTabCount === 1 ? '' : 's'}
-                  </span>
+                {(headerRepo || activeRepoDetails?.branch || selectableRepos.length > 0) ? (
+                  <div ref={repoPickerRef} style={{ position: 'relative', flexShrink: 0 }}>
+                    <button
+                      type="button"
+                      onClick={() => setRepoPickerOpen((value) => !value)}
+                      aria-label="Select workspace repo"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        padding: '2px 8px',
+                        borderRadius: 999,
+                        border: '1px solid var(--t-panel-border)',
+                        background: repoPickerOpen ? 'var(--t-panel-active)' : 'var(--t-divider-subtle)',
+                        color: 'var(--t-text-secondary)',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.01em',
+                        whiteSpace: 'nowrap',
+                        cursor: 'pointer',
+                        transition: 'background 120ms ease, border-color 120ms ease',
+                        maxWidth: 180,
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!repoPickerOpen) {
+                          e.currentTarget.style.background = 'var(--t-hover)';
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!repoPickerOpen) {
+                          e.currentTarget.style.background = 'var(--t-divider-subtle)';
+                        }
+                      }}
+                    >
+                      <span
+                        style={{
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {headerRepo ? `${headerRepo.name} · ${activeRepoDetails?.branch ?? 'main'}` : (activeRepoDetails?.branch ?? 'Select repo')}
+                      </span>
+                      <ChevronDown size={11} style={{ opacity: 0.72, flexShrink: 0 }} />
+                    </button>
+                    {repoPickerOpen && selectableRepos.length > 0 ? (
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: 'calc(100% + 6px)',
+                          right: 0,
+                          minWidth: 220,
+                          borderRadius: 12,
+                          border: '1px solid var(--t-panel-border)',
+                          background: 'var(--t-panel)',
+                          boxShadow: 'var(--t-panel-shadow)',
+                          overflow: 'hidden',
+                          zIndex: 40,
+                        }}
+                      >
+                        {selectableRepos.map((repo, index) => {
+                          const isSelected = repo.localPath === headerRepo?.localPath;
+                          return (
+                            <button
+                              key={repo.localPath}
+                              type="button"
+                              onClick={() => {
+                                onSelectRepoScope?.(repo);
+                                setRepoPickerOpen(false);
+                              }}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 10,
+                                width: '100%',
+                                padding: '9px 12px',
+                                border: 'none',
+                                borderBottom: index === selectableRepos.length - 1 ? 'none' : '1px solid var(--t-divider-subtle)',
+                                background: isSelected ? 'var(--t-panel-active)' : 'transparent',
+                                color: 'var(--t-text)',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                fontFamily: '-apple-system, system-ui, sans-serif',
+                              }}
+                              onMouseEnter={(e) => {
+                                if (!isSelected) e.currentTarget.style.background = 'var(--t-hover)';
+                              }}
+                              onMouseLeave={(e) => {
+                                if (!isSelected) e.currentTarget.style.background = 'transparent';
+                              }}
+                            >
+                              <span
+                                style={{
+                                  width: 6,
+                                  height: 6,
+                                  borderRadius: 999,
+                                  background: isSelected ? THEME_ACCENT : 'var(--t-text-faint)',
+                                  flexShrink: 0,
+                                }}
+                              />
+                              <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                <span style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.2 }}>{repo.name}</span>
+                                <span style={{ fontSize: 10, color: 'var(--t-text-faint)', lineHeight: 1.2 }}>
+                                  {repo.branch ?? 'main'}
+                                </span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
                 ) : null}
                 {onSplitVertical ? (
                   <button
@@ -4355,7 +4659,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                     <SplitHorizontalIcon />
                   </button>
                 ) : null}
-                {onCloseTile ? (
+                {canCloseTile && onCloseTile ? (
                   <button
                     type="button"
                     onClick={onCloseTile}
@@ -4369,14 +4673,14 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                       borderRadius: 7,
                       border: 'none',
                       background: 'transparent',
-                      color: 'var(--t-text-secondary)',
+                      color: 'var(--t-text-faint)',
                       cursor: 'pointer',
                       flexShrink: 0,
                     }}
                     onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.12)'; e.currentTarget.style.color = '#ef4444'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-text-secondary)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-text-faint)'; }}
                   >
-                    <X size={12} />
+                    <X size={13} strokeWidth={2.2} />
                   </button>
                 ) : null}
               </div>
@@ -4392,7 +4696,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           onNewTab={handleNewTab}
           onNewChatTab={handleNewChatTab}
           onNewLLMChatTab={handleNewLLMChatTab}
-          scopedRepo={activeRepo ?? preferredRepo ?? null}
+          scopedRepo={preferredRepo ?? activeRepo ?? null}
           onRegisterRepo={handleRegisterRepo}
         />
 
@@ -4410,6 +4714,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                   tabId={tab.id}
                   preferredRepo={tab.repo ?? null}
                   linkedIssue={tab.linkedIssue ?? null}
+                  draftInjection={tab.llmDraftInjection ?? null}
+                  onSummaryChange={handleUpdateLlmSummary}
+                  onConsumeDraftInjection={(injectionId) => handleConsumeLlmDraftInjection(tab.id, injectionId)}
                   onLinkedIssueChange={(issue) => handleUpdateLinkedIssue(tab.id, issue)}
                   onOpenHistoryChat={(historyTabId: string, title: string) => {
                     // Create a new tab that loads the history
