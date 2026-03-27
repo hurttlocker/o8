@@ -18,12 +18,14 @@ import {
   FolderOpen,
   Globe,
   GitBranch,
+  GitMerge,
   GitPullRequest,
   MessageSquare,
   X,
 } from 'lucide-react';
 import type { ReviewChangedFile, ReviewPullRequestSummary, ReviewWorktreeSummary, WorkflowReviewSnapshot } from '@/lib/fleet/types';
 import type { RepoReadiness } from '@/lib/repos/types';
+import { deriveWorkflowStage, describeWorkflowStage, workflowBadge } from '@/lib/workflows/status';
 import { BlueGlassActionButton, BlueGlassHoverCard } from './BlueGlassHoverCard';
 import { MarkdownBody } from './MarkdownBody';
 import {
@@ -235,6 +237,16 @@ function repoSlugFromRemote(remoteUrl?: string) {
     .replace(/^git@github\.com:/, 'https://github.com/');
   const match = normalized.match(/github\.com\/([^/]+\/[^/]+)$/);
   return match?.[1] ?? null;
+}
+
+function normalizeBranchName(value?: string | null) {
+  return value?.trim().replace(/^refs\/heads\//, '') || null;
+}
+
+function branchesMatch(left?: string | null, right?: string | null) {
+  const normalizedLeft = normalizeBranchName(left);
+  const normalizedRight = normalizeBranchName(right);
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
 }
 
 function formatAge(value?: string | number | null) {
@@ -518,6 +530,68 @@ function ContextIconButton({
       >
         {icon}
       </span>
+    </button>
+  );
+}
+
+function PrimaryActionButton({
+  label,
+  onClick,
+  icon,
+  disabled = false,
+  tone = 'accent',
+}: {
+  label: string;
+  onClick: () => void;
+  icon?: React.ReactNode;
+  disabled?: boolean;
+  tone?: 'accent' | 'success' | 'neutral';
+}) {
+  const palette = tone === 'success'
+    ? {
+        background: 'rgba(34, 197, 94, 0.12)',
+        border: 'rgba(34, 197, 94, 0.2)',
+        color: '#15803d',
+      }
+    : tone === 'neutral'
+      ? {
+          background: 'var(--t-btn-secondary-bg)',
+          border: 'var(--t-btn-secondary-border)',
+          color: 'var(--t-text)',
+        }
+      : {
+          background: THEME_ACCENT_SOFT,
+          border: 'rgba(37, 99, 235, 0.18)',
+          color: THEME_ACCENT,
+        };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        minHeight: 30,
+        padding: '7px 11px',
+        borderRadius: 9,
+        border: `1px solid ${palette.border}`,
+        background: disabled ? 'var(--t-divider-subtle)' : palette.background,
+        color: disabled ? 'var(--t-text-faint)' : palette.color,
+        fontSize: 11,
+        fontWeight: 700,
+        cursor: disabled ? 'default' : 'pointer',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {icon ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 12, height: 12, lineHeight: 0 }}>
+          {icon}
+        </span>
+      ) : null}
+      {label}
     </button>
   );
 }
@@ -1018,6 +1092,7 @@ const ReviewTab = memo(function ReviewTab({
   onOpenPullRequest?: (prNumber: number, repo?: string) => void;
 }) {
   const [snapshot, setSnapshot] = useState<WorkflowReviewSnapshot | null>(null);
+  const [repoSnapshot, setRepoSnapshot] = useState<WorkflowReviewSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [checks, setChecks] = useState<WorkspaceReviewCheckRun[]>([]);
   const [checksLoading, setChecksLoading] = useState(false);
@@ -1031,6 +1106,9 @@ const ReviewTab = memo(function ReviewTab({
   const [prDetail, setPrDetail] = useState<WorkspacePullRequestDetail | null>(null);
   const [commentsLoading, setCommentsLoading] = useState(false);
   const [addedContextKeys, setAddedContextKeys] = useState<Record<string, boolean>>({});
+  const [reviewActionLoading, setReviewActionLoading] = useState<'merge' | null>(null);
+  const [reviewActionResult, setReviewActionResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [reviewReloadNonce, setReviewReloadNonce] = useState(0);
   const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const workspaceQuery = useMemo(() => (
@@ -1038,6 +1116,11 @@ const ReviewTab = memo(function ReviewTab({
   ), [repo?.localPath]);
   const repoSlug = useMemo(() => repoSlugFromRemote(repo?.remoteUrl), [repo?.remoteUrl]);
   const reviewQuery = useMemo(() => {
+    const parts = [workspaceQuery, 'strictBranch=1'];
+    if (repoSlug) parts.push(`repo=${encodeURIComponent(repoSlug)}`);
+    return parts.filter(Boolean).length ? `?${parts.filter(Boolean).join('&')}` : '';
+  }, [repoSlug, workspaceQuery]);
+  const repoReviewQuery = useMemo(() => {
     const parts = [workspaceQuery];
     if (repoSlug) parts.push(`repo=${encodeURIComponent(repoSlug)}`);
     return parts.filter(Boolean).length ? `?${parts.filter(Boolean).join('&')}` : '';
@@ -1066,7 +1149,29 @@ const ReviewTab = memo(function ReviewTab({
       active = false;
       window.clearInterval(id);
     };
-  }, [reviewQuery]);
+  }, [reviewQuery, reviewReloadNonce]);
+
+  useEffect(() => {
+    let active = true;
+    async function fetchRepoReview() {
+      try {
+        const res = await fetch(`/api/review/workspace${repoReviewQuery}`);
+        if (!res.ok) throw new Error('Unable to load repo review state');
+        const data = await res.json() as WorkflowReviewSnapshot;
+        if (!active) return;
+        setRepoSnapshot(data);
+      } catch {
+        if (!active) return;
+        setRepoSnapshot(null);
+      }
+    }
+    void fetchRepoReview();
+    const id = window.setInterval(() => { void fetchRepoReview(); }, 45_000);
+    return () => {
+      active = false;
+      window.clearInterval(id);
+    };
+  }, [repoReviewQuery, reviewReloadNonce]);
 
   useEffect(() => {
     const slug = repoSlug;
@@ -1183,7 +1288,20 @@ const ReviewTab = memo(function ReviewTab({
     };
   }, [repo?.name, repoSlug]);
 
-  const currentPullRequest = snapshot?.pullRequests[0] ?? null;
+  const currentBranch = normalizeBranchName(repo?.branch ?? snapshot?.branch ?? null);
+  const currentPullRequest = useMemo(
+    () => snapshot?.pullRequests.find((pullRequest) => branchesMatch(pullRequest.headRefName, currentBranch)) ?? snapshot?.pullRequests[0] ?? null,
+    [currentBranch, snapshot?.pullRequests],
+  );
+  const alternatePullRequests = useMemo(() => {
+    if (!repoSnapshot?.pullRequests.length) return [] as ReviewPullRequestSummary[];
+    return repoSnapshot.pullRequests.filter((pullRequest) => {
+      if (currentPullRequest && pullRequest.number === currentPullRequest.number) {
+        return false;
+      }
+      return !branchesMatch(pullRequest.headRefName, currentBranch);
+    });
+  }, [currentBranch, currentPullRequest, repoSnapshot?.pullRequests]);
 
   useEffect(() => {
     const activePr = currentPullRequest;
@@ -1215,10 +1333,12 @@ const ReviewTab = memo(function ReviewTab({
       active = false;
       window.clearInterval(id);
     };
-  }, [currentPullRequest, repoSlug]);
+  }, [currentPullRequest, repoSlug, reviewReloadNonce]);
 
   useEffect(() => {
     setAddedContextKeys({});
+    setReviewActionResult(null);
+    setReviewActionLoading(null);
   }, [repo?.localPath, currentPullRequest?.number]);
 
   const injectPayload = useCallback((key: string, payload: AgentPanelChatInjectionPayload) => {
@@ -1227,13 +1347,22 @@ const ReviewTab = memo(function ReviewTab({
     setAddedContextKeys((current) => ({ ...current, [key]: true }));
   }, [onInjectChatContext, repo]);
 
+  const scopedChecks = useMemo(() => {
+    if (!currentBranch) return checks;
+    const exactMatches = checks.filter((check) => branchesMatch(check.headBranch, currentBranch));
+    return exactMatches;
+  }, [checks, currentBranch]);
   const failedChecks = useMemo(
-    () => checks.filter((check) => Boolean(check.conclusion) && check.conclusion.toLowerCase() !== 'success'),
-    [checks],
+    () => scopedChecks.filter((check) => Boolean(check.conclusion) && check.conclusion.toLowerCase() !== 'success'),
+    [scopedChecks],
+  );
+  const pendingChecks = useMemo(
+    () => scopedChecks.filter((check) => !check.conclusion || check.status?.toLowerCase() !== 'completed'),
+    [scopedChecks],
   );
   const groupedChecks = useMemo(
-    () => groupWorkflowRuns(checks, repo?.branch ?? null),
-    [checks, repo?.branch],
+    () => groupWorkflowRuns(scopedChecks, currentBranch),
+    [currentBranch, scopedChecks],
   );
 
   const openRunHover = useCallback((runId: number, rect: DOMRect) => {
@@ -1283,8 +1412,8 @@ const ReviewTab = memo(function ReviewTab({
   }, [hoveredRunId, repoSlug]);
 
   const hoveredRun = useMemo(
-    () => checks.find((check) => check.databaseId === hoveredRunId) ?? null,
-    [checks, hoveredRunId],
+    () => scopedChecks.find((check) => check.databaseId === hoveredRunId) ?? null,
+    [hoveredRunId, scopedChecks],
   );
   const hoveredGroup = useMemo(
     () => groupedChecks.find((group) => group.runs.some((run) => run.databaseId === hoveredRunId)) ?? null,
@@ -1321,6 +1450,102 @@ const ReviewTab = memo(function ReviewTab({
       line: comment.line,
     })),
   ], [currentPullRequest?.number, issueComments, repoSlug, reviewComments]);
+  const requestedChangesCount = useMemo(() => {
+    const decision = currentPullRequest?.reviewDecision?.toLowerCase() ?? '';
+    return decision === 'changes_requested' ? 1 : 0;
+  }, [currentPullRequest?.reviewDecision]);
+  const reviewStage = useMemo(
+    () => {
+      const workflowKey = prDetail?.pr.workflowStage?.key;
+      if (workflowKey) {
+        return workflowBadge(workflowKey as Parameters<typeof workflowBadge>[0]);
+      }
+      return deriveWorkflowStage({
+        prState: currentPullRequest?.state,
+        failedChecks: failedChecks.length,
+        pendingChecks: pendingChecks.length,
+        requestedChanges: requestedChangesCount,
+        readinessState: prDetail?.pr.readiness?.state ?? repo?.readiness?.state ?? null,
+      });
+    },
+    [currentPullRequest?.state, failedChecks.length, pendingChecks.length, prDetail?.pr.readiness?.state, prDetail?.pr.workflowStage?.key, repo?.readiness?.state, requestedChangesCount],
+  );
+  const reviewGuidance = useMemo(
+    () => describeWorkflowStage({
+      stage: reviewStage,
+      prState: currentPullRequest?.state,
+      failedChecks: failedChecks.length,
+      pendingChecks: pendingChecks.length,
+      requestedChanges: requestedChangesCount,
+      readinessState: prDetail?.pr.readiness?.state ?? repo?.readiness?.state ?? null,
+      readinessSummary: prDetail?.pr.readiness?.summary ?? repo?.readiness?.summary ?? null,
+      readinessNextAction: prDetail?.pr.readiness?.nextAction ?? repo?.readiness?.nextAction ?? null,
+    }),
+    [currentPullRequest?.state, failedChecks.length, pendingChecks.length, prDetail?.pr.readiness?.nextAction, prDetail?.pr.readiness?.state, prDetail?.pr.readiness?.summary, repo?.readiness?.nextAction, repo?.readiness?.state, repo?.readiness?.summary, requestedChangesCount, reviewStage],
+  );
+  const openBranchPullRequest = useCallback(() => {
+    if (!repoSlug || !currentBranch) return;
+    window.open(`https://github.com/${repoSlug}/compare/main...${currentBranch}?expand=1`, '_blank', 'noopener,noreferrer');
+  }, [currentBranch, repoSlug]);
+  const submitPullRequestAction = useCallback(async (action: 'merge') => {
+    if (!currentPullRequest || !repoSlug) return;
+    setReviewActionLoading(action);
+    setReviewActionResult(null);
+    try {
+      const res = await fetch(`/api/panel/prs/${currentPullRequest.number}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, repo: repoSlug }),
+      });
+      const data = await res.json() as { error?: string; action?: string };
+      if (!res.ok) {
+        throw new Error(data.error || `Unable to ${action} pull request`);
+      }
+      setReviewActionResult({
+        type: 'success',
+        message: action === 'merge' ? `Merged PR #${currentPullRequest.number}.` : 'Action completed.',
+      });
+      setReviewReloadNonce((value) => value + 1);
+    } catch (error) {
+      setReviewActionResult({
+        type: 'error',
+        message: error instanceof Error ? error.message : `Unable to ${action} pull request`,
+      });
+    } finally {
+      setReviewActionLoading(null);
+    }
+  }, [currentPullRequest, repoSlug]);
+  const addFailedChecksToChat = useCallback(() => {
+    if (!currentPullRequest?.number || !failedChecks.length) return;
+    injectPayload(
+      `checks:${currentPullRequest.number}`,
+      formatCiCheckBatchInjection(
+        currentPullRequest.number,
+        repoSlug ?? undefined,
+        failedChecks.map((check) => ({
+          prNumber: currentPullRequest.number,
+          repo: repoSlug ?? undefined,
+          name: check.workflowName || check.displayTitle || 'Workflow',
+          status: check.status,
+          conclusion: check.conclusion,
+          detailsUrl: check.url,
+          startedAt: check.createdAt,
+          completedAt: check.updatedAt,
+        })),
+      ),
+    );
+  }, [currentPullRequest, failedChecks, injectPayload, repoSlug]);
+  const addCommentsToChat = useCallback(() => {
+    if (!currentPullRequest?.number || !allCommentContexts.length) return;
+    injectPayload(
+      `comments:${currentPullRequest.number}`,
+      formatReviewCommentBatchInjection(
+        currentPullRequest.number,
+        repoSlug ?? undefined,
+        allCommentContexts,
+      ),
+    );
+  }, [allCommentContexts, currentPullRequest, injectPayload, repoSlug]);
 
   if (loading && !snapshot) {
     return <div style={{ padding: 16, fontSize: 12, color: 'var(--t-text-muted)' }}>Loading review…</div>;
@@ -1332,6 +1557,186 @@ const ReviewTab = memo(function ReviewTab({
 
   return (
     <div className="cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto', paddingBottom: 10 }}>
+      <ReviewSection title="Review State">
+        <ContextObjectCard itemKind="review-state" itemId={currentPullRequest ? `pr:${currentPullRequest.number}` : repo?.localPath ?? 'review-state'}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <GitPullRequest
+                size={14}
+                style={{
+                  color: currentPullRequest ? prStateLabel(currentPullRequest).color : 'var(--t-text-faint)',
+                  marginTop: 2,
+                  flexShrink: 0,
+                }}
+              />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>
+                    {currentPullRequest ? `PR #${currentPullRequest.number}` : 'No PR attached'}
+                  </div>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      padding: '2px 7px',
+                      borderRadius: 999,
+                      background: reviewGuidance.stage?.background ?? 'var(--t-divider-subtle)',
+                      color: reviewGuidance.stage?.color ?? 'var(--t-text-secondary)',
+                      fontSize: 10,
+                      fontWeight: 700,
+                    }}
+                  >
+                    {currentPullRequest ? (prDetail?.pr.workflowStage?.label ?? reviewGuidance.stage?.label ?? prStateLabel(currentPullRequest).label) : (repo?.readiness?.label ?? 'No PR')}
+                  </span>
+                  {currentBranch ? (
+                    <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                      {currentBranch}
+                    </span>
+                  ) : null}
+                </div>
+                <div style={{ marginTop: 4, fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
+                  {currentPullRequest
+                    ? currentPullRequest.title
+                    : 'Open a pull request for this branch before treating review as a merge lane.'}
+                </div>
+                <div style={{ marginTop: 5, fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.5 }}>
+                  {currentPullRequest
+                    ? reviewGuidance.detail
+                    : repo?.readiness?.summary ?? 'This branch is local-only right now.'}
+                </div>
+                {currentPullRequest && reviewGuidance.nextAction ? (
+                  <div style={{ marginTop: 5, fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.5 }}>
+                    {reviewGuidance.nextAction}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              {!currentPullRequest && repoSlug && currentBranch && currentBranch !== 'main' ? (
+                <PrimaryActionButton
+                  icon={<GitPullRequest size={11} strokeWidth={2.2} />}
+                  label="Create PR"
+                  onClick={openBranchPullRequest}
+                />
+              ) : null}
+              {currentPullRequest && reviewGuidance.mergeAllowed ? (
+                <PrimaryActionButton
+                  icon={<GitMerge size={11} strokeWidth={2.2} />}
+                  label={reviewActionLoading === 'merge' ? 'Merging…' : 'Merge PR'}
+                  onClick={() => { void submitPullRequestAction('merge'); }}
+                  disabled={reviewActionLoading !== null}
+                  tone="success"
+                />
+              ) : null}
+              {currentPullRequest && !reviewGuidance.mergeAllowed && failedChecks.length > 0 && onInjectChatContext ? (
+                <PrimaryActionButton
+                  icon={<MessageSquare size={11} strokeWidth={2.2} />}
+                  label={addedContextKeys[`checks:${currentPullRequest.number}`] ? 'Checks added' : 'Add failed to chat'}
+                  onClick={addFailedChecksToChat}
+                  disabled={Boolean(addedContextKeys[`checks:${currentPullRequest.number}`])}
+                />
+              ) : null}
+              {currentPullRequest && !reviewGuidance.mergeAllowed && failedChecks.length === 0 && allCommentContexts.length > 0 && onInjectChatContext ? (
+                <PrimaryActionButton
+                  icon={<MessageSquare size={11} strokeWidth={2.2} />}
+                  label={addedContextKeys[`comments:${currentPullRequest.number}`] ? 'Comments added' : 'Add comments to chat'}
+                  onClick={addCommentsToChat}
+                  disabled={Boolean(addedContextKeys[`comments:${currentPullRequest.number}`])}
+                />
+              ) : null}
+              {currentPullRequest && repoSlug && onOpenPullRequest ? (
+                <PrimaryActionButton
+                  icon={<ArrowRight size={11} strokeWidth={2.2} />}
+                  label="Open PR"
+                  onClick={() => onOpenPullRequest(currentPullRequest.number, repoSlug)}
+                  tone="neutral"
+                />
+              ) : null}
+            </div>
+
+            {reviewActionResult ? (
+              <div
+                style={{
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  background: reviewActionResult.type === 'success' ? 'rgba(34, 197, 94, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+                  color: reviewActionResult.type === 'success' ? '#15803d' : '#b91c1c',
+                  fontSize: 11,
+                  fontWeight: 600,
+                }}
+              >
+                {reviewActionResult.message}
+              </div>
+            ) : null}
+          </div>
+        </ContextObjectCard>
+
+        {!currentPullRequest && alternatePullRequests.length > 0 ? (
+          <>
+            <div style={{ padding: '0 2px', fontSize: 10, fontWeight: 700, color: 'var(--t-text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Other open pull requests
+            </div>
+            {alternatePullRequests.slice(0, 4).map((pullRequest) => (
+              <ContextObjectCard key={pullRequest.number} itemKind="pull-request" itemId={`alternate-pr:${pullRequest.number}`} style={{ padding: '7px 8px', borderRadius: 9 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <GitPullRequest size={13} style={{ color: prStateLabel(pullRequest).color, marginTop: 2, flexShrink: 0 }} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t-text)' }}>
+                      PR #{pullRequest.number}
+                    </div>
+                    <div style={{ marginTop: 3, fontSize: 11, color: 'var(--t-text-secondary)', lineHeight: 1.45 }}>
+                      {pullRequest.title}
+                    </div>
+                    <div style={{ marginTop: 3, fontSize: 10, color: 'var(--t-text-muted)', display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+                      <span>{normalizeBranchName(pullRequest.headRefName) ?? pullRequest.headRefName}</span>
+                      <span>{prStateLabel(pullRequest).label}</span>
+                    </div>
+                  </div>
+                  {repoSlug && onOpenPullRequest ? (
+                    <ContextIconButton
+                      icon={<ArrowRight size={11} strokeWidth={2} />}
+                      label="Open PR"
+                      onClick={() => onOpenPullRequest(pullRequest.number, repoSlug)}
+                    />
+                  ) : null}
+                </div>
+              </ContextObjectCard>
+            ))}
+          </>
+        ) : null}
+
+        {snapshot.worktrees.length > 0 ? snapshot.worktrees.map((worktree) => {
+          const tone = worktreeStateTone(worktree);
+          return (
+            <ContextObjectCard key={`${worktree.path}:${worktree.branch ?? 'detached'}`} itemKind="worktree" itemId={worktree.path}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <GitBranch size={14} style={{ color: tone.color, marginTop: 2, flexShrink: 0 }} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{worktree.branch ?? 'Detached worktree'}</div>
+                    <span style={{ display: 'inline-flex', padding: '2px 7px', borderRadius: 999, background: tone.bg, color: tone.color, fontSize: 10, fontWeight: 700 }}>
+                      {worktreeStateLabel(worktree)}
+                    </span>
+                  </div>
+                  <div style={{ marginTop: 3, fontSize: 11, color: 'var(--t-text-muted)' }}>{worktree.path}</div>
+                </div>
+              </div>
+            </ContextObjectCard>
+          );
+        }) : (
+          <EmptySectionState>No tracked workspaces are linked yet.</EmptySectionState>
+        )}
+
+        {snapshot.warnings && snapshot.warnings.length > 0 ? snapshot.warnings.map((warning, index) => (
+          <ContextObjectCard key={warning} itemKind="warning" itemId={`warning-${index}`}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, color: '#92400e' }}>
+              <AlertTriangle size={14} style={{ marginTop: 2, flexShrink: 0 }} />
+              <div style={{ fontSize: 12, lineHeight: 1.5 }}>{warning}</div>
+            </div>
+          </ContextObjectCard>
+        )) : null}
+      </ReviewSection>
+
       <ReviewSection
         title="Checks"
         actions={
@@ -1340,33 +1745,17 @@ const ReviewTab = memo(function ReviewTab({
               <ContextActionChip
                 icon={<MessageSquare size={11} strokeWidth={2} />}
                 label={addedContextKeys[`checks:${currentPullRequest.number}`] ? 'Added' : 'Add failed to chat'}
-                onClick={() => injectPayload(
-                  `checks:${currentPullRequest.number}`,
-                  formatCiCheckBatchInjection(
-                    currentPullRequest.number,
-                    repoSlug ?? undefined,
-                    failedChecks.map((check) => ({
-                      prNumber: currentPullRequest.number,
-                      repo: repoSlug ?? undefined,
-                      name: check.workflowName || check.displayTitle || 'Workflow',
-                      status: check.status,
-                      conclusion: check.conclusion,
-                      detailsUrl: check.url,
-                      startedAt: check.createdAt,
-                      completedAt: check.updatedAt,
-                    })),
-                  ),
-                )}
+                onClick={addFailedChecksToChat}
                 disabled={Boolean(addedContextKeys[`checks:${currentPullRequest.number}`])}
               />
             ) : null}
           </>
         }
       >
-        {checksLoading && checks.length === 0 ? (
+        {checksLoading && scopedChecks.length === 0 ? (
           <EmptySectionState>Loading CI state…</EmptySectionState>
-        ) : checks.length === 0 ? (
-          <EmptySectionState>No recent CI runs yet.</EmptySectionState>
+        ) : scopedChecks.length === 0 ? (
+          <EmptySectionState>{currentBranch ? `No recent CI runs for ${currentBranch}.` : 'No recent CI runs yet.'}</EmptySectionState>
         ) : (
           <>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1592,14 +1981,7 @@ const ReviewTab = memo(function ReviewTab({
               <ContextActionChip
                 icon={<MessageSquare size={11} strokeWidth={2} />}
                 label={addedContextKeys[`comments:${currentPullRequest.number}`] ? 'Added' : 'Add comments'}
-                onClick={() => injectPayload(
-                  `comments:${currentPullRequest.number}`,
-                  formatReviewCommentBatchInjection(
-                    currentPullRequest.number,
-                    repoSlug ?? undefined,
-                    allCommentContexts,
-                  ),
-                )}
+                onClick={addCommentsToChat}
                 disabled={Boolean(addedContextKeys[`comments:${currentPullRequest.number}`])}
               />
             ) : null}
@@ -1747,56 +2129,6 @@ const ReviewTab = memo(function ReviewTab({
             ) : null}
           </>
         )}
-      </ReviewSection>
-
-      <ReviewSection title="Review State">
-        {currentPullRequest ? (
-          <ContextObjectCard itemKind="pull-request" itemId={String(currentPullRequest.number)}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-              <GitPullRequest size={14} style={{ color: prStateLabel(currentPullRequest).color, marginTop: 2, flexShrink: 0 }} />
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>PR #{currentPullRequest.number}</div>
-                  <span style={{ display: 'inline-flex', padding: '2px 7px', borderRadius: 999, background: prStateLabel(currentPullRequest).bg, color: prStateLabel(currentPullRequest).color, fontSize: 10, fontWeight: 700 }}>
-                    {prDetail?.pr.workflowStage?.label ?? prStateLabel(currentPullRequest).label}
-                  </span>
-                </div>
-                <div style={{ marginTop: 3, fontSize: 12, color: 'var(--t-text-secondary)' }}>{currentPullRequest.title}</div>
-              </div>
-            </div>
-          </ContextObjectCard>
-        ) : null}
-
-        {snapshot.worktrees.length > 0 ? snapshot.worktrees.map((worktree) => {
-          const tone = worktreeStateTone(worktree);
-          return (
-            <ContextObjectCard key={`${worktree.path}:${worktree.branch ?? 'detached'}`} itemKind="worktree" itemId={worktree.path}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                <GitBranch size={14} style={{ color: tone.color, marginTop: 2, flexShrink: 0 }} />
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{worktree.branch ?? 'Detached worktree'}</div>
-                    <span style={{ display: 'inline-flex', padding: '2px 7px', borderRadius: 999, background: tone.bg, color: tone.color, fontSize: 10, fontWeight: 700 }}>
-                      {worktreeStateLabel(worktree)}
-                    </span>
-                  </div>
-                  <div style={{ marginTop: 3, fontSize: 11, color: 'var(--t-text-muted)' }}>{worktree.path}</div>
-                </div>
-              </div>
-            </ContextObjectCard>
-          );
-        }) : (
-          <EmptySectionState>No tracked workspaces are linked yet.</EmptySectionState>
-        )}
-
-        {snapshot.warnings && snapshot.warnings.length > 0 ? snapshot.warnings.map((warning, index) => (
-          <ContextObjectCard key={warning} itemKind="warning" itemId={`warning-${index}`}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, color: '#92400e' }}>
-              <AlertTriangle size={14} style={{ marginTop: 2, flexShrink: 0 }} />
-              <div style={{ fontSize: 12, lineHeight: 1.5 }}>{warning}</div>
-            </div>
-          </ContextObjectCard>
-        )) : null}
       </ReviewSection>
 
       <ReviewSection
