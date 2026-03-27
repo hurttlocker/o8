@@ -51,9 +51,24 @@ export interface PersistedTabState {
 
 const API_PATH = '/api/panel/terminal-state';
 
-function buildStatePath(scope: string) {
+function hashScopeKey(value: string) {
+  let hash = 5381;
+  for (let i = 0; i < value.length; i += 1) {
+    hash = ((hash << 5) + hash) ^ value.charCodeAt(i);
+  }
+  return Math.abs(hash >>> 0).toString(36);
+}
+
+export function buildRepoStateScope(repoPath: string) {
+  return `repo-${hashScopeKey(repoPath)}`;
+}
+
+function buildStatePath(scope: string, repoPath?: string | null) {
   const params = new URLSearchParams();
   params.set('scope', scope);
+  if (repoPath) {
+    params.set('repoPath', repoPath);
+  }
   return `${API_PATH}?${params.toString()}`;
 }
 
@@ -71,9 +86,9 @@ export async function saveTabState(state: PersistedTabState, scope = 'tile-root'
 }
 
 /** Load tab state from server */
-export async function loadTabState(scope = 'tile-root'): Promise<PersistedTabState | null> {
+export async function loadTabState(scope = 'tile-root', repoPath?: string | null): Promise<PersistedTabState | null> {
   try {
-    const res = await fetch(buildStatePath(scope));
+    const res = await fetch(buildStatePath(scope, repoPath));
     if (!res.ok) return null;
     const data = await res.json();
     if (data.version !== 1) return null;

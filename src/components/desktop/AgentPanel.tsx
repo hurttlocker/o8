@@ -53,6 +53,7 @@ import { formatModelLabel } from '@/lib/format';
 import type { RuntimeSurfaceSummary } from '@/lib/fleet/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { RepoReadiness } from '@/lib/repos/types';
+import { isTauri } from '@/lib/tauri/bridge';
 import { deriveWorkflowStage, describeWorkflowStage, pickDominantWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
 
 // ── Types ──
@@ -598,12 +599,14 @@ function SidebarSection({
 }
 
 function ActivityDock({
+  title,
   count,
   summary,
   open,
   onToggle,
   children,
 }: {
+  title: string;
   count: number;
   summary: string;
   open: boolean;
@@ -643,7 +646,7 @@ function ActivityDock({
         </span>
         <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em' }}>Activity</span>
+            <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em' }}>{title}</span>
               <span
                 style={{
                   display: 'inline-flex',
@@ -664,11 +667,11 @@ function ActivityDock({
               {count}
             </span>
           </span>
-          <span
-            style={{
-              display: 'block',
-              marginTop: 2,
-              fontSize: 10,
+        <span
+          style={{
+            display: 'block',
+            marginTop: 2,
+            fontSize: 10,
               lineHeight: 1.35,
               color: 'var(--t-text-faint)',
               overflow: 'hidden',
@@ -696,344 +699,6 @@ function ActivityDock({
           </div>
         </div>
       ) : null}
-    </section>
-  );
-}
-
-function WorkspaceHeroAction({
-  label,
-  icon,
-  onClick,
-  primary = false,
-  compact = false,
-}: {
-  label: string;
-  icon: React.ReactNode;
-  onClick?: () => void;
-  primary?: boolean;
-  compact?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!onClick}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: compact ? 4 : 6,
-        minHeight: compact ? 27 : 29,
-        padding: primary
-          ? compact ? '6px 9px' : '7px 11px'
-          : compact ? '5px 8px' : '6px 10px',
-        borderRadius: compact ? 7 : 9,
-        border: primary ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
-        background: primary ? THEME_ACCENT : THEME_BG_CARD,
-        color: primary ? '#fff' : 'var(--t-text-secondary)',
-        fontSize: compact ? 9 : 10,
-        fontWeight: 700,
-        cursor: onClick ? 'pointer' : 'not-allowed',
-        opacity: onClick ? 1 : 0.45,
-        fontFamily: '-apple-system, system-ui, sans-serif',
-        boxShadow: primary ? `0 8px 18px ${THEME_ACCENT_RING}` : 'none',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function WorkspaceHeroOptionsButton({
-  onClick,
-  compact = false,
-}: {
-  onClick?: () => void;
-  compact?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={!onClick}
-      aria-label="Launch options"
-      title="Launch options"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minWidth: compact ? 27 : 29,
-        minHeight: compact ? 27 : 29,
-        padding: 0,
-        borderRadius: compact ? 7 : 9,
-        border: `1px solid ${THEME_ACCENT_BORDER}`,
-        background: THEME_BG_CARD,
-        color: THEME_ACCENT,
-        fontSize: 10,
-        fontWeight: 700,
-        cursor: onClick ? 'pointer' : 'not-allowed',
-        opacity: onClick ? 1 : 0.45,
-        fontFamily: '-apple-system, system-ui, sans-serif',
-      }}
-    >
-      <ChevronDown size={compact ? 12 : 14} strokeWidth={2.2} />
-    </button>
-  );
-}
-
-function WorkspaceHeroPill({
-  label,
-  tone = 'neutral',
-  compact = false,
-  fullWidth = false,
-}: {
-  label: string;
-  tone?: 'neutral' | 'blue' | 'green' | 'amber' | 'red';
-  compact?: boolean;
-  fullWidth?: boolean;
-}) {
-  const palette = tone === 'blue'
-    ? { background: THEME_ACCENT_SOFT, border: THEME_ACCENT_BORDER, color: THEME_ACCENT }
-    : tone === 'green'
-      ? { background: 'rgba(22, 163, 74, 0.12)', border: 'rgba(34, 197, 94, 0.18)', color: '#15803d' }
-      : tone === 'amber'
-        ? { background: 'rgba(245, 158, 11, 0.12)', border: 'rgba(245, 158, 11, 0.2)', color: '#b45309' }
-        : tone === 'red'
-          ? { background: 'rgba(239, 68, 68, 0.12)', border: 'rgba(239, 68, 68, 0.2)', color: '#b91c1c' }
-      : { background: THEME_BG_CARD, border: 'var(--t-panel-border)', color: 'var(--t-text-secondary)' };
-
-  return (
-    <span
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: fullWidth ? 'flex-start' : undefined,
-        maxWidth: fullWidth ? '100%' : undefined,
-        padding: compact ? '1px 6px' : '2px 7px',
-        borderRadius: 999,
-        background: palette.background,
-        border: `1px solid ${palette.border}`,
-        color: palette.color,
-        fontSize: 9,
-        fontWeight: 700,
-        letterSpacing: '0.01em',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}
-    >
-      {label}
-    </span>
-  );
-}
-
-function WorkspaceHero({
-  title,
-  subtitle,
-  repoSlug,
-  branch,
-  readiness,
-  workflowStage,
-  workflowNextAction,
-  workspaceLabel,
-  changedFiles,
-  activeRuns,
-  onLaunch,
-  onLaunchOptions,
-  onOpenGitLog,
-  onOpenCI,
-}: {
-  title: string;
-  subtitle: string;
-  repoSlug?: string | null;
-  branch?: string | null;
-  readiness?: RepoReadiness | null;
-  workflowStage?: WorkflowStageBadge | null;
-  workflowNextAction?: string | null;
-  workspaceLabel?: string | null;
-  changedFiles: number;
-  activeRuns: number;
-  onLaunch?: () => void;
-  onLaunchOptions?: () => void;
-  onOpenGitLog?: () => void;
-  onOpenCI?: () => void;
-}) {
-  const cardRef = useRef<HTMLDivElement | null>(null);
-  const [cardWidth, setCardWidth] = useState(0);
-  const compact = cardWidth > 0 && cardWidth < 390;
-  const normalizedTitle = title.trim().toLowerCase();
-  const normalizedRepoSlug = repoSlug?.trim().toLowerCase() ?? null;
-  const showRepoSlugChip = Boolean(
-    repoSlug
-    && normalizedRepoSlug
-    && normalizedRepoSlug !== normalizedTitle
-    && normalizedRepoSlug !== normalizedTitle.replace(/\s+/g, '-'),
-  );
-  const showWorkflowChip = Boolean(
-    workflowStage
-    && workflowStage.label.trim().toLowerCase() !== (readiness?.label.trim().toLowerCase() ?? ''),
-  );
-
-  useEffect(() => {
-    const node = cardRef.current;
-    if (!node || typeof ResizeObserver === 'undefined') return;
-
-    const updateWidth = () => {
-      setCardWidth(node.getBoundingClientRect().width);
-    };
-
-    updateWidth();
-    const observer = new ResizeObserver((entries) => {
-      const nextWidth = entries[0]?.contentRect.width;
-      if (typeof nextWidth === 'number') setCardWidth(nextWidth);
-      else updateWidth();
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-
-  const showChangeBadge = changedFiles > 0;
-  const showActiveBadge = activeRuns > 0;
-  const hasActions = Boolean(onLaunch || onLaunchOptions || onOpenGitLog || onOpenCI);
-
-  return (
-    <section style={{ paddingRight: 14, paddingBottom: 10, paddingLeft: 14, borderBottom: '1px solid var(--t-divider-subtle)' }}>
-      <div
-        ref={cardRef}
-        style={{
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-      >
-        <div style={{ position: 'relative', padding: compact ? '2px 0 0' : '2px 0 0' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: compact ? 8 : 10 }}>
-            <span
-              style={{
-                width: compact ? 16 : 18,
-                height: compact ? 16 : 18,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: THEME_ACCENT,
-                flexShrink: 0,
-                marginTop: 1,
-              }}
-            >
-              <FolderOpen size={compact ? 13 : 14} strokeWidth={2.1} />
-            </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--t-text-faint)' }}>
-                Selection
-              </div>
-              <div
-                style={{
-                  marginTop: 4,
-                  fontSize: compact ? 15 : 16,
-                  lineHeight: 1.08,
-                  fontWeight: 720,
-                  letterSpacing: '-0.02em',
-                  color: 'var(--t-text)',
-                }}
-              >
-                {title}
-              </div>
-              <div style={{ marginTop: 3, fontSize: 10.5, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>
-                {subtitle}
-              </div>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 10 }}>
-            {showRepoSlugChip ? <WorkspaceHeroPill label={repoSlug!} tone="blue" compact={compact} /> : null}
-            {branch ? <WorkspaceHeroPill label={branch} compact={compact} /> : null}
-            {readiness ? (
-              <WorkspaceHeroPill
-                label={readiness.label}
-                tone={readiness.state === 'blocked' ? 'red' : readiness.state === 'needs_setup' ? 'blue' : readiness.state === 'ready' ? 'green' : 'neutral'}
-                compact={compact}
-              />
-            ) : null}
-            {showWorkflowChip && workflowStage ? (
-              <WorkspaceHeroPill
-                label={workflowStage.label}
-                tone={
-                  workflowStage.key === 'blocked'
-                    ? 'red'
-                    : workflowStage.key === 'waiting' || workflowStage.key === 'queued'
-                      ? 'amber'
-                      : workflowStage.key === 'working' || workflowStage.key === 'merge_ready'
-                        ? 'green'
-                        : workflowStage.key === 'reviewing'
-                          ? 'blue'
-                          : 'neutral'
-                }
-                compact={compact}
-              />
-            ) : null}
-            {showChangeBadge ? <WorkspaceHeroPill label={`${changedFiles} changed`} tone="blue" compact={compact} /> : null}
-            {showActiveBadge ? <WorkspaceHeroPill label={`${activeRuns} active`} tone="green" compact={compact} /> : null}
-          </div>
-          {(workspaceLabel || workflowNextAction || readiness?.nextAction) ? (
-            <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {workspaceLabel ? (
-                <div
-                  style={{
-                    fontSize: 10,
-                    color: 'var(--t-text-faint)',
-                    fontFamily: '"SF Mono", ui-monospace, monospace',
-                    lineHeight: 1.4,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {workspaceLabel}
-                </div>
-              ) : null}
-              {(workflowNextAction || readiness?.nextAction) ? (
-                <div
-                  style={{
-                    fontSize: 10,
-                    lineHeight: 1.35,
-                    color: 'var(--t-text-faint)',
-                  }}
-                >
-                  {workflowNextAction || readiness?.nextAction}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {hasActions ? (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
-              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                <WorkspaceHeroAction
-                  label="Launch Agent"
-                  icon={<PlayCircle size={compact ? 11 : 13} strokeWidth={2} />}
-                  onClick={onLaunch}
-                  primary
-                  compact={compact}
-                />
-                {onLaunchOptions ? <WorkspaceHeroOptionsButton onClick={onLaunchOptions} compact={compact} /> : null}
-              </div>
-              <WorkspaceHeroAction
-                label="Git Log"
-                icon={<GitCommit size={compact ? 11 : 13} strokeWidth={2} />}
-                onClick={onOpenGitLog}
-                compact={compact}
-              />
-              <WorkspaceHeroAction
-                label="CI"
-                icon={<CheckCircle2 size={compact ? 11 : 13} strokeWidth={2} />}
-                onClick={onOpenCI}
-                compact={compact}
-              />
-            </div>
-          ) : null}
-        </div>
-      </div>
     </section>
   );
 }
@@ -3857,7 +3522,6 @@ function MemoryTabContent({ onOpenMemory }: { onOpenMemory?: () => void }) {
 
 export const AgentPanel = memo(function AgentPanel({
   selectedRepo,
-  selectedRepoName,
   selectedRepoBranch,
   selectedRepoLocalPath,
   selectedRepoReadiness,
@@ -3880,7 +3544,6 @@ export const AgentPanel = memo(function AgentPanel({
   lifecycleEvents,
 }: {
   selectedRepo?: string | null;
-  selectedRepoName?: string | null;
   selectedRepoBranch?: string | null;
   selectedRepoLocalPath?: string | null;
   selectedRepoReadiness?: RepoReadiness | null;
@@ -3919,7 +3582,6 @@ export const AgentPanel = memo(function AgentPanel({
   const [commits, setCommits] = useState<{ hash: string; message: string; age: string }[]>([]);
   const [issues, setIssues] = useState<GHIssue[]>([]);
   const [prs, setPrs] = useState<GHPullRequest[]>([]);
-  const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
   const [activityOpen, setActivityOpen] = useState(false);
   const [reposOpen, setReposOpen] = useState(true);
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
@@ -3929,6 +3591,7 @@ export const AgentPanel = memo(function AgentPanel({
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
   const [launchIntentNonce, setLaunchIntentNonce] = useState(0);
   const [workspaceIntentNonce, setWorkspaceIntentNonce] = useState(0);
+  const [addRepoIntentNonce, setAddRepoIntentNonce] = useState(0);
   const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
   const hasSelectedRepo = Boolean(selectedRepoLocalPath);
   const scopedRepo = hasSelectedRepo ? (selectedRepo ?? null) : activeRepo;
@@ -4239,24 +3902,6 @@ export const AgentPanel = memo(function AgentPanel({
       .catch(() => setRepoLocalPath(null));
   }, [effectiveScopedRepo, selectedRepoLocalPath]);
 
-  // Fetch changed-file truth for the selected workspace/repo so the focus hero stays current.
-  useEffect(() => {
-    async function fetchFiles() {
-      try {
-        const wsPath = hasSelectedRepo ? (selectedRepoLocalPath ?? repoLocalPath) : (activeWorkspace ?? repoLocalPath);
-        const wsParam = wsPath ? `?workspace=${encodeURIComponent(wsPath)}` : '';
-        const res = await fetch(`/api/panel/files${wsParam}`);
-        if (!res.ok) return;
-        const data = await res.json();
-        const freshChanged = new Set<string>(data.changedFiles ?? []);
-        setChangedFiles(prev => setsEqual(prev, freshChanged) ? prev : freshChanged);
-      } catch { /* silent */ }
-    }
-    void fetchFiles();
-    const id = setInterval(fetchFiles, 60_000);
-    return () => clearInterval(id);
-  }, [activeWorkspace, hasSelectedRepo, repoLocalPath, selectedRepoLocalPath]);
-
   const activeWorkspaceGroup = useMemo(
     () => (expandedGroup ? workspaceGroups.find((group) => group.workspace === expandedGroup) ?? null : null),
     [expandedGroup, workspaceGroups],
@@ -4276,61 +3921,12 @@ export const AgentPanel = memo(function AgentPanel({
       ?? null,
     [activeWorkspaceGroup, effectiveScopedRepo, workspaceGroups],
   );
-  const currentScopePath = hasSelectedRepo
-    ? (selectedRepoLocalPath ?? repoLocalPath)
-    : (activeWorkspace ?? repoLocalPath);
   const currentLaunchRepoPath = hasSelectedRepo ? (selectedRepoLocalPath ?? repoLocalPath) : repoLocalPath;
-  const heroTitle = hasSelectedRepo
-    ? 'Selected workspace'
-    : preferredWorkspaceGroup
-      ? 'Workspace focus'
-      : 'No workspace selected';
-  const heroSubtitle = hasSelectedRepo
-    ? (selectedRepoName ?? selectedRepoLocalPath?.split('/').pop() ?? 'Local repository')
-    : preferredWorkspaceGroup
-      ? `${preferredWorkspaceGroup.displayName} · ${preferredWorkspaceGroup.agents.length} live surface${preferredWorkspaceGroup.agents.length === 1 ? '' : 's'}`
-      : 'Open a repository to focus work.';
-  const heroBranch = hasSelectedRepo
-    ? (selectedRepoBranch ?? null)
-    : (preferredWorkspaceGroup?.agents.find((agent) => agent.branch && !agent.branch.startsWith('surface/'))?.branch ?? null);
-  const heroReadiness = hasSelectedRepo
-    ? (selectedRepoReadiness ?? null)
-    : (preferredWorkspaceGroup?.agents.find((agent) => agent.repoReadiness)?.repoReadiness ?? null);
-  const heroWorkflowStage = hasSelectedRepo
-    ? pickDominantWorkflowStage(
-        agents
-          .filter((agent) => agent.workspace === currentScopePath || agent.repo === selectedRepoName)
-          .map((agent) => agent.workflowStage ?? deriveWorkflowStage({
-            runtimeStatus: agent.status,
-            workspaceStatus: agent.workspaceStatus,
-            lifecycleState: agent.lifecycleState,
-            latestText: agent.currentTask,
-            readinessState: agent.repoReadiness?.state ?? selectedRepoReadiness?.state ?? null,
-          })),
-      )
-    : pickDominantWorkflowStage(
-        (preferredWorkspaceGroup?.agents ?? []).map((agent) => agent.workflowStage ?? deriveWorkflowStage({
-          runtimeStatus: agent.status,
-          workspaceStatus: agent.workspaceStatus,
-          lifecycleState: agent.lifecycleState,
-          latestText: agent.currentTask,
-          readinessState: agent.repoReadiness?.state ?? null,
-        })),
-      );
-  const heroWorkflowGuidance = describeWorkflowStage({
-    stage: heroWorkflowStage,
-    readinessState: heroReadiness?.state ?? null,
-    readinessSummary: heroReadiness?.summary ?? null,
-    readinessNextAction: heroReadiness?.nextAction ?? null,
-  });
-  const heroWorkspaceLabel = compactWorkspaceLabel(currentScopePath);
   const workspacesSummary = inventoryLoading
     ? 'Loading repositories and workspaces...'
     : activeRunsCount > 0 || reviewRunsCount > 0
       ? `${activeRunsCount} active · ${reviewRunsCount} in review`
-      : currentLaunchRepoPath
-        ? 'Repository and workspace list'
-        : 'Repositories and live workspaces';
+      : null;
   const activityAgentRepoById = useMemo(
     () => new Map(agents.map((agent) => [agent.id, agentRepoSlug(agent)])),
     [agents],
@@ -4344,16 +3940,24 @@ export const AgentPanel = memo(function AgentPanel({
     });
   }, [activityAgentRepoById, effectiveScopedRepo, events]);
   const activityItemCount = visibleActivityEvents.length + commits.length + issues.length + prs.length;
+  const activityDockTitle = effectiveScopedRepo ? 'Repo activity' : 'Activity';
   const latestEventSummary = visibleActivityEvents[0]?.title
     ?? (prs[0] ? `PR #${prs[0].number} · ${prs[0].title}` : null)
     ?? (issues[0] ? `Issue #${issues[0].number} · ${issues[0].title}` : null)
     ?? (commits[0]?.message ?? 'Recent workflow events');
+  const activitySummary = effectiveScopedRepo
+    ? `${shortRepoLabel(effectiveScopedRepo)} · ${latestEventSummary}`
+    : latestEventSummary;
   const launchIntent = launchIntentNonce > 0 && currentLaunchRepoPath
     ? { repoPath: currentLaunchRepoPath, nonce: launchIntentNonce }
     : null;
   const workspaceIntent = workspaceIntentNonce > 0 && currentLaunchRepoPath
     ? { repoPath: currentLaunchRepoPath, nonce: workspaceIntentNonce }
     : null;
+  const addRepoIntent = addRepoIntentNonce > 0
+    ? { nonce: addRepoIntentNonce }
+    : null;
+  const titlebarSpacerHeight = isTauri() ? 38 : 10;
 
   return (
     <div style={{
@@ -4366,7 +3970,7 @@ export const AgentPanel = memo(function AgentPanel({
     >
       {/* ── Titlebar spacer ── */}
       <div style={{
-        height: 38,
+        height: titlebarSpacerHeight,
         flexShrink: 0,
         WebkitAppRegion: 'drag' as unknown as string,
       } as React.CSSProperties} />
@@ -4378,7 +3982,7 @@ export const AgentPanel = memo(function AgentPanel({
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',
           WebkitOverflowScrolling: 'touch',
-          paddingTop: 2,
+          paddingTop: isTauri() ? 2 : 0,
           paddingBottom: 18,
           display: 'flex',
           flexDirection: 'column',
@@ -4386,19 +3990,6 @@ export const AgentPanel = memo(function AgentPanel({
         } as React.CSSProperties}
         className="hide-scrollbar"
       >
-        <WorkspaceHero
-          title={heroTitle}
-          subtitle={heroSubtitle}
-          repoSlug={hasSelectedRepo ? null : effectiveScopedRepo}
-          branch={heroBranch}
-          readiness={heroReadiness}
-          workflowStage={heroWorkflowStage}
-          workflowNextAction={heroWorkflowGuidance.nextAction ?? null}
-          workspaceLabel={heroWorkspaceLabel}
-          changedFiles={changedFiles.size}
-          activeRuns={activeRunsCount}
-        />
-
         <SidebarSection
           title="Workspaces"
           icon={FolderOpen}
@@ -4407,46 +3998,91 @@ export const AgentPanel = memo(function AgentPanel({
           open={reposOpen}
           onToggle={() => setReposOpen((current) => !current)}
           headerAction={(
-            <button
-              type="button"
-              aria-label="Create workspace"
-              onClick={() => {
-                if (!currentLaunchRepoPath) return;
-                setReposOpen(true);
-                setWorkspaceIntentNonce((current) => current + 1);
-              }}
+            <div
               style={{
-                display: 'inline-flex',
+                display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
-                width: 26,
-                height: 26,
-                padding: 0,
-                borderRadius: 8,
-                border: 'none',
-                background: 'transparent',
-                color: currentLaunchRepoPath ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
-                cursor: currentLaunchRepoPath ? 'pointer' : 'default',
-                opacity: currentLaunchRepoPath ? 1 : 0.45,
-                appearance: 'none',
-                WebkitAppearance: 'none',
-                lineHeight: 0,
-                transition: 'background 140ms ease, color 140ms ease',
-              }}
-              onMouseEnter={(event) => {
-                if (!currentLaunchRepoPath) return;
-                const target = event.currentTarget;
-                target.style.background = 'var(--t-panel-hover)';
-                target.style.color = 'var(--t-text)';
-              }}
-              onMouseLeave={(event) => {
-                const target = event.currentTarget;
-                target.style.background = 'transparent';
-                target.style.color = currentLaunchRepoPath ? 'var(--t-text-muted)' : 'var(--t-text-faint)';
+                gap: 4,
               }}
             >
-              <Plus size={15} strokeWidth={2.2} />
-            </button>
+              <button
+                type="button"
+                aria-label="Add repository"
+                onClick={() => {
+                  setReposOpen(true);
+                  setAddRepoIntentNonce((current) => current + 1);
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 26,
+                  height: 26,
+                  padding: 0,
+                  borderRadius: 8,
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--t-text-muted)',
+                  cursor: 'pointer',
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  lineHeight: 0,
+                  transition: 'background 140ms ease, color 140ms ease',
+                }}
+                onMouseEnter={(event) => {
+                  const target = event.currentTarget;
+                  target.style.background = 'var(--t-panel-hover)';
+                  target.style.color = 'var(--t-text)';
+                }}
+                onMouseLeave={(event) => {
+                  const target = event.currentTarget;
+                  target.style.background = 'transparent';
+                  target.style.color = 'var(--t-text-muted)';
+                }}
+              >
+                <Folder size={15} strokeWidth={2.2} />
+              </button>
+              <button
+                type="button"
+                aria-label="Create workspace"
+                onClick={() => {
+                  if (!currentLaunchRepoPath) return;
+                  setReposOpen(true);
+                  setWorkspaceIntentNonce((current) => current + 1);
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 26,
+                  height: 26,
+                  padding: 0,
+                  borderRadius: 8,
+                  border: 'none',
+                  background: 'transparent',
+                  color: currentLaunchRepoPath ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
+                  cursor: currentLaunchRepoPath ? 'pointer' : 'default',
+                  opacity: currentLaunchRepoPath ? 1 : 0.45,
+                  appearance: 'none',
+                  WebkitAppearance: 'none',
+                  lineHeight: 0,
+                  transition: 'background 140ms ease, color 140ms ease',
+                }}
+                onMouseEnter={(event) => {
+                  if (!currentLaunchRepoPath) return;
+                  const target = event.currentTarget;
+                  target.style.background = 'var(--t-panel-hover)';
+                  target.style.color = 'var(--t-text)';
+                }}
+                onMouseLeave={(event) => {
+                  const target = event.currentTarget;
+                  target.style.background = 'transparent';
+                  target.style.color = currentLaunchRepoPath ? 'var(--t-text-muted)' : 'var(--t-text-faint)';
+                }}
+              >
+                <Plus size={15} strokeWidth={2.2} />
+              </button>
+            </div>
           )}
         >
           {fleetMeta?.mode === 'stale' ? (
@@ -4508,37 +4144,49 @@ export const AgentPanel = memo(function AgentPanel({
             onSectionOpenChange={setReposOpen}
             launchIntent={launchIntent}
             workspaceIntent={workspaceIntent}
+            addIntent={addRepoIntent}
             hideHeader
           />
         </SidebarSection>
 
-      </div>
-
-      <ActivityDock
-        count={activityItemCount}
-        summary={latestEventSummary}
-        open={activityOpen}
-        onToggle={() => setActivityOpen((current) => !current)}
-      >
-        <ActivityFeed
-          events={visibleActivityEvents}
-          commits={commits}
-          agents={agents}
-          onSelectSession={onSelectSession}
-          onSelectIssue={onSelectIssue}
-          onSelectCommit={onSelectCommit}
-          onSelectPR={onSelectPR}
-          onReviewPR={onReviewPR}
-          onLaunchTask={(request) => {
-            void launchRepoTask(request).catch((error) => {
-              window.alert(error instanceof Error ? error.message : 'Unable to launch repo task.');
-            });
+        <div
+          style={{
+            position: 'sticky',
+            bottom: 0,
+            marginTop: 10,
+            background: 'var(--t-bg)',
+            zIndex: 1,
           }}
-          activeRepo={effectiveScopedRepo}
-          activeAgentKey={hasSelectedRepo ? null : (expandedGroup ? agents.find(a => a.workspace === expandedGroup)?.sessionKey ?? null : null)}
-          refreshKey={activityRefreshKey}
-        />
-      </ActivityDock>
+        >
+          <ActivityDock
+            title={activityDockTitle}
+            count={activityItemCount}
+            summary={activitySummary}
+            open={activityOpen}
+            onToggle={() => setActivityOpen((current) => !current)}
+          >
+            <ActivityFeed
+              events={visibleActivityEvents}
+              commits={commits}
+              agents={agents}
+              onSelectSession={onSelectSession}
+              onSelectIssue={onSelectIssue}
+              onSelectCommit={onSelectCommit}
+              onSelectPR={onSelectPR}
+              onReviewPR={onReviewPR}
+              onLaunchTask={(request) => {
+                void launchRepoTask(request).catch((error) => {
+                  window.alert(error instanceof Error ? error.message : 'Unable to launch repo task.');
+                });
+              }}
+              activeRepo={effectiveScopedRepo}
+              activeAgentKey={hasSelectedRepo ? null : (expandedGroup ? agents.find(a => a.workspace === expandedGroup)?.sessionKey ?? null : null)}
+              refreshKey={activityRefreshKey}
+            />
+          </ActivityDock>
+        </div>
+
+      </div>
 
       {/* ── Issue Detail Modal ── */}
       {selectedIssue !== null ? (
