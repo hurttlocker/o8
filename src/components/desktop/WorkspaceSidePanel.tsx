@@ -1647,7 +1647,7 @@ const ReviewTab = memo(function ReviewTab({
               {currentPullRequest && repoSlug && onOpenPullRequest ? (
                 <PrimaryActionButton
                   icon={<ArrowRight size={11} strokeWidth={2.2} />}
-                  label="Open PR"
+                  label="Open full PR"
                   onClick={() => onOpenPullRequest(currentPullRequest.number, repoSlug)}
                   tone="neutral"
                 />
@@ -1695,7 +1695,7 @@ const ReviewTab = memo(function ReviewTab({
                   {repoSlug && onOpenPullRequest ? (
                     <ContextIconButton
                       icon={<ArrowRight size={11} strokeWidth={2} />}
-                      label="Open PR"
+                      label="Open full PR"
                       onClick={() => onOpenPullRequest(pullRequest.number, repoSlug)}
                     />
                   ) : null}
@@ -1988,7 +1988,7 @@ const ReviewTab = memo(function ReviewTab({
             {currentPullRequest && repoSlug && onOpenPullRequest ? (
               <ContextActionChip
                 icon={<ArrowRight size={11} strokeWidth={2} />}
-                label="Open PR"
+                label="Open full PR"
                 onClick={() => onOpenPullRequest(currentPullRequest.number, repoSlug)}
               />
             ) : null}
