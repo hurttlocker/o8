@@ -4,9 +4,17 @@ import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const snapshot = await getWorkspaceReviewSnapshot();
+    const { searchParams } = new URL(request.url);
+    const workspacePath = searchParams.get('workspace');
+    const repoSlug = searchParams.get('repo');
+    const strictBranch = searchParams.get('strictBranch') === '1';
+    const snapshot = await getWorkspaceReviewSnapshot({
+      workspacePath,
+      repoSlug,
+      allowFallbackPullRequests: !strictBranch,
+    });
     return NextResponse.json(snapshot, {
       headers: {
         'Cache-Control': 'no-store, max-age=0',
