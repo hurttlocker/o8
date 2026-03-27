@@ -40,7 +40,7 @@ const capabilities: RuntimeCapabilities = {
  * Map internal fleet AgentSummary to the universal RuntimeSession shape.
  */
 function mapAgentToSession(
-  agent: { id: string; name: string; sessionKey: string; status: string; currentTask: string; workspace: string; branch: string; model: string; lastEventAt: string; runtimeSurface?: { ownership?: string; capabilities?: { sendInput?: boolean; interrupt?: boolean; diffContext?: boolean }; lifecycle?: { availability?: string; lastOutcome?: string; lastRunMode?: string; lastRunStartedAt?: string; lastRunFinishedAt?: string; summary?: string }; reviewContext?: { repoSlug?: string; branch?: string; head?: string }; cwd?: string } },
+  agent: { id: string; name: string; sessionKey: string; status: string; currentTask: string; workspace: string; branch: string; model: string; lastEventAt: string; tmuxSession?: string; runtimeSurface?: { ownership?: string; capabilities?: { sendInput?: boolean; interrupt?: boolean; diffContext?: boolean }; lifecycle?: { availability?: string; lastOutcome?: string; lastRunMode?: string; lastRunStartedAt?: string; lastRunFinishedAt?: string; summary?: string }; reviewContext?: { repoSlug?: string; branch?: string; head?: string }; cwd?: string } },
 ): RuntimeSession {
   const surface = agent.runtimeSurface;
   const ownership = (surface?.ownership ?? 'discovered') as RuntimeSession['ownership'];
@@ -77,6 +77,7 @@ function mapAgentToSession(
       lastRunFinishedAt: surface.lifecycle.lastRunFinishedAt,
       summary: surface.lifecycle.summary,
     } : undefined,
+    tmuxSession: agent.tmuxSession,
   };
 }
 

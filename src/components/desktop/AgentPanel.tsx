@@ -27,7 +27,6 @@ import {
   Cpu,
   FileText,
   Folder,
-  FolderOpen,
   GitBranch,
   GitCommit,
   ExternalLink,
@@ -496,7 +495,7 @@ function SidebarSection({
   children,
 }: {
   title: string;
-  icon: LucideIcon;
+  icon?: LucideIcon;
   count?: number | string | null;
   summary?: string | null;
   accent?: string;
@@ -527,19 +526,21 @@ function SidebarSection({
             fontFamily: '-apple-system, system-ui, sans-serif',
           }}
         >
-          <span
-            style={{
-              width: 18,
-              height: 18,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: open ? tone : 'var(--t-text-muted)',
-              flexShrink: 0,
-            }}
-          >
-            <Icon size={14} strokeWidth={2} />
-          </span>
+          {Icon ? (
+            <span
+              style={{
+                width: 18,
+                height: 18,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: open ? tone : 'var(--t-text-muted)',
+                flexShrink: 0,
+              }}
+            >
+              <Icon size={14} strokeWidth={2} />
+            </span>
+          ) : null}
           <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
               <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em' }}>{title}</span>
@@ -622,7 +623,7 @@ function ActivityDock({
           width: '100%',
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 0,
           padding: '10px 14px 8px',
           border: 'none',
           background: 'transparent',
@@ -631,19 +632,6 @@ function ActivityDock({
           fontFamily: '-apple-system, system-ui, sans-serif',
         }}
       >
-        <span
-          style={{
-            width: 18,
-            height: 18,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#f59e0b',
-            flexShrink: 0,
-          }}
-        >
-          <Zap size={14} strokeWidth={2} />
-        </span>
         <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em' }}>{title}</span>
@@ -1574,6 +1562,24 @@ function shortWorkspaceLabel(workspace?: string | null) {
   return parts[0] ?? 'Local activity';
 }
 
+function compactActivitySummaryLabel(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return 'Recent workflow events';
+  const segments = trimmed
+    .split(/[·•]/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length <= 1) return trimmed;
+  const seen = new Set<string>();
+  const deduped = segments.filter((segment) => {
+    const key = segment.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return deduped.join(' · ');
+}
+
 function agentRepoSlug(agent?: AgentDetail | null) {
   return normalizeRepoSlug(agent?.runtimeSurface?.reviewContext?.repoSlug);
 }
@@ -1584,6 +1590,15 @@ function activityItemKey(item: ActivityItem) {
   if (item.kind === 'issue') return `i-${item.repo}-${item.number}`;
   if (item.kind === 'pr') return `pr-${item.repo}-${item.number}`;
   return `ci-${item.repo}-${item.id}`;
+}
+
+function normalizeActivitySubject(value?: string | null) {
+  if (!value) return null;
+  return value
+    .replace(/^\[[^\]]+\]\s*/, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
 }
 
 const ActivityFeed = memo(function ActivityFeed({
@@ -1684,10 +1699,10 @@ const ActivityFeed = memo(function ActivityFeed({
   const isAllRepos = repo === ALL_REPOS_KEY;
   const repoLabel = isAllRepos ? 'GitHub' : repo ? shortRepoLabel(repo) : activeAgentWorkspaceLabel;
   const scopeHelp = isAllRepos
-    ? 'GitHub scope for all registered local repos. Agent events stay live/local.'
+    ? 'Recent pull requests, commits, issues, and checks across your registered repos.'
     : repo
-      ? `GitHub scope for ${repo}. Agent events stay live/local.`
-      : 'No GitHub repo scoped yet. Agent events stay live/local.';
+      ? `Recent pull requests, commits, issues, and checks for ${shortRepoLabel(repo)}.`
+      : 'Recent repo work appears here once a GitHub repo is attached.';
 
   // Clear override when agent changes
   useEffect(() => { setRepoOverride(null); }, [activeAgentKey]);
@@ -1866,10 +1881,12 @@ const ActivityFeed = memo(function ActivityFeed({
     // Repo-specific commits from API
     all.push(...extras.repoCommits, ...fallbackCommitItems);
 
-    // Agent events (always included — they're cross-repo)
-    for (const e of visibleAgentEvents) {
-      const ts = e.timestamp ? new Date(e.timestamp).getTime() || Date.now() : Date.now();
-      all.push({ kind: 'event', data: e, ts });
+    // Keep live/local agent chatter only for the aggregate feed.
+    if (!repo || isAllRepos) {
+      for (const e of visibleAgentEvents) {
+        const ts = e.timestamp ? new Date(e.timestamp).getTime() || Date.now() : Date.now();
+        all.push({ kind: 'event', data: e, ts });
+      }
     }
 
     all.push(...extras.issues, ...extras.prs, ...extras.ciRuns);
@@ -1877,7 +1894,7 @@ const ActivityFeed = memo(function ActivityFeed({
     // Sort newest first
     all.sort((a, b) => b.ts - a.ts);
     return all.slice(0, 40);
-  }, [extras, fallbackCommitItems, visibleAgentEvents]);
+  }, [extras, fallbackCommitItems, isAllRepos, repo, visibleAgentEvents]);
 
   // Counts per type for filter badges
   const counts = useMemo(() => {
@@ -1891,7 +1908,28 @@ const ActivityFeed = memo(function ActivityFeed({
 
   // Apply filter
   const filtered = useMemo(() => {
-    if (filter === 'all') return items;
+    if (filter === 'all') {
+      const primarySubjects = new Set(
+        items.flatMap((item) => {
+          if (item.kind === 'commit') {
+            const subject = normalizeActivitySubject(item.message);
+            return subject ? [subject] : [];
+          }
+          if (item.kind === 'pr') {
+            const subject = normalizeActivitySubject(item.title);
+            return subject ? [subject] : [];
+          }
+          return [];
+        }),
+      );
+      return items.filter((item) => {
+        if (item.kind === 'ci') {
+          const subject = normalizeActivitySubject(item.title);
+          if (subject && primarySubjects.has(subject)) return false;
+        }
+        return true;
+      });
+    }
     return items.filter(i => i.kind === filter);
   }, [items, filter]);
 
@@ -3524,6 +3562,7 @@ export const AgentPanel = memo(function AgentPanel({
   selectedRepo,
   selectedRepoBranch,
   selectedRepoLocalPath,
+  activeWorkspacePath,
   selectedRepoReadiness,
   onLaunchWorkspaceAgent,
   onLaunchWorkspaceTask,
@@ -3546,6 +3585,7 @@ export const AgentPanel = memo(function AgentPanel({
   selectedRepo?: string | null;
   selectedRepoBranch?: string | null;
   selectedRepoLocalPath?: string | null;
+  activeWorkspacePath?: string | null;
   selectedRepoReadiness?: RepoReadiness | null;
   onLaunchWorkspaceAgent?: (request: {
     repoPath: string;
@@ -3906,13 +3946,16 @@ export const AgentPanel = memo(function AgentPanel({
     () => (expandedGroup ? workspaceGroups.find((group) => group.workspace === expandedGroup) ?? null : null),
     [expandedGroup, workspaceGroups],
   );
-  const activeRunsCount = useMemo(
-    () => agents.filter((agent) => ['running', 'watching', 'healthy'].includes(agent.status)).length,
-    [agents],
+  const trackedWorkspaceCount = useMemo(
+    () => workspaceGroups.filter((group) => group.repo !== 'openclaw').length,
+    [workspaceGroups],
   );
-  const reviewRunsCount = useMemo(
-    () => agents.filter((agent) => agent.workspaceStatus === 'in_review' || agent.status === 'reviewing').length,
-    [agents],
+  const reviewWorkspaceCount = useMemo(
+    () => workspaceGroups.filter((group) => (
+      group.repo !== 'openclaw'
+      && group.agents.some((agent) => agent.workspaceStatus === 'in_review' || agent.status === 'reviewing')
+    )).length,
+    [workspaceGroups],
   );
   const preferredWorkspaceGroup = useMemo(
     () => activeWorkspaceGroup
@@ -3924,8 +3967,8 @@ export const AgentPanel = memo(function AgentPanel({
   const currentLaunchRepoPath = hasSelectedRepo ? (selectedRepoLocalPath ?? repoLocalPath) : repoLocalPath;
   const workspacesSummary = inventoryLoading
     ? 'Loading repositories and workspaces...'
-    : activeRunsCount > 0 || reviewRunsCount > 0
-      ? `${activeRunsCount} active · ${reviewRunsCount} in review`
+    : trackedWorkspaceCount > 0 || reviewWorkspaceCount > 0
+      ? `${trackedWorkspaceCount} live · ${reviewWorkspaceCount} in review`
       : null;
   const activityAgentRepoById = useMemo(
     () => new Map(agents.map((agent) => [agent.id, agentRepoSlug(agent)])),
@@ -3941,13 +3984,10 @@ export const AgentPanel = memo(function AgentPanel({
   }, [activityAgentRepoById, effectiveScopedRepo, events]);
   const activityItemCount = visibleActivityEvents.length + commits.length + issues.length + prs.length;
   const activityDockTitle = effectiveScopedRepo ? 'Repo activity' : 'Activity';
-  const latestEventSummary = visibleActivityEvents[0]?.title
-    ?? (prs[0] ? `PR #${prs[0].number} · ${prs[0].title}` : null)
+  const latestEventSummary = (prs[0] ? `PR #${prs[0].number} · ${prs[0].title}` : null)
     ?? (issues[0] ? `Issue #${issues[0].number} · ${issues[0].title}` : null)
-    ?? (commits[0]?.message ?? 'Recent workflow events');
-  const activitySummary = effectiveScopedRepo
-    ? `${shortRepoLabel(effectiveScopedRepo)} · ${latestEventSummary}`
-    : latestEventSummary;
+    ?? (commits[0]?.message ?? compactActivitySummaryLabel(visibleActivityEvents[0]?.title));
+  const activitySummary = compactActivitySummaryLabel(latestEventSummary);
   const launchIntent = launchIntentNonce > 0 && currentLaunchRepoPath
     ? { repoPath: currentLaunchRepoPath, nonce: launchIntentNonce }
     : null;
@@ -3992,7 +4032,6 @@ export const AgentPanel = memo(function AgentPanel({
       >
         <SidebarSection
           title="Workspaces"
-          icon={FolderOpen}
           summary={workspacesSummary}
           accent="#2563eb"
           open={reposOpen}
@@ -4140,6 +4179,7 @@ export const AgentPanel = memo(function AgentPanel({
             onReviewPR={onReviewPR}
             onLaunchWorkspaceAgent={onLaunchWorkspaceAgent}
             activeRepoLocalPath={currentLaunchRepoPath}
+            activeWorkspacePath={activeWorkspacePath ?? selectedRepoLocalPath ?? null}
             sectionOpen={reposOpen}
             onSectionOpenChange={setReposOpen}
             launchIntent={launchIntent}

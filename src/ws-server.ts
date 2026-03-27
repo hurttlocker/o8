@@ -144,6 +144,7 @@ interface ClientState {
 interface TerminalAttachment {
   id: string;
   sessionName: string;
+  kind: 'dash-shell' | 'tmux-attach' | 'managed-process';
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   ptyProcess: any; // node-pty IPty
   clientIds: Set<string>;
@@ -153,10 +154,29 @@ interface TerminalAttachment {
   batchTimer: ReturnType<typeof setTimeout> | null;
   lastOutputAt: number; // timestamp of last PTY output (for stall detection)
   createdAt: number;    // timestamp of terminal creation
+  orphanTimer: ReturnType<typeof setTimeout> | null;
+  scrollbackChunks: string[];
+  scrollbackBytes: number;
+}
+
+interface InternalTerminalSpawnPayload {
+  sessionName?: string;
+  shellCommand?: string;
+  cwd?: string;
+  cols?: number;
+  rows?: number;
+  env?: Record<string, string>;
+}
+
+interface InternalTerminalSignalPayload {
+  sessionName?: string;
+  signal?: string;
 }
 
 const terminalAttachments = new Map<string, TerminalAttachment>();
 const TERMINAL_BATCH_MS = 16; // batch PTY output every 16ms (60fps)
+const DASH_SESSION_ORPHAN_TTL_MS = 30 * 60 * 1000;
+const TERMINAL_SCROLLBACK_MAX_BYTES = 512 * 1024;
 
 function sanitizePtyEnv() {
   const env: Record<string, string> = {};
@@ -209,6 +229,162 @@ function resolveTmuxBinary() {
   } catch {
     return 'tmux';
   }
+}
+
+function isDashTerminalSession(sessionName: string) {
+  return sessionName.startsWith('cortex-dash-');
+}
+
+function spawnDashShellPty(
+  sessionName: string,
+  cols: number,
+  rows: number,
+) {
+  if (!pty) {
+    throw new Error('node-pty not available');
+  }
+
+  const shell = resolvePreferredShell();
+  const env = sanitizePtyEnv();
+  env.CORTEX_TERMINAL_SESSION_NAME = sessionName;
+  const cwd = process.env.HOME ?? homedir() ?? '/tmp';
+
+  console.log(`[ws-server] Spawning dashboard PTY shell: ${shell} -l (${sessionName})`);
+  return pty.spawn(shell, ['-l'], {
+    name: 'xterm-256color',
+    cols,
+    rows,
+    cwd,
+    env,
+  });
+}
+
+function spawnManagedCommandPty(
+  sessionName: string,
+  shellCommand: string,
+  cwd: string,
+  cols: number,
+  rows: number,
+  envOverrides?: Record<string, string>,
+) {
+  if (!pty) {
+    throw new Error('node-pty not available');
+  }
+
+  const shell = resolvePreferredShell();
+  const env = {
+    ...sanitizePtyEnv(),
+    ...(envOverrides ?? {}),
+    CORTEX_TERMINAL_SESSION_NAME: sessionName,
+  };
+
+  console.log(`[ws-server] Spawning managed PTY session: ${shell} -lc <command> (${sessionName})`);
+  return pty.spawn(shell, ['-l', '-c', shellCommand], {
+    name: 'xterm-256color',
+    cols,
+    rows,
+    cwd,
+    env,
+  });
+}
+
+function trimScrollback(att: TerminalAttachment) {
+  while (att.scrollbackBytes > TERMINAL_SCROLLBACK_MAX_BYTES && att.scrollbackChunks.length > 0) {
+    const removed = att.scrollbackChunks.shift() ?? '';
+    att.scrollbackBytes -= Buffer.byteLength(removed, 'utf-8');
+  }
+}
+
+function appendScrollback(att: TerminalAttachment, data: string) {
+  if (!data) return;
+  att.scrollbackChunks.push(data);
+  att.scrollbackBytes += Buffer.byteLength(data, 'utf-8');
+  trimScrollback(att);
+}
+
+function sendTerminalScrollback(client: ClientState, attachment: TerminalAttachment) {
+  if (attachment.scrollbackChunks.length === 0) return;
+  const scrollback = attachment.scrollbackChunks.join('');
+  if (!scrollback) return;
+  const encoded = Buffer.from(scrollback, 'utf-8').toString('base64');
+  sendRaw(client, JSON.stringify({
+    channel: 'terminal',
+    event: 'data',
+    data: { sessionName: attachment.sessionName, data: encoded },
+  }));
+}
+
+function registerTerminalAttachment(attachment: TerminalAttachment) {
+  const { sessionName, ptyProcess } = attachment;
+
+  ptyProcess.onData((data: string) => {
+    const att = terminalAttachments.get(sessionName);
+    if (!att) return;
+
+    att.lastOutputAt = Date.now();
+    appendScrollback(att, data);
+    att.batchBuffer += data;
+
+    if (!att.batchTimer) {
+      att.batchTimer = setTimeout(() => {
+        const buffered = att.batchBuffer;
+        att.batchBuffer = '';
+        att.batchTimer = null;
+
+        if (!buffered || att.clientIds.size === 0) return;
+
+        const encoded = Buffer.from(buffered, 'utf-8').toString('base64');
+        const msg = JSON.stringify({
+          channel: 'terminal',
+          event: 'data',
+          data: { sessionName, data: encoded },
+        });
+
+        for (const cid of att.clientIds) {
+          const c = clients.get(cid);
+          if (c) sendRaw(c, msg);
+        }
+      }, TERMINAL_BATCH_MS);
+    }
+  });
+
+  ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
+    console.log(`[ws-server] Terminal PTY exited for ${sessionName} (code ${exitCode})`);
+    const att = terminalAttachments.get(sessionName);
+    if (!att) return;
+
+    if (att.batchTimer) clearTimeout(att.batchTimer);
+    if (att.orphanTimer) clearTimeout(att.orphanTimer);
+
+    if (att.batchBuffer) {
+      appendScrollback(att, att.batchBuffer);
+      const encoded = Buffer.from(att.batchBuffer, 'utf-8').toString('base64');
+      const flushMsg = JSON.stringify({
+        channel: 'terminal', event: 'data', data: { sessionName, data: encoded },
+      });
+      for (const cid of att.clientIds) {
+        const c = clients.get(cid);
+        if (c) sendRaw(c, flushMsg);
+      }
+    }
+
+    const exitMsg = JSON.stringify({
+      channel: 'terminal', event: 'exited', data: { sessionName, exitCode },
+    });
+    for (const cid of att.clientIds) {
+      const c = clients.get(cid);
+      if (c) {
+        sendRaw(c, exitMsg);
+        c.terminalSessions.delete(sessionName);
+      }
+    }
+
+    terminalAttachments.delete(sessionName);
+
+    if (!isDashTerminalSession(sessionName)) {
+      broadcastLifecycle(sessionName, exitCode === 0 ? 'completed' : 'failed', exitCode);
+    }
+  });
 }
 
 function spawnTmuxAttachPty(
@@ -1384,18 +1560,14 @@ function startPollingLoops() {
 
 // ── Terminal handlers ──
 
-/** Find an existing cortex-dash tmux session to reuse, or return null. */
+/** Find an existing detached dashboard PTY session to reuse, or return null. */
 function findExistingDashSession(): string | null {
-  try {
-    const out = execSync('tmux list-sessions -F "#{session_name}" 2>/dev/null', {
-      encoding: 'utf-8',
-      timeout: 3000,
-    });
-    const sessions = out.trim().split('\n').filter(n => n.startsWith('cortex-dash-'));
-    return sessions[0] ?? null;
-  } catch {
-    return null;
+  for (const [sessionName, attachment] of terminalAttachments) {
+    if (attachment.kind === 'dash-shell' && attachment.clientIds.size === 0) {
+      return sessionName;
+    }
   }
+  return null;
 }
 
 // Helper — all terminal events must wrap payload in `data` to match hook parser
@@ -1416,8 +1588,8 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   // Only opportunistically reuse orphaned dashboard shells for non-targeted creates.
   // Explicit request IDs should always receive a fresh tmux session so ownership is deterministic.
   const existing = findExistingDashSession();
-  if (!requestId && existing && !terminalAttachments.has(existing)) {
-    console.log(`[ws-server] Reusing existing tmux session: ${existing}`);
+  if (!requestId && existing) {
+    console.log(`[ws-server] Reusing existing dashboard PTY session: ${existing}`);
     sendTerminal(client, 'created', { sessionName: existing, requestId });
     handleTerminalAttach(client, { sessionName: existing, cols, rows });
     return;
@@ -1427,12 +1599,27 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   const sessionName = `cortex-dash-${shortId}`;
 
   try {
-    const home = process.env.HOME ?? '/tmp';
-    execSync(
-      `tmux new-session -d -s ${sessionName} -x ${cols} -y ${rows} -c "${home}" \\; set-option status off \\; set-option default-terminal "xterm-256color" \\; set-option allow-passthrough on \\; set-environment TERM xterm-256color \\; set-environment LANG en_US.UTF-8 \\; set-environment LC_ALL en_US.UTF-8`,
-      { encoding: 'utf-8', timeout: 5000 },
-    );
-    console.log(`[ws-server] Created tmux session: ${sessionName}`);
+    const ptyProcess = spawnDashShellPty(sessionName, cols, rows);
+    const now = Date.now();
+    const attachment: TerminalAttachment = {
+      id: randomUUID(),
+      sessionName,
+      kind: 'dash-shell',
+      ptyProcess,
+      clientIds: new Set(),
+      cols,
+      rows,
+      batchBuffer: '',
+      batchTimer: null,
+      lastOutputAt: now,
+      createdAt: now,
+      orphanTimer: null,
+      scrollbackChunks: [],
+      scrollbackBytes: 0,
+    };
+    terminalAttachments.set(sessionName, attachment);
+    registerTerminalAttachment(attachment);
+    console.log(`[ws-server] Created dashboard PTY session: ${sessionName}`);
 
     sendTerminal(client, 'created', { sessionName, requestId });
     handleTerminalAttach(client, { sessionName, cols, rows });
@@ -1463,10 +1650,22 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
 
   if (attachment) {
     // Add this client to existing attachment
+    if (attachment.orphanTimer) {
+      clearTimeout(attachment.orphanTimer);
+      attachment.orphanTimer = null;
+    }
     attachment.clientIds.add(client.id);
     client.terminalSessions.add(sessionName);
     sendTerminal(client, 'attached', { sessionName });
+    if (attachment.kind === 'dash-shell') {
+      sendTerminalScrollback(client, attachment);
+    }
     console.log(`[ws-server] Client ${client.id} attached to existing terminal ${sessionName}`);
+    return;
+  }
+
+  if (isDashTerminalSession(sessionName)) {
+    sendTerminal(client, 'error', { sessionName, error: 'Dashboard terminal session no longer exists. Create a new shell.' });
     return;
   }
 
@@ -1478,6 +1677,7 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
     attachment = {
       id: randomUUID(),
       sessionName,
+      kind: 'tmux-attach',
       ptyProcess,
       clientIds: new Set([client.id]),
       cols,
@@ -1486,78 +1686,14 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
       batchTimer: null,
       lastOutputAt: now,
       createdAt: now,
+      orphanTimer: null,
+      scrollbackChunks: [],
+      scrollbackBytes: 0,
     };
 
     terminalAttachments.set(sessionName, attachment);
     client.terminalSessions.add(sessionName);
-
-    // Wire PTY output → batched WS broadcast
-    ptyProcess.onData((data: string) => {
-      const att = terminalAttachments.get(sessionName);
-      if (!att) return;
-
-      att.lastOutputAt = Date.now();
-      att.batchBuffer += data;
-
-      if (!att.batchTimer) {
-        att.batchTimer = setTimeout(() => {
-          const buffered = att.batchBuffer;
-          att.batchBuffer = '';
-          att.batchTimer = null;
-
-          if (!buffered) return;
-
-          const encoded = Buffer.from(buffered, 'utf-8').toString('base64');
-          const msg = JSON.stringify({
-            channel: 'terminal',
-            event: 'data',
-            data: { sessionName, data: encoded },
-          });
-
-          for (const cid of att.clientIds) {
-            const c = clients.get(cid);
-            if (c) sendRaw(c, msg);
-          }
-        }, TERMINAL_BATCH_MS);
-      }
-    });
-
-    ptyProcess.onExit(({ exitCode }: { exitCode: number }) => {
-      console.log(`[ws-server] Terminal PTY exited for ${sessionName} (code ${exitCode})`);
-      const att = terminalAttachments.get(sessionName);
-      if (!att) return;
-
-      if (att.batchTimer) clearTimeout(att.batchTimer);
-
-      // Flush remaining buffer
-      if (att.batchBuffer) {
-        const encoded = Buffer.from(att.batchBuffer, 'utf-8').toString('base64');
-        const flushMsg = JSON.stringify({
-          channel: 'terminal', event: 'data', data: { sessionName, data: encoded },
-        });
-        for (const cid of att.clientIds) {
-          const c = clients.get(cid);
-          if (c) sendRaw(c, flushMsg);
-        }
-      }
-
-      // Notify all clients
-      const exitMsg = JSON.stringify({
-        channel: 'terminal', event: 'exited', data: { sessionName, exitCode },
-      });
-      for (const cid of att.clientIds) {
-        const c = clients.get(cid);
-        if (c) {
-          sendRaw(c, exitMsg);
-          c.terminalSessions.delete(sessionName);
-        }
-      }
-
-      terminalAttachments.delete(sessionName);
-
-      // ── Broadcast agent lifecycle event to ALL clients ──
-      broadcastLifecycle(sessionName, exitCode === 0 ? 'completed' : 'failed', exitCode);
-    });
+    registerTerminalAttachment(attachment);
 
     sendTerminal(client, 'attached', { sessionName });
     console.log(`[ws-server] Client ${client.id} attached to new terminal ${sessionName}`);
@@ -1651,23 +1787,24 @@ function removeClientFromTerminal(clientId: string, sessionName: string) {
 
   // If no more clients, destroy the PTY handle and clean up the tmux session
   if (attachment.clientIds.size === 0) {
-    console.log(`[ws-server] No clients left for terminal ${sessionName} — destroying PTY + tmux`);
+    if (attachment.kind === 'dash-shell') {
+      if (attachment.orphanTimer) clearTimeout(attachment.orphanTimer);
+      attachment.orphanTimer = setTimeout(() => {
+        const latest = terminalAttachments.get(sessionName);
+        if (!latest || latest.clientIds.size > 0) return;
+        console.log(`[ws-server] Reaping idle dashboard PTY session: ${sessionName}`);
+        if (latest.batchTimer) clearTimeout(latest.batchTimer);
+        try { latest.ptyProcess.kill(); } catch { /* already gone */ }
+        terminalAttachments.delete(sessionName);
+      }, DASH_SESSION_ORPHAN_TTL_MS);
+      console.log(`[ws-server] Dashboard terminal ${sessionName} detached — keeping PTY alive for reattach`);
+      return;
+    }
+
+    console.log(`[ws-server] No clients left for terminal ${sessionName} — destroying PTY`);
     if (attachment.batchTimer) clearTimeout(attachment.batchTimer);
     try { attachment.ptyProcess.kill(); } catch { /* already gone */ }
     terminalAttachments.delete(sessionName);
-
-    // Kill dashboard tmux sessions after a grace period (allows reconnection on hot reload).
-    // Agent-launched sessions (cortex-codex-*, cortex-claude-*) persist for reattach.
-    if (sessionName.startsWith('cortex-dash-')) {
-      setTimeout(() => {
-        // Only kill if no one reattached during the grace period
-        if (terminalAttachments.has(sessionName)) return;
-        try {
-          execSync(`tmux kill-session -t ${sessionName} 2>/dev/null`, { timeout: 3000 });
-          console.log(`[ws-server] Killed ephemeral tmux session: ${sessionName} (after grace period)`);
-        } catch { /* already gone */ }
-      }, 10_000);
-    }
   }
 }
 
@@ -1752,6 +1889,12 @@ function handleAgentKill(_client: ClientState, msg: Record<string, unknown>) {
   const signal = (msg.signal as string) ?? 'SIGTERM';
   if (!sessionName) return;
 
+  terminateTerminalSession(sessionName, signal);
+}
+
+function terminateTerminalSession(sessionName: string, signal: string = 'SIGTERM') {
+  if (!sessionName) return;
+
   console.log(`[ws-server] Kill request for ${sessionName} (signal: ${signal})`);
 
   // 1. Try killing via PTY attachment (Codex / Claude Code terminals)
@@ -1786,8 +1929,17 @@ function handleAgentKill(_client: ClientState, msg: Record<string, unknown>) {
   // 3. Try OpenClaw session interrupt (for OpenClaw agents)
   // OpenClaw agents don't have PTYs — they run through the gateway
   // For now, broadcast the kill state; the frontend can steer via the API
+  if (sessionName.startsWith('cortex-')) {
+    console.log(`[ws-server] No live PTY found for ${sessionName} — skipping stale kill broadcast`);
+    return;
+  }
   console.log(`[ws-server] No PTY/tmux found for ${sessionName} — broadcasting killed state`);
   broadcastLifecycle(sessionName, 'killed');
+}
+
+function isAuthorizedInternalRequest(req: import('http').IncomingMessage) {
+  const auth = req.headers.authorization ?? '';
+  return auth === `Bearer ${WS_TOKEN}`;
 }
 
 // ── Server startup ──
@@ -1808,9 +1960,185 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  if (req.url === '/terminal-spawn' && req.method === 'POST') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      let payload: InternalTerminalSpawnPayload = {};
+      try {
+        payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as InternalTerminalSpawnPayload;
+      } catch {
+        res.writeHead(400);
+        res.end('invalid json');
+        return;
+      }
+
+      const sessionName = payload?.sessionName?.trim();
+      const shellCommand = payload?.shellCommand?.trim();
+      const cwd = payload?.cwd?.trim();
+      const cols = typeof payload?.cols === 'number' ? payload.cols : 120;
+      const rows = typeof payload?.rows === 'number' ? payload.rows : 30;
+      if (!sessionName || !shellCommand || !cwd) {
+        res.writeHead(400);
+        res.end('sessionName, shellCommand, and cwd are required');
+        return;
+      }
+      if (!/^cortex-[a-z0-9_-]+$/i.test(sessionName)) {
+        res.writeHead(400);
+        res.end('invalid session name');
+        return;
+      }
+      if (!pty) {
+        res.writeHead(503);
+        res.end('node-pty unavailable');
+        return;
+      }
+      if (terminalAttachments.has(sessionName)) {
+        const existing = terminalAttachments.get(sessionName);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, sessionName, pid: existing?.ptyProcess?.pid ?? null }));
+        return;
+      }
+
+      try {
+        const ptyProcess = spawnManagedCommandPty(sessionName, shellCommand, cwd, cols, rows, payload?.env);
+        const now = Date.now();
+        const attachment: TerminalAttachment = {
+          id: randomUUID(),
+          sessionName,
+          kind: 'managed-process',
+          ptyProcess,
+          clientIds: new Set(),
+          cols,
+          rows,
+          batchBuffer: '',
+          batchTimer: null,
+          lastOutputAt: now,
+          createdAt: now,
+          orphanTimer: null,
+          scrollbackChunks: [],
+          scrollbackBytes: 0,
+        };
+        terminalAttachments.set(sessionName, attachment);
+        registerTerminalAttachment(attachment);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, sessionName, pid: ptyProcess.pid ?? null }));
+      } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to spawn terminal session' }));
+      }
+    });
+    return;
+  }
+
+  if (req.url === '/terminal-sessions' && req.method === 'GET') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+
+    const sessions = [...terminalAttachments.values()]
+      .filter((attachment) => attachment.kind === 'dash-shell')
+      .map((attachment) => attachment.sessionName);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ sessions }));
+    return;
+  }
+
+  if (req.url === '/terminal-signal' && req.method === 'POST') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      let payload: InternalTerminalSignalPayload = {};
+      try {
+        payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as InternalTerminalSignalPayload;
+      } catch {
+        res.writeHead(400);
+        res.end('invalid json');
+        return;
+      }
+
+      const sessionName = payload?.sessionName?.trim();
+      const signal = payload?.signal?.trim() || 'SIGTERM';
+      if (!sessionName) {
+        res.writeHead(400);
+        res.end('sessionName required');
+        return;
+      }
+
+      try {
+        terminateTerminalSession(sessionName, signal);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to signal terminal session' }));
+      }
+    });
+    return;
+  }
+
+  if (req.url === '/terminal-exec' && req.method === 'POST') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      let payload: { sessionName?: string; command?: string } | null = null;
+      try {
+        payload = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as { sessionName?: string; command?: string };
+      } catch {
+        res.writeHead(400);
+        res.end('invalid json');
+        return;
+      }
+
+      const sessionName = payload?.sessionName?.trim();
+      const command = payload?.command;
+      if (!sessionName || !command) {
+        res.writeHead(400);
+        res.end('sessionName and command required');
+        return;
+      }
+
+      const attachment = terminalAttachments.get(sessionName);
+      if (!attachment) {
+        res.writeHead(404);
+        res.end('session not found');
+        return;
+      }
+
+      try {
+        attachment.ptyProcess.write(`${command}\n`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to write to terminal' }));
+      }
+    });
+    return;
+  }
+
   if (req.url === '/internal/realtime' && req.method === 'POST') {
-    const auth = req.headers.authorization ?? '';
-    if (auth !== `Bearer ${WS_TOKEN}`) {
+    if (!isAuthorizedInternalRequest(req)) {
       res.writeHead(401);
       res.end('unauthorized');
       return;

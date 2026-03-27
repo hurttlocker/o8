@@ -22,11 +22,10 @@ import type {
   LaunchOptions,
 } from './types';
 import {
-  isTmuxAvailable,
   tmuxSessionName,
-  createTmuxSession,
-  renameTmuxSession,
 } from '@/lib/terminal/tmux';
+import { spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
+import { getRuntimeTerminalSession, registerRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
 
 const execFileAsync = promisify(execFile);
 
@@ -76,6 +75,30 @@ function quoteShellArg(value: string) {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
+async function spawnDetached(command: string, args: string[], cwd: string) {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: 'ignore',
+      detached: true,
+      cwd,
+      env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+    });
+
+    const handleSpawn = () => {
+      child.off('error', handleError);
+      child.unref();
+      resolve();
+    };
+    const handleError = (error: Error) => {
+      child.off('spawn', handleSpawn);
+      reject(error);
+    };
+
+    child.once('spawn', handleSpawn);
+    child.once('error', handleError);
+  });
+}
+
 async function listProjectSessionIds(projectPath: string) {
   const projectDir = path.join(CLAUDE_PROJECTS_DIR, encodeProjectPath(projectPath));
   const entries = await readdir(projectDir).catch(() => []);
@@ -84,6 +107,61 @@ async function listProjectSessionIds(projectPath: string) {
       .filter((entry) => entry.endsWith('.jsonl'))
       .map((entry) => entry.replace(/\.jsonl$/, '')),
   );
+}
+
+async function findSessionJsonl(sessionId: string) {
+  try {
+    const projectDirs = await readdir(CLAUDE_PROJECTS_DIR);
+    for (const projectDirName of projectDirs) {
+      const jsonlPath = path.join(CLAUDE_PROJECTS_DIR, projectDirName, `${sessionId}.jsonl`);
+      try {
+        await access(jsonlPath);
+        return { jsonlPath, projectDirName };
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+async function readSessionCwd(jsonlPath: string) {
+  try {
+    const raw = await readFile(jsonlPath, 'utf8');
+    for (const line of raw.split('\n')) {
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line) as ClaudeCodeMessage;
+        if (typeof parsed.cwd === 'string' && parsed.cwd) {
+          return parsed.cwd;
+        }
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+}
+
+async function resolveSessionProjectPath(sessionId: string) {
+  const match = await findSessionJsonl(sessionId);
+  if (!match) {
+    return null;
+  }
+
+  const cwd = await readSessionCwd(match.jsonlPath);
+  return {
+    jsonlPath: match.jsonlPath,
+    projectDirName: match.projectDirName,
+    projectPath: cwd ?? decodeProjectPath(match.projectDirName),
+    cwd,
+  };
 }
 
 function extractSessionIdFromOutput(raw: string) {
@@ -237,7 +315,6 @@ interface SessionMeta {
 
 async function discoverProjectSessions(projectDirName: string): Promise<SessionMeta[]> {
   const projectDir = path.join(CLAUDE_PROJECTS_DIR, projectDirName);
-  const projectPath = decodeProjectPath(projectDirName);
 
   let entries: string[];
   try {
@@ -294,6 +371,8 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
           }
         } catch { /* skip */ }
       }
+
+      const projectPath = cwd ?? decodeProjectPath(projectDirName);
 
       // Extract context % from last assistant message usage (read tail)
       let contextUsedPercent: number | undefined;
@@ -460,6 +539,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         initialTask: meta.firstUserMessage,
         model: meta.model ?? 'claude',
         contextUsedPercent: meta.contextUsedPercent,
+        tmuxSession: getRuntimeTerminalSession(`claude-code:${meta.sessionId}`)?.sessionName ?? undefined,
       };
     });
 
@@ -574,6 +654,7 @@ export const claudeCodeRuntime: AgentRuntime = {
         initialTask: firstUserMessage ?? `Live Claude Code session (PID ${proc.pid})`,
         model: model ?? 'claude',
         contextUsedPercent,
+        tmuxSession: realSessionId ? (getRuntimeTerminalSession(`claude-code:${realSessionId}`)?.sessionName ?? undefined) : undefined,
       });
     }
 
@@ -647,34 +728,40 @@ export const claudeCodeRuntime: AgentRuntime = {
       const cliArgs = [
         '-p', '--print',
         ...(opts.worktreeFlag ? ['--worktree', opts.worktreeFlag] : []),
-        '--permission-mode', 'bypassPermissions',
+        '--dangerously-skip-permissions',
         '--output-format', 'stream-json',
         '--verbose',
         opts.prompt,
       ];
-      let tmuxName: string | null = null;
+      const bridgeSessionName = tmuxSessionName('cc', launchId);
+      const shellCmd = `${quoteShellArg(CLAUDE_BIN)} ${cliArgs.map(quoteShellArg).join(' ')} | tee ${quoteShellArg(stdoutPath)} 2>${quoteShellArg(stderrPath)}`;
 
-      // Try tmux-wrapped launch first
-      if (await isTmuxAvailable()) {
-        tmuxName = tmuxSessionName('cc', launchId);
-        const shellCmd = `${quoteShellArg(CLAUDE_BIN)} ${cliArgs.map(quoteShellArg).join(' ')} | tee ${quoteShellArg(stdoutPath)} 2>${quoteShellArg(stderrPath)}`;
-        const result = await createTmuxSession(tmuxName, 'sh', ['-c', shellCmd], opts.cwd);
-        if (result.ok) {
-          const sessionId = await waitForLaunchSessionId(stdoutPath, projectPaths, knownSessionIds);
-          if (sessionId) {
-            await renameTmuxSession(tmuxName, tmuxSessionName('cc', sessionId));
-            return {
-              ok: true,
-              note: `Claude Code session launched in tmux:${tmuxSessionName('cc', sessionId)} at ${shortenPath(opts.cwd)}`,
-              sessionKey: `claude-code:${sessionId}`,
-            };
-          }
+      try {
+        await spawnBridgeTerminalSession({
+          sessionName: bridgeSessionName,
+          shellCommand: shellCmd,
+          cwd: opts.cwd,
+          env: { FORCE_COLOR: '0', NO_COLOR: '1' },
+        });
+        const sessionId = await waitForLaunchSessionId(stdoutPath, projectPaths, knownSessionIds);
+        if (sessionId) {
+          registerRuntimeTerminalSession(`claude-code:${sessionId}`, {
+            sessionName: bridgeSessionName,
+            runtime: 'claude-code',
+            cwd: opts.cwd,
+          });
           return {
-            ok: false,
-            note: `Claude Code launched in tmux:${tmuxName}, but Cortex could not resolve the persistent session id.`,
+            ok: true,
+            note: `Claude Code session launched in terminal:${bridgeSessionName} at ${shortenPath(opts.cwd)}`,
+            sessionKey: `claude-code:${sessionId}`,
           };
         }
-        // tmux failed — fall through to detached spawn
+        return {
+          ok: false,
+          note: `Claude Code launched in terminal:${bridgeSessionName}, but Cortex could not resolve the persistent session id.`,
+        };
+      } catch {
+        // bridge spawn failed — fall through to detached spawn
       }
 
       // Fallback: detached spawn (existing behavior)
@@ -753,19 +840,8 @@ export const claudeCodeRuntime: AgentRuntime = {
     // Resolve the CWD for this session so we can use --continue (which is more
     // reliable than --resume <id> — the latter requires the session to be in
     // Claude's internal conversation store, which has different retention)
-    let sessionCwd: string | undefined;
-    try {
-      const projectDirs = await readdir(CLAUDE_PROJECTS_DIR);
-      for (const dir of projectDirs) {
-        const candidate = path.join(CLAUDE_PROJECTS_DIR, dir, `${sessionId}.jsonl`);
-        try {
-          await access(candidate);
-          // Decode the project dir name back to a path
-          sessionCwd = decodeProjectPath(dir);
-          break;
-        } catch { /* not in this project */ }
-      }
-    } catch { /* projects dir missing */ }
+    const sessionProject = await resolveSessionProjectPath(sessionId);
+    const sessionCwd = sessionProject?.cwd ?? sessionProject?.projectPath;
 
     // Use --continue with the correct CWD (picks up most recent conversation
     // in that directory). Falls back to --resume <id> if CWD unknown.
@@ -773,7 +849,7 @@ export const claudeCodeRuntime: AgentRuntime = {
       ? [
           '-p', '--print',
           '--continue',
-          '--permission-mode', 'bypassPermissions',
+          '--dangerously-skip-permissions',
           '--output-format', 'stream-json',
           '--verbose',
           message,
@@ -781,7 +857,7 @@ export const claudeCodeRuntime: AgentRuntime = {
       : [
           '-p', '--print',
           '--resume', sessionId,
-          '--permission-mode', 'bypassPermissions',
+          '--dangerously-skip-permissions',
           '--output-format', 'stream-json',
           '--verbose',
           message,
@@ -790,32 +866,14 @@ export const claudeCodeRuntime: AgentRuntime = {
     const spawnCwd = sessionCwd ?? process.env.HOME ?? '/tmp';
 
     try {
-      // Try tmux-wrapped resume
-      if (await isTmuxAvailable()) {
-        const tmuxName = tmuxSessionName('cc', sessionId);
-        const result = await createTmuxSession(tmuxName, 'claude', cliArgs, spawnCwd);
-        if (result.ok) {
-          return {
-            ok: true,
-            note: `Message sent to Claude Code session${sessionCwd ? ` in ${shortenPath(sessionCwd)}` : ''}.`,
-            sessionKey,
-          };
-        }
-      }
-
-      // Fallback: detached spawn
-      const child = spawn('claude', cliArgs, {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        detached: true,
-        cwd: spawnCwd,
-        env: { ...process.env },
-      });
-
-      child.unref();
+      // Resume must start a fresh Claude CLI turn every time. Reusing a dead
+      // tmux session name can silently no-op on later sends, so resume runs
+      // detached instead of through the tmux session helper.
+      await spawnDetached(CLAUDE_BIN, cliArgs, spawnCwd);
 
       return {
         ok: true,
-        note: 'Message sent to Claude Code session.',
+        note: `Message sent to Claude Code session${sessionCwd ? ` in ${shortenPath(sessionCwd)}` : ''}.`,
         sessionKey,
       };
     } catch (err) {
@@ -839,18 +897,8 @@ export const claudeCodeRuntime: AgentRuntime = {
     if (livePidMatch?.[1]) {
       targetPids = [Number(livePidMatch[1])];
     } else {
-      let sessionCwd: string | undefined;
-      try {
-        const projectDirs = await readdir(CLAUDE_PROJECTS_DIR);
-        for (const dir of projectDirs) {
-          const candidate = path.join(CLAUDE_PROJECTS_DIR, dir, `${sessionId}.jsonl`);
-          try {
-            await access(candidate);
-            sessionCwd = decodeProjectPath(dir);
-            break;
-          } catch { /* skip */ }
-        }
-      } catch { /* skip */ }
+      const sessionProject = await resolveSessionProjectPath(sessionId);
+      const sessionCwd = sessionProject?.cwd ?? sessionProject?.projectPath;
 
       if (sessionCwd) {
         const normalizedTarget = normalizeFsPath(sessionCwd);
@@ -895,18 +943,8 @@ export const claudeCodeRuntime: AgentRuntime = {
     const sessionId = sessionKey.replace('claude-code:', '');
 
     // Find the session to get CWD
-    let cwd: string | null = null;
-    try {
-      const projectDirs = await readdir(CLAUDE_PROJECTS_DIR);
-      for (const dir of projectDirs) {
-        const jsonlPath = path.join(CLAUDE_PROJECTS_DIR, dir, `${sessionId}.jsonl`);
-        try {
-          await access(jsonlPath);
-          cwd = decodeProjectPath(dir);
-          break;
-        } catch { /* not in this project */ }
-      }
-    } catch { /* projects dir missing */ }
+    const sessionProject = await resolveSessionProjectPath(sessionId);
+    const cwd = sessionProject?.cwd ?? sessionProject?.projectPath ?? null;
 
     if (!cwd) return [];
 

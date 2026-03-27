@@ -350,7 +350,7 @@ function GlassModal({
             alignItems: 'flex-start',
             justifyContent: 'space-between',
             gap: 12,
-            padding: '16px 18px 14px',
+            padding: 'var(--cortex-dialog-header-padding)',
             borderBottom: '1px solid rgba(255, 255, 255, 0.14)',
           }}
         >
@@ -402,7 +402,7 @@ function GlassModal({
 
         <div
           style={{
-            padding: 18,
+            padding: 'var(--cortex-dialog-body-padding)',
             overflowY: 'auto',
             display: 'flex',
             flexDirection: 'column',
@@ -415,7 +415,7 @@ function GlassModal({
         {footer ? (
           <div
             style={{
-              padding: '14px 18px 18px',
+              padding: 'var(--cortex-dialog-footer-padding)',
               borderTop: '1px solid rgba(255, 255, 255, 0.14)',
               display: 'flex',
               alignItems: 'center',
@@ -610,6 +610,7 @@ function RepoCard({
   expanded,
   onToggle,
   isActive = false,
+  activeWorkspacePath = null,
 }: {
   repo: RepoRegistryEntry;
   workspaceNotice: WorkspaceCreateResult | null;
@@ -627,6 +628,7 @@ function RepoCard({
   expanded: boolean;
   onToggle: () => void;
   isActive?: boolean;
+  activeWorkspacePath?: string | null;
 }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [cardWidth, setCardWidth] = useState(0);
@@ -1210,7 +1212,12 @@ function RepoCard({
     return Array.from(unique.values());
   }, [agentsByBranch]);
 
-  const currentBadge = isActive ? (
+  const activeWorktree = useMemo(
+    () => (worktreeSummary?.worktrees ?? []).find((worktree) => worktree.path === activeWorkspacePath) ?? null,
+    [activeWorkspacePath, worktreeSummary],
+  );
+  const activeWorktreeTone = activeWorktree ? worktreeStageTone(activeWorktree.status) : null;
+  const currentBadge = isActive && !activeWorktree ? (
     <span
       style={{
         display: 'inline-flex',
@@ -1381,8 +1388,8 @@ function RepoCard({
   ].filter(Boolean);
   const primaryPreview = prPreview[0] ?? null;
   const rowMeta = [
-    repo.defaultBranch,
-    repo.readiness?.label ?? null,
+    activeWorktree?.branch ?? repo.defaultBranch,
+    activeWorktreeTone?.label ?? repo.readiness?.label ?? null,
     primaryPreview ? `PR #${primaryPreview.number}` : null,
     repoAgents.length > 0 ? `${repoAgents.length} live` : null,
   ]
@@ -1390,6 +1397,10 @@ function RepoCard({
     .slice(0, 3)
     .join(' · ');
   const repoHeaderLeadingInset = 19;
+  const visibleBranches = useMemo(
+    () => branches.filter((branch) => branch.isWorktree || !branch.current),
+    [branches],
+  );
   const showHeaderHover = hoveringHeader && (
     prPreviewLoading
     || prPreview.length > 0
@@ -2046,13 +2057,16 @@ function RepoCard({
           <div style={{ marginTop: 6 }}>
             {branchesLoading ? (
               <div style={{ fontSize: 11, color: 'var(--t-text-faint)', padding: '4px 0' }}>Loading branches…</div>
-            ) : branches.length > 0 ? (
+            ) : visibleBranches.length > 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                {branches.map((branch) => {
+                {visibleBranches.map((branch) => {
                   const branchAgents = agentsByBranch?.get(branch.name) ?? [];
                   const isIdleWorktree = branch.isWorktree && branch.isStale;
                   const isCurrentBranch = branch.current;
                   const worktree = worktreesByBranch.get(branch.name);
+                  const isActiveWorktree = Boolean(activeWorkspacePath && worktree?.path === activeWorkspacePath);
+                  const isActiveRootBranch = Boolean(!branch.isWorktree && branch.current && activeWorkspacePath === repo.localPath);
+                  const isActiveScope = isActiveWorktree || isActiveRootBranch;
                   const worktreeTone = branch.isWorktree
                     ? worktreeStageTone(worktree?.status ?? (branch.isStale ? 'stale' : 'ready'))
                     : null;
@@ -2068,7 +2082,7 @@ function RepoCard({
                       ? `${branchAgents.length} agents`
                       : null;
                   const branchDiffAgent = branchAgents.find((agent) => ((agent.additions ?? 0) > 0 || (agent.deletions ?? 0) > 0)) ?? null;
-                  const branchBaseBackground = 'transparent';
+                  const branchBaseBackground = isActiveScope ? 'rgba(37, 99, 235, 0.08)' : 'transparent';
                   const branchHoverBackground = 'var(--t-panel-hover)';
                   return (
                   <div key={branch.name}>
@@ -2089,15 +2103,15 @@ function RepoCard({
                     }}
                   style={{
                       display: 'flex',
-                      alignItems: 'center',
+                      alignItems: 'flex-start',
                       gap: 8,
-                      minHeight: 32,
+                      minHeight: branch.isWorktree ? 40 : 32,
                       padding: '6px 7px',
                       borderRadius: 8,
                       background: branchBaseBackground,
-                      border: '1px solid transparent',
+                      border: isActiveScope ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid transparent',
                       cursor: branch.current ? 'default' : checkoutBusy ? 'wait' : 'pointer',
-                      transition: 'background 120ms ease',
+                      transition: 'background 120ms ease, border-color 120ms ease',
                     }}
                   >
                     {/* Branch icon — colored by type */}
@@ -2106,23 +2120,58 @@ function RepoCard({
                       strokeWidth={2}
                       style={{
                         flexShrink: 0,
-                        color: branch.current ? THEME_SUCCESS_TEXT : branch.isWorktree ? THEME_WORKTREE_TEXT : 'var(--t-text-muted)',
+                        color: isActiveScope ? THEME_ACCENT : branch.current ? THEME_SUCCESS_TEXT : branch.isWorktree ? THEME_WORKTREE_TEXT : 'var(--t-text-muted)',
+                        marginTop: branch.isWorktree ? 2 : 1,
                       }}
                     />
-                    {/* Branch name */}
-                    <span style={{
-                      fontSize: 11.5,
-                      fontWeight: branch.current || branch.isWorktree ? 620 : 560,
-                      color: 'var(--t-text)',
-                      fontFamily: '"SF Mono", ui-monospace, monospace',
-                      flex: 1,
-                      minWidth: 0,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}>
-                      {branch.name}
-                    </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: branch.isWorktree ? 1 : 0, flex: 1, minWidth: 0 }}>
+                      <span style={{
+                        fontSize: 11.5,
+                        fontWeight: branch.current || branch.isWorktree ? 620 : 560,
+                        color: 'var(--t-text)',
+                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {branch.name}
+                      </span>
+                      {branch.isWorktree ? (
+                        <span style={{
+                          fontSize: 10,
+                          lineHeight: 1.2,
+                          color: 'var(--t-text-faint)',
+                          minWidth: 0,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}>
+                          {worktreeTone?.label ?? 'Workspace tracked'}
+                        </span>
+                      ) : null}
+                    </div>
+                    {isActiveScope ? (
+                      <span
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          padding: '2px 7px',
+                          borderRadius: 999,
+                          background: THEME_ACCENT_SOFT,
+                          border: `1px solid ${THEME_ACCENT_BORDER}`,
+                          color: THEME_ACCENT,
+                          fontSize: 9,
+                          fontWeight: 700,
+                          letterSpacing: '0.04em',
+                          textTransform: 'uppercase',
+                          flexShrink: 0,
+                          marginTop: branch.isWorktree ? 0 : 1,
+                        }}
+                      >
+                        Current
+                      </span>
+                    ) : null}
                     {branchDiffAgent ? (
                       <span
                         style={{
@@ -2348,6 +2397,8 @@ function RepoCard({
               border: '1px solid var(--t-panel-border)',
             }}>
               <input
+                id={`create-branch-name-${repo.id}`}
+                name={`create-branch-name-${repo.id}`}
                 value={newBranchName}
                 onChange={(e) => setNewBranchName(e.currentTarget.value)}
                 placeholder="feat/my-feature"
@@ -2374,6 +2425,8 @@ function RepoCard({
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 10, color: 'var(--t-text-secondary)' }}>
                   <input
+                    id={`create-branch-worktree-${repo.id}`}
+                    name={`create-branch-worktree-${repo.id}`}
                     type="checkbox"
                     checked={newBranchWorktree}
                     onChange={(e) => setNewBranchWorktree(e.currentTarget.checked)}
@@ -2666,6 +2719,8 @@ function RepoCard({
               <SetupModeButton label="Skip" selected={draftSetup.envMode === 'skip'} onClick={() => updateEnvMode('skip')} />
             </div>
             <input
+              id={`repo-setup-env-files-${repo.id}`}
+              name={`repo-setup-env-files-${repo.id}`}
               value={draftSetup.envFiles.join(', ')}
               onChange={(event) => {
                 const envFiles = event.currentTarget.value.split(',');
@@ -2699,6 +2754,8 @@ function RepoCard({
             }}
           >
             <input
+              id={`repo-setup-install-${repo.id}`}
+              name={`repo-setup-install-${repo.id}`}
               type="checkbox"
               checked={draftSetup.installOnCreateWorkspace}
               onChange={(event) => {
@@ -2740,6 +2797,8 @@ function RepoCard({
             }}
           >
             <input
+              id={`repo-setup-build-${repo.id}`}
+              name={`repo-setup-build-${repo.id}`}
               type="checkbox"
               checked={draftSetup.runBuildOnCreateWorkspace}
               onChange={(event) => {
@@ -2778,6 +2837,8 @@ function RepoCard({
               Dev command
             </div>
             <input
+              id={`repo-setup-dev-command-${repo.id}`}
+              name={`repo-setup-dev-command-${repo.id}`}
               value={draftSetup.devCommand ?? ''}
               onChange={(e) => setDraftSetup(current => ({ ...current, devCommand: e.currentTarget.value || null }))}
               placeholder="npm run dev"
@@ -2804,6 +2865,8 @@ function RepoCard({
               Default port
             </div>
             <input
+              id={`repo-setup-default-port-${repo.id}`}
+              name={`repo-setup-default-port-${repo.id}`}
               value={draftSetup.defaultPort ?? ''}
               onChange={(e) => {
                 const val = e.currentTarget.value.trim();
@@ -2908,6 +2971,7 @@ export function RepoRegistrySection({
   onLaunchComplete,
   onLaunchWorkspaceAgent,
   activeRepoLocalPath = null,
+  activeWorkspacePath = null,
   sectionOpen,
   onSectionOpenChange,
   launchIntent,
@@ -2921,6 +2985,7 @@ export function RepoRegistrySection({
   onLaunchComplete?: () => void;
   onLaunchWorkspaceAgent?: (request: WorkspaceAgentLaunchRequest) => Promise<void>;
   activeRepoLocalPath?: string | null;
+  activeWorkspacePath?: string | null;
   sectionOpen?: boolean;
   onSectionOpenChange?: (open: boolean) => void;
   launchIntent?: { repoPath: string | null; nonce: number } | null;
@@ -3631,6 +3696,7 @@ export function RepoRegistrySection({
                 expanded={expandedRepoId === repo.id}
                 onToggle={() => setExpandedRepoId((current) => current === repo.id ? null : repo.id)}
                 isActive={repo.localPath === activeRepoLocalPath}
+                activeWorkspacePath={activeWorkspacePath}
               />
             ))
           ) : null}
@@ -3645,10 +3711,12 @@ export function RepoRegistrySection({
         subtitle="First pass is local-folder only. Cortex validates the path, resolves the repo root, and records the default branch plus setup scaffold."
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+          <label htmlFor="add-repository-path" style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
             Local folder path
-          </div>
+          </label>
           <input
+            id="add-repository-path"
+            name="addRepositoryPath"
             value={repoPathInput}
             onChange={(event) => {
               setRepoPathInput(event.currentTarget.value);
@@ -3787,10 +3855,12 @@ export function RepoRegistrySection({
         subtitle="This reuses the existing worktree API. Cortex derives a worktree branch from the name below and returns the new workspace path after creation."
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+          <label htmlFor="create-workspace-name" style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
             Workspace name
-          </div>
+          </label>
           <input
+            id="create-workspace-name"
+            name="createWorkspaceName"
             value={workspaceName}
             onChange={(event) => setWorkspaceName(event.currentTarget.value)}
             placeholder="repo-sync-20260317"
@@ -3832,10 +3902,12 @@ export function RepoRegistrySection({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+          <label htmlFor="create-workspace-base-branch" style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
             Base branch
-          </div>
+          </label>
           <input
+            id="create-workspace-base-branch"
+            name="createWorkspaceBaseBranch"
             value={workspaceBaseBranch}
             onChange={(event) => setWorkspaceBaseBranch(event.currentTarget.value)}
             placeholder="main"
@@ -3863,6 +3935,8 @@ export function RepoRegistrySection({
           }}
         >
           <input
+            id="create-workspace-use-setup"
+            name="createWorkspaceUseSetup"
             type="checkbox"
             checked={workspaceUseSetup}
             onChange={(event) => setWorkspaceUseSetup(event.currentTarget.checked)}
@@ -4016,10 +4090,12 @@ export function RepoRegistrySection({
         subtitle="Open a new workspace CLI tab with the runtime you want. Add a prompt only if you want the agent to start immediately."
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+          <label htmlFor="launch-agent-runtime" style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
             Runtime
-          </div>
+          </label>
           <select
+            id="launch-agent-runtime"
+            name="launchAgentRuntime"
             value={launchRuntime}
             onChange={(event) => setLaunchRuntime(event.currentTarget.value as 'codex' | 'claude-code')}
             style={{
@@ -4041,10 +4117,12 @@ export function RepoRegistrySection({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+          <label htmlFor="launch-agent-tab-label" style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
             Tab label
-          </div>
+          </label>
           <input
+            id="launch-agent-tab-label"
+            name="launchAgentTabLabel"
             value={launchTaskName}
             onChange={(event) => setLaunchTaskName(event.currentTarget.value)}
             placeholder="Optional"
@@ -4064,10 +4142,12 @@ export function RepoRegistrySection({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
+          <label htmlFor="launch-agent-prompt" style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
             Initial prompt
-          </div>
+          </label>
           <textarea
+            id="launch-agent-prompt"
+            name="launchAgentPrompt"
             value={launchPrompt}
             onChange={(event) => setLaunchPrompt(event.currentTarget.value)}
             rows={6}
