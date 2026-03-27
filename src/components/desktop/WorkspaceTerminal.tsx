@@ -8,7 +8,7 @@ import { IssueLinkPickerModal, buildLinkedIssueContext, type LinkedIssueRef } fr
 import { Canvas, type CanvasRepoTaskLaunchRequest, type CanvasTab } from './Canvas';
 import { useTheme } from '@/lib/theme/context';
 import { saveTabState, loadTabState, checkAliveSessions, type PersistedChatCheckpoint, type PersistedTabState } from '@/lib/terminal/tab-state';
-import type { MobileTranscriptEntry, MobileTranscriptSource, MobileTranscriptThinkingStep, MobileTranscriptToolCall } from '@/lib/mobile/types';
+import type { MobileInboxSnapshot, MobileTranscriptEntry, MobileTranscriptSource, MobileTranscriptThinkingStep, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { deriveWorkflowStage } from '@/lib/workflows/status';
 import type { RepoReadiness } from '@/lib/repos/types';
 import {
@@ -87,13 +87,15 @@ interface WorkspaceTerminalProps {
   stateScope: string;
   defaultTab: 'llm-chat' | 'terminal';
   preferredRepo?: RegisteredRepo | null;
+  onActiveChatSessionChange?: (sessionKey: string | null) => void;
+  onChatSessionsChange?: (sessions: MobileInboxSnapshot['sessions']) => void;
   onRepoScopeChange?: (repoPath: string | null) => void;
   onLaunchRepoAgent?: (repo: RegisteredRepo) => void | Promise<void>;
   onOpenRepoGitLog?: (repo: RegisteredRepo) => void;
   onOpenRepoCI?: (repo: RegisteredRepo) => void;
   onOpenRepoDiff?: (repo: RegisteredRepo | null) => void;
   onInjectChatContext?: (payload: import('@/lib/chat/injection').AgentPanelChatInjectionPayload) => void;
-  onSelectCommit?: (hash: string) => void;
+  onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
   onSplitVertical?: () => void;
   onSplitHorizontal?: () => void;
@@ -3039,10 +3041,10 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       stateScope,
       defaultTab,
       preferredRepo = null,
+      onActiveChatSessionChange,
+      onChatSessionsChange,
       onRepoScopeChange,
       onLaunchRepoAgent,
-      onOpenRepoGitLog,
-      onOpenRepoCI,
       onOpenRepoDiff,
       onInjectChatContext,
       onSelectCommit,
@@ -3086,6 +3088,79 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         : (visibleTabs[visibleTabs.length - 1]?.id ?? ''),
       [activeTabId, visibleTabs],
     );
+
+    useEffect(() => {
+      const nextSessions: MobileInboxSnapshot['sessions'] = visibleTabs
+        .filter((tab) => tab.kind === 'chat' && (tab.chatRuntime === 'codex' || tab.chatRuntime === 'claude-code') && tab.chatSessionKey)
+        .map((tab) => {
+          const runtime = tab.chatRuntime as 'codex' | 'claude-code';
+          const prefixedKey = runtime === 'codex'
+            ? `codex:${tab.chatSessionKey}`
+            : `claude-code:${tab.chatSessionKey}`;
+          const repoSlug = repoSlugFromRemote(tab.repo?.remoteUrl);
+          const latestMessage = [...(tab.chatMessages ?? [])].reverse().find((entry) => entry.role === 'assistant' || entry.role === 'user');
+          return {
+            id: prefixedKey,
+            name: tab.label,
+            squadId: 'workspace',
+            runtime,
+            model: tab.chatModel ?? (runtime === 'claude-code' ? 'claude-code' : 'codex'),
+            status: tab.id === effectiveActiveTabId ? 'running' : 'idle',
+            currentTask: latestMessage?.text?.trim() ?? '',
+            workspace: tab.repo?.localPath ?? preferredRepo?.localPath ?? '',
+            branch: tab.repo?.branch ?? preferredRepo?.branch ?? 'main',
+            sessionKey: prefixedKey,
+            approvalStatus: 'none',
+            lastEventAt: new Date(tab.lastActivity).toISOString(),
+            context: { usedPercent: 0, trend: 'stable' as const },
+            alerts: 0,
+            surfaceLabel: tab.label,
+            isCurrentSession: tab.id === effectiveActiveTabId,
+            runtimeSurface: {
+              id: prefixedKey,
+              runtime,
+              kind: 'chat-session',
+              ownership: 'owned',
+              title: tab.label,
+              cwd: tab.repo?.localPath ?? preferredRepo?.localPath,
+              branch: tab.repo?.branch ?? preferredRepo?.branch ?? undefined,
+              sourceLabel: 'Workspace chat tab',
+              capabilities: {
+                attach: false,
+                readTail: true,
+                sendInput: true,
+                interrupt: true,
+                resize: false,
+                diffContext: true,
+                reviewContext: true,
+              },
+              reviewContext: repoSlug ? {
+                repoSlug,
+                branch: tab.repo?.branch ?? preferredRepo?.branch ?? undefined,
+              } : undefined,
+            },
+          };
+        });
+      onChatSessionsChange?.(nextSessions);
+
+      const activeChat = nextSessions.find((session) => session.isCurrentSession) ?? nextSessions[0] ?? null;
+      onActiveChatSessionChange?.(activeChat?.sessionKey ?? null);
+    }, [effectiveActiveTabId, onActiveChatSessionChange, onChatSessionsChange, preferredRepo, visibleTabs]);
+
+    useEffect(() => {
+      const activeTab = visibleTabs.find((tab) => tab.id === effectiveActiveTabId) ?? null;
+      const activeChatTab = activeTab?.kind === 'chat' && activeTab.chatRuntime && activeTab.chatSessionKey
+        ? activeTab
+        : visibleTabs.find((tab) => tab.kind === 'chat' && tab.chatRuntime && tab.chatSessionKey) ?? null;
+      if (!activeChatTab || !activeChatTab.chatRuntime || !activeChatTab.chatSessionKey) {
+        onActiveChatSessionChange?.(null);
+        return;
+      }
+      const prefixedKey = activeChatTab.chatRuntime === 'codex'
+        ? `codex:${activeChatTab.chatSessionKey}`
+        : `claude-code:${activeChatTab.chatSessionKey}`;
+      onActiveChatSessionChange?.(prefixedKey);
+    }, [effectiveActiveTabId, onActiveChatSessionChange, visibleTabs]);
 
     // Persist tab state (debounced — saves 500ms after last change)
     const persistTabs = useCallback((currentTabs: TerminalTab[], currentActiveId: string) => {
@@ -3511,6 +3586,27 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       return resolvedTabId;
     }, []);
 
+    const handleOpenWorkspaceCommitTab = useCallback((hash: string, meta?: Record<string, string>, repo?: RegisteredRepo) => {
+      const nextMeta: Record<string, string> = { ...(meta ?? {}) };
+      if (!nextMeta.workspace && repo?.localPath) {
+        nextMeta.workspace = repo.localPath;
+      }
+      const repoSlug = repoSlugFromRemote(repo?.remoteUrl);
+      if (!nextMeta.repo && repoSlug) {
+        nextMeta.repo = repoSlug;
+      }
+
+      openWorkspaceInspectorTab({
+        id: `commit:${hash}:${nextMeta.workspace ?? 'default'}`,
+        kind: 'commit',
+        label: hash.slice(0, 7),
+        resourceId: hash,
+        meta: Object.keys(nextMeta).length > 0 ? nextMeta : undefined,
+      }, {
+        repo,
+      });
+    }, [openWorkspaceInspectorTab]);
+
     // Route terminal events to the correct tab's XtermPanel
     useImperativeHandle(ref, () => ({
       writeToTerminal: (sessionName: string, data: string) => {
@@ -3870,6 +3966,10 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     );
     const activeCheckpoint = activeTab?.kind === 'chat' ? activeTab.chatCheckpoints?.[0] : null;
 
+    useEffect(() => {
+      onActiveChatSessionChange?.(activeTab?.kind === 'chat' ? activeTab.chatSessionKey ?? null : null);
+    }, [activeTab, onActiveChatSessionChange]);
+
     const handleDragStart = useCallback((e: React.MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
@@ -4132,33 +4232,6 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                     onClick={onLaunchRepoAgent ? () => { void onLaunchRepoAgent(activeRepo); } : undefined}
                   />
                 ) : null}
-                {activeRepo ? (
-                  <RepoScopeActionButton
-                    label="Git Log"
-                    icon={<GitCommit size={12} strokeWidth={2} />}
-                    onClick={onOpenRepoGitLog ? () => onOpenRepoGitLog(activeRepo) : undefined}
-                  />
-                ) : null}
-                {activeRepo && activeRepoDetails?.remoteUrl ? (
-                  <RepoScopeActionButton
-                    label="CI"
-                    icon={<CheckCircle2 size={12} strokeWidth={2} />}
-                    onClick={onOpenRepoCI ? () => onOpenRepoCI({
-                      name: activeRepo.name,
-                      localPath: activeRepo.localPath,
-                      branch: activeRepo.branch ?? activeRepoDetails.branch,
-                      readiness: activeRepo.readiness ?? activeRepoDetails.readiness ?? null,
-                      remoteUrl: activeRepoDetails.remoteUrl,
-                    }) : undefined}
-                  />
-                ) : null}
-                {activeRepo || preferredRepo ? (
-                  <RepoScopeActionButton
-                    label="Diff"
-                    icon={<span style={{ fontSize: 11, fontWeight: 800, lineHeight: 1 }}>Δ</span>}
-                    onClick={onOpenRepoDiff ? () => onOpenRepoDiff(activeRepo ?? preferredRepo ?? null) : undefined}
-                  />
-                ) : null}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                 {activeRepoDetails?.branch ? (
@@ -4404,7 +4477,13 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                   onCloseTab={() => handleCloseTab(tab.id)}
                   selectedRepo={repoSlugFromRemote(tab.repo?.remoteUrl) ?? null}
                   onInjectChatContext={onInjectChatContext}
-                  onSelectCommit={onSelectCommit}
+                  onSelectCommit={(hash, meta) => {
+                    if (tab.repo || meta?.workspace) {
+                      handleOpenWorkspaceCommitTab(hash, meta, tab.repo);
+                      return;
+                    }
+                    onSelectCommit?.(hash, meta);
+                  }}
                   onLaunchWorkspaceTask={onLaunchWorkspaceTask}
                   embedded
                 />
