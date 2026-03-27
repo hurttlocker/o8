@@ -34,7 +34,7 @@ export interface TerminalTab {
   chatSessionKey?: string; // OpenClaw session key or CLI session ID
   chatModel?: string;
   chatContinueLatest?: boolean;
-  chatDraftInjection?: { id: string; text: string; autoSend?: boolean };
+  chatDraftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string };
   chatMessages?: MobileTranscriptEntry[];
   chatCheckpoints?: PersistedChatCheckpoint[];
   linkedIssue?: LinkedIssueRef | null;
@@ -65,6 +65,7 @@ export interface TerminalTabHandle {
     repo?: RegisteredRepo;
     modelId?: string;
     initialText?: string;
+    draftReason?: string;
     autoSend?: boolean;
     createNew?: boolean;
     label?: string;
@@ -73,6 +74,7 @@ export interface TerminalTabHandle {
     runtime?: 'codex' | 'claude-code';
     repo?: RegisteredRepo;
     modelId?: string;
+    draftReason?: string;
     autoSend?: boolean;
     createNew?: boolean;
     label?: string;
@@ -172,6 +174,46 @@ const CODEX_CLI_MODELS: WorkspaceCliModelOption[] = [
   { id: 'gpt-5.4', label: 'GPT-5.4', color: '#10b981' },
   { id: 'gpt-4o', label: 'GPT-4o', color: '#10b981' },
 ];
+
+interface QueuedContextCard {
+  id: string;
+  reason?: string;
+  text: string;
+  title: string;
+  meta: string[];
+  preview?: string;
+}
+
+function buildQueuedContextCard(injection: { id: string; text: string; reason?: string }): QueuedContextCard {
+  const lines = injection.text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const header = lines[0]?.match(/^\[(.+)\]$/)?.[1] ?? lines[0] ?? 'Context';
+  const meta = lines
+    .slice(1)
+    .filter((line) => /^[A-Za-z][A-Za-z ]+:\s+/.test(line))
+    .slice(0, 3);
+  const firstBodyLine = lines.find((line) => !/^\[.+\]$/.test(line) && !/^[A-Za-z][A-Za-z ]+:\s+/.test(line));
+  const preview = firstBodyLine && firstBodyLine !== header ? firstBodyLine : undefined;
+
+  const title = injection.reason?.startsWith('pr-comment')
+    ? 'PR comment context'
+    : injection.reason?.startsWith('ci-check')
+      ? 'CI context'
+      : injection.reason?.startsWith('deploy')
+        ? 'Deploy context'
+        : header;
+
+  return {
+    id: injection.id,
+    reason: injection.reason,
+    text: injection.text,
+    title,
+    meta,
+    preview,
+  };
+}
 
 function buildCheckpointLabel(tab: TerminalTab, messages: MobileTranscriptEntry[]) {
   const lastUser = [...messages].reverse().find((entry) => entry.role === 'user' && entry.text.trim());
@@ -853,6 +895,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
+  const [queuedContextCards, setQueuedContextCards] = useState<QueuedContextCard[]>([]);
   const [liveAssistantId, setLiveAssistantId] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState('');
   const [activeToolCalls, setActiveToolCalls] = useState<MobileTranscriptToolCall[]>([]);
@@ -1309,11 +1352,16 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   }, [chatRuntime, chatSessionKey, fetchTranscript, linkedIssue, onUpdateMessages, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.chatContinueLatest, tab.repo?.localPath, tabId]);
 
   const handleSend = useCallback(async () => {
-    const text = draft.trim();
-    if (!text || sending) return;
+    const baseDraft = draft.trim();
+    if ((!baseDraft && queuedContextCards.length === 0) || sending) return;
+    const text = [
+      ...queuedContextCards.map((card) => card.text.trim()).filter(Boolean),
+      baseDraft,
+    ].filter(Boolean).join('\n\n');
+    setQueuedContextCards([]);
     setDraft('');
     await sendText(text);
-  }, [draft, sendText, sending]);
+  }, [draft, queuedContextCards, sendText, sending]);
 
   useEffect(() => {
     const injection = tab.chatDraftInjection;
@@ -1327,9 +1375,10 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
       void sendText(injection.text);
       requestAnimationFrame(() => composeRef.current?.focus());
     } else {
-      setDraft((prev) => prev.trim()
-        ? `${prev.trimEnd()}\n\n${injection.text}\n\n`
-        : `${injection.text}\n\n`);
+      setQueuedContextCards((prev) => {
+        if (prev.some((card) => card.id === injection.id)) return prev;
+        return [...prev, buildQueuedContextCard(injection)];
+      });
       requestAnimationFrame(() => composeRef.current?.focus());
     }
 
@@ -1408,6 +1457,12 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
     }
     onUpdateMessages(tabId, current.filter((_, idx) => idx !== messageIndex));
   }, [onUpdateMessages, tabId]);
+
+  const handleRemoveQueuedContext = useCallback((contextId: string) => {
+    setQueuedContextCards((prev) => prev.filter((card) => card.id !== contextId));
+  }, []);
+
+  const canSend = draft.trim().length > 0 || queuedContextCards.length > 0;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'var(--t-bg-gradient)', position: 'relative' }}>
@@ -1640,6 +1695,92 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
           transition: 'border-color 200ms, box-shadow 200ms',
           overflow: 'hidden',
         }}>
+          {queuedContextCards.length > 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                paddingTop: 14,
+                paddingRight: 14,
+                paddingBottom: 0,
+                paddingLeft: 14,
+                borderBottom: '1px solid var(--t-divider-subtle)',
+              }}
+            >
+              {queuedContextCards.map((card) => (
+                <div
+                  key={card.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 10,
+                    padding: '10px 12px',
+                    borderRadius: 14,
+                    border: '1px solid var(--t-panel-border)',
+                    background: THEME_BG_CARD,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 28,
+                      height: 28,
+                      borderRadius: 10,
+                      background: THEME_ACCENT_SOFT,
+                      color: THEME_ACCENT,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <MessageSquare size={14} />
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: THEME_ACCENT }}>
+                      Staged Context
+                    </div>
+                    <div style={{ marginTop: 4, fontSize: 13, fontWeight: 700, color: 'var(--t-text)' }}>
+                      {card.title}
+                    </div>
+                    {card.meta.length > 0 ? (
+                      <div style={{ marginTop: 4, display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--t-text-muted)' }}>
+                        {card.meta.map((entry) => (
+                          <span key={entry}>{entry}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {card.preview ? (
+                      <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
+                        {card.preview.length > 180 ? `${card.preview.slice(0, 177).trimEnd()}…` : card.preview}
+                      </div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveQueuedContext(card.id)}
+                    title="Remove staged context"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 28,
+                      height: 28,
+                      borderRadius: 10,
+                      border: '1px solid var(--t-panel-border)',
+                      background: 'var(--t-panel)',
+                      color: 'var(--t-text-secondary)',
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           <div style={{
             paddingTop: 14,
             paddingBottom: 8,
@@ -1834,7 +1975,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                 <button
                   type="button"
                   onClick={() => void handleSend()}
-                  disabled={!draft.trim() || sending}
+                  disabled={!canSend || sending}
                   title="Send message (Enter)"
                   style={{
                     display: 'flex',
@@ -1844,9 +1985,9 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                     height: 32,
                     border: 'none',
                     borderRadius: 10,
-                    background: draft.trim() ? THEME_ACCENT : 'var(--t-divider-strong)',
-                    color: draft.trim() ? '#ffffff' : 'var(--t-text-faint)',
-                    cursor: draft.trim() ? 'pointer' : 'default',
+                    background: canSend ? THEME_ACCENT : 'var(--t-divider-strong)',
+                    color: canSend ? '#ffffff' : 'var(--t-text-faint)',
+                    cursor: canSend ? 'pointer' : 'default',
                     flexShrink: 0,
                     transition: 'all 150ms',
                   }}
@@ -3221,6 +3362,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       repo?: RegisteredRepo;
       modelId?: string;
       initialText?: string;
+      draftReason?: string;
       autoSend?: boolean;
       createNew?: boolean;
       label?: string;
@@ -3253,6 +3395,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           ? {
               id: `workspace-chat-injection-${Date.now()}`,
               text: options.initialText,
+              reason: options.draftReason,
               autoSend: options.autoSend,
             }
           : undefined;
@@ -3596,6 +3739,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           chatDraftInjection: {
             id: `workspace-chat-injection-${Date.now()}`,
             text: recoveryNote,
+            reason: 'checkpoint-restore',
             autoSend: false,
           },
           chatCheckpoints: sourceTab.chatCheckpoints,
