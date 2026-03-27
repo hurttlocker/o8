@@ -16,7 +16,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
-import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
+import { CortexTaskBoard } from './CortexTaskBoard';
 
 // ── Types ──
 
@@ -28,6 +28,19 @@ export interface TimelineSegment {
   durationMin: number;
   label?: string;
   agent?: string;
+}
+
+interface TimelineSegmentGeometry {
+  index: number;
+  seg: TimelineSegment;
+  leftPct: number;
+  widthPct: number;
+  actualLeftPx: number;
+  actualWidthPx: number;
+  displayLeftPx: number;
+  displayWidthPx: number;
+  color: string;
+  layer: number;
 }
 
 // ── Constants ──
@@ -57,8 +70,8 @@ const DRILL_MAX_HEIGHT = 680;
 const DEFAULT_TIMELINE_REPO = 'hurttlocker/cortex-ide';
 const TIMELINE_BAR_HEIGHT = 20;
 const TIMELINE_ACTIVE_SEGMENT_MIN_PX = 4;
-// Intentionally disabled for v0.001.0 to keep the customer surface simpler.
-// Keep the drill-down implementation in place so we can restore it after the UX pass.
+// Keep the drill-down implementation in place, but disable dashboard
+// double-click entry until the interaction is ready to ship.
 const TIMELINE_DRILLDOWN_ENABLED = false;
 
 // ── Helpers ──
@@ -78,6 +91,78 @@ export function formatTime(minutesSinceAnchor: number): string {
   const period = h >= 12 ? 'PM' : 'AM';
   const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
   return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+function timelineSegmentLayer(kind: SegmentKind) {
+  switch (kind) {
+    case 'coding': return 1;
+    case 'thinking': return 2;
+    case 'testing': return 3;
+    case 'error': return 4;
+    default: return 0;
+  }
+}
+
+function timelineSegmentMinWidth(kind: SegmentKind) {
+  if (kind === 'error') return 6;
+  if (kind === 'thinking' || kind === 'testing') return 5;
+  return TIMELINE_ACTIVE_SEGMENT_MIN_PX;
+}
+
+function timelineSegmentChrome(kind: SegmentKind, color: string, hovered: boolean) {
+  if (kind === 'coding') {
+    return {
+      top: 2,
+      height: TIMELINE_BAR_HEIGHT - 4,
+      borderRadius: 4,
+      opacity: hovered ? 1 : 0.98,
+      background: `linear-gradient(180deg, rgba(255,255,255,0.22) 0%, ${color} 24%, ${color} 100%)`,
+      boxShadow: hovered
+        ? `0 0 0 1px rgba(255,255,255,0.48) inset, 0 0 0 1px ${color}55, 0 3px 12px ${color}35`
+        : `0 0 0 1px rgba(255,255,255,0.34) inset, 0 1px 7px ${color}2c`,
+      transform: hovered ? 'translateY(-1px)' : 'none',
+    };
+  }
+
+  if (kind === 'thinking') {
+    return {
+      top: 5,
+      height: TIMELINE_BAR_HEIGHT - 10,
+      borderRadius: 999,
+      opacity: hovered ? 1 : 0.96,
+      background: `linear-gradient(180deg, rgba(255,255,255,0.64) 0%, ${color}e0 30%, ${color} 100%)`,
+      boxShadow: hovered
+        ? `0 0 0 1px rgba(255,255,255,0.72) inset, 0 0 0 1px ${color}50, 0 3px 10px ${color}30`
+        : `0 0 0 1px rgba(255,255,255,0.52) inset, 0 1px 6px ${color}22`,
+      transform: hovered ? 'translateY(-1px)' : 'none',
+    };
+  }
+
+  if (kind === 'testing') {
+    return {
+      top: 4,
+      height: TIMELINE_BAR_HEIGHT - 8,
+      borderRadius: 999,
+      opacity: hovered ? 1 : 0.97,
+      background: `linear-gradient(180deg, rgba(255,255,255,0.42) 0%, ${color}e5 24%, ${color} 100%)`,
+      boxShadow: hovered
+        ? `0 0 0 1px rgba(255,255,255,0.62) inset, 0 0 0 1px ${color}50, 0 3px 10px ${color}30`
+        : `0 0 0 1px rgba(255,255,255,0.4) inset, 0 1px 6px ${color}24`,
+      transform: hovered ? 'translateY(-1px)' : 'none',
+    };
+  }
+
+  return {
+    top: 1,
+    height: TIMELINE_BAR_HEIGHT - 2,
+    borderRadius: 999,
+    opacity: 1,
+    background: `linear-gradient(180deg, rgba(255,255,255,0.4) 0%, ${color} 28%, #dc2626 100%)`,
+    boxShadow: hovered
+      ? '0 0 0 1px rgba(255,255,255,0.64) inset, 0 0 0 1px rgba(239,68,68,0.52), 0 4px 12px rgba(239,68,68,0.36)'
+      : '0 0 0 1px rgba(255,255,255,0.42) inset, 0 2px 8px rgba(239,68,68,0.28)',
+    transform: hovered ? 'translateY(-1px)' : 'none',
+  };
 }
 
 function runtimeLabel(runtime: string | null | undefined): string {
@@ -154,13 +239,10 @@ function useTimelineData() {
   const [segments, setSegments] = useState<TimelineSegment[]>([]);
   const [windowMinutes, setWindowMinutes] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
-
-  useEffect(() => subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled), []);
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch(appendOpenClawBetaQuery('/api/panel/timeline', openClawBetaEnabled));
+      const res = await fetch('/api/panel/timeline?includeOpenClaw=1');
       if (res.ok) {
         const data = await res.json();
         setWindowMinutes(data.windowMinutes ?? 0);
@@ -195,7 +277,7 @@ function useTimelineData() {
     setSegments([]);
     setWindowMinutes(0);
     setLoading(false);
-  }, [openClawBetaEnabled]);
+  }, []);
 
   useEffect(() => {
     fetchData();
@@ -208,20 +290,17 @@ function useTimelineData() {
 
 function useTimelineSessions() {
   const [sessions, setSessions] = useState<AgentSummary[]>([]);
-  const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
-
-  useEffect(() => subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled), []);
 
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch(appendOpenClawBetaQuery('/api/mobile/inbox', openClawBetaEnabled));
+      const res = await fetch('/api/mobile/inbox?includeOpenClaw=1');
       if (!res.ok) return;
       const data = await res.json() as MobileInboxSnapshot;
       setSessions(data.sessions ?? []);
     } catch {
       // silent
     }
-  }, [openClawBetaEnabled]);
+  }, []);
 
   useEffect(() => {
     void fetchSessions();
@@ -276,8 +355,12 @@ function TimelineButton({ icon, label, onClick }: { icon: React.ReactNode; label
 
 export function SessionTimeline({
   onExpand,
+  repoPath,
+  repoName,
 }: {
   onExpand?: () => void;
+  repoPath?: string | null;
+  repoName?: string | null;
 }) {
   const { segments, windowMinutes, loading } = useTimelineData();
   const liveSessions = useTimelineSessions();
@@ -288,7 +371,17 @@ export function SessionTimeline({
   const [hoverClientX, setHoverClientX] = useState<number | null>(null);
   const [hoverBarTop, setHoverBarTop] = useState<number>(0);
 
-  const totalSpan = windowMinutes;
+  const fallbackWindowMinutes = useMemo(() => {
+    const now = new Date();
+    const anchor = new Date(now);
+    if (now.getHours() < 6) {
+      anchor.setDate(anchor.getDate() - 1);
+    }
+    anchor.setHours(6, 0, 0, 0);
+    return Math.max(1, Math.floor((now.getTime() - anchor.getTime()) / 60000));
+  }, []);
+  const totalSpan = windowMinutes > 0 ? windowMinutes : fallbackWindowMinutes;
+  const hasActivity = segments.length > 0;
 
   const kindTotals = useMemo(() => {
     const totals: Partial<Record<SegmentKind, number>> = {};
@@ -301,20 +394,19 @@ export function SessionTimeline({
   const [hoveredSegIdx, setHoveredSegIdx] = useState<number | null>(null);
 
   const segmentGeometry = useMemo(() => {
-    if (totalSpan === 0) return [];
-    return segments.map((seg, index) => {
-      if (seg.kind === 'idle') return null;
+    if (totalSpan === 0) return [] as TimelineSegmentGeometry[];
+    return segments.reduce<TimelineSegmentGeometry[]>((acc, seg, index) => {
+      if (seg.kind === 'idle') return acc;
       const leftPct = (seg.startMin / totalSpan) * 100;
       const widthPct = (seg.durationMin / totalSpan) * 100;
       const actualWidthPx = barWidth > 0 ? (seg.durationMin / totalSpan) * barWidth : 0;
       const actualLeftPx = barWidth > 0 ? (seg.startMin / totalSpan) * barWidth : 0;
-      const displayWidthPx = barWidth > 0 ? Math.max(actualWidthPx, TIMELINE_ACTIVE_SEGMENT_MIN_PX) : 0;
+      const displayWidthPx = barWidth > 0 ? Math.max(actualWidthPx, timelineSegmentMinWidth(seg.kind)) : 0;
       const centeredLeftPx = actualLeftPx + (actualWidthPx / 2) - (displayWidthPx / 2);
       const displayLeftPx = barWidth > 0
         ? Math.min(Math.max(0, centeredLeftPx), Math.max(0, barWidth - displayWidthPx))
         : 0;
-
-      return {
+      acc.push({
         index,
         seg,
         leftPct,
@@ -324,9 +416,55 @@ export function SessionTimeline({
         displayLeftPx,
         displayWidthPx,
         color: SEGMENT_COLORS[seg.kind],
-      };
-    });
+        layer: timelineSegmentLayer(seg.kind),
+      });
+      return acc;
+    }, []);
   }, [barWidth, segments, totalSpan]);
+
+  const paintedSegments = useMemo(() => {
+    return [...segmentGeometry].sort((a, b) => {
+      const layerDelta = a.layer - b.layer;
+      if (layerDelta !== 0) return layerDelta;
+      return a.index - b.index;
+    });
+  }, [segmentGeometry]);
+
+  const activityWindows = useMemo(() => {
+    if (barWidth <= 0 || segmentGeometry.length === 0) return [];
+
+    return [...segmentGeometry]
+      .sort((a, b) => a.displayLeftPx - b.displayLeftPx)
+      .reduce<Array<{ left: number; width: number }>>((acc, entry) => {
+        const left = entry.displayLeftPx;
+        const right = entry.displayLeftPx + entry.displayWidthPx;
+        const current = acc[acc.length - 1];
+
+        if (!current) {
+          acc.push({ left, width: right - left });
+          return acc;
+        }
+
+        const currentRight = current.left + current.width;
+        if (left <= currentRight + 1) {
+          current.width = Math.max(current.width, right - current.left);
+          return acc;
+        }
+
+        acc.push({ left, width: right - left });
+        return acc;
+      }, []);
+  }, [barWidth, segmentGeometry]);
+
+  const hoverSegments = useMemo(() => {
+    return [...paintedSegments].sort((a, b) => {
+      const layerDelta = b.layer - a.layer;
+      if (layerDelta !== 0) return layerDelta;
+      const widthDelta = a.displayWidthPx - b.displayWidthPx;
+      if (widthDelta !== 0) return widthDelta;
+      return b.index - a.index;
+    });
+  }, [paintedSegments]);
 
   const ribbonBridges = useMemo(() => {
     if (barWidth <= 0 || totalSpan === 0) return [];
@@ -433,6 +571,8 @@ export function SessionTimeline({
       w: clampDrillWidth(current.w),
       h: clampDrillHeight(current.h),
     }));
+    setSelectedAgent(null);
+    setIssuesPanelOpen(false);
     setDrillOpen(true);
   }, [clampDrillHeight, clampDrillWidth]);
 
@@ -759,7 +899,7 @@ export function SessionTimeline({
   }, [hoverMin, hoveredSeg, hoveredContext, totalSpan]);
 
   const handleBarMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!barRef.current || totalSpan === 0) return;
+    if (!barRef.current || totalSpan === 0 || !hasActivity) return;
     const rect = barRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const pct = Math.max(0, Math.min(1, x / rect.width));
@@ -770,8 +910,7 @@ export function SessionTimeline({
     let foundLeftPx = 0;
     let foundWidthPx = 0;
 
-    for (const entry of segmentGeometry) {
-      if (!entry) continue;
+    for (const entry of hoverSegments) {
       const leftPx = barWidth > 0 ? entry.displayLeftPx : rect.width * (entry.leftPct / 100);
       const widthPx = barWidth > 0 ? entry.displayWidthPx : rect.width * (entry.widthPct / 100);
       if (x >= leftPx && x <= leftPx + widthPx) {
@@ -813,7 +952,7 @@ export function SessionTimeline({
     setHoveredSegIdx(foundIdx);
     setHoverClientX(e.clientX);
     setHoverBarTop(rect.top);
-  }, [barWidth, ribbonBridges, segmentGeometry, segments, totalSpan]);
+  }, [barWidth, hasActivity, hoverSegments, ribbonBridges, segments, totalSpan]);
 
   const handleBarMouseLeave = useCallback(() => {
     setHoverX(null);
@@ -822,7 +961,54 @@ export function SessionTimeline({
     setHoverClientX(null);
   }, []);
 
-  if (loading || segments.length === 0 || totalSpan === 0) return null;
+  if (loading) {
+    return (
+      <div style={{
+        height: 36,
+        flexShrink: 0,
+        display: 'flex',
+        alignItems: 'center',
+        padding: '0 16px 0 90px',
+        gap: 12,
+        background: 'var(--t-chrome-timeline)',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        borderBottom: '1px solid var(--t-divider-subtle)',
+        fontSize: 11,
+        fontWeight: 500,
+        color: 'var(--t-text-secondary)',
+        letterSpacing: '-0.01em',
+        position: 'relative',
+        zIndex: 100,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
+          {onExpand ? <TimelineButton icon={<ExpandIcon />} label="Expand timeline" onClick={onExpand} /> : null}
+          <span style={{ fontWeight: 600, color: 'var(--t-text)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '0.04em' }}>
+            Today
+          </span>
+        </div>
+        <div style={{
+          flex: 1,
+          height: TIMELINE_BAR_HEIGHT,
+          borderRadius: 6,
+          background: 'var(--t-timeline-bar)',
+          boxShadow: 'inset 0 0 0 1px rgba(148, 163, 184, 0.08)',
+          position: 'relative',
+          overflow: 'hidden',
+        }}>
+          <div style={{
+            position: 'absolute',
+            inset: 0,
+            background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.14) 50%, transparent 100%)',
+            animation: 'llmShimmer 1.6s linear infinite',
+          }} />
+        </div>
+        <div style={{ flexShrink: 0, fontSize: 10, color: 'var(--t-text-faint)' }}>
+          Loading activity…
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -845,7 +1031,7 @@ export function SessionTimeline({
     }}>
       {/* Left — Play + Expand + Label */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, whiteSpace: 'nowrap' }}>
-        <TimelineButton icon={<PlayIcon />} label="Play session replay" />
+        {hasActivity ? <TimelineButton icon={<PlayIcon />} label="Play session replay" /> : null}
         {onExpand && <TimelineButton icon={<ExpandIcon />} label="Expand timeline" onClick={onExpand} />}
         <span style={{ fontWeight: 600, color: 'var(--t-text)', textTransform: 'uppercase', fontSize: 10, letterSpacing: '0.04em' }}>
           Today: {formatDuration(totalSpan)}
@@ -865,10 +1051,29 @@ export function SessionTimeline({
           overflow: 'visible',
           background: 'var(--t-timeline-bar)',
           position: 'relative',
-          cursor: TIMELINE_DRILLDOWN_ENABLED ? 'crosshair' : 'default',
+          cursor: TIMELINE_DRILLDOWN_ENABLED && hasActivity ? 'crosshair' : 'default',
           boxShadow: 'inset 0 0 0 1px rgba(148, 163, 184, 0.08)',
         }}
       >
+        {/* System-wide occupancy backbone — keeps concurrent IDE activity reading as full-width time coverage */}
+        {activityWindows.map((window, index) => (
+          <div
+            key={`activity:${index}:${window.left}:${window.width}`}
+            style={{
+              position: 'absolute',
+              left: window.left,
+              width: window.width,
+              top: 2,
+              height: TIMELINE_BAR_HEIGHT - 4,
+              borderRadius: 4,
+              background: 'linear-gradient(180deg, rgba(96, 165, 250, 0.18) 0%, rgba(37, 99, 235, 0.1) 100%)',
+              boxShadow: 'inset 0 0 0 1px rgba(147, 197, 253, 0.12)',
+              pointerEvents: 'none',
+              zIndex: 1,
+            }}
+          />
+        ))}
+
         {/* Gentle ribbons connecting nearby same-kind runs across tiny idle gaps */}
         {ribbonBridges.map((bridge) => (
           <div
@@ -883,15 +1088,15 @@ export function SessionTimeline({
               background: `linear-gradient(90deg, ${bridge.color}08 0%, ${bridge.color}2d 50%, ${bridge.color}08 100%)`,
               boxShadow: `0 0 12px ${bridge.color}18`,
               pointerEvents: 'none',
-              zIndex: 1,
+              zIndex: 2,
             }}
           />
         ))}
 
         {/* Segments */}
-        {segmentGeometry.map((entry) => {
-          if (!entry) return null;
+        {paintedSegments.map((entry) => {
           const isHovered = hoveredSegIdx === entry.index;
+          const chrome = timelineSegmentChrome(entry.seg.kind, entry.color, isHovered);
           return (
             <div
               key={entry.index}
@@ -899,17 +1104,15 @@ export function SessionTimeline({
                 position: 'absolute',
                 left: barWidth > 0 ? entry.displayLeftPx : `${entry.leftPct}%`,
                 width: barWidth > 0 ? entry.displayWidthPx : `${entry.widthPct}%`,
-                top: 2,
-                height: TIMELINE_BAR_HEIGHT - 4,
-                background: `linear-gradient(180deg, rgba(255,255,255,0.18) 0%, ${entry.color} 22%, ${entry.color} 100%)`,
-                opacity: isHovered ? 1 : 0.92,
+                top: chrome.top,
+                height: chrome.height,
+                background: chrome.background,
+                opacity: chrome.opacity,
                 transition: 'opacity 60ms ease-out, transform 80ms ease-out, box-shadow 80ms ease-out',
-                borderRadius: 4,
-                boxShadow: isHovered
-                  ? `0 0 0 1px rgba(255,255,255,0.48) inset, 0 0 0 1px ${entry.color}55, 0 3px 12px ${entry.color}35`
-                  : `0 0 0 1px rgba(255,255,255,0.34) inset, 0 1px 6px ${entry.color}28`,
-                transform: isHovered ? 'translateY(-1px)' : 'none',
-                zIndex: isHovered ? 3 : 2,
+                borderRadius: chrome.borderRadius,
+                boxShadow: chrome.boxShadow,
+                transform: chrome.transform,
+                zIndex: isHovered ? 8 : entry.layer + 3,
               }}
             />
           );
@@ -929,7 +1132,7 @@ export function SessionTimeline({
               background: lineColor,
               borderRadius: 1,
               pointerEvents: 'none',
-              zIndex: 5,
+              zIndex: 10,
               boxShadow: `0 0 6px ${lineColor}40`,
             }} />
           );
@@ -940,16 +1143,22 @@ export function SessionTimeline({
 
       {/* Right — Legend dots */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-        {(['thinking', 'coding', 'testing', 'error'] as SegmentKind[]).map((kind) => {
-          const total = kindTotals[kind];
-          if (!total) return null;
-          return (
-            <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-              <div style={{ width: 6, height: 6, borderRadius: 3, background: SEGMENT_COLORS[kind], flexShrink: 0 }} />
-              <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{formatDuration(total)}</span>
-            </div>
-          );
-        })}
+        {hasActivity ? (
+          (['thinking', 'coding', 'testing', 'error'] as SegmentKind[]).map((kind) => {
+            const total = kindTotals[kind];
+            if (!total) return null;
+            return (
+              <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                <div style={{ width: 6, height: 6, borderRadius: 3, background: SEGMENT_COLORS[kind], flexShrink: 0 }} />
+                <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{formatDuration(total)}</span>
+              </div>
+            );
+          })
+        ) : (
+          <span style={{ fontSize: 10, color: 'var(--t-text-faint)', whiteSpace: 'nowrap' }}>
+            No IDE activity yet
+          </span>
+        )}
       </div>
 
       {hoverCard && hoverClientX !== null && typeof document !== 'undefined' && createPortal(
@@ -1038,57 +1247,38 @@ export function SessionTimeline({
         document.body,
       )}
 
-      {/* ── Agent Drill-Down Modal (glass, draggable) ── */}
+      {/* ── Full-Screen Timeline Drilldown / Cortex Board ── */}
       {TIMELINE_DRILLDOWN_ENABLED && drillOpen && typeof document !== 'undefined' && createPortal(
         <>
-          {/* Backdrop */}
-          <div
-            onClick={() => setDrillOpen(false)}
-            style={{
-              position: 'fixed', inset: 0, zIndex: 9998,
-              background: 'rgba(0, 0, 0, 0.05)',
-              backdropFilter: 'blur(6px)',
-              WebkitBackdropFilter: 'blur(6px)',
-            }}
-          />
-          {/* Modal */}
-          <div style={{
-            position: 'fixed',
-            left: drillPos.x,
-            top: drillPos.y,
-            width: drillSize.w,
-            maxHeight: drillSize.h,
-            zIndex: 9999,
-            background: 'rgba(255, 255, 255, 0.18)',
-            backdropFilter: 'blur(80px) saturate(2.2)',
-            WebkitBackdropFilter: 'blur(80px) saturate(2.2)',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-            borderRadius: 16,
-            boxShadow: '0 24px 80px rgba(0, 0, 0, 0.08), 0 8px 32px rgba(0, 0, 0, 0.04), inset 0 0.5px 0 rgba(255, 255, 255, 0.4), inset 0 -0.5px 0 rgba(255, 255, 255, 0.1)',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            animation: 'drillFadeIn 180ms cubic-bezier(0.32, 0.72, 0, 1)',
-          }}>
-            {/* Header — draggable */}
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 9999,
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.14), rgba(239,246,255,0.1))',
+          backdropFilter: 'blur(28px) saturate(1.42)',
+          WebkitBackdropFilter: 'blur(28px) saturate(1.42)',
+          display: 'flex',
+          flexDirection: 'column',
+          animation: 'drillFadeIn 180ms cubic-bezier(0.32, 0.72, 0, 1)',
+        }}>
+            {/* Header */}
             <div
-              onMouseDown={handleDrillDragStartWrapped}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '14px 16px 10px',
-                cursor: 'grab',
+                padding: '18px 22px 14px',
                 userSelect: 'none',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.18)',
+                background: 'linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04))',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
-                  Agent Activity
+                  Cortex Board
                 </span>
                 <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontWeight: 500 }}>
-                  Today · {formatDuration(totalSpan)}
+                  Timeline drilldown · {formatDuration(totalSpan)}
                 </span>
               </div>
               <button
@@ -1110,234 +1300,19 @@ export function SessionTimeline({
               </button>
             </div>
 
-            {/* Content — per-agent breakdown */}
+            {/* Content — Cortex board shell */}
             <div style={{
-              padding: '12px 16px 16px',
-              overflowY: 'auto',
+              padding: '18px 22px 22px',
+              overflow: 'hidden',
               flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 14,
+              minHeight: 0,
             }}>
-              {agentBreakdown.map((entry) => {
-                const context = liveAgentContext.get(entry.agent);
-                const runtimeTone = context?.runtime === 'OpenClaw'
-                  ? '#2563eb'
-                  : context?.runtime === 'Claude Code'
-                    ? '#8b5cf6'
-                    : context?.runtime === 'Codex'
-                      ? '#16a34a'
-                      : '#64748b';
-
-                return (
-                  <div
-                    key={entry.agent}
-                    ref={(el) => { if (el) agentCardRefs.current.set(entry.agent, el); }}
-                    onClick={() => handleAgentClick(entry.agent)}
-                    style={{
-                      background: selectedAgent === entry.agent ? 'rgba(37, 99, 235, 0.12)' : 'rgba(255, 255, 255, 0.1)',
-                      border: selectedAgent === entry.agent ? '1px solid rgba(37, 99, 235, 0.3)' : '1px solid rgba(255, 255, 255, 0.15)',
-                      borderRadius: 12,
-                      padding: 12,
-                      cursor: 'pointer',
-                      transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
-                    }}
-                    onMouseEnter={(e) => { if (selectedAgent !== entry.agent) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.18)'; }}
-                    onMouseLeave={(e) => { if (selectedAgent !== entry.agent) e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'; }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: context ? 6 : 8 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                        <div style={{
-                          width: 24, height: 24, borderRadius: 8,
-                          background: 'rgba(37, 99, 235, 0.12)',
-                          border: '1px solid rgba(37, 99, 235, 0.2)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 11, fontWeight: 700, color: '#2563eb',
-                          flexShrink: 0,
-                        }}>
-                          {entry.agent[0]}
-                        </div>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
-                            {entry.agent}
-                          </div>
-                          {context?.label ? (
-                            <div
-                              style={{
-                                fontSize: 10,
-                                color: 'var(--t-text-muted)',
-                                marginTop: 1,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                                maxWidth: 260,
-                              }}
-                            >
-                              {context.label}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                      <span style={{
-                        fontSize: 11, fontWeight: 600, color: 'var(--t-text-muted)',
-                        fontFamily: '"SF Mono", ui-monospace, monospace',
-                        flexShrink: 0,
-                      }}>
-                        {formatDuration(entry.totalMin)}
-                      </span>
-                    </div>
-
-                    {context ? (
-                      <>
-                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-                          <span style={{
-                            fontSize: 9,
-                            fontWeight: 700,
-                            color: runtimeTone,
-                            background: `${runtimeTone}14`,
-                            border: `1px solid ${runtimeTone}24`,
-                            borderRadius: 999,
-                            padding: '2px 6px',
-                          }}>
-                            {context.runtime}
-                          </span>
-                          {context.location ? (
-                            <span style={{
-                              fontSize: 9,
-                              fontWeight: 600,
-                              color: 'var(--t-text-secondary)',
-                              background: 'rgba(255,255,255,0.16)',
-                              border: '1px solid rgba(255,255,255,0.16)',
-                              borderRadius: 999,
-                              padding: '2px 6px',
-                              fontFamily: '"SF Mono", ui-monospace, monospace',
-                            }}>
-                              {context.location}
-                            </span>
-                          ) : null}
-                          {context.extra ? (
-                            <span style={{
-                              fontSize: 9,
-                              fontWeight: 600,
-                              color: 'var(--t-text-muted)',
-                              background: 'rgba(255,255,255,0.12)',
-                              border: '1px solid rgba(255,255,255,0.14)',
-                              borderRadius: 999,
-                              padding: '2px 6px',
-                            }}>
-                              {context.extra}
-                            </span>
-                          ) : null}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 10.5,
-                            lineHeight: 1.45,
-                            color: 'var(--t-text-secondary)',
-                            marginBottom: 9,
-                            display: '-webkit-box',
-                            WebkitLineClamp: 2,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                          }}
-                        >
-                          {context.summary}
-                        </div>
-                      </>
-                    ) : (
-                      <div
-                        style={{
-                          fontSize: 10.5,
-                          lineHeight: 1.45,
-                          color: 'var(--t-text-muted)',
-                          marginBottom: 9,
-                        }}
-                      >
-                        No live surface matched for this agent right now. Timeline is showing historical activity only.
-                      </div>
-                    )}
-
-                    <div style={{
-                      height: 10, borderRadius: 5, overflow: 'hidden',
-                      display: 'flex', background: 'rgba(255, 255, 255, 0.08)',
-                    }}>
-                      {entry.segments.map((seg, i) => {
-                        const agentTotal = entry.segments.reduce((s, x) => s + x.durationMin, 0);
-                        const pct = (seg.durationMin / agentTotal) * 100;
-                        return (
-                          <div
-                            key={i}
-                            title={`${SEGMENT_LABELS[seg.kind]} — ${formatDuration(seg.durationMin)}${seg.label ? ` · ${seg.label}` : ''}`}
-                            style={{
-                              width: `${pct}%`,
-                              height: '100%',
-                              background: SEGMENT_COLORS[seg.kind],
-                              opacity: 0.85,
-                              transition: 'opacity 120ms',
-                            }}
-                            onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.85'; }}
-                          />
-                        );
-                      })}
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 12, marginTop: 8, flexWrap: 'wrap' }}>
-                      {(['coding', 'thinking', 'testing', 'error'] as SegmentKind[]).map((kind) => {
-                        const mins = entry.breakdown[kind];
-                        if (!mins) return null;
-                        return (
-                          <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                            <div style={{ width: 6, height: 6, borderRadius: 3, background: SEGMENT_COLORS[kind] }} />
-                            <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontWeight: 500 }}>
-                              {SEGMENT_LABELS[kind]} {formatDuration(mins)}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-
-              {agentBreakdown.length === 0 && (
-                <div style={{ textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 12, padding: 20 }}>
-                  No agent activity yet today
-                </div>
-              )}
+              <CortexTaskBoard
+                repoPath={repoPath}
+                repoName={repoName}
+              />
             </div>
-
-            {/* Bottom-right resize grip */}
-            <button
-              type="button"
-              onMouseDown={handleDrillResizeStart}
-              aria-label="Resize activity panel"
-              style={{
-                position: 'absolute',
-                right: 10,
-                bottom: 10,
-                width: 18,
-                height: 18,
-                padding: 0,
-                border: 'none',
-                borderRadius: 9,
-                background: 'rgba(255,255,255,0.14)',
-                cursor: 'nwse-resize',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--t-text-faint)',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.32)',
-              }}
-            >
-              <svg width={10} height={10} viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round">
-                <path d="M3 7L7 3" />
-                <path d="M5 7L7 5" />
-                <path d="M7 7L7 7" />
-              </svg>
-            </button>
           </div>
-
           {/* ── SVG Connector Line ── */}
           {selectedAgent && (() => {
             const cardEl = agentCardRefs.current.get(selectedAgent);
