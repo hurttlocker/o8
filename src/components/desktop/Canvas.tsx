@@ -3307,6 +3307,18 @@ interface PRDetail {
   workflowStage?: WorkflowStageBadge | null;
 }
 
+function normalizePRDetail(pr: PRDetail): PRDetail {
+  return {
+    ...pr,
+    labels: Array.isArray(pr.labels) ? pr.labels : [],
+    reviews: Array.isArray(pr.reviews) ? pr.reviews : [],
+    files: Array.isArray(pr.files) ? pr.files : [],
+    statusCheckRollup: Array.isArray(pr.statusCheckRollup) ? pr.statusCheckRollup : [],
+    reviewComments: Array.isArray(pr.reviewComments) ? pr.reviewComments : [],
+    issueComments: Array.isArray(pr.issueComments) ? pr.issueComments : [],
+  };
+}
+
 const prStateStyles: Record<string, { color: string; label: string; bg: string }> = {
   OPEN: { color: '#22c55e', label: 'Open', bg: 'rgba(34,197,94,0.08)' },
   MERGED: { color: '#8b5cf6', label: 'Merged', bg: 'rgba(139,92,246,0.08)' },
@@ -3429,7 +3441,7 @@ function PRViewer({
       const fresh = await fetch(`/api/panel/prs/${prNumber}${repoParam}`);
       if (fresh.ok) {
         const freshData = await fresh.json();
-        setPr(freshData.pr);
+        setPr(normalizePRDetail(freshData.pr));
       }
     } catch (err) {
       setActionResult({ type: 'error', message: err instanceof Error ? err.message : 'Failed' });
@@ -3453,7 +3465,7 @@ function PRViewer({
       })
       .then((data) => {
         if (!cancelled) {
-          setPr(data.pr);
+          setPr(normalizePRDetail(data.pr));
           setLoading(false);
         }
       })
