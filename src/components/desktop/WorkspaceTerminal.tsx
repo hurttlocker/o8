@@ -198,7 +198,7 @@ function buildQueuedContextCard(injection: { id: string; text: string; reason?: 
   const preview = firstBodyLine && firstBodyLine !== header ? firstBodyLine : undefined;
 
   const title = injection.reason?.startsWith('pr-comment')
-    ? 'PR comment context'
+    ? (meta[0]?.startsWith('Author:') ? meta[0].replace(/^Author:\s*/, '') : 'PR comment')
     : injection.reason?.startsWith('ci-check')
       ? 'CI context'
       : injection.reason?.startsWith('deploy')
@@ -1715,8 +1715,8 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                     display: 'flex',
                     alignItems: 'flex-start',
                     gap: 10,
-                    padding: '10px 12px',
-                    borderRadius: 14,
+                    padding: '8px 10px',
+                    borderRadius: 12,
                     border: '1px solid var(--t-panel-border)',
                     background: THEME_BG_CARD,
                   }}
@@ -1728,7 +1728,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                       justifyContent: 'center',
                       width: 28,
                       height: 28,
-                      borderRadius: 10,
+                      borderRadius: 9,
                       background: THEME_ACCENT_SOFT,
                       color: THEME_ACCENT,
                       flexShrink: 0,
@@ -1740,19 +1740,19 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                     <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: THEME_ACCENT }}>
                       Staged Context
                     </div>
-                    <div style={{ marginTop: 4, fontSize: 13, fontWeight: 700, color: 'var(--t-text)' }}>
+                    <div style={{ marginTop: 3, fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>
                       {card.title}
                     </div>
                     {card.meta.length > 0 ? (
-                      <div style={{ marginTop: 4, display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 11, color: 'var(--t-text-muted)' }}>
-                        {card.meta.map((entry) => (
+                      <div style={{ marginTop: 3, display: 'flex', gap: 7, flexWrap: 'wrap', fontSize: 10, color: 'var(--t-text-muted)' }}>
+                        {card.meta.slice(0, 2).map((entry) => (
                           <span key={entry}>{entry}</span>
                         ))}
                       </div>
                     ) : null}
                     {card.preview ? (
-                      <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
-                        {card.preview.length > 180 ? `${card.preview.slice(0, 177).trimEnd()}…` : card.preview}
+                      <div style={{ marginTop: 5, fontSize: 11, lineHeight: 1.45, color: 'var(--t-text-secondary)' }}>
+                        {card.preview.length > 120 ? `${card.preview.slice(0, 117).trimEnd()}…` : card.preview}
                       </div>
                     ) : null}
                   </div>
@@ -1767,14 +1767,27 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                       width: 28,
                       height: 28,
                       borderRadius: 10,
-                      border: '1px solid var(--t-panel-border)',
-                      background: 'var(--t-panel)',
-                      color: 'var(--t-text-secondary)',
+                      border: '1px solid var(--t-btn-secondary-border)',
+                      background: 'var(--t-btn-secondary-bg)',
+                      color: 'var(--t-text)',
                       cursor: 'pointer',
                       flexShrink: 0,
+                      boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06)',
                     }}
                   >
-                    <X size={13} />
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 14,
+                        height: 14,
+                        lineHeight: 0,
+                        color: 'var(--t-text-secondary)',
+                      }}
+                    >
+                      <X size={13} />
+                    </span>
                   </button>
                 </div>
               ))}
