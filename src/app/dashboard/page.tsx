@@ -1708,6 +1708,7 @@ function DashboardInner() {
       if (workspaceTarget) {
         workspaceTarget.handle.injectIntoCliChat(payload.text, {
           repo: targetRepo ?? undefined,
+          draftReason: payload.reason,
         });
         return;
       }
