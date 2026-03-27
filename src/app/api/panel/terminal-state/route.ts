@@ -18,7 +18,23 @@ function getStateFile(scope: string) {
   return path.join(STATE_SCOPE_DIR, `${scope}.json`);
 }
 
-function findLatestRepoState(repoPath: string) {
+function stateMatchesRepoPath(data: unknown, repoPath: string) {
+  return Array.isArray((data as { tabs?: Array<{ repoPath?: string }> })?.tabs)
+    && (data as { tabs: Array<{ repoPath?: string }> }).tabs.some((tab) => tab.repoPath === repoPath);
+}
+
+function repoStateStats(data: unknown, repoPath: string) {
+  const tabs = Array.isArray((data as { tabs?: Array<{ repoPath?: string; kind?: string }> })?.tabs)
+    ? (data as { tabs: Array<{ repoPath?: string; kind?: string }> }).tabs
+    : [];
+  const matchingTabs = tabs.filter((tab) => tab.repoPath === repoPath);
+  return {
+    matchingCount: matchingTabs.length,
+    llmChatOnly: matchingTabs.length > 0 && matchingTabs.every((tab) => tab.kind === 'llm-chat'),
+  };
+}
+
+function findLatestRepoState(repoPath: string, excludeFile?: string | null) {
   if (!existsSync(STATE_SCOPE_DIR)) {
     return null;
   }
@@ -27,17 +43,20 @@ function findLatestRepoState(repoPath: string) {
     .filter((file) => file.endsWith('.json'))
     .map((file) => {
       const fullPath = path.join(STATE_SCOPE_DIR, file);
+      if (excludeFile && fullPath === excludeFile) {
+        return null;
+      }
       try {
         const parsed = JSON.parse(readFileSync(fullPath, 'utf-8'));
-        const matchesRepo = Array.isArray(parsed?.tabs)
-          && parsed.tabs.some((tab: { repoPath?: string }) => tab.repoPath === repoPath);
-        if (!matchesRepo) {
+        const stats = repoStateStats(parsed, repoPath);
+        if (stats.matchingCount === 0) {
           return null;
         }
         const savedAt = typeof parsed?.savedAt === 'string'
           ? Date.parse(parsed.savedAt)
           : statSync(fullPath).mtimeMs;
         return {
+          matchingCount: stats.matchingCount,
           savedAt: Number.isFinite(savedAt) ? savedAt : statSync(fullPath).mtimeMs,
           data: parsed,
         };
@@ -45,8 +64,11 @@ function findLatestRepoState(repoPath: string) {
         return null;
       }
     })
-    .filter((entry): entry is { savedAt: number; data: unknown } => Boolean(entry))
-    .sort((a, b) => b.savedAt - a.savedAt);
+    .filter((entry): entry is { matchingCount: number; savedAt: number; data: unknown } => Boolean(entry))
+    .sort((a, b) => {
+      if (b.matchingCount !== a.matchingCount) return b.matchingCount - a.matchingCount;
+      return b.savedAt - a.savedAt;
+    });
 
   return candidates[0]?.data ?? null;
 }
@@ -61,7 +83,21 @@ export async function GET(request: Request) {
 
     if (existsSync(stateFile)) {
       const data = JSON.parse(readFileSync(stateFile, 'utf-8'));
-      return NextResponse.json(data);
+      if (!repoPath) {
+        return NextResponse.json(data);
+      }
+      if (stateMatchesRepoPath(data, repoPath)) {
+        const currentStats = repoStateStats(data, repoPath);
+        const fallback = findLatestRepoState(repoPath, stateFile);
+        if (fallback) {
+          const fallbackStats = repoStateStats(fallback, repoPath);
+          const shouldPreferFallback = currentStats.llmChatOnly && fallbackStats.matchingCount > currentStats.matchingCount;
+          if (shouldPreferFallback) {
+            return NextResponse.json(fallback);
+          }
+        }
+        return NextResponse.json(data);
+      }
     }
 
     if (scope === 'tile-root' && existsSync(LEGACY_STATE_FILE)) {

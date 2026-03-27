@@ -1,12 +1,12 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+const WS_PORT = Number(process.env.WS_PORT ?? 3002);
+const WS_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
 
 /**
  * POST /api/panel/terminal-exec
- * Sends a command to a tmux session via send-keys.
- * This is reliable — bypasses xterm rendering race conditions.
+ * Sends a command to a dashboard terminal session owned by the WS bridge.
  */
 export async function POST(request: Request) {
   try {
@@ -21,11 +21,19 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Invalid session name' }, { status: 400 });
     }
 
-    // Wait for the clear command to finish, then send the actual command
-    execSync(
-      `tmux send-keys -t ${sessionName} ${JSON.stringify(command)} Enter`,
-      { encoding: 'utf-8', timeout: 5000 },
-    );
+    const response = await fetch(`http://127.0.0.1:${WS_PORT}/terminal-exec`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${WS_TOKEN}`,
+      },
+      body: JSON.stringify({ sessionName, command }),
+      cache: 'no-store',
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({})) as { error?: string };
+      return NextResponse.json({ error: data.error || 'Failed to execute command' }, { status: response.status });
+    }
 
     return NextResponse.json({ ok: true });
   } catch (error) {

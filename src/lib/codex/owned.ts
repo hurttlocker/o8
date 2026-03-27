@@ -7,7 +7,8 @@ import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
 import { getWorktreeManager } from '@/lib/worktree/launch';
-import { isTmuxAvailable, tmuxSessionName, createTmuxSession } from '@/lib/terminal/tmux';
+import { tmuxSessionName } from '@/lib/terminal/tmux';
+import { signalBridgeTerminalSession, spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import type {
   AgentSummary,
   EventItem,
@@ -735,24 +736,26 @@ async function spawnOwnedRun(session: OwnedCodexSessionRecord, prompt: string, m
     : runArgsForResume(session.threadId ?? '', prompt);
 
   let pid = 0;
-  let tmuxName: string | undefined;
+  let terminalSessionName: string | undefined;
 
-  // Try tmux-wrapped launch first
-  if (await isTmuxAvailable()) {
-    tmuxName = tmuxSessionName('codex', runId);
-    // Use shell command with tee to preserve JSON stdout capture
-    const codexCmd = ['codex', ...args].map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
-    const shellCmd = `${codexCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
-    const result = await createTmuxSession(tmuxName, 'sh', ['-c', shellCmd], session.repoPath);
-    if (result.ok) {
-      // tmux doesn't give us a direct PID, use 0
-      pid = 0;
-    } else {
-      tmuxName = undefined; // fall through to detached spawn
-    }
+  const bridgeSessionName = tmuxSessionName('codex', runId);
+  const codexCmd = ['codex', ...args].map(a => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+  const shellCmd = `${codexCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
+
+  try {
+    const result = await spawnBridgeTerminalSession({
+      sessionName: bridgeSessionName,
+      shellCommand: shellCmd,
+      cwd: session.repoPath,
+      env: { FORCE_COLOR: '0', NO_COLOR: '1' },
+    });
+    terminalSessionName = result.sessionName;
+    pid = typeof result.pid === 'number' ? result.pid : 0;
+  } catch {
+    // bridge spawn failed — fall through to detached spawn
   }
 
-  if (!tmuxName) {
+  if (!terminalSessionName) {
     // Fallback: detached spawn (existing behavior)
     const stdoutFd = openSync(stdoutPath, 'a');
     const stderrFd = openSync(stderrPath, 'a');
@@ -779,7 +782,7 @@ async function spawnOwnedRun(session: OwnedCodexSessionRecord, prompt: string, m
     stdoutPath,
     stderrPath,
     outcome: 'running',
-    tmuxSession: tmuxName,
+    tmuxSession: terminalSessionName,
   };
 
   session.latestPrompt = prompt;
@@ -868,7 +871,11 @@ export async function interruptOwnedCodexSession(surfaceId: string) {
   }
 
   try {
-    process.kill(-session.activeRun.pid, 'SIGINT');
+    if (session.activeRun.tmuxSession) {
+      await signalBridgeTerminalSession(session.activeRun.tmuxSession, 'SIGINT');
+    } else {
+      process.kill(-session.activeRun.pid, 'SIGINT');
+    }
     session.activeRun = {
       ...session.activeRun,
       outcome: 'interrupted',

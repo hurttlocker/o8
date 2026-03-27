@@ -63,6 +63,17 @@ const MonacoEditor = dynamic(() => import('@/lib/monaco-polyfills').then(() =>
   ssr: false,
   loading: () => <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading editor…</div>,
 });
+const MonacoDiffEditor = dynamic(() => import('@/lib/monaco-polyfills').then(() =>
+  import('@monaco-editor/react').then(async (mod) => {
+    const { loader } = mod;
+    const monaco = await import('monaco-editor');
+    loader.config({ monaco });
+    return mod.DiffEditor;
+  })
+), {
+  ssr: false,
+  loading: () => <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading diff…</div>,
+});
 import {
   formatCiCheckBatchInjection,
   formatCiCheckInjection,
@@ -101,7 +112,7 @@ export interface CanvasProps {
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   selectedRepo?: string | null;
-  onSelectCommit?: (hash: string) => void;
+  onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onInjectChatContext?: (payload: AgentPanelChatInjectionPayload) => void;
   onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
   /** When embedded in ContextualPanel, hide the tab bar (parent manages tabs) */
@@ -328,7 +339,7 @@ const TabContent = memo(function TabContent({
 }: {
   tab: CanvasTab;
   selectedRepo?: string | null;
-  onSelectCommit?: (hash: string) => void;
+  onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onInjectChatContext?: (payload: AgentPanelChatInjectionPayload) => void;
   onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
 }) {
@@ -348,7 +359,7 @@ const TabContent = memo(function TabContent({
     case 'diff':
       return <DiffViewer />;
     case 'commit':
-      return <CommitViewer commitHash={tab.resourceId} />;
+      return <CommitViewer commitHash={tab.resourceId} workspace={tab.meta?.workspace} />;
     case 'pr':
       return <PRViewer prNumber={parseInt(tab.resourceId, 10)} repo={tab.meta?.repo} onInjectChatContext={onInjectChatContext} />;
     case 'readme':
@@ -1320,6 +1331,92 @@ function getMonacoLanguage(path: string): string {
   return map[ext] || 'plaintext';
 }
 
+function defineCortexMonacoThemes(monaco: typeof import('monaco-editor')) {
+  monaco.editor.defineTheme('cortex-graphite', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '8f99a6', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '9db5ff' },
+      { token: 'string', foreground: '7fd6b7' },
+      { token: 'number', foreground: 'f1b57f' },
+      { token: 'type', foreground: 'd6c48f' },
+      { token: 'variable', foreground: 'f2a8b8' },
+      { token: 'function', foreground: '8fc0ff' },
+    ],
+    colors: {
+      'editor.background': '#3d434b',
+      'editor.foreground': '#eef3f8',
+      'editor.lineHighlightBackground': '#49515b',
+      'editor.selectionBackground': '#7aa2ff33',
+      'editorLineNumber.foreground': '#8893a0',
+      'editorLineNumber.activeForeground': '#dbe4ee',
+      'editor.inactiveSelectionBackground': '#7aa2ff1f',
+      'editorCursor.foreground': '#7aa2ff',
+      'editorGutter.background': '#3d434b',
+      'editorWidget.background': '#444b55',
+      'editorWidget.border': '#65707d',
+      'input.background': '#343a42',
+      'input.border': '#65707d',
+      'focusBorder': '#7aa2ff',
+      'minimap.background': '#3d434b',
+      'scrollbarSlider.background': '#65707d88',
+      'scrollbarSlider.hoverBackground': '#7b879488',
+      'diffEditor.insertedTextBackground': '#16653433',
+      'diffEditor.insertedLineBackground': '#1665341f',
+      'diffEditor.removedTextBackground': '#1d4ed833',
+      'diffEditor.removedLineBackground': '#1d4ed81f',
+      'diffEditor.diagonalFill': '#3d434b',
+    },
+  });
+
+  monaco.editor.defineTheme('cortex-frost', {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '94a3b8', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '6366f1' },
+      { token: 'string', foreground: '0d9488' },
+      { token: 'number', foreground: 'e879a0' },
+      { token: 'type', foreground: '8b5cf6' },
+      { token: 'variable', foreground: '0284c7' },
+      { token: 'function', foreground: '4f46e5' },
+      { token: 'delimiter', foreground: '94a3b8' },
+      { token: 'tag', foreground: 'e879a0' },
+      { token: 'attribute.name', foreground: '8b5cf6' },
+      { token: 'attribute.value', foreground: '0d9488' },
+      { token: 'operator', foreground: '64748b' },
+      { token: 'regexp', foreground: 'e879a0' },
+    ],
+    colors: {
+      'editor.background': '#f0f7ff',
+      'editor.foreground': '#1e293b',
+      'editor.lineHighlightBackground': '#e8f1fc',
+      'editor.selectionBackground': '#c7d2fe',
+      'editorLineNumber.foreground': '#94a3b8',
+      'editorLineNumber.activeForeground': '#475569',
+      'editor.inactiveSelectionBackground': '#c7d2fe60',
+      'editorCursor.foreground': '#4f46e5',
+      'editorGutter.background': '#f0f7ff',
+      'editorWidget.background': '#f8fafc',
+      'editorWidget.border': '#cbd5e1',
+      'input.background': '#ffffff',
+      'input.border': '#cbd5e1',
+      'focusBorder': '#6366f1',
+      'minimap.background': '#f0f7ff',
+      'scrollbarSlider.background': '#94a3b840',
+      'scrollbarSlider.hoverBackground': '#64748b40',
+      'editorBracketMatch.background': '#e0e7ff',
+      'editorBracketMatch.border': '#a5b4fc',
+      'diffEditor.insertedTextBackground': '#dcfce766',
+      'diffEditor.insertedLineBackground': '#dcfce740',
+      'diffEditor.removedTextBackground': '#dbeafe88',
+      'diffEditor.removedLineBackground': '#dbeafe55',
+      'diffEditor.diagonalFill': '#f0f7ff',
+    },
+  });
+}
+
 const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath: string; workspace?: string }) {
   const { themeId } = useTheme();
   const [content, setContent] = useState<string | null>(null);
@@ -1372,7 +1469,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
       const res = await fetch('/api/v2/files', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: filePath, content: editContent }),
+        body: JSON.stringify({ path: filePath, content: editContent, workspace }),
       });
       if (res.ok) {
         setContent(editContent);
@@ -1963,84 +2060,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
               }
             }}
             onMount={handleEditorMount}
-            beforeMount={(monaco) => {
-              // Graphite dark theme — soft shell gray, not Monaco black
-              monaco.editor.defineTheme('cortex-graphite', {
-                base: 'vs-dark',
-                inherit: true,
-                rules: [
-                  { token: 'comment', foreground: '8f99a6', fontStyle: 'italic' },
-                  { token: 'keyword', foreground: '9db5ff' },
-                  { token: 'string', foreground: '7fd6b7' },
-                  { token: 'number', foreground: 'f1b57f' },
-                  { token: 'type', foreground: 'd6c48f' },
-                  { token: 'variable', foreground: 'f2a8b8' },
-                  { token: 'function', foreground: '8fc0ff' },
-                ],
-                colors: {
-                  'editor.background': '#3d434b',
-                  'editor.foreground': '#eef3f8',
-                  'editor.lineHighlightBackground': '#49515b',
-                  'editor.selectionBackground': '#7aa2ff33',
-                  'editorLineNumber.foreground': '#8893a0',
-                  'editorLineNumber.activeForeground': '#dbe4ee',
-                  'editor.inactiveSelectionBackground': '#7aa2ff1f',
-                  'editorCursor.foreground': '#7aa2ff',
-                  'editorGutter.background': '#3d434b',
-                  'editorWidget.background': '#444b55',
-                  'editorWidget.border': '#65707d',
-                  'input.background': '#343a42',
-                  'input.border': '#65707d',
-                  'focusBorder': '#7aa2ff',
-                  'minimap.background': '#3d434b',
-                  'scrollbarSlider.background': '#65707d88',
-                  'scrollbarSlider.hoverBackground': '#7b879488',
-                },
-              });
-
-              // Cortex Frost — icy blue background, pastel blue/violet syntax
-              // Apple-clean with soft pastels that pop on the ice
-              monaco.editor.defineTheme('cortex-frost', {
-                base: 'vs',
-                inherit: true,
-                rules: [
-                  { token: 'comment', foreground: '94a3b8', fontStyle: 'italic' },  // slate-400
-                  { token: 'keyword', foreground: '6366f1' },   // indigo-500 — soft violet
-                  { token: 'string', foreground: '0d9488' },    // teal-600 — ocean green
-                  { token: 'number', foreground: 'e879a0' },    // pastel rose
-                  { token: 'type', foreground: '8b5cf6' },      // violet-500
-                  { token: 'variable', foreground: '0284c7' },  // sky-600
-                  { token: 'function', foreground: '4f46e5' },  // indigo-600
-                  { token: 'delimiter', foreground: '94a3b8' }, // slate-400
-                  { token: 'tag', foreground: 'e879a0' },       // pastel rose
-                  { token: 'attribute.name', foreground: '8b5cf6' },  // violet
-                  { token: 'attribute.value', foreground: '0d9488' }, // teal
-                  { token: 'operator', foreground: '64748b' },  // slate-500
-                  { token: 'regexp', foreground: 'e879a0' },    // pastel rose
-                ],
-                colors: {
-                  'editor.background': '#f0f7ff',              // icy blue
-                  'editor.foreground': '#1e293b',              // slate-800
-                  'editor.lineHighlightBackground': '#e8f1fc', // soft blue line
-                  'editor.selectionBackground': '#c7d2fe',     // indigo-200
-                  'editorLineNumber.foreground': '#94a3b8',    // slate-400
-                  'editorLineNumber.activeForeground': '#475569', // slate-600
-                  'editor.inactiveSelectionBackground': '#c7d2fe60',
-                  'editorCursor.foreground': '#4f46e5',        // indigo cursor
-                  'editorGutter.background': '#f0f7ff',
-                  'editorWidget.background': '#f8fafc',        // slate-50
-                  'editorWidget.border': '#cbd5e1',            // slate-300
-                  'input.background': '#ffffff',
-                  'input.border': '#cbd5e1',
-                  'focusBorder': '#6366f1',                    // indigo focus
-                  'minimap.background': '#f0f7ff',
-                  'scrollbarSlider.background': '#94a3b840',
-                  'scrollbarSlider.hoverBackground': '#64748b40',
-                  'editorBracketMatch.background': '#e0e7ff',  // indigo-100
-                  'editorBracketMatch.border': '#a5b4fc',      // indigo-300
-                },
-              });
-            }}
+            beforeMount={defineCortexMonacoThemes}
             options={{
               readOnly: false,
               fontSize: 13,
@@ -2228,7 +2248,7 @@ interface GitLogCommit {
   refs: { type: string; name: string }[];
 }
 
-function GitLogViewer({ workspace, onSelectCommit }: { workspace: string; onSelectCommit?: (hash: string) => void }) {
+function GitLogViewer({ workspace, onSelectCommit }: { workspace: string; onSelectCommit?: (hash: string, meta?: Record<string, string>) => void }) {
   const [commits, setCommits] = useState<GitLogCommit[]>([]);
   const [currentBranch, setCurrentBranch] = useState('main');
   const [loading, setLoading] = useState(true);
@@ -2296,7 +2316,7 @@ function GitLogViewer({ workspace, onSelectCommit }: { workspace: string; onSele
           <button
             key={commit.hash}
             type="button"
-            onClick={() => onSelectCommit?.(commit.hash)}
+            onClick={() => onSelectCommit?.(commit.hash, workspace ? { workspace } : undefined)}
             style={{
               display: 'flex',
               gap: 12,
@@ -3901,12 +3921,11 @@ function PRViewer({
   const reviews = pr.reviews ?? [];
   const requestedChangesCount = reviews.filter((review) => review.state?.toLowerCase() === 'changes_requested').length;
   const approvedCount = reviews.filter((review) => review.state?.toLowerCase() === 'approved').length;
-  const reviewStage = pr.workflowStage ?? deriveWorkflowStage({
+  const reviewStage = deriveWorkflowStage({
     prState: pr.state,
     requestedChanges: requestedChangesCount,
     failedChecks: failedChecks.length,
     pendingChecks: pendingChecks.length,
-    readinessState: pr.readiness?.state ?? localRepo?.readiness?.state ?? null,
   });
   const reviewGuidance = describeWorkflowStage({
     stage: reviewStage,
@@ -3915,9 +3934,6 @@ function PRViewer({
     approvedCount,
     failedChecks: failedChecks.length,
     pendingChecks: pendingChecks.length,
-    readinessState: pr.readiness?.state ?? localRepo?.readiness?.state ?? null,
-    readinessSummary: pr.readiness?.summary ?? localRepo?.readiness?.summary ?? null,
-    readinessNextAction: pr.readiness?.nextAction ?? localRepo?.readiness?.nextAction ?? null,
   });
   const reviewStatus = reviewStage
     ? {
@@ -3930,7 +3946,7 @@ function PRViewer({
             ? { background: 'rgba(245,158,11,0.10)', border: 'rgba(245,158,11,0.18)', color: '#b45309' }
             : reviewStage.key === 'merge_ready'
               ? { background: 'rgba(34,197,94,0.10)', border: 'rgba(34,197,94,0.18)', color: '#15803d' }
-              : readinessTone(pr.readiness ?? localRepo?.readiness),
+              : readinessTone(pr.readiness),
       }
     : null;
 
@@ -3967,7 +3983,7 @@ function PRViewer({
             #{pr.number} {pr.title}
           </span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: 12, color: 'var(--t-text-secondary)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 6, fontSize: 12, color: 'var(--t-text-secondary)' }}>
           <span>{pr.author.login}</span>
           <span>wants to merge</span>
           <span style={{
@@ -3996,69 +4012,31 @@ function PRViewer({
           <span style={{ color: '#ef4444', fontWeight: 600 }}>-{pr.deletions}</span>
           <span>·</span>
           <span>{formatAge(pr.createdAt)}</span>
+          {reviewStatus ? (
+            <>
+              <span>·</span>
+              <span
+                title={reviewStatus.detail}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '2px 8px',
+                  borderRadius: 999,
+                  border: `1px solid ${reviewStatus.tone.border}`,
+                  background: reviewStatus.tone.background,
+                  color: reviewStatus.tone.color,
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              >
+                {reviewStatus.label}
+              </span>
+            </>
+          ) : null}
         </div>
         {pr.mergedBy ? (
           <div style={{ fontSize: 12, color: '#8b5cf6', marginTop: 4 }}>
             Merged by {pr.mergedBy.login} {pr.mergedAt ? formatAge(pr.mergedAt) : ''}
-          </div>
-        ) : null}
-        {localRepo?.readiness ? (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              marginTop: 10,
-              padding: '10px 12px',
-              borderRadius: 12,
-              border: `1px solid ${readinessTone(localRepo.readiness).border}`,
-              background: readinessTone(localRepo.readiness).background,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: readinessTone(localRepo.readiness).color }}>
-                {localRepo.name} · {localRepo.readiness.label}
-              </span>
-              {localRepo.readiness.currentBranch ? (
-                <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
-                  {localRepo.readiness.currentBranch}
-                </span>
-              ) : null}
-            </div>
-            <div style={{ fontSize: 12, lineHeight: 1.45, color: 'var(--t-text-secondary)' }}>
-              {localRepo.readiness.summary}
-            </div>
-            {localRepo.readiness.nextAction ? (
-              <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--t-text-muted)' }}>
-                {localRepo.readiness.nextAction}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-        {reviewStatus ? (
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-              marginTop: 10,
-              padding: '10px 12px',
-              borderRadius: 12,
-              border: `1px solid ${reviewStatus.tone.border}`,
-              background: reviewStatus.tone.background,
-            }}
-          >
-            <div style={{ fontSize: 11, fontWeight: 700, color: reviewStatus.tone.color }}>
-              {reviewStatus.label}
-            </div>
-            <div style={{ fontSize: 12, lineHeight: 1.45, color: 'var(--t-text-secondary)' }}>
-              {reviewStatus.detail}
-            </div>
-            {reviewStatus.nextAction ? (
-              <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--t-text-muted)' }}>
-                {reviewStatus.nextAction}
-              </div>
-            ) : null}
           </div>
         ) : null}
 
@@ -4209,35 +4187,6 @@ function PRViewer({
             {actionResult.message}
           </div>
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-          {[
-            '1-5 sections',
-            '[ ] move lane',
-            activeSection !== 'overview' && activeSectionItemCount > 0 ? 'J/K move row' : null,
-            activeSection !== 'overview' && activeSectionItemCount > 0 ? 'Enter open/add' : null,
-            repo ? 'O GitHub' : null,
-            pr.state === 'OPEN' ? 'C/A/R/M review' : null,
-          ].filter((hint): hint is string => Boolean(hint)).map((hint) => (
-            <span
-              key={hint}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: '3px 8px',
-                borderRadius: 999,
-                border: '1px solid rgba(148, 163, 184, 0.18)',
-                background: 'rgba(255,255,255,0.42)',
-                fontSize: 10,
-                fontWeight: 700,
-                color: 'var(--t-text-muted)',
-                letterSpacing: '0.03em',
-                textTransform: 'uppercase',
-              }}
-            >
-              {hint}
-            </span>
-          ))}
-        </div>
       </div>
 
       {/* Comment compose bar — for open PRs */}
@@ -4256,6 +4205,7 @@ function PRViewer({
         }}>
           <input
             ref={commentInputRef}
+            name="reviewComment"
             type="text"
             placeholder="Add a comment… (C focuses, Cmd/Ctrl+Enter sends)"
             value={commentText}
@@ -4872,43 +4822,237 @@ interface CommitDetail {
   author: string;
   email: string;
   date: string;
-  files: { path: string; additions: number | null; deletions: number | null }[];
+  files: { path: string; additions: number | null; deletions: number | null; status?: string }[];
   totalAdditions: number;
   totalDeletions: number;
   diff: string;
 }
 
-function CommitViewer({ commitHash }: { commitHash: string }) {
+interface CommitFileCompare {
+  path: string;
+  status: string;
+  commitContent: string | null;
+  commitSource: 'commit' | 'parent' | null;
+  workspaceContent: string | null;
+  workspaceExists: boolean;
+  note?: string;
+}
+
+function CommitViewer({ commitHash, workspace }: { commitHash: string; workspace?: string }) {
+  const { themeId } = useTheme();
   const [commit, setCommit] = useState<CommitDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [compareData, setCompareData] = useState<CommitFileCompare | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [editContent, setEditContent] = useState('');
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveNote, setSaveNote] = useState<string | null>(null);
+  const [commitComposerOpen, setCommitComposerOpen] = useState(false);
+  const [commitMsg, setCommitMsg] = useState('');
+  const [commitLoading, setCommitLoading] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
+  const [actionToast, setActionToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const compareBaselineRef = useRef('');
+  const diffEditorRef = useRef<import('monaco-editor').editor.IStandaloneDiffEditor | null>(null);
+  const diffEditorListenerRef = useRef<import('monaco-editor').IDisposable | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError(null);
 
-    fetch(`/api/panel/commits/${commitHash}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
+    const wsParam = workspace ? `?workspace=${encodeURIComponent(workspace)}` : '';
+    fetch(`/api/panel/commits/${commitHash}${wsParam}`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
       })
       .then((data) => {
-        if (!cancelled) {
-          setCommit(data.commit);
-          setLoading(false);
-        }
+        if (cancelled) return;
+        const nextCommit = (data.commit ?? null) as CommitDetail | null;
+        setCommit(nextCommit);
+        setSelectedFile((current) => {
+          if (current && nextCommit?.files.some((file) => file.path === current)) {
+            return current;
+          }
+          return workspace ? nextCommit?.files[0]?.path ?? null : null;
+        });
+        setLoading(false);
       })
       .catch((err) => {
-        if (!cancelled) {
-          setError(err.message);
-          setLoading(false);
-        }
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : 'Unknown error');
+        setLoading(false);
       });
 
     return () => { cancelled = true; };
-  }, [commitHash]);
+  }, [commitHash, workspace]);
+
+  useEffect(() => {
+    if (!selectedFile) {
+      setCompareData(null);
+      setEditContent('');
+      setDirty(false);
+      setSaveNote(null);
+      return;
+    }
+
+    let cancelled = false;
+    setCompareLoading(true);
+    setSaveNote(null);
+    const wsParam = workspace ? `&workspace=${encodeURIComponent(workspace)}` : '';
+
+    fetch(`/api/panel/commits/${commitHash}/file?path=${encodeURIComponent(selectedFile)}${wsParam}`)
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json();
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const nextCompare = (data.file ?? null) as CommitFileCompare | null;
+        setCompareData(nextCompare);
+        const nextContent = nextCompare?.workspaceContent ?? nextCompare?.commitContent ?? '';
+        compareBaselineRef.current = nextContent;
+        setEditContent(nextContent);
+        setDirty(false);
+        setCompareLoading(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setCompareData({
+          path: selectedFile,
+          status: 'unknown',
+          commitContent: null,
+          commitSource: null,
+          workspaceContent: null,
+          workspaceExists: false,
+          note: err instanceof Error ? err.message : 'Unable to load file compare',
+        });
+        compareBaselineRef.current = '';
+        setEditContent('');
+        setDirty(false);
+        setCompareLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [commitHash, selectedFile, workspace]);
+
+  const handleSave = useCallback(async () => {
+    if (!workspace || !selectedFile || saving) return false;
+    setSaving(true);
+    setSaveNote(null);
+    try {
+      const res = await fetch('/api/v2/files', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: selectedFile, content: editContent, workspace }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error ?? 'Save failed');
+      }
+      setCompareData((current) => current
+        ? {
+            ...current,
+            workspaceContent: editContent,
+            workspaceExists: true,
+          }
+        : current);
+      compareBaselineRef.current = editContent;
+      setDirty(false);
+      setSaveNote('Saved');
+      setTimeout(() => setSaveNote(null), 2200);
+      return true;
+    } catch (err) {
+      setSaveNote(`Error: ${err instanceof Error ? err.message : 'Save failed'}`);
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }, [editContent, saving, selectedFile, workspace]);
+
+  const stageAndCommit = useCallback(async () => {
+    if (!workspace || !commitMsg.trim() || commitLoading) return;
+    setCommitLoading(true);
+    setActionToast(null);
+    try {
+      if (dirty) {
+        const saved = await handleSave();
+        if (!saved) {
+          setCommitLoading(false);
+          return;
+        }
+      }
+      const res = await fetch('/api/review/commit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: commitMsg, workspace }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Commit failed');
+      setActionToast({ type: 'success', message: data.message || `Committed ${data.hash ?? commitHash.slice(0, 7)}` });
+      setCommitMsg('');
+      setCommitComposerOpen(false);
+    } catch (err) {
+      setActionToast({ type: 'error', message: err instanceof Error ? err.message : 'Commit failed' });
+    } finally {
+      setCommitLoading(false);
+    }
+  }, [commitHash, commitLoading, commitMsg, dirty, handleSave, workspace]);
+
+  const handlePush = useCallback(async () => {
+    if (!workspace || pushLoading || saving || commitLoading || dirty) return;
+    setPushLoading(true);
+    setActionToast(null);
+    try {
+      const res = await fetch('/api/review/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Push failed');
+      setActionToast({
+        type: 'success',
+        message: data.message || `Pushed ${data.branch ?? 'branch'}${data.upstream ? ` to ${data.upstream}` : ''}`,
+      });
+    } catch (err) {
+      setActionToast({ type: 'error', message: err instanceof Error ? err.message : 'Push failed' });
+    } finally {
+      setPushLoading(false);
+    }
+  }, [commitLoading, dirty, pushLoading, saving, workspace]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!selectedFile || !workspace) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        void handleSave();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleSave, selectedFile, workspace]);
+
+  useEffect(() => () => {
+    diffEditorListenerRef.current?.dispose();
+  }, []);
+
+  const handleDiffEditorMount = useCallback((editor: unknown) => {
+    const diffEditor = editor as import('monaco-editor').editor.IStandaloneDiffEditor;
+    diffEditorRef.current = diffEditor;
+    diffEditorListenerRef.current?.dispose();
+    const modifiedEditor = diffEditor.getModifiedEditor();
+    diffEditorListenerRef.current = modifiedEditor.onDidChangeModelContent(() => {
+      const value = modifiedEditor.getValue();
+      setEditContent(value);
+      setDirty(value !== compareBaselineRef.current);
+    });
+  }, []);
 
   if (loading) {
     return (
@@ -4926,7 +5070,6 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
     );
   }
 
-  // Parse diff into per-file sections
   const fileDiffs = new Map<string, string>();
   if (commit.diff) {
     const sections = commit.diff.split(/^diff --git /m).filter(Boolean);
@@ -4940,33 +5083,149 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
   }
 
   const activeDiff = selectedFile ? (fileDiffs.get(selectedFile) ?? '') : commit.diff;
+  const selectedFileEntry = selectedFile ? commit.files.find((file) => file.path === selectedFile) ?? null : null;
+  const compareLanguage = selectedFile ? getMonacoLanguage(selectedFile) : 'plaintext';
+  const editorTheme = themeId === 'dark' ? 'cortex-graphite' : 'cortex-frost';
+  const hasWorkspace = Boolean(workspace);
+  const normalizedSelectedFilePath = selectedFile
+    ? selectedFile.replace(/^\/+/, '').replace(/\s+/g, '-')
+    : null;
+  const originalModelPath = normalizedSelectedFilePath
+    ? `/__cortex_commit__/${commit.hash}/${normalizedSelectedFilePath}`
+    : undefined;
+  const modifiedModelPath = normalizedSelectedFilePath
+    ? `/__cortex_workspace__/${normalizedSelectedFilePath}`
+    : undefined;
+  const canEditSelectedFile = Boolean(
+    workspace
+    && selectedFile
+    && (
+      compareData?.workspaceExists
+      || compareData?.commitContent !== null
+    ),
+  );
+  const editorValue = compareData?.workspaceContent ?? compareData?.commitContent ?? editContent;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Header */}
       <div style={{
-        paddingTop: 16,
-        paddingRight: 20,
-        paddingBottom: 12,
-        paddingLeft: 20,
+        paddingTop: 11,
+        paddingRight: 16,
+        paddingBottom: 9,
+        paddingLeft: 16,
         borderBottom: '1px solid var(--t-divider)',
         background: 'var(--t-panel-translucent)',
         flexShrink: 0,
       }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text)', lineHeight: 1.4 }}>
-          {commit.subject}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+          <div style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 14,
+            fontWeight: 600,
+            color: 'var(--t-text)',
+            lineHeight: 1.35,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
+            {commit.subject}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            {saveNote ? (
+              <span style={{
+                fontSize: 10,
+                fontWeight: 600,
+                color: saveNote.startsWith('Error') ? '#ef4444' : '#16a34a',
+              }}>
+                {saveNote}
+              </span>
+            ) : null}
+            {hasWorkspace ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void handleSave()}
+                  disabled={!selectedFile || !hasWorkspace || saving || !dirty}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    height: 26,
+                    padding: '0 10px',
+                    borderRadius: 999,
+                    border: '1px solid var(--t-divider)',
+                    background: dirty ? 'var(--t-panel-translucent)' : 'transparent',
+                    color: dirty ? 'var(--t-text)' : 'var(--t-text-muted)',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    cursor: dirty ? 'pointer' : 'default',
+                  }}
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCommitComposerOpen((current) => !current)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    height: 26,
+                    padding: '0 10px',
+                    borderRadius: 999,
+                    border: '1px solid var(--t-divider)',
+                    background: commitComposerOpen || commitMsg.trim() ? 'var(--t-panel-translucent)' : 'transparent',
+                    color: commitComposerOpen || commitMsg.trim() ? 'var(--t-text)' : 'var(--t-text-muted)',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Check size={12} />
+                  Commit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handlePush()}
+                  disabled={!hasWorkspace || pushLoading || saving || commitLoading || dirty}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    height: 26,
+                    padding: '0 10px',
+                    borderRadius: 999,
+                    border: '1px solid var(--t-divider)',
+                    background: pushLoading ? 'var(--t-panel-translucent)' : 'transparent',
+                    color: pushLoading || (!dirty && !saving && !commitLoading) ? 'var(--t-text-secondary)' : 'var(--t-text-muted)',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    cursor: !dirty && !saving && !commitLoading ? 'pointer' : 'default',
+                  }}
+                >
+                  <Send size={11} />
+                  {pushLoading ? 'Pushing…' : 'Push'}
+                </button>
+              </>
+            ) : (
+              <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>
+                Read-only
+              </span>
+            )}
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 6, fontSize: 12, color: 'var(--t-text-secondary)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, fontSize: 11, color: 'var(--t-text-muted)', flexWrap: 'wrap' }}>
           <span style={{
             fontFamily: '"SF Mono", ui-monospace, monospace',
-            fontSize: 11,
-            paddingTop: 2,
+            fontSize: 10,
+            paddingTop: 1,
             paddingRight: 6,
-            paddingBottom: 2,
+            paddingBottom: 1,
             paddingLeft: 6,
-            borderRadius: 4,
+            borderRadius: 999,
             background: 'var(--t-divider-subtle)',
-            color: 'var(--t-text-secondary)',
+            color: 'var(--t-text-muted)',
           }}>
             {commit.shortHash}
           </span>
@@ -4974,20 +5233,118 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
           <span>·</span>
           <span>{formatAge(commit.date)}</span>
           <span>·</span>
-          <span style={{ color: '#22c55e', fontWeight: 600 }}>+{commit.totalAdditions}</span>
-          <span style={{ color: '#ef4444', fontWeight: 600 }}>-{commit.totalDeletions}</span>
+          <span style={{ color: 'rgba(34,197,94,0.9)', fontWeight: 600 }}>+{commit.totalAdditions}</span>
+          <span style={{ color: 'rgba(37,99,235,0.9)', fontWeight: 600 }}>-{commit.totalDeletions}</span>
           <span>{commit.files.length} file{commit.files.length !== 1 ? 's' : ''}</span>
         </div>
         {commit.body ? (
-          <div style={{ marginTop: 8, fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>
+          <div style={{ marginTop: 5, fontSize: 12, color: 'var(--t-text-muted)', lineHeight: 1.4, whiteSpace: 'pre-wrap' }}>
             {commit.body}
           </div>
         ) : null}
       </div>
 
-      {/* Body: file list + diff */}
+      {hasWorkspace && commitComposerOpen ? (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          paddingTop: 8,
+          paddingRight: 16,
+          paddingBottom: 8,
+          paddingLeft: 20,
+          borderBottom: '1px solid var(--t-divider-subtle)',
+          background: 'var(--t-panel-translucent)',
+          flexShrink: 0,
+        }}>
+          <input
+            type="text"
+            placeholder="Commit message..."
+            value={commitMsg}
+            onChange={(event) => setCommitMsg(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && commitMsg.trim()) {
+                event.preventDefault();
+                void stageAndCommit();
+              }
+              if (event.key === 'Escape') {
+                setCommitComposerOpen(false);
+              }
+            }}
+            style={{
+              flex: 1,
+              minWidth: 0,
+              border: '1px solid var(--t-divider)',
+              borderRadius: 10,
+              padding: '8px 11px',
+              fontSize: 12,
+              background: 'var(--t-panel)',
+              color: 'var(--t-text)',
+              outline: 'none',
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => void stageAndCommit()}
+            disabled={!commitMsg.trim() || commitLoading}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              height: 32,
+              padding: '0 12px',
+              borderRadius: 10,
+              border: '1px solid rgba(34,197,94,0.22)',
+              background: commitMsg.trim() ? 'rgba(34,197,94,0.12)' : 'transparent',
+              color: commitMsg.trim() ? '#16a34a' : 'var(--t-text-muted)',
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: commitMsg.trim() ? 'pointer' : 'default',
+            }}
+          >
+            <Check size={13} />
+            {commitLoading ? 'Committing…' : 'Stage All + Commit'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setCommitComposerOpen(false)}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 32,
+              height: 32,
+              borderRadius: 10,
+              border: '1px solid var(--t-divider)',
+              background: 'transparent',
+              color: 'var(--t-text-muted)',
+              cursor: 'pointer',
+            }}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      ) : null}
+
+      {actionToast ? (
+        <div style={{
+          paddingTop: 4,
+          paddingRight: 20,
+          paddingBottom: 4,
+          paddingLeft: 20,
+          fontSize: 11,
+          fontWeight: 600,
+          color: actionToast.type === 'success' ? '#16a34a' : '#ef4444',
+          background: actionToast.type === 'success'
+            ? 'rgba(34,197,94,0.06)'
+            : 'rgba(239,68,68,0.08)',
+          flexShrink: 0,
+        }}>
+          {actionToast.message}
+        </div>
+      ) : null}
+
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        {/* File list sidebar */}
         <div style={{
           width: 260,
           flexShrink: 0,
@@ -4995,7 +5352,6 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
           overflowY: 'auto',
           background: 'var(--t-bg-subtle)',
         }}>
-          {/* "All files" option */}
           <button
             type="button"
             onClick={() => setSelectedFile(null)}
@@ -5019,7 +5375,7 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
               color: 'var(--t-text-strong)',
             }}
           >
-            All files ({commit.files.length})
+            Overview ({commit.files.length})
           </button>
 
           {commit.files.map((file) => {
@@ -5050,7 +5406,7 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
                   transition: 'all 100ms ease',
                 }}
               >
-                <FileText size={14} strokeWidth={1.8} style={{ color: 'var(--t-text-muted)', flexShrink: 0 }} />
+                <DiffStatusIcon status={file.status ?? 'modified'} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{
                     fontSize: 13,
@@ -5072,7 +5428,7 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
                 </div>
                 <div style={{ display: 'flex', gap: 4, flexShrink: 0, fontSize: 11, fontWeight: 600 }}>
                   {(file.additions ?? 0) > 0 ? <span style={{ color: '#22c55e' }}>+{file.additions}</span> : null}
-                  {(file.deletions ?? 0) > 0 ? <span style={{ color: '#ef4444' }}>-{file.deletions}</span> : null}
+                  {(file.deletions ?? 0) > 0 ? <span style={{ color: '#2563eb' }}>-{file.deletions}</span> : null}
                 </div>
                 <ChevronRight size={12} strokeWidth={2} style={{ color: 'var(--t-text-faint)', flexShrink: 0 }} />
               </button>
@@ -5080,23 +5436,132 @@ function CommitViewer({ commitHash }: { commitHash: string }) {
           })}
         </div>
 
-        {/* Diff preview */}
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          <pre style={{
-            margin: 0,
-            paddingTop: 14,
-            paddingRight: 16,
-            paddingBottom: 14,
-            paddingLeft: 16,
-            fontSize: '0.8rem',
-            lineHeight: 1.65,
-            fontFamily: '"SF Mono", "Menlo", "Monaco", ui-monospace, monospace',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            color: 'var(--t-text-strong)',
-          }}>
-            {renderDiffLines(activeDiff)}
-          </pre>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+          {selectedFile ? (
+            <>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                paddingTop: 10,
+                paddingRight: 16,
+                paddingBottom: 10,
+                paddingLeft: 16,
+                borderBottom: '1px solid var(--t-divider-subtle)',
+                background: 'var(--t-panel-translucent)',
+                flexShrink: 0,
+              }}>
+                <FileText size={14} strokeWidth={1.8} style={{ color: 'var(--t-text-muted)' }} />
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)' }}>
+                  {selectedFileEntry?.path ?? selectedFile}
+                </span>
+                {selectedFileEntry ? (
+                  <span style={{ fontSize: 11, color: '#16a34a', fontWeight: 700 }}>
+                    +{selectedFileEntry.additions ?? 0}
+                  </span>
+                ) : null}
+                {selectedFileEntry ? (
+                  <span style={{ fontSize: 11, color: '#2563eb', fontWeight: 700 }}>
+                    -{selectedFileEntry.deletions ?? 0}
+                  </span>
+                ) : null}
+                <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--t-text-muted)' }}>
+                  {compareData?.note ?? ''}
+                </span>
+              </div>
+
+              <div style={{ flex: 1, minHeight: 0 }}>
+                {compareLoading ? (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>
+                    Loading live compare…
+                  </div>
+                ) : compareData && compareData.commitContent !== null && compareData.workspaceContent !== null ? (
+                  <MonacoDiffEditor
+                    height="100%"
+                    language={compareLanguage}
+                    original={compareData.commitContent}
+                    modified={editContent}
+                    originalModelPath={originalModelPath}
+                    modifiedModelPath={modifiedModelPath}
+                    keepCurrentOriginalModel
+                    keepCurrentModifiedModel
+                    theme={editorTheme}
+                    beforeMount={defineCortexMonacoThemes}
+                    onMount={handleDiffEditorMount}
+                    options={{
+                      readOnly: !canEditSelectedFile,
+                      originalEditable: false,
+                      renderSideBySide: true,
+                      minimap: { enabled: false },
+                      scrollBeyondLastLine: false,
+                      wordWrap: 'on',
+                      lineNumbers: 'on',
+                      padding: { top: 12, bottom: 12 },
+                      overviewRulerBorder: false,
+                      glyphMargin: false,
+                      scrollbar: {
+                        verticalScrollbarSize: 8,
+                        horizontalScrollbarSize: 8,
+                        useShadows: false,
+                      },
+                    }}
+                  />
+                ) : (
+                  <MonacoEditor
+                    height="100%"
+                    language={compareLanguage}
+                    value={editorValue}
+                    theme={editorTheme}
+                    beforeMount={defineCortexMonacoThemes}
+                    onChange={(value) => {
+                      if (!canEditSelectedFile || value === undefined) return;
+                      setEditContent(value);
+                      setDirty(value !== (compareData?.workspaceContent ?? compareData?.commitContent ?? ''));
+                    }}
+                    options={{
+                      readOnly: !canEditSelectedFile,
+                      fontSize: 13,
+                      fontFamily: '"SF Mono", "Menlo", "Monaco", "Cascadia Code", ui-monospace, monospace',
+                      lineHeight: 20,
+                      tabSize: 2,
+                      insertSpaces: true,
+                      minimap: { enabled: false },
+                      scrollBeyondLastLine: false,
+                      wordWrap: 'on',
+                      lineNumbers: 'on',
+                      padding: { top: 12, bottom: 12 },
+                      glyphMargin: false,
+                      overviewRulerLanes: 0,
+                      overviewRulerBorder: false,
+                      scrollbar: {
+                        verticalScrollbarSize: 8,
+                        horizontalScrollbarSize: 8,
+                        useShadows: false,
+                      },
+                    }}
+                  />
+                )}
+              </div>
+            </>
+          ) : (
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              <pre style={{
+                margin: 0,
+                paddingTop: 14,
+                paddingRight: 16,
+                paddingBottom: 14,
+                paddingLeft: 16,
+                fontSize: '0.8rem',
+                lineHeight: 1.65,
+                fontFamily: '"SF Mono", "Menlo", "Monaco", ui-monospace, monospace',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                color: 'var(--t-text-strong)',
+              }}>
+                {renderDiffLines(activeDiff)}
+              </pre>
+            </div>
+          )}
         </div>
       </div>
     </div>
