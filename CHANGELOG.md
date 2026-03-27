@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-03-26
 
+- `b6e1953` fix: tighten workspace review panel flow
 - `c0eacdb` feat: turn workspace side panel into repo companion surface
 - `6cf89a7` feat: route repo surfaces into workspace tabs
 
