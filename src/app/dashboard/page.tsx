@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { DesktopWebSocketProvider, useSharedDesktopWs, type WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from '@/components/desktop/hooks/useDesktopWebSocket';
 import type { TerminalHandle } from '@/components/desktop/LiveOutput';
@@ -28,6 +29,7 @@ import { SetupWizard, type DetectionResult } from '@/components/desktop/SetupWiz
 import { WorkspaceSidePanel, type WorkspaceSidePanelRepo, type WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
+import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
 import { deriveWorkflowStage, describeWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
 
@@ -350,6 +352,8 @@ function DashboardInner() {
   const termCreatedRef = useRef(false);
   const terminalRef = useRef<TerminalHandle>(null);
   const workspaceTerminalHandlesRef = useRef<Map<string, TerminalTabHandle>>(new Map());
+  const [workspaceChatSessionByTileId, setWorkspaceChatSessionByTileId] = useState<Record<string, string | undefined>>({});
+  const [workspaceChatSessionsByTileId, setWorkspaceChatSessionsByTileId] = useState<Record<string, MobileInboxSnapshot['sessions']>>({});
   const contextualPanelHandlesRef = useRef<Map<string, ContextualPanelHandle>>(new Map());
   const canvasStateByTileIdRef = useRef<Record<string, CanvasTileState>>({});
   const [agentsJson, setAgentsJson] = useState('[]');
@@ -364,6 +368,7 @@ function DashboardInner() {
   const [rightPanelMode, setRightPanelMode] = useState<'chat' | 'workspace'>('chat');
   const [workspaceSidePanelView, setWorkspaceSidePanelView] = useState<WorkspaceSidePanelView>('blank');
   const [workspaceSidePanelRepoPath, setWorkspaceSidePanelRepoPath] = useState<string | null>(null);
+  const [workspaceSidePanelPullRequestNumber, setWorkspaceSidePanelPullRequestNumber] = useState<number | null>(null);
   const [workspaceSidePanelActivationKey, setWorkspaceSidePanelActivationKey] = useState(0);
   const [thoughtsOpen, setThoughtsOpen] = useState(false);
   const [wsStatus, setWsStatus] = useState<WsConnectionState>('connecting');
@@ -371,6 +376,7 @@ function DashboardInner() {
   const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const [tileLayoutHydrated, setTileLayoutHydrated] = useState(false);
+  const lastWorkspacePanelViewRef = useRef<'diff' | 'review'>('diff');
 
   // ── Setup wizard state ──
   const [setupWizardOpen, setSetupWizardOpen] = useState(false);
@@ -481,13 +487,45 @@ function DashboardInner() {
       remoteUrl: matched.remoteUrl ?? undefined,
     };
   }, [globalRepoBranch, globalRepoEntries, globalRepoEntry]);
-  const openWorkspaceSidePanel = useCallback((view: WorkspaceSidePanelView, repo?: WorkspaceSidePanelRepo | null) => {
+  const getWorkspaceSidePanelRepoByPath = useCallback((repoPath?: string | null): WorkspaceSidePanelRepo | null => {
+    if (!repoPath) {
+      return globalRepoEntry ? {
+        name: globalRepoEntry.name,
+        localPath: globalRepoEntry.localPath,
+        branch: globalRepoEntry.readiness?.currentBranch ?? globalRepoBranch,
+        readiness: globalRepoEntry.readiness ?? null,
+        remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
+      } : null;
+    }
+
+    const matched = globalRepoEntries.find((entry) => entry.localPath === repoPath) ?? null;
+    if (!matched) return null;
+    return {
+      name: matched.name,
+      localPath: matched.localPath,
+      branch: matched.readiness?.currentBranch ?? matched.defaultBranch,
+      readiness: matched.readiness ?? null,
+      remoteUrl: matched.remoteUrl ?? undefined,
+    };
+  }, [globalRepoBranch, globalRepoEntries, globalRepoEntry]);
+  const openWorkspaceSidePanel = useCallback((
+    view: WorkspaceSidePanelView,
+    repo?: WorkspaceSidePanelRepo | null,
+    options?: { pullRequestNumber?: number | null },
+  ) => {
     setChatVisible(true);
     setRightPanelMode('workspace');
     setWorkspaceSidePanelView(view);
     setWorkspaceSidePanelRepoPath(repo?.localPath ?? globalRepoEntry?.localPath ?? null);
+    setWorkspaceSidePanelPullRequestNumber(view === 'review' ? options?.pullRequestNumber ?? null : null);
     setWorkspaceSidePanelActivationKey((value) => value + 1);
   }, [globalRepoEntry]);
+
+  useEffect(() => {
+    if (workspaceSidePanelView === 'diff' || workspaceSidePanelView === 'review') {
+      lastWorkspacePanelViewRef.current = workspaceSidePanelView;
+    }
+  }, [workspaceSidePanelView]);
   const [selectedRepoWorktrees, setSelectedRepoWorktrees] = useState<RepoWorktreeSummary | null>(null);
   const [selectedRepoWorktreesLoading, setSelectedRepoWorktreesLoading] = useState(false);
   const [selectedRepoWorktreeRefreshNonce, setSelectedRepoWorktreeRefreshNonce] = useState(0);
@@ -881,6 +919,34 @@ function DashboardInner() {
     const handle = workspaceTerminalHandlesRef.current.get(targetTileId);
     return handle ? { tileId: targetTileId, handle } : null;
   }, [findPreferredWorkspaceTerminalTileId]);
+
+  const activeWorkspaceChatSessionKey = useMemo(() => {
+    if (activeTileId && workspaceChatSessionByTileId[activeTileId]) {
+      return workspaceChatSessionByTileId[activeTileId];
+    }
+    const preferredRepoPath = workspaceTerminalPreferredRepo?.localPath ?? null;
+    if (preferredRepoPath) {
+      const matchingTerminalLeaf = findTerminalLeafByRepoPath(tileLayout.root, preferredRepoPath);
+      if (matchingTerminalLeaf && workspaceChatSessionByTileId[matchingTerminalLeaf.id]) {
+        return workspaceChatSessionByTileId[matchingTerminalLeaf.id];
+      }
+    }
+    return Object.values(workspaceChatSessionByTileId).find((value): value is string => Boolean(value)) ?? undefined;
+  }, [activeTileId, tileLayout.root, workspaceChatSessionByTileId, workspaceTerminalPreferredRepo?.localPath]);
+
+  const workspaceChatSessions = useMemo(() => {
+    if (activeTileId && workspaceChatSessionsByTileId[activeTileId]?.length) {
+      return workspaceChatSessionsByTileId[activeTileId];
+    }
+    const preferredRepoPath = workspaceTerminalPreferredRepo?.localPath ?? null;
+    if (preferredRepoPath) {
+      const matchingTerminalLeaf = findTerminalLeafByRepoPath(tileLayout.root, preferredRepoPath);
+      if (matchingTerminalLeaf && workspaceChatSessionsByTileId[matchingTerminalLeaf.id]?.length) {
+        return workspaceChatSessionsByTileId[matchingTerminalLeaf.id];
+      }
+    }
+    return Object.values(workspaceChatSessionsByTileId).find((sessions) => sessions.length > 0) ?? [];
+  }, [activeTileId, tileLayout.root, workspaceChatSessionsByTileId, workspaceTerminalPreferredRepo?.localPath]);
 
   const ensureWorkspaceTerminalTile = useCallback((repoPath?: string | null, preferredTileId?: string | null) => {
     const normalizedRepoPath = repoPath ?? null;
@@ -1634,6 +1700,12 @@ function DashboardInner() {
     });
   }, [openCanvasTab]);
 
+  const handleReviewPR = useCallback((prNumber: number, repo?: string) => {
+    openWorkspaceSidePanel('review', getWorkspaceSidePanelRepoBySlug(repo), {
+      pullRequestNumber: prNumber,
+    });
+  }, [getWorkspaceSidePanelRepoBySlug, openWorkspaceSidePanel]);
+
   const handleExpandWorkspace = useCallback((workspace: string, repo: string | null) => {
     setActiveWorkspace(workspace);
     // Only open README tab if workspace actually has a README
@@ -1654,13 +1726,28 @@ function DashboardInner() {
   }, [openCanvasTab]);
 
   const handleOpenGitLog = useCallback((workspace?: string) => {
-    openCanvasTab({
-      id: `git-log:${workspace ?? 'default'}`,
-      kind: 'git-log',
-      label: 'Git Log',
-      resourceId: workspace ?? '',
-    });
-  }, [openCanvasTab]);
+    openWorkspaceSidePanel('git-log', getWorkspaceSidePanelRepoByPath(workspace));
+  }, [getWorkspaceSidePanelRepoByPath, openWorkspaceSidePanel]);
+
+  const handleToggleChatPanel = useCallback(() => {
+    if (chatVisible && rightPanelMode === 'chat') {
+      setChatVisible(false);
+      return;
+    }
+    setChatVisible(true);
+    setRightPanelMode('chat');
+  }, [chatVisible, rightPanelMode]);
+
+  const handleToggleWorkspacePanel = useCallback(() => {
+    if (chatVisible && rightPanelMode === 'workspace') {
+      setChatVisible(false);
+      return;
+    }
+    const nextView = workspaceSidePanelView === 'review' || workspaceSidePanelView === 'diff'
+      ? workspaceSidePanelView
+      : lastWorkspacePanelViewRef.current;
+    openWorkspaceSidePanel(nextView, workspaceSidePanelRepo);
+  }, [chatVisible, openWorkspaceSidePanel, rightPanelMode, workspaceSidePanelRepo, workspaceSidePanelView]);
 
   const handleOpenMemory = useCallback(() => {
     setShowMemoryView(true);
@@ -1963,14 +2050,55 @@ function DashboardInner() {
     });
   }, [openCanvasTab]);
 
-  const handleSelectCommit = useCallback((hash: string) => {
-    openCanvasTab({
-      id: `commit:${hash}`,
+  const handleSelectCommit = useCallback((hash: string, meta?: Record<string, string>) => {
+    const nextMeta: Record<string, string> = { ...(meta ?? {}) };
+    const matchedRepo = nextMeta.workspace
+      ? globalRepoEntries.find((repo) => (
+          nextMeta.workspace === repo.localPath
+          || nextMeta.workspace.startsWith(`${repo.localPath}/`)
+        )) ?? null
+      : nextMeta.repo
+        ? globalRepoEntries.find((repo) => repoSlugFromRemote(repo.remoteUrl) === nextMeta.repo) ?? null
+        : globalRepoEntry ?? null;
+
+    if (matchedRepo) {
+      if (!nextMeta.workspace) {
+        nextMeta.workspace = matchedRepo.localPath;
+      }
+      if (!nextMeta.repo) {
+        const repoSlug = repoSlugFromRemote(matchedRepo.remoteUrl);
+        if (repoSlug) {
+          nextMeta.repo = repoSlug;
+        }
+      }
+    }
+
+    const repoPath = matchedRepo?.localPath ?? nextMeta.workspace ?? globalRepoEntry?.localPath ?? null;
+    const canvasTab: CanvasTab = {
+      id: `commit:${hash}${nextMeta.workspace ? `:${nextMeta.workspace}` : ''}`,
       kind: 'commit',
       label: hash.slice(0, 7),
       resourceId: hash,
-    });
-  }, [openCanvasTab]);
+      meta: Object.keys(nextMeta).length > 0 ? nextMeta : undefined,
+    };
+
+    void (async () => {
+      const workspaceTarget = await waitForWorkspaceTerminalTarget({ repoPath });
+      if (workspaceTarget) {
+        workspaceTarget.handle.openInspectorTab(canvasTab, {
+          repo: matchedRepo ? {
+            name: matchedRepo.name,
+            localPath: matchedRepo.localPath,
+            branch: matchedRepo.readiness?.currentBranch ?? matchedRepo.defaultBranch,
+            readiness: matchedRepo.readiness ?? null,
+            remoteUrl: matchedRepo.remoteUrl ?? undefined,
+          } : undefined,
+        });
+        return;
+      }
+      openCanvasTab(canvasTab);
+    })();
+  }, [globalRepoEntries, globalRepoEntry, openCanvasTab, waitForWorkspaceTerminalTarget]);
 
   // ── Left drag handle ──
   const startLeftDrag = useCallback((e: React.MouseEvent) => {
@@ -2427,13 +2555,13 @@ function DashboardInner() {
         actions.push({
           id: 'review:open-pr',
           category: 'review',
-          title: `Open current PR #${currentReviewAgent.pr.number}`,
+          title: `Review current PR #${currentReviewAgent.pr.number}`,
           detail: reviewGuidance.nextAction ? `${currentReviewAgent.pr.title} · ${reviewGuidance.nextAction}` : currentReviewAgent.pr.title,
           stateLabel: reviewStateLabel,
           stateTone: reviewStateTone,
-          keywords: [reviewRepo, currentReviewAgent.pr.title, 'pull request', 'open pr', String(currentReviewAgent.pr.number)],
+          keywords: [reviewRepo, currentReviewAgent.pr.title, 'pull request', 'review pr', 'open pr', String(currentReviewAgent.pr.number)],
           priority: 310,
-          run: () => handleSelectPR(currentReviewAgent.pr!.number, reviewRepo),
+          run: () => handleReviewPR(currentReviewAgent.pr!.number, reviewRepo),
         });
 
         actions.push({
@@ -2487,7 +2615,7 @@ function DashboardInner() {
             if (!response.ok) {
               throw new Error(data.error || 'Unable to merge the current pull request.');
             }
-            handleSelectPR(currentReviewAgent.pr!.number, reviewRepo);
+            handleReviewPR(currentReviewAgent.pr!.number, reviewRepo);
           },
         });
       }
@@ -2661,13 +2789,13 @@ function DashboardInner() {
     handleFocusCurrentRepoSetup,
     handleLaunchWorkspaceAgent,
     handleLaunchWorkspaceRepoTask,
+    handleReviewPR,
     handleOpenFolder,
     handleOpenRepoInDesktop,
     handleOpenSettingsTab,
     handleOpenCI,
     handleRunInTerminal,
     handleSelectIssue,
-    handleSelectPR,
     openRepoWorkspaceModal,
     paletteAgents,
     focusRepoSetup,
@@ -2780,6 +2908,26 @@ function DashboardInner() {
             stateScope={tileId}
             defaultTab={tileId === 'tile-root' ? 'llm-chat' : 'terminal'}
             preferredRepo={tilePreferredRepo}
+            onActiveChatSessionChange={(sessionKey) => {
+              setWorkspaceChatSessionByTileId((current) => (
+                current[tileId] === (sessionKey ?? undefined)
+                  ? current
+                  : { ...current, [tileId]: sessionKey ?? undefined }
+              ));
+            }}
+            onChatSessionsChange={(sessions) => {
+              setWorkspaceChatSessionsByTileId((current) => {
+                const previous = current[tileId] ?? [];
+                const same = previous.length === sessions.length
+                  && previous.every((session, index) => (
+                    session.sessionKey === sessions[index]?.sessionKey
+                    && session.status === sessions[index]?.status
+                    && session.name === sessions[index]?.name
+                  ));
+                if (same) return current;
+                return { ...current, [tileId]: sessions };
+              });
+            }}
             onRepoScopeChange={(repoPath) => setTerminalTileRepoScope(tileId, repoPath)}
             onLaunchRepoAgent={(repo) => {
               void handleLaunchWorkspaceAgent({
@@ -2956,23 +3104,10 @@ function DashboardInner() {
         onToggleSidebar={() => setSidebarVisible(v => !v)}
         bottomPanelVisible={bottomPanelVisible}
         onToggleBottomPanel={toggleContextualPanelTile}
-        chatVisible={chatVisible}
-        onToggleChat={() => {
-          if (!chatVisible) {
-            setChatVisible(true);
-            setRightPanelMode('workspace');
-            setWorkspaceSidePanelView('blank');
-            setWorkspaceSidePanelRepoPath(globalRepoEntry?.localPath ?? null);
-            return;
-          }
-          if (rightPanelMode === 'chat') {
-            setRightPanelMode('workspace');
-            setWorkspaceSidePanelView('blank');
-            setWorkspaceSidePanelRepoPath(globalRepoEntry?.localPath ?? null);
-            return;
-          }
-          setRightPanelMode('chat');
-        }}
+        chatVisible={chatVisible && rightPanelMode === 'chat'}
+        onToggleChat={handleToggleChatPanel}
+        workspacePanelVisible={chatVisible && rightPanelMode === 'workspace'}
+        onToggleWorkspacePanel={handleToggleWorkspacePanel}
         wsStatus={wsStatus}
         renderSearch={(onClose) => (
           <UniversalSearch
@@ -3002,14 +3137,18 @@ function DashboardInner() {
       />
 
       {/* ── Session Timeline ── */}
-      <SessionTimeline onExpand={() => {
-        openCanvasTab({
-          id: 'timeline:session',
-          kind: 'timeline',
-          label: 'Session Replay',
-          resourceId: 'session',
-        });
-      }} />
+      <SessionTimeline
+        repoPath={globalRepoEntry?.localPath ?? activeWorkspace ?? null}
+        repoName={globalRepoEntry?.name ?? null}
+        onExpand={() => {
+          openCanvasTab({
+            id: 'timeline:session',
+            kind: 'timeline',
+            label: 'Session Replay',
+            resourceId: 'session',
+          });
+        }}
+      />
 
       {/* ── Main Layout (horizontal) ── */}
       <div style={{
@@ -3091,17 +3230,18 @@ function DashboardInner() {
         position: 'relative',
       }}>
         <AgentPanel
-          selectedRepo={globalRepo}
-          selectedRepoName={globalRepoEntry?.name ?? null}
-          selectedRepoBranch={globalRepoBranch}
-          selectedRepoLocalPath={globalRepoEntry?.localPath ?? null}
-          selectedRepoReadiness={globalRepoEntry?.readiness ?? null}
+          selectedRepo={globalRepo ?? repoSlugFromRemote(workspaceTerminalPreferredRepo?.remoteUrl)}
+          selectedRepoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
+          selectedRepoBranch={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
+          selectedRepoLocalPath={globalRepoEntry?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null}
+          selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
           onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
           onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
           onSelectSession={handleSelectSession}
           onSelectIssue={handleSelectIssue}
           onSelectCommit={handleSelectCommit}
           onSelectPR={handleSelectPR}
+          onReviewPR={handleReviewPR}
           onExpandWorkspace={handleExpandWorkspace}
           onSelectFile={handleSelectFile}
           onOpenCI={handleOpenCI}
@@ -3204,84 +3344,119 @@ function DashboardInner() {
         )}
       </div>
 
-      {/* ── Right drag handle ── */}
-      {chatVisible && <div
-        onMouseDown={startRightDrag}
-        style={{
-          width: 6,
-          cursor: 'col-resize',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          zIndex: 10,
-        }}
-      >
-        <div style={{
-          width: 3,
-          height: 40,
-          borderRadius: 2,
-          backgroundColor: 'var(--t-drag-handle)',
-          transition: 'background-color 150ms',
-        }} />
-      </div>}
+      <AnimatePresence initial={false}>
+        {chatVisible ? (
+          <motion.div
+            key="right-panel-shell"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            style={{
+              display: 'flex',
+              height: '100%',
+              flexShrink: 0,
+            }}
+          >
+            <div
+              onMouseDown={startRightDrag}
+              style={{
+                width: 6,
+                cursor: 'col-resize',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                zIndex: 10,
+              }}
+            >
+              <div style={{
+                width: 3,
+                height: 40,
+                borderRadius: 2,
+                backgroundColor: 'var(--t-drag-handle)',
+                transition: 'background-color 150ms',
+              }} />
+            </div>
 
-      {/* ── Right: Chat Sidebar ── */}
-      {chatVisible && <div style={{
-        width: rightWidth,
-        flexShrink: 0,
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        borderLeft: '1px solid var(--t-divider)',
-      }}>
+            <div
+              style={{
+                width: rightWidth,
+                flexShrink: 0,
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                borderLeft: '1px solid var(--t-divider)',
+              }}
+            >
+              <AnimatePresence initial={false} mode="wait">
+                <motion.div
+                  key={`${rightPanelMode}:${workspaceSidePanelView}:${workspaceSidePanelActivationKey}`}
+                  initial={{ opacity: 0, x: 12 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 12 }}
+                  transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                  }}
+                >
         {rightPanelMode === 'chat' ? (
           <AgentPanelChat
-            externalSessionKey={activeSessionKey}
+            workspaceSessions={workspaceChatSessions}
+            externalSessionKey={activeWorkspaceChatSessionKey ?? activeSessionKey}
             onSelectSession={handleSelectSession}
-          draftInjection={desktopDraftInjection}
-          onOpenDiff={() => {
-            void (async () => {
-              const repoPath = globalRepoEntry?.localPath ?? null;
-              const workspaceTarget = await waitForWorkspaceTerminalTarget({ repoPath });
-              if (workspaceTarget) {
-                workspaceTarget.handle.openWorkspaceDiff();
-                return;
-              }
-              openWorkspaceSidePanel('diff', globalRepoEntry ? {
-                name: globalRepoEntry.name,
-                localPath: globalRepoEntry.localPath,
-                branch: globalRepoEntry.readiness?.currentBranch ?? globalRepoBranch,
-                readiness: globalRepoEntry.readiness ?? null,
-                remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
-              } : null);
-            })();
-          }}
-            onOpenMermaid={(code) => {
-              openCanvasTab({
-                id: `mermaid:${code.slice(0, 40)}`,
-                kind: 'mermaid',
-                label: 'Diagram',
-                resourceId: code,
-              });
-            }}
-            onOpenFile={handleSelectFile}
-            onRunInTerminal={handleRunInTerminal}
-            onWsStatusChange={setWsStatus}
-          />
-        ) : (
-          <WorkspaceSidePanel
-            key={`${workspaceSidePanelView}:${workspaceSidePanelActivationKey}`}
-            view={workspaceSidePanelView}
-            repo={workspaceSidePanelRepo}
-            onClearView={() => setWorkspaceSidePanelView('blank')}
-            onOpenFile={(filePath, repo) => handleSelectFile(filePath, repo?.localPath)}
-            onInjectChatContext={(payload, repo) => injectPayloadIntoRepoChat(payload, repo)}
-            onOpenPullRequest={handleSelectPR}
-          />
-        )}
-      </div>}
+                      draftInjection={desktopDraftInjection}
+                      onOpenDiff={() => {
+                        void (async () => {
+                          const repoPath = globalRepoEntry?.localPath ?? null;
+                          const workspaceTarget = await waitForWorkspaceTerminalTarget({ repoPath });
+                          if (workspaceTarget) {
+                            workspaceTarget.handle.openWorkspaceDiff();
+                            return;
+                          }
+                          openWorkspaceSidePanel('diff', globalRepoEntry ? {
+                            name: globalRepoEntry.name,
+                            localPath: globalRepoEntry.localPath,
+                            branch: globalRepoEntry.readiness?.currentBranch ?? globalRepoBranch,
+                            readiness: globalRepoEntry.readiness ?? null,
+                            remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
+                          } : null);
+                        })();
+                      }}
+                      onOpenMermaid={(code) => {
+                        openCanvasTab({
+                          id: `mermaid:${code.slice(0, 40)}`,
+                          kind: 'mermaid',
+                          label: 'Diagram',
+                          resourceId: code,
+                        });
+                      }}
+                      onOpenFile={handleSelectFile}
+                      onRunInTerminal={handleRunInTerminal}
+                      onWsStatusChange={setWsStatus}
+                    />
+                  ) : (
+                    <WorkspaceSidePanel
+                      view={workspaceSidePanelView}
+                      repo={workspaceSidePanelRepo}
+                      onClearView={() => setChatVisible(false)}
+                      onOpenFile={(filePath, repo) => handleSelectFile(filePath, repo?.localPath)}
+                      onInjectChatContext={(payload, repo) => injectPayloadIntoRepoChat(payload, repo)}
+                      preferredPullRequestNumber={workspaceSidePanelPullRequestNumber}
+                      onOpenPullRequest={handleSelectPR}
+                      onSelectCommit={handleSelectCommit}
+                    />
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       {/* ── Alert Toast (desktop only — urgent alerts slide in bottom-left near bell) ── */}
       <AlertToast alerts={activeAlerts} onAction={handleAlertAction} />

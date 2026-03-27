@@ -4,10 +4,9 @@
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowRight,
   AlertCircle,
   CheckCircle2,
-  ChevronDown,
-  ChevronRight,
   ExternalLink,
   FolderOpen,
   GitBranch,
@@ -29,7 +28,7 @@ import type {
   RepoSetupEnvMode,
   ValidatedRepoCandidate,
 } from '@/lib/repos/types';
-import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
+import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, refreshOpenClawBetaStatus, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 import {
   FOCUS_REPO_SETUP_EVENT,
   OPEN_REPO_WORKSPACE_EVENT,
@@ -538,6 +537,9 @@ interface BranchAgent {
   name: string;
   sessionKey: string;
   color: string;
+  additions?: number;
+  deletions?: number;
+  changedFiles?: number;
 }
 
 interface BranchInfo {
@@ -599,7 +601,9 @@ function RepoCard({
   onOpenGitHub,
   onRemove,
   onSaveSetup,
+  onSelectSession,
   onSelectPR,
+  onReviewPR,
   onSelectBranch,
   agentsByBranch,
   activePorts,
@@ -615,7 +619,9 @@ function RepoCard({
   onOpenGitHub: (repo: RepoRegistryEntry) => void;
   onRemove: (repo: RepoRegistryEntry) => void;
   onSaveSetup: (repoId: string, setup: RepoSetupConfig) => Promise<void>;
+  onSelectSession?: (sessionKey: string) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
+  onReviewPR?: (prNumber: number, repo?: string) => void;
   onSelectBranch?: (branch: string, repoPath: string) => void;
   agentsByBranch?: Map<string, BranchAgent[]>;
   activePorts?: number[];
@@ -1191,8 +1197,19 @@ function RepoCard({
     }
   }, []);
 
-  const cardBackground = isActive || expanded ? 'rgba(255,255,255,0.02)' : 'transparent';
+  const cardBackground = 'transparent';
   const compactLayout = cardWidth > 0 && cardWidth < 320;
+  const repoAgents = useMemo(() => {
+    const unique = new Map<string, BranchAgent>();
+    agentsByBranch?.forEach((branchAgents) => {
+      branchAgents.forEach((agent) => {
+        if (!unique.has(agent.sessionKey)) {
+          unique.set(agent.sessionKey, agent);
+        }
+      });
+    });
+    return Array.from(unique.values());
+  }, [agentsByBranch]);
 
   const currentBadge = isActive ? (
     <span
@@ -1214,6 +1231,7 @@ function RepoCard({
       Current
     </span>
   ) : null;
+  const showInlineRepoMeta = false;
   const portsBadge = activePorts && activePorts.length > 0 ? (
     <span style={{
       display: 'inline-flex',
@@ -1325,6 +1343,59 @@ function RepoCard({
       {repo.defaultBranch}
     </span>
   );
+  const repoAgentsBadge = repoAgents.length > 0 ? (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        padding: compactLayout ? '2px 7px' : '2px 8px',
+        borderRadius: 999,
+        background: 'var(--t-panel-hover)',
+        border: '1px solid var(--t-panel-border)',
+        color: 'var(--t-text-secondary)',
+        fontSize: 10,
+        fontWeight: 700,
+        flexShrink: 0,
+      }}
+    >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: '#34c759',
+          boxShadow: '0 0 8px rgba(52, 199, 89, 0.32)',
+        }}
+      />
+      {repoAgents.length} live
+    </span>
+  ) : null;
+  const headerMetaBadges = [
+    currentBadge,
+    readinessBadge,
+    portsBadge,
+    branchBadge,
+    repoAgentsBadge,
+    prBadge,
+    mergeRiskBadge,
+  ].filter(Boolean);
+  const primaryPreview = prPreview[0] ?? null;
+  const rowMeta = [
+    repo.defaultBranch,
+    repo.readiness?.label ?? null,
+    primaryPreview ? `PR #${primaryPreview.number}` : null,
+    repoAgents.length > 0 ? `${repoAgents.length} live` : null,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .slice(0, 3)
+    .join(' · ');
+  const showHeaderHover = hoveringHeader && (
+    prPreviewLoading
+    || prPreview.length > 0
+    || headerMetaBadges.length > 0
+    || Boolean(repo.readiness?.summary)
+  );
   const menuTrigger = (
     <button
       type="button"
@@ -1338,9 +1409,9 @@ function RepoCard({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width: 30,
-        height: 30,
-        borderRadius: 10,
+        width: 26,
+        height: 26,
+        borderRadius: 8,
         border: menuOpen ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
         background: menuOpen
           ? THEME_ACCENT_SOFT
@@ -1348,7 +1419,6 @@ function RepoCard({
         color: menuOpen ? THEME_ACCENT : 'var(--t-text-secondary)',
         cursor: 'pointer',
         flexShrink: 0,
-        boxShadow: '0 4px 10px rgba(15, 23, 42, 0.08)',
         transition: 'all 140ms ease',
       }}
       onMouseEnter={(e) => {
@@ -1376,10 +1446,10 @@ function RepoCard({
   return (
     <div
       ref={cardRef}
-      style={{
-        position: 'relative',
-        borderRadius: 0,
-        background: cardBackground,
+        style={{
+          position: 'relative',
+          borderRadius: 0,
+          background: cardBackground,
         borderTopWidth: 0,
         borderRightWidth: 0,
         borderBottomWidth: 1,
@@ -1400,8 +1470,8 @@ function RepoCard({
         style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: compactLayout ? 8 : 0,
-          padding: compactLayout ? '11px 0 10px' : '12px 0',
+          gap: 6,
+          padding: compactLayout ? '9px 14px 8px' : '10px 14px 9px',
           cursor: 'pointer',
         }}
         onClick={onToggle}
@@ -1411,64 +1481,54 @@ function RepoCard({
         <div
           style={{
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'flex-start',
             gap: 8,
             minWidth: 0,
           }}
         >
-          <span style={{ color: 'var(--t-text-muted)', flexShrink: 0, display: 'flex' }}>
-            {expanded ? <ChevronDown size={14} strokeWidth={2} /> : <ChevronRight size={14} strokeWidth={2} />}
-          </span>
-          <span
-            style={{
-              fontSize: 13,
-              fontWeight: 700,
-              color: 'var(--t-text)',
-              letterSpacing: '-0.01em',
-              flex: 1,
-              minWidth: 0,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {repo.name}
-          </span>
-          {!compactLayout ? currentBadge : null}
-          {!compactLayout ? portsBadge : null}
-          {!compactLayout ? readinessBadge : null}
-          {!compactLayout ? prBadge : null}
-          {!compactLayout ? mergeRiskBadge : null}
-          {!compactLayout ? branchBadge : null}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <span
+                style={{
+                  fontSize: 13,
+                  fontWeight: 700,
+                  color: 'var(--t-text)',
+                  letterSpacing: '-0.01em',
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {repo.name}
+              </span>
+              {isActive ? currentBadge : null}
+            </div>
+            <div
+              style={{
+                marginTop: 2,
+                fontSize: 10,
+                lineHeight: 1.3,
+                color: 'var(--t-text-faint)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {rowMeta || shortenPath(repo.localPath)}
+            </div>
+          </div>
           {menuTrigger}
         </div>
-
-        {compactLayout ? (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 6,
-              flexWrap: 'wrap',
-              paddingLeft: 22,
-            }}
-          >
-            {currentBadge}
-            {portsBadge}
-            {readinessBadge}
-            {prBadge}
-            {branchBadge}
-          </div>
-        ) : null}
       </div>
 
-      {hoveringHeader && (prPreviewLoading || prPreview.length > 0) ? (
+      {showHeaderHover ? (
         <BlueGlassHoverCard
-          eyebrow="Open Pull Request"
-          title={prPreviewLoading ? `Checking ${repo.name}…` : `PR #${prPreview[0].number} • ${prPreview[0].title}`}
+          eyebrow={prPreviewLoading || prPreview.length > 0 ? 'Repository Status' : 'Repository'}
+          title={prPreviewLoading ? `Checking ${repo.name}…` : repo.name}
           subtitle={prPreviewLoading
-            ? 'Looking for active merge work on this repo.'
-            : `${prPreview[0].author.login} wants to merge ${prPreview[0].headRefName} into ${repo.defaultBranch}.`}
+            ? 'Looking for active merge work and repo status.'
+            : shortenPath(repo.localPath)}
           anchorRect={hoverPreviewRect}
           interactive
           onMouseEnter={() => {
@@ -1480,28 +1540,37 @@ function RepoCard({
           onMouseLeave={closePreviewHover}
           footer={prPreviewLoading ? null : (
             <>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <BlueGlassMetricPill label="Review" value={prPreview[0].reviewDecision || 'pending'} color="#1d4ed8" />
-                <BlueGlassMetricPill
-                  label="Files"
-                  value={String(prPreview[0].changedFiles)}
-                  color="rgba(15,23,42,0.78)"
-                />
-                <BlueGlassMetricPill label="Risk" value={mergeRisk.label} color={mergeRisk.color} />
-              </div>
+              {prPreview.length > 0 ? (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <BlueGlassMetricPill label="Review" value={primaryPreview?.reviewDecision || 'pending'} color="#1d4ed8" />
+                  <BlueGlassMetricPill
+                    label="Files"
+                    value={String(primaryPreview?.changedFiles ?? 0)}
+                    color="rgba(15,23,42,0.78)"
+                  />
+                  <BlueGlassMetricPill label="Risk" value={mergeRisk.label} color={mergeRisk.color} />
+                </div>
+              ) : null}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                {onSelectPR ? (
+                {primaryPreview && onReviewPR ? (
                   <BlueGlassActionButton
                     icon={<GitPullRequest size={12} strokeWidth={2} />}
                     label="Review"
-                    onClick={() => onSelectPR(prPreview[0].number, githubSlug ?? undefined)}
+                    onClick={() => onReviewPR(primaryPreview.number, githubSlug ?? undefined)}
                   />
                 ) : null}
-                {prPreview[0].url ? (
+                {primaryPreview && onSelectPR ? (
+                  <BlueGlassActionButton
+                    icon={<ArrowRight size={12} strokeWidth={2} />}
+                    label="Open full PR"
+                    onClick={() => onSelectPR(primaryPreview.number, githubSlug ?? undefined)}
+                  />
+                ) : null}
+                {primaryPreview?.url ? (
                   <BlueGlassActionButton
                     icon={<ExternalLink size={12} strokeWidth={2} />}
-                    label="Open PR"
-                    onClick={() => window.open(prPreview[0].url, '_blank', 'noopener,noreferrer')}
+                    label="Open on GitHub"
+                    onClick={() => window.open(primaryPreview.url, '_blank', 'noopener,noreferrer')}
                   />
                 ) : null}
               </div>
@@ -1510,83 +1579,99 @@ function RepoCard({
         >
           {!prPreviewLoading ? (
             <>
-              <BlueGlassSparklineLane
-                segments={[
-                  { label: 'Pass', value: previewCheckCounts.passed, color: '#22c55e' },
-                  { label: 'Fail', value: previewCheckCounts.failed, color: '#ef4444' },
-                  { label: 'Pending', value: previewCheckCounts.pending, color: '#f59e0b' },
-                ]}
-              />
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 8,
-                  fontSize: 11,
-                  color: 'rgba(15, 23, 42, 0.7)',
-                }}
-              >
-                <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>{prPreview[0].headRefName}</span>
-                <span>{formatRelativeTime(prPreview[0].createdAt)}</span>
-              </div>
-              {previewFailingChecks.length > 0 ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#dc2626' }}>
-                    Top failing checks
-                  </div>
-                  {previewFailingChecks.map((check) => (
-                    <div
-                      key={check}
-                      style={{
-                        fontSize: 11,
-                        lineHeight: 1.45,
-                        color: 'rgba(15, 23, 42, 0.76)',
-                        padding: '6px 8px',
-                        borderRadius: 10,
-                        background: 'rgba(255,255,255,0.28)',
-                      }}
-                    >
-                      {check}
-                    </div>
+              {headerMetaBadges.length > 0 ? (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {headerMetaBadges.map((badge, index) => (
+                    <span key={index}>{badge}</span>
                   ))}
                 </div>
               ) : null}
-              {prPreviewDetail?.files?.length ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#1d4ed8' }}>
-                    Changed files
+              {repo.readiness?.summary ? (
+                <div style={{ fontSize: 12, lineHeight: 1.55, color: 'rgba(15, 23, 42, 0.76)' }}>
+                  {repo.readiness.summary}
+                </div>
+              ) : null}
+              {prPreview.length > 0 ? (
+                <>
+                  <BlueGlassSparklineLane
+                    segments={[
+                      { label: 'Pass', value: previewCheckCounts.passed, color: '#22c55e' },
+                      { label: 'Fail', value: previewCheckCounts.failed, color: '#ef4444' },
+                      { label: 'Pending', value: previewCheckCounts.pending, color: '#f59e0b' },
+                    ]}
+                  />
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                      fontSize: 11,
+                      color: 'rgba(15, 23, 42, 0.7)',
+                    }}
+                  >
+                    <span style={{ fontFamily: '"SF Mono", ui-monospace, monospace' }}>{primaryPreview?.headRefName}</span>
+                    <span>{primaryPreview ? formatRelativeTime(primaryPreview.createdAt) : null}</span>
                   </div>
-                  {prPreviewDetail.files.slice(0, 3).map((file) => (
-                    <div
-                      key={file.path}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        padding: '6px 8px',
-                        borderRadius: 10,
-                        background: 'rgba(255,255,255,0.28)',
-                        fontSize: 11,
-                      }}
-                    >
-                      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgba(15,23,42,0.78)' }}>
-                        {file.path}
-                      </span>
-                      <span style={{ color: '#16a34a', fontWeight: 700 }}>+{file.additions}</span>
-                      <span style={{ color: '#dc2626', fontWeight: 700 }}>-{file.deletions}</span>
+                  <div style={{ fontSize: 12, lineHeight: 1.5, color: 'rgba(15, 23, 42, 0.76)' }}>
+                    {primaryPreview?.title}
+                  </div>
+                  {previewFailingChecks.length > 0 ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#dc2626' }}>
+                        Top failing checks
+                      </div>
+                      {previewFailingChecks.map((check) => (
+                        <div
+                          key={check}
+                          style={{
+                            fontSize: 11,
+                            lineHeight: 1.45,
+                            color: 'rgba(15, 23, 42, 0.76)',
+                            padding: '6px 8px',
+                            borderRadius: 10,
+                            background: 'rgba(255,255,255,0.28)',
+                          }}
+                        >
+                          {check}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  ) : null}
+                  {prPreviewDetail?.files?.length ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#1d4ed8' }}>
+                        Changed files
+                      </div>
+                      {prPreviewDetail.files.slice(0, 3).map((file) => (
+                        <div
+                          key={file.path}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 8,
+                            padding: '6px 8px',
+                            borderRadius: 10,
+                            background: 'var(--t-panel-hover)',
+                            fontSize: 11,
+                          }}
+                        >
+                          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text)' }}>
+                            {file.path}
+                          </span>
+                          <span style={{ color: 'var(--t-text-secondary)', fontWeight: 700, fontFamily: '"SF Mono", ui-monospace, monospace' }}>+{file.additions}</span>
+                          <span style={{ color: 'var(--t-text-secondary)', fontWeight: 700, fontFamily: '"SF Mono", ui-monospace, monospace' }}>-{file.deletions}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                  {prPreview.length > 1 ? (
+                    <div style={{ fontSize: 11, color: 'rgba(15, 23, 42, 0.62)' }}>
+                      {prPreview.length - 1} more open PR{prPreview.length - 1 === 1 ? '' : 's'} on this repo.
+                    </div>
+                  ) : null}
+                </>
               ) : null}
-              {prPreview.length > 1 ? (
-                <div style={{ fontSize: 11, color: 'rgba(15, 23, 42, 0.62)' }}>
-                  {prPreview.length - 1} more open PR{prPreview.length - 1 === 1 ? '' : 's'} on this repo.
-                </div>
-              ) : null}
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#1d4ed8' }}>
-                Next move: review the merge path before you steer more work into this repo.
-              </div>
             </>
           ) : null}
         </BlueGlassHoverCard>
@@ -1621,6 +1706,7 @@ function RepoCard({
           >
             {[
               { label: 'Launch with options', icon: <PlayCircle size={12} strokeWidth={2} />, action: () => { onOpenLaunchOptions(repo); setMenuOpen(false); } },
+              { label: 'Create workspace', icon: <Plus size={12} strokeWidth={2} />, action: () => { onOpenWorkspace(repo); setMenuOpen(false); } },
               { label: 'Settings', icon: <Settings2 size={12} strokeWidth={2} />, action: () => { setSettingsOpen((v) => !v); setMenuOpen(false); } },
               ...(githubUrl ? [{ label: 'Open on GitHub', icon: <ExternalLink size={12} strokeWidth={2} />, action: () => { onOpenGitHub(repo); setMenuOpen(false); } }] : []),
               { label: 'Remove from Cortex', icon: <Trash2 size={12} strokeWidth={2} />, action: () => { onRemove(repo); setMenuOpen(false); }, danger: true },
@@ -1656,172 +1742,9 @@ function RepoCard({
 
       {/* Expanded content */}
       {expanded ? (
-        <div style={{ padding: compactLayout ? '8px 0 14px 20px' : '6px 0 16px 28px' }}>
-          {/* Primary actions row */}
-          <div style={{ display: 'flex', alignItems: 'center', columnGap: compactLayout ? 10 : 12, rowGap: 8, flexWrap: compactLayout ? 'wrap' : 'nowrap', marginBottom: compactLayout ? 12 : 10 }}>
-            <button
-              type="button"
-              onClick={() => onLaunchAgent(repo)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '4px 8px',
-                border: `1px solid ${THEME_ACCENT_BORDER}`,
-                borderRadius: 999,
-                background: THEME_ACCENT_SOFT,
-                color: THEME_ACCENT,
-                fontSize: 11,
-                fontWeight: 700,
-                cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
-              }}
-            >
-              <PlayCircle size={11} strokeWidth={2} />
-              Launch agent
-            </button>
-            <button
-              type="button"
-              onClick={() => onOpenWorkspace(repo)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '4px 8px',
-                border: '1px solid var(--t-panel-border)',
-                borderRadius: 999,
-                background: 'var(--t-divider-subtle)',
-                color: 'var(--t-text-secondary)',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
-              }}
-            >
-              <GitBranch size={11} strokeWidth={2} />
-              Create workspace
-            </button>
-            <button
-              type="button"
-              onClick={() => onOpenLaunchOptions(repo)}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 5,
-                padding: '4px 8px',
-                border: '1px solid var(--t-panel-border)',
-                borderRadius: 999,
-                background: 'var(--t-divider-subtle)',
-                color: 'var(--t-text-secondary)',
-                fontSize: 11,
-                fontWeight: 600,
-                cursor: 'pointer',
-                fontFamily: '-apple-system, system-ui, sans-serif',
-              }}
-            >
-              <ChevronDown size={11} strokeWidth={2} />
-              Options
-            </button>
-            {/* Dev server Run/Stop */}
-            {repo.setup.devCommand ? (
-              devServerRunning ? (<>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleStopDevServer(); }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '2px 8px',
-                    borderRadius: 6,
-                    border: '1px solid rgba(239,68,68,0.15)',
-                    background: 'rgba(239,68,68,0.05)',
-                    color: '#dc2626',
-                    fontSize: 10,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    fontFamily: '-apple-system, system-ui, sans-serif',
-                  }}
-                >
-                  <Square size={8} strokeWidth={2.5} fill="#dc2626" />
-                  Stop{devServerPort ? ` :${devServerPort}` : ''}
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); setDevLogsOpen(v => !v); }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                  gap: 3,
-                  padding: '2px 6px',
-                  borderRadius: 6,
-                  border: `1px solid ${devLogsOpen ? THEME_ACCENT_BORDER : 'var(--t-btn-secondary-border)'}`,
-                  background: devLogsOpen ? THEME_ACCENT_SOFT : 'transparent',
-                  color: devLogsOpen ? THEME_ACCENT : 'var(--t-text-muted)',
-                  fontSize: 10,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                    fontFamily: '-apple-system, system-ui, sans-serif',
-                  }}
-                >
-                  Logs
-                </button>
-              </>) : (
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); handleStartDevServer(); }}
-                  disabled={devServerStarting}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '2px 8px',
-                    borderRadius: 6,
-                    border: '1px solid rgba(34,197,94,0.15)',
-                    background: 'rgba(34,197,94,0.05)',
-                    color: '#16a34a',
-                    fontSize: 10,
-                    fontWeight: 600,
-                    cursor: devServerStarting ? 'wait' : 'pointer',
-                    opacity: devServerStarting ? 0.6 : 1,
-                    fontFamily: '-apple-system, system-ui, sans-serif',
-                  }}
-                >
-                  <Play size={8} strokeWidth={2.5} fill="#16a34a" />
-                  {devServerStarting ? 'Starting…' : 'Run dev'}
-                </button>
-              )
-            ) : null}
-            {!compactLayout ? <div style={{ flex: 1 }} /> : null}
-            {!compactLayout ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRemove(repo);
-                }}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: 0,
-                  border: 'none',
-                  background: 'transparent',
-                  color: '#b91c1c',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                }}
-              >
-                <Trash2 size={11} strokeWidth={2} />
-                Remove from Cortex
-              </button>
-            ) : null}
-          </div>
-
+        <div style={{ padding: compactLayout ? '6px 14px 12px 14px' : '4px 14px 14px 14px' }}>
           {/* Multi-agent conflict warning */}
-          {(() => {
+          {showInlineRepoMeta ? (() => {
             if (!agentsByBranch) return null;
             const conflicts: { branch: string; agents: BranchAgent[] }[] = [];
             agentsByBranch.forEach((agents, branch) => {
@@ -1860,7 +1783,7 @@ function RepoCard({
                 ))}
               </div>
             );
-          })()}
+          })() : null}
 
           {/* Dev server logs */}
           {devLogsOpen && devServerRunning ? (
@@ -1904,7 +1827,7 @@ function RepoCard({
           ) : null}
 
           {/* Workspace notice */}
-          {workspaceNotice ? (
+          {showInlineRepoMeta && workspaceNotice ? (
             <div
               style={{
                 display: 'flex',
@@ -1923,7 +1846,7 @@ function RepoCard({
             </div>
           ) : null}
 
-          {repo.readiness ? (
+          {showInlineRepoMeta && repo.readiness ? (
             <div
               style={{
                 display: 'flex',
@@ -2019,7 +1942,7 @@ function RepoCard({
             </div>
           ) : null}
 
-          {worktreeHealthBanner ? (
+          {showInlineRepoMeta && worktreeHealthBanner ? (
             <div
               style={{
                 display: 'flex',
@@ -2125,11 +2048,10 @@ function RepoCard({
             {branchesLoading ? (
               <div style={{ fontSize: 11, color: 'var(--t-text-faint)', padding: '4px 0' }}>Loading branches…</div>
             ) : branches.length > 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 {branches.map((branch) => {
                   const branchAgents = agentsByBranch?.get(branch.name) ?? [];
                   const isIdleWorktree = branch.isWorktree && branch.isStale;
-                  const isFreshWorktree = branch.isWorktree && !branch.isStale;
                   const isCurrentBranch = branch.current;
                   const worktree = worktreesByBranch.get(branch.name);
                   const worktreeTone = branch.isWorktree
@@ -2146,27 +2068,9 @@ function RepoCard({
                     : branchAgents.length > 1
                       ? `${branchAgents.length} agents`
                       : null;
-                  const branchBaseBackground = isCurrentBranch
-                    ? 'rgba(34, 197, 94, 0.08)'
-                    : isIdleWorktree
-                      ? 'rgba(245, 158, 11, 0.10)'
-                      : isFreshWorktree
-                        ? 'rgba(255, 255, 255, 0.025)'
-                        : 'transparent';
-                  const branchBorder = isCurrentBranch
-                    ? `1px solid ${THEME_SUCCESS_BORDER}`
-                    : isIdleWorktree
-                      ? `1px solid ${THEME_WORKTREE_BORDER}`
-                      : isFreshWorktree
-                        ? '1px solid rgba(255,255,255,0.08)'
-                        : '1px solid transparent';
-                  const branchHoverBackground = isIdleWorktree
-                    ? 'rgba(245, 158, 11, 0.12)'
-                    : isFreshWorktree
-                      ? 'rgba(255, 255, 255, 0.04)'
-                      : isCurrentBranch
-                        ? 'rgba(34, 197, 94, 0.10)'
-                        : 'rgba(255, 255, 255, 0.04)';
+                  const branchDiffAgent = branchAgents.find((agent) => ((agent.additions ?? 0) > 0 || (agent.deletions ?? 0) > 0)) ?? null;
+                  const branchBaseBackground = 'transparent';
+                  const branchHoverBackground = 'var(--t-panel-hover)';
                   return (
                   <div key={branch.name}>
                   <div
@@ -2187,19 +2091,19 @@ function RepoCard({
                   style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: 6,
-                      minHeight: 34,
-                      padding: '6px 8px',
-                      borderRadius: 10,
+                      gap: 8,
+                      minHeight: 32,
+                      padding: '6px 7px',
+                      borderRadius: 8,
                       background: branchBaseBackground,
-                      border: branchBorder,
+                      border: '1px solid transparent',
                       cursor: branch.current ? 'default' : checkoutBusy ? 'wait' : 'pointer',
-                      transition: 'background 120ms ease, border-color 120ms ease',
+                      transition: 'background 120ms ease',
                     }}
                   >
                     {/* Branch icon — colored by type */}
                     <GitBranch
-                      size={12}
+                      size={11}
                       strokeWidth={2}
                       style={{
                         flexShrink: 0,
@@ -2208,9 +2112,9 @@ function RepoCard({
                     />
                     {/* Branch name */}
                     <span style={{
-                      fontSize: 12,
-                      fontWeight: branch.current || branch.isWorktree ? 650 : 560,
-                      color: isIdleWorktree ? THEME_WORKTREE_TEXT : 'var(--t-text)',
+                      fontSize: 11.5,
+                      fontWeight: branch.current || branch.isWorktree ? 620 : 560,
+                      color: 'var(--t-text)',
                       fontFamily: '"SF Mono", ui-monospace, monospace',
                       flex: 1,
                       minWidth: 0,
@@ -2220,66 +2124,18 @@ function RepoCard({
                     }}>
                       {branch.name}
                     </span>
-                    {/* Current indicator */}
-                    {branch.current ? (
-                      <span style={{
-                        fontSize: 9,
-                        fontWeight: 700,
-                        color: THEME_SUCCESS_TEXT,
-                        padding: '1px 6px',
-                        borderRadius: 999,
-                        background: THEME_SUCCESS_SOFT,
-                        border: `1px solid ${THEME_SUCCESS_BORDER}`,
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.04em',
-                        flexShrink: 0,
-                      }}>
-                        current
-                      </span>
-                    ) : null}
-                    {/* Worktree badge */}
-                    {branch.isWorktree && !branch.current && worktreeTone ? (
-                      <span style={{
-                        fontSize: 9,
-                        fontWeight: 700,
-                        color: worktreeTone.color,
-                        padding: '1px 6px',
-                        borderRadius: 999,
-                        background: worktreeTone.background,
-                        border: `1px solid ${worktreeTone.border}`,
-                        letterSpacing: '0.03em',
-                        flexShrink: 0,
-                      }}>
-                        {worktreeTone.label}
-                      </span>
-                    ) : null}
-                    {/* Stale badge */}
-                    {branch.isStale ? (
-                      <span style={{
-                        fontSize: 9,
-                        fontWeight: 600,
-                        color: isIdleWorktree ? THEME_WORKTREE_TEXT : 'var(--t-text-muted)',
-                        padding: '1px 5px',
-                        borderRadius: 4,
-                        background: isIdleWorktree ? THEME_WORKTREE_SOFT : 'var(--t-divider-subtle)',
-                        border: `1px solid ${isIdleWorktree ? THEME_WORKTREE_BORDER : 'var(--t-panel-border)'}`,
-                        flexShrink: 0,
-                      }}>
-                        {branch.staleDays}d idle
-                      </span>
-                    ) : null}
-                    {branchAgentLabel ? (
-                      <span style={{
-                        fontSize: 9,
-                        fontWeight: 600,
-                        color: 'var(--t-text-secondary)',
-                        padding: '1px 6px',
-                        borderRadius: 999,
-                        background: 'var(--t-divider-subtle)',
-                        border: '1px solid var(--t-panel-border)',
-                        flexShrink: 0,
-                      }}>
-                        {branchAgentLabel}
+                    {branchDiffAgent ? (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          color: 'var(--t-text-secondary)',
+                          fontFamily: '"SF Mono", ui-monospace, monospace',
+                          letterSpacing: '-0.01em',
+                          flexShrink: 0,
+                        }}
+                      >
+                        +{(branchDiffAgent.additions ?? 0).toLocaleString()} -{(branchDiffAgent.deletions ?? 0).toLocaleString()}
                       </span>
                     ) : null}
                   </div>
@@ -2312,6 +2168,16 @@ function RepoCard({
                         <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', borderRadius: 999, padding: '3px 8px' }}>
                           {branch.lastCommitAge}
                         </span>
+                        {branchAgentLabel ? (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', borderRadius: 999, padding: '3px 8px' }}>
+                            {branchAgentLabel}
+                          </span>
+                        ) : null}
+                        {branchDiffAgent ? (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', borderRadius: 999, padding: '3px 8px', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                            +{(branchDiffAgent.additions ?? 0).toLocaleString()} -{(branchDiffAgent.deletions ?? 0).toLocaleString()}
+                          </span>
+                        ) : null}
                         {branch.ahead > 0 || branch.behind > 0 ? (
                           <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-secondary)', background: 'var(--t-divider-subtle)', border: '1px solid var(--t-panel-border)', borderRadius: 999, padding: '3px 8px', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
                             {branch.ahead > 0 ? `↑${branch.ahead}` : ''}{branch.behind > 0 ? ` ↓${branch.behind}` : ''}
@@ -2328,6 +2194,38 @@ function RepoCard({
                           </span>
                         ) : null}
                       </div>
+                      {branchAgents.length > 0 ? (
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+                          {branchAgents.map((agent) => (
+                            <span
+                              key={agent.sessionKey}
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                fontSize: 10,
+                                fontWeight: 700,
+                                color: 'var(--t-text-secondary)',
+                                background: 'var(--t-panel-hover)',
+                                border: '1px solid var(--t-panel-border)',
+                                borderRadius: 999,
+                                padding: '4px 8px',
+                              }}
+                            >
+                              <span
+                                style={{
+                                  width: 6,
+                                  height: 6,
+                                  borderRadius: '50%',
+                                  background: agent.color,
+                                  boxShadow: `0 0 10px ${agent.color}55`,
+                                }}
+                              />
+                              {agent.name}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
                       <div style={{ marginTop: 10, fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-secondary)' }}>
                         {branch.lastCommitMessage || (branch.current ? 'Current branch checked out in this repository.' : 'Click the row to switch to this branch.')}
                       </div>
@@ -2341,6 +2239,16 @@ function RepoCard({
                           {branch.current ? 'Current branch' : 'Click row to switch'}
                         </span>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          {branchAgents.map((agent) => (
+                            onSelectSession ? (
+                              <RepoActionButton
+                                key={agent.sessionKey}
+                                label={`Open ${agent.name}`}
+                                icon={<PlayCircle size={12} strokeWidth={2} />}
+                                onClick={() => onSelectSession(agent.sessionKey)}
+                              />
+                            ) : null
+                          ))}
                           {worktree ? (
                             <RepoActionButton
                               label="Open workspace"
@@ -2520,20 +2428,30 @@ function RepoCard({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 4,
-                padding: '4px 6px',
+                gap: 6,
+                width: '100%',
+                padding: '6px 7px',
                 marginTop: 2,
                 border: 'none',
                 background: 'transparent',
                 color: 'var(--t-text-muted)',
                 fontSize: 11,
+                fontWeight: 500,
                 cursor: 'pointer',
                 fontFamily: '-apple-system, system-ui, sans-serif',
-                borderRadius: 6,
-                transition: 'color 120ms',
+                borderRadius: 8,
+                transition: 'background 140ms ease, color 140ms ease',
               }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = THEME_ACCENT; }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = 'var(--t-text-muted)'; }}
+              onMouseEnter={(e) => {
+                const target = e.currentTarget as HTMLButtonElement;
+                target.style.color = 'var(--t-text)';
+                target.style.background = 'var(--t-panel-hover)';
+              }}
+              onMouseLeave={(e) => {
+                const target = e.currentTarget as HTMLButtonElement;
+                target.style.color = 'var(--t-text-muted)';
+                target.style.background = 'transparent';
+              }}
             >
               <Plus size={11} strokeWidth={2} />
               New branch
@@ -2626,7 +2544,7 @@ function RepoCard({
           ) : null}
 
           {/* Stale branch summary */}
-          {(() => {
+          {showInlineRepoMeta ? (() => {
             const staleBranches = branches.filter(b => b.isStale);
             if (staleBranches.length === 0) return null;
             const idleWorktreeBranches = staleBranches.filter((branch) => branch.isWorktree);
@@ -2682,23 +2600,25 @@ function RepoCard({
                 </button>
               </div>
             );
-          })()}
+          })() : null}
 
           {/* Repo metadata — compact */}
-          <div
-            style={{
-              fontSize: 10,
-              color: 'var(--t-text-muted)',
-              fontFamily: '"SF Mono", ui-monospace, monospace',
-              lineHeight: 1.6,
-              marginTop: 6,
-            }}
-          >
-            <div style={{ color: 'var(--t-text-secondary)' }}>{shortenPath(repo.localPath)}</div>
-            {repo.remoteUrl ? (
-              <div style={{ color: 'var(--t-text-faint)' }}>{repo.remoteUrl.replace(/^https?:\/\//, '')}</div>
-            ) : null}
-          </div>
+          {showInlineRepoMeta ? (
+            <div
+              style={{
+                fontSize: 10,
+                color: 'var(--t-text-muted)',
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                lineHeight: 1.6,
+                marginTop: 6,
+              }}
+            >
+              <div style={{ color: 'var(--t-text-secondary)' }}>{shortenPath(repo.localPath)}</div>
+              {repo.remoteUrl ? (
+                <div style={{ color: 'var(--t-text-faint)' }}>{repo.remoteUrl.replace(/^https?:\/\//, '')}</div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -2985,22 +2905,26 @@ function RepoCard({
 export function RepoRegistrySection({
   onSelectSession,
   onSelectPR,
+  onReviewPR,
   onLaunchComplete,
   onLaunchWorkspaceAgent,
   activeRepoLocalPath = null,
   sectionOpen,
   onSectionOpenChange,
   launchIntent,
+  workspaceIntent,
   hideHeader = false,
 }: {
   onSelectSession?: (sessionKey: string) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
+  onReviewPR?: (prNumber: number, repo?: string) => void;
   onLaunchComplete?: () => void;
   onLaunchWorkspaceAgent?: (request: WorkspaceAgentLaunchRequest) => Promise<void>;
   activeRepoLocalPath?: string | null;
   sectionOpen?: boolean;
   onSectionOpenChange?: (open: boolean) => void;
   launchIntent?: { repoPath: string | null; nonce: number } | null;
+  workspaceIntent?: { repoPath: string | null; nonce: number } | null;
   hideHeader?: boolean;
 } = {}) {
   const [repos, setRepos] = useState<RepoRegistryEntry[]>([]);
@@ -3078,6 +3002,7 @@ export function RepoRegistrySection({
   const [removeBusy, setRemoveBusy] = useState(false);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const handledLaunchIntentNonceRef = useRef<number | null>(null);
+  const handledWorkspaceIntentNonceRef = useRef<number | null>(null);
   const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
 
   useEffect(() => {
@@ -3087,7 +3012,10 @@ export function RepoRegistrySection({
     } catch { /* ignore */ }
   }, [expandedRepoId]);
 
-  useEffect(() => subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled), []);
+  useEffect(() => {
+    void refreshOpenClawBetaStatus().then((status) => setOpenClawBetaEnabled(status.effective_enabled));
+    return subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled);
+  }, []);
 
   useEffect(() => {
     try {
@@ -3133,7 +3061,15 @@ export function RepoRegistrySection({
     function fetchAgentBranches() {
       fetch(appendOpenClawBetaQuery('/api/panel/workspaces', openClawBetaEnabled))
         .then(r => r.json())
-        .then((data: { workspaces?: { repo: string; branch: string; agentName: string; sessionKey: string; agentStatus: string }[] }) => {
+        .then((data: { workspaces?: Array<{
+          repo: string;
+          branch: string;
+          agentName: string;
+          sessionKey: string;
+          agentStatus: string;
+          localDiff?: { additions: number; deletions: number; changedFiles: number };
+          pr?: { additions: number; deletions: number; changedFiles: number } | null;
+        }> }) => {
           const map = new Map<string, Map<string, BranchAgent[]>>();
           const AGENT_COLORS: Record<string, string> = {
             'Assistant': '#111827',
@@ -3152,10 +3088,18 @@ export function RepoRegistrySection({
             const isClaude = agentName.toLowerCase().includes('claude');
             const displayName = isCodex ? 'Codex' : isClaude ? 'Claude Code' : agentName;
             const color = AGENT_COLORS[displayName] ?? (isCodex ? '#10b981' : isClaude ? '#8b5cf6' : '#6b7280');
+            const diffSource = ws.pr ?? ws.localDiff ?? null;
             // Deduplicate by session key
             const existing = branchMap.get(ws.branch)!;
             if (!existing.some(a => a.sessionKey === ws.sessionKey)) {
-              existing.push({ name: displayName, sessionKey: ws.sessionKey, color });
+              existing.push({
+                name: displayName,
+                sessionKey: ws.sessionKey,
+                color,
+                additions: diffSource?.additions,
+                deletions: diffSource?.deletions,
+                changedFiles: diffSource?.changedFiles,
+              });
             }
           }
           setAgentBranchMap(map);
@@ -3492,6 +3436,17 @@ export function RepoRegistrySection({
     openLaunchModal(match);
   }, [launchIntent?.nonce, launchIntent?.repoPath, openLaunchModal, repos, setReposOpen]);
 
+  useEffect(() => {
+    if (!workspaceIntent?.repoPath) return;
+    if (handledWorkspaceIntentNonceRef.current === workspaceIntent.nonce) return;
+    const match = repos.find((repo) => repo.localPath === workspaceIntent.repoPath);
+    if (!match) return;
+    handledWorkspaceIntentNonceRef.current = workspaceIntent.nonce;
+    setReposOpen(true);
+    setExpandedRepoId(match.id);
+    openWorkspaceModal(match);
+  }, [openWorkspaceModal, repos, setReposOpen, workspaceIntent?.nonce, workspaceIntent?.repoPath]);
+
   const branchPreview = useMemo(() => getWorkspaceBranchPreview(workspaceName), [workspaceName]);
 
   return (
@@ -3542,17 +3497,6 @@ export function RepoRegistrySection({
                 }} />
               ) : repos.length}
             </span>
-            <span
-              style={{
-                marginLeft: 'auto',
-                fontSize: 10,
-                color: 'var(--t-text-faint)',
-                display: 'flex',
-                alignItems: 'center',
-              }}
-            >
-              {reposOpen ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}
-            </span>
           </button>
         </div>
       ) : null}
@@ -3561,6 +3505,8 @@ export function RepoRegistrySection({
         <div
           style={{
             flexShrink: 0,
+            marginLeft: hideHeader ? -14 : 0,
+            marginRight: hideHeader ? -14 : 0,
             paddingTop: 0,
             paddingRight: hideHeader ? 0 : 14,
             paddingBottom: 8,
@@ -3655,7 +3601,9 @@ export function RepoRegistrySection({
                 onOpenGitHub={handleOpenGitHub}
                 onRemove={setRemoveTarget}
                 onSaveSetup={handleSaveSetup}
+                onSelectSession={onSelectSession}
                 onSelectPR={onSelectPR}
+                onReviewPR={onReviewPR}
                 onSelectBranch={(branch, repoPath) => {
                   // Future: switch conversation context to agent on this branch
                   // For now: could trigger file tree refresh for this branch
@@ -3681,19 +3629,32 @@ export function RepoRegistrySection({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
-                padding: '10px 0 6px',
+                gap: 8,
+                minHeight: 38,
+                marginTop: 10,
+                padding: hideHeader ? '0 14px' : '0 12px',
                 border: 'none',
-                borderTop: '1px solid var(--t-divider-subtle)',
                 background: 'transparent',
                 color: 'var(--t-text-secondary)',
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 500,
                 cursor: 'pointer',
                 fontFamily: '-apple-system, system-ui, sans-serif',
+                borderRadius: 14,
+                transition: 'background 140ms ease, border-color 140ms ease',
+              }}
+              onMouseEnter={(event) => {
+                const target = event.currentTarget;
+                target.style.background = 'var(--t-panel-hover)';
+                target.style.color = 'var(--t-text)';
+              }}
+              onMouseLeave={(event) => {
+                const target = event.currentTarget;
+                target.style.background = 'transparent';
+                target.style.color = 'var(--t-text-secondary)';
               }}
             >
-              <FolderOpen size={12} strokeWidth={2} />
+              <FolderOpen size={14} strokeWidth={2} />
               Add repository
             </button>
           ) : null}

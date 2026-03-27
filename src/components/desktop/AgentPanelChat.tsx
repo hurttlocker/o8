@@ -38,7 +38,7 @@ import type {
 } from '@/lib/mobile/types';
 import type { ProjectGroup } from '@/components/mobile/types';
 import { buildProjectGroups } from '@/components/mobile/utils';
-import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
+import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, refreshOpenClawBetaStatus, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 import { CodeBlock } from './CodeBlock';
 import { DesktopToolCallStack } from './DesktopAgentMessage';
 import { DiffModal } from './DiffModal';
@@ -3437,6 +3437,7 @@ export const DesktopComposePane = memo(function DesktopComposePane({
 
 export function AgentPanelChat({
   externalSessionKey,
+  workspaceSessions,
   draftInjection,
   onOpenDiff,
   onOpenFile,
@@ -3446,6 +3447,7 @@ export function AgentPanelChat({
   onWsStatusChange,
 }: {
   externalSessionKey?: string;
+  workspaceSessions?: SessionSummary[];
   draftInjection?: { id: string; text: string } | null;
   onOpenDiff?: () => void;
   onOpenFile?: (filePath: string, workspace?: string) => void;
@@ -3495,9 +3497,14 @@ export function AgentPanelChat({
   const lastAppliedExternalSessionKeyRef = useRef('');
   const lastNonEmptySessionsRef = useRef<SessionSummary[]>([]);
 
+  const effectiveSessions = useMemo(
+    () => (workspaceSessions && workspaceSessions.length > 0 ? workspaceSessions : sessions),
+    [sessions, workspaceSessions],
+  );
+
   const selectedSession = useMemo(
-    () => sessions.find(s => s.sessionKey === selectedKey),
-    [sessions, selectedKey]
+    () => effectiveSessions.find(s => s.sessionKey === selectedKey),
+    [effectiveSessions, selectedKey]
   );
   const headerSession = useMemo(
     () => selectedSession ?? (lastHeaderSessionRef.current?.sessionKey === selectedKey ? lastHeaderSessionRef.current : null),
@@ -3511,18 +3518,18 @@ export function AgentPanelChat({
   }, [selectedSession]);
 
   useEffect(() => {
-    if (sessions.length > 0) {
-      lastNonEmptySessionsRef.current = sessions;
+    if (effectiveSessions.length > 0) {
+      lastNonEmptySessionsRef.current = effectiveSessions;
     }
-  }, [sessions]);
+  }, [effectiveSessions]);
 
   useEffect(() => {
-    if (selectedSession || sessions.length === 0) return;
-    const primary = sessions.find((session) => session.sessionKey === snapshot?.primarySessionKey) ?? sessions[0];
+    if (selectedSession || effectiveSessions.length === 0) return;
+    const primary = effectiveSessions.find((session) => session.sessionKey === snapshot?.primarySessionKey) ?? effectiveSessions[0];
     if (primary && primary.sessionKey !== selectedKey) {
       setSelectedKey(primary.sessionKey);
     }
-  }, [selectedKey, selectedSession, sessions, snapshot?.primarySessionKey]);
+  }, [effectiveSessions, selectedKey, selectedSession, snapshot?.primarySessionKey]);
 
   const streamingTextRef = useRef('');
 
@@ -3530,7 +3537,10 @@ export function AgentPanelChat({
     selectedKeyRef.current = selectedKey;
   }, [selectedKey]);
 
-  useEffect(() => subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled), []);
+  useEffect(() => {
+    void refreshOpenClawBetaStatus().then((status) => setOpenClawBetaEnabled(status.effective_enabled));
+    return subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled);
+  }, []);
   useEffect(() => {
     initialInboxReadyRef.current = false;
   }, [openClawBetaEnabled]);
@@ -3650,14 +3660,16 @@ export function AgentPanelChat({
   }, [selectedSession?.tmuxSession, sendTerminalAttach, sendTerminalDetach, supportsSlashTerminalRelay]);
 
   const stablePickerSessions = useMemo(() => {
-    if (sessions.length > 0) return sessions;
+    if (effectiveSessions.length > 0) return effectiveSessions;
     if (loading || connectionState !== 'connected') return lastNonEmptySessionsRef.current;
     return [];
-  }, [connectionState, loading, sessions]);
+  }, [connectionState, effectiveSessions, loading]);
 
   const pickerSnapshot = useMemo(
-    () => (snapshot && snapshot.sessions.length > 0 ? snapshot : buildPickerFallbackSnapshot(stablePickerSessions, selectedKey)),
-    [selectedKey, snapshot, stablePickerSessions],
+    () => (workspaceSessions && workspaceSessions.length > 0
+      ? buildPickerFallbackSnapshot(workspaceSessions, selectedKey)
+      : (snapshot && snapshot.sessions.length > 0 ? snapshot : buildPickerFallbackSnapshot(stablePickerSessions, selectedKey))),
+    [selectedKey, snapshot, stablePickerSessions, workspaceSessions],
   );
 
   const projectGroups = useMemo(
@@ -3941,7 +3953,7 @@ export function AgentPanelChat({
 
   // ── Send message ──
   const sendToClaudeCode = useCallback(async (text: string) => {
-    const session = sessions.find(s => s.sessionKey === selectedKey);
+    const session = effectiveSessions.find(s => s.sessionKey === selectedKey);
     const cwd = session?.workspace || undefined;
 
     // Create a streaming assistant entry
@@ -4054,10 +4066,10 @@ export function AgentPanelChat({
       liveToolCallsRef.current = [];
       setActiveToolCalls([]);
     }
-  }, [sessions, selectedKey, scrollToBottom]);
+  }, [effectiveSessions, selectedKey, scrollToBottom]);
 
   const sendToCodex = useCallback(async (text: string) => {
-    const session = sessions.find(s => s.sessionKey === selectedKey);
+    const session = effectiveSessions.find(s => s.sessionKey === selectedKey);
     const cwd = session?.workspace || undefined;
 
     const assistantId = `codex-${Date.now()}`;
@@ -4166,7 +4178,7 @@ export function AgentPanelChat({
       liveToolCallsRef.current = [];
       setActiveToolCalls([]);
     }
-  }, [sessions, selectedKey, scrollToBottom]);
+  }, [effectiveSessions, selectedKey, scrollToBottom]);
 
   const send = useCallback(async () => {
     if ((!draft.trim() && pendingFiles.length === 0) || !selectedKey || sending || !selectedSession?.runtimeSurface?.capabilities.sendInput) return;
@@ -4331,15 +4343,15 @@ export function AgentPanelChat({
 
   // ── Select session by session key (for session picker) ──
   const handleSessionFocus = useCallback((sessionKey: string) => {
-    const session = sessions.find(s => s.sessionKey === sessionKey);
+    const session = effectiveSessions.find(s => s.sessionKey === sessionKey);
     if (session) {
       setSelectedKey(session.sessionKey);
       onSelectSession?.(session.sessionKey);
     }
-  }, [onSelectSession, sessions]);
+  }, [effectiveSessions, onSelectSession]);
 
   useEffect(() => {
-    const session = sessions.find(s => s.sessionKey === selectedKey);
+    const session = effectiveSessions.find(s => s.sessionKey === selectedKey);
 
     // Reset session refs when switching
     claudeSessionIdRef.current = undefined;
@@ -4354,7 +4366,7 @@ export function AgentPanelChat({
     if (session.runtime === 'codex' && session.sessionKey.startsWith('codex:')) {
       codexThreadIdRef.current = session.sessionKey.replace('codex:', '');
     }
-  }, [sessions, selectedKey]);
+  }, [effectiveSessions, selectedKey]);
 
   // ── Init ──
   useEffect(() => { void fetchSessions(); }, [fetchSessions]);
