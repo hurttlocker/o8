@@ -24,6 +24,18 @@ interface CiCheckContext {
   completedAt?: string;
 }
 
+interface DeployContext {
+  project?: string;
+  repo?: string;
+  environment?: string;
+  state: string;
+  url?: string;
+  sha?: string;
+  createdAt?: string;
+  target?: string;
+  commitMessage?: string;
+}
+
 function formatRepoContext(prNumber: number, repo?: string) {
   return repo ? `PR #${prNumber} in ${repo}` : `PR #${prNumber}`;
 }
@@ -111,6 +123,61 @@ export function formatCiCheckBatchInjection(
 
   return {
     reason: `ci-check-batch-${prNumber}`,
+    text: [header, '', ...lines].join('\n'),
+  };
+}
+
+export function formatDeployContextInjection(context: DeployContext): AgentPanelChatInjectionPayload {
+  const subject = context.project
+    ? `deployment context from ${context.project}`
+    : context.repo
+      ? `deployment context from ${context.repo}`
+      : 'deployment context';
+  const lines = [`[${subject}]`, `State: ${context.state}`];
+  if (context.environment) {
+    lines.push(`Environment: ${context.environment}`);
+  }
+  if (context.target) {
+    lines.push(`Target: ${context.target}`);
+  }
+  if (context.sha) {
+    lines.push(`SHA: ${context.sha}`);
+  }
+  if (context.createdAt) {
+    lines.push(`Created: ${context.createdAt}`);
+  }
+  if (context.url) {
+    lines.push(`URL: ${context.url}`);
+  }
+  if (context.commitMessage) {
+    lines.push(`Commit: ${context.commitMessage}`);
+  }
+  return {
+    reason: `deploy-${(context.project ?? context.repo ?? 'context').toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${(context.environment ?? context.state ?? 'state').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    text: lines.join('\n'),
+  };
+}
+
+export function formatDeployBatchInjection(
+  project: string | undefined,
+  repo: string | undefined,
+  deployments: DeployContext[],
+): AgentPanelChatInjectionPayload {
+  const subject = project ?? repo ?? 'workspace';
+  const header = `[Deployment context from ${subject}]`;
+  const lines = deployments.map((deployment, index) => {
+    const parts = [
+      `${index + 1}. ${deployment.environment ?? deployment.target ?? 'deployment'}`,
+      `state=${deployment.state}`,
+      deployment.sha ? `sha=${deployment.sha}` : null,
+      deployment.url ? `url=${deployment.url}` : null,
+      deployment.createdAt ? `created=${deployment.createdAt}` : null,
+    ].filter(Boolean);
+    return parts.join(' • ');
+  });
+
+  return {
+    reason: `deploy-batch-${subject.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
     text: [header, '', ...lines].join('\n'),
   };
 }

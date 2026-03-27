@@ -77,6 +77,7 @@ export interface TerminalTabHandle {
     createNew?: boolean;
     label?: string;
   }) => string;
+  openWorkspaceDiff: () => void;
   openInspectorTab: (tab: CanvasTab, options?: { repo?: RegisteredRepo; createNew?: boolean }) => string;
 }
 
@@ -88,6 +89,7 @@ interface WorkspaceTerminalProps {
   onLaunchRepoAgent?: (repo: RegisteredRepo) => void | Promise<void>;
   onOpenRepoGitLog?: (repo: RegisteredRepo) => void;
   onOpenRepoCI?: (repo: RegisteredRepo) => void;
+  onOpenRepoDiff?: (repo: RegisteredRepo | null) => void;
   onInjectChatContext?: (payload: import('@/lib/chat/injection').AgentPanelChatInjectionPayload) => void;
   onSelectCommit?: (hash: string) => void;
   onLaunchWorkspaceTask?: (request: CanvasRepoTaskLaunchRequest) => Promise<void>;
@@ -2887,6 +2889,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       onLaunchRepoAgent,
       onOpenRepoGitLog,
       onOpenRepoCI,
+      onOpenRepoDiff,
       onInjectChatContext,
       onSelectCommit,
       onLaunchWorkspaceTask,
@@ -2919,15 +2922,29 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     const urlDetectionEnabledRef = useRef(false); // suppress during initial replay
     const previousWsConnectedRef = useRef(false);
     const reportedRepoScopeRef = useRef<string | null | undefined>(undefined);
+    const visibleTabs = useMemo(
+      () => tabs.filter((tab) => !(tab.kind === 'canvas' && tab.canvasTab?.kind === 'ci')),
+      [tabs],
+    );
+    const effectiveActiveTabId = useMemo(
+      () => visibleTabs.some((tab) => tab.id === activeTabId)
+        ? activeTabId
+        : (visibleTabs[visibleTabs.length - 1]?.id ?? ''),
+      [activeTabId, visibleTabs],
+    );
 
     // Persist tab state (debounced — saves 500ms after last change)
     const persistTabs = useCallback((currentTabs: TerminalTab[], currentActiveId: string) => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
+        const persistableTabs = currentTabs.filter((tab) => !(tab.kind === 'canvas' && tab.canvasTab?.kind === 'ci'));
+        const nextActiveId = persistableTabs.some((tab) => tab.id === currentActiveId)
+          ? currentActiveId
+          : (persistableTabs[persistableTabs.length - 1]?.id ?? currentActiveId);
         const persisted: PersistedTabState = {
           version: 1,
-          activeTabId: currentActiveId,
-          tabs: currentTabs.map(t => ({
+          activeTabId: nextActiveId,
+          tabs: persistableTabs.map(t => ({
             id: t.id,
             label: t.label,
             kind: t.kind,
@@ -2968,9 +2985,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     useEffect(() => {
       tabsRef.current = tabs;
       if (tabs.length > 0) {
-        persistTabs(tabs, activeTabId);
+        persistTabs(tabs, effectiveActiveTabId);
       }
-    }, [tabs, activeTabId, persistTabs]);
+    }, [tabs, effectiveActiveTabId, persistTabs]);
 
     const createDefaultShellTab = useCallback((): TerminalTab => {
       tabCountRef.current += 1;
@@ -3064,6 +3081,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                 restoredActiveTabId = tabId;
               }
             } else if (tabKind === 'canvas' && st.canvasTab) {
+              if (st.canvasTab.kind === 'ci') {
+                continue;
+              }
               const tabId = `canvas-${tabCountRef.current}`;
               restoredTabs.push({
                 id: tabId,
@@ -3412,8 +3432,13 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         createNew: options?.createNew ?? false,
         label: options?.label,
       }),
+      openWorkspaceDiff: () => {
+        const activeWorkspaceTab = tabsRef.current.find((tab) => tab.id === activeTabId);
+        const repo = activeWorkspaceTab?.repo ?? tabsRef.current.find((tab) => tab.repo)?.repo ?? preferredRepo ?? null;
+        onOpenRepoDiff?.(repo);
+      },
       openInspectorTab: (canvasTab, options) => openWorkspaceInspectorTab(canvasTab, options),
-    }), [handleSessionCreated, onPreviewDetected, openWorkspaceCliChatSession, openWorkspaceInspectorTab]);
+    }), [activeTabId, handleSessionCreated, onOpenRepoDiff, onPreviewDetected, openWorkspaceCliChatSession, openWorkspaceInspectorTab, preferredRepo]);
 
     // Auto-register a folder so it shows in the picker next time
     const handleRegisterRepo = useCallback((localPath: string) => {
@@ -3683,8 +3708,8 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     const [isDragging, setIsDragging] = useState(false);
     const containerDivRef = useRef<HTMLDivElement>(null);
     const activeTab = useMemo(
-      () => tabs.find((tab) => tab.id === activeTabId) ?? null,
-      [tabs, activeTabId],
+      () => visibleTabs.find((tab) => tab.id === effectiveActiveTabId) ?? null,
+      [effectiveActiveTabId, visibleTabs],
     );
     const activeCheckpoint = activeTab?.kind === 'chat' ? activeTab.chatCheckpoints?.[0] : null;
 
@@ -3716,14 +3741,14 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
 
     const hasPreviews = showPreviewPane && previews.length > 0;
     const paneRepoPaths = useMemo(() => {
-      const repoPaths = tabs.map((tab) => tab.repo?.localPath).filter((value): value is string => Boolean(value));
+      const repoPaths = visibleTabs.map((tab) => tab.repo?.localPath).filter((value): value is string => Boolean(value));
       if (repoPaths.length > 0) {
         return Array.from(new Set(repoPaths));
       }
       return preferredRepo?.localPath ? [preferredRepo.localPath] : [];
-    }, [preferredRepo, tabs]);
+    }, [preferredRepo, visibleTabs]);
     const paneHasMixedRepos = paneRepoPaths.length > 1;
-    const activeRepo = activeTab?.repo ?? tabs.find((tab) => tab.repo)?.repo ?? preferredRepo ?? null;
+    const activeRepo = activeTab?.repo ?? visibleTabs.find((tab) => tab.repo)?.repo ?? preferredRepo ?? null;
     const activeRepoDetails = useMemo(() => {
       if (!activeRepo) return null;
       const preferredMatch = preferredRepo?.localPath === activeRepo.localPath ? preferredRepo : null;
@@ -3970,6 +3995,13 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                     }) : undefined}
                   />
                 ) : null}
+                {activeRepo || preferredRepo ? (
+                  <RepoScopeActionButton
+                    label="Diff"
+                    icon={<span style={{ fontSize: 11, fontWeight: 800, lineHeight: 1 }}>Δ</span>}
+                    onClick={onOpenRepoDiff ? () => onOpenRepoDiff(activeRepo ?? preferredRepo ?? null) : undefined}
+                  />
+                ) : null}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                 {activeRepoDetails?.branch ? (
@@ -4123,8 +4155,8 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         ) : null}
 
         <TabBar
-          tabs={tabs}
-          activeTabId={activeTabId}
+          tabs={visibleTabs}
+          activeTabId={effectiveActiveTabId}
           onSelectTab={setActiveTabId}
           onCloseTab={handleCloseTab}
           onNewTab={handleNewTab}
@@ -4136,11 +4168,11 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
 
         {/* Terminal panels — all mounted, only active is visible */}
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-          {tabs.map((tab) => (
+          {visibleTabs.map((tab) => (
             tab.kind === 'llm-chat' ? (
               <div key={tab.id} style={{
                 flex: 1,
-                display: tab.id === activeTabId ? 'flex' : 'none',
+                display: tab.id === effectiveActiveTabId ? 'flex' : 'none',
                 flexDirection: 'column',
                 height: '100%',
               }}>
@@ -4179,7 +4211,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             ) : tab.kind === 'chat' ? (
               <div key={tab.id} style={{
                 flex: 1,
-                display: tab.id === activeTabId ? 'flex' : 'none',
+                display: tab.id === effectiveActiveTabId ? 'flex' : 'none',
                 flexDirection: 'column',
                 height: '100%',
                 minHeight: 0,
@@ -4201,7 +4233,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                 key={tab.id}
                 style={{
                   flex: 1,
-                  display: tab.id === activeTabId ? 'flex' : 'none',
+                  display: tab.id === effectiveActiveTabId ? 'flex' : 'none',
                   flexDirection: 'column',
                   height: '100%',
                   minHeight: 0,
@@ -4232,14 +4264,14 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                 sendTerminalInput={sendTerminalInput}
                 sendTerminalResize={sendTerminalResize}
                 sendTerminalDetach={sendTerminalDetach}
-                visible={tab.id === activeTabId}
+                visible={tab.id === effectiveActiveTabId}
               />
             ) : (
               <div
                 key={tab.id}
                 style={{
                   flex: 1,
-                  display: tab.id === activeTabId ? 'flex' : 'none',
+                  display: tab.id === effectiveActiveTabId ? 'flex' : 'none',
                   alignItems: 'center',
                   justifyContent: 'center',
                   color: 'var(--t-text-muted)',
@@ -4265,7 +4297,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           ))}
 
           {/* Empty state when no tabs */}
-          {tabs.length === 0 && (
+          {visibleTabs.length === 0 && (
             <div style={{
               flex: 1,
               display: 'flex',
