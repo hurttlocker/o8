@@ -16,8 +16,9 @@ import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
 import { createPortal } from 'react-dom';
 import { BlueGlassActionButton, BlueGlassHoverCard, BlueGlassMetricPill, BlueGlassSparklineLane } from './BlueGlassHoverCard';
-import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
+import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, refreshOpenClawBetaStatus, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 import {
+  ArrowRight,
   AlertCircle,
   BookOpen,
   ChevronDown,
@@ -188,15 +189,6 @@ function mergeRiskLabel(detail: PRHoverDetail | null): { label: string; color: s
   if (detail.reviewDecision === 'REVIEW_REQUIRED') return { label: 'review pending', color: '#2563eb' };
   return { label: 'merge ready', color: '#16a34a' };
 }
-
-interface FileNode {
-  name: string;
-  path: string;
-  type: 'file' | 'dir';
-  children?: FileNode[];
-}
-
-type Tab = 'activity' | 'issues' | 'prs' | 'files' | 'ci';
 
 // ── Lightweight collection comparisons (replaces JSON.stringify deep compare) ──
 
@@ -499,6 +491,7 @@ function SidebarSection({
   accent,
   open,
   onToggle,
+  headerAction,
   children,
 }: {
   title: string;
@@ -508,99 +501,99 @@ function SidebarSection({
   accent?: string;
   open: boolean;
   onToggle: () => void;
+  headerAction?: React.ReactNode;
   children: React.ReactNode;
 }) {
   const tone = accent ?? '#2563eb';
 
   return (
-    <div style={{ paddingLeft: 14, paddingRight: 14 }}>
-      <button
-        type="button"
-        onClick={onToggle}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          padding: '10px 12px',
-          borderRadius: 16,
-          border: open ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
-          background: open ? THEME_ACCENT_SOFT : THEME_BG_CARD,
-          color: 'var(--t-text)',
-          cursor: 'pointer',
-          fontFamily: '-apple-system, system-ui, sans-serif',
-          boxShadow: open ? `0 10px 24px ${THEME_ACCENT_RING}` : '0 8px 18px rgba(15, 23, 42, 0.06)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-        }}
-      >
-        <span
+    <section style={{ borderTop: '1px solid var(--t-divider-subtle)' }}>
+      <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, paddingRight: 14 }}>
+        <button
+          type="button"
+          onClick={onToggle}
           style={{
-            width: 32,
-            height: 32,
-            borderRadius: 11,
-            display: 'inline-flex',
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            background: open ? THEME_ACCENT_SOFT_STRONG : 'var(--t-divider-subtle)',
-            color: open ? THEME_ACCENT : tone,
-            flexShrink: 0,
+            gap: 8,
+            padding: '10px 14px 8px',
+            border: 'none',
+            background: 'transparent',
+            color: 'var(--t-text)',
+            cursor: 'pointer',
+            fontFamily: '-apple-system, system-ui, sans-serif',
           }}
         >
-          <Icon size={15} strokeWidth={2} />
-        </span>
-        <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em' }}>{title}</span>
-            {count !== null && count !== undefined ? (
-              <span
+          <span
+            style={{
+              width: 18,
+              height: 18,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: open ? tone : 'var(--t-text-muted)',
+              flexShrink: 0,
+            }}
+          >
+            <Icon size={14} strokeWidth={2} />
+          </span>
+          <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em' }}>{title}</span>
+              {count !== null && count !== undefined ? (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: 18,
+                    height: 18,
+                    paddingLeft: 6,
+                    paddingRight: 6,
+                    borderRadius: 999,
+                    background: 'var(--t-divider-subtle)',
+                    color: 'var(--t-text-secondary)',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    flexShrink: 0,
+                  }}
+                >
+                  {count}
+                </span>
+              ) : null}
+            </div>
+            {summary ? (
+              <div
                 style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 22,
-                  height: 22,
-                  paddingLeft: 7,
-                  paddingRight: 7,
-                  borderRadius: 999,
-                  background: 'var(--t-divider-subtle)',
-                  color: 'var(--t-text-secondary)',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  fontFamily: '"SF Mono", ui-monospace, monospace',
-                  flexShrink: 0,
+                  marginTop: 2,
+                  fontSize: 10,
+                  lineHeight: 1.35,
+                  color: 'var(--t-text-faint)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
                 }}
               >
-                {count}
-              </span>
+                {summary}
+              </div>
             ) : null}
           </div>
-          {summary ? (
-            <div
-              style={{
-                marginTop: 3,
-                fontSize: 11,
-                lineHeight: 1.45,
-                color: 'var(--t-text-muted)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {summary}
-            </div>
-          ) : null}
-        </div>
-        <span style={{ color: 'var(--t-text-faint)', display: 'inline-flex', alignItems: 'center' }}>
-          {open ? <ChevronDown size={14} strokeWidth={2} /> : <ChevronRight size={14} strokeWidth={2} />}
-        </span>
-      </button>
+        </button>
+        {headerAction ? (
+          <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+            {headerAction}
+          </div>
+        ) : null}
+      </div>
       {open ? (
-        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ paddingRight: 14, paddingBottom: 10, paddingLeft: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {children}
         </div>
       ) : null}
-    </div>
+    </section>
   );
 }
 
@@ -618,135 +611,92 @@ function ActivityDock({
   children: React.ReactNode;
 }) {
   return (
-    <div
-      style={{
-        flexShrink: 0,
-        paddingTop: 10,
-        paddingRight: 14,
-        paddingBottom: 14,
-        paddingLeft: 14,
-        background: 'linear-gradient(180deg, rgba(248,250,252,0), var(--t-bg) 22%)',
-      }}
-    >
-      <div
+    <section style={{ flexShrink: 0, borderTop: '1px solid var(--t-divider-subtle)' }}>
+      <button
+        type="button"
+        onClick={onToggle}
         style={{
-          borderRadius: 22,
-          border: open ? '1px solid rgba(249, 115, 22, 0.18)' : '1px solid rgba(148, 163, 184, 0.12)',
-          background: open
-            ? 'linear-gradient(180deg, rgba(249, 115, 22, 0.08), var(--t-panel-translucent))'
-            : 'var(--t-panel-translucent)',
-          boxShadow: open
-            ? '0 -18px 34px rgba(15, 23, 42, 0.14), 0 10px 20px rgba(249, 115, 22, 0.06)'
-            : '0 -8px 18px rgba(15, 23, 42, 0.08)',
-          backdropFilter: 'blur(22px)',
-          WebkitBackdropFilter: 'blur(22px)',
-          overflow: 'hidden',
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '10px 14px 8px',
+          border: 'none',
+          background: 'transparent',
+          cursor: 'pointer',
+          color: 'var(--t-text)',
+          fontFamily: '-apple-system, system-ui, sans-serif',
         }}
       >
-        <button
-          type="button"
-          onClick={onToggle}
+        <span
           style={{
-            width: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-            padding: '10px 14px 12px',
-            border: 'none',
-            background: 'transparent',
-            cursor: 'pointer',
-            color: 'var(--t-text)',
-            fontFamily: '-apple-system, system-ui, sans-serif',
+            width: 18,
+            height: 18,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#f59e0b',
+            flexShrink: 0,
           }}
         >
-          <span
-            style={{
-              alignSelf: 'center',
-              width: 42,
-              height: 4,
-              borderRadius: 999,
-              background: open ? 'rgba(249, 115, 22, 0.26)' : 'rgba(148, 163, 184, 0.32)',
-            }}
-          />
-          <span style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%' }}>
-            <span
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: 12,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'rgba(249, 115, 22, 0.12)',
-                color: '#f97316',
-                flexShrink: 0,
-              }}
-            >
-              <Zap size={15} strokeWidth={2} />
-            </span>
-            <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em' }}>Activity</span>
-                <span
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    minWidth: 22,
-                    height: 22,
-                    paddingLeft: 7,
-                    paddingRight: 7,
-                    borderRadius: 999,
-                    background: 'rgba(15, 23, 42, 0.06)',
-                    color: 'var(--t-text-secondary)',
-                    fontSize: 11,
-                    fontWeight: 700,
-                    fontFamily: '"SF Mono", ui-monospace, monospace',
-                  }}
-                >
-                  {count}
-                </span>
-              </span>
+          <Zap size={14} strokeWidth={2} />
+        </span>
+        <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em' }}>Activity</span>
               <span
                 style={{
-                  display: 'block',
-                  marginTop: 4,
-                  fontSize: 11,
-                  lineHeight: 1.45,
-                  color: 'var(--t-text-muted)',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: 18,
+                  height: 18,
+                  paddingLeft: 6,
+                  paddingRight: 6,
+                  borderRadius: 999,
+                  background: 'var(--t-divider-subtle)',
+                  color: 'var(--t-text-secondary)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  fontFamily: '"SF Mono", ui-monospace, monospace',
                 }}
               >
-                {summary}
-              </span>
-            </span>
-            <span style={{ color: 'var(--t-text-faint)', display: 'inline-flex', alignItems: 'center' }}>
-              {open ? <ChevronDown size={14} strokeWidth={2} /> : <ChevronRight size={14} strokeWidth={2} />}
+              {count}
             </span>
           </span>
-        </button>
+          <span
+            style={{
+              display: 'block',
+              marginTop: 2,
+              fontSize: 10,
+              lineHeight: 1.35,
+              color: 'var(--t-text-faint)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {summary}
+          </span>
+        </span>
+      </button>
 
-        {open ? (
-          <div style={{ paddingRight: 12, paddingBottom: 12, paddingLeft: 12 }}>
-            <div
-              style={{
-                maxHeight: 340,
-                overflowY: 'auto',
-                borderRadius: 18,
-                border: '1px solid rgba(249, 115, 22, 0.12)',
-                background: 'var(--t-panel-translucent)',
-                scrollbarWidth: 'none',
-              } as React.CSSProperties}
-              className="hide-scrollbar"
-            >
-              {children}
-            </div>
+      {open ? (
+        <div style={{ paddingRight: 14, paddingBottom: 10, paddingLeft: 14 }}>
+          <div
+            style={{
+              maxHeight: 320,
+              overflowY: 'auto',
+              background: 'transparent',
+              scrollbarWidth: 'none',
+            } as React.CSSProperties}
+            className="hide-scrollbar"
+          >
+            {children}
           </div>
-        ) : null}
-      </div>
-    </div>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -773,20 +723,20 @@ function WorkspaceHeroAction({
         alignItems: 'center',
         justifyContent: 'center',
         gap: compact ? 4 : 6,
-        minHeight: compact ? 29 : 32,
+        minHeight: compact ? 27 : 29,
         padding: primary
-          ? compact ? '7px 10px' : '8px 12px'
-          : compact ? '6px 9px' : '7px 11px',
-        borderRadius: compact ? 8 : 10,
+          ? compact ? '6px 9px' : '7px 11px'
+          : compact ? '5px 8px' : '6px 10px',
+        borderRadius: compact ? 7 : 9,
         border: primary ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
         background: primary ? THEME_ACCENT : THEME_BG_CARD,
         color: primary ? '#fff' : 'var(--t-text-secondary)',
-        fontSize: compact ? 9 : 11,
+        fontSize: compact ? 9 : 10,
         fontWeight: 700,
         cursor: onClick ? 'pointer' : 'not-allowed',
         opacity: onClick ? 1 : 0.45,
         fontFamily: '-apple-system, system-ui, sans-serif',
-        boxShadow: primary ? (compact ? `0 8px 16px ${THEME_ACCENT_RING}` : `0 12px 24px ${THEME_ACCENT_RING}`) : 'none',
+        boxShadow: primary ? `0 8px 18px ${THEME_ACCENT_RING}` : 'none',
         whiteSpace: 'nowrap',
       }}
     >
@@ -814,14 +764,14 @@ function WorkspaceHeroOptionsButton({
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        minWidth: compact ? 29 : 32,
-        minHeight: compact ? 29 : 32,
+        minWidth: compact ? 27 : 29,
+        minHeight: compact ? 27 : 29,
         padding: 0,
-        borderRadius: compact ? 8 : 10,
+        borderRadius: compact ? 7 : 9,
         border: `1px solid ${THEME_ACCENT_BORDER}`,
         background: THEME_BG_CARD,
         color: THEME_ACCENT,
-        fontSize: 11,
+        fontSize: 10,
         fontWeight: 700,
         cursor: onClick ? 'pointer' : 'not-allowed',
         opacity: onClick ? 1 : 0.45,
@@ -861,12 +811,12 @@ function WorkspaceHeroPill({
         alignItems: 'center',
         justifyContent: fullWidth ? 'flex-start' : undefined,
         maxWidth: fullWidth ? '100%' : undefined,
-        padding: compact ? '2px 7px' : '3px 8px',
+        padding: compact ? '1px 6px' : '2px 7px',
         borderRadius: 999,
         background: palette.background,
         border: `1px solid ${palette.border}`,
         color: palette.color,
-        fontSize: compact ? 9 : 10,
+        fontSize: 9,
         fontWeight: 700,
         letterSpacing: '0.01em',
         overflow: 'hidden',
@@ -913,6 +863,18 @@ function WorkspaceHero({
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [cardWidth, setCardWidth] = useState(0);
   const compact = cardWidth > 0 && cardWidth < 390;
+  const normalizedTitle = title.trim().toLowerCase();
+  const normalizedRepoSlug = repoSlug?.trim().toLowerCase() ?? null;
+  const showRepoSlugChip = Boolean(
+    repoSlug
+    && normalizedRepoSlug
+    && normalizedRepoSlug !== normalizedTitle
+    && normalizedRepoSlug !== normalizedTitle.replace(/\s+/g, '-'),
+  );
+  const showWorkflowChip = Boolean(
+    workflowStage
+    && workflowStage.label.trim().toLowerCase() !== (readiness?.label.trim().toLowerCase() ?? ''),
+  );
 
   useEffect(() => {
     const node = cardRef.current;
@@ -932,70 +894,59 @@ function WorkspaceHero({
     return () => observer.disconnect();
   }, []);
 
+  const showChangeBadge = changedFiles > 0;
+  const showActiveBadge = activeRuns > 0;
+  const hasActions = Boolean(onLaunch || onLaunchOptions || onOpenGitLog || onOpenCI);
+
   return (
-    <div style={{ paddingLeft: 14, paddingRight: 14, paddingBottom: 16 }}>
+    <section style={{ paddingRight: 14, paddingBottom: 10, paddingLeft: 14, borderBottom: '1px solid var(--t-divider-subtle)' }}>
       <div
         ref={cardRef}
         style={{
           position: 'relative',
           overflow: 'hidden',
-          borderRadius: 22,
-          border: `1px solid ${THEME_ACCENT_BORDER}`,
-          background: 'linear-gradient(180deg, var(--t-panel) 0%, var(--t-panel-translucent) 100%)',
-          boxShadow: 'var(--t-panel-shadow)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
         }}
       >
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            background: `radial-gradient(circle at top right, ${THEME_ACCENT_RING}, transparent 46%)`,
-            pointerEvents: 'none',
-          }}
-        />
-        <div style={{ position: 'relative', padding: compact ? '14px 14px 13px' : '17px 17px 15px' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: compact ? 10 : 12 }}>
+        <div style={{ position: 'relative', padding: compact ? '2px 0 0' : '2px 0 0' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: compact ? 8 : 10 }}>
             <span
               style={{
-                width: compact ? 36 : 40,
-                height: compact ? 36 : 40,
-                borderRadius: compact ? 12 : 14,
+                width: compact ? 16 : 18,
+                height: compact ? 16 : 18,
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                background: THEME_ACCENT_SOFT_STRONG,
                 color: THEME_ACCENT,
                 flexShrink: 0,
+                marginTop: 1,
               }}
             >
-              <FolderOpen size={compact ? 16 : 18} strokeWidth={2.1} />
+              <FolderOpen size={compact ? 13 : 14} strokeWidth={2.1} />
             </span>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: THEME_ACCENT }}>
-                Current Workspace
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--t-text-faint)' }}>
+                Selection
               </div>
               <div
                 style={{
-                  marginTop: compact ? 4 : 6,
-                  fontSize: compact ? 17 : 20,
-                  lineHeight: 1.04,
-                  fontWeight: 800,
-                  letterSpacing: '-0.03em',
+                  marginTop: 4,
+                  fontSize: compact ? 15 : 16,
+                  lineHeight: 1.08,
+                  fontWeight: 720,
+                  letterSpacing: '-0.02em',
                   color: 'var(--t-text)',
                 }}
               >
                 {title}
               </div>
-              <div style={{ marginTop: 4, fontSize: compact ? 10 : 12, lineHeight: compact ? 1.4 : 1.5, color: 'var(--t-text-secondary)' }}>
+              <div style={{ marginTop: 3, fontSize: 10.5, lineHeight: 1.4, color: 'var(--t-text-muted)' }}>
                 {subtitle}
               </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: compact ? 5 : 7, flexWrap: 'wrap', marginTop: compact ? 10 : 13 }}>
-            {repoSlug ? <WorkspaceHeroPill label={repoSlug} tone="blue" compact={compact} /> : null}
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginTop: 10 }}>
+            {showRepoSlugChip ? <WorkspaceHeroPill label={repoSlug!} tone="blue" compact={compact} /> : null}
             {branch ? <WorkspaceHeroPill label={branch} compact={compact} /> : null}
             {readiness ? (
               <WorkspaceHeroPill
@@ -1004,7 +955,7 @@ function WorkspaceHero({
                 compact={compact}
               />
             ) : null}
-            {workflowStage ? (
+            {showWorkflowChip && workflowStage ? (
               <WorkspaceHeroPill
                 label={workflowStage.label}
                 tone={
@@ -1021,20 +972,32 @@ function WorkspaceHero({
                 compact={compact}
               />
             ) : null}
-            <WorkspaceHeroPill label={`${changedFiles} changed`} tone={changedFiles > 0 ? 'blue' : 'neutral'} compact={compact} />
-            <WorkspaceHeroPill label={`${activeRuns} active`} tone={activeRuns > 0 ? 'green' : 'neutral'} compact={compact} />
+            {showChangeBadge ? <WorkspaceHeroPill label={`${changedFiles} changed`} tone="blue" compact={compact} /> : null}
+            {showActiveBadge ? <WorkspaceHeroPill label={`${activeRuns} active`} tone="green" compact={compact} /> : null}
           </div>
           {(workspaceLabel || workflowNextAction || readiness?.nextAction) ? (
-            <div style={{ marginTop: compact ? 6 : 7, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
               {workspaceLabel ? (
-                <WorkspaceHeroPill label={workspaceLabel} compact={compact} fullWidth />
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: 'var(--t-text-faint)',
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    lineHeight: 1.4,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {workspaceLabel}
+                </div>
               ) : null}
               {(workflowNextAction || readiness?.nextAction) ? (
                 <div
                   style={{
-                    fontSize: compact ? 10 : 11,
-                    lineHeight: 1.45,
-                    color: 'var(--t-text-muted)',
+                    fontSize: 10,
+                    lineHeight: 1.35,
+                    color: 'var(--t-text-faint)',
                   }}
                 >
                   {workflowNextAction || readiness?.nextAction}
@@ -1043,33 +1006,35 @@ function WorkspaceHero({
             </div>
           ) : null}
 
-          <div style={{ display: 'flex', gap: compact ? 5 : 7, flexWrap: 'wrap', marginTop: compact ? 12 : 15 }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: compact ? 4 : 6 }}>
+          {hasActions ? (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                <WorkspaceHeroAction
+                  label="Launch Agent"
+                  icon={<PlayCircle size={compact ? 11 : 13} strokeWidth={2} />}
+                  onClick={onLaunch}
+                  primary
+                  compact={compact}
+                />
+                {onLaunchOptions ? <WorkspaceHeroOptionsButton onClick={onLaunchOptions} compact={compact} /> : null}
+              </div>
               <WorkspaceHeroAction
-                label="Launch Agent"
-                icon={<PlayCircle size={compact ? 11 : 13} strokeWidth={2} />}
-                onClick={onLaunch}
-                primary
+                label="Git Log"
+                icon={<GitCommit size={compact ? 11 : 13} strokeWidth={2} />}
+                onClick={onOpenGitLog}
                 compact={compact}
               />
-              {onLaunchOptions ? <WorkspaceHeroOptionsButton onClick={onLaunchOptions} compact={compact} /> : null}
+              <WorkspaceHeroAction
+                label="CI"
+                icon={<CheckCircle2 size={compact ? 11 : 13} strokeWidth={2} />}
+                onClick={onOpenCI}
+                compact={compact}
+              />
             </div>
-            <WorkspaceHeroAction
-              label="Git Log"
-              icon={<GitCommit size={compact ? 11 : 13} strokeWidth={2} />}
-              onClick={onOpenGitLog}
-              compact={compact}
-            />
-            <WorkspaceHeroAction
-              label="CI"
-              icon={<CheckCircle2 size={compact ? 11 : 13} strokeWidth={2} />}
-              onClick={onOpenCI}
-              compact={compact}
-            />
-          </div>
+          ) : null}
         </div>
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1081,6 +1046,7 @@ const AgentCard = memo(function AgentCard({
   onToggle,
   onSelectSession,
   onSelectPR,
+  onReviewPR,
   onAgentKill,
   onRetry,
   lifecycleEvents,
@@ -1090,6 +1056,7 @@ const AgentCard = memo(function AgentCard({
   onToggle: () => void;
   onSelectSession?: (sessionKey: string) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
+  onReviewPR?: (prNumber: number, repo?: string) => void;
   onAgentKill?: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
   onRetry?: (agent: AgentDetail) => void;
   lifecycleEvents?: Map<string, { state: string; exitCode?: number; ts: number }>;
@@ -1217,14 +1184,8 @@ const AgentCard = memo(function AgentCard({
 
   return (
     <div style={{
-      background: cardBackground,
-      border: cardBorder,
-      borderRadius: expanded ? 18 : 16,
-      backdropFilter: 'blur(20px)',
-      WebkitBackdropFilter: 'blur(20px)',
-      boxShadow: expanded
-        ? 'var(--t-panel-shadow)'
-        : '0 8px 18px rgba(15, 23, 42, 0.08)',
+      background: expanded ? 'rgba(255,255,255,0.025)' : 'transparent',
+      borderBottom: '1px solid var(--t-divider-subtle)',
       transition: 'all 200ms ease',
       overflow: 'hidden',
     }}>
@@ -1235,26 +1196,24 @@ const AgentCard = memo(function AgentCard({
           display: 'flex',
           alignItems: 'stretch',
           gap: isCompact ? 10 : 12,
-          padding: headerPadding,
+          padding: expanded ? '12px 0 10px' : '10px 0 9px',
           cursor: 'pointer',
         }}
       >
         <div style={{
-          width: iconBoxSize,
-          height: iconBoxSize,
-          borderRadius: iconRadius,
-          background: iconTint,
-          border: '1px solid var(--t-panel-border)',
+          width: expanded ? 20 : 18,
+          height: expanded ? 20 : 18,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           color: group.repo === 'openclaw' ? THEME_ACCENT : 'var(--t-text-secondary)',
           flexShrink: 0,
+          marginTop: 2,
         }}>
           {group.repo === 'openclaw' ? (
-            <Monitor size={iconSize} strokeWidth={2} />
+            <Monitor size={expanded ? 14 : 13} strokeWidth={2} />
           ) : (
-            <svg width={iconSize} height={iconSize} viewBox="0 0 24 24" fill="currentColor" style={{ display: 'block' }}>
+            <svg width={expanded ? 14 : 13} height={expanded ? 14 : 13} viewBox="0 0 24 24" fill="currentColor" style={{ display: 'block' }}>
               <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
             </svg>
           )}
@@ -1339,7 +1298,7 @@ const AgentCard = memo(function AgentCard({
               <span
                 onClick={(e) => {
                   e.stopPropagation();
-                  onSelectPR?.(primaryPr.number, group.repo);
+                  (onReviewPR ?? onSelectPR)?.(primaryPr.number, group.repo);
                 }}
                 style={{
                   display: 'inline-flex',
@@ -1419,7 +1378,7 @@ const AgentCard = memo(function AgentCard({
               <span
                 onClick={(e) => {
                   e.stopPropagation();
-                  onSelectPR?.(primaryPr.number, group.repo);
+                  (onReviewPR ?? onSelectPR)?.(primaryPr.number, group.repo);
                 }}
                 style={{
                   display: 'inline-flex',
@@ -1554,8 +1513,8 @@ const AgentCard = memo(function AgentCard({
           <div style={{
             minWidth: metricMinWidth,
             padding: metricPadding,
-            borderRadius: expanded ? 14 : 12,
-            background: ctx ? `${metricTone}12` : THEME_BG_CARD,
+            borderRadius: 999,
+            background: ctx ? `${metricTone}12` : 'var(--t-divider-subtle)',
             border: `1px solid ${ctx ? `${metricTone}24` : 'var(--t-panel-border)'}`,
             textAlign: 'right',
           }}>
@@ -1745,7 +1704,7 @@ const AgentCard = memo(function AgentCard({
                     <>
                       {branch && <span style={{ color: 'var(--t-text-faint)' }}>·</span>}
                       <span
-                        onClick={(e) => { e.stopPropagation(); onSelectPR?.(pr.number, group.repo); }}
+                        onClick={(e) => { e.stopPropagation(); (onReviewPR ?? onSelectPR)?.(pr.number, group.repo); }}
                         style={{
                           fontWeight: 600,
                           color: pr.state === 'merged' ? '#8b5cf6' : pr.state === 'open' ? '#22c55e' : '#9ca3af',
@@ -1802,7 +1761,7 @@ const AgentCard = memo(function AgentCard({
                 </div>
               ) : diff && (diff.add > 0 || diff.del > 0) ? (
                 <span
-                  onClick={pr ? (e) => { e.stopPropagation(); onSelectPR?.(pr.number, group.repo); } : undefined}
+                  onClick={pr ? (e) => { e.stopPropagation(); (onReviewPR ?? onSelectPR)?.(pr.number, group.repo); } : undefined}
                   style={{
                     fontSize: 10, fontWeight: 700,
                     fontFamily: '"SF Mono", ui-monospace, monospace',
@@ -1826,7 +1785,7 @@ const AgentCard = memo(function AgentCard({
         return (
           <div style={{
             borderTop: '1px solid var(--t-divider-subtle)',
-            padding: '6px 10px 10px',
+            padding: '6px 0 10px 26px',
           }}>
             {statusGroups.filter(g => g.agents.length > 0).map(g => (
               <div key={g.key} style={{ marginTop: 8 }}>
@@ -1970,6 +1929,7 @@ const ActivityFeed = memo(function ActivityFeed({
   onSelectIssue,
   onSelectCommit,
   onSelectPR,
+  onReviewPR,
   onLaunchTask,
   activeRepo: externalRepo,
   activeAgentKey,
@@ -1980,8 +1940,9 @@ const ActivityFeed = memo(function ActivityFeed({
   agents: AgentDetail[];
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
-  onSelectCommit?: (hash: string) => void;
+  onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
+  onReviewPR?: (prNumber: number, repo?: string) => void;
   onLaunchTask?: (request: RepoTaskLaunchRequest) => void;
   activeRepo?: string | null;
   activeAgentKey?: string | null;
@@ -2065,6 +2026,20 @@ const ActivityFeed = memo(function ActivityFeed({
 
   // Clear override when agent changes
   useEffect(() => { setRepoOverride(null); }, [activeAgentKey]);
+
+  const agentRepoById = useMemo(
+    () => new Map(agents.map((agent) => [agent.id, agentRepoSlug(agent)])),
+    [agents],
+  );
+
+  const visibleAgentEvents = useMemo(() => {
+    return events.filter((event) => {
+      const eventRepo = agentRepoById.get(event.agentId) ?? null;
+      if (!eventRepo) return false;
+      if (!repo || isAllRepos) return true;
+      return eventRepo === repo;
+    });
+  }, [agentRepoById, events, isAllRepos, repo]);
 
   // Fetch issues, PRs, CI, and commits for selected repo(s)
   useEffect(() => {
@@ -2207,14 +2182,27 @@ const ActivityFeed = memo(function ActivityFeed({
   }, [repo, isAllRepos, allRepos, refreshKey]);
 
   // Build unified timeline — commits now come from per-repo fetch, not parent prop
+  const fallbackCommitItems = useMemo<ActivityItem[]>(() => {
+    if (extras.repoCommits.length > 0) return [];
+    const fallbackRepo = repo ?? externalPanelRepo ?? activeAgentRepo ?? null;
+    return commits.slice(0, 10).map((commit, index) => ({
+      kind: 'commit' as const,
+      hash: commit.hash,
+      message: commit.message,
+      age: commit.age,
+      ts: Date.now() - index,
+      repo: fallbackRepo ?? undefined,
+    }));
+  }, [activeAgentRepo, commits, externalPanelRepo, extras.repoCommits.length, repo]);
+
   const items = useMemo<ActivityItem[]>(() => {
     const all: ActivityItem[] = [];
 
     // Repo-specific commits from API
-    all.push(...extras.repoCommits);
+    all.push(...extras.repoCommits, ...fallbackCommitItems);
 
     // Agent events (always included — they're cross-repo)
-    for (const e of events) {
+    for (const e of visibleAgentEvents) {
       const ts = e.timestamp ? new Date(e.timestamp).getTime() || Date.now() : Date.now();
       all.push({ kind: 'event', data: e, ts });
     }
@@ -2224,7 +2212,7 @@ const ActivityFeed = memo(function ActivityFeed({
     // Sort newest first
     all.sort((a, b) => b.ts - a.ts);
     return all.slice(0, 40);
-  }, [events, extras]);
+  }, [extras, fallbackCommitItems, visibleAgentEvents]);
 
   // Counts per type for filter badges
   const counts = useMemo(() => {
@@ -2412,7 +2400,7 @@ const ActivityFeed = memo(function ActivityFeed({
                 </span>
                 <button
                   type="button"
-                  onClick={() => onSelectPR?.(openPr.number, openPr.repo)}
+                  onClick={() => (onReviewPR ?? onSelectPR)?.(openPr.number, openPr.repo)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
@@ -2627,17 +2615,18 @@ const ActivityFeed = memo(function ActivityFeed({
           {group.items.map((item, idx) => {
             const fi = feedIcon(item);
             const key = activityItemKey(item);
-            const clickable = (item.kind === 'commit' && !!onSelectCommit) || item.kind === 'issue' || item.kind === 'pr' || item.kind === 'ci';
+            const clickable = (item.kind === 'commit' && !!onSelectCommit) || item.kind === 'issue' || item.kind === 'ci';
             const handleClick = () => {
-              if (item.kind === 'commit') { onSelectCommit?.(item.hash); return; }
+              if (item.kind === 'commit') {
+                onSelectCommit?.(item.hash, item.repo ? { repo: item.repo } : undefined);
+                return;
+              }
               if (item.kind === 'issue') {
                 if (onSelectIssue) {
                   onSelectIssue(item.number, item.repo);
                   return;
                 }
               }
-              // PRs open in contextual canvas
-              if (item.kind === 'pr') { onSelectPR?.(item.number, item.repo); return; }
               // Issues/CI open in browser
               let url = '';
               if (item.kind === 'issue') url = `https://github.com/${item.repo}/issues/${item.number}`;
@@ -2849,9 +2838,9 @@ const ActivityFeed = memo(function ActivityFeed({
                     footer={item.kind === 'pr' ? (
                       <>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                          <BlueGlassMetricPill label="Review" value={item.reviewDecision || 'pending'} color="#1d4ed8" />
+                          <BlueGlassMetricPill label="State" value={mergeRisk?.label ?? 'reviewing'} color={mergeRisk?.color ?? '#64748b'} />
+                          <BlueGlassMetricPill label="Checks" value={`${item.checkSummary?.failed ?? 0} fail · ${item.checkSummary?.pending ?? 0} pending`} color={item.checkSummary?.failed ? '#dc2626' : item.checkSummary?.pending ? '#d97706' : '#1d4ed8'} />
                           <BlueGlassMetricPill label="Files" value={String(item.changedFiles)} color="rgba(15,23,42,0.78)" />
-                          <BlueGlassMetricPill label="Risk" value={mergeRisk?.label ?? 'warming'} color={mergeRisk?.color ?? '#64748b'} />
                         </div>
                         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                           {onLaunchTask ? (
@@ -2867,14 +2856,23 @@ const ActivityFeed = memo(function ActivityFeed({
                               })}
                             />
                           ) : null}
-                          <BlueGlassActionButton
-                            icon={<GitPullRequest size={12} strokeWidth={2} />}
-                            label="Review"
-                            onClick={() => onSelectPR?.(item.number, item.repo)}
-                          />
+                          {onReviewPR ? (
+                            <BlueGlassActionButton
+                              icon={<GitPullRequest size={12} strokeWidth={2} />}
+                              label="Review"
+                              onClick={() => onReviewPR(item.number, item.repo)}
+                            />
+                          ) : null}
+                          {onSelectPR ? (
+                            <BlueGlassActionButton
+                              icon={<ArrowRight size={12} strokeWidth={2} />}
+                              label="Open full PR"
+                              onClick={() => onSelectPR(item.number, item.repo)}
+                            />
+                          ) : null}
                           <BlueGlassActionButton
                             icon={<ExternalLink size={12} strokeWidth={2} />}
-                            label="Open PR"
+                            label="Open on GitHub"
                             onClick={() => window.open(`https://github.com/${item.repo}/pull/${item.number}`, '_blank', 'noopener,noreferrer')}
                           />
                         </div>
@@ -2900,8 +2898,8 @@ const ActivityFeed = memo(function ActivityFeed({
                         {onSelectCommit ? (
                           <BlueGlassActionButton
                             icon={<GitCommit size={12} strokeWidth={2} />}
-                            label="Open in Canvas"
-                            onClick={() => onSelectCommit(item.hash)}
+                            label="Open in Workspace"
+                            onClick={() => onSelectCommit(item.hash, item.repo ? { repo: item.repo } : undefined)}
                           />
                         ) : null}
                       </>
@@ -3810,251 +3808,6 @@ function DeployList({ onOpenDeploy }: { onOpenDeploy?: (project?: string) => voi
   );
 }
 
-// ── File Tree (light theme) ──
-
-// ── File icon color mapping (VS Code / Cursor style) ──
-const FILE_ICON_COLORS: Record<string, string> = {
-  // TypeScript / JavaScript
-  '.ts': '#3178c6', '.tsx': '#3178c6', '.d.ts': '#3178c6',
-  '.js': '#f7df1e', '.jsx': '#f7df1e', '.mjs': '#f7df1e', '.cjs': '#f7df1e',
-  // Styles
-  '.css': '#1572b6', '.scss': '#cd6799', '.less': '#1d365d', '.sass': '#cd6799',
-  // Data / Config
-  '.json': '#cbcb41', '.yaml': '#cb171e', '.yml': '#cb171e', '.toml': '#9c4121',
-  '.xml': '#e37933', '.csv': '#237346',
-  // Web
-  '.html': '#e34f26', '.htm': '#e34f26', '.svg': '#ffb13b',
-  // Docs
-  '.md': '#519aba', '.mdx': '#519aba', '.txt': '#89929b',
-  // Go
-  '.go': '#00add8', '.mod': '#00add8', '.sum': '#00add8',
-  // Rust
-  '.rs': '#ce412b',
-  // Python
-  '.py': '#3572a5', '.pyi': '#3572a5',
-  // Shell
-  '.sh': '#4eaa25', '.bash': '#4eaa25', '.zsh': '#4eaa25', '.fish': '#4eaa25',
-  // Images
-  '.png': '#a074c4', '.jpg': '#a074c4', '.jpeg': '#a074c4', '.gif': '#a074c4',
-  '.ico': '#a074c4', '.webp': '#a074c4',
-  // Lock/Config
-  '.lock': '#89929b', '.env': '#ecd53f', '.gitignore': '#f05032',
-  // Other
-  '.wasm': '#654ff0', '.sql': '#e38c00', '.graphql': '#e535ab', '.prisma': '#2d3748',
-};
-
-// Special filename → color
-const FILE_NAME_COLORS: Record<string, string> = {
-  'package.json': '#3c873a', 'package-lock.json': '#3c873a',
-  'tsconfig.json': '#3178c6', 'next.config.js': '#000000', 'next.config.ts': '#000000', 'next.config.mjs': '#000000',
-  'tailwind.config.js': '#38bdf8', 'tailwind.config.ts': '#38bdf8',
-  'postcss.config.js': '#dd3a0a', 'postcss.config.mjs': '#dd3a0a',
-  '.eslintrc': '#4b32c3', '.eslintrc.js': '#4b32c3', '.eslintrc.json': '#4b32c3', 'eslint.config.js': '#4b32c3', 'eslint.config.mjs': '#4b32c3',
-  '.prettierrc': '#56b3b4', 'prettier.config.js': '#56b3b4',
-  'Dockerfile': '#2496ed', 'docker-compose.yml': '#2496ed', 'docker-compose.yaml': '#2496ed',
-  'Makefile': '#6d8086', 'CMakeLists.txt': '#6d8086',
-  'README.md': '#519aba', 'LICENSE': '#d4aa00', 'CHANGELOG.md': '#519aba',
-  'Cargo.toml': '#ce412b', 'Cargo.lock': '#ce412b',
-  'go.mod': '#00add8', 'go.sum': '#00add8',
-  '.env': '#ecd53f', '.env.local': '#ecd53f', '.env.example': '#ecd53f', '.env.development': '#ecd53f',
-  '.gitignore': '#f05032', '.gitattributes': '#f05032',
-  'jest.config.js': '#c21325', 'jest.config.ts': '#c21325', 'vitest.config.ts': '#729b1b',
-  'CLAUDE.md': '#d97706', 'AGENTS.md': '#d97706',
-};
-
-// Folder name → color
-const FOLDER_COLORS: Record<string, string> = {
-  'src': '#42a5f5', 'app': '#ef5350', 'pages': '#ef5350',
-  'components': '#ab47bc', 'lib': '#26a69a', 'utils': '#26a69a',
-  'hooks': '#7e57c2', 'context': '#e57373',
-  'styles': '#ec407a', 'css': '#ec407a',
-  'public': '#66bb6a', 'static': '#66bb6a', 'assets': '#ffa726',
-  'api': '#42a5f5', 'server': '#42a5f5', 'routes': '#42a5f5',
-  'types': '#3178c6', 'interfaces': '#3178c6',
-  'config': '#78909c', 'configs': '#78909c', '.vscode': '#007acc',
-  'test': '#c21325', 'tests': '#c21325', '__tests__': '#c21325', 'spec': '#c21325',
-  'scripts': '#78909c', 'bin': '#78909c', 'cmd': '#78909c',
-  'docs': '#42a5f5', 'doc': '#42a5f5',
-  'node_modules': '#66bb6a', '.next': '#000000', '.turbo': '#0096ff',
-  '.git': '#f05032', '.github': '#6e5494',
-  'dist': '#78909c', 'build': '#78909c', 'out': '#78909c', 'target': '#78909c',
-  'internal': '#26a69a', 'pkg': '#26a69a',
-  'migrations': '#e38c00', 'prisma': '#2d3748',
-  'ios': '#a2aaad', 'android': '#3ddc84',
-  'src-tauri': '#ffc131',
-};
-
-function getFileIconColor(name: string): string {
-  // Check exact filename first
-  const lower = name.toLowerCase();
-  if (FILE_NAME_COLORS[lower]) return FILE_NAME_COLORS[lower];
-  if (FILE_NAME_COLORS[name]) return FILE_NAME_COLORS[name];
-  // Then extension (handle .d.ts specially)
-  if (name.endsWith('.d.ts')) return FILE_ICON_COLORS['.d.ts']!;
-  const ext = '.' + name.split('.').pop()?.toLowerCase();
-  return FILE_ICON_COLORS[ext] ?? '#89929b';
-}
-
-function getFolderColor(name: string): string {
-  return FOLDER_COLORS[name.toLowerCase()] ?? '#42a5f5';
-}
-
-function FileTreeNode({ node, depth = 0, changedFiles, onSelectFile }: {
-  node: FileNode;
-  depth?: number;
-  changedFiles: Set<string>;
-  onSelectFile?: (path: string) => void;
-}) {
-  const [open, setOpen] = useState(depth === 0 || node.name === 'src');
-
-  const isChanged = node.type === 'file' && changedFiles.has(node.path);
-
-  // Check if any children (recursively) are changed
-  const hasChangedChild = node.type === 'dir' && hasChangedDescendant(node, changedFiles);
-
-  if (node.type === 'file') {
-    const iconColor = isChanged ? THEME_ACCENT : getFileIconColor(node.name);
-    return (
-      <div
-        onClick={() => onSelectFile?.(node.path)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          paddingTop: 4,
-          paddingRight: 14,
-          paddingBottom: 4,
-          paddingLeft: 14 + depth * 16,
-          fontSize: 12,
-          color: isChanged ? THEME_ACCENT : 'var(--t-text-secondary)',
-          fontWeight: isChanged ? 500 : 400,
-          fontFamily: '"SF Mono", ui-monospace, monospace',
-          cursor: 'pointer',
-          transition: 'color 100ms',
-        }}
-      >
-        <FileText size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: iconColor }} />
-        {node.name}
-        {isChanged ? (
-          <span style={{
-            width: 6,
-            height: 6,
-            borderRadius: 3,
-            background: THEME_ACCENT,
-            flexShrink: 0,
-            marginLeft: 'auto',
-          }} />
-        ) : null}
-      </div>
-    );
-  }
-
-  const folderColor = getFolderColor(node.name);
-  return (
-    <div>
-      <div
-        onClick={() => setOpen(!open)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          paddingTop: 4,
-          paddingRight: 14,
-          paddingBottom: 4,
-          paddingLeft: 14 + depth * 16,
-          fontSize: 12,
-          fontWeight: 500,
-          color: hasChangedChild ? THEME_ACCENT : 'var(--t-text)',
-          cursor: 'pointer',
-          transition: 'color 100ms',
-        }}
-      >
-        {open
-          ? <FolderOpen size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: hasChangedChild ? THEME_ACCENT : folderColor }} />
-          : <Folder size={13} strokeWidth={1.5} style={{ flexShrink: 0, color: hasChangedChild ? THEME_ACCENT : folderColor }} />
-        }
-        {node.name}
-        {open
-          ? <ChevronDown size={11} strokeWidth={2} style={{ color: 'var(--t-text-muted)' }} />
-          : <ChevronRight size={11} strokeWidth={2} style={{ color: 'var(--t-text-muted)' }} />
-        }
-        {hasChangedChild && !open ? (
-          <span style={{
-            width: 6,
-            height: 6,
-            borderRadius: 3,
-            background: THEME_ACCENT,
-            flexShrink: 0,
-          }} />
-        ) : null}
-      </div>
-      {open && node.children ? (
-        node.children.map((child) => (
-          <FileTreeNode key={child.path} node={child} depth={depth + 1} changedFiles={changedFiles} onSelectFile={onSelectFile} />
-        ))
-      ) : null}
-    </div>
-  );
-}
-
-function hasChangedDescendant(node: FileNode, changedFiles: Set<string>): boolean {
-  if (node.type === 'file') return changedFiles.has(node.path);
-  return node.children?.some(c => hasChangedDescendant(c, changedFiles)) ?? false;
-}
-
-function filterTreeToChanged(nodes: FileNode[], changed: Set<string>): FileNode[] {
-  return nodes
-    .map((node) => {
-      if (node.type === 'file') {
-        return changed.has(node.path) ? node : null;
-      }
-      // Directory — recurse and keep if any children match
-      const filteredChildren = filterTreeToChanged(node.children ?? [], changed);
-      if (filteredChildren.length === 0) return null;
-      return { ...node, children: filteredChildren };
-    })
-    .filter((n): n is FileNode => n !== null);
-}
-
-function filterTreeToEnv(nodes: FileNode[]): FileNode[] {
-  const envPattern = /^\.env|\.env\./;
-  return nodes
-    .map((node) => {
-      if (node.type === 'file') {
-        const name = node.name.toLowerCase();
-        return envPattern.test(name) ? node : null;
-      }
-      const filteredChildren = filterTreeToEnv(node.children ?? []);
-      if (filteredChildren.length === 0) return null;
-      return { ...node, children: filteredChildren };
-    })
-    .filter((n): n is FileNode => n !== null);
-}
-
-const FileTree = memo(function FileTree({ tree, changedFiles, onSelectFile }: {
-  tree: FileNode[];
-  changedFiles: Set<string>;
-  onSelectFile?: (path: string) => void;
-}) {
-  if (!tree.length) {
-    return <div style={{ padding: 20, fontSize: 13, color: 'var(--t-text-muted)' }}>No files found</div>;
-  }
-
-  return (
-    <div style={{ paddingTop: 6, paddingBottom: 6 }}>
-      {tree.map((node) => (
-        <FileTreeNode key={node.path} node={node} changedFiles={changedFiles} onSelectFile={onSelectFile} />
-      ))}
-    </div>
-  );
-});
-
-// ── Tab Bar ──
-
-const tabs: { id: Tab; icon: typeof Zap; label: string }[] = [
-  { id: 'files', icon: Folder, label: 'Files' },
-];
-
 // ── Memory Tab — auto-opens canvas on mount ──
 
 function MemoryTabContent({ onOpenMemory }: { onOpenMemory?: () => void }) {
@@ -4114,6 +3867,7 @@ export const AgentPanel = memo(function AgentPanel({
   onSelectIssue,
   onSelectCommit,
   onSelectPR,
+  onReviewPR,
   onExpandWorkspace,
   onSelectFile,
   onOpenCI,
@@ -4142,8 +3896,9 @@ export const AgentPanel = memo(function AgentPanel({
   onLaunchWorkspaceTask?: (request: RepoTaskLaunchRequest) => Promise<void>;
   onSelectSession?: (sessionKey: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
-  onSelectCommit?: (hash: string) => void;
+  onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
+  onReviewPR?: (prNumber: number, repo?: string) => void;
   onExpandWorkspace?: (workspace: string, repo: string | null) => void;
   onSelectFile?: (filePath: string, workspace?: string) => void;
   onOpenCI?: (repo: string) => void;
@@ -4164,14 +3919,8 @@ export const AgentPanel = memo(function AgentPanel({
   const [commits, setCommits] = useState<{ hash: string; message: string; age: string }[]>([]);
   const [issues, setIssues] = useState<GHIssue[]>([]);
   const [prs, setPrs] = useState<GHPullRequest[]>([]);
-  const [fileTree, setFileTree] = useState<FileNode[]>([]);
   const [changedFiles, setChangedFiles] = useState<Set<string>>(new Set());
-  const [fileFilter, setFileFilter] = useState<'all' | 'changes' | 'env'>('changes');
-  const [filesHeight, setFilesHeight] = useState(240);
-  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
-  const [changesOpen, setChangesOpen] = useState(true);
   const [activityOpen, setActivityOpen] = useState(false);
-  const [agentsOpen, setAgentsOpen] = useState(true);
   const [reposOpen, setReposOpen] = useState(true);
   const [selectedIssue, setSelectedIssue] = useState<number | null>(null);
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
@@ -4179,11 +3928,15 @@ export const AgentPanel = memo(function AgentPanel({
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
   const [launchIntentNonce, setLaunchIntentNonce] = useState(0);
+  const [workspaceIntentNonce, setWorkspaceIntentNonce] = useState(0);
   const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
   const hasSelectedRepo = Boolean(selectedRepoLocalPath);
   const scopedRepo = hasSelectedRepo ? (selectedRepo ?? null) : activeRepo;
 
-  useEffect(() => subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled), []);
+  useEffect(() => {
+    void refreshOpenClawBetaStatus().then((status) => setOpenClawBetaEnabled(status.effective_enabled));
+    return subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled);
+  }, []);
 
   const launchRepoTask = useCallback(async (request: RepoTaskLaunchRequest) => {
     if (onLaunchWorkspaceTask) {
@@ -4486,18 +4239,15 @@ export const AgentPanel = memo(function AgentPanel({
       .catch(() => setRepoLocalPath(null));
   }, [effectiveScopedRepo, selectedRepoLocalPath]);
 
-  // Fetch file tree (re-fetch when repo or workspace changes)
+  // Fetch changed-file truth for the selected workspace/repo so the focus hero stays current.
   useEffect(() => {
     async function fetchFiles() {
       try {
-        // V1: top header repo is the left-panel source of truth when selected.
         const wsPath = hasSelectedRepo ? (selectedRepoLocalPath ?? repoLocalPath) : (activeWorkspace ?? repoLocalPath);
         const wsParam = wsPath ? `?workspace=${encodeURIComponent(wsPath)}` : '';
         const res = await fetch(`/api/panel/files${wsParam}`);
         if (!res.ok) return;
         const data = await res.json();
-        const freshTree = data.tree ?? [];
-        setFileTree(prev => arraysMatchBy(prev, freshTree, (f: FileNode) => f.path) ? prev : freshTree);
         const freshChanged = new Set<string>(data.changedFiles ?? []);
         setChangedFiles(prev => setsEqual(prev, freshChanged) ? prev : freshChanged);
       } catch { /* silent */ }
@@ -4531,13 +4281,15 @@ export const AgentPanel = memo(function AgentPanel({
     : (activeWorkspace ?? repoLocalPath);
   const currentLaunchRepoPath = hasSelectedRepo ? (selectedRepoLocalPath ?? repoLocalPath) : repoLocalPath;
   const heroTitle = hasSelectedRepo
-    ? (selectedRepoName ?? selectedRepoLocalPath?.split('/').pop() ?? 'Selected Repository')
-    : (preferredWorkspaceGroup?.displayName ?? (effectiveScopedRepo?.split('/').pop() ?? 'Workspace'));
-  const heroSubtitle = hasSelectedRepo
-    ? 'Pinned repository for browsing changes, launching agents, and opening workflow tools.'
+    ? 'Selected workspace'
     : preferredWorkspaceGroup
-      ? `${preferredWorkspaceGroup.agents.length} connected surface${preferredWorkspaceGroup.agents.length === 1 ? '' : 's'} in the live workspace focus.`
-      : 'Select a repository or expand a workspace to make launch, changes, and activity explicit.';
+      ? 'Workspace focus'
+      : 'No workspace selected';
+  const heroSubtitle = hasSelectedRepo
+    ? (selectedRepoName ?? selectedRepoLocalPath?.split('/').pop() ?? 'Local repository')
+    : preferredWorkspaceGroup
+      ? `${preferredWorkspaceGroup.displayName} · ${preferredWorkspaceGroup.agents.length} live surface${preferredWorkspaceGroup.agents.length === 1 ? '' : 's'}`
+      : 'Open a repository to focus work.';
   const heroBranch = hasSelectedRepo
     ? (selectedRepoBranch ?? null)
     : (preferredWorkspaceGroup?.agents.find((agent) => agent.branch && !agent.branch.startsWith('surface/'))?.branch ?? null);
@@ -4572,19 +4324,35 @@ export const AgentPanel = memo(function AgentPanel({
     readinessNextAction: heroReadiness?.nextAction ?? null,
   });
   const heroWorkspaceLabel = compactWorkspaceLabel(currentScopePath);
-  const changesSummary = hasSelectedRepo
-    ? `${changedFiles.size} changed file${changedFiles.size === 1 ? '' : 's'} in ${selectedRepoName ?? 'the selected repo'}`
-    : preferredWorkspaceGroup
-      ? `${changedFiles.size} changed file${changedFiles.size === 1 ? '' : 's'} in ${preferredWorkspaceGroup.displayName}`
-      : 'Repository files and environment entry points.';
-  const latestEventSummary = events[0]?.title ?? 'Commits, issues, pull requests, and CI surface here.';
-  const filteredTree = fileFilter === 'changes'
-    ? filterTreeToChanged(fileTree, changedFiles)
-    : fileFilter === 'env'
-      ? filterTreeToEnv(fileTree)
-      : fileTree;
+  const workspacesSummary = inventoryLoading
+    ? 'Loading repositories and workspaces...'
+    : activeRunsCount > 0 || reviewRunsCount > 0
+      ? `${activeRunsCount} active · ${reviewRunsCount} in review`
+      : currentLaunchRepoPath
+        ? 'Repository and workspace list'
+        : 'Repositories and live workspaces';
+  const activityAgentRepoById = useMemo(
+    () => new Map(agents.map((agent) => [agent.id, agentRepoSlug(agent)])),
+    [agents],
+  );
+  const visibleActivityEvents = useMemo(() => {
+    return events.filter((event) => {
+      const eventRepo = activityAgentRepoById.get(event.agentId) ?? null;
+      if (!eventRepo) return false;
+      if (!effectiveScopedRepo) return true;
+      return eventRepo === effectiveScopedRepo;
+    });
+  }, [activityAgentRepoById, effectiveScopedRepo, events]);
+  const activityItemCount = visibleActivityEvents.length + commits.length + issues.length + prs.length;
+  const latestEventSummary = visibleActivityEvents[0]?.title
+    ?? (prs[0] ? `PR #${prs[0].number} · ${prs[0].title}` : null)
+    ?? (issues[0] ? `Issue #${issues[0].number} · ${issues[0].title}` : null)
+    ?? (commits[0]?.message ?? 'Recent workflow events');
   const launchIntent = launchIntentNonce > 0 && currentLaunchRepoPath
     ? { repoPath: currentLaunchRepoPath, nonce: launchIntentNonce }
+    : null;
+  const workspaceIntent = workspaceIntentNonce > 0 && currentLaunchRepoPath
+    ? { repoPath: currentLaunchRepoPath, nonce: workspaceIntentNonce }
     : null;
 
   return (
@@ -4593,7 +4361,7 @@ export const AgentPanel = memo(function AgentPanel({
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      background: 'var(--t-bg-subtle)',
+      background: 'var(--t-bg)',
     } as React.CSSProperties}
     >
       {/* ── Titlebar spacer ── */}
@@ -4614,14 +4382,14 @@ export const AgentPanel = memo(function AgentPanel({
           paddingBottom: 18,
           display: 'flex',
           flexDirection: 'column',
-          gap: 14,
+          gap: 0,
         } as React.CSSProperties}
         className="hide-scrollbar"
       >
         <WorkspaceHero
           title={heroTitle}
           subtitle={heroSubtitle}
-          repoSlug={effectiveScopedRepo}
+          repoSlug={hasSelectedRepo ? null : effectiveScopedRepo}
           branch={heroBranch}
           readiness={heroReadiness}
           workflowStage={heroWorkflowStage}
@@ -4629,295 +4397,138 @@ export const AgentPanel = memo(function AgentPanel({
           workspaceLabel={heroWorkspaceLabel}
           changedFiles={changedFiles.size}
           activeRuns={activeRunsCount}
-          onLaunch={currentLaunchRepoPath
-            ? () => {
-                if (!onLaunchWorkspaceAgent) return;
-                void onLaunchWorkspaceAgent({
-                  repoPath: currentLaunchRepoPath,
-                  createNew: true,
-                }).catch((error) => {
-                  window.alert(error instanceof Error ? error.message : 'Unable to launch workspace agent.');
-                });
-              }
-            : undefined}
-          onLaunchOptions={currentLaunchRepoPath
-            ? () => {
-                setReposOpen(true);
-                setLaunchIntentNonce((current) => current + 1);
-              }
-            : undefined}
-          onOpenGitLog={currentScopePath ? () => onOpenGitLog?.(currentScopePath) : undefined}
-          onOpenCI={effectiveScopedRepo ? () => onOpenCI?.(effectiveScopedRepo) : undefined}
         />
 
         <SidebarSection
-          title="Agents"
-          icon={Cpu}
-          count={inventoryLoading ? '...' : agents.length}
-          summary={inventoryLoading ? 'Loading live sessions...' : `${activeRunsCount} active · ${reviewRunsCount} in review`}
-          accent="#2563eb"
-          open={agentsOpen}
-          onToggle={() => setAgentsOpen((current) => !current)}
-        >
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              scrollbarWidth: 'thin',
-              scrollbarColor: 'rgba(0,0,0,0.1) transparent',
-            }}
-          >
-            {fleetMeta?.mode === 'stale' ? (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                padding: '10px 12px',
-                borderRadius: 16,
-                background: 'rgba(245, 158, 11, 0.08)',
-                border: '1px solid rgba(245, 158, 11, 0.15)',
-                fontSize: 11,
-                color: '#d97706',
-                fontWeight: 600,
-              }}>
-                <span style={{ fontSize: 13 }}>⏳</span>
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  Showing cached session state while the gateway reconnects. Live updates resume automatically.
-                </span>
-                <button
-                  type="button"
-                  onClick={() => window.location.reload()}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    border: 'none',
-                    borderRadius: 999,
-                    background: 'rgba(217, 119, 6, 0.12)',
-                    color: '#b45309',
-                    padding: '4px 8px',
-                    cursor: 'pointer',
-                    fontSize: 10,
-                    fontWeight: 700,
-                    fontFamily: '-apple-system, system-ui, sans-serif',
-                    flexShrink: 0,
-                  }}
-                >
-                  Reload
-                </button>
-              </div>
-            ) : null}
-            {inventoryLoading ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {[0, 1, 2].map((index) => (
-                  <div
-                    key={index}
-                    style={{
-                      borderRadius: 18,
-                      border: '1px solid var(--t-panel-border)',
-                      background: THEME_PANEL_GLASS,
-                      backdropFilter: 'blur(20px)',
-                      WebkitBackdropFilter: 'blur(20px)',
-                      boxShadow: 'var(--t-panel-shadow)',
-                      padding: '12px 12px 11px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 8,
-                    }}
-                  >
-                    <div style={{ width: `${52 + index * 10}%`, height: 12, borderRadius: 999, background: 'var(--t-divider-strong)' }} />
-                    <div style={{ width: `${38 + index * 8}%`, height: 10, borderRadius: 999, background: 'var(--t-divider)' }} />
-                    <div style={{ width: '100%', height: 6, borderRadius: 999, background: THEME_ACCENT_SOFT }} />
-                  </div>
-                ))}
-              </div>
-            ) : workspaceGroups.length === 0 ? (
-              <div style={{
-                borderRadius: 18,
-                border: '1px solid var(--t-panel-border)',
-                background: THEME_PANEL_GLASS,
-                padding: '14px 16px',
-                fontSize: 13,
-                color: gatewayReachable && gatewayWarming ? THEME_ACCENT : 'var(--t-text-muted)',
-              }}>
-                {gatewayReachable && gatewayWarming ? 'OpenClaw connected, loading agents...' : 'No agents found.'}
-              </div>
-            ) : (
-              workspaceGroups.map((group) => (
-                <AgentCard
-                  key={group.workspace}
-                  group={group}
-                  expanded={expandedGroup === group.workspace}
-                  onToggle={() => setExpandedGroup(expandedGroup === group.workspace ? null : group.workspace)}
-                  onSelectSession={onSelectSession}
-                  onSelectPR={onSelectPR}
-                  onAgentKill={onAgentKill}
-                  onRetry={(agent) => {
-                    fetch('/api/runtime/launch', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        runtime: agent.model?.toLowerCase().includes('codex') ? 'codex' : 'claude-code',
-                        prompt: agent.currentTask || 'Resume previous work',
-                        cwd: agent.workspace,
-                      }),
-                    }).then(() => { setTimeout(() => fetchNowRef.current(), 2000); }).catch(() => {});
-                  }}
-                  lifecycleEvents={lifecycleEvents}
-                />
-              ))
-            )}
-          </div>
-        </SidebarSection>
-
-        <SidebarSection
-          title="Repositories"
+          title="Workspaces"
           icon={FolderOpen}
-          summary={currentLaunchRepoPath ? 'Current repository is pinned at the top of the list.' : 'Bring local repositories into Cortex and launch isolated work.'}
+          summary={workspacesSummary}
           accent="#2563eb"
           open={reposOpen}
           onToggle={() => setReposOpen((current) => !current)}
+          headerAction={(
+            <button
+              type="button"
+              aria-label="Create workspace"
+              onClick={() => {
+                if (!currentLaunchRepoPath) return;
+                setReposOpen(true);
+                setWorkspaceIntentNonce((current) => current + 1);
+              }}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 26,
+                height: 26,
+                padding: 0,
+                borderRadius: 8,
+                border: 'none',
+                background: 'transparent',
+                color: currentLaunchRepoPath ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
+                cursor: currentLaunchRepoPath ? 'pointer' : 'default',
+                opacity: currentLaunchRepoPath ? 1 : 0.45,
+                appearance: 'none',
+                WebkitAppearance: 'none',
+                lineHeight: 0,
+                transition: 'background 140ms ease, color 140ms ease',
+              }}
+              onMouseEnter={(event) => {
+                if (!currentLaunchRepoPath) return;
+                const target = event.currentTarget;
+                target.style.background = 'var(--t-panel-hover)';
+                target.style.color = 'var(--t-text)';
+              }}
+              onMouseLeave={(event) => {
+                const target = event.currentTarget;
+                target.style.background = 'transparent';
+                target.style.color = currentLaunchRepoPath ? 'var(--t-text-muted)' : 'var(--t-text-faint)';
+              }}
+            >
+              <Plus size={15} strokeWidth={2.2} />
+            </button>
+          )}
         >
+          {fleetMeta?.mode === 'stale' ? (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '10px 12px',
+              borderRadius: 16,
+              background: 'rgba(245, 158, 11, 0.08)',
+              border: '1px solid rgba(245, 158, 11, 0.15)',
+              fontSize: 11,
+              color: '#d97706',
+              fontWeight: 600,
+            }}>
+              <span style={{ fontSize: 13 }}>⏳</span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                Showing cached session state while the gateway reconnects. Live updates resume automatically.
+              </span>
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  border: 'none',
+                  borderRadius: 999,
+                  background: 'rgba(217, 119, 6, 0.12)',
+                  color: '#b45309',
+                  padding: '4px 8px',
+                  cursor: 'pointer',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  flexShrink: 0,
+                }}
+              >
+                Reload
+              </button>
+            </div>
+          ) : gatewayReachable && gatewayWarming ? (
+            <div style={{
+              padding: '8px 2px 2px',
+              fontSize: 11,
+              color: THEME_ACCENT,
+            }}>
+              OpenClaw connected, loading live workspaces...
+            </div>
+          ) : null}
           <RepoRegistrySection
             onLaunchComplete={() => { fetchNowRef.current(); }}
             onSelectSession={onSelectSession}
             onSelectPR={onSelectPR}
+            onReviewPR={onReviewPR}
             onLaunchWorkspaceAgent={onLaunchWorkspaceAgent}
             activeRepoLocalPath={currentLaunchRepoPath}
             sectionOpen={reposOpen}
             onSectionOpenChange={setReposOpen}
             launchIntent={launchIntent}
+            workspaceIntent={workspaceIntent}
             hideHeader
           />
         </SidebarSection>
 
-        <SidebarSection
-          title="Changes"
-          icon={FolderOpen}
-          count={changedFiles.size}
-          summary={changesSummary}
-          accent="#1d4ed8"
-          open={changesOpen}
-          onToggle={() => setChangesOpen((current) => !current)}
-        >
-          <div
-            style={{
-              borderRadius: 18,
-              border: '1px solid var(--t-panel-border)',
-              background: THEME_PANEL_GLASS,
-              boxShadow: 'var(--t-panel-shadow)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                gap: 8,
-                padding: '12px 12px 0',
-                flexWrap: 'wrap',
-              }}
-            >
-              {[
-                { id: 'changes' as const, label: `Changed${changedFiles.size > 0 ? ` (${changedFiles.size})` : ''}` },
-                { id: 'all' as const, label: 'All files' },
-                { id: 'env' as const, label: 'Env' },
-              ].map((option) => {
-                const active = fileFilter === option.id;
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => setFileFilter(option.id)}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      minHeight: 30,
-                      padding: '6px 10px',
-                      borderRadius: 999,
-                      border: active ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
-                      background: active ? THEME_ACCENT_SOFT : THEME_BG_CARD,
-                      color: active ? THEME_ACCENT : 'var(--t-text-secondary)',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      fontFamily: '-apple-system, system-ui, sans-serif',
-                    }}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
-            <div
-              className="cortex-dark-scroll"
-              style={{
-                height: filesHeight,
-                overflowY: 'auto',
-                marginTop: 10,
-                scrollbarWidth: 'thin',
-                scrollbarColor: 'var(--t-divider-strong) transparent',
-              }}
-            >
-              <FileTree
-                tree={filteredTree}
-                changedFiles={changedFiles}
-                onSelectFile={(path) => onSelectFile?.(path, currentScopePath ?? undefined)}
-              />
-            </div>
-            <div
-              onMouseDown={(e) => {
-                e.preventDefault();
-                dragRef.current = { startY: e.clientY, startH: filesHeight };
-                const onMove = (ev: MouseEvent) => {
-                  if (!dragRef.current) return;
-                  const delta = ev.clientY - dragRef.current.startY;
-                  setFilesHeight(Math.max(140, Math.min(620, dragRef.current.startH + delta)));
-                };
-                const onUp = () => {
-                  dragRef.current = null;
-                  document.removeEventListener('mousemove', onMove);
-                  document.removeEventListener('mouseup', onUp);
-                };
-                document.addEventListener('mousemove', onMove);
-                document.addEventListener('mouseup', onUp);
-              }}
-              style={{
-                height: 18,
-                cursor: 'row-resize',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <div style={{
-                width: 34,
-                height: 4,
-                borderRadius: 999,
-                background: 'var(--t-divider-strong)',
-              }} />
-            </div>
-          </div>
-        </SidebarSection>
       </div>
 
       <ActivityDock
-        count={events.length}
+        count={activityItemCount}
         summary={latestEventSummary}
         open={activityOpen}
         onToggle={() => setActivityOpen((current) => !current)}
       >
         <ActivityFeed
-          events={events}
+          events={visibleActivityEvents}
           commits={commits}
           agents={agents}
           onSelectSession={onSelectSession}
           onSelectIssue={onSelectIssue}
           onSelectCommit={onSelectCommit}
           onSelectPR={onSelectPR}
+          onReviewPR={onReviewPR}
           onLaunchTask={(request) => {
             void launchRepoTask(request).catch((error) => {
               window.alert(error instanceof Error ? error.message : 'Unable to launch repo task.');
