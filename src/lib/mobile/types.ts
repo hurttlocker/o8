@@ -106,6 +106,24 @@ export interface MobileTranscriptToolCall {
   preview?: string;
 }
 
+export type MobileTranscriptRuntimeEventKind = 'command' | 'task' | 'handoff' | 'runtime';
+
+export interface MobileTranscriptRuntimeEvent {
+  kind: MobileTranscriptRuntimeEventKind;
+  title: string;
+  summary: string;
+  status?: string;
+  task?: string;
+  source?: string;
+  changedFiles?: string[];
+  action?: string;
+  rawPreviewLines?: string[];
+  commandName?: string;
+  commandMessage?: string;
+  commandArgs?: string;
+  outputLabel?: string;
+}
+
 export interface MobileTranscriptSource {
   title: string;
   url?: string;
@@ -128,6 +146,7 @@ export interface MobileTranscriptEntry {
   text: string;
   media?: MobileTranscriptMedia[];
   toolCalls?: MobileTranscriptToolCall[];
+  runtimeEvent?: MobileTranscriptRuntimeEvent;
   timestamp?: number;
   timestampLabel?: string;
   model?: string;

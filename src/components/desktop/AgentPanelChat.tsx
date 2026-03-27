@@ -41,7 +41,7 @@ import type { ProjectGroup } from '@/components/mobile/types';
 import { buildProjectGroups } from '@/components/mobile/utils';
 import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, refreshOpenClawBetaStatus, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 import { CodeBlock } from './CodeBlock';
-import { DesktopToolCallStack } from './DesktopAgentMessage';
+import { DesktopRuntimeEventCard, DesktopToolCallStack } from './DesktopAgentMessage';
 import { DiffModal } from './DiffModal';
 import { MessageActions } from './MessageActions';
 import {
@@ -61,6 +61,7 @@ import type { ApprovalRecord } from '@/lib/approvals/types';
 import { formatModelLabel } from '@/lib/format';
 import { ttsEngine } from '@/lib/tts/engine';
 import { autocompleteSlashCommand, buildSlashTerminalInput, getSlashCommandSuggestions, isSlashCommandText } from '@/lib/slash-commands';
+import { sanitizeDesktopTranscriptEntries } from '@/lib/chat/desktop-transcript-sanitizer';
 
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
@@ -290,7 +291,6 @@ function buildPickerFallbackSnapshot(sessions: SessionSummary[], selectedKey: st
     sourceLabel: 'desktop-session-fallback',
     primarySessionKey: sessions.find((session) => session.sessionKey === selectedKey)?.sessionKey ?? sessions[0]?.sessionKey,
     sessions,
-    approvals: [],
     items: [],
     summary: {
       alerts: 0,
@@ -562,7 +562,11 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
   const hasMedia = Boolean(entry.media?.length);
   const hasToolCalls = Boolean(entry.toolCalls?.length);
   const isSlashCommand = isSlashCommandText(entry.text);
-  const runtimeEvent = useMemo(() => parseRuntimeEventSummary(entry.text), [entry.text]);
+  const runtimeEvent = useMemo(() => {
+    if (entry.runtimeEvent) return entry.runtimeEvent;
+    const fallback = parseRuntimeEventSummary(entry.text);
+    return fallback ? { kind: 'handoff' as const, ...fallback } : null;
+  }, [entry.runtimeEvent, entry.text]);
   const speakerChanged = !previousEntry || previousEntry.role !== entry.role;
   const showTimestamp = (() => {
     if (!previousEntry?.timestampLabel || !entry.timestampLabel) return speakerChanged;
@@ -578,7 +582,6 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
   );
 
   const [activeBlock, setActiveBlock] = useState<number | null>(null);
-  const [handoffExpanded, setHandoffExpanded] = useState(false);
   const [operatorExpanded, setOperatorExpanded] = useState(false);
   const playingRef = useRef(false);
 
@@ -624,231 +627,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
   if (!isUser && runtimeEvent) {
     return (
       <article className={`remodex-message-card remodex-message-card-assistant${isNew ? ' remodex-turn-new' : ''}`}>
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10,
-          padding: '2px 0',
-        }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-          }}>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 28,
-              height: 28,
-              borderRadius: 10,
-              background: 'rgba(37, 99, 235, 0.10)',
-              color: '#2563eb',
-              flexShrink: 0,
-            }}>
-              <Sparkles size={15} strokeWidth={2.2} />
-            </span>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{
-                fontSize: 12,
-                fontWeight: 700,
-                color: 'var(--t-text)',
-                letterSpacing: '-0.01em',
-              }}>
-                {runtimeEvent.title}
-              </div>
-              <div style={{
-                marginTop: 2,
-                fontSize: 11,
-                color: 'var(--t-text-secondary)',
-                lineHeight: 1.45,
-              }}>
-                {runtimeEvent.summary}
-              </div>
-            </div>
-          </div>
-
-          <div style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 6,
-          }}>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              padding: '3px 8px',
-              borderRadius: 999,
-              background: THEME_ACCENT_SOFT,
-              color: THEME_ACCENT,
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: '0.02em',
-            }}>
-              sub-agent
-            </span>
-            {runtimeEvent.status ? (
-              <span style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: '3px 8px',
-                borderRadius: 999,
-                background: runtimeEvent.status.toLowerCase().includes('timed')
-                  ? 'rgba(245, 158, 11, 0.10)'
-                  : 'rgba(37, 99, 235, 0.10)',
-                color: runtimeEvent.status.toLowerCase().includes('timed') ? '#b45309' : '#2563eb',
-                fontSize: 10,
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.04em',
-              }}>
-                {runtimeEvent.status}
-              </span>
-            ) : null}
-            {runtimeEvent.source ? (
-              <span style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: '3px 8px',
-                borderRadius: 999,
-                background: 'var(--t-divider-subtle)',
-                color: 'var(--t-text-secondary)',
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: '0.02em',
-              }}>
-                {runtimeEvent.source}
-              </span>
-            ) : null}
-            {runtimeEvent.changedFiles?.length ? (
-              <span style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: '3px 8px',
-                borderRadius: 999,
-                background: THEME_BG_CARD,
-                color: 'var(--t-text-secondary)',
-                fontSize: 10,
-                fontWeight: 700,
-                letterSpacing: '0.02em',
-              }}>
-                {runtimeEvent.changedFiles.length} file{runtimeEvent.changedFiles.length !== 1 ? 's' : ''}
-              </span>
-            ) : null}
-            {(runtimeEvent.action || runtimeEvent.rawPreviewLines?.length || runtimeEvent.changedFiles?.length) ? (
-                <button
-                  type="button"
-                  onClick={() => setHandoffExpanded((value) => !value)}
-                  style={{
-                    display: 'inline-flex',
-                  alignItems: 'center',
-                    gap: 5,
-                    padding: '3px 8px',
-                    borderRadius: 999,
-                    border: '1px solid var(--t-panel-border)',
-                    background: handoffExpanded ? THEME_ACCENT_SOFT : THEME_BG_CARD,
-                    color: handoffExpanded ? THEME_ACCENT : 'var(--t-text-secondary)',
-                    fontSize: 10,
-                    fontWeight: 700,
-                    letterSpacing: '0.02em',
-                  cursor: 'pointer',
-                }}
-              >
-                {handoffExpanded ? 'Hide details' : 'View details'}
-              </button>
-            ) : null}
-          </div>
-
-          {handoffExpanded && (runtimeEvent.action || runtimeEvent.rawPreviewLines?.length || runtimeEvent.changedFiles?.length) ? (
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              padding: '10px 12px',
-              borderRadius: 12,
-              background: THEME_PANEL_GLASS,
-              border: '1px solid var(--t-panel-border)',
-            }}>
-              {runtimeEvent.action ? (
-                <div>
-                  <div style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: 'var(--t-text-muted)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                    marginBottom: 4,
-                  }}>
-                    Delivery
-                  </div>
-                  <div style={{
-                    fontSize: 11,
-                    color: 'var(--t-text-secondary)',
-                    lineHeight: 1.5,
-                  }}>
-                    {runtimeEvent.action}
-                  </div>
-                </div>
-              ) : null}
-
-              {runtimeEvent.changedFiles?.length ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: 'var(--t-text-muted)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                  }}>
-                    Changed Files
-                  </div>
-                  {runtimeEvent.changedFiles.map((filePath) => (
-                    <div
-                      key={filePath}
-                      style={{
-                        fontSize: 11,
-                        color: 'var(--t-text-secondary)',
-                        fontFamily: '"SF Mono", ui-monospace, monospace',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {filePath}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-
-              {runtimeEvent.rawPreviewLines?.length ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <div style={{
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: 'var(--t-text-muted)',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                  }}>
-                    Payload Preview
-                  </div>
-                  <div style={{
-                    padding: '8px 10px',
-                    borderRadius: 10,
-                    background: THEME_BG_CARD,
-                    border: '1px solid var(--t-panel-border)',
-                    fontSize: 11,
-                    lineHeight: 1.5,
-                    color: 'var(--t-text-secondary)',
-                    fontFamily: '"SF Mono", ui-monospace, monospace',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}>
-                    {runtimeEvent.rawPreviewLines.join('\n')}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+        <DesktopRuntimeEventCard event={runtimeEvent} />
       </article>
     );
   }
@@ -3706,6 +3485,10 @@ export function AgentPanelChat({
     () => deriveSidebarRuntimeCapabilities(selectedSession),
     [selectedSession],
   );
+  const sanitizedTranscript = useMemo(
+    () => sanitizeDesktopTranscriptEntries(transcript),
+    [transcript],
+  );
   const liveActivityHeadline = useMemo(() => {
     const headline = selectedSession?.activity?.headline?.trim();
     if (!headline) return undefined;
@@ -3716,12 +3499,12 @@ export function AgentPanelChat({
     if (!sidebarCapabilities.supportsToolEvents) return [];
     if (activeToolCalls.length > 0) return activeToolCalls;
 
-    const transcriptCalls = lastTurnToolCalls(transcript);
+    const transcriptCalls = lastTurnToolCalls(sanitizedTranscript);
     if (agentRunning && transcriptCalls.length > 0) return transcriptCalls;
 
     const activityTool = activityToLiveToolCall(selectedSession?.activity);
     return activityTool ? [activityTool] : [];
-  }, [activeToolCalls, agentRunning, selectedSession?.activity, sidebarCapabilities.supportsToolEvents, transcript]);
+  }, [activeToolCalls, agentRunning, sanitizedTranscript, selectedSession?.activity, sidebarCapabilities.supportsToolEvents]);
 
   const scrollToBottom = useCallback((force = false) => {
     if (!scrollRef.current) return;
@@ -3742,9 +3525,9 @@ export function AgentPanelChat({
       setSnapshot(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
       setSessions(prev => JSON.stringify(prev) === JSON.stringify(data.sessions) ? prev : data.sessions);
       initialInboxReadyRef.current = true;
-      const selectedStillExists = data.sessions.some((session) => session.sessionKey === selectedKey);
+      const selectedStillExists = data.sessions.some((session: SessionSummary) => session.sessionKey === selectedKey);
       if ((!selectedKey || !selectedStillExists) && data.sessions.length > 0) {
-        const primary = data.sessions.find(s => s.isCurrentSession) ?? data.sessions[0];
+        const primary = data.sessions.find((session: SessionSummary) => session.isCurrentSession) ?? data.sessions[0];
         setSelectedKey(primary.sessionKey);
       }
     } catch { /* silent */ }
@@ -4251,8 +4034,8 @@ export function AgentPanelChat({
   // ── Track agent running state ──
   // Agent is "running" after user sends until an assistant message arrives
   useEffect(() => {
-    if (transcript.length === 0) { setAgentRunning(false); return; }
-    const last = transcript[transcript.length - 1];
+    if (sanitizedTranscript.length === 0) { setAgentRunning(false); return; }
+    const last = sanitizedTranscript[sanitizedTranscript.length - 1];
     // If last message is user (or local optimistic) → agent is generating
     if ((last.role === 'user' || last.id.startsWith('local-')) && !isSlashCommandText(last.text)) {
       setAgentRunning(true);
@@ -4260,7 +4043,7 @@ export function AgentPanelChat({
     } else {
       setAgentRunning(false);
     }
-  }, [transcript]);
+  }, [sanitizedTranscript]);
 
   useEffect(() => {
     if (agentRunning || streamingText) return;
@@ -4642,7 +4425,7 @@ export function AgentPanelChat({
 
       <DesktopTranscriptPane
         loading={loading}
-        transcript={transcript}
+        transcript={sanitizedTranscript}
         currentAgentName={currentAgentName}
         onOpenMermaid={onOpenMermaid}
         onRunInTerminal={onRunInTerminal}

@@ -267,6 +267,8 @@ export function TitleBar({
   const [availableEditors, setAvailableEditors] = useState<{ id: string; name: string; available: boolean }[]>([]);
   const selectedRepoPath = selectedRepoEntry?.localPath ?? '';
   const hasSelectedRepo = Boolean(selectedRepoEntry);
+  const openMenuButtonRef = useRef<HTMLButtonElement>(null);
+  const openMenuRef = useRef<HTMLDivElement>(null);
 
   // Fetch available editors on mount
   useEffect(() => {
@@ -317,6 +319,91 @@ export function TitleBar({
   }, [searchExpanded]);
 
   const closeSearch = useCallback(() => setSearchExpanded(false), []);
+  const closeOpenMenu = useCallback((options?: { restoreFocus?: boolean }) => {
+    setOpenMenuOpen(false);
+    if (options?.restoreFocus) {
+      requestAnimationFrame(() => {
+        openMenuButtonRef.current?.focus();
+      });
+    }
+  }, []);
+
+  const handleOpenIn = useCallback((editor: string) => {
+    void fetch('/api/panel/open-in', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ editor, repo: selectedRepoPath }),
+    });
+    closeOpenMenu({ restoreFocus: true });
+  }, [closeOpenMenu, selectedRepoPath]);
+
+  const handleCopyRepoPath = useCallback(() => {
+    void navigator.clipboard.writeText(selectedRepoPath);
+    closeOpenMenu({ restoreFocus: true });
+  }, [closeOpenMenu, selectedRepoPath]);
+
+  useEffect(() => {
+    if (!openMenuOpen) return;
+
+    const getMenuItems = () => Array.from(
+      openMenuRef.current?.querySelectorAll<HTMLButtonElement>('button[data-open-menu-item="true"]') ?? [],
+    );
+
+    const focusFrame = requestAnimationFrame(() => {
+      getMenuItems()[0]?.focus();
+    });
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (openMenuRef.current?.contains(target) || openMenuButtonRef.current?.contains(target)) {
+        return;
+      }
+      closeOpenMenu();
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeOpenMenu({ restoreFocus: true });
+        return;
+      }
+
+      if (event.key === 'Tab') {
+        closeOpenMenu();
+        return;
+      }
+
+      const menuItems = getMenuItems();
+      if (menuItems.length === 0) return;
+
+      const activeIndex = menuItems.findIndex((item) => item === document.activeElement);
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        const nextIndex = activeIndex >= 0 ? (activeIndex + 1) % menuItems.length : 0;
+        menuItems[nextIndex]?.focus();
+      } else if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        const nextIndex = activeIndex >= 0 ? (activeIndex - 1 + menuItems.length) % menuItems.length : menuItems.length - 1;
+        menuItems[nextIndex]?.focus();
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        menuItems[0]?.focus();
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        menuItems[menuItems.length - 1]?.focus();
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      cancelAnimationFrame(focusFrame);
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [closeOpenMenu, openMenuOpen]);
 
   return (
     <header
@@ -447,8 +534,12 @@ export function TitleBar({
       {hasSelectedRepo ? (
         <div style={{ position: 'relative', flexShrink: 0, ['WebkitAppRegion' as string]: 'no-drag' }} data-no-drag="">
           <button
+            ref={openMenuButtonRef}
             type="button"
             onClick={() => setOpenMenuOpen(v => !v)}
+            aria-haspopup="menu"
+            aria-expanded={openMenuOpen}
+            aria-controls={openMenuOpen ? 'titlebar-open-menu' : undefined}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -486,20 +577,23 @@ export function TitleBar({
           </button>
 
           {openMenuOpen ? (
-            <>
-              <div onClick={() => setOpenMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 9998 }} />
-              <div style={{
+            <div
+              id="titlebar-open-menu"
+              ref={openMenuRef}
+              role="menu"
+              aria-label="Open current repository in another app"
+              style={{
                 position: 'absolute',
                 top: '100%',
                 right: 0,
                 marginTop: 6,
                 minWidth: 180,
-                borderRadius: 10,
-                border: '1px solid rgba(255,255,255,0.3)',
-                background: 'rgba(255,255,255,0.75)',
+                borderRadius: 12,
+                border: '1px solid rgba(148,163,184,0.18)',
+                background: 'rgba(255,255,255,0.92)',
                 backdropFilter: 'blur(40px) saturate(1.8)',
                 WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-                boxShadow: '0 12px 48px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06)',
+                boxShadow: '0 18px 42px rgba(15,23,42,0.16), 0 4px 10px rgba(15,23,42,0.06)',
                 overflow: 'hidden',
                 zIndex: 9999,
               }}>
@@ -511,14 +605,9 @@ export function TitleBar({
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => {
-                        fetch('/api/panel/open-in', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ editor: item.id, repo: selectedRepoPath }),
-                        });
-                      setOpenMenuOpen(false);
-                    }}
+                    role="menuitem"
+                    data-open-menu-item="true"
+                    onClick={() => handleOpenIn(item.id)}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 8, width: '100%',
                       padding: '8px 12px', border: 'none', background: 'transparent',
@@ -531,10 +620,10 @@ export function TitleBar({
                     <span style={{ width: 16, textAlign: 'center', fontSize: 13 }}>{item.icon}</span>
                     {item.name}
                   </button>
-                ))}
+                  ))}
 
                 {/* Divider */}
-                <div style={{ height: 1, background: 'rgba(255,255,255,0.12)', margin: '4px 0' }} />
+                <div style={{ height: 1, background: 'rgba(148,163,184,0.16)', margin: '4px 0' }} />
 
                 {/* IDEs */}
                 {availableEditors
@@ -543,14 +632,9 @@ export function TitleBar({
                     <button
                       key={editor.id}
                       type="button"
-                      onClick={() => {
-                        fetch('/api/panel/open-in', {
-                          method: 'POST',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ editor: editor.id, repo: selectedRepoPath }),
-                        });
-                        setOpenMenuOpen(false);
-                      }}
+                      role="menuitem"
+                      data-open-menu-item="true"
+                      onClick={() => handleOpenIn(editor.id)}
                       style={{
                         display: 'flex', alignItems: 'center', gap: 8, width: '100%',
                         padding: '8px 12px', border: 'none', background: 'transparent',
@@ -571,15 +655,14 @@ export function TitleBar({
                   ))}
 
                 {/* Divider */}
-                <div style={{ height: 1, background: 'rgba(255,255,255,0.12)', margin: '4px 0' }} />
+                <div style={{ height: 1, background: 'rgba(148,163,184,0.16)', margin: '4px 0' }} />
 
                 {/* Copy path */}
                 <button
                   type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(selectedRepoPath);
-                    setOpenMenuOpen(false);
-                  }}
+                  role="menuitem"
+                  data-open-menu-item="true"
+                  onClick={handleCopyRepoPath}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 8, width: '100%',
                     padding: '8px 12px', border: 'none', background: 'transparent',
@@ -599,7 +682,6 @@ export function TitleBar({
                   <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t-text-faint)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>⌘⇧C</span>
                 </button>
               </div>
-            </>
           ) : null}
         </div>
       ) : null}
