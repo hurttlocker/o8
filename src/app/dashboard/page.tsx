@@ -1409,7 +1409,11 @@ function DashboardInner() {
     const nextContent = sourceTile?.type === 'leaf'
       && sourceTile.content.kind === 'terminal'
       && newKind === 'terminal'
-      ? { kind: 'terminal' as const, repoPath: sourceTile.content.repoPath ?? null }
+      ? {
+          kind: 'terminal' as const,
+          repoPath: sourceTile.content.repoPath ?? null,
+          createdFromSplit: true,
+        }
       : createTileContent(newKind);
     const result = splitTile(tileLayout.root, tileId, direction, nextContent, ratio);
     if (!result.newTileId) {
@@ -3086,6 +3090,7 @@ function DashboardInner() {
             stateScope={tileId}
             defaultTab={tileId === 'tile-root' ? 'llm-chat' : 'terminal'}
             preferredRepo={tilePreferredRepo}
+            splitCreated={content.kind === 'terminal' ? Boolean(content.createdFromSplit) : false}
             availableRepos={globalRepoEntries.map((repo) => ({
               name: repo.name,
               localPath: repo.localPath,

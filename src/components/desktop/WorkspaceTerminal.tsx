@@ -7,7 +7,7 @@ import LLMChat, { ChainOfThought, MessageBubble, type LLMMessage } from './LLMCh
 import { IssueLinkPickerModal, buildLinkedIssueContext, type LinkedIssueRef } from './IssueLinkPicker';
 import { Canvas, type CanvasRepoTaskLaunchRequest, type CanvasTab } from './Canvas';
 import { useTheme } from '@/lib/theme/context';
-import { saveTabState, loadTabState, checkAliveSessions, type PersistedChatCheckpoint, type PersistedTabState } from '@/lib/terminal/tab-state';
+import { saveTabState, loadTabState, checkAliveSessions, buildRepoStateScope, type PersistedChatCheckpoint, type PersistedTabState } from '@/lib/terminal/tab-state';
 import type { MobileInboxSnapshot, MobileTranscriptEntry, MobileTranscriptSource, MobileTranscriptThinkingStep, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { deriveWorkflowStage } from '@/lib/workflows/status';
 import type { RepoReadiness } from '@/lib/repos/types';
@@ -90,6 +90,7 @@ interface WorkspaceTerminalProps {
   stateScope: string;
   defaultTab: 'llm-chat' | 'terminal';
   preferredRepo?: RegisteredRepo | null;
+  splitCreated?: boolean;
   availableRepos?: RegisteredRepo[];
   onActiveChatSessionChange?: (sessionKey: string | null) => void;
   onChatSessionsChange?: (sessions: MobileInboxSnapshot['sessions']) => void;
@@ -3119,6 +3120,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       stateScope,
       defaultTab,
       preferredRepo = null,
+      splitCreated = false,
       availableRepos = [],
       onActiveChatSessionChange,
       onChatSessionsChange,
@@ -3164,6 +3166,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     const activeChatSessionChangeRef = useRef(onActiveChatSessionChange);
     const reportedChatSessionsSignatureRef = useRef<string>('');
     const reportedActiveChatSessionKeyRef = useRef<string | null>(null);
+    const stableRepoScope = !splitCreated && preferredRepo?.localPath
+      ? buildRepoStateScope(preferredRepo.localPath)
+      : null;
     const visibleTabs = useMemo(
       () => tabs.filter((tab) => !(tab.kind === 'canvas' && tab.canvasTab?.kind === 'ci')),
       [tabs],
@@ -3348,8 +3353,11 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           savedAt: new Date().toISOString(),
         };
         saveTabState(persisted, stateScope);
+        if (stableRepoScope && stableRepoScope !== stateScope) {
+          saveTabState(persisted, stableRepoScope);
+        }
       }, 500);
-    }, [stateScope]);
+    }, [stableRepoScope, stateScope]);
 
     const requestTerminalForTab = useCallback((tabId: string, command?: string) => {
       const requestId = `workspace-${tabId}-${Date.now()}`;
@@ -3407,7 +3415,18 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       setTimeout(() => { urlDetectionEnabledRef.current = true; }, 5000);
 
       (async () => {
-        const saved = await loadTabState(stateScope);
+        let saved = await loadTabState(stateScope, preferredRepo?.localPath ?? null);
+        const preferredRepoPath = preferredRepo?.localPath ?? null;
+        const savedRepoPaths = saved
+          ? Array.from(new Set(saved.tabs.map((tab) => tab.repoPath).filter((value): value is string => Boolean(value))))
+          : [];
+        const savedMatchesPreferredRepo = !preferredRepoPath
+          || savedRepoPaths.length === 0
+          || savedRepoPaths.includes(preferredRepoPath);
+
+        if ((!saved || saved.tabs.length === 0 || !savedMatchesPreferredRepo) && stableRepoScope) {
+          saved = await loadTabState(stableRepoScope, preferredRepo?.localPath ?? null);
+        }
 
         if (saved && saved.tabs.length > 0) {
           // Check which tmux sessions are still alive
@@ -3554,7 +3573,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           }
         }
       })();
-    }, [createDefaultChatTab, createDefaultShellTab, defaultTab, preferredRepo, requestTerminalForTab, sendTerminalAttach, stateScope, termWsConnected]);
+    }, [createDefaultChatTab, createDefaultShellTab, defaultTab, preferredRepo, requestTerminalForTab, sendTerminalAttach, stableRepoScope, stateScope, termWsConnected]);
 
     // On reconnect, reattach existing terminal tabs without resetting chat state.
     useEffect(() => {
@@ -4287,6 +4306,10 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     const paneHasMixedRepos = paneRepoPaths.length > 1;
     const activeRepo = activeTab?.repo ?? visibleTabs.find((tab) => tab.repo)?.repo ?? preferredRepo ?? null;
     const headerRepo = preferredRepo ?? activeRepo ?? null;
+    const isFreshSplitShell = splitCreated
+      && visibleTabs.length === 1
+      && activeTab?.kind === 'terminal'
+      && activeTab.label === 'Shell';
     const activeRepoDetails = useMemo(() => {
       if (!headerRepo) return null;
       const preferredMatch = preferredRepo?.localPath === headerRepo.localPath ? preferredRepo : null;
@@ -4454,10 +4477,16 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
-                  fontSize: 11,
+                  fontSize: isFreshSplitShell ? 10 : 11,
                   lineHeight: 1.2,
-                  color: paneHasMixedRepos ? 'var(--t-text-secondary)' : 'var(--t-text-faint)',
-                  fontWeight: paneHasMixedRepos ? 600 : 500,
+                  color: paneHasMixedRepos
+                    ? 'var(--t-text-secondary)'
+                    : isFreshSplitShell
+                      ? 'var(--t-text-secondary)'
+                      : 'var(--t-text-faint)',
+                  fontWeight: paneHasMixedRepos || isFreshSplitShell ? 600 : 500,
+                  letterSpacing: isFreshSplitShell ? '0.04em' : 'normal',
+                  textTransform: isFreshSplitShell ? 'uppercase' : 'none',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -4465,11 +4494,13 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
               >
                 {paneHasMixedRepos
                   ? `${paneRepoPaths.length} repos in this pane`
+                  : isFreshSplitShell
+                    ? 'Split pane'
                   : headerRepo
                     ? shortenPath(headerRepo.localPath)
                     : `${paneRepoPaths.length} repos across these tabs`}
               </div>
-              {paneHasMixedRepos && headerRepo ? (
+              {(paneHasMixedRepos && headerRepo) || (isFreshSplitShell && headerRepo) ? (
                 <div
                   style={{
                     marginTop: 2,
@@ -4481,9 +4512,11 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {headerRepo
-                    ? `${shortenPath(headerRepo.localPath)} · ${paneRepoPaths.length} repos in this pane`
-                  : `${paneRepoPaths.length} repos across these tabs`}
+                  {isFreshSplitShell && headerRepo
+                    ? `${shortenPath(headerRepo.localPath)} · ready for a new shell or agent`
+                    : headerRepo
+                      ? `${shortenPath(headerRepo.localPath)} · ${paneRepoPaths.length} repos in this pane`
+                      : `${paneRepoPaths.length} repos across these tabs`}
                 </div>
               ) : null}
             </div>
@@ -4507,28 +4540,29 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                       style={{
                         display: 'inline-flex',
                         alignItems: 'center',
-                        gap: 5,
-                        padding: '2px 8px',
+                        gap: 6,
+                        padding: '4px 11px',
                         borderRadius: 999,
-                        border: '1px solid var(--t-panel-border)',
-                        background: repoPickerOpen ? 'var(--t-panel-active)' : 'var(--t-divider-subtle)',
-                        color: 'var(--t-text-secondary)',
-                        fontSize: 10,
+                        border: repoPickerOpen ? '1px solid var(--t-accent-border)' : '1px solid var(--t-panel-border)',
+                        background: repoPickerOpen ? 'var(--t-panel-active)' : 'var(--t-panel)',
+                        color: 'var(--t-text)',
+                        fontSize: 11,
                         fontWeight: 700,
                         letterSpacing: '0.01em',
                         whiteSpace: 'nowrap',
                         cursor: 'pointer',
-                        transition: 'background 120ms ease, border-color 120ms ease',
-                        maxWidth: 180,
+                        transition: 'background 120ms ease, border-color 120ms ease, color 120ms ease',
+                        maxWidth: 196,
+                        boxShadow: repoPickerOpen ? '0 0 0 1px var(--t-accent-ring)' : 'none',
                       }}
                       onMouseEnter={(e) => {
                         if (!repoPickerOpen) {
-                          e.currentTarget.style.background = 'var(--t-hover)';
+                          e.currentTarget.style.background = 'var(--t-panel-active)';
                         }
                       }}
                       onMouseLeave={(e) => {
                         if (!repoPickerOpen) {
-                          e.currentTarget.style.background = 'var(--t-divider-subtle)';
+                          e.currentTarget.style.background = 'var(--t-panel)';
                         }
                       }}
                     >
@@ -4620,12 +4654,13 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      width: 24,
-                      height: 24,
+                      width: 22,
+                      height: 22,
                       borderRadius: 7,
                       border: 'none',
                       background: 'transparent',
-                      color: 'var(--t-text-secondary)',
+                      color: 'var(--t-text-faint)',
+                      opacity: 0.78,
                       cursor: 'pointer',
                       flexShrink: 0,
                     }}
@@ -4644,12 +4679,13 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      width: 24,
-                      height: 24,
+                      width: 22,
+                      height: 22,
                       borderRadius: 7,
                       border: 'none',
                       background: 'transparent',
-                      color: 'var(--t-text-secondary)',
+                      color: 'var(--t-text-faint)',
+                      opacity: 0.78,
                       cursor: 'pointer',
                       flexShrink: 0,
                     }}
@@ -4668,12 +4704,13 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      width: 24,
-                      height: 24,
+                      width: 22,
+                      height: 22,
                       borderRadius: 7,
                       border: 'none',
                       background: 'transparent',
                       color: 'var(--t-text-faint)',
+                      opacity: 0.74,
                       cursor: 'pointer',
                       flexShrink: 0,
                     }}

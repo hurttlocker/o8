@@ -16,6 +16,7 @@ export interface WorkspaceTileContent {
 export interface TerminalTileContent {
   kind: 'terminal';
   repoPath?: string | null;
+  createdFromSplit?: boolean;
 }
 
 export interface PreviewTileContent {
