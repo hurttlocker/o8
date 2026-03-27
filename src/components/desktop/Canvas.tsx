@@ -73,7 +73,7 @@ import {
 import { useTheme } from '@/lib/theme/context';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
-import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
+import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, refreshOpenClawBetaStatus, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import { deriveWorkflowStage, describeWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
 
@@ -472,7 +472,10 @@ function TimelineExpanded() {
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
   const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
 
-  useEffect(() => subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled), []);
+  useEffect(() => {
+    void refreshOpenClawBetaStatus().then((status) => setOpenClawBetaEnabled(status.effective_enabled));
+    return subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -3883,8 +3886,9 @@ function PRViewer({
   const visibleReviewComments = currentVisibleReviewComments;
   const failedChecks = ciChecks.filter((check) => check.conclusion && check.conclusion.toLowerCase() !== 'success');
   const pendingChecks = ciChecks.filter((check) => !check.conclusion || check.status?.toLowerCase() !== 'completed');
-  const requestedChangesCount = pr.reviews.filter((review) => review.state?.toLowerCase() === 'changes_requested').length;
-  const approvedCount = pr.reviews.filter((review) => review.state?.toLowerCase() === 'approved').length;
+  const reviews = pr.reviews ?? [];
+  const requestedChangesCount = reviews.filter((review) => review.state?.toLowerCase() === 'changes_requested').length;
+  const approvedCount = reviews.filter((review) => review.state?.toLowerCase() === 'approved').length;
   const reviewStage = pr.workflowStage ?? deriveWorkflowStage({
     prState: pr.state,
     requestedChanges: requestedChangesCount,
@@ -4321,12 +4325,12 @@ function PRViewer({
             ) : null}
 
             {/* Reviews */}
-            {pr.reviews.length > 0 ? (
+            {reviews.length > 0 ? (
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text-secondary)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                   Reviews
                 </div>
-                {pr.reviews.map((review, i) => (
+                {reviews.map((review, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginBottom: 4 }}>
                     <span style={{
                       color: review.state === 'APPROVED' ? '#22c55e' : review.state === 'CHANGES_REQUESTED' ? '#ef4444' : '#f59e0b',
