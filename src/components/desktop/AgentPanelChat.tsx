@@ -36,6 +36,7 @@ import type {
   MobileTranscriptMedia,
   MobileTranscriptToolCall,
 } from '@/lib/mobile/types';
+import { filterInboxSnapshotByOpenClaw } from '@/lib/mobile/inbox-filter';
 import type { ProjectGroup } from '@/components/mobile/types';
 import { buildProjectGroups } from '@/components/mobile/utils';
 import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, refreshOpenClawBetaStatus, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
@@ -56,6 +57,7 @@ import {
   lastSidebarTurnToolCalls as normalizeLastSidebarTurnToolCalls,
   type SidebarRuntimeCapabilities,
 } from '@/lib/chat/sidebar-events';
+import type { ApprovalRecord } from '@/lib/approvals/types';
 import { formatModelLabel } from '@/lib/format';
 import { ttsEngine } from '@/lib/tts/engine';
 import { autocompleteSlashCommand, buildSlashTerminalInput, getSlashCommandSuggestions, isSlashCommandText } from '@/lib/slash-commands';
@@ -100,6 +102,9 @@ function sessionDisplayModel(session?: SessionSummary) {
   if (session.runtime === 'openclaw') {
     return formatModelLabel(session.primaryModel ?? session.model ?? session.heartbeatModel ?? 'OpenClaw');
   }
+  if (session.runtime === 'chat') {
+    return formatModelLabel(session.model ?? 'Workspace Chat');
+  }
   if (session.runtime === 'codex') {
     return formatModelLabel(session.model ?? 'Codex');
   }
@@ -134,6 +139,7 @@ function sessionLocalFolderLabel(session: SessionSummary) {
 function sessionRuntimeLabel(session: SessionSummary) {
   if (session.runtime === 'claude-code') return 'Claude Code';
   if (session.runtime === 'codex') return 'Codex';
+  if (session.runtime === 'chat') return 'Chat';
   if (session.runtime === 'openclaw') return 'OpenClaw';
   return 'Session';
 }
@@ -173,6 +179,14 @@ function sessionTaskLabel(session?: SessionSummary) {
   return null;
 }
 
+function sessionTaskSummary(session?: SessionSummary, max = 42) {
+  if (!session) return null;
+  const taskSummary = session.currentTask?.trim();
+  if (!taskSummary) return null;
+  if (/^(hi|hey|hello|good (morning|afternoon|evening))\b/i.test(taskSummary)) return null;
+  return compactLine(taskSummary, taskSummary, max);
+}
+
 function isMeaningfulTaskLabel(label?: string | null) {
   if (!label) return false;
   return /\bIssue #\d+\b/i.test(label) || /\bPR #\d+\b/i.test(label) || /^Review$/i.test(label);
@@ -203,27 +217,34 @@ function sessionHeaderTitle(session?: SessionSummary) {
     return compactLine(session.name ?? 'OpenClaw', 'OpenClaw', 36);
   }
   const repoLabel = sessionRepoLabel(session);
-  if (repoLabel) return compactLine(repoLabel, repoLabel, 36);
-  return compactLine(sessionRuntimeLabel(session), 'Session', 36);
+  const runtimeLabel = sessionRuntimeLabel(session);
+  if (repoLabel) return compactLine(`${repoLabel} · ${runtimeLabel}`, runtimeLabel, 42);
+  return compactLine(runtimeLabel, 'Session', 36);
 }
 
 function sessionPickerSubtitle(session?: SessionSummary) {
   if (!session) return '';
+  const taskSummary = sessionTaskSummary(session, 42);
+  if (taskSummary) return taskSummary;
   const branchLabel = cleanBranchLabel(session.branch);
   if (branchLabel) return compactLine(branchLabel, branchLabel, 42);
   const taskLabel = sessionTaskLabel(session);
   if (taskLabel) return compactLine(taskLabel, taskLabel, 42);
   const folderLabel = sessionLocalFolderLabel(session);
   if (folderLabel) return compactLine(folderLabel, folderLabel, 42);
-  const taskSummary = session.currentTask?.trim();
-  if (taskSummary) return compactLine(taskSummary, taskSummary, 42);
   return '';
 }
 
 function sessionPickerRowSubtitle(session: SessionSummary) {
+  const taskSummary = sessionTaskSummary(session, 40);
+  const branchLabel = cleanBranchLabel(session.branch);
+  if (taskSummary) {
+    const combined = branchLabel ? `${taskSummary} · ${branchLabel}` : taskSummary;
+    return compactLine(combined, taskSummary, 52);
+  }
   const parts = [
     sessionTaskLabel(session),
-    cleanBranchLabel(session.branch),
+    branchLabel,
   ].filter((value): value is string => Boolean(value));
   if (parts.length > 0) return compactLine(parts.join(' · '), parts[0], 52);
   return sessionLocalFolderLabel(session) ?? compactLine(session.currentTask, 'Session ready', 52);
@@ -261,34 +282,6 @@ function sessionChipStyles(tone: SessionPickerChipTone) {
   }
 }
 
-function filterDesktopInboxSnapshot(snapshot: MobileInboxSnapshot, includeOpenClaw: boolean): MobileInboxSnapshot {
-  if (includeOpenClaw) return snapshot;
-
-  const sessions = snapshot.sessions.filter((session) => session.runtime !== 'openclaw');
-  const allowedSessionKeys = new Set(sessions.map((session) => session.sessionKey));
-  const items = snapshot.items.filter((item) => !item.sessionKey || allowedSessionKeys.has(item.sessionKey));
-  const alerts = items.filter((item) => item.kind === 'alert' && item.severity !== 'info').length;
-  const approvals = items.filter((item) => item.kind === 'approval').length;
-  const reviewItems = items.filter((item) => item.kind === 'review').length;
-  const activeRuns = sessions.filter((session) => ['running', 'reviewing', 'blocked', 'waiting', 'failed'].includes(session.status)).length;
-  const primarySessionKey = sessions.find((session) => session.sessionKey === snapshot.primarySessionKey)?.sessionKey
-    ?? sessions.find((session) => session.status === 'running' || session.status === 'reviewing')?.sessionKey
-    ?? sessions[0]?.sessionKey;
-
-  return {
-    ...snapshot,
-    primarySessionKey,
-    sessions,
-    items,
-    summary: {
-      alerts,
-      approvals,
-      reviewItems,
-      activeRuns,
-    },
-  };
-}
-
 function buildPickerFallbackSnapshot(sessions: SessionSummary[], selectedKey: string): MobileInboxSnapshot | null {
   if (sessions.length === 0) return null;
   return {
@@ -297,6 +290,7 @@ function buildPickerFallbackSnapshot(sessions: SessionSummary[], selectedKey: st
     sourceLabel: 'desktop-session-fallback',
     primarySessionKey: sessions.find((session) => session.sessionKey === selectedKey)?.sessionKey ?? sessions[0]?.sessionKey,
     sessions,
+    approvals: [],
     items: [],
     summary: {
       alerts: 0,
@@ -309,15 +303,12 @@ function buildPickerFallbackSnapshot(sessions: SessionSummary[], selectedKey: st
 
 function composeFooterLeadLabel(session?: SessionSummary, statusOverride?: string) {
   const taskLabel = sessionTaskLabel(session);
-  if (taskLabel && isMeaningfulTaskLabel(taskLabel)) return taskLabel;
+  if (taskLabel && /\b(Issue #\d+|PR #\d+)\b/i.test(taskLabel)) return taskLabel;
 
   const rawStatus = (statusOverride ?? session?.status ?? '').trim().toLowerCase();
-  if (rawStatus === 'reviewing') return 'Reviewing';
-  if (rawStatus === 'running') return 'Working';
   if (rawStatus === 'waiting') return 'Waiting';
   if (rawStatus === 'blocked' || rawStatus === 'failed') return 'Blocked';
-  if (rawStatus === 'idle') return 'Ready';
-  return null;
+  return session ? sessionRuntimeLabel(session) : null;
 }
 
 function mediaHref(path: string): string {
@@ -359,17 +350,7 @@ type GroupSourceCard = {
   canOpenDiff?: boolean;
 };
 
-type SidebarApproval = {
-  id: string;
-  agent: string;
-  sessionKey: string;
-  title: string;
-  description: string;
-  command?: string;
-  risk: 'low' | 'medium' | 'high';
-  createdAt: number;
-  status: 'pending' | 'approved' | 'rejected';
-};
+type SidebarApproval = ApprovalRecord;
 
 function parseRuntimeEventSummary(text: string): RuntimeEventSummary | null {
   return normalizeSidebarRuntimeEventSummary(text) as RuntimeEventSummary | null;
@@ -3207,6 +3188,8 @@ export const DesktopComposePane = memo(function DesktopComposePane({
 
         <textarea
           ref={composeRef}
+          name="agentPanelMessage"
+          aria-label={`Message ${currentAgentName}`}
           className="remodex-compose-input"
           value={draft}
           onChange={e => setDraft(e.target.value)}
@@ -3392,7 +3375,7 @@ export const DesktopComposePane = memo(function DesktopComposePane({
             : undefined);
           const pct = typeof rawPct === 'number' && rawPct > 0 ? Math.round(rawPct) : null;
           const leadLabel = composeFooterLeadLabel(selectedSession, statusOverride);
-          const branchLabel = branchOverride ?? selectedSession?.branch;
+          const branchLabel = cleanBranchLabel(branchOverride ?? selectedSession?.branch);
 
           return (
             <>
@@ -3589,7 +3572,7 @@ export function AgentPanelChat({
     onInboxUpdate: (data: Record<string, unknown>) => {
       if (!initialInboxReadyRef.current) return;
       if (!openClawBetaEnabled) return;
-      const inbox = filterDesktopInboxSnapshot(data as unknown as MobileInboxSnapshot, openClawBetaEnabled);
+      const inbox = filterInboxSnapshotByOpenClaw(data as unknown as MobileInboxSnapshot, openClawBetaEnabled);
       if (inbox?.sessions) {
         setSnapshot(inbox);
         setSessions(inbox.sessions);
@@ -3755,7 +3738,7 @@ export function AgentPanelChat({
     try {
       const res = await fetch(appendOpenClawBetaQuery('/api/mobile/inbox', openClawBetaEnabled));
       if (!res.ok) return;
-      const data = filterDesktopInboxSnapshot((await res.json()) as MobileInboxSnapshot, openClawBetaEnabled);
+      const data = filterInboxSnapshotByOpenClaw((await res.json()) as MobileInboxSnapshot, openClawBetaEnabled);
       setSnapshot(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
       setSessions(prev => JSON.stringify(prev) === JSON.stringify(data.sessions) ? prev : data.sessions);
       initialInboxReadyRef.current = true;
@@ -4537,6 +4520,8 @@ export function AgentPanelChat({
       {/* Hidden file input */}
       <input
         ref={fileInputRef}
+        name="agentPanelAttachments"
+        aria-label="Attach files"
         type="file"
         multiple
         accept="image/*,.pdf,.txt,.md,.json,.csv,.tsx,.ts,.js,.py"

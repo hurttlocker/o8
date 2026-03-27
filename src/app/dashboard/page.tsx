@@ -31,6 +31,7 @@ import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
+import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import { deriveWorkflowStage, describeWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
 
 /** Normalize the flat API response into the shape SetupWizard expects. */
@@ -119,29 +120,27 @@ interface WorkspaceChatTargetOption {
 }
 
 function buildWorkspaceChatTargetOptions(sessions: MobileInboxSnapshot['sessions']): WorkspaceChatTargetOption[] {
-  const counts = new Map<string, number>();
+  const runtimeCounts = new Map<string, number>();
+  const runtimeOrdinals = new Map<string, number>();
   for (const session of sessions) {
-    const baseLabel = session.name?.trim() || workspaceSessionRuntimeLabel(session);
-    counts.set(baseLabel, (counts.get(baseLabel) ?? 0) + 1);
+    const baseLabel = workspaceSessionRuntimeLabel(session);
+    runtimeCounts.set(baseLabel, (runtimeCounts.get(baseLabel) ?? 0) + 1);
   }
 
   return sessions.map((session) => {
-    const baseLabel = session.name?.trim() || workspaceSessionRuntimeLabel(session);
+    const baseLabel = workspaceSessionRuntimeLabel(session);
+    const nextOrdinal = (runtimeOrdinals.get(baseLabel) ?? 0) + 1;
+    runtimeOrdinals.set(baseLabel, nextOrdinal);
     const disambiguators = [
-      compactSessionTargetText(session.currentTask, 28),
       compactSessionTargetText(session.branch, 22),
       compactSessionTargetText(session.workspace?.split('/').pop(), 18),
     ].filter((value): value is string => Boolean(value));
-    const label = (counts.get(baseLabel) ?? 0) > 1 && disambiguators.length > 0
-      ? `${baseLabel} · ${disambiguators[0]}`
-      : baseLabel;
-    const detail = [workspaceSessionRuntimeLabel(session), compactSessionTargetText(session.branch, 20)]
-      .filter((value): value is string => Boolean(value))
-      .join(' · ');
+    const label = (runtimeCounts.get(baseLabel) ?? 0) > 1 ? `${baseLabel} ${nextOrdinal}` : baseLabel;
+    const detail = disambiguators[0] ?? null;
     return {
       sessionKey: session.sessionKey,
       label,
-      detail: detail || null,
+      detail,
     };
   });
 }
@@ -189,6 +188,23 @@ interface RepoWorktreeSummary {
   totalDiskUsage: number;
 }
 
+interface WorkspaceScopeEntry extends WorkspaceSidePanelRepo {
+  registryRepoId?: string;
+  isWorktree?: boolean;
+  worktreeStatus?: WorktreeInfo['status'] | null;
+}
+
+function repoEntryToWorkspaceScope(repo: RepoRegistryEntry): WorkspaceScopeEntry {
+  return {
+    registryRepoId: repo.id,
+    name: repo.name,
+    localPath: repo.localPath,
+    branch: repo.readiness?.currentBranch ?? repo.defaultBranch,
+    readiness: repo.readiness ?? null,
+    remoteUrl: repo.remoteUrl ?? undefined,
+  };
+}
+
 interface CanvasTileState {
   tabs: CanvasTab[];
   activeTabId: string | null;
@@ -211,6 +227,24 @@ function findUnscopedTerminalLeaf(node: TileLayout['root']): TileLeafNode | null
     return node.content.kind === 'terminal' && !node.content.repoPath ? node : null;
   }
   return findUnscopedTerminalLeaf(node.children[0]) ?? findUnscopedTerminalLeaf(node.children[1]);
+}
+
+function collectOpenTerminalRepoPaths(node: TileLayout['root'], excludeTileId?: string | null): string[] {
+  if (node.type === 'leaf') {
+    if (
+      node.id !== excludeTileId
+      && node.content.kind === 'terminal'
+      && typeof node.content.repoPath === 'string'
+      && node.content.repoPath.trim()
+    ) {
+      return [node.content.repoPath];
+    }
+    return [];
+  }
+  return [
+    ...collectOpenTerminalRepoPaths(node.children[0], excludeTileId),
+    ...collectOpenTerminalRepoPaths(node.children[1], excludeTileId),
+  ];
 }
 
 function findCanvasLeafByRepoPath(node: TileLayout['root'], repoPath: string): TileLeafNode | null {
@@ -438,6 +472,12 @@ function DashboardInner() {
   const canvasStateByTileIdRef = useRef<Record<string, CanvasTileState>>({});
   const [agentsJson, setAgentsJson] = useState('[]');
   const [activeWorkspace, setActiveWorkspace] = useState<string | undefined>();
+  const [workspaceLifecycleRecords, setWorkspaceLifecycleRecords] = useState<WorkspaceLifecycleRecordView[]>([]);
+  const [workspaceLifecycleSummary, setWorkspaceLifecycleSummary] = useState<WorkspaceLifecycleSummaryView>({
+    unreadCount: 0,
+    archivedCount: 0,
+    nextAttentionWorkspaceId: null,
+  });
   const [showMemoryView, setShowMemoryView] = useState(false);
   const [alertTrayOpen, setAlertTrayOpen] = useState(false);
   const [activeNavSection, setActiveNavSection] = useState<NavSection>('agents');
@@ -459,6 +499,7 @@ function DashboardInner() {
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const [tileLayoutHydrated, setTileLayoutHydrated] = useState(false);
   const lastWorkspacePanelViewRef = useRef<'diff' | 'review'>('diff');
+  const lastMarkedWorkspaceReadRef = useRef<string>('');
 
   // ── Setup wizard state ──
   const [setupWizardOpen, setSetupWizardOpen] = useState(false);
@@ -496,32 +537,98 @@ function DashboardInner() {
     } catch { /* silent */ }
   }, []);
 
+  const refreshWorkspaceLifecycle = useCallback(async () => {
+    try {
+      const response = await fetch('/api/panel/workspaces', {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+      });
+      if (!response.ok) return;
+      const payload = await response.json() as {
+        lifecycle?: {
+          records?: WorkspaceLifecycleRecordView[];
+          summary?: WorkspaceLifecycleSummaryView;
+        };
+      };
+      setWorkspaceLifecycleRecords(payload.lifecycle?.records ?? []);
+      setWorkspaceLifecycleSummary(payload.lifecycle?.summary ?? {
+        unreadCount: 0,
+        archivedCount: 0,
+        nextAttentionWorkspaceId: null,
+      });
+    } catch {
+      // Keep the last truthful lifecycle snapshot if refresh fails.
+    }
+  }, []);
+
+  const mutateWorkspaceLifecycle = useCallback(async (
+    action: 'archive' | 'restore' | 'mark_read',
+    workspaceId: string,
+  ) => {
+    const response = await fetch('/api/panel/workspaces', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, workspaceId }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as { error?: string } | null;
+      throw new Error(payload?.error || 'Unable to update workspace lifecycle.');
+    }
+    await refreshWorkspaceLifecycle();
+  }, [refreshWorkspaceLifecycle]);
+
   // Global repo state (shared between TitleBar and AgentPanel)
   const [globalRepoId, setGlobalRepoId] = useState<string | null>(null);
   const [globalRepoBranch, setGlobalRepoBranch] = useState<string>('main');
   const [globalRepoEntries, setGlobalRepoEntries] = useState<RepoRegistryEntry[]>([]);
+  const [allRepoWorktrees, setAllRepoWorktrees] = useState<Record<string, WorktreeInfo[]>>({});
   const globalRepoEntry = useMemo(
     () => globalRepoEntries.find((repo) => repo.id === globalRepoId) ?? null,
     [globalRepoEntries, globalRepoId],
   );
+  const workspaceScopeEntries = useMemo<WorkspaceScopeEntry[]>(() => {
+    const entries: WorkspaceScopeEntry[] = [];
+    for (const repo of globalRepoEntries) {
+      entries.push(repoEntryToWorkspaceScope(repo));
+      for (const worktree of allRepoWorktrees[repo.localPath] ?? []) {
+        entries.push({
+          registryRepoId: repo.id,
+          name: repo.name,
+          localPath: worktree.path,
+          branch: worktree.branch,
+          readiness: null,
+          remoteUrl: repo.remoteUrl ?? undefined,
+          isWorktree: true,
+          worktreeStatus: worktree.status,
+        });
+      }
+    }
+    return entries;
+  }, [allRepoWorktrees, globalRepoEntries]);
   const workspaceTerminalPreferredRepo = useMemo(() => {
+    const activeWorkspaceRepo = activeWorkspace
+      ? globalRepoEntries.find((repo) => (
+        activeWorkspace === repo.localPath
+        || activeWorkspace.startsWith(`${repo.localPath}/`)
+      )) ?? null
+      : null;
     const source =
-      globalRepoEntry
+      (globalRepoEntry ? repoEntryToWorkspaceScope(globalRepoEntry) : null)
       ?? (activeWorkspace
-        ? globalRepoEntries.find((repo) => (
-          activeWorkspace === repo.localPath
-          || activeWorkspace.startsWith(`${repo.localPath}/`)
-        )) ?? null
+        ? workspaceScopeEntries.find((entry) => entry.localPath === activeWorkspace)
+          ?? (activeWorkspaceRepo ? repoEntryToWorkspaceScope(activeWorkspaceRepo) : null)
         : null)
-      ?? (globalRepoEntries.length === 1 ? globalRepoEntries[0] : null);
+      ?? (globalRepoEntries.length === 1 ? repoEntryToWorkspaceScope(globalRepoEntries[0]) : null);
     return source ? {
       name: source.name,
       localPath: source.localPath,
-      branch: source.readiness?.currentBranch ?? (globalRepoEntry?.id === source.id ? globalRepoBranch : source.defaultBranch),
+      branch: source.branch ?? source.readiness?.currentBranch ?? 'main',
       readiness: source.readiness ?? null,
       ...(source.remoteUrl ? { remoteUrl: source.remoteUrl } : {}),
+      ...(source.registryRepoId ? { registryRepoId: source.registryRepoId } : {}),
+      ...(source.isWorktree ? { isWorktree: true, worktreeStatus: source.worktreeStatus ?? null } : {}),
     } : null;
-  }, [activeWorkspace, globalRepoBranch, globalRepoEntries, globalRepoEntry]);
+  }, [activeWorkspace, globalRepoEntries, globalRepoEntry, workspaceScopeEntries]);
   const globalRepo = useMemo(
     () => repoSlugFromRemote(globalRepoEntry?.remoteUrl),
     [globalRepoEntry],
@@ -530,7 +637,7 @@ function DashboardInner() {
     if (!workspaceSidePanelRepoPath) {
       return null;
     }
-    const matched = globalRepoEntries.find((repo) => repo.localPath === workspaceSidePanelRepoPath) ?? null;
+    const matched = workspaceScopeEntries.find((repo) => repo.localPath === workspaceSidePanelRepoPath) ?? null;
     if (!matched) {
       return globalRepoEntry?.localPath === workspaceSidePanelRepoPath
         ? {
@@ -545,11 +652,11 @@ function DashboardInner() {
     return {
       name: matched.name,
       localPath: matched.localPath,
-      branch: matched.readiness?.currentBranch ?? matched.defaultBranch,
+      branch: matched.branch ?? matched.readiness?.currentBranch ?? null,
       readiness: matched.readiness ?? null,
       remoteUrl: matched.remoteUrl ?? undefined,
     };
-  }, [globalRepoBranch, globalRepoEntries, globalRepoEntry, workspaceSidePanelRepoPath]);
+  }, [globalRepoBranch, globalRepoEntry, workspaceScopeEntries, workspaceSidePanelRepoPath]);
   const getWorkspaceSidePanelRepoBySlug = useCallback((repoSlug?: string | null): WorkspaceSidePanelRepo | null => {
     if (!repoSlug) return globalRepoEntry ? {
       name: globalRepoEntry.name,
@@ -580,16 +687,16 @@ function DashboardInner() {
       } : null;
     }
 
-    const matched = globalRepoEntries.find((entry) => entry.localPath === repoPath) ?? null;
+    const matched = workspaceScopeEntries.find((entry) => entry.localPath === repoPath) ?? null;
     if (!matched) return null;
     return {
       name: matched.name,
       localPath: matched.localPath,
-      branch: matched.readiness?.currentBranch ?? matched.defaultBranch,
+      branch: matched.branch ?? matched.readiness?.currentBranch ?? null,
       readiness: matched.readiness ?? null,
       remoteUrl: matched.remoteUrl ?? undefined,
     };
-  }, [globalRepoBranch, globalRepoEntries, globalRepoEntry]);
+  }, [globalRepoBranch, globalRepoEntry, workspaceScopeEntries]);
   const openWorkspaceSidePanel = useCallback((
     view: WorkspaceSidePanelView,
     repo?: WorkspaceSidePanelRepo | null,
@@ -641,15 +748,22 @@ function DashboardInner() {
     return repos;
   }, []);
 
-  // Fetch registered repos on mount — but don't auto-select
+  // Fetch registered repos on mount — prefer saved repo, otherwise restore the first registered repo
   useEffect(() => {
     loadRegisteredRepos()
       .then((repos) => {
         const savedId = typeof window !== 'undefined' ? sessionStorage.getItem('cortex-global-repo-id') : null;
         if (savedId && repos.some((repo) => repo.id === savedId)) {
           setGlobalRepoId(savedId);
+          return;
         }
-        // Otherwise leave null — show "Open Folder" prompt
+        const fallbackRepo = repos[0] ?? null;
+        if (!fallbackRepo) return;
+        setGlobalRepoId(fallbackRepo.id);
+        setGlobalRepoBranch(fallbackRepo.defaultBranch || 'main');
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('cortex-global-repo-id', fallbackRepo.id);
+        }
       })
       .catch(() => {
         setGlobalRepoEntries([]);
@@ -743,6 +857,46 @@ function DashboardInner() {
     }, 30_000);
     return () => window.clearInterval(intervalId);
   }, [globalRepoEntry?.localPath, refreshSelectedRepoWorktrees, selectedRepoWorktreeRefreshNonce]);
+
+  useEffect(() => {
+    if (globalRepoEntries.length === 0) {
+      setAllRepoWorktrees({});
+      return;
+    }
+    let active = true;
+    async function fetchAllRepoWorktrees() {
+      const entries = await Promise.all(globalRepoEntries.map(async (repo) => {
+        try {
+          const response = await fetch(`/api/worktrees?repo=${encodeURIComponent(repo.localPath)}`);
+          const data = await response.json() as RepoWorktreeSummary & { error?: string };
+          return [repo.localPath, Array.isArray(data.worktrees) ? data.worktrees : []] as const;
+        } catch {
+          return [repo.localPath, []] as const;
+        }
+      }));
+      if (!active) return;
+      setAllRepoWorktrees(Object.fromEntries(entries));
+    }
+    void fetchAllRepoWorktrees();
+    const intervalId = window.setInterval(() => { void fetchAllRepoWorktrees(); }, 45_000);
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+    };
+  }, [globalRepoEntries]);
+
+  useEffect(() => {
+    void refreshWorkspaceLifecycle();
+    const intervalId = window.setInterval(() => {
+      void refreshWorkspaceLifecycle();
+    }, 30_000);
+    return () => window.clearInterval(intervalId);
+  }, [refreshWorkspaceLifecycle]);
+
+  useEffect(() => {
+    if (wsStatus !== 'connected') return;
+    void refreshWorkspaceLifecycle();
+  }, [refreshWorkspaceLifecycle, wsStatus]);
 
   const handleOpenFolder = useCallback(async () => {
     let folderPath: string | null = null;
@@ -1039,12 +1193,12 @@ function DashboardInner() {
     ?? globalRepoEntry?.localPath
     ?? '__global__';
   const activeWorkspaceChatTargetKey = useMemo(() => {
-    if (activeWorkspaceChatSessionKey && workspaceChatTargets.some((target) => target.sessionKey === activeWorkspaceChatSessionKey)) {
-      return activeWorkspaceChatSessionKey;
-    }
     const preferredTargetKey = workspaceChatTargetKeyByRepoPath[workspaceChatTargetRepoPath];
     if (preferredTargetKey && workspaceChatTargets.some((target) => target.sessionKey === preferredTargetKey)) {
       return preferredTargetKey;
+    }
+    if (activeWorkspaceChatSessionKey && workspaceChatTargets.some((target) => target.sessionKey === activeWorkspaceChatSessionKey)) {
+      return activeWorkspaceChatSessionKey;
     }
     return workspaceChatTargets[0]?.sessionKey ?? null;
   }, [activeWorkspaceChatSessionKey, workspaceChatTargetKeyByRepoPath, workspaceChatTargetRepoPath, workspaceChatTargets]);
@@ -1053,6 +1207,23 @@ function DashboardInner() {
     [activeWorkspaceChatTargetKey, workspaceChatTargets],
   );
   const workspaceChatTargetLabel = workspaceChatTargetOption?.label ?? null;
+  const activeSurfaceRepoPath = useMemo(() => {
+    if (!activeTileId) return null;
+    const activeTile = findTile(tileLayout.root, activeTileId);
+    if (activeTile?.type === 'leaf' && activeTile.content.kind === 'terminal') {
+      return activeTile.content.repoPath ?? null;
+    }
+    return null;
+  }, [activeTileId, tileLayout.root]);
+
+  useEffect(() => {
+    const preferredRepoPath = workspaceTerminalPreferredRepo?.localPath ?? null;
+    if (!preferredRepoPath) return;
+    if (collectOpenTerminalRepoPaths(tileLayout.root).length > 0) return;
+    const firstUnscopedLeaf = findUnscopedTerminalLeaf(tileLayout.root);
+    if (!firstUnscopedLeaf) return;
+    setTerminalTileRepoScope(firstUnscopedLeaf.id, preferredRepoPath);
+  }, [setTerminalTileRepoScope, tileLayout.root, workspaceTerminalPreferredRepo?.localPath]);
 
   const ensureWorkspaceTerminalTile = useCallback((repoPath?: string | null, preferredTileId?: string | null) => {
     const normalizedRepoPath = repoPath ?? null;
@@ -1411,7 +1582,7 @@ function DashboardInner() {
       && newKind === 'terminal'
       ? {
           kind: 'terminal' as const,
-          repoPath: sourceTile.content.repoPath ?? null,
+          repoPath: null,
           createdFromSplit: true,
         }
       : createTileContent(newKind);
@@ -1868,6 +2039,26 @@ function DashboardInner() {
     openWorkspaceSidePanel(nextView, workspaceSidePanelRepo);
   }, [chatVisible, openWorkspaceSidePanel, rightPanelMode, workspaceSidePanelRepo, workspaceSidePanelView]);
 
+  useEffect(() => {
+    if (rightPanelMode !== 'workspace') return;
+    if (workspaceSidePanelPullRequestNumber) return;
+    const nextRepoPath = activeSurfaceRepoPath
+      ?? workspaceTerminalPreferredRepo?.localPath
+      ?? globalRepoEntry?.localPath
+      ?? null;
+    if (workspaceSidePanelRepoPath === nextRepoPath) {
+      return;
+    }
+    setWorkspaceSidePanelRepoPath(nextRepoPath);
+  }, [
+    activeSurfaceRepoPath,
+    globalRepoEntry?.localPath,
+    rightPanelMode,
+    workspaceSidePanelPullRequestNumber,
+    workspaceSidePanelRepoPath,
+    workspaceTerminalPreferredRepo?.localPath,
+  ]);
+
   const handleSelectWorkspaceChatTarget = useCallback((sessionKey: string) => {
     setWorkspaceChatTargetKeyByRepoPath((current) => {
       if (current[workspaceChatTargetRepoPath] === sessionKey) {
@@ -1930,6 +2121,10 @@ function DashboardInner() {
         repoPath: targetRepo?.localPath ?? null,
       });
       if (workspaceTarget) {
+        setActiveTileId(workspaceTarget.tileId);
+        if (targetRepo?.localPath) {
+          setActiveWorkspace(targetRepo.localPath);
+        }
         workspaceTarget.handle.injectIntoCliChat(payload.text, {
           repo: targetRepo ?? undefined,
           draftReason: payload.reason,
@@ -2328,10 +2523,65 @@ function DashboardInner() {
     return null;
   }, [globalRepo, scopedRepoAgents, selectedSessionAgent]);
   const selectedSessionWorktree = selectedSessionAgent?.worktree ?? null;
+  const currentWorkspaceLifecycleRecord = useMemo(() => {
+    const workflowAgent = currentReviewAgent ?? selectedSessionAgent ?? scopedRepoAgents[0] ?? null;
+    if (workflowAgent?.sessionKey) {
+      const liveMatch = workspaceLifecycleRecords.find((record) => (
+        record.live && record.sessionKey === workflowAgent.sessionKey
+      ));
+      if (liveMatch) {
+        return liveMatch;
+      }
+    }
+
+    const fallbackRepoPath = workspaceTerminalPreferredRepo?.localPath ?? globalRepoEntry?.localPath ?? null;
+    if (!fallbackRepoPath) return null;
+
+    return workspaceLifecycleRecords.find((record) => (
+      !record.archivedAt && record.repoPath === fallbackRepoPath
+    )) ?? null;
+  }, [currentReviewAgent, globalRepoEntry?.localPath, scopedRepoAgents, selectedSessionAgent, workspaceLifecycleRecords, workspaceTerminalPreferredRepo?.localPath]);
+  const archivedWorkspaceCandidate = useMemo(() => {
+    const preferredRepoPath = workspaceTerminalPreferredRepo?.localPath ?? globalRepoEntry?.localPath ?? null;
+    return [...workspaceLifecycleRecords]
+      .filter((record) => Boolean(record.archivedAt))
+      .sort((left, right) => {
+        const leftPreferred = preferredRepoPath ? left.repoPath === preferredRepoPath : false;
+        const rightPreferred = preferredRepoPath ? right.repoPath === preferredRepoPath : false;
+        if (leftPreferred !== rightPreferred) return leftPreferred ? -1 : 1;
+        const leftTime = left.archivedAt ? new Date(left.archivedAt).getTime() : 0;
+        const rightTime = right.archivedAt ? new Date(right.archivedAt).getTime() : 0;
+        return rightTime - leftTime;
+      })[0] ?? null;
+  }, [globalRepoEntry?.localPath, workspaceLifecycleRecords, workspaceTerminalPreferredRepo?.localPath]);
+  const nextAttentionWorkspace = useMemo(() => {
+    if (!workspaceLifecycleSummary.nextAttentionWorkspaceId) return null;
+    return workspaceLifecycleRecords.find((record) => record.id === workspaceLifecycleSummary.nextAttentionWorkspaceId) ?? null;
+  }, [workspaceLifecycleRecords, workspaceLifecycleSummary.nextAttentionWorkspaceId]);
   const staleSelectedRepoWorktrees = useMemo(
     () => (selectedRepoWorktrees?.worktrees ?? []).filter((worktree) => worktree.status === 'stale'),
     [selectedRepoWorktrees],
   );
+
+  useEffect(() => {
+    if (!activeSessionKey || selectedSessionAgent || paletteAgents.length === 0) return;
+    const fallbackSession = paletteAgents.find((agent) => agent.isCurrentSession) ?? paletteAgents[0];
+    if (!fallbackSession || fallbackSession.sessionKey === activeSessionKey) return;
+    setActiveSessionKey(fallbackSession.sessionKey);
+  }, [activeSessionKey, paletteAgents, selectedSessionAgent]);
+
+  useEffect(() => {
+    if (!currentWorkspaceLifecycleRecord || currentWorkspaceLifecycleRecord.archivedAt || currentWorkspaceLifecycleRecord.unreadCount === 0) {
+      return;
+    }
+    const marker = `${currentWorkspaceLifecycleRecord.id}:${currentWorkspaceLifecycleRecord.lastActivityAt ?? ''}`;
+    if (lastMarkedWorkspaceReadRef.current === marker) {
+      return;
+    }
+    lastMarkedWorkspaceReadRef.current = marker;
+    void mutateWorkspaceLifecycle('mark_read', currentWorkspaceLifecycleRecord.id).catch(() => undefined);
+  }, [currentWorkspaceLifecycleRecord, mutateWorkspaceLifecycle]);
+
   const paletteActions = useMemo<CommandPaletteAction[]>(() => {
     const actions: CommandPaletteAction[] = [];
     const workflowContextAgent = currentReviewAgent ?? selectedSessionAgent ?? scopedRepoAgents[0] ?? null;
@@ -2930,33 +3180,133 @@ function DashboardInner() {
       run: () => window.location.reload(),
     });
 
-    actions.push({
-      id: 'workspace:archive-unavailable',
-      category: 'workspace',
-      title: 'Archive workspace',
-      detail: workflowContextGuidance.archiveDetail,
-      stateLabel: workflowContextStage?.label ?? 'Unavailable',
-      stateTone: workflowContextStage ? workflowTone(workflowContextStage.label) : 'slate',
-      keywords: ['archive workspace', 'archive lane', 'archive'],
-      priority: 12,
-      disabled: true,
-      unavailableReason: workflowContextGuidance.archiveUnavailableReason,
-      run: () => undefined,
-    });
+    if (nextAttentionWorkspace) {
+      actions.push({
+        id: `workspace:attention:${nextAttentionWorkspace.id}`,
+        category: 'attention',
+        title: 'Open next workspace needing attention',
+        detail: nextAttentionWorkspace.attentionDetail,
+        stateLabel: nextAttentionWorkspace.attentionLabel,
+        stateTone: nextAttentionWorkspace.workflowStage
+          ? workflowTone(nextAttentionWorkspace.workflowStage.label)
+          : 'amber',
+        keywords: [
+          'next workspace',
+          'next attention',
+          nextAttentionWorkspace.repo,
+          nextAttentionWorkspace.branch,
+          nextAttentionWorkspace.workspacePath,
+        ],
+        priority: 330 + Math.min(nextAttentionWorkspace.attentionRank, 120),
+        run: async () => {
+          const matchingRepo = globalRepoEntries.find((entry) => (
+            nextAttentionWorkspace.repoPath === entry.localPath
+            || nextAttentionWorkspace.workspacePath.startsWith(`${entry.localPath}/`)
+          )) ?? null;
+          if (matchingRepo) {
+            await handleSelectRegisteredRepo(matchingRepo.id);
+          }
+          setActiveWorkspace(nextAttentionWorkspace.workspacePath);
+          setSidebarVisible(true);
+          setChatVisible(true);
+          if (nextAttentionWorkspace.sessionKey) {
+            setActiveSessionKey(nextAttentionWorkspace.sessionKey);
+            setRightPanelMode('chat');
+            return;
+          }
+          setRightPanelMode('workspace');
+        },
+      });
+    }
 
-    actions.push({
-      id: 'workspace:resume-unavailable',
-      category: 'workspace',
-      title: 'Resume archived workspace',
-      detail: workflowContextGuidance.resumeDetail,
-      stateLabel: workflowContextStage?.label ?? 'Unavailable',
-      stateTone: workflowContextStage ? workflowTone(workflowContextStage.label) : 'slate',
-      keywords: ['resume workspace', 'resume archived workspace', 'resume'],
-      priority: 11,
-      disabled: true,
-      unavailableReason: workflowContextGuidance.resumeUnavailableReason,
-      run: () => undefined,
-    });
+    if (currentWorkspaceLifecycleRecord) {
+      actions.push({
+        id: `workspace:archive:${currentWorkspaceLifecycleRecord.id}`,
+        category: 'workspace',
+        title: 'Archive workspace',
+        detail: currentWorkspaceLifecycleRecord.archive.detail,
+        stateLabel: currentWorkspaceLifecycleRecord.workflowStage?.label ?? currentWorkspaceLifecycleRecord.attentionLabel,
+        stateTone: currentWorkspaceLifecycleRecord.workflowStage
+          ? workflowTone(currentWorkspaceLifecycleRecord.workflowStage.label)
+          : 'slate',
+        keywords: [
+          'archive workspace',
+          'archive lane',
+          currentWorkspaceLifecycleRecord.repo,
+          currentWorkspaceLifecycleRecord.branch,
+        ],
+        priority: 120,
+        disabled: !currentWorkspaceLifecycleRecord.archive.available,
+        unavailableReason: currentWorkspaceLifecycleRecord.archive.unavailableReason,
+        run: async () => {
+          if (!currentWorkspaceLifecycleRecord.archive.available) return;
+          await mutateWorkspaceLifecycle('archive', currentWorkspaceLifecycleRecord.id);
+        },
+      });
+    } else {
+      actions.push({
+        id: 'workspace:archive-unavailable',
+        category: 'workspace',
+        title: 'Archive workspace',
+        detail: workflowContextGuidance.archiveDetail,
+        stateLabel: workflowContextStage?.label ?? 'Unavailable',
+        stateTone: workflowContextStage ? workflowTone(workflowContextStage.label) : 'slate',
+        keywords: ['archive workspace', 'archive lane', 'archive'],
+        priority: 12,
+        disabled: true,
+        unavailableReason: workflowContextGuidance.archiveUnavailableReason,
+        run: () => undefined,
+      });
+    }
+
+    if (archivedWorkspaceCandidate) {
+      actions.push({
+        id: `workspace:resume:${archivedWorkspaceCandidate.id}`,
+        category: 'workspace',
+        title: 'Resume archived workspace',
+        detail: archivedWorkspaceCandidate.resume.detail,
+        stateLabel: 'Archived',
+        stateTone: 'slate',
+        keywords: [
+          'resume workspace',
+          'resume archived workspace',
+          'restore archived workspace',
+          archivedWorkspaceCandidate.repo,
+          archivedWorkspaceCandidate.branch,
+        ],
+        priority: 115,
+        disabled: !archivedWorkspaceCandidate.resume.available,
+        unavailableReason: archivedWorkspaceCandidate.resume.unavailableReason,
+        run: async () => {
+          if (!archivedWorkspaceCandidate.resume.available) return;
+          await mutateWorkspaceLifecycle('restore', archivedWorkspaceCandidate.id);
+          const matchingRepo = globalRepoEntries.find((entry) => (
+            archivedWorkspaceCandidate.repoPath === entry.localPath
+            || archivedWorkspaceCandidate.workspacePath.startsWith(`${entry.localPath}/`)
+          )) ?? null;
+          if (matchingRepo) {
+            await handleSelectRegisteredRepo(matchingRepo.id);
+          }
+          setActiveWorkspace(archivedWorkspaceCandidate.workspacePath);
+          setRightPanelMode('workspace');
+          setChatVisible(true);
+        },
+      });
+    } else {
+      actions.push({
+        id: 'workspace:resume-unavailable',
+        category: 'workspace',
+        title: 'Resume archived workspace',
+        detail: workflowContextGuidance.resumeDetail,
+        stateLabel: workflowContextStage?.label ?? 'Unavailable',
+        stateTone: workflowContextStage ? workflowTone(workflowContextStage.label) : 'slate',
+        keywords: ['resume workspace', 'resume archived workspace', 'resume'],
+        priority: 11,
+        disabled: true,
+        unavailableReason: workflowContextGuidance.resumeUnavailableReason,
+        run: () => undefined,
+      });
+    }
 
     return actions;
   }, [
@@ -2976,10 +3326,15 @@ function DashboardInner() {
     handleOpenSettingsTab,
     handleOpenCI,
     handleRunInTerminal,
+    handleSelectRegisteredRepo,
     handleSelectIssue,
     openRepoWorkspaceModal,
     paletteAgents,
     focusRepoSetup,
+    currentWorkspaceLifecycleRecord,
+    archivedWorkspaceCandidate,
+    mutateWorkspaceLifecycle,
+    nextAttentionWorkspace,
     selectedRepoWorktrees,
     selectedRepoWorktreesLoading,
     selectedSessionWorktree,
@@ -3072,17 +3427,35 @@ function DashboardInner() {
       hideHeader: true,
       // closable determined dynamically in TileContainer (last terminal is protected)
       render: ({ tileId, content }) => {
+        const firstTerminalLeafId = (() => {
+          const firstLeaf = getFirstLeaf(tileLayout.root);
+          return firstLeaf.content.kind === 'terminal' ? firstLeaf.id : null;
+        })();
+        const hasScopedTerminalLeaf = collectOpenTerminalRepoPaths(tileLayout.root).length > 0;
         const tileRepoEntry = content.kind === 'terminal' && content.repoPath
-          ? globalRepoEntries.find((repo) => repo.localPath === content.repoPath) ?? null
+          ? workspaceScopeEntries.find((repo) => repo.localPath === content.repoPath) ?? null
           : null;
+        const isFreshSplitTile = content.kind === 'terminal' && !content.repoPath && tileId !== 'tile-root';
+        const isPrimaryUnscopedTerminal = content.kind === 'terminal'
+          && !content.repoPath
+          && !hasScopedTerminalLeaf
+          && firstTerminalLeafId === tileId;
+        const effectiveSplitCreated = isFreshSplitTile && !isPrimaryUnscopedTerminal;
         const tilePreferredRepo = tileRepoEntry ? {
           name: tileRepoEntry.name,
           localPath: tileRepoEntry.localPath,
-          branch: tileRepoEntry.readiness?.currentBranch ?? tileRepoEntry.defaultBranch,
+          branch: tileRepoEntry.branch ?? tileRepoEntry.readiness?.currentBranch ?? null,
           readiness: tileRepoEntry.readiness ?? null,
           ...(tileRepoEntry.remoteUrl ? { remoteUrl: tileRepoEntry.remoteUrl } : {}),
-        } : workspaceTerminalPreferredRepo;
+          ...(tileRepoEntry.registryRepoId ? { registryRepoId: tileRepoEntry.registryRepoId } : {}),
+          ...(tileRepoEntry.isWorktree ? { isWorktree: true, worktreeStatus: tileRepoEntry.worktreeStatus ?? null } : {}),
+        } : isPrimaryUnscopedTerminal
+          ? workspaceTerminalPreferredRepo
+        : isFreshSplitTile
+          ? null
+          : workspaceTerminalPreferredRepo;
         const canCloseTerminalTile = collectLeafContentKinds(tileLayout.root).filter((kind) => kind === 'terminal').length > 1;
+        const openRepoPaths = Array.from(new Set(collectOpenTerminalRepoPaths(tileLayout.root, tileId)));
 
         return (
           <WorkspaceTerminal
@@ -3090,14 +3463,9 @@ function DashboardInner() {
             stateScope={tileId}
             defaultTab={tileId === 'tile-root' ? 'llm-chat' : 'terminal'}
             preferredRepo={tilePreferredRepo}
-            splitCreated={content.kind === 'terminal' ? Boolean(content.createdFromSplit) : false}
-            availableRepos={globalRepoEntries.map((repo) => ({
-              name: repo.name,
-              localPath: repo.localPath,
-              branch: repo.readiness?.currentBranch ?? repo.defaultBranch,
-              readiness: repo.readiness ?? null,
-              ...(repo.remoteUrl ? { remoteUrl: repo.remoteUrl } : {}),
-            }))}
+            splitCreated={content.kind === 'terminal' ? effectiveSplitCreated : false}
+            availableRepos={workspaceScopeEntries}
+            openRepoPaths={openRepoPaths}
             canCloseTile={canCloseTerminalTile}
             onActiveChatSessionChange={(sessionKey) => {
               setWorkspaceChatSessionByTileId((current) => (
@@ -3132,7 +3500,9 @@ function DashboardInner() {
                 }
                 setActiveWorkspace(repo.localPath);
               }
-              const matched = globalRepoEntries.find((entry) => entry.localPath === repo.localPath) ?? null;
+              const matched = repo.registryRepoId
+                ? globalRepoEntries.find((entry) => entry.id === repo.registryRepoId) ?? null
+                : globalRepoEntries.find((entry) => entry.localPath === repo.localPath) ?? null;
               if (matched) {
                 void handleSelectRegisteredRepo(matched.id);
               }
@@ -3271,6 +3641,7 @@ function DashboardInner() {
     parsedAgents,
     registerContextualPanelHandle,
     registerWorkspaceTerminalHandle,
+    workspaceScopeEntries,
     selectCanvasTab,
     setTerminalTileRepoScope,
     sendAgentKill,
@@ -3435,6 +3806,7 @@ function DashboardInner() {
           selectedRepo={globalRepo ?? repoSlugFromRemote(workspaceTerminalPreferredRepo?.remoteUrl)}
           selectedRepoBranch={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
           selectedRepoLocalPath={globalRepoEntry?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null}
+          activeWorkspacePath={activeWorkspace ?? null}
           selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
           onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
           onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
