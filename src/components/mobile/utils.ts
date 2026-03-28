@@ -217,6 +217,7 @@ export function threadLaneLabel(session: SessionSummary) {
   if (session.isCurrentSession) return 'Assistant';
   if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') return 'Codex';
   if (session.runtime === 'claude-code') return 'Claude Code';
+  if (session.runtime === 'chat') return 'Chat';
   return session.runtime === 'openclaw' ? 'OpenClaw' : 'Session';
 }
 
@@ -734,6 +735,7 @@ export async function readJson<T>(response: Response) {
 
 export function agentDisplayName(session: SessionSummary): string {
   if (session.isCurrentSession) return 'Assistant';
+  if (session.runtime === 'chat') return 'Chat';
   if (session.runtime === 'codex') return 'Codex';
   const name = session.name || '';
   if (name.startsWith('Hawk')) return 'Hawk';
@@ -755,6 +757,10 @@ export function mobileSessionSecondaryLabel(session: SessionSummary): string {
   const branchShort = session.branch?.replace(/^(feat|fix|batch|chore|refactor)\//, '') ?? '';
   const pid = sessionRuntimePid(session);
 
+  if (session.runtime === 'chat') {
+    return session.model || 'Workspace Chat';
+  }
+
   if (session.runtime === 'codex') {
     const ownership = session.runtimeSurface?.ownership ?? '';
     const availability = session.runtimeSurface?.lifecycle?.availability ?? '';
@@ -774,6 +780,7 @@ export function mobileSessionSecondaryLabel(session: SessionSummary): string {
 
 function projectSessionPriority(session: SessionSummary, selectedSession?: SessionSummary): number {
   if (session.sessionKey === selectedSession?.sessionKey) return 1000;
+  if (session.runtime === 'chat' && session.status === 'running') return 980;
   if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'discovered' && session.status === 'running') return 960;
   if (session.runtime === 'claude-code' && session.status === 'running') return 940;
   if (session.isCurrentSession) return 920;
@@ -803,7 +810,13 @@ export function projectSummary(sessions: SessionSummary[]): string {
   const runtimeCounts = new Map<string, number>();
   let runningCount = 0;
   for (const session of sessions) {
-    const label = session.runtime === 'codex' ? 'Codex' : session.runtime === 'claude-code' ? 'Claude Code' : 'OpenClaw';
+    const label = session.runtime === 'codex'
+      ? 'Codex'
+      : session.runtime === 'claude-code'
+        ? 'Claude Code'
+        : session.runtime === 'chat'
+          ? 'Chat'
+          : 'OpenClaw';
     runtimeCounts.set(label, (runtimeCounts.get(label) ?? 0) + 1);
     if (session.status === 'running' || session.status === 'reviewing') {
       runningCount += 1;
@@ -833,7 +846,7 @@ export function buildProjectGroups(
     const ageHours = daysMatch ? parseInt(daysMatch[1], 10) * 24 : hoursMatch ? parseInt(hoursMatch[1], 10) : 0;
     const isStale = ageHours > 4;
 
-    if (session.runtime === 'claude-code' || session.runtime === 'codex') {
+    if (session.runtime === 'claude-code' || session.runtime === 'codex' || session.runtime === 'chat') {
       // Desktop now scopes these surfaces to IDE-opened sessions only,
       // so keep them in the picker even when they are briefly idle.
       return true;

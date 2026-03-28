@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
@@ -249,16 +249,19 @@ function discoverIdeChatSessions(sinceTs: number): Array<{ id: string; model: st
   return sessions;
 }
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
-    const url = new URL(request.url);
-    const hours = parseInt(url.searchParams.get('hours') || '24', 10);
+    const hours = parseInt(request.nextUrl.searchParams.get('hours') || '24', 10);
+    const includeOpenClaw = request.nextUrl.searchParams.get('includeOpenClaw') !== '0';
     const sinceTs = Date.now() - hours * 60 * 60 * 1000;
+    const visibleSurfaces = includeOpenClaw
+      ? SURFACES
+      : SURFACES.filter((surface) => surface !== 'OpenClaw Chat');
 
     const hourlyMap = new Map<string, HourBucket>();
     const modelMap = new Map<string, ModelBreakdown>();
     const agentMap = new Map<string, Breakdown>();
-    const surfaceMap = new Map<string, Breakdown>(SURFACES.map((surface) => [surface, createBreakdown()]));
+    const surfaceMap = new Map<string, Breakdown>(visibleSurfaces.map((surface) => [surface, createBreakdown()]));
     const topSessions: TopSession[] = [];
 
     let totalCost = 0;
@@ -339,76 +342,78 @@ export async function GET(request: Request) {
     };
 
     // ── OpenClaw chat sessions ────────────────────────────────────────────────
-    const openClawAgents = discoverOpenClawAgents();
-    const sessionsRoot = join(homedir(), '.openclaw', 'agents');
+    if (includeOpenClaw) {
+      const openClawAgents = discoverOpenClawAgents();
+      const sessionsRoot = join(homedir(), '.openclaw', 'agents');
 
-    for (const [agentId, agentName] of Object.entries(openClawAgents)) {
-      const sessionsDir = join(sessionsRoot, agentId, 'sessions');
-      const files = safeReadDir(sessionsDir).filter((file) => file.endsWith('.jsonl'));
+      for (const [agentId, agentName] of Object.entries(openClawAgents)) {
+        const sessionsDir = join(sessionsRoot, agentId, 'sessions');
+        const files = safeReadDir(sessionsDir).filter((file) => file.endsWith('.jsonl'));
 
-      for (const file of files) {
-        const filePath = join(sessionsDir, file);
+        for (const file of files) {
+          const filePath = join(sessionsDir, file);
 
-        try {
-          const stat = statSync(filePath);
-          if (stat.mtimeMs < sinceTs) continue;
+          try {
+            const stat = statSync(filePath);
+            if (stat.mtimeMs < sinceTs) continue;
 
-          const session = createSession(
-            basename(file, '.jsonl'),
-            agentName,
-            'OpenClaw Chat',
-            (Date.now() - stat.mtimeMs) < ACTIVE_WINDOW_MS,
-          );
+            const session = createSession(
+              basename(file, '.jsonl'),
+              agentName,
+              'OpenClaw Chat',
+              (Date.now() - stat.mtimeMs) < ACTIVE_WINDOW_MS,
+            );
 
-          const lines = readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
-          for (const line of lines) {
-            try {
-              const parsed = JSON.parse(line) as Record<string, unknown>;
-              const message = (parsed.message ?? {}) as Record<string, unknown>;
-              const usage = (message.usage ?? {}) as Record<string, unknown>;
-              const costData = (usage.cost ?? {}) as Record<string, unknown>;
-              const ts = parseTimestamp(parsed.timestamp ?? message.timestamp, stat.mtimeMs);
-              if (ts < sinceTs) continue;
+            const lines = readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
+            for (const line of lines) {
+              try {
+                const parsed = JSON.parse(line) as Record<string, unknown>;
+                const message = (parsed.message ?? {}) as Record<string, unknown>;
+                const usage = (message.usage ?? {}) as Record<string, unknown>;
+                const costData = (usage.cost ?? {}) as Record<string, unknown>;
+                const ts = parseTimestamp(parsed.timestamp ?? message.timestamp, stat.mtimeMs);
+                if (ts < sinceTs) continue;
 
-              const cost = firstFiniteNumber(costData.total, costData.usdTotal) ?? 0;
-              const inputTokens = numberOrZero(usage.input);
-              const outputTokens = numberOrZero(usage.output);
-              const cacheTokens = numberOrZero(usage.cacheRead);
-              const cacheWriteTokens = numberOrZero(usage.cacheWrite);
+                const cost = firstFiniteNumber(costData.total, costData.usdTotal) ?? 0;
+                const inputTokens = numberOrZero(usage.input);
+                const outputTokens = numberOrZero(usage.output);
+                const cacheTokens = numberOrZero(usage.cacheRead);
+                const cacheWriteTokens = numberOrZero(usage.cacheWrite);
 
-              if (cost === 0 && inputTokens === 0 && outputTokens === 0 && cacheTokens === 0 && cacheWriteTokens === 0) {
-                continue;
+                if (cost === 0 && inputTokens === 0 && outputTokens === 0 && cacheTokens === 0 && cacheWriteTokens === 0) {
+                  continue;
+                }
+
+                const model = String(message.model ?? message.api ?? 'unknown');
+                const normalizedModel = recordUsage({
+                  ts,
+                  cost,
+                  inputTokens,
+                  outputTokens,
+                  cacheTokens,
+                  cacheWriteTokens,
+                  model,
+                  agent: agentName,
+                  surface: 'OpenClaw Chat',
+                });
+
+                session.cost += cost;
+                session.messages += 1;
+                session.inputTokens += inputTokens;
+                session.outputTokens += outputTokens;
+                session.cacheTokens += cacheTokens;
+                session.cacheWriteTokens += cacheWriteTokens;
+                session.models.add(normalizedModel);
+                if (session.model === 'unknown' || session.model === '') session.model = model;
+              } catch {
+                // skip malformed lines
               }
-
-              const model = String(message.model ?? message.api ?? 'unknown');
-              const normalizedModel = recordUsage({
-                ts,
-                cost,
-                inputTokens,
-                outputTokens,
-                cacheTokens,
-                cacheWriteTokens,
-                model,
-                agent: agentName,
-                surface: 'OpenClaw Chat',
-              });
-
-              session.cost += cost;
-              session.messages += 1;
-              session.inputTokens += inputTokens;
-              session.outputTokens += outputTokens;
-              session.cacheTokens += cacheTokens;
-              session.cacheWriteTokens += cacheWriteTokens;
-              session.models.add(normalizedModel);
-              if (session.model === 'unknown' || session.model === '') session.model = model;
-            } catch {
-              // skip malformed lines
             }
-          }
 
-          finalizeSession(session);
-        } catch {
-          // skip unreadable files
+            finalizeSession(session);
+          } catch {
+            // skip unreadable files
+          }
         }
       }
     }
@@ -708,7 +713,7 @@ export async function GET(request: Request) {
         totalTokens,
       },
       byAgent: Object.fromEntries(agentMap.entries()),
-      bySurface: Object.fromEntries(SURFACES.map((surface) => [surface, surfaceMap.get(surface) ?? createBreakdown()])),
+      bySurface: Object.fromEntries(visibleSurfaces.map((surface) => [surface, surfaceMap.get(surface) ?? createBreakdown()])),
       byModel,
       hourly,
       topSessions: topSessions.slice(0, 10),

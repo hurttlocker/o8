@@ -1,9 +1,12 @@
+import path from 'node:path';
 import type { AgentRuntime, RuntimeSession } from '@/lib/runtimes/types';
 import type { AgentSummary, EventItem, FleetSnapshot, SquadSummary } from '@/lib/fleet/types';
 import { getOpenClawFleetSnapshot } from '@/lib/openclaw/fleet';
 import { codexRuntime } from '@/lib/runtimes/codex';
 import { claudeCodeRuntime } from '@/lib/runtimes/claude-code';
-import { listIdeRuntimeSessions } from '@/lib/runtime/ide-session-registry';
+import { listCurrentIdeRepoPaths } from '@/lib/runtime/ide-terminal-state';
+import { listIdeRuntimeSessions, listIdeRuntimeTabs, type IdeRuntimeSessionDescriptor } from '@/lib/runtime/ide-session-registry';
+import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
 
 const RUNTIME_INVENTORY_TTL_MS = 15_000;
 const runtimeInventoryCache = new Map<string, { snapshot: FleetSnapshot; cachedAt: number }>();
@@ -136,15 +139,111 @@ function mapRuntimeSessionToAgent(
   };
 }
 
+function mapIdeGhostRuntimeTabToAgent(session: IdeRuntimeSessionDescriptor): AgentSummary {
+  const workspace = shortenHomePath(session.repoPath ?? '~/clawd');
+  const runtimeName = defaultRuntimeDisplayName(session.runtimeId);
+  const currentTask = session.liveSessionKey
+    ? `Restored ${runtimeName} chat tab from IDE state. Waiting for live runtime reattachment.`
+    : `Restored ${runtimeName} chat tab from IDE state. No active runtime session is attached.`;
+
+  return {
+    id: session.sessionKey,
+    name: session.label,
+    squadId: `squad-${session.runtimeId}`,
+    runtime: session.runtimeId,
+    model: session.model || runtimeName,
+    primaryModel: session.model || runtimeName,
+    status: 'idle',
+    currentTask,
+    workspace,
+    branch: 'unknown',
+    sessionKey: session.sessionKey,
+    approvalStatus: 'none',
+    lastEventAt: relativeAge(new Date(session.savedAt ?? Date.now())),
+    context: {
+      usedPercent: 0,
+      trend: 'stable',
+    },
+    alerts: 0,
+    sessionId: session.tabId,
+    sessionKind: 'discovered',
+    surfaceLabel: runtimeName,
+    isCurrentSession: session.isCurrentSession,
+    tokenUsage: undefined,
+    runtimeSurface: {
+      id: session.sessionKey,
+      runtime: session.runtimeId,
+      kind: 'chat-session',
+      ownership: 'discovered',
+      title: session.label,
+      cwd: workspace,
+      branch: 'unknown',
+      sourceLabel: session.liveSessionKey
+        ? 'IDE chat tab restored without a currently live runtime session'
+        : 'IDE chat tab restored from desktop state only',
+      capabilities: {
+        attach: false,
+        readTail: true,
+        sendInput: false,
+        interrupt: false,
+        resize: false,
+        diffContext: true,
+        reviewContext: true,
+      },
+    },
+  };
+}
+
+function isRegistryBackedRuntimeSession(sessionKey: string) {
+  return Boolean(getRuntimeTerminalSession(sessionKey));
+}
+
+function normalizeInventoryWorkspacePath(workspace?: string | null) {
+  const trimmed = workspace?.trim();
+  if (!trimmed) return null;
+  const home = process.env.HOME ?? '';
+  const expanded = trimmed.startsWith('~/') && home
+    ? path.join(home, trimmed.slice(2))
+    : trimmed === '~' && home
+      ? home
+      : trimmed;
+  return path.normalize(expanded).toLowerCase();
+}
+
+function selectRepoFallbackAgents(agents: AgentSummary[], existingSessionKeys: Set<string>) {
+  const currentRepoPaths = new Set(listCurrentIdeRepoPaths());
+  if (currentRepoPaths.size === 0) return [] as AgentSummary[];
+
+  const selected: AgentSummary[] = [];
+  const seenRepoRuntime = new Set<string>();
+
+  for (const agent of agents) {
+    if (existingSessionKeys.has(agent.sessionKey)) continue;
+    if (agent.runtime !== 'codex' && agent.runtime !== 'claude-code') continue;
+    if (!['running', 'reviewing', 'waiting'].includes(agent.status)) continue;
+
+    const workspaceKey = normalizeInventoryWorkspacePath(agent.runtimeSurface?.cwd ?? agent.workspace);
+    if (!workspaceKey || !currentRepoPaths.has(workspaceKey)) continue;
+
+    const bucketKey = `${agent.runtime}:${workspaceKey}`;
+    if (seenRepoRuntime.has(bucketKey)) continue;
+    seenRepoRuntime.add(bucketKey);
+    selected.push(agent);
+  }
+
+  return selected;
+}
+
 function filterSnapshotToIdeSessions(snapshot: FleetSnapshot) {
   const ideSessions = listIdeRuntimeSessions();
-  const ideSessionByKey = new Map(ideSessions.map((session) => [session.sessionKey, session]));
+  const ideTabs = listIdeRuntimeTabs();
+  const ideSessionByKey = new Map(ideSessions.map((session) => [session.liveSessionKey ?? session.sessionKey, session]));
   const keepAgentIds = new Set<string>();
 
   const agents = snapshot.agents
     .filter((agent) => {
       if (agent.runtime === 'openclaw') return true;
-      return ideSessionByKey.has(agent.sessionKey);
+      return ideSessionByKey.has(agent.sessionKey) || isRegistryBackedRuntimeSession(agent.sessionKey);
     })
     .map((agent) => {
       if (agent.runtime === 'openclaw') {
@@ -173,6 +272,25 @@ function filterSnapshotToIdeSessions(snapshot: FleetSnapshot) {
       return next;
     });
 
+  const fallbackAgents = selectRepoFallbackAgents(snapshot.agents, new Set(agents.map((agent) => agent.sessionKey)));
+  for (const agent of fallbackAgents) {
+    keepAgentIds.add(agent.id);
+    agents.push(agent);
+  }
+
+  const liveAgentKeys = new Set(
+    agents
+      .filter((agent) => agent.runtime !== 'openclaw')
+      .map((agent) => agent.sessionKey),
+  );
+  const ghostAgents = ideTabs
+    .filter((tab) => !tab.liveSessionKey || !liveAgentKeys.has(tab.liveSessionKey))
+    .map(mapIdeGhostRuntimeTabToAgent);
+  for (const ghost of ghostAgents) {
+    keepAgentIds.add(ghost.id);
+    agents.push(ghost);
+  }
+
   const squads = snapshot.squads
     .map((squad) => {
       const members = squad.members.filter((member) => keepAgentIds.has(member));
@@ -191,6 +309,7 @@ function filterSnapshotToIdeSessions(snapshot: FleetSnapshot) {
   const events = snapshot.events.filter((event) => !event.agentId || keepAgentIds.has(event.agentId));
   const artifacts = snapshot.artifacts.filter((artifact) => !artifact.agentId || keepAgentIds.has(artifact.agentId));
   const primarySessionKey = agents.find((agent) => agent.runtime === 'openclaw' && agent.isCurrentSession)?.sessionKey
+    ?? agents.find((agent) => agent.isCurrentSession)?.sessionKey
     ?? agents.find((agent) => agent.status === 'running')?.sessionKey
     ?? agents[0]?.sessionKey;
 
@@ -210,7 +329,8 @@ function filterSnapshotToIdeSessions(snapshot: FleetSnapshot) {
 async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
   const runtimes: AgentRuntime[] = [codexRuntime, claudeCodeRuntime].filter((runtime) => runtime.capabilities.discover);
   const ideSessions = listIdeRuntimeSessions();
-  const ideSessionByKey = new Map(ideSessions.map((session) => [session.sessionKey, session]));
+  const ideTabs = listIdeRuntimeTabs();
+  const ideSessionByKey = new Map(ideSessions.map((session) => [session.liveSessionKey ?? session.sessionKey, session]));
   const results = await Promise.allSettled(
     runtimes.map(async (runtime) => ({
       runtime,
@@ -218,13 +338,11 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
     })),
   );
 
-  const discovered = results
+  const discoveredAll = results
     .filter((result): result is PromiseFulfilledResult<{ runtime: AgentRuntime; sessions: RuntimeSession[] }> => result.status === 'fulfilled')
-    .flatMap((result) => result.value.sessions
-      .filter((session) => ideSessionByKey.has(session.sessionKey))
-      .map((session) => ({ runtime: result.value.runtime, session })));
+    .flatMap((result) => result.value.sessions.map((session) => ({ runtime: result.value.runtime, session })));
 
-  discovered.sort((left, right) => {
+  discoveredAll.sort((left, right) => {
     const statusWeight = (status: RuntimeSession['status']) => (
       status === 'running' ? 5
         : status === 'reviewing' ? 4
@@ -237,7 +355,25 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
     return right.session.lastActivityAt.getTime() - left.session.lastActivityAt.getTime();
   });
 
+  const discovered = discoveredAll.filter(({ session }) => (
+    ideSessionByKey.has(session.sessionKey) || isRegistryBackedRuntimeSession(session.sessionKey)
+  ));
+
   const agents = discovered.map(({ runtime, session }) => mapRuntimeSessionToAgent(runtime, session, ideSessionByKey.get(session.sessionKey)));
+  const fallbackAgents = selectRepoFallbackAgents(
+    discoveredAll.map(({ runtime, session }) => mapRuntimeSessionToAgent(runtime, session, ideSessionByKey.get(session.sessionKey))),
+    new Set(agents.map((agent) => agent.sessionKey)),
+  );
+  agents.push(...fallbackAgents);
+
+  const liveSessionKeys = new Set(
+    [...discovered, ...discoveredAll.filter(({ session }) => fallbackAgents.some((agent) => agent.sessionKey === session.sessionKey))]
+      .map(({ session }) => session.sessionKey),
+  );
+  const ghostAgents = ideTabs
+    .filter((tab) => !tab.liveSessionKey || !liveSessionKeys.has(tab.liveSessionKey))
+    .map(mapIdeGhostRuntimeTabToAgent);
+  agents.push(...ghostAgents);
 
   const squads: SquadSummary[] = [];
   for (const runtime of runtimes) {
@@ -276,7 +412,9 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
       timestamp: agent.lastEventAt,
     }));
 
-  const primarySessionKey = agents.find((agent) => agent.status === 'running')?.sessionKey ?? agents[0]?.sessionKey;
+  const primarySessionKey = agents.find((agent) => agent.isCurrentSession)?.sessionKey
+    ?? agents.find((agent) => agent.status === 'running')?.sessionKey
+    ?? agents[0]?.sessionKey;
 
   return {
     generatedAt: new Date().toISOString(),

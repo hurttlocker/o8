@@ -46,11 +46,13 @@ function TileHeaderButton({
   disabled,
   children,
   onClick,
+  testId,
 }: {
   title: string;
   disabled?: boolean;
   children: React.ReactNode;
   onClick: () => void;
+  testId?: string;
 }) {
   return (
     <button
@@ -58,6 +60,7 @@ function TileHeaderButton({
       onClick={onClick}
       disabled={disabled}
       title={title}
+      data-testid={testId}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
@@ -164,13 +167,13 @@ export function TileHeader({
         gap: 2,
         flexShrink: 0,
       }}>
-        <TileHeaderButton title="Split vertically" onClick={onSplitVertical}>
+        <TileHeaderButton title="Split vertically" onClick={onSplitVertical} testId="tile-split-vertical">
           <SplitVerticalIcon />
         </TileHeaderButton>
-        <TileHeaderButton title="Split horizontally" onClick={onSplitHorizontal}>
+        <TileHeaderButton title="Split horizontally" onClick={onSplitHorizontal} testId="tile-split-horizontal">
           <SplitHorizontalIcon />
         </TileHeaderButton>
-        <TileHeaderButton title="Close tile" disabled={!canClose} onClick={onClose}>
+        <TileHeaderButton title="Close tile" disabled={!canClose} onClick={onClose} testId="tile-close">
           <XIcon />
         </TileHeaderButton>
       </div>

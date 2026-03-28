@@ -61,6 +61,13 @@ import type { ApprovalRecord } from '@/lib/approvals/types';
 import { formatModelLabel } from '@/lib/format';
 import { ttsEngine } from '@/lib/tts/engine';
 import { autocompleteSlashCommand, buildSlashTerminalInput, getSlashCommandSuggestions, isSlashCommandText } from '@/lib/slash-commands';
+import {
+  adHocLaneTitle,
+  normalizeRuntimeStatusToOrchestratorStatus,
+  orchestratorRuntimeTone,
+  orchestratorStatusTone,
+} from '@/lib/orchestrator/display';
+import type { OrchestratorPacket, WorkspaceLaneState } from '@/lib/orchestrator/types';
 
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
@@ -88,6 +95,7 @@ type SessionPickerChip = {
 // ── Helpers ──
 
 function getAgentName(s: SessionSummary): string {
+  if (s.orchestrationPacket?.title?.trim()) return s.orchestrationPacket.title.trim();
   if (s.runtime === 'claude-code') return 'Claude Code';
   if (s.isCurrentSession) return 'Assistant';
   const name = s.name || s.sessionKey;
@@ -137,6 +145,9 @@ function sessionLocalFolderLabel(session: SessionSummary) {
 }
 
 function sessionRuntimeLabel(session: SessionSummary) {
+  if (session.orchestrationPacket?.runtime) {
+    return orchestratorRuntimeTone(session.orchestrationPacket.runtime).label;
+  }
   if (session.runtime === 'claude-code') return 'Claude Code';
   if (session.runtime === 'codex') return 'Codex';
   if (session.runtime === 'chat') return 'Chat';
@@ -160,8 +171,22 @@ function cleanBranchLabel(branch?: string | null) {
   return trimmed.replace(/^(feat|fix|batch|chore|refactor)\//, '');
 }
 
+function sessionLaneTitle(session?: SessionSummary) {
+  if (!session) return 'No lane selected';
+  if (session.orchestrationPacket?.title?.trim()) {
+    return session.orchestrationPacket.title.trim();
+  }
+  if (session.runtime === 'chat' || session.runtime === 'codex' || session.runtime === 'claude-code') {
+    return adHocLaneTitle('chat');
+  }
+  return adHocLaneTitle('terminal');
+}
+
 function sessionTaskLabel(session?: SessionSummary) {
   if (!session) return null;
+  if (session.orchestrationPacket?.referenceLabel) {
+    return session.orchestrationPacket.referenceLabel;
+  }
   const candidates = [
     session.name,
     session.currentTask,
@@ -189,43 +214,41 @@ function sessionTaskSummary(session?: SessionSummary, max = 42) {
   return compactLine(taskSummary, taskSummary, max);
 }
 
-function isMeaningfulTaskLabel(label?: string | null) {
-  if (!label) return false;
-  return /\bIssue #\d+\b/i.test(label) || /\bPR #\d+\b/i.test(label) || /^Review$/i.test(label);
-}
-
 function sessionStateChip(session?: SessionSummary): SessionPickerChip | null {
   if (!session) return null;
-  if (session.status === 'running') return { label: 'Working', tone: 'green' };
-  if (session.status === 'reviewing') return { label: 'Reviewing', tone: 'purple' };
-  if (session.status === 'waiting') return { label: 'Waiting', tone: 'slate' };
-  if (session.status === 'blocked' || session.status === 'failed') return { label: 'Blocked', tone: 'red' };
-  return { label: 'Ready', tone: 'blue' };
+  const canonical = session.orchestrationPacket
+    ? orchestratorStatusTone(session.orchestrationPacket.status)
+    : orchestratorStatusTone(normalizeRuntimeStatusToOrchestratorStatus(session.status));
+  const tone: SessionPickerChipTone = canonical.label === 'Running'
+    ? 'green'
+    : canonical.label === 'Review'
+      ? 'purple'
+      : canonical.label === 'Blocked'
+        ? 'red'
+        : canonical.label === 'Queued' || canonical.label === 'Launching'
+          ? 'blue'
+          : 'slate';
+  return { label: canonical.label, tone };
 }
 
 function sessionPickerTitle(session?: SessionSummary) {
-  if (!session) return 'Select session';
-  if (session.runtime === 'openclaw') {
-    return compactLine(sanitizeTranscriptText(session.name ?? 'OpenClaw'), 'OpenClaw', 36);
-  }
-  const repoLabel = sessionRepoLabel(session);
-  const runtimeLabel = sessionRuntimeLabel(session);
-  return compactLine(repoLabel ? `${repoLabel} · ${runtimeLabel}` : runtimeLabel, runtimeLabel, 36);
+  if (!session) return 'No lane selected';
+  return compactLine(sessionLaneTitle(session), sessionLaneTitle(session), 36);
 }
 
 function sessionHeaderTitle(session?: SessionSummary) {
-  if (!session) return 'Select session';
-  if (session.runtime === 'openclaw') {
-    return compactLine(sanitizeTranscriptText(session.name ?? 'OpenClaw'), 'OpenClaw', 36);
-  }
-  const repoLabel = sessionRepoLabel(session);
-  const runtimeLabel = sessionRuntimeLabel(session);
-  if (repoLabel) return compactLine(`${repoLabel} · ${runtimeLabel}`, runtimeLabel, 42);
-  return compactLine(runtimeLabel, 'Session', 36);
+  if (!session) return 'No lane selected';
+  return compactLine(sessionLaneTitle(session), sessionLaneTitle(session), 42);
 }
 
 function sessionPickerSubtitle(session?: SessionSummary) {
   if (!session) return '';
+  if (session.orchestrationPacket) {
+    const repoLabel = sessionRepoLabel(session);
+    const branchLabel = cleanBranchLabel(session.branch);
+    const detail = [repoLabel, branchLabel].filter((value): value is string => Boolean(value)).join(' · ');
+    return compactLine(detail || 'Workspace lane', 'Workspace lane', 42);
+  }
   const taskSummary = sessionTaskSummary(session, 42);
   if (taskSummary) return taskSummary;
   const branchLabel = cleanBranchLabel(session.branch);
@@ -238,6 +261,12 @@ function sessionPickerSubtitle(session?: SessionSummary) {
 }
 
 function sessionPickerRowSubtitle(session: SessionSummary) {
+  if (session.orchestrationPacket) {
+    const repoLabel = sessionRepoLabel(session);
+    const branchLabel = cleanBranchLabel(session.branch);
+    const detail = [repoLabel, branchLabel, sessionRuntimeLabel(session)].filter((value): value is string => Boolean(value));
+    return compactLine(detail.join(' · '), detail[0] ?? 'Workspace lane', 52);
+  }
   const taskSummary = sessionTaskSummary(session, 40);
   const branchLabel = cleanBranchLabel(session.branch);
   if (taskSummary) {
@@ -255,8 +284,11 @@ function sessionPickerRowSubtitle(session: SessionSummary) {
 function sessionPickerChips(session?: SessionSummary): SessionPickerChip[] {
   if (!session) return [];
   const chips: SessionPickerChip[] = [];
-  const taskLabel = sessionTaskLabel(session);
-  if (taskLabel && isMeaningfulTaskLabel(taskLabel)) chips.push({ label: taskLabel, tone: 'blue' });
+  if (session.orchestrationPacket?.referenceLabel) {
+    chips.push({ label: session.orchestrationPacket.referenceLabel, tone: 'blue' });
+  } else {
+    chips.push({ label: 'Ad hoc', tone: 'slate' });
+  }
   chips.push({
     label: sessionRuntimeLabel(session),
     tone: session.runtime === 'claude-code' ? 'purple' : session.runtime === 'codex' ? 'green' : 'slate',
@@ -1566,7 +1598,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
               e.currentTarget.style.borderColor = 'var(--t-panel-border)';
             }
           }}
-          aria-label="Switch session"
+          aria-label="Switch lane"
           aria-expanded={pickerOpen}
         >
           <span style={{ position: 'relative', width: 8, height: 8, flexShrink: 0 }}>
@@ -3493,6 +3525,8 @@ export const DesktopComposePane = memo(function DesktopComposePane({
 export function AgentPanelChat({
   externalSessionKey,
   workspaceSessions,
+  workspaceLane,
+  orchestratorPackets = [],
   draftInjection,
   onOpenDiff,
   onOpenFile,
@@ -3503,6 +3537,8 @@ export function AgentPanelChat({
 }: {
   externalSessionKey?: string;
   workspaceSessions?: SessionSummary[];
+  workspaceLane?: WorkspaceLaneState | null;
+  orchestratorPackets?: OrchestratorPacket[];
   draftInjection?: { id: string; text: string } | null;
   onOpenDiff?: () => void;
   onOpenFile?: (filePath: string, workspace?: string) => void;
@@ -3562,6 +3598,20 @@ export function AgentPanelChat({
     () => effectiveSessions.find(s => s.sessionKey === selectedKey),
     [effectiveSessions, selectedKey]
   );
+  const selectedOrchestratorPacket = useMemo(
+    () => workspaceLane?.packet
+      ?? selectedSession?.orchestrationPacket
+      ?? orchestratorPackets.find((packet) => packet.lane?.sessionKey === selectedKey)
+      ?? null,
+    [orchestratorPackets, selectedKey, selectedSession?.orchestrationPacket, workspaceLane?.packet],
+  );
+  const selectedOrchestratorRepoPath = useMemo(
+    () => workspaceLane?.repoPath
+      ?? selectedSession?.workspace
+      ?? orchestratorPackets.find((packet) => packet.lane?.sessionKey === selectedKey)?.lane?.repoPath
+      ?? null,
+    [orchestratorPackets, selectedKey, selectedSession?.workspace, workspaceLane?.repoPath],
+  );
   const headerSession = useMemo(
     () => selectedSession ?? (lastHeaderSessionRef.current?.sessionKey === selectedKey ? lastHeaderSessionRef.current : null),
     [selectedKey, selectedSession],
@@ -3583,10 +3633,14 @@ export function AgentPanelChat({
     if (!workspaceScopeProvided) return;
     if (effectiveSessions.some((session) => session.sessionKey === selectedKey)) return;
     if (!selectedKey && effectiveSessions.length === 0) return;
+    transcriptRequestRef.current += 1;
+    selectedKeyRef.current = '';
     lastHeaderSessionRef.current = null;
     setSelectedKey('');
     setTranscript([]);
     setApprovals([]);
+    setLoading(false);
+    setAgentRunning(false);
     setStreamingText('');
     liveToolCallsRef.current = [];
     setActiveToolCalls([]);
@@ -3746,14 +3800,6 @@ export function AgentPanelChat({
     () => pickerSnapshot ? buildProjectGroups(pickerSnapshot, selectedSession) : [],
     [pickerSnapshot, selectedSession]
   );
-  const pickerEmptyStateLabel = useMemo(
-    () => (
-      workspaceScopeProvided
-        ? 'No IDE sessions in this workspace'
-        : ((loading || connectionState !== 'connected' || stablePickerSessions.length > 0) ? 'Refreshing sessions…' : 'No IDE sessions yet')
-    ),
-    [connectionState, loading, stablePickerSessions.length, workspaceScopeProvided],
-  );
   const fallbackLiveSession = useMemo(
     () => stablePickerSessions.find((session) => session.isCurrentSession) ?? stablePickerSessions[0] ?? null,
     [stablePickerSessions],
@@ -3764,36 +3810,130 @@ export function AgentPanelChat({
     && !loading
     && stablePickerSessions.length > 0,
   );
+  const laneTranscriptState = useMemo(() => {
+    if (workspaceLane?.transcriptState) {
+      if (workspaceLane.transcriptState === 'ready' && loading && transcript.length === 0) {
+        return 'waiting_activity';
+      }
+      return workspaceLane.transcriptState;
+    }
+    if (selectedOrchestratorPacket?.status === 'recovering') return 'recovering';
+    if (missingSelectedSession) return 'missing';
+    if (workspaceScopeProvided && !selectedSession && effectiveSessions.length === 0) return 'no_lane';
+    if ((selectedSession || selectedOrchestratorPacket) && loading && transcript.length === 0) return 'waiting_activity';
+    return 'ready';
+  }, [
+    effectiveSessions.length,
+    loading,
+    missingSelectedSession,
+    selectedOrchestratorPacket,
+    selectedSession,
+    transcript.length,
+    workspaceLane,
+    workspaceScopeProvided,
+  ]);
+  const pickerEmptyStateLabel = useMemo(
+    () => (
+      workspaceScopeProvided
+        ? (laneTranscriptState === 'recovering'
+          ? 'Recovering lane'
+          : laneTranscriptState === 'missing'
+            ? 'Lane missing'
+            : laneTranscriptState === 'waiting_activity'
+              ? 'Waiting for first activity'
+              : 'No lane selected')
+        : ((loading || connectionState !== 'connected' || stablePickerSessions.length > 0) ? 'Refreshing sessions…' : 'No IDE sessions yet')
+    ),
+    [connectionState, laneTranscriptState, loading, stablePickerSessions.length, workspaceScopeProvided],
+  );
 
   // ── Derived header values ──
   const activeTitle = useMemo(() => {
+    if (workspaceLane?.title) return workspaceLane.title;
     if (!headerSession) {
-      if (selectedKey.startsWith('claude-code:')) return 'Claude Code';
-      if (selectedKey.startsWith('codex:')) return 'Codex';
-      return 'Select session';
+      if (selectedOrchestratorPacket?.title?.trim()) return selectedOrchestratorPacket.title.trim();
+      return workspaceScopeProvided ? 'No lane selected' : 'Select session';
     }
     return sessionHeaderTitle(headerSession);
-  }, [headerSession, selectedKey]);
+  }, [headerSession, selectedOrchestratorPacket?.title, workspaceLane?.title, workspaceScopeProvided]);
 
   const activeSubtitle = useMemo(() => {
+    if (workspaceLane?.subtitle) return workspaceLane.subtitle;
     if (!headerSession) {
-      return '';
+      return selectedOrchestratorRepoPath ?? '';
     }
     return sessionPickerSubtitle(headerSession);
-  }, [headerSession]);
-  const activeChips = useMemo(() => sessionPickerChips(headerSession ?? undefined), [headerSession]);
+  }, [headerSession, selectedOrchestratorRepoPath, workspaceLane?.subtitle]);
+  const activeChips = useMemo(() => {
+    if (workspaceLane) {
+      const runtimeTone = workspaceLane.runtime ? orchestratorRuntimeTone(workspaceLane.runtime) : null;
+      const statusTone = workspaceLane.status ? orchestratorStatusTone(workspaceLane.status) : null;
+      const chips: SessionPickerChip[] = [];
+      if (workspaceLane.packet?.referenceLabel) {
+        chips.push({ label: workspaceLane.packet.referenceLabel, tone: 'blue' });
+      } else if (workspaceLane.isAdHoc) {
+        chips.push({ label: 'Ad hoc', tone: 'slate' });
+      }
+      if (runtimeTone) {
+        chips.push({ label: runtimeTone.label, tone: workspaceLane.runtime === 'claude-code' ? 'purple' : 'green' });
+      }
+      if (statusTone) {
+        const tone: SessionPickerChipTone = statusTone.label === 'Running'
+          ? 'green'
+          : statusTone.label === 'Review'
+            ? 'purple'
+            : statusTone.label === 'Blocked'
+              ? 'red'
+              : statusTone.label === 'Queued' || statusTone.label === 'Launching'
+                ? 'blue'
+                : 'slate';
+        chips.push({ label: statusTone.label, tone });
+      }
+      return chips;
+    }
+    if (headerSession) return sessionPickerChips(headerSession);
+    if (!selectedOrchestratorPacket) return [];
+    const runtimeTone = orchestratorRuntimeTone(selectedOrchestratorPacket.runtime);
+    const statusTone = orchestratorStatusTone(selectedOrchestratorPacket.status);
+    const packetTone: SessionPickerChipTone = 'blue';
+    const runtimeChipTone: SessionPickerChipTone = selectedOrchestratorPacket.runtime === 'claude-code' ? 'purple' : 'green';
+    const statusChipTone: SessionPickerChipTone = statusTone.label === 'Running'
+      ? 'green'
+      : statusTone.label === 'Review'
+        ? 'purple'
+        : statusTone.label === 'Blocked'
+          ? 'red'
+          : statusTone.label === 'Queued' || statusTone.label === 'Launching'
+            ? 'blue'
+            : 'slate';
+    return [
+      { label: selectedOrchestratorPacket.referenceLabel, tone: packetTone },
+      { label: runtimeTone.label, tone: runtimeChipTone },
+      {
+        label: statusTone.label,
+        tone: statusChipTone,
+      },
+    ];
+  }, [headerSession, selectedOrchestratorPacket, workspaceLane]);
 
   const isMainOpenClaw = headerSession?.runtime === 'openclaw' && headerSession?.sessionKey === 'agent:main:main';
   const connectionDotColor = isMainOpenClaw
     ? '#2563eb'
-    : headerSession?.status === 'running'
-      ? '#34c759'
-      : headerSession?.status === 'reviewing'
-        ? '#ff9f0a'
-        : '#8e8e93';
+    : workspaceLane?.status
+      ? orchestratorStatusTone(workspaceLane.status).dot
+      : selectedOrchestratorPacket
+        ? orchestratorStatusTone(selectedOrchestratorPacket.status).dot
+      : headerSession?.status === 'running'
+        ? '#34c759'
+        : headerSession?.status === 'reviewing'
+          ? '#ff9f0a'
+          : '#8e8e93';
 
-  const currentAgentName = selectedSession ? getAgentName(selectedSession) : 'Assistant';
-  const showWorkspaceEmptyState = workspaceScopeProvided && !loading && effectiveSessions.length === 0;
+  const currentAgentName = selectedSession ? getAgentName(selectedSession) : (selectedOrchestratorPacket?.title ?? 'Assistant');
+  const showWorkspaceEmptyState = workspaceScopeProvided && laneTranscriptState === 'no_lane';
+  const showLaneWaitingState = workspaceScopeProvided && laneTranscriptState === 'waiting_activity';
+  const showLaneRecoveringState = workspaceScopeProvided && laneTranscriptState === 'recovering';
+  const showLaneMissingState = workspaceScopeProvided && laneTranscriptState === 'missing';
   const sidebarCapabilities = useMemo<SidebarRuntimeCapabilities>(
     () => deriveSidebarRuntimeCapabilities(selectedSession),
     [selectedSession],
@@ -4384,6 +4524,19 @@ export function AgentPanelChat({
 
   // ── External session key (from Agent Panel click) ──
   useEffect(() => {
+    if (workspaceScopeProvided && workspaceLane) {
+      if (workspaceLane.sessionKey) {
+        if (workspaceLane.sessionKey !== lastAppliedExternalSessionKeyRef.current) {
+          lastAppliedExternalSessionKeyRef.current = workspaceLane.sessionKey;
+          setSelectedKey(workspaceLane.sessionKey);
+        }
+      } else if (workspaceLane.transcriptState !== 'missing' && selectedKey) {
+        lastAppliedExternalSessionKeyRef.current = '';
+        setSelectedKey('');
+        setTranscript([]);
+      }
+      return;
+    }
     if (!externalSessionKey) return;
     if (workspaceScopeProvided && !effectiveSessions.some((session) => session.sessionKey === externalSessionKey)) {
       return;
@@ -4392,7 +4545,7 @@ export function AgentPanelChat({
       lastAppliedExternalSessionKeyRef.current = externalSessionKey;
       setSelectedKey(externalSessionKey);
     }
-  }, [effectiveSessions, externalSessionKey, workspaceScopeProvided]);
+  }, [effectiveSessions, externalSessionKey, selectedKey, workspaceLane, workspaceScopeProvided]);
 
   useEffect(() => {
     if (!draftInjection?.id) return;
@@ -4674,7 +4827,7 @@ export function AgentPanelChat({
         </div>
       )}
 
-      {missingSelectedSession && fallbackLiveSession ? (
+      {!workspaceScopeProvided && missingSelectedSession && fallbackLiveSession ? (
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -4689,7 +4842,9 @@ export function AgentPanelChat({
           marginTop: !wsConnected ? 0 : headerOverlayHeight,
         }}>
           <span style={{ flex: 1, minWidth: 0, lineHeight: 1.45 }}>
-            The selected session is no longer live. Jump to {fallbackLiveSession.name} or refresh the workspace snapshot.
+            {connectionState === 'connected'
+              ? `Lane missing. Jump to ${fallbackLiveSession.name} or refresh the workspace snapshot.`
+              : 'Recovering lane. The last selected lane is waiting for the runtime inventory to return.'}
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
             <button
@@ -4710,7 +4865,7 @@ export function AgentPanelChat({
                 fontFamily: '-apple-system, system-ui, sans-serif',
               }}
             >
-              Open live session
+              Open live lane
             </button>
             <button
               type="button"
@@ -4757,7 +4912,97 @@ export function AgentPanelChat({
               lineHeight: 1.6,
             }}
           >
-            No workspace chat sessions are attached to this workspace. Open or launch a workspace session from the center surface.
+            <div style={{ fontSize: 14, fontWeight: 650, color: 'var(--t-text)' }}>No lane selected</div>
+            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--t-text-muted)' }}>
+              Focus or launch a workspace lane from the center surface.
+            </div>
+          </div>
+        </div>
+      ) : showLaneWaitingState ? (
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingTop: wsConnected ? headerOverlayHeight + 8 : 12,
+            paddingRight: 18,
+            paddingBottom: 18,
+            paddingLeft: 18,
+          }}
+        >
+          <div
+            className="remodex-loading-card"
+            style={{
+              maxWidth: 320,
+              textAlign: 'center',
+              lineHeight: 1.6,
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 650, color: 'var(--t-text)' }}>
+              Waiting for first activity
+            </div>
+            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--t-text-muted)' }}>
+              The lane is attached. Transcript activity will appear here as soon as the runtime emits its first event.
+            </div>
+          </div>
+        </div>
+      ) : showLaneRecoveringState ? (
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingTop: wsConnected ? headerOverlayHeight + 8 : 12,
+            paddingRight: 18,
+            paddingBottom: 18,
+            paddingLeft: 18,
+          }}
+        >
+          <div
+            className="remodex-loading-card"
+            style={{
+              maxWidth: 320,
+              textAlign: 'center',
+              lineHeight: 1.6,
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 650, color: 'var(--t-text)' }}>
+              Recovering lane
+            </div>
+            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--t-text-muted)' }}>
+              This lane is reattaching to the workspace after restore. Hold here until the runtime inventory settles.
+            </div>
+          </div>
+        </div>
+      ) : showLaneMissingState ? (
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingTop: wsConnected ? headerOverlayHeight + 8 : 12,
+            paddingRight: 18,
+            paddingBottom: 18,
+            paddingLeft: 18,
+          }}
+        >
+          <div
+            className="remodex-loading-card"
+            style={{
+              maxWidth: 320,
+              textAlign: 'center',
+              lineHeight: 1.6,
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 650, color: 'var(--t-text)' }}>
+              Lane missing
+            </div>
+            <div style={{ marginTop: 6, fontSize: 12, color: 'var(--t-text-muted)' }}>
+              The selected lane no longer has a live workspace binding. Re-focus a live lane or relaunch it from Thoughts.
+            </div>
           </div>
         </div>
       ) : (

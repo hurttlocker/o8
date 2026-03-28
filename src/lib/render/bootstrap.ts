@@ -116,6 +116,7 @@ function createShellMobileSnapshot(): MobileInboxSnapshot {
     sourceLabel: 'Mobile shell warming',
     note: 'Shell rendered immediately. Live inbox, transcript, and review truth are still warming in the background.',
     sessions: [],
+    approvals: [],
     items: [],
     summary: {
       alerts: 0,

@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
+import { requirePanelAuth } from '@/lib/panel/auth';
 
 const VERCEL_TOKEN = process.env.VERCEL_TOKEN;
 
@@ -21,7 +22,10 @@ interface VercelDeployment {
   inspectorUrl?: string;
 }
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
+  const denied = requirePanelAuth(request);
+  if (denied) return denied;
+
   const { searchParams } = new URL(request.url);
   const projectName = searchParams.get('project');
   const limit = Math.min(parseInt(searchParams.get('limit') ?? '15', 10), 30);

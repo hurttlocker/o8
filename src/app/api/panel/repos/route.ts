@@ -26,6 +26,8 @@ import type {
   RepoRegistryPostBody,
 } from '@/lib/repos/types';
 
+const RUNTIME_CLEANUP_TIMEOUT_MS = 3_500;
+
 function normalizeScopePath(filePath?: string | null) {
   const trimmed = filePath?.trim();
   if (!trimmed) return null;
@@ -68,16 +70,26 @@ function agentBelongsToRepoScope(
 }
 
 async function stopRepoBoundRuntimeSessions(repo: { localPath: string; remoteUrl?: string | null; name: string }) {
-  const snapshot = await getRuntimeInventorySnapshot({ fresh: true, includeOpenClaw: true });
-  const targetAgents = snapshot.agents.filter((agent) => agentBelongsToRepoScope(agent, repo));
+  const snapshot = await Promise.race([
+    getRuntimeInventorySnapshot({ fresh: true, includeOpenClaw: true }),
+    new Promise<Awaited<ReturnType<typeof getRuntimeInventorySnapshot>>>((_, reject) => {
+      setTimeout(() => reject(new Error('Runtime inventory timed out.')), RUNTIME_CLEANUP_TIMEOUT_MS);
+    }),
+  ]).catch(() => null);
+  const targetAgents = snapshot?.agents.filter((agent) => agentBelongsToRepoScope(agent, repo)) ?? [];
   const stoppedSessionKeys = new Set<string>();
 
   await Promise.allSettled(targetAgents.map(async (agent) => {
     try {
-      await performRuntimeAction({
-        action: 'stop',
-        surfaceId: agent.runtimeSurface?.id ?? agent.sessionKey,
-      });
+      await Promise.race([
+        performRuntimeAction({
+          action: 'stop',
+          surfaceId: agent.runtimeSurface?.id ?? agent.sessionKey,
+        }),
+        new Promise<null>((resolve) => {
+          setTimeout(() => resolve(null), RUNTIME_CLEANUP_TIMEOUT_MS);
+        }),
+      ]);
       stoppedSessionKeys.add(agent.sessionKey);
     } catch {
       // Best effort: repo removal should still proceed.
@@ -85,7 +97,12 @@ async function stopRepoBoundRuntimeSessions(repo: { localPath: string; remoteUrl
 
     const terminalBinding = getRuntimeTerminalSession(agent.sessionKey);
     if (terminalBinding?.sessionName) {
-      await killTmuxSession(terminalBinding.sessionName).catch(() => undefined);
+      await Promise.race([
+        killTmuxSession(terminalBinding.sessionName).catch(() => undefined),
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, RUNTIME_CLEANUP_TIMEOUT_MS);
+        }),
+      ]);
     }
   }));
 
@@ -188,9 +205,9 @@ export async function DELETE(request: Request) {
     // Look up localPath before removal so we can clean up skeleton cache
     const repos = await listRepos();
     const toRemove = repos.find(r => r.id === body.id);
-    const stoppedSessions = toRemove
-      ? await stopRepoBoundRuntimeSessions(toRemove)
-      : { targetedSessionCount: 0, stoppedSessionCount: 0, removedTerminalBindings: 0 };
+    const removedTerminalBindings = toRemove?.localPath
+      ? removeRuntimeTerminalSessionsForRepoPath(toRemove.localPath)
+      : [];
 
     await removeRepo(body.id);
 
@@ -214,7 +231,7 @@ export async function DELETE(request: Request) {
         sessionKey: toRemove?.localPath,
         status: 'completed',
         note: toRemove
-          ? `Removed ${toRemove.name} from Cortex and stopped ${stoppedSessions.stoppedSessionCount}/${stoppedSessions.targetedSessionCount} repo-bound runtime session(s).`
+          ? `Removed ${toRemove.name} from Cortex and queued background cleanup for repo-bound runtime sessions.`
           : 'Repository removed from Cortex.',
         createdAt: new Date().toISOString(),
         settledAt: new Date().toISOString(),
@@ -223,10 +240,19 @@ export async function DELETE(request: Request) {
       fresh: true,
     });
 
+    if (toRemove) {
+      void stopRepoBoundRuntimeSessions(toRemove).catch(() => undefined);
+    }
+
     return NextResponse.json({
       ok: true,
       removedId: body.id,
-      stoppedSessions,
+      stoppedSessions: {
+        targetedSessionCount: 0,
+        stoppedSessionCount: 0,
+        removedTerminalBindings: removedTerminalBindings.length,
+        cleanupPending: Boolean(toRemove),
+      },
     });
   } catch (error) {
     return NextResponse.json(

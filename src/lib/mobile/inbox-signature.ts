@@ -5,7 +5,11 @@ function sessionSignature(session: MobileInboxSnapshot['sessions'][number]) {
 }
 
 function itemSignature(item: MobileInboxSnapshot['items'][number]) {
-  return `${item.id}:${item.kind}:${item.severity}:${item.title}:${item.detail}:${item.sessionKey ?? ''}:${item.timestampLabel ?? ''}:${item.actions.map((action) => `${action.kind}:${action.label}:${action.available ? 1 : 0}`).join(',')}`;
+  return `${item.id}:${item.kind}:${item.severity}:${item.title}:${item.detail}:${item.approvalId ?? ''}:${item.sessionKey ?? ''}:${item.timestampLabel ?? ''}:${item.actions.map((action) => `${action.kind}:${action.label}:${action.available ? 1 : 0}`).join(',')}`;
+}
+
+function approvalSignature(approval: MobileInboxSnapshot['approvals'][number]) {
+  return `${approval.id}:${approval.sessionKey}:${approval.agent}:${approval.severity}:${approval.title}:${approval.description}:${approval.createdAt}:${Object.entries(approval.metadata ?? {}).sort(([left], [right]) => left.localeCompare(right)).map(([key, value]) => `${key}:${value}`).join('|')}`;
 }
 
 function reviewSignature(review: MobileInboxSnapshot['review']) {
@@ -24,6 +28,7 @@ export function mobileInboxSignature(snapshot: MobileInboxSnapshot) {
     snapshot.primarySessionKey ?? '',
     snapshot.note ?? '',
     snapshot.sessions.map(sessionSignature).join('|'),
+    (snapshot.approvals ?? []).map(approvalSignature).join('|'),
     snapshot.items.map(itemSignature).join('|'),
     `${snapshot.summary.alerts}:${snapshot.summary.activeRuns}:${snapshot.summary.approvals}:${snapshot.summary.reviewItems}`,
     reviewSignature(snapshot.review),

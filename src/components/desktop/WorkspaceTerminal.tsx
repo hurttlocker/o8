@@ -19,6 +19,17 @@ import {
   type PersistedTabState,
 } from '@/lib/terminal/tab-state';
 import type { MobileInboxSnapshot, MobileTranscriptEntry, MobileTranscriptSource, MobileTranscriptThinkingStep, MobileTranscriptToolCall } from '@/lib/mobile/types';
+import type {
+  OrchestratorLaneSnapshot,
+  WorkspaceLaneState,
+  WorkspaceOrchestrationPacketBadge,
+} from '@/lib/orchestrator/types';
+import {
+  adHocLaneTitle,
+  laneDisplayTitle,
+  orchestratorRuntimeTone,
+  orchestratorStatusTone,
+} from '@/lib/orchestrator/display';
 import { deriveWorkflowStage } from '@/lib/workflows/status';
 import type { RepoReadiness } from '@/lib/repos/types';
 import {
@@ -51,6 +62,7 @@ export interface TerminalTab {
   chatCheckpoints?: PersistedChatCheckpoint[];
   linkedIssue?: LinkedIssueRef | null;
   canvasTab?: CanvasTab;
+  orchestrationPacket?: WorkspaceOrchestrationPacketBadge | null;
 }
 
 type LocalhostPreview = DetectedLocalhostPreview;
@@ -72,6 +84,7 @@ export interface TerminalTabHandle {
   setTermExited: (sessionName: string) => void;
   onSessionCreated: (sessionName: string, requestId?: string) => boolean;
   clearDetectedPreview: (port: number) => void;
+  isRestoreSettled: () => boolean;
   openCliChatSession: (options: {
     runtime?: 'codex' | 'claude-code';
     repo?: RegisteredRepo;
@@ -81,6 +94,7 @@ export interface TerminalTabHandle {
     autoSend?: boolean;
     createNew?: boolean;
     label?: string;
+    orchestrationPacket?: WorkspaceOrchestrationPacketBadge | null;
   }) => string;
   injectIntoCliChat: (text: string, options?: {
     runtime?: 'codex' | 'claude-code';
@@ -91,7 +105,11 @@ export interface TerminalTabHandle {
     createNew?: boolean;
     label?: string;
     targetSessionKey?: string;
+    orchestrationPacket?: WorkspaceOrchestrationPacketBadge | null;
   }) => string;
+  focusTab: (tabId: string) => boolean;
+  setOrchestrationPacket: (tabId: string, packet: WorkspaceOrchestrationPacketBadge | null) => boolean;
+  getChatTabSnapshots: () => OrchestratorLaneSnapshot[];
   openWorkspaceDiff: () => void;
   openInspectorTab: (tab: CanvasTab, options?: { repo?: RegisteredRepo; createNew?: boolean }) => string;
 }
@@ -106,6 +124,7 @@ interface WorkspaceTerminalProps {
   openRepoPaths?: string[];
   onActiveChatSessionChange?: (sessionKey: string | null) => void;
   onChatSessionsChange?: (sessions: MobileInboxSnapshot['sessions']) => void;
+  onActiveLaneChange?: (lane: WorkspaceLaneState | null) => void;
   onRepoScopeChange?: (repoPath: string | null) => void;
   onActiveRepoContextChange?: (repo: RegisteredRepo | null) => void;
   onSelectRepoScope?: (repo: RegisteredRepo) => void;
@@ -161,6 +180,124 @@ function repoSlugFromRemote(remoteUrl?: string | null) {
   if (!remoteUrl) return null;
   const match = remoteUrl.match(/github\.com[/:]([^/]+\/[^/.]+)(?:\.git)?$/i);
   return match?.[1] ?? null;
+}
+
+function activeManualLaneStatus(tab: TerminalTab | null) {
+  if (!tab) return orchestratorStatusTone('idle');
+  if (tab.kind === 'chat') {
+    return orchestratorStatusTone(tab.chatSessionKey ? 'running' : 'launching');
+  }
+  if (tab.kind === 'terminal') {
+    return orchestratorStatusTone(tab.tmuxSession ? 'running' : 'launching');
+  }
+  return orchestratorStatusTone('idle');
+}
+
+function manualLaneRuntimeTone(tab: TerminalTab | null) {
+  if (!tab) return null;
+  if (tab.kind === 'chat') {
+    return orchestratorRuntimeTone(tab.chatRuntime);
+  }
+  if (tab.kind === 'terminal') {
+    if (tab.cliAgent === 'claude') return orchestratorRuntimeTone('claude-code');
+    if (tab.cliAgent === 'codex') return orchestratorRuntimeTone('codex');
+    return {
+      label: 'Terminal',
+      shortLabel: 'Sh',
+      color: '#64748b',
+      background: 'rgba(148, 163, 184, 0.12)',
+      border: 'rgba(148, 163, 184, 0.2)',
+      dot: '#94a3b8',
+    };
+  }
+  return null;
+}
+
+function buildWorkspaceLaneState(
+  stateScope: string,
+  tab: TerminalTab | null,
+  preferredRepo?: RegisteredRepo | null,
+): WorkspaceLaneState | null {
+  if (!tab) {
+    return {
+      tileId: stateScope,
+      tabId: null,
+      kind: null,
+      title: 'No lane selected',
+      subtitle: null,
+      repoPath: preferredRepo?.localPath ?? null,
+      branch: preferredRepo?.branch ?? null,
+      runtime: null,
+      sessionKey: null,
+      packet: null,
+      status: null,
+      transcriptState: 'no_lane',
+      isAdHoc: true,
+    };
+  }
+
+  if (tab.kind !== 'chat') {
+    return {
+      tileId: stateScope,
+      tabId: tab.id,
+      kind: tab.kind,
+      title: laneDisplayTitle(tab.orchestrationPacket, tab.kind),
+      subtitle: tab.repo
+        ? `${tab.repo.name} · ${tab.repo.branch ?? 'main'}`
+        : null,
+      repoPath: tab.repo?.localPath ?? preferredRepo?.localPath ?? null,
+      branch: tab.repo?.branch ?? preferredRepo?.branch ?? null,
+      runtime: null,
+      sessionKey: null,
+      packet: tab.orchestrationPacket ?? null,
+      status: tab.orchestrationPacket?.status ?? null,
+      transcriptState: 'no_lane',
+      isAdHoc: !tab.orchestrationPacket,
+    };
+  }
+
+  const status = tab.orchestrationPacket?.status
+    ?? (tab.chatSessionKey ? 'running' : 'launching');
+  const transcriptState = status === 'recovering'
+    ? 'recovering'
+    : status === 'blocked' && !tab.chatSessionKey && (tab.chatMessages?.length ?? 0) === 0
+      ? 'missing'
+      : !tab.chatSessionKey && (tab.chatMessages?.length ?? 0) === 0
+        ? 'waiting_activity'
+        : tab.chatSessionKey && (tab.chatMessages?.length ?? 0) === 0
+          ? 'waiting_activity'
+          : 'ready';
+  return {
+    tileId: stateScope,
+    tabId: tab.id,
+    kind: tab.kind,
+    title: laneDisplayTitle(tab.orchestrationPacket, tab.kind),
+    subtitle: tab.repo
+      ? `${tab.repo.name} · ${tab.repo.branch ?? 'main'}`
+      : null,
+    repoPath: tab.repo?.localPath ?? preferredRepo?.localPath ?? null,
+    branch: tab.repo?.branch ?? preferredRepo?.branch ?? null,
+    runtime: tab.orchestrationPacket?.runtime ?? (tab.chatRuntime === 'codex' || tab.chatRuntime === 'claude-code' ? tab.chatRuntime : null),
+    sessionKey: formatWorkspaceChatSessionKey(tab.chatRuntime, tab.chatSessionKey),
+    packet: tab.orchestrationPacket ?? null,
+    status,
+    transcriptState,
+    isAdHoc: !tab.orchestrationPacket,
+  };
+}
+
+function sameOrchestrationPacketBadge(
+  left: WorkspaceOrchestrationPacketBadge | null | undefined,
+  right: WorkspaceOrchestrationPacketBadge | null | undefined,
+) {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.packetId === right.packetId
+    && left.referenceLabel === right.referenceLabel
+    && left.title === right.title
+    && left.status === right.status
+    && left.runtime === right.runtime
+    && left.branchTarget === right.branchTarget;
 }
 
 function formatWorkspaceChatSessionKey(
@@ -1701,7 +1838,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                 maxWidth: 420,
                 lineHeight: '1.5',
               }}>
-                Chat with {selectedModel.label} — scoped to this {runtimeLabel} session{tab.repo ? ` in ${tab.repo.name}` : ''}.
+                Chat with {selectedModel.label} — scoped to this {runtimeLabel} lane{tab.repo ? ` in ${tab.repo.name}` : ''}.
               </div>
             </div>
 
@@ -2384,12 +2521,18 @@ function describeWorkspaceChatTab(tab: TerminalTab) {
   };
 }
 
-function workspaceTabPrimaryLabel(tab: TerminalTab, chatTabMeta: ReturnType<typeof describeWorkspaceChatTab>) {
+function workspaceTabPrimaryLabel(tab: TerminalTab) {
+  if (tab.orchestrationPacket) {
+    return laneDisplayTitle(tab.orchestrationPacket, tab.kind);
+  }
   if (tab.kind === 'llm-chat') {
-    return chatTabMeta?.summary ?? 'new chat';
+    return adHocLaneTitle('llm-chat');
   }
   if (tab.kind === 'chat') {
-    return chatTabMeta?.summary ?? 'new task';
+    return adHocLaneTitle('chat');
+  }
+  if (tab.kind === 'terminal') {
+    return adHocLaneTitle('terminal');
   }
   return tab.label;
 }
@@ -2498,13 +2641,30 @@ const TabBar = memo(function TabBar({
           const taskMeta = parseWorkspaceTaskLabel(tab.label);
           const taskState = taskMeta ? inferWorkspaceTaskState(tab) : null;
           const chatTabMeta = describeWorkspaceChatTab(tab);
+          const runtimeTone = tab.kind === 'chat'
+            ? orchestratorRuntimeTone(tab.orchestrationPacket?.runtime ?? tab.chatRuntime)
+            : tab.orchestrationPacket
+              ? orchestratorRuntimeTone(tab.orchestrationPacket.runtime)
+              : manualLaneRuntimeTone(tab);
+          const orchestrationTone = tab.orchestrationPacket
+            ? orchestratorStatusTone(tab.orchestrationPacket.status)
+            : (tab.kind === 'chat' || tab.kind === 'terminal'
+              ? activeManualLaneStatus(tab)
+              : null);
           const checkpointCount = tab.kind === 'chat' ? (tab.chatCheckpoints?.length ?? 0) : 0;
-          const primaryLabel = workspaceTabPrimaryLabel(tab, chatTabMeta);
-          const showSecondaryRow = Boolean(tab.kind !== 'chat' && tab.kind !== 'llm-chat' && (taskMeta || checkpointCount > 0));
+          const primaryLabel = workspaceTabPrimaryLabel(tab);
+          const tabDetail = tab.orchestrationPacket
+            ? (chatTabMeta?.detail ?? tab.orchestrationPacket.branchTarget ?? null)
+            : (chatTabMeta?.summary ?? chatTabMeta?.detail ?? null);
+          const showSecondaryRow = Boolean(
+            tabDetail
+            || runtimeTone
+            || (tab.kind !== 'chat' && tab.kind !== 'llm-chat' && (taskMeta || checkpointCount > 0))
+          );
           const tabTitle = [
-            tab.label,
+            primaryLabel,
+            tabDetail,
             chatTabMeta?.fullSummary,
-            chatTabMeta?.detail,
           ].filter((value): value is string => Boolean(value)).join(' — ');
           return (
             <button
@@ -2553,18 +2713,87 @@ const TabBar = memo(function TabBar({
               ) : (
                 <AgentDot color={agent?.color ?? '#64748b'} />
               )}
-              <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, gap: taskMeta ? 1 : 0 }}>
-                <span style={{
-                  maxWidth: 220,
-                  overflow: 'hidden',
-                  whiteSpace: 'nowrap',
-                  fontWeight: taskMeta || chatTabMeta?.summary ? 600 : undefined,
-                  letterSpacing: '-0.01em',
-                }}>
-                  {primaryLabel}
-                </span>
+                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, gap: taskMeta ? 1 : 0 }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <span style={{
+                      maxWidth: 220,
+                      overflow: 'hidden',
+                      whiteSpace: 'nowrap',
+                      textOverflow: 'ellipsis',
+                      fontWeight: taskMeta || chatTabMeta?.summary ? 600 : undefined,
+                      letterSpacing: '-0.01em',
+                    }}>
+                      {primaryLabel}
+                    </span>
+                    {runtimeTone ? (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        padding: '1px 6px',
+                        borderRadius: 999,
+                        background: runtimeTone.background,
+                        border: `1px solid ${runtimeTone.border}`,
+                        color: runtimeTone.color,
+                        fontSize: 9,
+                        fontWeight: 800,
+                        letterSpacing: '0.03em',
+                        textTransform: 'uppercase',
+                        flexShrink: 0,
+                      }}>
+                        {runtimeTone.shortLabel}
+                      </span>
+                    ) : null}
+                    {tab.orchestrationPacket ? (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        padding: '1px 6px',
+                        borderRadius: 999,
+                        background: 'var(--t-divider-subtle)',
+                        color: 'var(--t-text-secondary)',
+                        fontSize: 9,
+                        fontWeight: 800,
+                        letterSpacing: '0.03em',
+                        textTransform: 'uppercase',
+                        flexShrink: 0,
+                      }}>
+                        {tab.orchestrationPacket.referenceLabel}
+                      </span>
+                    ) : null}
+                    {orchestrationTone ? (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        padding: '1px 6px',
+                        borderRadius: 999,
+                        background: orchestrationTone.background,
+                        border: `1px solid ${orchestrationTone.border}`,
+                        color: orchestrationTone.color,
+                        fontSize: 9,
+                        fontWeight: 800,
+                        letterSpacing: '0.03em',
+                        textTransform: 'uppercase',
+                        flexShrink: 0,
+                      }}>
+                        {orchestrationTone.label}
+                      </span>
+                    ) : null}
+                  </span>
                 {showSecondaryRow ? (
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    {tabDetail ? (
+                      <span style={{
+                        maxWidth: 220,
+                        overflow: 'hidden',
+                        whiteSpace: 'nowrap',
+                        textOverflow: 'ellipsis',
+                        color: 'var(--t-text-faint)',
+                        fontSize: 10,
+                        fontWeight: 500,
+                      }}>
+                        {tabDetail}
+                      </span>
+                    ) : null}
                     {taskMeta && taskState ? (
                       <span style={{
                         display: 'inline-flex',
@@ -3182,6 +3411,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       openRepoPaths = [],
       onActiveChatSessionChange,
       onChatSessionsChange,
+      onActiveLaneChange,
       onRepoScopeChange,
       onActiveRepoContextChange,
       onSelectRepoScope,
@@ -3218,11 +3448,16 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     const pendingRequestRef = useRef<Map<string, string>>(new Map()); // requestId → tabId
     const restoredRef = useRef(false);
     const restoreSettledRef = useRef(false);
+    const restoreInFlightRef = useRef(false);
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const detectedPortsRef = useRef<Set<number>>(new Set()); // avoid duplicate detections
     const urlDetectionEnabledRef = useRef(false); // suppress during initial replay
     const previousWsConnectedRef = useRef(false);
+    const termWsConnectedRef = useRef(termWsConnected);
+    const initialTerminalBootstrapRef = useRef(false);
     const restoreKeyRef = useRef<string | null>(null);
+    const preferredRepoRef = useRef(preferredRepo);
+    preferredRepoRef.current = preferredRepo;
     const reportedRepoScopeRef = useRef<string | null | undefined>(undefined);
     const chatSessionsChangeRef = useRef(onChatSessionsChange);
     const activeChatSessionChangeRef = useRef(onActiveChatSessionChange);
@@ -3258,6 +3493,10 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     }, [onActiveChatSessionChange, onChatSessionsChange]);
 
     useEffect(() => {
+      termWsConnectedRef.current = termWsConnected;
+    }, [termWsConnected]);
+
+    useEffect(() => {
       if (!repoPickerOpen) return;
       const handlePointerDown = (event: MouseEvent) => {
         if (repoPickerRef.current && !repoPickerRef.current.contains(event.target as Node)) {
@@ -3272,9 +3511,44 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       const previousKey = restoreKeyRef.current;
       if (previousKey === restoreKey) return;
       restoreKeyRef.current = restoreKey;
+      const nextPreferredRepoPath = preferredRepo?.localPath ?? null;
+      const currentTabs = tabsRef.current;
+      const hasOrchestratedTabs = currentTabs.some((tab) => Boolean(tab.orchestrationPacket));
+      const canPreserveScopedTabs = previousKey !== null
+        && currentTabs.length > 0
+        && (
+          hasOrchestratedTabs
+          || (
+            nextPreferredRepoPath
+            && currentTabs.some((tab) => tab.repo?.localPath === nextPreferredRepoPath)
+            && currentTabs.every((tab) => !tab.repo?.localPath || tab.repo.localPath === nextPreferredRepoPath)
+          )
+        );
+
+      if (previousKey === null) {
+        // First run — just record the key without resetting state
+        return;
+      }
+
+      // If a restore is still in flight (loadTabState / applyPersistedState pending),
+      // the tile scope is the same, and the only change is preferredRepo resolving,
+      // let the in-flight restore finish instead of cancelling and restarting.
+      // This prevents a race where loadRegisteredRepos resolves before the first
+      // loadTabState completes, causing tabs to be cleared mid-restore.
+      const previousScope = previousKey.split('::')[0];
+      const nextScope = restoreKey.split('::')[0];
+      if (
+        restoreInFlightRef.current
+        && previousScope === nextScope
+        && currentTabs.length === 0
+      ) {
+        return;
+      }
+
       restoredRef.current = false;
       restoreSettledRef.current = false;
       previousWsConnectedRef.current = false;
+      initialTerminalBootstrapRef.current = false;
       reportedRepoScopeRef.current = undefined;
       reportedChatSessionsSignatureRef.current = '';
       reportedActiveChatSessionKeyRef.current = null;
@@ -3285,83 +3559,51 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
       }
-      if (previousKey === null) return;
+      if (canPreserveScopedTabs) {
+        restoredRef.current = true;
+        restoreSettledRef.current = true;
+        const preserveFrame = window.requestAnimationFrame(() => {
+          setRestoreCompletedKey(restoreKey);
+        });
+        return () => window.cancelAnimationFrame(preserveFrame);
+      }
       urlDetectionEnabledRef.current = false;
       const resetFrame = window.requestAnimationFrame(() => {
         setPreviews([]);
+        tabsRef.current = [];
         setTabs([]);
         setActiveTabId('');
       });
       return () => window.cancelAnimationFrame(resetFrame);
-    }, [restoreKey]);
+    }, [preferredRepo?.localPath, restoreKey]);
 
     useEffect(() => {
       const preferredLocalPath = preferredRepo?.localPath ?? '';
       const preferredBranch = preferredRepo?.branch ?? 'main';
       const nextSessions: MobileInboxSnapshot['sessions'] = visibleTabs
         .filter((tab) => (
-          (tab.kind === 'chat' && (tab.chatRuntime === 'codex' || tab.chatRuntime === 'claude-code'))
-          || tab.kind === 'llm-chat'
+          tab.kind === 'chat' && (tab.chatRuntime === 'codex' || tab.chatRuntime === 'claude-code')
         ))
         .map((tab) => {
-          if (tab.kind === 'llm-chat') {
-            const prefixedKey = formatWorkspaceChatSessionKey('chat', tab.id) ?? tab.id;
-            return {
-              id: prefixedKey,
-              name: tab.label,
-              squadId: 'workspace',
-              runtime: 'chat',
-              model: 'Workspace Chat',
-              status: tab.id === effectiveActiveTabId ? 'running' : 'idle',
-              currentTask: '',
-              workspace: tab.repo?.localPath ?? preferredLocalPath,
-              branch: tab.repo?.branch ?? preferredBranch,
-              sessionKey: prefixedKey,
-              approvalStatus: 'none',
-              lastEventAt: new Date(tab.lastActivity).toISOString(),
-              context: { usedPercent: 0, trend: 'stable' as const },
-              alerts: 0,
-              surfaceLabel: tab.label,
-              isCurrentSession: tab.id === effectiveActiveTabId,
-              runtimeSurface: {
-                id: prefixedKey,
-                runtime: 'chat',
-                kind: 'chat-session',
-                ownership: 'owned',
-                title: tab.label,
-                cwd: tab.repo?.localPath ?? preferredLocalPath,
-                branch: tab.repo?.branch ?? preferredBranch,
-                sourceLabel: 'Workspace chat tab',
-                capabilities: {
-                  attach: false,
-                  readTail: true,
-                  sendInput: true,
-                  interrupt: false,
-                  resize: false,
-                  diffContext: true,
-                  reviewContext: true,
-                },
-                reviewContext: undefined,
-              },
-            };
-          }
-
           const runtime = tab.chatRuntime as 'codex' | 'claude-code';
           const prefixedKey = formatWorkspaceChatSessionKey(runtime, tab.chatSessionKey)
             ?? fallbackWorkspaceChatSessionKey(runtime, tab.id, stableRepoScope ?? stateScope);
           const repoSlug = repoSlugFromRemote(tab.repo?.remoteUrl);
           const latestMessage = [...(tab.chatMessages ?? [])].reverse().find((entry) => entry.role === 'assistant' || entry.role === 'user');
           const hasLiveSession = Boolean(tab.chatSessionKey);
+          const laneTitle = laneDisplayTitle(tab.orchestrationPacket, tab.kind);
           return {
             id: prefixedKey,
-            name: tab.label,
+            name: laneTitle,
             squadId: 'workspace',
             runtime,
             model: tab.chatModel ?? (runtime === 'claude-code' ? 'claude-code' : 'codex'),
             status: tab.id === effectiveActiveTabId && hasLiveSession ? 'running' : 'idle',
-            currentTask: latestMessage?.text?.trim() ?? (hasLiveSession
-              ? ''
-              : `Restored ${runtime === 'claude-code' ? 'Claude Code' : 'Codex'} tab from IDE state. No live runtime is attached.`),
+            currentTask: tab.orchestrationPacket?.title
+              ?? latestMessage?.text?.trim()
+              ?? (hasLiveSession
+                ? ''
+                : `Restored ${runtime === 'claude-code' ? 'Claude Code' : 'Codex'} lane from IDE state. No live runtime is attached.`),
             workspace: tab.repo?.localPath ?? preferredLocalPath,
             branch: tab.repo?.branch ?? preferredBranch,
             sessionKey: prefixedKey,
@@ -3369,19 +3611,20 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             lastEventAt: new Date(tab.lastActivity).toISOString(),
             context: { usedPercent: 0, trend: 'stable' as const },
             alerts: 0,
-            surfaceLabel: tab.label,
+            surfaceLabel: laneTitle,
             isCurrentSession: tab.id === effectiveActiveTabId,
+            orchestrationPacket: tab.orchestrationPacket ?? null,
             runtimeSurface: {
               id: prefixedKey,
               runtime,
               kind: 'chat-session',
               ownership: 'owned',
-              title: tab.label,
+              title: laneTitle,
               cwd: tab.repo?.localPath ?? preferredLocalPath,
               branch: tab.repo?.branch ?? preferredBranch,
               sourceLabel: hasLiveSession
-                ? 'Workspace chat tab'
-                : 'Workspace chat tab restored without a live runtime session',
+                ? 'Workspace lane'
+                : 'Workspace lane restored without a live runtime session',
               capabilities: {
                 attach: false,
                 readTail: true,
@@ -3416,85 +3659,76 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         ?? nextSessions[0]
         ?? null;
       const nextActiveSessionKey = activeChat?.sessionKey ?? null;
-      if (nextSessions.some((session) => session.isCurrentSession) && reportedActiveChatSessionKeyRef.current !== nextActiveSessionKey) {
+      if (reportedActiveChatSessionKeyRef.current !== nextActiveSessionKey) {
         reportedActiveChatSessionKeyRef.current = nextActiveSessionKey;
         activeChatSessionChangeRef.current?.(nextActiveSessionKey);
       }
     }, [effectiveActiveTabId, preferredRepo?.branch, preferredRepo?.localPath, stableRepoScope, stateScope, visibleTabs]);
 
+    const serializePersistedTabs = useCallback((currentTabs: TerminalTab[]) => (
+      currentTabs
+        .filter((tab) => !(tab.kind === 'canvas' && tab.canvasTab?.kind === 'ci'))
+        .map((tab) => ({
+          id: tab.id,
+          label: tab.label,
+          kind: tab.kind,
+          cliAgent: tab.cliAgent ?? 'shell',
+          repoName: tab.repo?.name,
+          repoPath: tab.repo?.localPath,
+          tmuxSession: tab.tmuxSession ?? undefined,
+          chatRuntime: tab.chatRuntime,
+          chatSessionKey: tab.chatSessionKey,
+          chatModel: tab.chatModel,
+          chatContinueLatest: tab.chatContinueLatest,
+          chatCheckpoints: tab.chatCheckpoints,
+          linkedIssue: tab.linkedIssue ?? undefined,
+          orchestrationPacket: tab.orchestrationPacket ?? undefined,
+          canvasTab: tab.canvasTab ? {
+            id: tab.canvasTab.id,
+            kind: tab.canvasTab.kind,
+            label: tab.canvasTab.label,
+            resourceId: tab.canvasTab.resourceId,
+            meta: tab.canvasTab.meta,
+          } : undefined,
+        }))
+    ), []);
+
+    const persistTabsNow = useCallback((currentTabs: TerminalTab[], currentActiveId: string) => {
+      const persistableTabs = serializePersistedTabs(currentTabs);
+      const nextActiveId = persistableTabs.some((tab) => tab.id === currentActiveId)
+        ? currentActiveId
+        : (persistableTabs[persistableTabs.length - 1]?.id ?? currentActiveId);
+      const persisted: PersistedTabState = {
+        version: 1,
+        activeTabId: nextActiveId,
+        tabs: persistableTabs,
+        savedAt: new Date().toISOString(),
+      };
+      void saveTabState(persisted, stateScope);
+
+      const repoScopedTabs = preferredRepo?.localPath
+        ? persistableTabs.filter((tab) => tab.repoPath === preferredRepo.localPath)
+        : [];
+      if (stableRepoScope && stableRepoScope !== stateScope && preferredRepo?.localPath) {
+        const repoPersisted: PersistedTabState = {
+          version: 1,
+          activeTabId: repoScopedTabs.some((tab) => tab.id === currentActiveId)
+            ? currentActiveId
+            : (repoScopedTabs[repoScopedTabs.length - 1]?.id ?? ''),
+          tabs: repoScopedTabs,
+          savedAt: persisted.savedAt,
+        };
+        void saveTabState(repoPersisted, stableRepoScope);
+      }
+    }, [preferredRepo, serializePersistedTabs, stableRepoScope, stateScope]);
+
     // Persist tab state (debounced — saves 500ms after last change)
     const persistTabs = useCallback((currentTabs: TerminalTab[], currentActiveId: string) => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
-        const persistableTabs = currentTabs.filter((tab) => !(tab.kind === 'canvas' && tab.canvasTab?.kind === 'ci'));
-        const nextActiveId = persistableTabs.some((tab) => tab.id === currentActiveId)
-          ? currentActiveId
-          : (persistableTabs[persistableTabs.length - 1]?.id ?? currentActiveId);
-        const persisted: PersistedTabState = {
-          version: 1,
-          activeTabId: nextActiveId,
-          tabs: persistableTabs.map(t => ({
-            id: t.id,
-            label: t.label,
-            kind: t.kind,
-            cliAgent: t.cliAgent ?? 'shell',
-            repoName: t.repo?.name,
-            repoPath: t.repo?.localPath,
-            tmuxSession: t.tmuxSession ?? undefined,
-            chatRuntime: t.chatRuntime,
-            chatSessionKey: t.chatSessionKey,
-            chatModel: t.chatModel,
-            chatContinueLatest: t.chatContinueLatest,
-            chatCheckpoints: t.chatCheckpoints,
-            linkedIssue: t.linkedIssue ?? undefined,
-            canvasTab: t.canvasTab ? {
-              id: t.canvasTab.id,
-              kind: t.canvasTab.kind,
-              label: t.canvasTab.label,
-              resourceId: t.canvasTab.resourceId,
-              meta: t.canvasTab.meta,
-            } : undefined,
-          })),
-          savedAt: new Date().toISOString(),
-        };
-        saveTabState(persisted, stateScope);
-        const repoScopedTabs = preferredRepo?.localPath
-          ? persistableTabs.filter((tab) => tab.repo?.localPath === preferredRepo.localPath)
-          : [];
-        if (stableRepoScope && stableRepoScope !== stateScope && preferredRepo?.localPath && repoScopedTabs.length > 0) {
-          const repoPersisted: PersistedTabState = {
-            version: 1,
-            activeTabId: repoScopedTabs.some((tab) => tab.id === currentActiveId)
-              ? currentActiveId
-              : repoScopedTabs[repoScopedTabs.length - 1]?.id ?? currentActiveId,
-            tabs: repoScopedTabs.map(t => ({
-              id: t.id,
-              label: t.label,
-              kind: t.kind,
-              cliAgent: t.cliAgent ?? 'shell',
-              repoName: t.repo?.name,
-              repoPath: t.repo?.localPath,
-              tmuxSession: t.tmuxSession ?? undefined,
-              chatRuntime: t.chatRuntime,
-              chatSessionKey: t.chatSessionKey,
-              chatModel: t.chatModel,
-              chatContinueLatest: t.chatContinueLatest,
-              chatCheckpoints: t.chatCheckpoints,
-              linkedIssue: t.linkedIssue ?? undefined,
-              canvasTab: t.canvasTab ? {
-                id: t.canvasTab.id,
-                kind: t.canvasTab.kind,
-                label: t.canvasTab.label,
-                resourceId: t.canvasTab.resourceId,
-                meta: t.canvasTab.meta,
-              } : undefined,
-            })),
-            savedAt: persisted.savedAt,
-          };
-          saveTabState(repoPersisted, stableRepoScope);
-        }
+        persistTabsNow(currentTabs, currentActiveId);
       }, 500);
-    }, [preferredRepo, stableRepoScope, stateScope]);
+    }, [persistTabsNow]);
 
     const requestTerminalForTab = useCallback((tabId: string, command?: string) => {
       const requestId = `workspace-${tabId}-${Date.now()}`;
@@ -3535,20 +3769,63 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         label: 'Chat',
         kind: 'llm-chat',
         tmuxSession: null,
-        repo: preferredRepo ?? undefined,
+        repo: preferredRepoRef.current ?? undefined,
         linkedIssue: null,
         createdAt: now,
         lastActivity: now,
       };
-    }, [preferredRepo]);
+    }, []);
 
     const applyPersistedState = useCallback(async (saved: PersistedTabState, cancelled?: () => boolean) => {
       const tmuxNames = saved.tabs.map((t) => t.tmuxSession).filter(Boolean) as string[];
-      const [alive, liveRuntimeSessionKeys] = await Promise.all([
-        checkAliveSessions(tmuxNames),
-        loadLiveRuntimeSessionKeys(),
-      ]);
+
+      // If every saved tab is orchestrated or a non-runtime tab, skip the
+      // potentially slow liveness API calls entirely — these tabs should
+      // always be restored from their persisted state.
+      const needsLivenessCheck = saved.tabs.some((t) => {
+        const kind = t.kind ?? 'terminal';
+        if (kind === 'terminal') return true;
+        if (kind === 'chat' && !t.orchestrationPacket) return true;
+        return false;
+      });
+
+      let alive: Set<string>;
+      let liveRuntimeSessionKeys: Set<import('@/lib/terminal/tab-state').PersistedRuntimeSessionKey>;
+
+      if (needsLivenessCheck) {
+        // Race liveness checks against a timeout so slow API calls don't block
+        // tab restoration. Tabs are restored with optimistic session keys and
+        // validated asynchronously.
+        try {
+          const result = await Promise.race([
+            Promise.all([checkAliveSessions(tmuxNames), loadLiveRuntimeSessionKeys()]),
+            new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 2000)),
+          ]);
+          if (result === 'timeout') {
+            alive = new Set(tmuxNames);
+            liveRuntimeSessionKeys = new Set();
+          } else {
+            [alive, liveRuntimeSessionKeys] = result;
+          }
+        } catch {
+          alive = new Set(tmuxNames);
+          liveRuntimeSessionKeys = new Set();
+        }
+      } else {
+        // Optimistically treat all saved sessions as alive so orchestrated
+        // tabs keep their session keys on restore.
+        alive = new Set(tmuxNames);
+        const optimisticKeys = saved.tabs
+          .map((t) => formatPersistedRuntimeSessionKey(t.chatRuntime, t.chatSessionKey))
+          .filter((k): k is import('@/lib/terminal/tab-state').PersistedRuntimeSessionKey => k !== null);
+        liveRuntimeSessionKeys = new Set(optimisticKeys);
+      }
       if (cancelled?.()) return false;
+
+      // Read preferred repo from ref to avoid stale closure — the prop may
+      // change while this async function is in flight but the ref always
+      // reflects the latest value.
+      const currentPreferredRepo = preferredRepoRef.current;
 
       const restoredTabs: TerminalTab[] = [];
       const sessionsToAttach: string[] = [];
@@ -3569,7 +3846,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             label: st.label,
             kind: 'llm-chat',
             tmuxSession: null,
-            repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : (preferredRepo ?? undefined),
+            repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : (currentPreferredRepo ?? undefined),
             linkedIssue: st.linkedIssue ?? null,
             createdAt: now,
             lastActivity: now,
@@ -3589,9 +3866,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           const liveSessionKey = prefixedSessionKey && liveRuntimeSessionKeys.has(prefixedSessionKey)
             ? stripPersistedRuntimeSessionKey(st.chatRuntime, st.chatSessionKey)
             : undefined;
-          const tabId = `chat-${tabCountRef.current}`;
-          restoredTabs.push({
-            id: tabId,
+	          const tabId = st.id?.trim() || `chat-${tabCountRef.current}`;
+	          restoredTabs.push({
+	            id: tabId,
             label: st.label,
             kind: 'chat',
             tmuxSession: null,
@@ -3599,10 +3876,11 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             chatSessionKey: liveSessionKey,
             chatModel: st.chatModel,
             chatContinueLatest: liveSessionKey ? st.chatContinueLatest : false,
-            chatCheckpoints: st.chatCheckpoints ?? [],
-            repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : (preferredRepo ?? undefined),
-            linkedIssue: st.linkedIssue ?? null,
-            createdAt: now,
+	            chatCheckpoints: st.chatCheckpoints ?? [],
+	            repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : (currentPreferredRepo ?? undefined),
+	            linkedIssue: st.linkedIssue ?? null,
+	            orchestrationPacket: st.orchestrationPacket ?? null,
+	            createdAt: now,
             lastActivity: now,
             chatMessages: [],
           });
@@ -3618,7 +3896,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             label: st.label,
             kind: 'canvas',
             tmuxSession: null,
-            repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : (preferredRepo ?? undefined),
+            repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : (currentPreferredRepo ?? undefined),
             canvasTab: {
               id: st.canvasTab.id,
               kind: st.canvasTab.kind as CanvasTab['kind'],
@@ -3642,7 +3920,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             kind: 'terminal',
             tmuxSession: st.tmuxSession,
             cliAgent: st.cliAgent,
-            repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : (preferredRepo ?? undefined),
+            repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : (currentPreferredRepo ?? undefined),
             createdAt: now,
             lastActivity: now,
           });
@@ -3654,7 +3932,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             kind: 'terminal',
             tmuxSession: null,
             cliAgent: 'shell',
-            repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : (preferredRepo ?? undefined),
+            repo: st.repoPath ? { name: st.repoName ?? 'repo', localPath: st.repoPath } : (currentPreferredRepo ?? undefined),
             createdAt: now,
             lastActivity: now,
           });
@@ -3662,40 +3940,64 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         if (st.id === saved.activeTabId) restoredActiveTabId = tabId;
       }
 
+      let nextActiveId = '';
       if (defaultTab === 'llm-chat') {
         const restoredChat = restoredTabs.find((tab) => tab.kind === 'llm-chat');
         if (restoredChat) {
+          nextActiveId = restoredActiveTabId ?? restoredChat.id;
+          tabsRef.current = restoredTabs;
           setTabs(restoredTabs);
-          setActiveTabId(restoredActiveTabId ?? restoredChat.id);
+          setActiveTabId(nextActiveId);
+        } else if (restoredTabs.length > 0) {
+          const restoredCliChat = restoredTabs.find((tab) => tab.kind === 'chat');
+          nextActiveId = restoredActiveTabId ?? restoredCliChat?.id ?? restoredTabs[0]?.id ?? '';
+          tabsRef.current = restoredTabs;
+          setTabs(restoredTabs);
+          setActiveTabId(nextActiveId);
         } else {
           const defaultChat = createDefaultChatTab();
-          setTabs([defaultChat, ...restoredTabs]);
-          setActiveTabId(defaultChat.id);
+          const nextTabs = [defaultChat, ...restoredTabs];
+          nextActiveId = defaultChat.id;
+          tabsRef.current = nextTabs;
+          setTabs(nextTabs);
+          setActiveTabId(nextActiveId);
         }
       } else {
-        setTabs(restoredTabs);
         const restoredTerminal = restoredTabs.find((tab) => tab.kind === 'terminal');
-        setActiveTabId(restoredActiveTabId ?? restoredTerminal?.id ?? restoredTabs[0]?.id ?? '');
+        nextActiveId = restoredActiveTabId ?? restoredTerminal?.id ?? restoredTabs[0]?.id ?? '';
+        tabsRef.current = restoredTabs;
+        setTabs(restoredTabs);
+        setActiveTabId(nextActiveId);
       }
       if (cancelled?.()) return false;
 
-      for (const sessionName of sessionsToAttach) {
-        sendTerminalAttach(sessionName, 120, 30);
-      }
+      if (termWsConnectedRef.current) {
+        initialTerminalBootstrapRef.current = true;
+        for (const sessionName of sessionsToAttach) {
+          sendTerminalAttach(sessionName, 120, 30);
+        }
 
-      const deadTerminalTabs = restoredTabs.filter((t) => t.kind === 'terminal' && t.tmuxSession === null);
-      for (const deadTab of deadTerminalTabs) {
-        if (cancelled?.()) return false;
-        const restoreCommand = deadTab.repo?.localPath ? `cd ${deadTab.repo.localPath}` : undefined;
-        requestTerminalForTab(deadTab.id, restoreCommand);
+        const deadTerminalTabs = restoredTabs.filter((t) => t.kind === 'terminal' && t.tmuxSession === null);
+        for (const deadTab of deadTerminalTabs) {
+          if (cancelled?.()) return false;
+          const restoreCommand = deadTab.repo?.localPath ? `cd ${deadTab.repo.localPath}` : undefined;
+          requestTerminalForTab(deadTab.id, restoreCommand);
+        }
+      } else {
+        initialTerminalBootstrapRef.current = false;
       }
       return restoredTabs.length > 0;
-    }, [createDefaultChatTab, defaultTab, preferredRepo, requestTerminalForTab, sendTerminalAttach]);
+    }, [createDefaultChatTab, defaultTab, requestTerminalForTab, sendTerminalAttach]);
 
-    // Restore tabs on first WS connect for this page load.
+    // Restore tabs on first page load, even before the workspace bridge reconnects.
+    // This effect only re-runs when the tile scope actually changes (stateScope).
+    // All other values (preferredRepo, restoreKey, autoCreateDefaultTab, etc.)
+    // are read from refs at execution time so that async-resolving props
+    // (like repos loading) don't cancel an in-flight restore via effect cleanup.
     useEffect(() => {
-      if (!termWsConnected || restoredRef.current) return;
+      if (restoredRef.current) return;
       restoredRef.current = true;
+      restoreInFlightRef.current = true;
       let cancelled = false;
 
       // Suppress URL detection for 5s to skip replay of old terminal output
@@ -3704,63 +4006,96 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
 
       (async () => {
         try {
-          await new Promise<void>((resolve) => {
-            window.requestAnimationFrame(() => resolve());
-          });
+          let saved = splitCreated ? null : await loadTabState(stateScope, null);
           if (cancelled) return;
-
-          const allowRepoFallbackRestore = !splitCreated;
-          let saved = splitCreated ? null : await loadTabState(stateScope, allowRepoFallbackRestore ? (preferredRepo?.localPath ?? null) : null);
-          if (cancelled) return;
-          const preferredRepoPath = preferredRepo?.localPath ?? null;
+          const currentPreferredRepoPath = preferredRepoRef.current?.localPath ?? null;
+          const currentStableRepoScope = !splitCreated && currentPreferredRepoPath
+            ? buildRepoStateScope(currentPreferredRepoPath)
+            : null;
           const savedRepoPaths = saved
             ? Array.from(new Set(saved.tabs.map((tab) => tab.repoPath).filter((value): value is string => Boolean(value))))
             : [];
-          const savedMatchesPreferredRepo = !preferredRepoPath
+          const savedHasOrchestratedTabs = Boolean(saved?.tabs.some((tab) => tab.orchestrationPacket));
+          const savedMatchesPreferredRepo = !currentPreferredRepoPath
             || savedRepoPaths.length === 0
-            || savedRepoPaths.includes(preferredRepoPath);
+            || savedRepoPaths.includes(currentPreferredRepoPath);
 
-          if (!splitCreated && (!saved || saved.tabs.length === 0 || !savedMatchesPreferredRepo) && stableRepoScope) {
-            saved = await loadTabState(stableRepoScope, preferredRepo?.localPath ?? null);
+          if (
+            !splitCreated
+            && (!saved || saved.tabs.length === 0 || (!savedMatchesPreferredRepo && !savedHasOrchestratedTabs))
+            && currentStableRepoScope
+          ) {
+            saved = await loadTabState(currentStableRepoScope, currentPreferredRepoPath);
             if (cancelled) return;
           }
+
+          const currentRestoreKey = restoreKeyRef.current ?? `${stateScope}::${defaultTab}::${splitCreated ? 'split' : 'shared'}::${currentPreferredRepoPath ?? 'no-repo'}`;
 
           if (saved && saved.tabs.length > 0) {
             await applyPersistedState(saved, () => cancelled);
             if (cancelled) return;
+            restoreInFlightRef.current = false;
             restoreSettledRef.current = true;
-            setRestoreCompletedKey(restoreKey);
+            setRestoreCompletedKey(currentRestoreKey);
           } else if (autoCreateDefaultTab) {
             if (cancelled) return;
             if (defaultTab === 'llm-chat') {
               const defaultChat = createDefaultChatTab();
+              tabsRef.current = [defaultChat];
               setTabs([defaultChat]);
               setActiveTabId(defaultChat.id);
             } else {
               const defaultShell = createDefaultShellTab();
+              tabsRef.current = [defaultShell];
               setTabs([defaultShell]);
               setActiveTabId(defaultShell.id);
-              requestTerminalForTab(defaultShell.id);
+              if (termWsConnectedRef.current) {
+                initialTerminalBootstrapRef.current = true;
+                requestTerminalForTab(defaultShell.id);
+              }
             }
+            restoreInFlightRef.current = false;
             restoreSettledRef.current = true;
-            setRestoreCompletedKey(restoreKey);
+            setRestoreCompletedKey(currentRestoreKey);
           } else {
+            tabsRef.current = [];
             setTabs([]);
             setActiveTabId('');
+            restoreInFlightRef.current = false;
             restoreSettledRef.current = true;
-            setRestoreCompletedKey(restoreKey);
+            setRestoreCompletedKey(currentRestoreKey);
           }
         } catch {
+          restoreInFlightRef.current = false;
           if (cancelled) return;
+          const currentRestoreKey = restoreKeyRef.current ?? stateScope;
           restoreSettledRef.current = true;
-          setRestoreCompletedKey(restoreKey);
+          setRestoreCompletedKey(currentRestoreKey);
         }
       })();
       return () => {
         cancelled = true;
+        restoreInFlightRef.current = false;
         window.clearTimeout(urlDetectionTimer);
       };
-    }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createDefaultShellTab, defaultTab, preferredRepo, requestTerminalForTab, restoreKey, splitCreated, stableRepoScope, stateScope, termWsConnected]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only re-run when the tile scope changes. All other values are read from refs at execution time to prevent effect cleanup from cancelling in-flight restores when async props (repos, preferred repo) resolve.
+    }, [stateScope, splitCreated, defaultTab]);
+
+    useEffect(() => {
+      if (!termWsConnected || !restoreSettledRef.current || initialTerminalBootstrapRef.current) {
+        return;
+      }
+      initialTerminalBootstrapRef.current = true;
+      for (const tab of tabsRef.current) {
+        if (tab.kind !== 'terminal') continue;
+        if (tab.tmuxSession) {
+          sendTerminalAttach(tab.tmuxSession, 120, 30);
+          continue;
+        }
+        const restoreCommand = tab.repo?.localPath ? `cd ${tab.repo.localPath}` : undefined;
+        requestTerminalForTab(tab.id, restoreCommand);
+      }
+    }, [requestTerminalForTab, sendTerminalAttach, termWsConnected]);
 
     useEffect(() => {
       if (tabs.length > 0 || !termWsConnected || splitCreated || !primaryRestoreSettled) return;
@@ -3774,17 +4109,20 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             }
           }
           if (!autoCreateDefaultTab) {
+            tabsRef.current = [];
             setTabs([]);
             setActiveTabId('');
             return;
           }
           if (defaultTab === 'llm-chat') {
             const fallbackChat = createDefaultChatTab();
+            tabsRef.current = [fallbackChat];
             setTabs([fallbackChat]);
             setActiveTabId(fallbackChat.id);
             return;
           }
           const fallbackShell = createDefaultShellTab();
+          tabsRef.current = [fallbackShell];
           setTabs([fallbackShell]);
           setActiveTabId(fallbackShell.id);
           if (termWsConnected) {
@@ -3837,20 +4175,20 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       return claimed;
     }, [sendTerminalDetach]);
 
-    const openWorkspaceCliChatSession = useCallback((options: {
-      runtime?: 'codex' | 'claude-code';
-      repo?: RegisteredRepo;
-      modelId?: string;
-      initialText?: string;
-      draftReason?: string;
-      autoSend?: boolean;
-      createNew?: boolean;
-      label?: string;
-      targetSessionKey?: string;
-    }) => {
-      let resolvedTabId = '';
-      const runtimeLabels = { codex: 'Codex', 'claude-code': 'Claude Code' } as const;
-      const activeTab = tabsRef.current.find((tab) => tab.id === activeTabId);
+	    const openWorkspaceCliChatSession = useCallback((options: {
+	      runtime?: 'codex' | 'claude-code';
+	      repo?: RegisteredRepo;
+	      modelId?: string;
+	      initialText?: string;
+	      draftReason?: string;
+	      autoSend?: boolean;
+	      createNew?: boolean;
+	      label?: string;
+	      targetSessionKey?: string;
+	      orchestrationPacket?: WorkspaceOrchestrationPacketBadge | null;
+	    }) => {
+      const currentTabs = tabsRef.current;
+      const activeTab = currentTabs.find((tab) => tab.id === activeTabId);
       const targetRuntime = options.targetSessionKey?.startsWith('codex:')
         ? 'codex'
         : options.targetSessionKey?.startsWith('claude-code:')
@@ -3862,84 +4200,85 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           ? activeTab.chatRuntime
           : (options.createNew ? 'codex' : 'claude-code'));
 
-      setTabs((prev) => {
-        const targetedExisting = options.createNew || !options.targetSessionKey
-          ? null
-          : prev.find((tab) => (
-              tab.kind === 'chat'
-              && formatWorkspaceChatSessionKey(tab.chatRuntime, tab.chatSessionKey) === options.targetSessionKey
-              && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
-            ));
-        const activeExisting = prev.find((tab) => (
-          tab.id === activeTabId
-          && tab.kind === 'chat'
-          && tab.chatRuntime === resolvedRuntime
-          && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
-        ));
-
-        const matchingExisting = options.createNew
-          ? null
-          : targetedExisting
-            ?? activeExisting
-            ?? prev.find((tab) => (
-              tab.kind === 'chat'
-              && tab.chatRuntime === resolvedRuntime
-              && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
-            ));
-
-        const injection = options.initialText
-          ? {
-              id: `workspace-chat-injection-${Date.now()}`,
-              text: options.initialText,
-              reason: options.draftReason,
-              autoSend: options.autoSend,
-            }
-          : undefined;
-
-        if (matchingExisting) {
-          resolvedTabId = matchingExisting.id;
-          return prev.map((tab) => (
-            tab.id === matchingExisting.id
-              ? {
-                  ...tab,
-                  label: options.label ?? tab.label,
-                  chatModel: options.modelId ?? tab.chatModel,
-                  chatContinueLatest: tab.chatContinueLatest ?? false,
-                  chatDraftInjection: injection ?? tab.chatDraftInjection,
-                }
-              : tab
+      const targetedExisting = options.createNew || !options.targetSessionKey
+        ? null
+        : currentTabs.find((tab) => (
+            tab.kind === 'chat'
+            && formatWorkspaceChatSessionKey(tab.chatRuntime, tab.chatSessionKey) === options.targetSessionKey
+            && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
           ));
-        }
+      const activeExisting = currentTabs.find((tab) => (
+        tab.id === activeTabId
+        && tab.kind === 'chat'
+        && tab.chatRuntime === resolvedRuntime
+        && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+      ));
+      const matchingExisting = options.createNew
+        ? null
+        : targetedExisting
+          ?? activeExisting
+          ?? currentTabs.find((tab) => (
+            tab.kind === 'chat'
+            && tab.chatRuntime === resolvedRuntime
+            && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+          ));
+      const injection = options.initialText
+        ? {
+            id: `workspace-chat-injection-${Date.now()}`,
+            text: options.initialText,
+            reason: options.draftReason,
+            autoSend: options.autoSend,
+          }
+        : undefined;
 
-        tabCountRef.current += 1;
-        resolvedTabId = `chat-${tabCountRef.current}`;
-        const now = Date.now();
-        const baseLabel = runtimeLabels[resolvedRuntime];
-        const newTab: TerminalTab = {
-          id: resolvedTabId,
-          label: options.label ?? baseLabel,
-          kind: 'chat',
-          tmuxSession: null,
-          chatRuntime: resolvedRuntime,
-          chatSessionKey: undefined,
-          chatModel: options.modelId ?? (resolvedRuntime === 'claude-code' ? CLAUDE_CLI_MODELS[0].id : CODEX_CLI_MODELS[0].id),
-          chatContinueLatest: false,
-          chatDraftInjection: injection,
-          chatCheckpoints: [],
-          repo: options.repo,
-          createdAt: now,
-          lastActivity: now,
-          chatMessages: [],
-        };
-        return [...prev, newTab];
-      });
-
-      if (resolvedTabId) {
+      if (matchingExisting) {
+        const resolvedTabId = matchingExisting.id;
+        const nextTabs = currentTabs.map((tab) => (
+          tab.id === resolvedTabId
+            ? {
+                ...tab,
+                label: options.label ?? options.orchestrationPacket?.title ?? tab.label,
+                chatModel: options.modelId ?? tab.chatModel,
+                chatContinueLatest: tab.chatContinueLatest ?? false,
+                chatDraftInjection: injection ?? tab.chatDraftInjection,
+                orchestrationPacket: options.orchestrationPacket ?? tab.orchestrationPacket ?? null,
+              }
+            : tab
+        ));
+        tabsRef.current = nextTabs;
+        setTabs(nextTabs);
         setActiveTabId(resolvedTabId);
+        persistTabsNow(nextTabs, resolvedTabId);
+        return resolvedTabId;
       }
 
+      tabCountRef.current += 1;
+      const resolvedTabId = `chat-${tabCountRef.current}`;
+      const now = Date.now();
+      const newTab: TerminalTab = {
+        id: resolvedTabId,
+        label: options.label ?? options.orchestrationPacket?.title ?? adHocLaneTitle('chat'),
+        kind: 'chat',
+        tmuxSession: null,
+        chatRuntime: resolvedRuntime,
+        chatSessionKey: undefined,
+        chatModel: options.modelId ?? (resolvedRuntime === 'claude-code' ? CLAUDE_CLI_MODELS[0].id : CODEX_CLI_MODELS[0].id),
+        chatContinueLatest: false,
+        chatDraftInjection: injection,
+        chatCheckpoints: [],
+	        repo: options.repo,
+	        orchestrationPacket: options.orchestrationPacket ?? null,
+	        createdAt: now,
+	        lastActivity: now,
+	        chatMessages: [],
+      };
+      const nextTabs = [...currentTabs, newTab];
+      tabsRef.current = nextTabs;
+      setTabs(nextTabs);
+      setActiveTabId(resolvedTabId);
+      persistTabsNow(nextTabs, resolvedTabId);
       return resolvedTabId;
-    }, [activeTabId]);
+    }, [activeTabId, persistTabsNow]);
 
     const openWorkspaceLlmChatSession = useCallback((options: {
       repo?: RegisteredRepo;
@@ -3950,76 +4289,71 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       label?: string;
       targetSessionKey?: string;
     }) => {
-      let resolvedTabId = '';
+      const currentTabs = tabsRef.current;
       const targetTabId = options.targetSessionKey?.startsWith('llm-chat:')
         ? options.targetSessionKey.slice('llm-chat:'.length)
         : null;
 
-      setTabs((prev) => {
-        const activeExisting = prev.find((tab) => (
-          tab.id === activeTabId
-          && tab.kind === 'llm-chat'
-          && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
-        ));
-        const targetedExisting = options.createNew || !targetTabId
-          ? null
-          : prev.find((tab) => (
-              tab.kind === 'llm-chat'
-              && tab.id === targetTabId
-              && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
-            ));
-        const matchingExisting = options.createNew
-          ? null
-          : targetedExisting
-            ?? activeExisting
-            ?? prev.find((tab) => (
-              tab.kind === 'llm-chat'
-              && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
-            ));
-
-        const injection = options.initialText
-          ? {
-              id: `workspace-llm-injection-${Date.now()}`,
-              text: options.initialText,
-              reason: options.draftReason,
-              autoSend: options.autoSend,
-            }
-          : undefined;
-
-        if (matchingExisting) {
-          resolvedTabId = matchingExisting.id;
-          return prev.map((tab) => (
-            tab.id === matchingExisting.id
-              ? {
-                  ...tab,
-                  label: options.label ?? tab.label,
-                  llmDraftInjection: injection ?? tab.llmDraftInjection,
-                }
-              : tab
+      const activeExisting = currentTabs.find((tab) => (
+        tab.id === activeTabId
+        && tab.kind === 'llm-chat'
+        && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+      ));
+      const targetedExisting = options.createNew || !targetTabId
+        ? null
+        : currentTabs.find((tab) => (
+            tab.kind === 'llm-chat'
+            && tab.id === targetTabId
+            && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
           ));
-        }
+      const matchingExisting = options.createNew
+        ? null
+        : targetedExisting
+          ?? activeExisting
+          ?? currentTabs.find((tab) => (
+            tab.kind === 'llm-chat'
+            && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+          ));
+      const injection = options.initialText
+        ? {
+            id: `workspace-llm-injection-${Date.now()}`,
+            text: options.initialText,
+            reason: options.draftReason,
+            autoSend: options.autoSend,
+          }
+        : undefined;
 
-        tabCountRef.current += 1;
-        resolvedTabId = generateLlmChatTabId();
-        const now = Date.now();
-        const newTab: TerminalTab = {
-          id: resolvedTabId,
-          label: options.label ?? 'Chat',
-          kind: 'llm-chat',
-          tmuxSession: null,
-          repo: options.repo,
-          linkedIssue: null,
-          llmDraftInjection: injection,
-          createdAt: now,
-          lastActivity: now,
-        };
-        return [...prev, newTab];
-      });
-
-      if (resolvedTabId) {
+      if (matchingExisting) {
+        const resolvedTabId = matchingExisting.id;
+        setTabs((prev) => prev.map((tab) => (
+          tab.id === resolvedTabId
+            ? {
+                ...tab,
+                label: options.label ?? tab.label,
+                llmDraftInjection: injection ?? tab.llmDraftInjection,
+              }
+            : tab
+        )));
         setActiveTabId(resolvedTabId);
+        return resolvedTabId;
       }
 
+      tabCountRef.current += 1;
+      const resolvedTabId = generateLlmChatTabId();
+      const now = Date.now();
+      const newTab: TerminalTab = {
+        id: resolvedTabId,
+        label: options.label ?? 'Chat',
+        kind: 'llm-chat',
+        tmuxSession: null,
+        repo: options.repo,
+        linkedIssue: null,
+        llmDraftInjection: injection,
+        createdAt: now,
+        lastActivity: now,
+      };
+      setTabs((prev) => [...prev, newTab]);
+      setActiveTabId(resolvedTabId);
       return resolvedTabId;
     }, [activeTabId]);
 
@@ -4027,52 +4361,47 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       repo?: RegisteredRepo;
       createNew?: boolean;
     }) => {
-      let resolvedTabId = '';
-
-      setTabs((prev) => {
-        const matchingExisting = options?.createNew
-          ? null
-          : prev.find((tab) => (
-              tab.kind === 'canvas'
-              && tab.canvasTab?.id === canvasTab.id
-              && (options?.repo ? tab.repo?.localPath === options.repo.localPath : true)
-            ));
-
-        if (matchingExisting) {
-          resolvedTabId = matchingExisting.id;
-          return prev.map((tab) => (
-            tab.id === matchingExisting.id
-              ? {
-                  ...tab,
-                  label: canvasTab.label,
-                  canvasTab,
-                  repo: options?.repo ?? tab.repo,
-                  lastActivity: Date.now(),
-                }
-              : tab
+      const currentTabs = tabsRef.current;
+      const matchingExisting = options?.createNew
+        ? null
+        : currentTabs.find((tab) => (
+            tab.kind === 'canvas'
+            && tab.canvasTab?.id === canvasTab.id
+            && (options?.repo ? tab.repo?.localPath === options.repo.localPath : true)
           ));
-        }
 
-        tabCountRef.current += 1;
-        resolvedTabId = `canvas-${tabCountRef.current}`;
-        const now = Date.now();
-        const newTab: TerminalTab = {
-          id: resolvedTabId,
-          label: canvasTab.label,
-          kind: 'canvas',
-          tmuxSession: null,
-          repo: options?.repo,
-          canvasTab,
-          createdAt: now,
-          lastActivity: now,
-        };
-        return [...prev, newTab];
-      });
-
-      if (resolvedTabId) {
+      if (matchingExisting) {
+        const resolvedTabId = matchingExisting.id;
+        setTabs((prev) => prev.map((tab) => (
+          tab.id === resolvedTabId
+            ? {
+                ...tab,
+                label: canvasTab.label,
+                canvasTab,
+                repo: options?.repo ?? tab.repo,
+                lastActivity: Date.now(),
+              }
+            : tab
+        )));
         setActiveTabId(resolvedTabId);
+        return resolvedTabId;
       }
 
+      tabCountRef.current += 1;
+      const resolvedTabId = `canvas-${tabCountRef.current}`;
+      const now = Date.now();
+      const newTab: TerminalTab = {
+        id: resolvedTabId,
+        label: canvasTab.label,
+        kind: 'canvas',
+        tmuxSession: null,
+        repo: options?.repo,
+        canvasTab,
+        createdAt: now,
+        lastActivity: now,
+      };
+      setTabs((prev) => [...prev, newTab]);
+      setActiveTabId(resolvedTabId);
       return resolvedTabId;
     }, []);
 
@@ -4164,10 +4493,11 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         detectedPortsRef.current.delete(port);
         setPreviews((prev) => prev.filter((preview) => preview.port !== port));
       },
+      isRestoreSettled: () => restoreSettledRef.current,
       openCliChatSession: (options) => openWorkspaceCliChatSession(options),
-      injectIntoCliChat: (text, options) => (
-        options?.targetSessionKey?.startsWith('llm-chat:')
-          ? openWorkspaceLlmChatSession({
+	      injectIntoCliChat: (text, options) => (
+	        options?.targetSessionKey?.startsWith('llm-chat:')
+	          ? openWorkspaceLlmChatSession({
               repo: options?.repo,
               initialText: text,
               autoSend: options?.autoSend ?? false,
@@ -4176,25 +4506,63 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
               draftReason: options?.draftReason,
               targetSessionKey: options?.targetSessionKey,
             })
-          : openWorkspaceCliChatSession({
-              runtime: options?.runtime,
-              repo: options?.repo,
-              modelId: options?.modelId,
-              initialText: text,
-              autoSend: options?.autoSend ?? false,
-              createNew: options?.createNew ?? false,
-              label: options?.label,
-              draftReason: options?.draftReason,
-              targetSessionKey: options?.targetSessionKey,
-            })
-      ),
-      openWorkspaceDiff: () => {
-        const activeWorkspaceTab = tabsRef.current.find((tab) => tab.id === activeTabId);
-        const repo = activeWorkspaceTab?.repo ?? tabsRef.current.find((tab) => tab.repo)?.repo ?? preferredRepo ?? null;
-        onOpenRepoDiff?.(repo);
-      },
+	          : openWorkspaceCliChatSession({
+	              runtime: options?.runtime,
+	              repo: options?.repo,
+	              modelId: options?.modelId,
+	              initialText: text,
+	              autoSend: options?.autoSend ?? false,
+	              createNew: options?.createNew ?? false,
+	              label: options?.label,
+	              draftReason: options?.draftReason,
+	              targetSessionKey: options?.targetSessionKey,
+	              orchestrationPacket: options?.orchestrationPacket,
+	            })
+	      ),
+	      focusTab: (tabId) => {
+	        const exists = tabsRef.current.some((tab) => tab.id === tabId);
+	        if (!exists) return false;
+	        setActiveTabId(tabId);
+          persistTabsNow(tabsRef.current, tabId);
+	        return true;
+	      },
+	      setOrchestrationPacket: (tabId, packet) => {
+	        let found = false;
+	        setTabs((prev) => prev.map((tab) => {
+	          if (tab.id !== tabId) return tab;
+	          found = true;
+            if (sameOrchestrationPacketBadge(tab.orchestrationPacket, packet)) {
+              return tab;
+            }
+	          return { ...tab, orchestrationPacket: packet };
+	        }));
+	        return found;
+	      },
+	      getChatTabSnapshots: () => (
+	        tabsRef.current
+	          .filter((tab): tab is TerminalTab & { kind: 'chat'; chatRuntime: 'codex' | 'claude-code' } => (
+	            tab.kind === 'chat' && (tab.chatRuntime === 'codex' || tab.chatRuntime === 'claude-code')
+	          ))
+	          .map((tab) => ({
+	            tileId: stateScope,
+	            tabId: tab.id,
+	            label: tab.label,
+	            runtime: tab.chatRuntime,
+	            sessionKey: formatWorkspaceChatSessionKey(tab.chatRuntime, tab.chatSessionKey),
+	            repoPath: tab.repo?.localPath ?? preferredRepo?.localPath ?? null,
+	            branch: tab.repo?.branch ?? preferredRepo?.branch ?? null,
+	            status: tab.id === activeTabId && tab.chatSessionKey ? 'running' : 'idle',
+	            lastActivityAt: new Date(tab.lastActivity).toISOString(),
+	            packetId: tab.orchestrationPacket?.packetId ?? null,
+	          }))
+	      ),
+	      openWorkspaceDiff: () => {
+	        const activeWorkspaceTab = tabsRef.current.find((tab) => tab.id === activeTabId);
+	        const repo = activeWorkspaceTab?.repo ?? tabsRef.current.find((tab) => tab.repo)?.repo ?? preferredRepo ?? null;
+	        onOpenRepoDiff?.(repo);
+	      },
       openInspectorTab: (canvasTab, options) => openWorkspaceInspectorTab(canvasTab, options),
-    }), [activeTabId, handleSessionCreated, onOpenRepoDiff, onPreviewDetected, openWorkspaceCliChatSession, openWorkspaceInspectorTab, openWorkspaceLlmChatSession, preferredRepo]);
+	    }), [activeTabId, handleSessionCreated, onOpenRepoDiff, onPreviewDetected, openWorkspaceCliChatSession, openWorkspaceInspectorTab, openWorkspaceLlmChatSession, persistTabsNow, preferredRepo, stateScope]);
 
     // Auto-register a folder so it shows in the picker next time
     const handleRegisterRepo = useCallback((localPath: string) => {
@@ -4211,7 +4579,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
 
       tabCountRef.current += 1;
       const tabId = `tab-${tabCountRef.current}`;
-      const label = agent.label;
+      const label = adHocLaneTitle('terminal');
       const now = Date.now();
       const newTab: TerminalTab = {
         id: tabId,
@@ -4240,8 +4608,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     const handleNewChatTab = useCallback((runtime: 'codex' | 'claude-code', repo?: RegisteredRepo) => {
       tabCountRef.current += 1;
       const tabId = `chat-${tabCountRef.current}`;
-      const runtimeLabels = { 'codex': 'Codex', 'claude-code': 'Claude Code' };
-      const label = runtimeLabels[runtime];
+      const label = adHocLaneTitle('chat');
       const now = Date.now();
       const newTab: TerminalTab = {
         id: tabId,
@@ -4268,7 +4635,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       const now = Date.now();
       const newTab: TerminalTab = {
         id: tabId,
-        label: 'Chat',
+        label: adHocLaneTitle('llm-chat'),
         kind: 'llm-chat',
         tmuxSession: null,
         repo: repo ?? preferredRepo ?? undefined,
@@ -4487,11 +4854,15 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     const [isDragging, setIsDragging] = useState(false);
     const [launchRequestKey, setLaunchRequestKey] = useState(0);
     const containerDivRef = useRef<HTMLDivElement>(null);
-    const activeTab = useMemo(
-      () => visibleTabs.find((tab) => tab.id === effectiveActiveTabId) ?? null,
-      [effectiveActiveTabId, visibleTabs],
-    );
-    const activeCheckpoint = activeTab?.kind === 'chat' ? activeTab.chatCheckpoints?.[0] : null;
+	    const activeTab = useMemo(
+	      () => visibleTabs.find((tab) => tab.id === effectiveActiveTabId) ?? null,
+	      [effectiveActiveTabId, visibleTabs],
+	    );
+	    const activeCheckpoint = activeTab?.kind === 'chat' ? activeTab.chatCheckpoints?.[0] : null;
+	    const activeOrchestrationPacket = activeTab?.orchestrationPacket ?? null;
+	    const activeOrchestrationTone = activeOrchestrationPacket
+	      ? orchestratorStatusTone(activeOrchestrationPacket.status)
+	      : activeManualLaneStatus(activeTab);
 
     const handleDragStart = useCallback((e: React.MouseEvent) => {
       e.preventDefault();
@@ -4530,28 +4901,41 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     const paneHasMixedRepos = paneRepoPaths.length > 1;
     const activeRepo = activeTab?.repo ?? visibleTabs.find((tab) => tab.repo)?.repo ?? preferredRepo ?? null;
     const headerRepo = activeRepo ?? preferredRepo ?? null;
+    const activeLaneState = useMemo(
+      () => buildWorkspaceLaneState(stateScope, activeTab, preferredRepo ?? null),
+      [activeTab, preferredRepo, stateScope],
+    );
+    useEffect(() => {
+      onActiveLaneChange?.(activeLaneState);
+    }, [activeLaneState, onActiveLaneChange]);
     const isFreshSplitShell = splitCreated
       && visibleTabs.length === 1
       && activeTab?.kind === 'terminal'
       && activeTab.label === 'Shell';
-    const headerContextTitle = isFreshSplitShell
-      ? 'Split pane'
+    const headerLaneTitle = activeTab
+      ? laneDisplayTitle(activeOrchestrationPacket, activeTab.kind)
+      : 'Workspace lane';
+    const headerContextTitle = isFreshSplitShell && headerRepo
+      ? `${headerRepo.name} · ${headerRepo.branch ?? 'main'}`
+      : isFreshSplitShell
+        ? 'Choose a repo or worktree'
       : headerRepo?.isWorktree
-        ? (headerRepo.branch ?? headerRepo.name)
+        ? `${headerRepo.name} · ${headerRepo.branch ?? headerRepo.name}`
       : headerRepo
         ? shortenPath(headerRepo.localPath)
         : paneHasMixedRepos
           ? `${paneRepoPaths.length} repos in this pane`
           : `${paneRepoPaths.length} repos across these tabs`;
-    const headerContextSubtitle = isFreshSplitShell && headerRepo
-      ? `${shortenPath(headerRepo.localPath)} · ready for a new shell or agent`
-      : isFreshSplitShell
-        ? 'Choose a repo or worktree, or launch a new shell here.'
-      : headerRepo?.isWorktree
-        ? `${headerRepo.name} · ${headerRepo.worktreeStatus ?? 'workspace'}`
-      : paneHasMixedRepos
-        ? `${paneRepoPaths.length} repos in this pane`
-        : null;
+    const headerContextSubtitle = headerRepo?.isWorktree
+      ? `${shortenPath(headerRepo.localPath)} · ${headerRepo.worktreeStatus ?? 'workspace'}`
+      : headerRepo
+        ? `${headerRepo.name} · ${activeRepo?.branch ?? headerRepo.branch ?? 'main'}`
+        : isFreshSplitShell
+          ? 'Ready for a new lane'
+          : null;
+    const activeRuntimeTone = activeOrchestrationPacket
+      ? orchestratorRuntimeTone(activeOrchestrationPacket.runtime)
+      : manualLaneRuntimeTone(activeTab);
     const activeRepoDetails = useMemo(() => {
       if (!headerRepo) return null;
       return {
@@ -4744,38 +5128,103 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             flexShrink: 0,
           }}
         >
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
+	            <div style={{ flex: 1, minWidth: 0 }}>
+	              <div
                 style={{
-                  fontSize: isFreshSplitShell ? 11 : 11,
-                  lineHeight: 1.2,
-                  color: isFreshSplitShell ? 'var(--t-text-secondary)' : 'var(--t-text-faint)',
-                  fontWeight: isFreshSplitShell ? 600 : 500,
-                  letterSpacing: isFreshSplitShell ? '-0.01em' : 'normal',
-                  textTransform: 'none',
+                  fontSize: 15,
+                  lineHeight: 1.15,
+                  color: 'var(--t-text)',
+                  fontWeight: 720,
+                  letterSpacing: '-0.02em',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                 }}
               >
-                {headerContextTitle || 'Workspace'}
+                {headerLaneTitle}
               </div>
-              {headerContextSubtitle ? (
-                <div
+	              <div
                   style={{
                     marginTop: 2,
-                    fontSize: 10,
-                    lineHeight: 1.2,
+                    fontSize: 10.5,
+                    lineHeight: 1.25,
                     color: 'var(--t-text-faint)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
                   }}
-                >
-                  {headerContextSubtitle}
-                </div>
-              ) : null}
-            </div>
+	                >
+	                  {headerContextTitle || 'Workspace'}
+                      {headerContextSubtitle ? ` · ${headerContextSubtitle}` : ''}
+	                </div>
+	                <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
+                    {activeOrchestrationPacket ? (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '4px 8px',
+                        borderRadius: 999,
+                        background: 'var(--t-divider-subtle)',
+                        color: 'var(--t-text-secondary)',
+                        fontSize: 10,
+                        fontWeight: 800,
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                      }}>
+                        {activeOrchestrationPacket.referenceLabel}
+                      </span>
+                    ) : (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        padding: '4px 8px',
+                        borderRadius: 999,
+                        background: 'var(--t-divider-subtle)',
+                        color: 'var(--t-text-secondary)',
+                        fontSize: 10,
+                        fontWeight: 800,
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                      }}>
+                        Ad hoc
+                      </span>
+                    )}
+	                  {activeRuntimeTone ? (
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        padding: '4px 8px',
+                        borderRadius: 999,
+                        background: activeRuntimeTone.background,
+                        border: `1px solid ${activeRuntimeTone.border}`,
+                        color: activeRuntimeTone.color,
+                        fontSize: 10,
+                        fontWeight: 800,
+                        letterSpacing: '0.03em',
+                        textTransform: 'uppercase',
+                      }}>
+                        {activeRuntimeTone.label}
+                      </span>
+                    ) : null}
+	                  <span style={{
+	                    display: 'inline-flex',
+	                    alignItems: 'center',
+	                    padding: '4px 8px',
+	                    borderRadius: 999,
+	                    background: activeOrchestrationTone.background,
+	                    border: `1px solid ${activeOrchestrationTone.border}`,
+	                    color: activeOrchestrationTone.color,
+	                    fontSize: 10,
+	                    fontWeight: 800,
+	                    textTransform: 'uppercase',
+	                    letterSpacing: '0.04em',
+	                  }}>
+	                    {activeOrchestrationTone.label}
+	                  </span>
+	                </div>
+	            </div>
             <div
               style={{
                 display: 'flex',
@@ -4917,6 +5366,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                     type="button"
                     onClick={onSplitVertical}
                     aria-label="Split vertically"
+                    data-testid="workspace-split-vertical"
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -4942,6 +5392,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                     type="button"
                     onClick={onSplitHorizontal}
                     aria-label="Split horizontally"
+                    data-testid="workspace-split-horizontal"
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -4967,6 +5418,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                     type="button"
                     onClick={onCloseTile}
                     aria-label="Close workspace tile"
+                    data-testid="workspace-close-tile"
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
@@ -5149,7 +5601,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
               >
                 <TerminalIcon size={14} />
                 <div style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>
-                  {termWsConnected ? 'Starting workspace session…' : 'Waiting for the workspace bridge…'}
+                  {termWsConnected ? 'Starting workspace lane…' : 'Waiting for the workspace bridge…'}
                 </div>
                 <div style={{ fontSize: 12, lineHeight: 1.5, maxWidth: 420 }}>
                   {tab.repo?.localPath

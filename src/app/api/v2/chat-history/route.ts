@@ -32,7 +32,18 @@ export async function GET(request: NextRequest) {
     const data = readFileSync(filePath, 'utf-8');
     return NextResponse.json(JSON.parse(data));
   } catch {
-    return NextResponse.json(null, { status: 404 });
+    return NextResponse.json({
+      messages: [],
+      model: null,
+      savedAt: null,
+      starred: false,
+      title: null,
+      repoName: null,
+      repoPath: null,
+      repoBranch: null,
+      remoteUrl: null,
+      exists: false,
+    });
   }
 }
 

@@ -267,8 +267,8 @@ export function TitleBar({
   const [availableEditors, setAvailableEditors] = useState<{ id: string; name: string; available: boolean }[]>([]);
   const selectedRepoPath = selectedRepoEntry?.localPath ?? '';
   const hasSelectedRepo = Boolean(selectedRepoEntry);
-  const openMenuButtonRef = useRef<HTMLButtonElement>(null);
   const openMenuRef = useRef<HTMLDivElement>(null);
+  const openMenuButtonRef = useRef<HTMLButtonElement>(null);
 
   // Fetch available editors on mount
   useEffect(() => {
@@ -319,89 +319,34 @@ export function TitleBar({
   }, [searchExpanded]);
 
   const closeSearch = useCallback(() => setSearchExpanded(false), []);
-  const closeOpenMenu = useCallback((options?: { restoreFocus?: boolean }) => {
-    setOpenMenuOpen(false);
-    if (options?.restoreFocus) {
-      requestAnimationFrame(() => {
-        openMenuButtonRef.current?.focus();
-      });
-    }
-  }, []);
-
-  const handleOpenIn = useCallback((editor: string) => {
-    void fetch('/api/panel/open-in', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ editor, repo: selectedRepoPath }),
-    });
-    closeOpenMenu({ restoreFocus: true });
-  }, [closeOpenMenu, selectedRepoPath]);
-
-  const handleCopyRepoPath = useCallback(() => {
-    void navigator.clipboard.writeText(selectedRepoPath);
-    closeOpenMenu({ restoreFocus: true });
-  }, [closeOpenMenu, selectedRepoPath]);
+  const closeOpenMenu = useCallback(() => setOpenMenuOpen(false), []);
 
   useEffect(() => {
     if (!openMenuOpen) return;
 
-    const getMenuItems = () => Array.from(
-      openMenuRef.current?.querySelectorAll<HTMLButtonElement>('button[data-open-menu-item="true"]') ?? [],
-    );
-
-    const focusFrame = requestAnimationFrame(() => {
-      getMenuItems()[0]?.focus();
-    });
-
     const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (openMenuRef.current?.contains(target) || openMenuButtonRef.current?.contains(target)) {
-        return;
-      }
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (openMenuRef.current?.contains(target) || openMenuButtonRef.current?.contains(target)) return;
       closeOpenMenu();
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        event.preventDefault();
-        closeOpenMenu({ restoreFocus: true });
-        return;
-      }
-
-      if (event.key === 'Tab') {
         closeOpenMenu();
-        return;
-      }
-
-      const menuItems = getMenuItems();
-      if (menuItems.length === 0) return;
-
-      const activeIndex = menuItems.findIndex((item) => item === document.activeElement);
-      if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        const nextIndex = activeIndex >= 0 ? (activeIndex + 1) % menuItems.length : 0;
-        menuItems[nextIndex]?.focus();
-      } else if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        const nextIndex = activeIndex >= 0 ? (activeIndex - 1 + menuItems.length) % menuItems.length : menuItems.length - 1;
-        menuItems[nextIndex]?.focus();
-      } else if (event.key === 'Home') {
-        event.preventDefault();
-        menuItems[0]?.focus();
-      } else if (event.key === 'End') {
-        event.preventDefault();
-        menuItems[menuItems.length - 1]?.focus();
       }
     };
 
+    const handleWindowBlur = () => closeOpenMenu();
+
     document.addEventListener('pointerdown', handlePointerDown, true);
     document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('blur', handleWindowBlur);
 
     return () => {
-      cancelAnimationFrame(focusFrame);
       document.removeEventListener('pointerdown', handlePointerDown, true);
       document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('blur', handleWindowBlur);
     };
   }, [closeOpenMenu, openMenuOpen]);
 
@@ -536,33 +481,35 @@ export function TitleBar({
           <button
             ref={openMenuButtonRef}
             type="button"
-            onClick={() => setOpenMenuOpen(v => !v)}
+            onClick={() => setOpenMenuOpen((v) => !v)}
             aria-haspopup="menu"
             aria-expanded={openMenuOpen}
-            aria-controls={openMenuOpen ? 'titlebar-open-menu' : undefined}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 4,
-              padding: '5px 10px',
-              borderRadius: 8,
-              border: '1px solid var(--t-search-border)',
-              background: 'var(--t-search-bg)',
+              gap: 6,
+              padding: '6px 12px',
+              borderRadius: 10,
+              border: '1px solid var(--t-divider)',
+              background: openMenuOpen ? 'var(--t-panel)' : 'var(--t-panel-translucent)',
+              boxShadow: openMenuOpen ? '0 12px 26px rgba(0,0,0,0.18)' : 'none',
               cursor: 'pointer',
               fontFamily: '-apple-system, system-ui, sans-serif',
               fontSize: 12,
-              fontWeight: 500,
-              color: 'var(--t-text-muted)',
-              transition: 'background 150ms ease, border-color 150ms ease',
+              fontWeight: 600,
+              color: openMenuOpen ? 'var(--t-text)' : 'var(--t-text-secondary)',
+              transition: 'background 150ms ease, border-color 150ms ease, box-shadow 150ms ease, color 150ms ease',
               whiteSpace: 'nowrap',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'var(--t-hover)';
-              e.currentTarget.style.borderColor = 'var(--t-input-border)';
+              if (!openMenuOpen) {
+                e.currentTarget.style.background = 'var(--t-hover)';
+              }
+              e.currentTarget.style.borderColor = 'var(--t-divider-strong)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'var(--t-search-bg)';
-              e.currentTarget.style.borderColor = 'var(--t-search-border)';
+              e.currentTarget.style.background = openMenuOpen ? 'var(--t-panel)' : 'var(--t-panel-translucent)';
+              e.currentTarget.style.borderColor = 'var(--t-divider)';
             }}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -578,26 +525,39 @@ export function TitleBar({
 
           {openMenuOpen ? (
             <div
-              id="titlebar-open-menu"
               ref={openMenuRef}
               role="menu"
-              aria-label="Open current repository in another app"
+              aria-label="Open in menu"
               style={{
                 position: 'absolute',
                 top: '100%',
                 right: 0,
-                marginTop: 6,
-                minWidth: 180,
-                borderRadius: 12,
-                border: '1px solid rgba(148,163,184,0.18)',
-                background: 'rgba(255,255,255,0.92)',
-                backdropFilter: 'blur(40px) saturate(1.8)',
-                WebkitBackdropFilter: 'blur(40px) saturate(1.8)',
-                boxShadow: '0 18px 42px rgba(15,23,42,0.16), 0 4px 10px rgba(15,23,42,0.06)',
+                marginTop: 8,
+                minWidth: 228,
+                padding: 6,
+                borderRadius: 14,
+                border: '1px solid var(--t-divider)',
+                background: 'var(--t-panel-translucent)',
+                backdropFilter: 'blur(24px) saturate(1.6)',
+                WebkitBackdropFilter: 'blur(24px) saturate(1.6)',
+                boxShadow: '0 24px 60px rgba(0,0,0,0.28)',
                 overflow: 'hidden',
                 zIndex: 9999,
+              }}
+            >
+              <div style={{
+                padding: '4px 8px 8px',
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+                color: 'var(--t-text-secondary)',
               }}>
-                {/* System actions */}
+                Open selected repo in
+              </div>
+
+              {/* System actions */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {[
                   { id: 'finder', name: 'Finder', icon: '📁' },
                   { id: 'terminal', name: 'Terminal', icon: '▶' },
@@ -605,25 +565,52 @@ export function TitleBar({
                   <button
                     key={item.id}
                     type="button"
-                    role="menuitem"
-                    data-open-menu-item="true"
-                    onClick={() => handleOpenIn(item.id)}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-                      padding: '8px 12px', border: 'none', background: 'transparent',
-                      color: 'var(--t-text)', fontSize: 12, fontWeight: 400,
-                      cursor: 'pointer', fontFamily: '-apple-system, system-ui, sans-serif', textAlign: 'left',
+                    onClick={() => {
+                      fetch('/api/panel/open-in', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ editor: item.id, repo: selectedRepoPath }),
+                      });
+                      closeOpenMenu();
                     }}
-                    onMouseEnter={(e) => { (e.currentTarget).style.background = 'rgba(255,255,255,0.1)'; }}
-                    onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
+                    role="menuitem"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      width: '100%',
+                      padding: '9px 10px',
+                      border: 'none',
+                      borderRadius: 10,
+                      background: 'transparent',
+                      color: 'var(--t-text)',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      textAlign: 'left',
+                      transition: 'background 140ms ease, transform 140ms ease',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.transform = 'translateY(0)'; }}
                   >
-                    <span style={{ width: 16, textAlign: 'center', fontSize: 13 }}>{item.icon}</span>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 22,
+                      height: 22,
+                      borderRadius: 7,
+                      background: 'var(--t-divider-subtle)',
+                      fontSize: 13,
+                      flexShrink: 0,
+                    }}>{item.icon}</span>
                     {item.name}
                   </button>
-                  ))}
+                ))}
 
                 {/* Divider */}
-                <div style={{ height: 1, background: 'rgba(148,163,184,0.16)', margin: '4px 0' }} />
+                <div style={{ height: 1, background: 'var(--t-divider-subtle)', margin: '6px 2px' }} />
 
                 {/* IDEs */}
                 {availableEditors
@@ -632,19 +619,45 @@ export function TitleBar({
                     <button
                       key={editor.id}
                       type="button"
-                      role="menuitem"
-                      data-open-menu-item="true"
-                      onClick={() => handleOpenIn(editor.id)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-                        padding: '8px 12px', border: 'none', background: 'transparent',
-                        color: 'var(--t-text)', fontSize: 12, fontWeight: 400,
-                        cursor: 'pointer', fontFamily: '-apple-system, system-ui, sans-serif', textAlign: 'left',
+                      onClick={() => {
+                        fetch('/api/panel/open-in', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ editor: editor.id, repo: selectedRepoPath }),
+                        });
+                        closeOpenMenu();
                       }}
-                      onMouseEnter={(e) => { (e.currentTarget).style.background = 'rgba(255,255,255,0.1)'; }}
-                      onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
+                      role="menuitem"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        width: '100%',
+                        padding: '9px 10px',
+                        border: 'none',
+                        borderRadius: 10,
+                        background: 'transparent',
+                        color: 'var(--t-text)',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        fontFamily: '-apple-system, system-ui, sans-serif',
+                        textAlign: 'left',
+                        transition: 'background 140ms ease, transform 140ms ease',
+                      }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.transform = 'translateY(0)'; }}
                     >
-                      <span style={{ width: 16, textAlign: 'center' }}>
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 22,
+                        height: 22,
+                        borderRadius: 7,
+                        background: 'var(--t-divider-subtle)',
+                        flexShrink: 0,
+                      }}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
                           <polyline points="16 18 22 12 16 6" />
                           <polyline points="8 6 2 12 8 18" />
@@ -655,24 +668,46 @@ export function TitleBar({
                   ))}
 
                 {/* Divider */}
-                <div style={{ height: 1, background: 'rgba(148,163,184,0.16)', margin: '4px 0' }} />
+                <div style={{ height: 1, background: 'var(--t-divider-subtle)', margin: '6px 2px' }} />
 
                 {/* Copy path */}
                 <button
                   type="button"
-                  role="menuitem"
-                  data-open-menu-item="true"
-                  onClick={handleCopyRepoPath}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, width: '100%',
-                    padding: '8px 12px', border: 'none', background: 'transparent',
-                    color: 'var(--t-text)', fontSize: 12, fontWeight: 400,
-                    cursor: 'pointer', fontFamily: '-apple-system, system-ui, sans-serif', textAlign: 'left',
+                  onClick={() => {
+                    navigator.clipboard.writeText(selectedRepoPath);
+                    closeOpenMenu();
                   }}
-                  onMouseEnter={(e) => { (e.currentTarget).style.background = 'rgba(255,255,255,0.1)'; }}
-                  onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
+                  role="menuitem"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    width: '100%',
+                    padding: '9px 10px',
+                    border: 'none',
+                    borderRadius: 10,
+                    background: 'transparent',
+                    color: 'var(--t-text)',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: '-apple-system, system-ui, sans-serif',
+                    textAlign: 'left',
+                    transition: 'background 140ms ease, transform 140ms ease',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.transform = 'translateY(0)'; }}
                 >
-                  <span style={{ width: 16, textAlign: 'center' }}>
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 22,
+                    height: 22,
+                    borderRadius: 7,
+                    background: 'var(--t-divider-subtle)',
+                    flexShrink: 0,
+                  }}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.6 }}>
                       <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
@@ -682,6 +717,7 @@ export function TitleBar({
                   <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--t-text-faint)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>⌘⇧C</span>
                 </button>
               </div>
+            </div>
           ) : null}
         </div>
       ) : null}

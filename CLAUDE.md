@@ -16,10 +16,11 @@ npm run desktop:dev      # Both together (kills stale ports, concurrently)
 cargo tauri dev          # Tauri native shell (from src-tauri/)
 
 # Verification (run before every commit)
-npx tsc --noEmit         # or: npm run typecheck
+npx tsc --noEmit         # Quick type check (skips next typegen)
+npm run typecheck        # Full: rm types cache → next typegen → tsc --noEmit
 
 # Build
-npm run build            # Next.js production build
+npm run build            # Next.js production build (webpack, not turbopack)
 cargo tauri build        # Native macOS app (from src-tauri/)
 
 # Lint
@@ -28,6 +29,16 @@ npm run lint             # ESLint (flat config, next core-web-vitals + TS)
 # Performance
 npm run measure:render   # Bootstrap render speed measurement
 ```
+
+**No test runner is configured.** There are no jest/vitest/playwright configs and no `test` script. The single test file (`src/lib/cortex/fact-backed.test.ts`) exists but has no harness.
+
+## CI Pipeline (`.github/workflows/ci.yml`)
+
+Runs on push/PR to `main`: TypeCheck → Lint → Build (Node 22, `npm ci`). Build depends on typecheck passing. No automated tests.
+
+## Path Aliases
+
+`@/*` maps to `./src/*` (tsconfig paths). All imports use `@/lib/...`, `@/components/...`, etc.
 
 ## Design Philosophy
 
@@ -94,22 +105,42 @@ CSS variable system with 60+ tokens per theme. Two themes: "light" and "chocolat
 |------|-------------|
 | `src/app/dashboard/page.tsx` | Main layout orchestrator. All panels toggled here. |
 | `src/components/desktop/AgentPanel.tsx` | Agent fleet view: repo-grouped cards, status groups, activity feed, issues, PRs, CI, deploys. |
-| `src/components/desktop/DesktopChat.tsx` | Chat panel with message rendering, send, markdown. |
+| `src/components/desktop/LLMChat.tsx` | Chat panel with LLM conversation, message rendering, tool calls. |
 | `src/components/desktop/Canvas.tsx` | Bottom workspace: issue viewer, transcript viewer, file viewer, timeline. |
 | `src/components/desktop/ThoughtsCard.tsx` | Floating glass overlay — mini chat, approvals, agent picker. z-index 9999. |
 | `src/ws-server.ts` | WebSocket multiplexer for mobile real-time data. |
 
 ### API Routes (`src/app/api/`)
 
-All routes use `force-dynamic`. 14+ feature domains, 100+ route files. Key families:
-- `/api/panel/*` — Desktop panel data (repos, commits, PRs, issues, CI, deploys, terminals, search)
+All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key families:
+- `/api/panel/*` — Desktop panel data (repos, commits, PRs, issues, CI, deploys, terminals, search, analytics, approvals, workspaces)
+- `/api/v2/*` — v2 API layer: auth (GitHub OAuth), chat (streaming), chat-history, cortex (context/config/recall/action), files, keys, proxy/llm
 - `/api/mobile/*` — Mobile inbox, history, Cortex memory
 - `/api/command-center/*` — Fleet snapshot, bootstrap
+- `/api/board/*` — Task board endpoints
+- `/api/worktrees/*` — Git worktree management (merge, conflicts)
+- `/api/review/*` — Code review workflow (commit, push)
+- `/api/setup/*` — First-run setup wizard (config detection)
 - `/api/claude-code/*`, `/api/codex/*`, `/api/openclaw/*` — Per-runtime endpoints
 
 ### Library Domains (`src/lib/`)
 
-32 feature domains. Key ones: `runtimes` (adapter registry), `openclaw` (gateway client), `codex` (session management), `cortex` (memory), `db` (Drizzle schema), `theme` (CSS vars), `realtime` (WS event types), `auth` (JWT + GitHub OAuth), `terminal` (PTY/tmux), `fleet` (agent state types).
+37+ feature domains. Key ones:
+- `runtimes` — Adapter registry (OpenClaw, Codex, Claude Code)
+- `runtime` — IDE session registries: `ide-session-registry.ts`, `ide-llm-chat-registry.ts`, `ide-terminal-state.ts`, `ide-surface-state.ts`, `actions.ts`, `inventory.ts`
+- `openclaw` — Gateway client (`wsRpc()` WebSocket RPC)
+- `llm` — LLM subsystem: `tools.ts` (tool definitions), `memory.ts` (memory management), `chat-history-store.ts` (persistent storage), `context.ts`
+- `approvals` — Approval workflows for LLM actions (`store.ts`, `types.ts`, `llm.ts`)
+- `workspace` — Workspace lifecycle management and persistence
+- `worktree` — Git worktree management (conflicts, launch, manager)
+- `board` — Task board state and types
+- `cortex` — Memory recall/import client
+- `db` — Drizzle schema + SQLite
+- `theme` — CSS variable system
+- `panel` — Panel auth (loopback host checking + token verification)
+- `mobile` — Mobile-specific: inbox filter, sounds, types, OpenClaw bridge
+- `terminal` — PTY/tmux tab state
+- `connectors` — External service connectors (OpenClaw beta)
 
 ## Critical Rules
 

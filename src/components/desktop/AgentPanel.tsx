@@ -47,9 +47,11 @@ import {
 } from 'lucide-react';
 import { MarkdownBody } from './MarkdownBody';
 import { RepoRegistrySection } from './RepoRegistrySection';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { WorktreeBadge } from '@/components/mobile/WorktreeBadge';
 import { formatModelLabel } from '@/lib/format';
 import type { RuntimeSurfaceSummary } from '@/lib/fleet/types';
+import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import { isTauri } from '@/lib/tauri/bridge';
@@ -3686,6 +3688,8 @@ export const AgentPanel = memo(function AgentPanel({
   onAgentsUpdate,
   onAgentKill,
   lifecycleEvents,
+  orchestratorPackets = [],
+  ideWorkspaceSessions,
 }: {
   activeSessionKey?: string | null;
   selectedRepo?: string | null;
@@ -3719,6 +3723,8 @@ export const AgentPanel = memo(function AgentPanel({
   onAgentsUpdate?: (agents: AgentDetail[]) => void;
   onAgentKill?: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
   lifecycleEvents?: Map<string, { state: string; exitCode?: number; ts: number }>;
+  orchestratorPackets?: OrchestratorPacket[];
+  ideWorkspaceSessions?: MobileInboxSnapshot['sessions'];
 } = {}) {
   const [agents, setAgents] = useState<AgentDetail[]>([]);
   const [inventoryLoading, setInventoryLoading] = useState(true);
@@ -4289,6 +4295,8 @@ export const AgentPanel = memo(function AgentPanel({
             onSectionOpenChange={setReposOpen}
             launchIntent={launchIntent}
             addIntent={addRepoIntent}
+            orchestratorPackets={orchestratorPackets}
+            ideWorkspaceSessions={ideWorkspaceSessions}
             hideHeader
           />
         </SidebarSection>

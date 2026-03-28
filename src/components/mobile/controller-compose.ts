@@ -232,6 +232,13 @@ export async function submitSteerTurn({
 
   const targetSession = snapshot.sessions.find((session) => session.sessionKey === sessionKey)
     ?? (selectedSession?.sessionKey === sessionKey ? selectedSession : undefined);
+  if (targetSession && targetSession.runtimeSurface?.capabilities.sendInput === false) {
+    setActionNoteBySession((current) => ({
+      ...current,
+      [sessionKey]: `${targetSession.name} is restored from desktop state, but there is no live runtime attached to send into yet.`,
+    }));
+    return;
+  }
 
   // Infer runtime from session key prefix when snapshot lookup misses.
   // This prevents falling through to the OpenClaw steer path when the
@@ -239,6 +246,7 @@ export async function submitSteerTurn({
   const inferredRuntime = targetSession?.runtime
     ?? (sessionKey.startsWith('codex-owned:') ? 'codex'
       : sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-discovered:') ? 'codex'
+      : sessionKey.startsWith('llm-chat:') ? 'chat'
       : sessionKey.startsWith('claude-code:') ? 'claude-code'
       : 'openclaw');
   const inferredOwnership = targetSession?.runtimeSurface?.ownership
@@ -249,7 +257,8 @@ export async function submitSteerTurn({
   const isDiscoveredCodex = inferredRuntime === 'codex' && inferredOwnership === 'discovered';
   const isOwnedCodex = inferredRuntime === 'codex' && inferredOwnership === 'owned';
   const isClaudeCode = inferredRuntime === 'claude-code';
-  const isChat = inferredRuntime === 'openclaw' || isDiscoveredCodex || isOwnedCodex || isClaudeCode;
+  const isWorkspaceChat = inferredRuntime === 'chat';
+  const isChat = inferredRuntime === 'openclaw' || isDiscoveredCodex || isOwnedCodex || isClaudeCode || isWorkspaceChat;
   if (!isChat) {
     setActionNoteBySession((current) => ({ ...current, [sessionKey]: 'Cannot send to this session type.' }));
     return;
@@ -313,7 +322,21 @@ export async function submitSteerTurn({
   );
 
   try {
-    if (isDiscoveredCodex) {
+    if (isWorkspaceChat) {
+      await runAction({
+        action: 'steer',
+        sessionKey,
+        message,
+        attachments: attachments.map((item) => ({
+          type: 'image',
+          mimeType: item.mimeType,
+          fileName: item.fileName,
+          content: item.content,
+        })),
+      });
+      setSurfaceNote('Sent to workspace chat…');
+      scheduleHistoryRefreshBurst(sessionKey, loadHistory);
+    } else if (isDiscoveredCodex) {
       await runAction({ action: 'steer', sessionKey, message });
       setSurfaceNote('Sent to Codex…');
       scheduleHistoryRefreshBurst(sessionKey, loadHistory);

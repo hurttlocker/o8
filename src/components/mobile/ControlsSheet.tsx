@@ -110,7 +110,7 @@ export function ControlsSheet({
             }}
           >
             <span className="remodex-action-row-icon"><SlidersHorizontal size={18} strokeWidth={1.8} /></span>
-            <span className="remodex-action-row-label">{pendingApprovals.length ? 'Hide demo approvals' : 'Show demo approvals'}</span>
+            <span className="remodex-action-row-label">Open approval queue</span>
             {pendingApprovals.length ? <span className="remodex-action-row-badge">{pendingApprovals.length}</span> : null}
           </button>
           <Link href="/" className="remodex-controls-action-row remodex-controls-action-link" onClick={onClose}>

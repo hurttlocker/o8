@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, memo } from 'react';
+import type { OpenClawIntegrationStatus } from '@/lib/connectors/openclaw-beta';
+import { initSounds, isSoundEnabled, setSoundEnabled } from '@/lib/mobile/sounds';
 import { useTheme } from './ThemeContext';
 
 function AppearanceSection() {
@@ -63,6 +65,7 @@ function AppearanceSection() {
 
 interface SettingsViewProps {
   onBack: () => void;
+  openClawStatus: OpenClawIntegrationStatus;
 }
 
 interface GatewayStatus {
@@ -244,11 +247,17 @@ function StatusDot({ connected }: { connected: boolean }) {
   );
 }
 
-export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewProps) {
+export const SettingsView = memo(function SettingsView({ onBack, openClawStatus }: SettingsViewProps) {
   const [gateway, setGateway] = useState<GatewayStatus | null>(null);
   const [github, setGitHub] = useState<GitHubStatus | null>(null);
   const [notifications, setNotifications] = useState(true);
-  const [sounds, setSounds] = useState(false);
+  const [sounds, setSounds] = useState(() => {
+    if (typeof window === 'undefined') {
+      return true;
+    }
+    initSounds();
+    return isSoundEnabled();
+  });
   const [autoScroll, setAutoScroll] = useState(true);
   const [compactMode, setCompactMode] = useState(false);
 
@@ -271,6 +280,11 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
       .then(r => r.json())
       .then(data => setGitHub(data))
       .catch(() => setGitHub({ authenticated: false, username: '', repos: 0 }));
+  }, []);
+
+  const handleSoundsChange = useCallback((enabled: boolean) => {
+    setSounds(enabled);
+    setSoundEnabled(enabled);
   }, []);
 
   const handleClearCache = useCallback(() => {
@@ -369,9 +383,9 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
         />
         <SettingsToggle
           label="Sounds"
-          detail="Play sound on new notifications"
+          detail="Play sound on send and new notifications"
           checked={sounds}
-          onChange={setSounds}
+          onChange={handleSoundsChange}
           last
         />
       </SettingsGroup>
@@ -398,6 +412,13 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
 
       {/* Runtimes */}
       <SettingsGroup label="Runtimes">
+        <SettingsRow
+          label="OpenClaw Beta"
+          value={openClawStatus.effective_enabled ? 'Enabled' : 'Disabled'}
+          detail={openClawStatus.error
+            ? `Desktop-managed mirror unavailable: ${openClawStatus.error}`
+            : `Read-only mirror of desktop Cortex integration · mode ${openClawStatus.mode}`}
+        />
         <SettingsRow
           label="Codex"
           detail="OpenAI coding agent"

@@ -25,7 +25,7 @@ interface RunActionArgs {
   setActionStateBySession: Dispatch<SetStateAction<Record<string, ActionState>>>;
   setActionNoteBySession: Dispatch<SetStateAction<Record<string, string | null>>>;
   realtimeEnabled?: boolean;
-  refreshInbox: () => Promise<MobileInboxSnapshot>;
+  refreshInbox: (fresh?: boolean) => Promise<MobileInboxSnapshot>;
   loadHistory: (sessionKey: string, force?: boolean) => Promise<unknown>;
   loadOwnedReviewPacket: (sessionKey: string, force?: boolean) => Promise<RuntimeReviewPacket | null | undefined>;
 }
@@ -42,7 +42,7 @@ export async function runMobileAction({
   const sessionKey = payload.sessionKey;
   const nextState: ActionState = payload.action === 'stop'
     ? 'stopping'
-    : payload.action === 'watch' || payload.action === 'resolve'
+    : payload.action === 'watch' || payload.action === 'resolve' || payload.action === 'approve' || payload.action === 'deny'
       ? 'reviewing'
       : 'steering';
 
@@ -173,7 +173,7 @@ export function copyTextToClipboard({ text, setSurfaceNote }: CopyTextArgs) {
 interface RefreshSurfaceArgs {
   selectedSessionKey: string | undefined;
   selectedReviewFilePath: string | null;
-  refreshInbox: () => Promise<MobileInboxSnapshot>;
+  refreshInbox: (fresh?: boolean) => Promise<MobileInboxSnapshot>;
   loadHistory: (sessionKey: string, force?: boolean) => Promise<unknown>;
   loadOwnedReviewPacket: (sessionKey: string, force?: boolean) => Promise<RuntimeReviewPacket | null | undefined>;
   loadReviewFile: (reviewPath: string, force?: boolean) => Promise<MobileReviewFileResponse['file'] | undefined>;
