@@ -461,6 +461,25 @@ export async function getRuntimeInventorySnapshot(
       : await buildCliRuntimeSnapshot();
     const snapshot = includeOpenClaw ? filterSnapshotToIdeSessions(rawSnapshot) : rawSnapshot;
 
+    // ── Reconcile lanes with discovered sessions ���─
+    try {
+      const { reconcileLanesWithSessions } = await import('@/lib/lane/registry');
+      const sessionSummaries = snapshot.agents
+        .filter((agent) => agent.sessionKey && (agent.runtime === 'codex' || agent.runtime === 'claude-code'))
+        .map((agent) => ({
+          sessionKey: agent.sessionKey,
+          runtimeId: agent.runtime,
+          cwd: agent.workspace ?? '',
+          branch: agent.branch,
+          status: agent.status,
+        }));
+      if (sessionSummaries.length > 0) {
+        reconcileLanesWithSessions(sessionSummaries);
+      }
+    } catch {
+      // Lane reconciliation is non-critical
+    }
+
     const canCache = snapshot.meta.mode === 'live'
       && (!includeOpenClaw || (snapshot.meta.gatewayFreshness === 'fresh' && !snapshot.meta.observablePending));
     if (generation === runtimeInventoryGeneration && canCache) {

@@ -31,6 +31,7 @@ export interface OrchestratorLaneBinding {
   repoPath: string | null;
   runtime: OrchestratorRuntime;
   sessionKey?: string | null;
+  laneId?: string | null;
   lastHeartbeatAt?: string | null;
   lastEventAt?: string | null;
   lastEventLabel?: string | null;

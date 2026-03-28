@@ -3632,7 +3632,7 @@ export function AgentPanelChat({
   useEffect(() => {
     if (!workspaceScopeProvided) return;
     if (effectiveSessions.some((session) => session.sessionKey === selectedKey)) return;
-    if (!selectedKey && effectiveSessions.length === 0) return;
+    if (!selectedKey) return;
     transcriptRequestRef.current += 1;
     selectedKeyRef.current = '';
     lastHeaderSessionRef.current = null;
