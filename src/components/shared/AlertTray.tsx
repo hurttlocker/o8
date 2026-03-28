@@ -351,12 +351,12 @@ export const AlertTray = memo(function AlertTray({
         width: 360,
         maxHeight: 480,
         borderRadius: 18,
-        background: 'linear-gradient(180deg, rgba(239, 246, 255, 0.82), rgba(191, 219, 254, 0.52))',
+        background: 'linear-gradient(180deg, rgba(248, 250, 252, 0.92), rgba(241, 245, 249, 0.82))',
         backdropFilter: 'blur(28px) saturate(1.7)',
         WebkitBackdropFilter: 'blur(28px) saturate(1.7)',
-        border: '1px solid rgba(147, 197, 253, 0.22)',
+        border: '1px solid rgba(148, 163, 184, 0.22)',
         boxShadow:
-          '0 22px 56px rgba(29, 78, 216, 0.18), 0 8px 24px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255,255,255,0.45)',
+          '0 22px 56px rgba(15, 23, 42, 0.12), 0 8px 24px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255,255,255,0.45)',
         opacity: open ? 1 : 0,
         transform: open ? 'translateY(0) scale(1)' : 'translateY(8px) scale(0.97)',
         pointerEvents: open ? 'auto' : 'none',
@@ -390,7 +390,7 @@ function renderHeader(
         alignItems: 'center',
         justifyContent: 'space-between',
         padding: '14px 16px 10px',
-        borderBottom: '1px solid rgba(147, 197, 253, 0.2)',
+        borderBottom: '1px solid rgba(148, 163, 184, 0.2)',
         flexShrink: 0,
       }}
     >
@@ -444,7 +444,7 @@ function renderHeader(
             height: 28,
             borderRadius: 14,
             border: 'none',
-            background: 'rgba(37, 99, 235, 0.08)',
+            background: 'rgba(100, 116, 139, 0.08)',
             color: '#64748b',
             cursor: 'pointer',
             padding: 0,
