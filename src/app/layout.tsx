@@ -42,6 +42,18 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en">
       <body>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if (window.__TAURI_INTERNALS__) {
+                document.documentElement.dataset.tauri = 'true';
+                if (document.body) {
+                  document.body.dataset.tauri = 'true';
+                }
+              }
+            `,
+          }}
+        />
         {children}
         <script
           dangerouslySetInnerHTML={{
