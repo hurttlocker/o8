@@ -3,6 +3,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
 import path from 'path';
+import { listRepos } from '@/lib/repos/registry';
 
 const HOME = process.env.HOME ?? '/tmp';
 const STATE_DIR = path.join(HOME, '.cortex-ide');
@@ -16,6 +17,44 @@ function sanitizeScope(rawScope: string | null) {
 
 function getStateFile(scope: string) {
   return path.join(STATE_SCOPE_DIR, `${scope}.json`);
+}
+
+function normalizeScopePath(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  return path.resolve(trimmed.replace(/^~(?=\/|$)/, HOME)).replace(/\/+$/, '');
+}
+
+function pathBelongsToRegisteredRepo(candidatePath?: string | null, repoRoots?: Set<string>) {
+  const normalizedCandidate = normalizeScopePath(candidatePath);
+  if (!normalizedCandidate || !repoRoots || repoRoots.size === 0) return false;
+  for (const repoRoot of repoRoots) {
+    if (normalizedCandidate === repoRoot || normalizedCandidate.startsWith(`${repoRoot}/`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function filterStateToRegisteredRepos(data: unknown, repoRoots: Set<string>) {
+  const tabs = Array.isArray((data as { tabs?: Array<{ repoPath?: string | null }> })?.tabs)
+    ? (data as { tabs: Array<{ repoPath?: string | null; id?: string }> }).tabs
+    : [];
+  if (tabs.length === 0) return data;
+  const filteredTabs = tabs.filter((tab) => !tab.repoPath || pathBelongsToRegisteredRepo(tab.repoPath, repoRoots));
+  if (filteredTabs.length === tabs.length) return data;
+  if (filteredTabs.length === 0) return null;
+
+  const current = data as { activeTabId?: string; [key: string]: unknown };
+  const nextActiveTabId = filteredTabs.some((tab) => tab.id === current.activeTabId)
+    ? current.activeTabId
+    : filteredTabs[0]?.id;
+
+  return {
+    ...current,
+    activeTabId: nextActiveTabId,
+    tabs: filteredTabs,
+  };
 }
 
 function stateMatchesRepoPath(data: unknown, repoPath: string) {
@@ -79,10 +118,17 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const scope = sanitizeScope(url.searchParams.get('scope'));
     const repoPath = url.searchParams.get('repoPath');
+    const repoRoots = new Set((await listRepos()).map((repo) => normalizeScopePath(repo.localPath)).filter((value): value is string => Boolean(value)));
+    if (repoRoots.size === 0) {
+      return NextResponse.json(null, { status: 404 });
+    }
     const stateFile = getStateFile(scope);
 
     if (existsSync(stateFile)) {
-      const data = JSON.parse(readFileSync(stateFile, 'utf-8'));
+      const data = filterStateToRegisteredRepos(JSON.parse(readFileSync(stateFile, 'utf-8')), repoRoots);
+      if (!data) {
+        return NextResponse.json(null, { status: 404 });
+      }
       if (!repoPath) {
         return NextResponse.json(data);
       }
@@ -101,7 +147,10 @@ export async function GET(request: Request) {
     }
 
     if (scope === 'tile-root' && existsSync(LEGACY_STATE_FILE)) {
-      const data = JSON.parse(readFileSync(LEGACY_STATE_FILE, 'utf-8'));
+      const data = filterStateToRegisteredRepos(JSON.parse(readFileSync(LEGACY_STATE_FILE, 'utf-8')), repoRoots);
+      if (!data) {
+        return NextResponse.json(null, { status: 404 });
+      }
       return NextResponse.json(data);
     }
 

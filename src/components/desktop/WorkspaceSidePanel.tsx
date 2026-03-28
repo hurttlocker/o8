@@ -24,7 +24,7 @@ import {
   MessageSquare,
   X,
 } from 'lucide-react';
-import type { ReviewChangedFile, ReviewPullRequestSummary, ReviewWorktreeSummary, WorkflowReviewSnapshot } from '@/lib/fleet/types';
+import type { ReviewChangedFile, ReviewWorktreeSummary, WorkflowReviewSnapshot } from '@/lib/fleet/types';
 import type { RepoReadiness } from '@/lib/repos/types';
 import { deriveWorkflowStage, describeWorkflowStage, workflowBadge } from '@/lib/workflows/status';
 import { BlueGlassActionButton, BlueGlassHoverCard } from './BlueGlassHoverCard';
@@ -51,6 +51,8 @@ export interface WorkspaceSidePanelRepo {
   branch?: string | null;
   readiness?: RepoReadiness | null;
   remoteUrl?: string;
+  isWorktree?: boolean;
+  worktreeStatus?: string | null;
 }
 
 interface WorkspaceChatTargetOption {
@@ -1538,7 +1540,6 @@ const ReviewTab = memo(function ReviewTab({
   onExpandReviewRail?: () => void;
 }) {
   const [snapshot, setSnapshot] = useState<WorkflowReviewSnapshot | null>(null);
-  const [repoSnapshot, setRepoSnapshot] = useState<WorkflowReviewSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [checks, setChecks] = useState<WorkspaceReviewCheckRun[]>([]);
   const [checksLoading, setChecksLoading] = useState(false);
@@ -1551,7 +1552,6 @@ const ReviewTab = memo(function ReviewTab({
   const [expandedSection, setExpandedSection] = useState<'checks' | 'comments' | 'deploy' | null>('checks');
   const [prDetail, setPrDetail] = useState<WorkspacePullRequestDetail | null>(null);
   const [commentsLoading, setCommentsLoading] = useState(false);
-  const [selectedPullRequestNumber, setSelectedPullRequestNumber] = useState<number | null>(preferredPullRequestNumber ?? null);
   const [addedContextKeys, setAddedContextKeys] = useState<Record<string, boolean>>({});
   const [reviewActionLoading, setReviewActionLoading] = useState<'merge' | null>(null);
   const [reviewActionResult, setReviewActionResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -1565,11 +1565,6 @@ const ReviewTab = memo(function ReviewTab({
   const repoSlug = useMemo(() => repoSlugFromRemote(repo?.remoteUrl), [repo?.remoteUrl]);
   const reviewQuery = useMemo(() => {
     const parts = [workspaceQuery, 'strictBranch=1'];
-    if (repoSlug) parts.push(`repo=${encodeURIComponent(repoSlug)}`);
-    return parts.filter(Boolean).length ? `?${parts.filter(Boolean).join('&')}` : '';
-  }, [repoSlug, workspaceQuery]);
-  const repoReviewQuery = useMemo(() => {
-    const parts = [workspaceQuery];
     if (repoSlug) parts.push(`repo=${encodeURIComponent(repoSlug)}`);
     return parts.filter(Boolean).length ? `?${parts.filter(Boolean).join('&')}` : '';
   }, [repoSlug, workspaceQuery]);
@@ -1596,26 +1591,6 @@ const ReviewTab = memo(function ReviewTab({
       window.clearInterval(id);
     };
   }, [reviewQuery, reviewReloadNonce]);
-
-  useEffect(() => {
-    let active = true;
-    async function fetchRepoReview() {
-      try {
-        const data = await fetchJsonWithTimeout<WorkflowReviewSnapshot>(`/api/review/workspace${repoReviewQuery}`, 12000);
-        if (!active) return;
-        setRepoSnapshot(data);
-      } catch {
-        if (!active) return;
-        setRepoSnapshot(null);
-      }
-    }
-    void fetchRepoReview();
-    const id = window.setInterval(() => { void fetchRepoReview(); }, 45_000);
-    return () => {
-      active = false;
-      window.clearInterval(id);
-    };
-  }, [repoReviewQuery, reviewReloadNonce]);
 
   useEffect(() => {
     const slug = repoSlug;
@@ -1732,54 +1707,33 @@ const ReviewTab = memo(function ReviewTab({
     };
   }, [repo?.name, repoSlug]);
 
-  useEffect(() => {
-    setSelectedPullRequestNumber(preferredPullRequestNumber ?? null);
-  }, [preferredPullRequestNumber, repo?.localPath]);
-
   const currentBranch = normalizeBranchName(repo?.branch ?? snapshot?.branch ?? null);
-  const pinnedPullRequestNumber = selectedPullRequestNumber ?? preferredPullRequestNumber ?? null;
-  const repoPullRequests = useMemo(
-    () => repoSnapshot?.pullRequests ?? snapshot?.pullRequests ?? [],
-    [repoSnapshot?.pullRequests, snapshot?.pullRequests],
-  );
   const branchPullRequest = useMemo(
     () => snapshot?.pullRequests.find((pullRequest) => branchesMatch(pullRequest.headRefName, currentBranch)) ?? null,
     [currentBranch, snapshot?.pullRequests],
   );
+  const preferredPullRequest = useMemo(
+    () => (
+      preferredPullRequestNumber
+        ? snapshot?.pullRequests.find((pullRequest) => pullRequest.number === preferredPullRequestNumber) ?? null
+        : null
+    ),
+    [preferredPullRequestNumber, snapshot?.pullRequests],
+  );
   const currentPullRequest = useMemo(
     () => {
-      if (selectedPullRequestNumber) {
-        return repoPullRequests.find((pullRequest) => pullRequest.number === selectedPullRequestNumber) ?? null;
+      if (branchPullRequest) return branchPullRequest;
+      if (preferredPullRequest && branchesMatch(preferredPullRequest.headRefName, currentBranch)) {
+        return preferredPullRequest;
       }
-      return branchPullRequest;
+      return null;
     },
-    [branchPullRequest, repoPullRequests, selectedPullRequestNumber],
+    [branchPullRequest, currentBranch, preferredPullRequest],
   );
   const resolvedPullRequest = useMemo<WorkspaceResolvedPullRequest | null>(() => {
-    if (currentPullRequest) {
-      return currentPullRequest;
-    }
-    if (pinnedPullRequestNumber && prDetail?.pr.number === pinnedPullRequestNumber) {
-      return {
-        number: prDetail.pr.number,
-        title: prDetail.pr.title,
-        state: prDetail.pr.state,
-        reviewDecision: prDetail.pr.reviewDecision ?? null,
-        headRefName: prDetail.pr.headRefName ?? null,
-        url: prDetail.pr.url,
-      };
-    }
+    if (currentPullRequest) return currentPullRequest;
     return null;
-  }, [
-    currentPullRequest,
-    pinnedPullRequestNumber,
-    prDetail?.pr.headRefName,
-    prDetail?.pr.number,
-    prDetail?.pr.reviewDecision,
-    prDetail?.pr.state,
-    prDetail?.pr.title,
-    prDetail?.pr.url,
-  ]);
+  }, [currentPullRequest]);
   const chatTargetHint = chatTargetLabel?.trim() ? `To ${chatTargetLabel.trim()}` : null;
   const chatTargetControl = chatTargets && chatTargets.length > 0 && selectedChatTargetKey && onSelectChatTarget
     ? (
@@ -1797,32 +1751,22 @@ const ReviewTab = memo(function ReviewTab({
     [currentBranch, resolvedPullRequest?.headRefName],
   );
   const activePullRequest = resolvedPullRequest;
-  const selectedPrIsOutsideCurrentBranch = Boolean(
-    activePullRequest
-    && currentBranch
-    && activePullRequest.headRefName
-    && !branchesMatch(activePullRequest.headRefName, currentBranch),
-  );
   const activeReadiness = useMemo(
     () => (
       activePullRequest
-        ? (selectedPrIsOutsideCurrentBranch ? null : (prDetail?.pr.readiness ?? null))
+        ? (prDetail?.pr.readiness ?? null)
         : (repo?.readiness ?? null)
     ),
-    [activePullRequest, prDetail?.pr.readiness, repo?.readiness, selectedPrIsOutsideCurrentBranch],
+    [activePullRequest, prDetail?.pr.readiness, repo?.readiness],
   );
-  const alternatePullRequests = useMemo(() => {
-    if (!repoPullRequests.length) return [] as ReviewPullRequestSummary[];
-    return repoPullRequests.filter((pullRequest) => {
-      if (activePullRequest && pullRequest.number === activePullRequest.number) {
-        return false;
-      }
-      return true;
-    });
-  }, [activePullRequest, repoPullRequests]);
+  const otherBranchPullRequestCount = useMemo(() => {
+    const pullRequests = snapshot?.pullRequests ?? [];
+    if (!currentBranch) return pullRequests.length;
+    return pullRequests.filter((pullRequest) => !branchesMatch(pullRequest.headRefName, currentBranch)).length;
+  }, [currentBranch, snapshot?.pullRequests]);
 
   useEffect(() => {
-    const activePrNumber = currentPullRequest?.number ?? pinnedPullRequestNumber;
+    const activePrNumber = currentPullRequest?.number ?? null;
     const slug = repoSlug;
     if (!activePrNumber || !slug) {
       setPrDetail(null);
@@ -1849,7 +1793,7 @@ const ReviewTab = memo(function ReviewTab({
       active = false;
       window.clearInterval(id);
     };
-  }, [currentPullRequest?.number, pinnedPullRequestNumber, repoSlug, reviewReloadNonce]);
+  }, [currentPullRequest?.number, repoSlug, reviewReloadNonce]);
 
   useEffect(() => {
     setAddedContextKeys({});
@@ -1992,7 +1936,7 @@ const ReviewTab = memo(function ReviewTab({
   }, [activePullRequest?.reviewDecision]);
   const reviewStage = useMemo(
     () => {
-      const workflowKey = selectedPrIsOutsideCurrentBranch ? null : (prDetail?.pr.workflowStage?.key ?? null);
+      const workflowKey = prDetail?.pr.workflowStage?.key ?? null;
       if (workflowKey) {
         return workflowBadge(workflowKey as Parameters<typeof workflowBadge>[0]);
       }
@@ -2001,10 +1945,10 @@ const ReviewTab = memo(function ReviewTab({
         failedChecks: failedChecks.length,
         pendingChecks: pendingChecks.length,
         requestedChanges: requestedChangesCount,
-        readinessState: activeReadiness?.state ?? null,
-      });
+      readinessState: activeReadiness?.state ?? null,
+    });
     },
-    [activePullRequest?.state, activeReadiness?.state, failedChecks.length, pendingChecks.length, prDetail?.pr.workflowStage?.key, requestedChangesCount, selectedPrIsOutsideCurrentBranch],
+    [activePullRequest?.state, activeReadiness?.state, failedChecks.length, pendingChecks.length, prDetail?.pr.workflowStage?.key, requestedChangesCount],
   );
   const reviewGuidance = useMemo(
     () => describeWorkflowStage({
@@ -2020,8 +1964,8 @@ const ReviewTab = memo(function ReviewTab({
     [activePullRequest?.state, activeReadiness?.nextAction, activeReadiness?.state, activeReadiness?.summary, failedChecks.length, pendingChecks.length, requestedChangesCount, reviewStage],
   );
   const reviewStageLabel = activePullRequest
-    ? ((selectedPrIsOutsideCurrentBranch ? null : prDetail?.pr.workflowStage?.label) ?? reviewGuidance.stage?.label ?? prStateLabel(activePullRequest).label)
-    : (pinnedPullRequestNumber ? 'Loading PR' : (activeReadiness?.label ?? 'No PR'));
+    ? (prDetail?.pr.workflowStage?.label ?? reviewGuidance.stage?.label ?? prStateLabel(activePullRequest).label)
+    : (activeReadiness?.label ?? 'No PR');
   useEffect(() => {
     if ((failedChecks.length + pendingChecks.length) > 0) {
       setExpandedSection('checks');
@@ -2054,6 +1998,17 @@ const ReviewTab = memo(function ReviewTab({
   const compactDeploySummary = shouldShowDeployList
     ? (deployments.length > 0 ? `${deployments.length} deployment${deployments.length === 1 ? '' : 's'}` : 'No deploys')
     : 'Post-merge only';
+  const reviewSnapshot = snapshot;
+  const scopedWorktrees = useMemo(() => {
+    if (!reviewSnapshot?.worktrees.length) return [] as ReviewWorktreeSummary[];
+    if (!currentBranch) {
+      return reviewSnapshot.worktrees.filter((worktree) => worktree.isCurrent);
+    }
+    const exactMatches = reviewSnapshot.worktrees.filter((worktree) => branchesMatch(worktree.branch, currentBranch));
+    return exactMatches.length > 0
+      ? exactMatches
+      : reviewSnapshot.worktrees.filter((worktree) => worktree.isCurrent);
+  }, [currentBranch, reviewSnapshot]);
   const openBranchPullRequest = useCallback(() => {
     if (!repoSlug || !currentBranch) return;
     window.open(`https://github.com/${repoSlug}/compare/main...${currentBranch}?expand=1`, '_blank', 'noopener,noreferrer');
@@ -2126,6 +2081,10 @@ const ReviewTab = memo(function ReviewTab({
     return <div style={{ padding: 16, fontSize: 12, color: 'var(--t-text-muted)' }}>No review surface available yet</div>;
   }
 
+  const scopeLabel = currentBranch
+    ? (repo?.isWorktree ? `${currentBranch} · worktree` : currentBranch)
+    : (repo?.name ?? 'Workspace');
+
   return (
     <div className="cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto', paddingBottom: 10 }}>
       <ReviewSection title="Review State">
@@ -2143,7 +2102,7 @@ const ReviewTab = memo(function ReviewTab({
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>
-                    {activePullRequest ? `PR #${activePullRequest.number}` : (pinnedPullRequestNumber ? `PR #${pinnedPullRequestNumber}` : 'No PR attached')}
+                    {activePullRequest ? `PR #${activePullRequest.number}` : 'No branch PR attached'}
                   </div>
                   <span
                     style={{
@@ -2163,22 +2122,24 @@ const ReviewTab = memo(function ReviewTab({
                       {reviewBranch}
                     </span>
                   ) : null}
+                  <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>
+                    Scoped to {scopeLabel}
+                  </span>
                 </div>
                 <div style={{ marginTop: 4, fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
                   {activePullRequest
                     ? activePullRequest.title
-                    : pinnedPullRequestNumber
-                      ? 'Loading selected pull request…'
-                    : 'Open a pull request for this branch before treating review as a merge lane.'}
+                    : 'Open a pull request for this branch or worktree before treating review as a merge lane.'}
                 </div>
                 <div style={{ marginTop: 5, fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.5 }}>
                   {activePullRequest
                     ? compactReview
                       ? 'Deep review is open in the center pane. Use this rail for merge and lightweight context.'
                       : reviewGuidance.detail
-                    : pinnedPullRequestNumber
-                      ? 'Keeping this lane pinned to the selected pull request while the details load.'
-                    : activeReadiness?.summary ?? 'This branch is local-only right now.'}
+                    : activeReadiness?.summary
+                      ?? (otherBranchPullRequestCount > 0
+                        ? `This branch or worktree does not have an attached pull request yet. ${otherBranchPullRequestCount} repo pull request${otherBranchPullRequestCount === 1 ? '' : 's'} exist on other branches.`
+                        : 'This branch or worktree does not have an attached pull request yet.')}
                 </div>
                 {activePullRequest && !compactReview && reviewGuidance.nextAction ? (
                   <div style={{ marginTop: 5, fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.5 }}>
@@ -2256,54 +2217,7 @@ const ReviewTab = memo(function ReviewTab({
           </div>
         </ContextObjectCard>
 
-        {!compactReview && alternatePullRequests.length > 0 ? (
-          <>
-            <div style={{ padding: '0 2px', fontSize: 10, fontWeight: 700, color: 'var(--t-text-faint)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              {activePullRequest ? 'Other open pull requests' : 'Open pull requests'}
-            </div>
-            {alternatePullRequests.slice(0, 4).map((pullRequest) => (
-              <ContextObjectCard key={pullRequest.number} itemKind="pull-request" itemId={`alternate-pr:${pullRequest.number}`} style={{ padding: '7px 8px', borderRadius: 9 }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-                  <GitPullRequest size={13} style={{ color: prStateLabel(pullRequest).color, marginTop: 2, flexShrink: 0 }} />
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--t-text)' }}>
-                      PR #{pullRequest.number}
-                    </div>
-                    <div style={{ marginTop: 3, fontSize: 11, color: 'var(--t-text-secondary)', lineHeight: 1.45 }}>
-                      {pullRequest.title}
-                    </div>
-                    <div style={{ marginTop: 3, fontSize: 10, color: 'var(--t-text-muted)', display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-                      <span>{normalizeBranchName(pullRequest.headRefName) ?? pullRequest.headRefName}</span>
-                      <span>{prStateLabel(pullRequest).label}</span>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <ContextIconButton
-                      icon={<GitPullRequest size={11} strokeWidth={2} />}
-                      label="Review here"
-                      onClick={() => setSelectedPullRequestNumber(pullRequest.number)}
-                    />
-                    {repoSlug && onOpenPullRequest ? (
-                      <ContextIconButton
-                        icon={<ArrowRight size={11} strokeWidth={2} />}
-                        label="Deep review"
-                        onClick={() => {
-                          if (onDeepReviewPullRequest) {
-                            onDeepReviewPullRequest(pullRequest.number, repoSlug);
-                            return;
-                          }
-                          onOpenPullRequest(pullRequest.number, repoSlug);
-                        }}
-                      />
-                    ) : null}
-                  </div>
-                </div>
-              </ContextObjectCard>
-            ))}
-          </>
-        ) : null}
-
-        {!compactReview && !activePullRequest && snapshot.worktrees.length > 0 ? snapshot.worktrees.map((worktree) => {
+        {!compactReview && !activePullRequest && scopedWorktrees.length > 0 ? scopedWorktrees.map((worktree) => {
           const tone = worktreeStateTone(worktree);
           return (
             <ContextObjectCard key={`${worktree.path}:${worktree.branch ?? 'detached'}`} itemKind="worktree" itemId={worktree.path}>
@@ -2882,6 +2796,13 @@ export function WorkspaceSidePanel({
     );
   }
 
+  const headerScopeSubtitle = repo
+    ? [
+        repo.branch ? (repo.isWorktree ? `${repo.branch} · worktree` : repo.branch) : null,
+        shortenPath(repo.localPath),
+      ].filter((value): value is string => Boolean(value)).join(' · ')
+    : 'Workspace side panel';
+
   return (
     <div
       style={{
@@ -2905,7 +2826,7 @@ export function WorkspaceSidePanel({
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{repo?.name ?? 'Workspace'}</div>
           <div style={{ marginTop: 2, fontSize: 11, color: 'var(--t-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {repo ? shortenPath(repo.localPath) : 'Workspace side panel'}
+            {headerScopeSubtitle}
           </div>
         </div>
         <button

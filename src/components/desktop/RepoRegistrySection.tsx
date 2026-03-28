@@ -7,6 +7,8 @@ import {
   ArrowRight,
   AlertCircle,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Copy,
   ExternalLink,
   FolderOpen,
@@ -155,10 +157,10 @@ function worktreeStageTone(status?: WorktreeStatus | null) {
       };
     case 'stale':
       return {
-        label: 'Blocked',
-        color: '#dc2626',
-        background: 'rgba(239, 68, 68, 0.1)',
-        border: 'rgba(239, 68, 68, 0.18)',
+        label: 'Needs attention',
+        color: '#d97706',
+        background: 'rgba(245, 158, 11, 0.12)',
+        border: 'rgba(245, 158, 11, 0.22)',
       };
     default:
       return {
@@ -256,9 +258,36 @@ function repoReadinessPalette(state?: RepoReadinessState) {
     case 'needs_setup':
       return { background: THEME_ACCENT_SOFT, border: THEME_ACCENT_BORDER, color: THEME_ACCENT };
     case 'blocked':
-      return { background: THEME_DANGER_SOFT, border: THEME_DANGER_BORDER, color: THEME_DANGER_TEXT };
+      return { background: THEME_WORKTREE_SOFT, border: THEME_WORKTREE_BORDER, color: THEME_WORKTREE_TEXT };
     default:
       return { background: 'var(--t-divider-subtle)', border: 'var(--t-panel-border)', color: 'var(--t-text-secondary)' };
+  }
+}
+
+function repoReadinessDisplayLabel(state?: RepoReadinessState, label?: string | null) {
+  if (state === 'blocked') return 'Needs attention';
+  return label ?? null;
+}
+
+function repoReadinessExplanation(readiness?: RepoRegistryEntry['readiness']) {
+  if (!readiness) return null;
+  return [readiness.summary, readiness.nextAction].filter(Boolean).join(' ');
+}
+
+function worktreeStatusExplanation(worktree?: WorktreeInfo | null) {
+  if (!worktree) return null;
+  switch (worktree.status) {
+    case 'stale':
+      return 'This worktree is no longer current. Reopen it or launch a fresh workspace before trusting it for new work.';
+    case 'creating':
+      return 'This workspace is still being created. Wait for setup to finish before using it.';
+    case 'setup':
+    case 'cleaning':
+      return 'This workspace is still preparing its environment. It is not ready for active work yet.';
+    case 'merging':
+      return 'This workspace is in a review or merge phase. Finish the merge flow before treating it as clean.';
+    default:
+      return null;
   }
 }
 
@@ -536,8 +565,12 @@ function OverflowDotsIcon({ color = 'currentColor' }: { color?: string }) {
 
 interface BranchAgent {
   name: string;
+  agentName: string;
   sessionKey: string;
   color: string;
+  runtime: string;
+  status: string;
+  currentTask?: string | null;
   additions?: number;
   deletions?: number;
   changedFiles?: number;
@@ -593,6 +626,108 @@ function mergeRiskLabel(detail: RepoPreviewPullRequestDetail | null): {
   return { label: 'merge ready', color: '#16a34a' };
 }
 
+function compactText(value: string | null | undefined, max = 56) {
+  const text = value?.trim() ?? '';
+  if (!text) return null;
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+function normalizeSessionTaskLabel(value?: string | null) {
+  const raw = value?.trim();
+  if (!raw) return null;
+  const cleaned = raw
+    .replace(/^Live Codex terminal verified via pid\/log mapping(?: on [^.]+)?\.\s*/i, '')
+    .replace(/^Live Codex terminal detected(?: on [^.]+)?\.\s*/i, '')
+    .replace(/^Recent Codex session recovered from local runtime history\.\s*/i, '')
+    .replace(/^Historical Codex session recovered from local runtime history\.\s*/i, '')
+    .replace(/^IDE-owned Codex session launched and waiting for its first thread id\.\s*/i, '')
+    .replace(/^IDE-owned Codex session is ready for resume after an interrupted run\.\s*/i, '')
+    .replace(/^IDE-owned Codex session is ready for a corrective follow-up after a failed run\.\s*/i, '')
+    .replace(/^IDE-owned Codex session ready for the next input via resume\.\s*/i, '')
+    .replace(/^IDE-owned Codex session is idle\.\s*/i, '')
+    .replace(/^Operator marked this owned result resolved\.\s*/i, '')
+    .replace(/^Mirroring the live Q ↔ Mister conversation, not spawning a fresh session\.\s*/i, '')
+    .trim();
+  const summary = cleaned || raw;
+  return summary.charAt(0).toLowerCase() === summary.charAt(0)
+    ? `${summary.charAt(0).toUpperCase()}${summary.slice(1)}`
+    : summary;
+}
+
+function runtimeBadgeTone(runtime?: string | null) {
+  switch (runtime) {
+    case 'claude-code':
+      return {
+        label: 'Claude Code',
+        shortLabel: 'CC',
+        color: '#8b5cf6',
+        background: 'rgba(139, 92, 246, 0.12)',
+        border: 'rgba(139, 92, 246, 0.18)',
+      };
+    case 'openclaw':
+      return {
+        label: 'OpenClaw',
+        shortLabel: 'OC',
+        color: '#2563eb',
+        background: 'rgba(37, 99, 235, 0.12)',
+        border: 'rgba(37, 99, 235, 0.18)',
+      };
+    default:
+      return {
+        label: 'Codex',
+        shortLabel: 'CX',
+        color: '#10b981',
+        background: 'rgba(16, 185, 129, 0.12)',
+        border: 'rgba(16, 185, 129, 0.18)',
+      };
+  }
+}
+
+function sessionStatusTone(status?: string | null) {
+  switch (status) {
+    case 'running':
+      return { label: 'Working', color: '#16a34a', glow: 'rgba(22, 163, 74, 0.18)' };
+    case 'reviewing':
+      return { label: 'Reviewing', color: '#7c3aed', glow: 'rgba(124, 58, 237, 0.18)' };
+    case 'waiting':
+      return { label: 'Waiting', color: '#d97706', glow: 'rgba(245, 158, 11, 0.18)' };
+    case 'blocked':
+    case 'failed':
+      return { label: 'Blocked', color: '#dc2626', glow: 'rgba(239, 68, 68, 0.18)' };
+    default:
+      return { label: 'Idle', color: 'var(--t-text-muted)', glow: 'rgba(148, 163, 184, 0.18)' };
+  }
+}
+
+function sessionSortValue(status?: string | null) {
+  switch (status) {
+    case 'running':
+      return 0;
+    case 'reviewing':
+      return 1;
+    case 'waiting':
+      return 2;
+    case 'blocked':
+    case 'failed':
+      return 3;
+    default:
+      return 4;
+  }
+}
+
+function compareBranchAgents(left: BranchAgent, right: BranchAgent) {
+  const statusDelta = sessionSortValue(left.status) - sessionSortValue(right.status);
+  if (statusDelta !== 0) return statusDelta;
+  return left.sessionKey.localeCompare(right.sessionKey);
+}
+
+function branchSessionLabel(agent: BranchAgent) {
+  const summary = compactText(normalizeSessionTaskLabel(agent.currentTask), 60);
+  if (summary) return summary;
+  const runtime = runtimeBadgeTone(agent.runtime).label;
+  return compactText(agent.agentName || agent.name || `${runtime} session`, 60) ?? `${runtime} session`;
+}
+
 function RepoCard({
   repo,
   workspaceNotice,
@@ -610,6 +745,7 @@ function RepoCard({
   expanded,
   onToggle,
   isActive = false,
+  activeSessionKey = null,
   activeWorkspacePath = null,
 }: {
   repo: RepoRegistryEntry;
@@ -628,6 +764,7 @@ function RepoCard({
   expanded: boolean;
   onToggle: () => void;
   isActive?: boolean;
+  activeSessionKey?: string | null;
   activeWorkspacePath?: string | null;
 }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -644,6 +781,7 @@ function RepoCard({
   const [branchDeleteConfirm, setBranchDeleteConfirm] = useState<string | null>(null);
   const [hoveredBranchName, setHoveredBranchName] = useState<string | null>(null);
   const [branchHoverRect, setBranchHoverRect] = useState<DOMRect | null>(null);
+  const [sessionDisclosureByBranch, setSessionDisclosureByBranch] = useState<Record<string, boolean>>({});
   const [createBranchOpen, setCreateBranchOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
   const [newBranchWorktree, setNewBranchWorktree] = useState(false);
@@ -1217,6 +1355,18 @@ function RepoCard({
     [activeWorkspacePath, worktreeSummary],
   );
   const activeWorktreeTone = activeWorktree ? worktreeStageTone(activeWorktree.status) : null;
+  const readinessPalette = repo.readiness ? repoReadinessPalette(repo.readiness.state) : null;
+  const readinessDisplayLabel = repoReadinessDisplayLabel(repo.readiness?.state, repo.readiness?.label);
+  const readinessExplanation = repoReadinessExplanation(repo.readiness);
+  const activeWorktreeExplanation = worktreeStatusExplanation(activeWorktree);
+  const rowStatusLabel = activeWorktreeTone?.label ?? readinessDisplayLabel ?? null;
+  const rowStatusColor = activeWorktreeTone?.color ?? readinessPalette?.color ?? 'var(--t-text-faint)';
+  const rowStatusExplanation = activeWorktreeExplanation ?? readinessExplanation;
+  const showStatusInfo = Boolean(
+    rowStatusLabel
+    && rowStatusExplanation
+    && (activeWorktreeTone?.label || repo.readiness?.state === 'blocked' || repo.readiness?.state === 'needs_setup'),
+  );
   const currentBadge = isActive && !activeWorktree ? (
     <span
       style={{
@@ -1307,12 +1457,12 @@ function RepoCard({
       {mergeRisk.label}
     </span>
   ) : null;
-  const readinessPalette = repo.readiness ? repoReadinessPalette(repo.readiness.state) : null;
   const readinessBadge = repo.readiness ? (
     <span
       style={{
         display: 'inline-flex',
         alignItems: 'center',
+        gap: 5,
         padding: compactLayout ? '2px 7px' : '2px 8px',
         borderRadius: 999,
         background: readinessPalette?.background,
@@ -1324,9 +1474,23 @@ function RepoCard({
         textTransform: 'uppercase',
         flexShrink: 0,
       }}
-      title={repo.readiness.summary}
+      title={readinessExplanation ?? repo.readiness.summary}
     >
-      {repo.readiness.label}
+      {readinessDisplayLabel}
+      {readinessExplanation && repo.readiness.state !== 'ready' ? (
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'help',
+          }}
+          title={readinessExplanation}
+          aria-label={readinessExplanation}
+        >
+          <AlertCircle size={11} strokeWidth={2.1} />
+        </span>
+      ) : null}
     </span>
   ) : null;
   const branchBadge = (
@@ -1387,19 +1551,70 @@ function RepoCard({
     mergeRiskBadge,
   ].filter(Boolean);
   const primaryPreview = prPreview[0] ?? null;
-  const rowMeta = [
-    activeWorktree?.branch ?? repo.defaultBranch,
-    activeWorktreeTone?.label ?? repo.readiness?.label ?? null,
-    primaryPreview ? `PR #${primaryPreview.number}` : null,
-    repoAgents.length > 0 ? `${repoAgents.length} live` : null,
-  ]
-    .filter((value): value is string => Boolean(value))
-    .slice(0, 3)
-    .join(' · ');
+  const rowMetaSegments: Array<{ key: string; content: React.ReactNode }> = [
+    {
+      key: 'branch',
+      content: (
+        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {activeWorktree?.branch ?? repo.defaultBranch}
+        </span>
+      ),
+    },
+  ];
+  if (rowStatusLabel) {
+    rowMetaSegments.push({
+      key: 'status',
+      content: (
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            minWidth: 0,
+            color: rowStatusColor,
+            fontWeight: 600,
+          }}
+          title={rowStatusExplanation ?? undefined}
+        >
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {rowStatusLabel}
+          </span>
+          {showStatusInfo ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                cursor: 'help',
+              }}
+              title={rowStatusExplanation ?? undefined}
+              aria-label={rowStatusExplanation ?? undefined}
+            >
+              <AlertCircle size={10} strokeWidth={2.1} />
+            </span>
+          ) : null}
+        </span>
+      ),
+    });
+  }
+  if (primaryPreview) {
+    rowMetaSegments.push({
+      key: 'pr',
+      content: <span>{`PR #${primaryPreview.number}`}</span>,
+    });
+  }
+  if (repoAgents.length > 0) {
+    rowMetaSegments.push({
+      key: 'live',
+      content: <span>{`${repoAgents.length} live`}</span>,
+    });
+  }
+  rowMetaSegments.splice(3);
   const repoHeaderLeadingInset = 19;
   const visibleBranches = useMemo(
-    () => branches.filter((branch) => branch.isWorktree || !branch.current),
-    [branches],
+    () => branches.filter((branch) => branch.isWorktree || !branch.current || Boolean(agentsByBranch?.get(branch.name)?.length)),
+    [agentsByBranch, branches],
   );
   const showHeaderHover = hoveringHeader && (
     prPreviewLoading
@@ -1526,7 +1741,33 @@ function RepoCard({
                 whiteSpace: 'nowrap',
               }}
             >
-              {rowMeta || shortenPath(repo.localPath)}
+              {rowMetaSegments.length > 0 ? (
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 0,
+                    minWidth: 0,
+                    maxWidth: '100%',
+                  }}
+                >
+                  {rowMetaSegments.map((segment, index) => (
+                    <span
+                      key={segment.key}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        minWidth: 0,
+                      }}
+                    >
+                      {index > 0 ? (
+                        <span style={{ padding: '0 5px', color: 'var(--t-text-faint)' }}>·</span>
+                      ) : null}
+                      {segment.content}
+                    </span>
+                  ))}
+                </span>
+              ) : shortenPath(repo.localPath)}
             </div>
           </div>
           {menuTrigger}
@@ -1866,9 +2107,7 @@ function RepoCard({
                 padding: '10px 12px',
                 borderRadius: 12,
                 border: `1px solid ${readinessPalette?.border}`,
-                background: repo.readiness.state === 'blocked'
-                  ? 'linear-gradient(180deg, rgba(239, 68, 68, 0.14) 0%, rgba(239, 68, 68, 0.08) 100%)'
-                  : readinessPalette?.background,
+                background: readinessPalette?.background,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -1881,7 +2120,7 @@ function RepoCard({
                     color: readinessPalette?.color,
                   }}
                 >
-                  {repo.readiness.label}
+                  {readinessDisplayLabel}
                 </span>
                 {repo.readiness.currentBranch ? (
                   <span style={{
@@ -2061,6 +2300,8 @@ function RepoCard({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 {visibleBranches.map((branch) => {
                   const branchAgents = agentsByBranch?.get(branch.name) ?? [];
+                  const orderedBranchAgents = [...branchAgents].sort(compareBranchAgents);
+                  const sessionsExpanded = sessionDisclosureByBranch[branch.name] ?? true;
                   const isIdleWorktree = branch.isWorktree && branch.isStale;
                   const isCurrentBranch = branch.current;
                   const worktree = worktreesByBranch.get(branch.name);
@@ -2187,6 +2428,180 @@ function RepoCard({
                       </span>
                     ) : null}
                   </div>
+                  {orderedBranchAgents.length > 0 ? (
+                    <div
+                      style={{
+                        marginLeft: 24,
+                        marginTop: 4,
+                        marginBottom: 7,
+                        paddingLeft: 12,
+                        borderLeft: '1px solid var(--t-divider-subtle)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSessionDisclosureByBranch((current) => ({
+                            ...current,
+                            [branch.name]: !(current[branch.name] ?? true),
+                          }));
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          width: '100%',
+                          padding: 0,
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'var(--t-text-faint)',
+                          fontSize: 10,
+                          fontWeight: 700,
+                          letterSpacing: '0.04em',
+                          textTransform: 'uppercase',
+                          cursor: 'pointer',
+                          fontFamily: '-apple-system, system-ui, sans-serif',
+                        }}
+                      >
+                        {sessionsExpanded ? <ChevronDown size={12} strokeWidth={2.2} /> : <ChevronRight size={12} strokeWidth={2.2} />}
+                        <span>Sessions</span>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            minWidth: 18,
+                            height: 18,
+                            padding: '0 6px',
+                            borderRadius: 999,
+                            background: 'var(--t-divider-subtle)',
+                            color: 'var(--t-text-secondary)',
+                            fontSize: 10,
+                            fontWeight: 700,
+                            fontFamily: '"SF Mono", ui-monospace, monospace',
+                            textTransform: 'none',
+                            letterSpacing: 'normal',
+                          }}
+                        >
+                          {orderedBranchAgents.length}
+                        </span>
+                      </button>
+                      {sessionsExpanded ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {orderedBranchAgents.map((agent) => {
+                            const runtimeTone = runtimeBadgeTone(agent.runtime);
+                            const statusTone = sessionStatusTone(agent.status);
+                            const isSelectedSession = activeSessionKey === agent.sessionKey;
+                            return (
+                              <button
+                                key={agent.sessionKey}
+                                type="button"
+                                disabled={!onSelectSession}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  onSelectSession?.(agent.sessionKey);
+                                }}
+                                style={{
+                                  width: '100%',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 10,
+                                  padding: '8px 10px',
+                                  borderRadius: 12,
+                                  border: isSelectedSession ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
+                                  background: isSelectedSession ? THEME_ACCENT_SOFT : 'rgba(255, 255, 255, 0.56)',
+                                  color: 'var(--t-text)',
+                                  cursor: onSelectSession ? 'pointer' : 'default',
+                                  fontFamily: '-apple-system, system-ui, sans-serif',
+                                  textAlign: 'left',
+                                  boxShadow: isSelectedSession ? `0 0 0 1px ${THEME_ACCENT_RING}` : 'none',
+                                  transition: 'background 160ms ease, border-color 160ms ease, box-shadow 160ms ease',
+                                  opacity: onSelectSession ? 1 : 0.78,
+                                }}
+                              >
+                                <span
+                                  title={runtimeTone.label}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    width: 28,
+                                    height: 28,
+                                    borderRadius: 999,
+                                    background: runtimeTone.background,
+                                    border: `1px solid ${runtimeTone.border}`,
+                                    color: runtimeTone.color,
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    letterSpacing: '-0.01em',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {runtimeTone.shortLabel}
+                                </span>
+                                <span style={{ flex: 1, minWidth: 0 }}>
+                                  <span
+                                    style={{
+                                      display: 'block',
+                                      fontSize: 11.5,
+                                      fontWeight: 620,
+                                      lineHeight: 1.35,
+                                      color: 'var(--t-text)',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    {branchSessionLabel(agent)}
+                                  </span>
+                                  <span
+                                    style={{
+                                      display: 'block',
+                                      marginTop: 1,
+                                      fontSize: 10,
+                                      lineHeight: 1.3,
+                                      color: 'var(--t-text-faint)',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    {runtimeTone.label}
+                                  </span>
+                                </span>
+                                <span
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    flexShrink: 0,
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    color: statusTone.color,
+                                  }}
+                                >
+                                  <span
+                                    style={{
+                                      width: 7,
+                                      height: 7,
+                                      borderRadius: '50%',
+                                      background: statusTone.color,
+                                      boxShadow: `0 0 10px ${statusTone.glow}`,
+                                    }}
+                                  />
+                                  <span>{statusTone.label}</span>
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {hoveredBranchName === branch.name && branchHoverRect && typeof document !== 'undefined' ? createPortal(
                     <div
                       onMouseEnter={holdBranchHover}
@@ -2968,8 +3383,11 @@ export function RepoRegistrySection({
   onSelectSession,
   onSelectPR,
   onReviewPR,
+  onRepoRemoved,
   onLaunchComplete,
   onLaunchWorkspaceAgent,
+  onRegistryStateChange,
+  activeSessionKey = null,
   activeRepoLocalPath = null,
   activeWorkspacePath = null,
   sectionOpen,
@@ -2982,8 +3400,11 @@ export function RepoRegistrySection({
   onSelectSession?: (sessionKey: string) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
   onReviewPR?: (prNumber: number, repo?: string) => void;
+  onRepoRemoved?: (repo: RepoRegistryEntry) => void;
   onLaunchComplete?: () => void;
   onLaunchWorkspaceAgent?: (request: WorkspaceAgentLaunchRequest) => Promise<void>;
+  onRegistryStateChange?: (state: { loading: boolean; count: number; hasError: boolean }) => void;
+  activeSessionKey?: string | null;
   activeRepoLocalPath?: string | null;
   activeWorkspacePath?: string | null;
   sectionOpen?: boolean;
@@ -3121,6 +3542,14 @@ export function RepoRegistrySection({
     void loadRepos();
   }, [loadRepos]);
 
+  useEffect(() => {
+    onRegistryStateChange?.({
+      loading,
+      count: repos.length,
+      hasError: Boolean(loadError),
+    });
+  }, [loadError, loading, onRegistryStateChange, repos.length]);
+
   // ── Agent ↔ Branch association (#168) ──
   const [agentBranchMap, setAgentBranchMap] = useState<Map<string, Map<string, BranchAgent[]>>>(new Map());
 
@@ -3133,7 +3562,9 @@ export function RepoRegistrySection({
           branch: string;
           agentName: string;
           sessionKey: string;
+          runtime?: string;
           agentStatus: string;
+          currentTask?: string | null;
           localDiff?: { additions: number; deletions: number; changedFiles: number };
           pr?: { additions: number; deletions: number; changedFiles: number } | null;
         }> }) => {
@@ -3161,8 +3592,12 @@ export function RepoRegistrySection({
             if (!existing.some(a => a.sessionKey === ws.sessionKey)) {
               existing.push({
                 name: displayName,
+                agentName: ws.agentName,
                 sessionKey: ws.sessionKey,
                 color,
+                runtime: ws.runtime ?? (isClaude ? 'claude-code' : 'codex'),
+                status: ws.agentStatus,
+                currentTask: ws.currentTask ?? null,
                 additions: diffSource?.additions,
                 deletions: diffSource?.deletions,
                 changedFiles: diffSource?.changedFiles,
@@ -3208,23 +3643,7 @@ export function RepoRegistrySection({
     setAdding(false);
   }, []);
 
-  const openAddModal = useCallback(() => {
-    setAddOpen(true);
-    setRepoPathInput('');
-    setValidationError(null);
-    setValidationResult(null);
-    setValidating(false);
-    setAdding(false);
-  }, []);
-
-  const handleValidate = useCallback(async () => {
-    const localPath = repoPathInput.trim();
-    if (!localPath) {
-      setValidationError('Enter a local folder path.');
-      setValidationResult(null);
-      return;
-    }
-
+  const validateRepoPath = useCallback(async (localPath: string) => {
     setValidating(true);
     setValidationError(null);
     setValidationResult(null);
@@ -3241,7 +3660,51 @@ export function RepoRegistrySection({
     } finally {
       setValidating(false);
     }
-  }, [repoPathInput]);
+  }, []);
+
+  const pickFolderPath = useCallback(async () => {
+    let folderPath: string | null = null;
+
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const result = await open({ directory: true, title: 'Select project folder' });
+      if (typeof result === 'string') folderPath = result;
+    } catch {
+      try {
+        const response = await fetch('/api/panel/browse-folder', { method: 'POST' });
+        const data = await response.json() as { path?: string | null };
+        if (typeof data.path === 'string') folderPath = data.path;
+      } catch {
+        folderPath = window.prompt('Enter folder path:');
+      }
+    }
+
+    const trimmedPath = folderPath?.trim() ?? '';
+    return trimmedPath.length > 0 ? trimmedPath : null;
+  }, []);
+
+  const handleBrowseForRepo = useCallback(async () => {
+    setAddOpen(true);
+    setValidationError(null);
+    setValidationResult(null);
+    setValidating(false);
+    setAdding(false);
+    const folderPath = await pickFolderPath();
+    if (!folderPath) return;
+    setRepoPathInput(folderPath);
+    await validateRepoPath(folderPath);
+  }, [pickFolderPath, validateRepoPath]);
+
+  const handleValidate = useCallback(async () => {
+    const localPath = repoPathInput.trim();
+    if (!localPath) {
+      setValidationError('Enter a local folder path.');
+      setValidationResult(null);
+      return;
+    }
+
+    await validateRepoPath(localPath);
+  }, [repoPathInput, validateRepoPath]);
 
   const handleAddRepo = useCallback(async () => {
     const localPath = repoPathInput.trim();
@@ -3478,13 +3941,14 @@ export function RepoRegistrySection({
         delete next[removeTarget.id];
         return next;
       });
+      onRepoRemoved?.(removeTarget);
       setRemoveTarget(null);
     } catch (error) {
       setRemoveError(error instanceof Error ? error.message : 'Unable to remove repository.');
     } finally {
       setRemoveBusy(false);
     }
-  }, [removeTarget]);
+  }, [onRepoRemoved, removeTarget]);
 
   const activeRepoEntry = useMemo(
     () => repos.find((repo) => repo.localPath === activeRepoLocalPath) ?? null,
@@ -3528,10 +3992,11 @@ export function RepoRegistrySection({
     if (handledAddIntentNonceRef.current === addIntent.nonce) return;
     handledAddIntentNonceRef.current = addIntent.nonce;
     setReposOpen(true);
-    openAddModal();
-  }, [addIntent?.nonce, openAddModal, setReposOpen]);
+    void handleBrowseForRepo();
+  }, [addIntent?.nonce, handleBrowseForRepo, setReposOpen]);
 
   const branchPreview = useMemo(() => getWorkspaceBranchPreview(workspaceName), [workspaceName]);
+  const showEmptyState = !loading && !loadError && repos.length === 0;
 
   return (
     <>
@@ -3593,7 +4058,7 @@ export function RepoRegistrySection({
             marginRight: hideHeader ? -14 : 0,
             paddingTop: 0,
             paddingRight: hideHeader ? 0 : 14,
-            paddingBottom: 8,
+            paddingBottom: showEmptyState ? 0 : 8,
             paddingLeft: hideHeader ? 0 : 14,
             display: 'flex',
             flexDirection: 'column',
@@ -3639,32 +4104,64 @@ export function RepoRegistrySection({
             </div>
           ) : null}
 
-          {!loading && !loadError && repos.length === 0 ? (
+          {showEmptyState ? (
             <div
               style={{
-                padding: '14px 0',
-                borderBottom: '1px solid var(--t-divider-subtle)',
+                padding: '8px 0 2px',
               }}
             >
               <div
                 style={{
-                  fontSize: 13,
-                  fontWeight: 700,
-                  color: 'var(--t-text)',
-                  letterSpacing: '-0.01em',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 10,
+                  padding: '9px 12px',
+                  borderRadius: 16,
+                  border: '1px solid var(--t-panel-border)',
+                  background: `linear-gradient(180deg, ${THEME_PANEL_GLASS} 0%, ${THEME_BG_CARD} 100%)`,
+                  boxShadow: '0 10px 24px rgba(4, 8, 14, 0.12), inset 0 1px 0 var(--t-divider-subtle)',
                 }}
               >
-                Bring a repo into Cortex
-              </div>
-              <div
-                style={{
-                  marginTop: 6,
-                  fontSize: 12,
-                  lineHeight: 1.5,
-                  color: 'var(--t-text-muted)',
-                }}
-              >
-                Add a local Git repository, persist it in the repo registry, and spin up isolated workspaces from the same panel.
+                <span
+                  style={{
+                    width: 24,
+                    height: 24,
+                    marginTop: 1,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 999,
+                    background: THEME_ACCENT_SOFT,
+                    color: THEME_ACCENT,
+                    flexShrink: 0,
+                  }}
+                >
+                  <FolderOpen size={13} strokeWidth={2.1} />
+                </span>
+                <span style={{ minWidth: 0 }}>
+                  <span
+                    style={{
+                      display: 'block',
+                      fontSize: 11.5,
+                      fontWeight: 650,
+                      color: 'var(--t-text)',
+                      letterSpacing: '-0.01em',
+                    }}
+                  >
+                    Bring a repo into Cortex
+                  </span>
+                  <span
+                    style={{
+                      display: 'block',
+                      marginTop: 3,
+                      fontSize: 10.5,
+                      lineHeight: 1.45,
+                      color: 'var(--t-text-faint)',
+                    }}
+                  >
+                    Add a local Git repository with + and launch workspace flows from here.
+                  </span>
+                </span>
               </div>
             </div>
           ) : null}
@@ -3687,6 +4184,7 @@ export function RepoRegistrySection({
                 onSelectSession={onSelectSession}
                 onSelectPR={onSelectPR}
                 onReviewPR={onReviewPR}
+                activeSessionKey={activeSessionKey}
                 onSelectBranch={(branch, repoPath) => {
                   // Future: switch conversation context to agent on this branch
                   // For now: could trigger file tree refresh for this branch
@@ -3714,30 +4212,55 @@ export function RepoRegistrySection({
           <label htmlFor="add-repository-path" style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)' }}>
             Local folder path
           </label>
-          <input
-            id="add-repository-path"
-            name="addRepositoryPath"
-            value={repoPathInput}
-            onChange={(event) => {
-              setRepoPathInput(event.currentTarget.value);
-              setValidationError(null);
-              setValidationResult(null);
-            }}
-            placeholder="~/projects/cortex-ide"
-            autoFocus
-            style={{
-              width: '100%',
-              minHeight: 40,
-              padding: '10px 12px',
-              borderRadius: 12,
-              border: '1px solid var(--t-btn-secondary-border)',
-              background: 'rgba(255, 255, 255, 0.55)',
-              color: 'var(--t-text)',
-              fontSize: 13,
-              fontFamily: '"SF Mono", ui-monospace, monospace',
-              outline: 'none',
-            }}
-          />
+          <div style={{ display: 'flex', alignItems: 'stretch', gap: 8 }}>
+            <input
+              id="add-repository-path"
+              name="addRepositoryPath"
+              value={repoPathInput}
+              onChange={(event) => {
+                setRepoPathInput(event.currentTarget.value);
+                setValidationError(null);
+                setValidationResult(null);
+              }}
+              placeholder="~/projects/cortex-ide"
+              autoFocus
+              style={{
+                flex: 1,
+                minHeight: 40,
+                padding: '10px 12px',
+                borderRadius: 12,
+                border: '1px solid var(--t-btn-secondary-border)',
+                background: 'rgba(255, 255, 255, 0.55)',
+                color: 'var(--t-text)',
+                fontSize: 13,
+                fontFamily: '"SF Mono", ui-monospace, monospace',
+                outline: 'none',
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                void handleBrowseForRepo();
+              }}
+              disabled={validating || adding}
+              style={{
+                minHeight: 40,
+                padding: '0 12px',
+                borderRadius: 12,
+                border: '1px solid var(--t-btn-secondary-border)',
+                background: 'var(--t-panel-hover)',
+                color: 'var(--t-text-secondary)',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: validating || adding ? 'not-allowed' : 'pointer',
+                opacity: validating || adding ? 0.45 : 1,
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Browse…
+            </button>
+          </div>
         </div>
 
         {validationError ? (

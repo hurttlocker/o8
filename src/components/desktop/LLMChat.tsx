@@ -43,12 +43,13 @@ import {
   Star,
   PanelLeftClose,
   MessageSquare,
+  X,
   ArrowUp,
   ArrowDown,
   Plus,
 } from 'lucide-react';
 import { renderLLMMarkdown } from './LLMMarkdown';
-import { saveChatHistory, loadChatHistory } from '@/lib/llm/chat-history';
+import { saveChatHistory, loadChatHistory, type SavedChatRepoContext } from '@/lib/llm/chat-history';
 import { CompactionNode } from './CompactionNode';
 import { shouldCompact, compactConversation, type LLMMessage as CompactMessage } from '@/lib/chat/compaction';
 import { IssueLinkPickerModal, buildLinkedIssueContext, type LinkedIssueRef } from './IssueLinkPicker';
@@ -95,6 +96,7 @@ export interface LLMMessage {
   recalledFacts?: number; // Cortex memory facts recalled for this message
   isCompaction?: boolean; // compaction node — compressed older messages
   compactedCount?: number; // how many messages were compressed
+  isPartial?: boolean; // restored in-flight assistant output after reload
 }
 
 interface FileChangePreview {
@@ -107,6 +109,58 @@ interface FileChangePreview {
   oldText?: string;
   newText?: string;
   content?: string;
+}
+
+interface QueuedContextCard {
+  id: string;
+  reason?: string;
+  text: string;
+  title: string;
+  meta: string[];
+  preview?: string;
+}
+
+function buildQueuedContextCard(injection: { id: string; text: string; reason?: string }): QueuedContextCard {
+  const lines = injection.text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const header = lines[0]?.match(/^\[(.+)\]$/)?.[1] ?? lines[0] ?? 'Context';
+  const meta = lines
+    .slice(1)
+    .filter((line) => /^[A-Za-z][A-Za-z ]+:\s+/.test(line))
+    .slice(0, 3);
+  const firstBodyLine = lines.find((line) => !/^\[.+\]$/.test(line) && !/^[A-Za-z][A-Za-z ]+:\s+/.test(line));
+  const preview = firstBodyLine && firstBodyLine !== header ? firstBodyLine : undefined;
+
+  const title = injection.reason?.startsWith('pr-comment')
+    ? (meta[0]?.startsWith('Author:') ? meta[0].replace(/^Author:\s*/, '') : 'PR comment')
+    : injection.reason?.startsWith('ci-check')
+      ? 'CI context'
+      : injection.reason?.startsWith('deploy')
+        ? 'Deploy context'
+        : header;
+
+  return {
+    id: injection.id,
+    reason: injection.reason,
+    text: injection.text,
+    title,
+    meta,
+    preview,
+  };
+}
+
+function buildConversationSummary(messages: LLMMessage[]) {
+  const latestUser = [...messages].reverse().find((message) => (
+    message.role === 'user'
+    && message.content.trim()
+    && !/^(hi|hey|hello)\b/i.test(message.content.trim())
+  ));
+  if (!latestUser) return null;
+  const summary = latestUser.content.replace(/\s+/g, ' ').trim();
+  if (!summary) return null;
+  return summary.length <= 48 ? summary : `${summary.slice(0, 47)}…`;
 }
 
 interface ModelOption {
@@ -141,6 +195,7 @@ const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
 const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
 const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
+const HISTORY_DELETED_EVENT = 'cortex-llm-history-deleted';
 
 // ── Subcomponents ──
 
@@ -766,6 +821,17 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
           </>
         ) : renderLLMMarkdown(message.content, { onApplyToFile, onOpenInCanvas, onRunInTerminal })}
       </div>
+      {!isUser && message.isPartial ? (
+        <div style={{
+          maxWidth: '90%',
+          paddingLeft: 2,
+          fontSize: 11,
+          color: 'var(--t-text-muted)',
+          fontStyle: 'italic',
+        }}>
+          Recovered after reload
+        </div>
+      ) : null}
 
       {/* Chain of Thought — shows above message content for completed messages */}
       {!isUser && (message.thinkingSteps || message.thinking) && (
@@ -1528,14 +1594,17 @@ function StreamingIndicator() {
 
 // ── Main Component ──
 
-export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIssueChange, onOpenInCanvas, onRunInTerminal, onOpenHistoryChat }: {
+export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInjection, onSummaryChange, onConsumeDraftInjection, onLinkedIssueChange, onOpenInCanvas, onRunInTerminal, onOpenHistoryChat }: {
   tabId: string;
-  preferredRepo?: { name?: string; remoteUrl?: string | null } | null;
+  preferredRepo?: { name?: string; localPath?: string; branch?: string | null; remoteUrl?: string | null } | null;
   linkedIssue?: LinkedIssueRef | null;
+  draftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string } | null;
+  onSummaryChange?: (tabId: string, summary: string | null) => void;
+  onConsumeDraftInjection?: (injectionId: string) => void;
   onLinkedIssueChange?: (issue: LinkedIssueRef | null) => void;
   onOpenInCanvas?: (code: string, language: string) => void;
   onRunInTerminal?: (command: string) => void;
-  onOpenHistoryChat?: (historyTabId: string, title: string) => void;
+  onOpenHistoryChat?: (historyTabId: string, title: string, repo?: SavedChatRepoContext | null) => void;
 }) {
   const [messages, setMessages] = useState<LLMMessage[]>([]);
   const [input, setInput] = useState('');
@@ -1556,6 +1625,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
   const [slashIndex, setSlashIndex] = useState(0);
   const [approvedToolsSet, setApprovedToolsSet] = useState<Set<string>>(new Set());
   const [pendingApproval, setPendingApproval] = useState<{
+    id?: string;
     name: string;
     args: Record<string, unknown>;
     summary: string;
@@ -1571,6 +1641,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
   const [historyItems, setHistoryItems] = useState<{
     tabId: string; title: string; preview: string; messageCount: number;
     model: string; savedAt: string; modifiedAt: string; starred: boolean;
+    repoName?: string | null; repoPath?: string | null; repoBranch?: string | null; remoteUrl?: string | null;
   }[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [applyModal, setApplyModal] = useState<{ code: string; language: string } | null>(null);
@@ -1579,6 +1650,8 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
   const [applyFileSuggestions, setApplyFileSuggestions] = useState<{ path: string }[]>([]);
   const [applyFileIndex, setApplyFileIndex] = useState(0);
   const applySearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handledDraftInjectionRef = useRef<string | null>(null);
+  const [queuedContextCards, setQueuedContextCards] = useState<QueuedContextCard[]>([]);
 
   // Apply code to a file
   const handleApplyToFile = useCallback((code: string, language: string) => {
@@ -1642,6 +1715,11 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
     try {
       await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(histTabId)}`, { method: 'DELETE' });
       setHistoryItems(prev => prev.filter(h => h.tabId !== histTabId));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(HISTORY_DELETED_EVENT, {
+          detail: { tabId: histTabId },
+        }));
+      }
     } catch { /* ignore */ }
   }, []);
 
@@ -1649,6 +1727,56 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
   useEffect(() => {
     if (historyOpen) loadHistory();
   }, [historyOpen, loadHistory]);
+
+  useEffect(() => {
+    const handleHistoryDeleted = (event: Event) => {
+      const detail = (event as CustomEvent<{ tabId?: string }>).detail;
+      if (!detail?.tabId || detail.tabId !== tabId) return;
+      setMessages([]);
+      setInput('');
+      setStreamContent('');
+      setIsStreaming(false);
+      setShowTypingIndicator(false);
+      setActiveToolCalls([]);
+      setActiveThinking(null);
+      setFollowUps([]);
+      setAttachedFiles([]);
+      setAttachedImages([]);
+      setQueuedContextCards([]);
+      setPendingApproval(null);
+      setEditedCommand('');
+      setApprovedToolsSet(new Set());
+    };
+
+    window.addEventListener(HISTORY_DELETED_EVENT, handleHistoryDeleted as EventListener);
+    return () => window.removeEventListener(HISTORY_DELETED_EVENT, handleHistoryDeleted as EventListener);
+  }, [tabId]);
+
+  useEffect(() => {
+    onSummaryChange?.(tabId, buildConversationSummary(messages));
+  }, [messages, onSummaryChange, tabId]);
+
+  useEffect(() => {
+    if (!draftInjection?.id) return;
+    if (handledDraftInjectionRef.current === draftInjection.id) return;
+    handledDraftInjectionRef.current = draftInjection.id;
+    if (draftInjection.autoSend) {
+      setInput((current) => {
+        const next = draftInjection.text.trim();
+        if (!next) return current;
+        return current.trim() ? `${next}\n\n${current}` : next;
+      });
+    } else {
+      setQueuedContextCards((current) => {
+        if (current.some((card) => card.id === draftInjection.id)) {
+          return current;
+        }
+        return [...current, buildQueuedContextCard(draftInjection)];
+      });
+    }
+    requestAnimationFrame(() => inputRef.current?.focus());
+    onConsumeDraftInjection?.(draftInjection.id);
+  }, [draftInjection, onConsumeDraftInjection]);
 
   const doApply = useCallback(async () => {
     if (!applyModal || !applyPath.trim()) return;
@@ -1673,6 +1801,27 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const fileSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const buildPersistedMessages = useCallback((baseMessages: LLMMessage[] = messages, partialContent: string = streamContent) => {
+    const stableMessages = isStreaming
+      ? baseMessages.filter((message) => !message.isPartial)
+      : baseMessages;
+
+    if (isStreaming && partialContent.trim()) {
+      return [
+        ...stableMessages,
+        {
+          id: `partial-${tabId}`,
+          role: 'assistant' as const,
+          content: partialContent,
+          model: model.label,
+          timestamp: Date.now(),
+          isPartial: true,
+        },
+      ];
+    }
+
+    return stableMessages;
+  }, [isStreaming, messages, model.label, streamContent, tabId]);
 
   // Load persisted messages + auto-select model
   useEffect(() => {
@@ -1713,13 +1862,31 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
   // Auto-save chat history (debounced)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!modelResolved || messages.length === 0) return;
+    if (!modelResolved) return;
+    const persistedMessages = buildPersistedMessages();
+    if (persistedMessages.length === 0) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
-      saveChatHistory(tabId, messages, model.id);
-    }, 1000);
+      saveChatHistory(tabId, persistedMessages, model.id, preferredRepo ?? null);
+    }, isStreaming ? 250 : 1000);
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
-  }, [messages, model.id, tabId, modelResolved]);
+  }, [buildPersistedMessages, isStreaming, model.id, modelResolved, preferredRepo, tabId]);
+
+  // Flush chat history on reload/navigation so in-flight assistant text survives page refresh.
+  useEffect(() => {
+    if (!modelResolved) return;
+    const flushHistory = () => {
+      const persistedMessages = buildPersistedMessages();
+      if (persistedMessages.length === 0) return;
+      void saveChatHistory(tabId, persistedMessages, model.id, preferredRepo ?? null);
+    };
+    window.addEventListener('pagehide', flushHistory);
+    window.addEventListener('beforeunload', flushHistory);
+    return () => {
+      window.removeEventListener('pagehide', flushHistory);
+      window.removeEventListener('beforeunload', flushHistory);
+    };
+  }, [buildPersistedMessages, model.id, modelResolved, preferredRepo, tabId]);
 
   // Auto-scroll on new messages (smooth, respects user scroll position)
   useEffect(() => {
@@ -1891,7 +2058,10 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
   }, [input, attachedFiles]);
 
   const handleSend = useCallback(async () => {
-    const text = input.trim();
+    const text = [
+      ...queuedContextCards.map((card) => card.text.trim()).filter(Boolean),
+      input.trim(),
+    ].filter(Boolean).join('\n\n');
     if (!text || isStreaming) return;
 
     // Extract @file references from the message
@@ -1932,6 +2102,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
     };
     setMessages((prev) => [...prev, userMsg]);
     setInput('');
+    setQueuedContextCards([]);
     setAttachedFiles([]);
     setAttachedImages([]);
     setFollowUps([]);
@@ -1958,6 +2129,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
         .filter((m) => {
           // Skip error/system messages (they poison the conversation)
           if (m.isError) return false;
+          if (m.isPartial) return false;
           if (m.content.startsWith('Error: ')) return false;
           if (m.content.startsWith('Action cancelled:')) return false;
           // Skip empty messages
@@ -1983,7 +2155,8 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
 
       // Fetch with automatic retry on transient failures (dev server HMR, network blip)
       let res: Response | null = null;
-      for (let attempt = 0; attempt < 2; attempt++) {
+      const retryDelays = [800, 1800];
+      for (let attempt = 0; attempt < retryDelays.length + 1; attempt++) {
         try {
           res = await fetch('/api/v2/proxy/llm', {
             method: 'POST',
@@ -1993,9 +2166,8 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
           });
           break; // Success — exit retry loop
         } catch (fetchErr) {
-          if (attempt === 0 && !controller.signal.aborted) {
-            // First failure — wait 1s and retry (likely dev server recompiling)
-            await new Promise(r => setTimeout(r, 1000));
+          if (attempt < retryDelays.length && !controller.signal.aborted) {
+            await new Promise(r => setTimeout(r, retryDelays[attempt]));
             continue;
           }
           throw fetchErr;
@@ -2138,6 +2310,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
               } else if (parsed.type === 'approval_required') {
                 const isTerminal = parsed.name === 'run_terminal_command';
                 setPendingApproval({
+                  id: typeof parsed.id === 'string' ? parsed.id : undefined,
                   name: parsed.name,
                   args: parsed.args,
                   summary: parsed.summary,
@@ -2272,7 +2445,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
       setShowTypingIndicator(false);
       abortRef.current = null;
     }
-  }, [input, isStreaming, linkedIssue, messages, model, streamContent]);
+  }, [approvedToolsSet, attachedFiles, attachedImages, input, isStreaming, linkedIssue, messages, model, queuedContextCards, showTypingIndicator, streamContent, tabId]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();
@@ -2342,26 +2515,33 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
 
   const isEmpty = messages.length === 0 && !isStreaming;
 
-  // Group history by date
   const groupedHistory = (() => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const yesterday = today - 86400000;
-    const thisWeek = today - 7 * 86400000;
+    const groups = new Map<string, typeof historyItems>();
+    const repoOrder = new Map<string, number>();
 
-    const groups: { label: string; items: typeof historyItems }[] = [];
-    const starred = historyItems.filter(h => h.starred);
-    const todayItems = historyItems.filter(h => !h.starred && new Date(h.modifiedAt).getTime() >= today);
-    const yesterdayItems = historyItems.filter(h => !h.starred && new Date(h.modifiedAt).getTime() >= yesterday && new Date(h.modifiedAt).getTime() < today);
-    const weekItems = historyItems.filter(h => !h.starred && new Date(h.modifiedAt).getTime() >= thisWeek && new Date(h.modifiedAt).getTime() < yesterday);
-    const olderItems = historyItems.filter(h => !h.starred && new Date(h.modifiedAt).getTime() < thisWeek);
+    for (const item of historyItems) {
+      const repoLabel = item.repoName?.trim()
+        || item.repoPath?.trim()?.split('/').filter(Boolean).pop()
+        || 'Unscoped';
+      if (!groups.has(repoLabel)) {
+        groups.set(repoLabel, []);
+      }
+      groups.get(repoLabel)!.push(item);
+      const currentOrder = repoOrder.get(repoLabel) ?? 0;
+      const timestamp = new Date(item.modifiedAt).getTime();
+      repoOrder.set(repoLabel, Math.max(currentOrder, Number.isFinite(timestamp) ? timestamp : 0));
+    }
 
-    if (starred.length) groups.push({ label: '⭐ Starred', items: starred });
-    if (todayItems.length) groups.push({ label: 'Today', items: todayItems });
-    if (yesterdayItems.length) groups.push({ label: 'Yesterday', items: yesterdayItems });
-    if (weekItems.length) groups.push({ label: 'This Week', items: weekItems });
-    if (olderItems.length) groups.push({ label: 'Older', items: olderItems });
-    return groups;
+    return [...groups.entries()]
+      .sort((left, right) => {
+        const preferredName = preferredRepo?.name?.trim();
+        if (preferredName) {
+          if (left[0] === preferredName && right[0] !== preferredName) return -1;
+          if (right[0] === preferredName && left[0] !== preferredName) return 1;
+        }
+        return (repoOrder.get(right[0]) ?? 0) - (repoOrder.get(left[0]) ?? 0);
+      })
+      .map(([label, items]) => ({ label, items }));
   })();
 
   return (
@@ -2494,7 +2674,12 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                         onMouseLeave={(e) => { (e.currentTarget).style.background = 'transparent'; }}
                         onClick={() => {
                           if (onOpenHistoryChat) {
-                            onOpenHistoryChat(conv.tabId, conv.title);
+                            onOpenHistoryChat(conv.tabId, conv.title, conv.repoName || conv.repoPath ? {
+                              name: conv.repoName ?? undefined,
+                              localPath: conv.repoPath ?? undefined,
+                              branch: conv.repoBranch ?? undefined,
+                              remoteUrl: conv.remoteUrl ?? undefined,
+                            } : null);
                           }
                         }}
                       >
@@ -2518,7 +2703,11 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
                           }}>
-                            {conv.messageCount} msgs · {conv.model.split('/').pop()}
+                            {[
+                              conv.repoBranch ? `${conv.repoBranch}` : null,
+                              `${conv.messageCount} msgs`,
+                              conv.model.split('/').pop(),
+                            ].filter(Boolean).join(' · ')}
                           </div>
                         </div>
                         <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
@@ -3311,125 +3500,80 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
               type="button"
               data-approve-btn="true"
               onClick={() => {
+                const approvalId = pendingApproval.id;
                 const toolName = pendingApproval.name;
+                const edited = pendingApproval.name === 'run_terminal_command' ? editedCommand.trim() : '';
                 setPendingApproval(null);
-
-                // Build updated approval set synchronously
-                const newApprovedTools = new Set([...approvedToolsSet, toolName]);
-                setApprovedToolsSet(newApprovedTools);
-
-                // Re-send directly via fetch — don't duplicate the user message
-                const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-                if (!lastUserMsg) return;
-
+                setApprovedToolsSet((current) => new Set([...current, toolName]));
                 setIsStreaming(true);
                 setShowTypingIndicator(true);
                 setStreamContent('');
-                const ctrl = new AbortController();
-                abortRef.current = ctrl;
+                setActiveThinking(null);
 
-                // Get clean message history (same filtering as handleSend)
-                const cleanMsgs = messages
-                  .filter(m => !m.isError && !m.content.startsWith('Error: ') && !m.content.startsWith('Action cancelled:') && m.content.trim())
-                  .map(m => ({ role: m.role, content: m.content }));
-                const recentMsgs = cleanMsgs.length > 40 ? cleanMsgs.slice(-40) : cleanMsgs;
-
-                // Fire the request with approvals baked in
-                fetch('/api/v2/proxy/llm', {
+                fetch('/api/panel/approvals', {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json', 'x-tab-id': tabId },
+                  headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    model: model.id,
-                    provider: model.provider,
-                    messages: recentMsgs,
-                    approvedTools: [...newApprovedTools],
+                    action: 'approve',
+                    id: approvalId,
+                    editedCommand: edited || undefined,
                   }),
-                  signal: ctrl.signal,
                 }).then(async (res) => {
-                  if (!res.ok || !res.body) {
-                    setIsStreaming(false);
-                    setShowTypingIndicator(false);
+                  const data = await res.json().catch(() => null) as {
+                    ok?: boolean;
+                    note?: string;
+                    assistantMessage?: LLMMessage | null;
+                    nextApproval?: {
+                      id?: string;
+                      toolName?: string;
+                      args?: Record<string, unknown>;
+                      summary?: string;
+                      editable?: boolean;
+                      diff?: { before?: string; after?: string; path?: string };
+                      command?: string;
+                    } | null;
+                    error?: string;
+                  } | null;
+
+                  if (!res.ok || !data?.ok) {
+                    setMessages((prev) => [...prev, {
+                      id: `approval-error-${Date.now()}`,
+                      role: 'assistant',
+                      content: `Error: ${data?.error || data?.note || 'Unable to approve this action.'}`,
+                      timestamp: Date.now(),
+                      isError: true,
+                    }]);
                     return;
                   }
-                  const reader = res.body.getReader();
-                  const decoder = new TextDecoder();
-                  let sseBuffer = '';
-                  let accumulated = '';
 
-                  while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
+                  if (data.assistantMessage) {
+                    setMessages((prev) => [...prev, data.assistantMessage as LLMMessage]);
+                  }
 
-                    sseBuffer += decoder.decode(value, { stream: true });
-                    const sseLines = sseBuffer.split('\n');
-                    sseBuffer = sseLines.pop() ?? '';
-
-                    for (const sseLine of sseLines) {
-                      if (!sseLine.startsWith('data: ')) continue;
-                      const data = sseLine.slice(6);
-                      if (data === '[DONE]') continue;
-
-                      try {
-                        const parsed = JSON.parse(data);
-                        if (parsed.type === 'content' && parsed.text) {
-                          accumulated += parsed.text;
-                          setStreamContent(accumulated);
-                          setShowTypingIndicator(false);
-                        } else if (parsed.type === 'tool_call') {
-                          setActiveThinking(prev => {
-                            const steps = prev?.steps ?? [];
-                            const existing = steps.find(s => s.label === parsed.name);
-                            if (existing) return prev;
-                            return {
-                              steps: [...steps, { type: 'tool' as const, label: parsed.name, tool: parsed.name, file: (parsed.args?.path as string) || '', status: parsed.status || 'running' }],
-                              thinking: prev?.thinking ?? '',
-                            };
-                          });
-                        } else if (parsed.type === 'tool_result') {
-                          // tool completed
-                        } else if (parsed.type === 'approval_required') {
-                          // Another approval needed (chained tools)
-                          const isTerminal = parsed.name === 'run_terminal_command';
-                          setPendingApproval({
-                            name: parsed.name,
-                            args: parsed.args,
-                            summary: parsed.summary,
-                            editable: parsed.editable ?? isTerminal,
-                            diff: parsed.diff,
-                          });
-                          if (isTerminal) setEditedCommand(String(parsed.args?.command || ''));
-                        } else if (parsed.type === 'sources') {
-                          // Handle sources — will be picked up on finalize
-                        } else if (parsed.type === 'usage') {
-                          // Usage tracking
-                        }
-                      } catch { /* skip malformed SSE */ }
+                  if (data.nextApproval?.toolName) {
+                    const isTerminal = data.nextApproval.toolName === 'run_terminal_command';
+                    setPendingApproval({
+                      id: data.nextApproval.id,
+                      name: data.nextApproval.toolName,
+                      args: data.nextApproval.args ?? {},
+                      summary: data.nextApproval.summary ?? 'Approval required',
+                      editable: data.nextApproval.editable ?? isTerminal,
+                      diff: data.nextApproval.diff,
+                    });
+                    if (isTerminal) {
+                      setEditedCommand(String(data.nextApproval.command || data.nextApproval.args?.command || ''));
                     }
                   }
-
-                  // Finalize the assistant message
-                  if (accumulated) {
-                    setMessages(prev => {
-                      // Find the last assistant message (streaming placeholder) and replace
-                      const last = prev[prev.length - 1];
-                      if (last && last.role === 'assistant' && last.id?.startsWith('stream-')) {
-                        return [...prev.slice(0, -1), { ...last, content: accumulated }];
-                      }
-                      // Or append new assistant message
-                      return [...prev, {
-                        id: `asst-${Date.now()}`,
-                        role: 'assistant' as const,
-                        content: accumulated,
-                        timestamp: Date.now(),
-                      }];
-                    });
-                  }
-
+                }).catch((error) => {
+                  setMessages((prev) => [...prev, {
+                    id: `approval-error-${Date.now()}`,
+                    role: 'assistant',
+                    content: `Error: ${error instanceof Error ? error.message : 'Unable to approve this action.'}`,
+                    timestamp: Date.now(),
+                    isError: true,
+                  }]);
+                }).finally(() => {
                   setStreamContent('');
-                  setIsStreaming(false);
-                  setShowTypingIndicator(false);
-                  setActiveThinking(null);
-                }).catch(() => {
                   setIsStreaming(false);
                   setShowTypingIndicator(false);
                 });
@@ -3456,14 +3600,46 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
             <button
               type="button"
               onClick={() => {
+                const approvalId = pendingApproval.id;
+                const fallbackSummary = pendingApproval.summary;
                 setPendingApproval(null);
-                // Add denial message
-                setMessages(prev => [...prev, {
-                  id: `deny-${Date.now()}`,
-                  role: 'assistant',
-                  content: `Action cancelled: ${pendingApproval.summary}`,
-                  timestamp: Date.now(),
-                }]);
+                fetch('/api/panel/approvals', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'reject', id: approvalId }),
+                }).then(async (res) => {
+                  const data = await res.json().catch(() => null) as {
+                    ok?: boolean;
+                    assistantMessage?: LLMMessage | null;
+                    note?: string;
+                  } | null;
+                  if (!res.ok || !data?.ok) {
+                    setMessages((prev) => [...prev, {
+                      id: `deny-${Date.now()}`,
+                      role: 'assistant',
+                      content: `Action cancelled: ${fallbackSummary}`,
+                      timestamp: Date.now(),
+                    }]);
+                    return;
+                  }
+                  if (data.assistantMessage) {
+                    setMessages((prev) => [...prev, data.assistantMessage as LLMMessage]);
+                    return;
+                  }
+                  setMessages((prev) => [...prev, {
+                    id: `deny-${Date.now()}`,
+                    role: 'assistant',
+                    content: data.note || `Action cancelled: ${fallbackSummary}`,
+                    timestamp: Date.now(),
+                  }]);
+                }).catch(() => {
+                  setMessages((prev) => [...prev, {
+                    id: `deny-${Date.now()}`,
+                    role: 'assistant',
+                    content: `Action cancelled: ${fallbackSummary}`,
+                    timestamp: Date.now(),
+                  }]);
+                });
               }}
               style={{
                 paddingTop: 7,
@@ -3784,6 +3960,94 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
             (e.currentTarget).style.boxShadow = 'none';
           }}
         >
+          {queuedContextCards.length > 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                paddingTop: 14,
+                paddingRight: 14,
+                paddingBottom: 0,
+                paddingLeft: 14,
+                borderBottom: '1px solid var(--t-divider-subtle)',
+              }}
+            >
+              {queuedContextCards.map((card) => (
+                <div
+                  key={card.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 10,
+                    padding: '8px 10px',
+                    borderRadius: 12,
+                    border: '1px solid var(--t-panel-border)',
+                    background: THEME_BG_CARD,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 28,
+                      height: 28,
+                      borderRadius: 9,
+                      background: THEME_ACCENT_SOFT,
+                      color: THEME_ACCENT,
+                      flexShrink: 0,
+                    }}
+                  >
+                    <MessageSquare size={14} />
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: THEME_ACCENT }}>
+                      Staged Context
+                    </div>
+                    <div style={{ marginTop: 3, fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>
+                      {card.title}
+                    </div>
+                    {card.meta.length > 0 ? (
+                      <div style={{ marginTop: 3, display: 'flex', gap: 7, flexWrap: 'wrap', fontSize: 10, color: 'var(--t-text-muted)' }}>
+                        {card.meta.slice(0, 2).map((entry) => (
+                          <span key={entry}>{entry}</span>
+                        ))}
+                      </div>
+                    ) : null}
+                    {card.preview ? (
+                      <div style={{ marginTop: 5, fontSize: 11, lineHeight: 1.45, color: 'var(--t-text-secondary)' }}>
+                        {card.preview}
+                      </div>
+                    ) : null}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQueuedContextCards((current) => current.filter((queuedCard) => queuedCard.id !== card.id));
+                    }}
+                    aria-label="Remove staged context"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 28,
+                      height: 28,
+                      borderRadius: 9,
+                      border: '1px solid var(--t-panel-border)',
+                      background: 'transparent',
+                      color: 'var(--t-text-faint)',
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
           {/* Textarea area — upper portion */}
           <div style={{
             paddingTop: 14,
@@ -3792,6 +4056,8 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
             paddingRight: 18,
           }}>
             <textarea
+              name="llmChatMessage"
+              aria-label={`Message ${model.label}`}
               ref={inputRef}
               value={input}
               onChange={(e) => handleInputChange(e.target.value)}
@@ -3851,6 +4117,8 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
               >
                 <Plus size={16} />
                 <input
+                  name="llmChatAttachments"
+                  aria-label="Attach files"
                   type="file"
                   accept="image/*,.txt,.md,.ts,.tsx,.js,.jsx,.py,.json,.yaml,.yml,.toml,.css,.html"
                   multiple
@@ -3947,7 +4215,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                   type="button"
                   data-send-btn="true"
                   onClick={handleSend}
-                  disabled={!input.trim()}
+                  disabled={!input.trim() && queuedContextCards.length === 0}
                   title="Send message (Enter)"
                   style={{
                     display: 'flex',
@@ -3957,14 +4225,14 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
                     height: 32,
                     border: 'none',
                     borderRadius: 10,
-                    background: input.trim() ? THEME_ACCENT : 'var(--t-divider-strong)',
-                    color: input.trim() ? 'white' : 'var(--t-text-faint)',
-                    cursor: input.trim() ? 'pointer' : 'default',
+                    background: input.trim() || queuedContextCards.length > 0 ? THEME_ACCENT : 'var(--t-divider-strong)',
+                    color: input.trim() || queuedContextCards.length > 0 ? 'white' : 'var(--t-text-faint)',
+                    cursor: input.trim() || queuedContextCards.length > 0 ? 'pointer' : 'default',
                     flexShrink: 0,
                     transition: 'all 150ms',
                   }}
-                  onMouseEnter={(e) => { if (input.trim()) (e.currentTarget).style.background = THEME_ACCENT; }}
-                  onMouseLeave={(e) => { if (input.trim()) (e.currentTarget).style.background = THEME_ACCENT; }}
+                  onMouseEnter={(e) => { if (input.trim() || queuedContextCards.length > 0) (e.currentTarget).style.background = THEME_ACCENT; }}
+                  onMouseLeave={(e) => { if (input.trim() || queuedContextCards.length > 0) (e.currentTarget).style.background = THEME_ACCENT; }}
                 >
                   <ArrowUp size={16} />
                 </button>
@@ -3987,6 +4255,8 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
+          padding: 'var(--cortex-dialog-overlay-padding)',
+          boxSizing: 'border-box',
           zIndex: 50,
           animation: 'llmFadeIn 150ms ease-out',
         }} onClick={() => setApplyModal(null)}>
@@ -3995,8 +4265,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
               background: 'white',
               borderRadius: 16,
               boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
-              width: 420,
-              maxWidth: '90%',
+              width: 'min(420px, 100%)',
               overflow: 'hidden',
               animation: 'llmFadeIn 200ms ease-out',
             }}
@@ -4004,10 +4273,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
           >
             {/* Header */}
             <div style={{
-              paddingTop: 16,
-              paddingBottom: 12,
-              paddingLeft: 20,
-              paddingRight: 20,
+              padding: 'var(--cortex-dialog-header-padding)',
               borderBottom: '1px solid #f1f5f9',
             }}>
               <div style={{ fontSize: 15, fontWeight: 600, color: '#0f172a' }}>
@@ -4019,7 +4285,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
             </div>
 
             {/* File search input */}
-            <div style={{ paddingTop: 16, paddingBottom: 16, paddingLeft: 20, paddingRight: 20, position: 'relative' }}>
+            <div style={{ padding: 'var(--cortex-dialog-body-padding)', position: 'relative' }}>
               <label style={{ fontSize: 12, fontWeight: 500, color: '#64748b', display: 'block', marginBottom: 6 }}>
                 Search for a file or type a new path
               </label>
@@ -4145,10 +4411,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, onLinkedIss
               display: 'flex',
               justifyContent: 'flex-end',
               gap: 8,
-              paddingTop: 12,
-              paddingBottom: 16,
-              paddingLeft: 20,
-              paddingRight: 20,
+              padding: 'var(--cortex-dialog-footer-padding)',
               borderTop: '1px solid #f1f5f9',
             }}>
               <button
