@@ -40,6 +40,10 @@ html::-webkit-scrollbar {
   --frost-strong: rgba(255,255,255,1);
   --msg-user-bg: rgba(0,122,255,0.08);
   --msg-assistant-bg: rgba(255,255,255,0.9);
+  --cortex-dialog-overlay-padding: 20px;
+  --cortex-dialog-header-padding: 16px 18px 14px;
+  --cortex-dialog-body-padding: 18px;
+  --cortex-dialog-footer-padding: 14px 18px 18px;
 }
 
 :root.dark-mode, .dark-mode {
@@ -1173,6 +1177,358 @@ button.workflow-file-item.workflow-file-item-active {
   margin: 0;
 }
 
+.dark-mode .inset-card,
+.dark-mode .operator-state-card,
+.dark-mode .workflow-file-item,
+.dark-mode .workflow-pr-item,
+.dark-mode .workflow-worktree-item,
+.dark-mode .workflow-issue-card,
+.dark-mode .workflow-commit-item,
+.dark-mode .transcript-entry,
+.dark-mode .tool-shell .operator-note {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+}
+
+.dark-mode .workflow-file-item p,
+.dark-mode .workflow-pr-item p,
+.dark-mode .workflow-worktree-item p,
+.dark-mode .workflow-issue-card p,
+.dark-mode .operator-state-card p,
+.dark-mode .muted,
+.dark-mode .agent-row-task,
+.dark-mode .event-detail {
+  color: var(--text-secondary);
+}
+
+.board-task-workspace-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.board-task-workspace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 0;
+}
+
+.board-task-strip {
+  gap: 0.95rem;
+}
+
+.board-task-strip-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 0;
+}
+
+.board-task-status-group,
+.board-task-chip-row,
+.board-task-action-row,
+.board-task-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.board-task-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.32rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.52);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  color: #475569;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.board-issue-card {
+  cursor: pointer;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.board-issue-card:hover,
+.board-issue-card-active {
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 10px 24px rgba(59, 130, 246, 0.08);
+  transform: translateY(-1px);
+}
+
+.board-task-action-button {
+  min-height: 38px;
+  padding: 0.65rem 0.92rem;
+  border-radius: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.board-task-action-button.button-primary {
+  border-color: transparent;
+}
+
+.board-task-action-button-danger {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.18);
+  color: #b91c1c;
+}
+
+.board-task-inline-button {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.board-task-inline-button-danger {
+  background: rgba(220, 38, 38, 0.08);
+  border-color: rgba(220, 38, 38, 0.18);
+  color: #b91c1c;
+}
+
+.board-task-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.14fr) minmax(320px, 0.86fr);
+  gap: 1rem;
+  min-height: 0;
+}
+
+.board-task-primary,
+.board-task-secondary {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 0;
+}
+
+.board-task-secondary {
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.board-task-secondary-grid {
+  margin-bottom: 0;
+}
+
+.board-task-primary .workflow-review-surface {
+  margin-top: 0;
+  min-height: 100%;
+}
+
+.board-task-review-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 100%;
+}
+
+.board-task-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  min-height: 160px;
+  padding: 1rem;
+  border-radius: 16px;
+  border: 1px dashed rgba(15, 23, 42, 0.12);
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.board-task-empty-compact {
+  min-height: 96px;
+  padding: 0.9rem;
+  font-size: 0.82rem;
+}
+
+.board-task-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--blue);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.board-task-binding-list,
+.board-task-dependency-list,
+.board-task-editor-body,
+.board-task-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.board-task-linker,
+.board-task-field-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.board-task-field {
+  display: grid;
+  gap: 0.42rem;
+}
+
+.board-task-field > span,
+.board-task-binding-label {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.board-task-input,
+.board-task-select,
+.board-task-textarea {
+  width: 100%;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--text);
+  font: inherit;
+  padding: 0.78rem 0.9rem;
+}
+
+.board-task-select {
+  min-height: 44px;
+}
+
+.board-task-input:focus,
+.board-task-select:focus,
+.board-task-textarea:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.16);
+  border-color: rgba(37, 99, 235, 0.28);
+}
+
+.board-task-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  color: #334155;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.board-task-binding-row {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.board-task-binding-value {
+  color: var(--text);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.board-task-dependency-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.board-task-editor-shell summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.9rem;
+  cursor: pointer;
+}
+
+.board-task-editor-shell summary::-webkit-details-marker {
+  display: none;
+}
+
+.board-task-editor-shell[open] summary {
+  margin-bottom: 0.95rem;
+}
+
+.board-task-editor-summary > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.board-task-editor-summary span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.board-task-editor-summary strong {
+  font-size: 0.98rem;
+}
+
+.board-task-editor-shell summary svg {
+  transition: transform 180ms ease;
+}
+
+.board-task-editor-shell[open] summary svg {
+  transform: rotate(90deg);
+}
+
+.dark-mode .board-task-pill {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.dark-mode .board-task-empty,
+.dark-mode .board-task-input,
+.dark-mode .board-task-select,
+.dark-mode .board-task-textarea {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark-mode .board-task-link,
+.dark-mode .board-task-checkbox,
+.dark-mode .board-task-binding-value,
+.dark-mode .board-task-dependency-row span {
+  color: var(--text);
+}
+
+.dark-mode .board-issue-card:hover,
+.dark-mode .board-issue-card-active {
+  border-color: rgba(59, 130, 246, 0.3);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.24);
+}
+
+@media (max-width: 1280px) {
+  .board-task-grid,
+  .board-task-strip-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 920px) {
+  .board-task-grid,
+  .board-task-strip-grid,
+  .board-task-linker,
+  .board-task-field-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .mobile-wrap button,
 .mobile-action-link {
   border: 1px solid rgba(255, 255, 255, 0.52);
@@ -2291,7 +2647,7 @@ button.workflow-file-item.workflow-file-item-active {
   gap: 0.82rem;
   min-width: 0;
   overflow-x: hidden;
-  padding: 0.05rem 0.25rem calc(10rem + env(safe-area-inset-bottom, 0px));
+  padding: 0.05rem 0.25rem calc(var(--remodex-compose-height, 120px) + env(safe-area-inset-bottom, 0px) + 40px);
 }
 
 .remodex-system-row {
@@ -2738,7 +3094,7 @@ button.workflow-file-item.workflow-file-item-active {
 
 .remodex-scroll-anchor {
   height: 1px;
-  scroll-margin-bottom: 228px;
+  scroll-margin-bottom: calc(var(--remodex-compose-height, 120px) + 108px);
 }
 
 /* ── Typing bubble ── */

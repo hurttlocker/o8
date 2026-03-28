@@ -7,12 +7,18 @@ const config = [
   {
     ignores: [
       '.next/**',
+      '**/.next/**',
+      '.cortex-worktrees/**',
       'node_modules/**',
+      '**/node_modules/**',
+      '**/.cortex-worktrees/**',
       'out/**',
       'build/**',
       'coverage/**',
       'electron/**',
       'src-tauri/target/**',
+      'test-results/**',
+      'tmp/**',
       'next-env.d.ts',
     ],
   },

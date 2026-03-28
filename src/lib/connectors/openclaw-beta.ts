@@ -15,6 +15,10 @@ export interface OpenClawIntegrationStatus {
   error?: string;
 }
 
+let refreshInflight: Promise<OpenClawIntegrationStatus> | null = null;
+let lastRefreshAt = 0;
+const REFRESH_TTL_MS = 15_000;
+
 function getLegacyEnabledFallback(): boolean {
   if (typeof window === 'undefined') return false;
   try {
@@ -106,26 +110,45 @@ export function writeOpenClawBetaEnabled(enabled: boolean) {
   });
 }
 
-export async function refreshOpenClawBetaStatus() {
-  try {
-    const res = await fetch(`/api/v2/cortex/action?command=${encodeURIComponent('integration openclaw --json')}`, {
-      cache: 'no-store',
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data.error || 'Unable to read Cortex OpenClaw integration status.');
-    }
-    const status = normalizeStatus(data.result ?? data);
-    writeOpenClawBetaStatus(status);
-    return status;
-  } catch (error) {
-    const fallback = {
-      ...readOpenClawBetaStatus(),
-      error: error instanceof Error ? error.message : 'Unable to read Cortex OpenClaw integration status.',
-    };
-    writeOpenClawBetaStatus(fallback);
-    return fallback;
+export async function refreshOpenClawBetaStatus(options: { force?: boolean } = {}) {
+  const { force = false } = options;
+  const current = readOpenClawBetaStatus();
+  if (!force && current.mode !== 'enabled') {
+    return current;
   }
+  if (!force && refreshInflight) {
+    return refreshInflight;
+  }
+  if (!force && Date.now() - lastRefreshAt < REFRESH_TTL_MS) {
+    return readOpenClawBetaStatus();
+  }
+
+  refreshInflight = (async () => {
+    try {
+      const res = await fetch(`/api/v2/cortex/action?command=${encodeURIComponent('integration openclaw --json')}`, {
+        cache: 'no-store',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || 'Unable to read Cortex OpenClaw integration status.');
+      }
+      const status = normalizeStatus(data.result ?? data);
+      writeOpenClawBetaStatus(status);
+      lastRefreshAt = Date.now();
+      return status;
+    } catch (error) {
+      const fallback = {
+        ...readOpenClawBetaStatus(),
+        error: error instanceof Error ? error.message : 'Unable to read Cortex OpenClaw integration status.',
+      };
+      writeOpenClawBetaStatus(fallback);
+      return fallback;
+    } finally {
+      refreshInflight = null;
+    }
+  })();
+
+  return refreshInflight;
 }
 
 export async function setOpenClawBetaMode(mode: OpenClawIntegrationMode) {

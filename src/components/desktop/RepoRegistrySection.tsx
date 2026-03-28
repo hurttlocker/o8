@@ -38,6 +38,12 @@ import {
   type FocusRepoSetupDetail,
   type OpenRepoWorkspaceDetail,
 } from '@/lib/desktop/events';
+import {
+  orchestratorRuntimeTone,
+  orchestratorStatusTone,
+} from '@/lib/orchestrator/display';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type { WorktreeInfo, WorktreeStatus } from '@/lib/worktree/types';
 
 interface JsonErrorShape {
@@ -576,6 +582,8 @@ interface BranchAgent {
   changedFiles?: number;
 }
 
+type IdeWorkspaceSession = MobileInboxSnapshot['sessions'][number];
+
 interface BranchInfo {
   name: string;
   current: boolean;
@@ -728,6 +736,66 @@ function branchSessionLabel(agent: BranchAgent) {
   return compactText(agent.agentName || agent.name || `${runtime} session`, 60) ?? `${runtime} session`;
 }
 
+function repoOwnsPath(repoPath: string, candidate?: string | null) {
+  const normalizedRepo = repoPath.trim().replace(/\/+$/, '');
+  const normalizedCandidate = candidate?.trim().replace(/\/+$/, '');
+  if (!normalizedCandidate) return false;
+  return normalizedCandidate === normalizedRepo || normalizedCandidate.startsWith(`${normalizedRepo}/`);
+}
+
+function repoNameFromWorkspacePath(workspacePath?: string | null) {
+  const trimmed = workspacePath?.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.replace(/^~\//, '').replace(/\/+$/, '');
+  const parts = normalized.split('/').filter(Boolean);
+  return parts[parts.length - 1] ?? null;
+}
+
+function buildBranchAgentMapFromIdeSessions(sessions: IdeWorkspaceSession[]) {
+  const map = new Map<string, Map<string, BranchAgent[]>>();
+  for (const session of sessions) {
+    const repoKey = repoNameFromWorkspacePath(session.workspace);
+    const branch = session.branch?.trim();
+    if (!repoKey || !branch || branch.startsWith('surface/')) continue;
+
+    if (!map.has(repoKey)) map.set(repoKey, new Map());
+    const branchMap = map.get(repoKey)!;
+    if (!branchMap.has(branch)) branchMap.set(branch, []);
+    const existing = branchMap.get(branch)!;
+    if (existing.some((agent) => agent.sessionKey === session.sessionKey)) continue;
+
+    const runtimeTone = runtimeBadgeTone(session.runtime);
+    existing.push({
+      name: runtimeTone.label,
+      agentName: session.name || runtimeTone.label,
+      sessionKey: session.sessionKey,
+      color: runtimeTone.color,
+      runtime: session.runtime,
+      status: session.status,
+      currentTask: session.currentTask ?? null,
+    });
+  }
+  return map;
+}
+
+function packetMatchesBranch(
+  packet: OrchestratorPacket,
+  repo: RepoRegistryEntry,
+  branch: BranchInfo,
+  branchAgents: BranchAgent[],
+) {
+  if (packet.status === 'archived' || packet.status === 'released') return false;
+  if (packet.lane?.sessionKey && branchAgents.some((agent) => agent.sessionKey === packet.lane?.sessionKey)) {
+    return true;
+  }
+  if (!repoOwnsPath(repo.localPath, packet.lane?.repoPath ?? packet.workspaceTargetPath)) {
+    return false;
+  }
+  const targetBranch = packet.branchTarget.trim();
+  if (!targetBranch) return branch.current;
+  return targetBranch === branch.name;
+}
+
 function RepoCard({
   repo,
   workspaceNotice,
@@ -741,6 +809,7 @@ function RepoCard({
   onReviewPR,
   onSelectBranch,
   agentsByBranch,
+  orchestratorPackets = [],
   activePorts,
   expanded,
   onToggle,
@@ -760,6 +829,7 @@ function RepoCard({
   onReviewPR?: (prNumber: number, repo?: string) => void;
   onSelectBranch?: (branch: string, repoPath: string) => void;
   agentsByBranch?: Map<string, BranchAgent[]>;
+  orchestratorPackets?: OrchestratorPacket[];
   activePorts?: number[];
   expanded: boolean;
   onToggle: () => void;
@@ -1612,9 +1682,27 @@ function RepoCard({
   }
   rowMetaSegments.splice(3);
   const repoHeaderLeadingInset = 19;
+  const repoScopedPackets = useMemo(
+    () => orchestratorPackets.filter((packet) => (
+      !packet.archivedAt
+      && packet.releaseState !== 'released'
+      && repoOwnsPath(repo.localPath, packet.workspaceTargetPath ?? packet.lane?.repoPath)
+    )),
+    [orchestratorPackets, repo.localPath],
+  );
   const visibleBranches = useMemo(
-    () => branches.filter((branch) => branch.isWorktree || !branch.current || Boolean(agentsByBranch?.get(branch.name)?.length)),
-    [agentsByBranch, branches],
+    () => branches.filter((branch) => (
+      branch.isWorktree
+      || !branch.current
+      || Boolean(agentsByBranch?.get(branch.name)?.length)
+      || repoScopedPackets.some((packet) => packet.branchTarget.trim() === branch.name)
+      || (branch.current && repoScopedPackets.some((packet) => packet.branchTarget.trim() === '' || packet.branchTarget.trim() === branch.name))
+    )),
+    [agentsByBranch, branches, repoScopedPackets],
+  );
+  const unmatchedRepoPackets = useMemo(
+    () => repoScopedPackets.filter((packet) => !visibleBranches.some((branch) => packetMatchesBranch(packet, repo, branch, agentsByBranch?.get(branch.name) ?? []))),
+    [agentsByBranch, repo, repoScopedPackets, visibleBranches],
   );
   const showHeaderHover = hoveringHeader && (
     prPreviewLoading
@@ -1691,7 +1779,7 @@ function RepoCard({
         overflow: 'hidden',
       }}
     >
-      {/* Compact header row — Conductor style */}
+      {/* Compact header row — orchestrator-first */}
       <div
         style={{
           display: 'flex',
@@ -2292,6 +2380,149 @@ function RepoCard({
             </div>
           ) : null}
 
+          {unmatchedRepoPackets.length > 0 ? (
+            <div style={{ marginTop: 8, marginLeft: 24, marginBottom: 8, paddingLeft: 12, borderLeft: '1px solid var(--t-divider-subtle)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  color: 'var(--t-text-faint)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                <span>Planned Work</span>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: 18,
+                    height: 18,
+                    padding: '0 6px',
+                    borderRadius: 999,
+                    background: 'var(--t-divider-subtle)',
+                    color: 'var(--t-text-secondary)',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    textTransform: 'none',
+                    letterSpacing: 'normal',
+                  }}
+                >
+                  {unmatchedRepoPackets.length}
+                </span>
+              </div>
+              {unmatchedRepoPackets.map((packet) => {
+                const runtimeTone = orchestratorRuntimeTone(packet.runtime);
+                const statusTone = orchestratorStatusTone(packet.status);
+                return (
+                  <div
+                    key={packet.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      padding: '8px 10px',
+                      borderRadius: 12,
+                      border: '1px solid var(--t-panel-border)',
+                      background: 'rgba(255, 255, 255, 0.52)',
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: statusTone.dot,
+                        boxShadow: `0 0 12px ${statusTone.dot}44`,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            padding: '2px 6px',
+                            borderRadius: 999,
+                            background: 'var(--t-divider-subtle)',
+                            color: 'var(--t-text-secondary)',
+                            fontSize: 9,
+                            fontWeight: 800,
+                            letterSpacing: '0.04em',
+                            textTransform: 'uppercase',
+                            flexShrink: 0,
+                          }}
+                        >
+                          {packet.referenceLabel}
+                        </span>
+                        <span
+                          style={{
+                            minWidth: 0,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            fontSize: 11.5,
+                            fontWeight: 640,
+                            color: 'var(--t-text)',
+                          }}
+                        >
+                          {packet.title}
+                        </span>
+                      </span>
+                      <span
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          marginTop: 2,
+                          minWidth: 0,
+                          overflow: 'hidden',
+                          whiteSpace: 'nowrap',
+                          textOverflow: 'ellipsis',
+                          fontSize: 10,
+                          lineHeight: 1.3,
+                          color: 'var(--t-text-faint)',
+                        }}
+                      >
+                        <span>{packet.branchTarget || 'new lane target'}</span>
+                        <span>·</span>
+                        <span>{runtimeTone.label}</span>
+                        <span>·</span>
+                        <span>{statusTone.label}</span>
+                      </span>
+                    </span>
+                    <span
+                      title={runtimeTone.label}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 28,
+                        height: 28,
+                        borderRadius: 999,
+                        background: runtimeTone.background,
+                        border: `1px solid ${runtimeTone.border}`,
+                        color: runtimeTone.color,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '-0.01em',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {runtimeTone.shortLabel}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+
           {/* Branch list — Apple-grade progressive disclosure */}
           <div style={{ marginTop: 6 }}>
             {branchesLoading ? (
@@ -2300,7 +2531,17 @@ function RepoCard({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 {visibleBranches.map((branch) => {
                   const branchAgents = agentsByBranch?.get(branch.name) ?? [];
-                  const orderedBranchAgents = [...branchAgents].sort(compareBranchAgents);
+                  const branchPackets = orchestratorPackets.filter((packet) => (
+                    packetMatchesBranch(packet, repo, branch, branchAgents)
+                  ));
+                  const packetBoundSessionKeys = new Set(
+                    branchPackets
+                      .map((packet) => packet.lane?.sessionKey ?? null)
+                      .filter((value): value is string => Boolean(value)),
+                  );
+                  const orderedBranchAgents = [...branchAgents]
+                    .filter((agent) => !packetBoundSessionKeys.has(agent.sessionKey))
+                    .sort(compareBranchAgents);
                   const sessionsExpanded = sessionDisclosureByBranch[branch.name] ?? true;
                   const isIdleWorktree = branch.isWorktree && branch.isStale;
                   const isCurrentBranch = branch.current;
@@ -2428,7 +2669,7 @@ function RepoCard({
                       </span>
                     ) : null}
                   </div>
-                  {orderedBranchAgents.length > 0 ? (
+                  {branchPackets.length > 0 || orderedBranchAgents.length > 0 ? (
                     <div
                       style={{
                         marginLeft: 24,
@@ -2441,69 +2682,63 @@ function RepoCard({
                         gap: 6,
                       }}
                     >
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          setSessionDisclosureByBranch((current) => ({
-                            ...current,
-                            [branch.name]: !(current[branch.name] ?? true),
-                          }));
-                        }}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          width: '100%',
-                          padding: 0,
-                          border: 'none',
-                          background: 'transparent',
-                          color: 'var(--t-text-faint)',
-                          fontSize: 10,
-                          fontWeight: 700,
-                          letterSpacing: '0.04em',
-                          textTransform: 'uppercase',
-                          cursor: 'pointer',
-                          fontFamily: '-apple-system, system-ui, sans-serif',
-                        }}
-                      >
-                        {sessionsExpanded ? <ChevronDown size={12} strokeWidth={2.2} /> : <ChevronRight size={12} strokeWidth={2.2} />}
-                        <span>Sessions</span>
-                        <span
-                          style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            minWidth: 18,
-                            height: 18,
-                            padding: '0 6px',
-                            borderRadius: 999,
-                            background: 'var(--t-divider-subtle)',
-                            color: 'var(--t-text-secondary)',
-                            fontSize: 10,
-                            fontWeight: 700,
-                            fontFamily: '"SF Mono", ui-monospace, monospace',
-                            textTransform: 'none',
-                            letterSpacing: 'normal',
-                          }}
-                        >
-                          {orderedBranchAgents.length}
-                        </span>
-                      </button>
-                      {sessionsExpanded ? (
+                      {branchPackets.length > 0 ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          {orderedBranchAgents.map((agent) => {
-                            const runtimeTone = runtimeBadgeTone(agent.runtime);
-                            const statusTone = sessionStatusTone(agent.status);
-                            const isSelectedSession = activeSessionKey === agent.sessionKey;
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              color: 'var(--t-text-faint)',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              letterSpacing: '0.04em',
+                              textTransform: 'uppercase',
+                            }}
+                          >
+                            <span>Work</span>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                minWidth: 18,
+                                height: 18,
+                                padding: '0 6px',
+                                borderRadius: 999,
+                                background: 'var(--t-divider-subtle)',
+                                color: 'var(--t-text-secondary)',
+                                fontSize: 10,
+                                fontWeight: 700,
+                                fontFamily: '"SF Mono", ui-monospace, monospace',
+                                textTransform: 'none',
+                                letterSpacing: 'normal',
+                              }}
+                            >
+                              {branchPackets.length}
+                            </span>
+                          </div>
+                          {branchPackets.map((packet) => {
+                            const runtimeTone = orchestratorRuntimeTone(packet.runtime);
+                            const statusTone = orchestratorStatusTone(packet.status);
+                            const isSelectedPacket = Boolean(packet.lane?.sessionKey && packet.lane.sessionKey === activeSessionKey);
+                            const marker = packet.releaseState === 'released'
+                              ? 'Released'
+                              : packet.blockedReason
+                                ? 'Blocked'
+                                : packet.status === 'awaiting_review'
+                                  ? 'Review'
+                                  : packet.dependencyLabels[0] ?? null;
                             return (
                               <button
-                                key={agent.sessionKey}
+                                key={packet.id}
                                 type="button"
-                                disabled={!onSelectSession}
+                                disabled={!packet.lane?.sessionKey || !onSelectSession}
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  onSelectSession?.(agent.sessionKey);
+                                  if (packet.lane?.sessionKey) {
+                                    onSelectSession?.(packet.lane.sessionKey);
+                                  }
                                 }}
                                 style={{
                                   width: '100%',
@@ -2512,17 +2747,93 @@ function RepoCard({
                                   gap: 10,
                                   padding: '8px 10px',
                                   borderRadius: 12,
-                                  border: isSelectedSession ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
-                                  background: isSelectedSession ? THEME_ACCENT_SOFT : 'rgba(255, 255, 255, 0.56)',
+                                  border: isSelectedPacket ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
+                                  background: isSelectedPacket ? THEME_ACCENT_SOFT : 'rgba(255, 255, 255, 0.56)',
                                   color: 'var(--t-text)',
-                                  cursor: onSelectSession ? 'pointer' : 'default',
+                                  cursor: packet.lane?.sessionKey && onSelectSession ? 'pointer' : 'default',
                                   fontFamily: '-apple-system, system-ui, sans-serif',
                                   textAlign: 'left',
-                                  boxShadow: isSelectedSession ? `0 0 0 1px ${THEME_ACCENT_RING}` : 'none',
+                                  boxShadow: isSelectedPacket ? `0 0 0 1px ${THEME_ACCENT_RING}` : 'none',
                                   transition: 'background 160ms ease, border-color 160ms ease, box-shadow 160ms ease',
-                                  opacity: onSelectSession ? 1 : 0.78,
+                                  opacity: packet.lane?.sessionKey && onSelectSession ? 1 : 0.82,
                                 }}
                               >
+                                <span
+                                  style={{
+                                    width: 8,
+                                    height: 8,
+                                    borderRadius: '50%',
+                                    background: statusTone.dot,
+                                    boxShadow: `0 0 12px ${statusTone.dot}44`,
+                                    flexShrink: 0,
+                                  }}
+                                />
+                                <span style={{ flex: 1, minWidth: 0 }}>
+                                  <span
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 6,
+                                      minWidth: 0,
+                                    }}
+                                  >
+                                    <span
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        padding: '2px 6px',
+                                        borderRadius: 999,
+                                        background: 'var(--t-divider-subtle)',
+                                        color: 'var(--t-text-secondary)',
+                                        fontSize: 9,
+                                        fontWeight: 800,
+                                        letterSpacing: '0.04em',
+                                        textTransform: 'uppercase',
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      {packet.referenceLabel}
+                                    </span>
+                                    <span
+                                      style={{
+                                        minWidth: 0,
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap',
+                                        fontSize: 11.5,
+                                        fontWeight: 640,
+                                        color: 'var(--t-text)',
+                                      }}
+                                    >
+                                      {packet.title}
+                                    </span>
+                                  </span>
+                                  <span
+                                    style={{
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 6,
+                                      marginTop: 2,
+                                      minWidth: 0,
+                                      overflow: 'hidden',
+                                      whiteSpace: 'nowrap',
+                                      textOverflow: 'ellipsis',
+                                      fontSize: 10,
+                                      lineHeight: 1.3,
+                                      color: 'var(--t-text-faint)',
+                                    }}
+                                  >
+                                    <span>{runtimeTone.label}</span>
+                                    <span>·</span>
+                                    <span>{statusTone.label}</span>
+                                    {marker ? (
+                                      <>
+                                        <span>·</span>
+                                        <span>{marker}</span>
+                                      </>
+                                    ) : null}
+                                  </span>
+                                </span>
                                 <span
                                   title={runtimeTone.label}
                                   style={{
@@ -2543,62 +2854,173 @@ function RepoCard({
                                 >
                                   {runtimeTone.shortLabel}
                                 </span>
-                                <span style={{ flex: 1, minWidth: 0 }}>
-                                  <span
-                                    style={{
-                                      display: 'block',
-                                      fontSize: 11.5,
-                                      fontWeight: 620,
-                                      lineHeight: 1.35,
-                                      color: 'var(--t-text)',
-                                      overflow: 'hidden',
-                                      textOverflow: 'ellipsis',
-                                      whiteSpace: 'nowrap',
-                                    }}
-                                  >
-                                    {branchSessionLabel(agent)}
-                                  </span>
-                                  <span
-                                    style={{
-                                      display: 'block',
-                                      marginTop: 1,
-                                      fontSize: 10,
-                                      lineHeight: 1.3,
-                                      color: 'var(--t-text-faint)',
-                                      overflow: 'hidden',
-                                      textOverflow: 'ellipsis',
-                                      whiteSpace: 'nowrap',
-                                    }}
-                                  >
-                                    {runtimeTone.label}
-                                  </span>
-                                </span>
-                                <span
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: 6,
-                                    flexShrink: 0,
-                                    fontSize: 10,
-                                    fontWeight: 700,
-                                    color: statusTone.color,
-                                  }}
-                                >
-                                  <span
-                                    style={{
-                                      width: 7,
-                                      height: 7,
-                                      borderRadius: '50%',
-                                      background: statusTone.color,
-                                      boxShadow: `0 0 10px ${statusTone.glow}`,
-                                    }}
-                                  />
-                                  <span>{statusTone.label}</span>
-                                </span>
                               </button>
                             );
                           })}
                         </div>
+                      ) : null}
+                      {orderedBranchAgents.length > 0 ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSessionDisclosureByBranch((current) => ({
+                                ...current,
+                                [branch.name]: !(current[branch.name] ?? true),
+                              }));
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 6,
+                              width: '100%',
+                              padding: 0,
+                              border: 'none',
+                              background: 'transparent',
+                              color: 'var(--t-text-faint)',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              letterSpacing: '0.04em',
+                              textTransform: 'uppercase',
+                              cursor: 'pointer',
+                              fontFamily: '-apple-system, system-ui, sans-serif',
+                            }}
+                          >
+                            {sessionsExpanded ? <ChevronDown size={12} strokeWidth={2.2} /> : <ChevronRight size={12} strokeWidth={2.2} />}
+                            <span>Ad hoc</span>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                minWidth: 18,
+                                height: 18,
+                                padding: '0 6px',
+                                borderRadius: 999,
+                                background: 'var(--t-divider-subtle)',
+                                color: 'var(--t-text-secondary)',
+                                fontSize: 10,
+                                fontWeight: 700,
+                                fontFamily: '"SF Mono", ui-monospace, monospace',
+                                textTransform: 'none',
+                                letterSpacing: 'normal',
+                              }}
+                            >
+                              {orderedBranchAgents.length}
+                            </span>
+                          </button>
+                          {sessionsExpanded ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              {orderedBranchAgents.map((agent) => {
+                                const runtimeTone = runtimeBadgeTone(agent.runtime);
+                                const statusTone = sessionStatusTone(agent.status);
+                                const isSelectedSession = activeSessionKey === agent.sessionKey;
+                                return (
+                                  <button
+                                    key={agent.sessionKey}
+                                    type="button"
+                                    disabled={!onSelectSession}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      onSelectSession?.(agent.sessionKey);
+                                    }}
+                                    style={{
+                                      width: '100%',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      gap: 10,
+                                      padding: '8px 10px',
+                                      borderRadius: 12,
+                                      border: isSelectedSession ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
+                                      background: isSelectedSession ? THEME_ACCENT_SOFT : 'rgba(255, 255, 255, 0.56)',
+                                      color: 'var(--t-text)',
+                                      cursor: onSelectSession ? 'pointer' : 'default',
+                                      fontFamily: '-apple-system, system-ui, sans-serif',
+                                      textAlign: 'left',
+                                      boxShadow: isSelectedSession ? `0 0 0 1px ${THEME_ACCENT_RING}` : 'none',
+                                      transition: 'background 160ms ease, border-color 160ms ease, box-shadow 160ms ease',
+                                      opacity: onSelectSession ? 1 : 0.78,
+                                    }}
+                                  >
+                                    <span
+                                      title={runtimeTone.label}
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        width: 28,
+                                        height: 28,
+                                        borderRadius: 999,
+                                        background: runtimeTone.background,
+                                        border: `1px solid ${runtimeTone.border}`,
+                                        color: runtimeTone.color,
+                                        fontSize: 10,
+                                        fontWeight: 700,
+                                        letterSpacing: '-0.01em',
+                                        flexShrink: 0,
+                                      }}
+                                    >
+                                      {runtimeTone.shortLabel}
+                                    </span>
+                                    <span style={{ flex: 1, minWidth: 0 }}>
+                                      <span
+                                        style={{
+                                          display: 'block',
+                                          fontSize: 11.5,
+                                          fontWeight: 620,
+                                          lineHeight: 1.35,
+                                          color: 'var(--t-text)',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                          whiteSpace: 'nowrap',
+                                        }}
+                                      >
+                                        Ad hoc · {branchSessionLabel(agent)}
+                                      </span>
+                                      <span
+                                        style={{
+                                          display: 'block',
+                                          marginTop: 1,
+                                          fontSize: 10,
+                                          lineHeight: 1.3,
+                                          color: 'var(--t-text-faint)',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis',
+                                          whiteSpace: 'nowrap',
+                                        }}
+                                      >
+                                        {runtimeTone.label}
+                                      </span>
+                                    </span>
+                                    <span
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 6,
+                                        flexShrink: 0,
+                                        fontSize: 10,
+                                        fontWeight: 700,
+                                        color: statusTone.color,
+                                      }}
+                                    >
+                                      <span
+                                        style={{
+                                          width: 7,
+                                          height: 7,
+                                          borderRadius: '50%',
+                                          background: statusTone.color,
+                                          boxShadow: `0 0 10px ${statusTone.glow}`,
+                                        }}
+                                      />
+                                      <span>{statusTone.label}</span>
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </>
                       ) : null}
                     </div>
                   ) : null}
@@ -3395,6 +3817,8 @@ export function RepoRegistrySection({
   launchIntent,
   workspaceIntent,
   addIntent,
+  orchestratorPackets = [],
+  ideWorkspaceSessions,
   hideHeader = false,
 }: {
   onSelectSession?: (sessionKey: string) => void;
@@ -3412,6 +3836,8 @@ export function RepoRegistrySection({
   launchIntent?: { repoPath: string | null; nonce: number } | null;
   workspaceIntent?: { repoPath: string | null; nonce: number } | null;
   addIntent?: { nonce: number } | null;
+  orchestratorPackets?: OrchestratorPacket[];
+  ideWorkspaceSessions?: IdeWorkspaceSession[];
   hideHeader?: boolean;
 } = {}) {
   const [repos, setRepos] = useState<RepoRegistryEntry[]>([]);
@@ -3552,8 +3978,16 @@ export function RepoRegistrySection({
 
   // ── Agent ↔ Branch association (#168) ──
   const [agentBranchMap, setAgentBranchMap] = useState<Map<string, Map<string, BranchAgent[]>>>(new Map());
+  const ideAgentBranchMap = useMemo(
+    () => buildBranchAgentMapFromIdeSessions(ideWorkspaceSessions ?? []),
+    [ideWorkspaceSessions],
+  );
+  const effectiveAgentBranchMap = ideWorkspaceSessions ? ideAgentBranchMap : agentBranchMap;
 
   useEffect(() => {
+    if (ideWorkspaceSessions) {
+      return;
+    }
     function fetchAgentBranches() {
       fetch(appendOpenClawBetaQuery('/api/panel/workspaces', openClawBetaEnabled))
         .then(r => r.json())
@@ -3611,7 +4045,7 @@ export function RepoRegistrySection({
     fetchAgentBranches();
     const id = setInterval(fetchAgentBranches, 30_000);
     return () => clearInterval(id);
-  }, [openClawBetaEnabled]);
+  }, [ideWorkspaceSessions, openClawBetaEnabled]);
 
   // ── Port data for running indicators (#170) ──
   const [portsByRepo, setPortsByRepo] = useState<Map<string, number[]>>(new Map());
@@ -4189,7 +4623,8 @@ export function RepoRegistrySection({
                   // Future: switch conversation context to agent on this branch
                   // For now: could trigger file tree refresh for this branch
                 }}
-                agentsByBranch={agentBranchMap.get(repo.name)}
+                agentsByBranch={effectiveAgentBranchMap.get(repo.name)}
+                orchestratorPackets={orchestratorPackets}
                 activePorts={portsByRepo.get(repo.name)}
                 expanded={expandedRepoId === repo.id}
                 onToggle={() => setExpandedRepoId((current) => current === repo.id ? null : repo.id)}

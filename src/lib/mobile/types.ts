@@ -5,6 +5,7 @@ import type {
   ReviewIssueSummary,
   ReviewPullRequestSummary,
 } from '@/lib/fleet/types';
+import type { MobileApprovalCard } from '@/lib/approvals/types';
 
 export type MobileInboxItemKind = 'alert' | 'approval' | 'review' | 'run_watch';
 
@@ -39,6 +40,8 @@ export interface MobileInboxItem {
   severity: EventSeverity;
   title: string;
   detail: string;
+  approvalId?: string;
+  metadata?: Record<string, string>;
   sessionKey?: string;
   timestampLabel?: string;
   actions: MobileControlAction[];
@@ -85,6 +88,7 @@ export interface MobileInboxSnapshot {
   primarySessionKey?: string;
   note?: string;
   sessions: AgentSummary[];
+  approvals: MobileApprovalCard[];
   items: MobileInboxItem[];
   summary: MobileInboxSummary;
   review?: MobileReviewFocus;
@@ -104,24 +108,6 @@ export interface MobileTranscriptToolCall {
   args?: Record<string, unknown>;
   status?: 'calling' | 'running' | 'done';
   preview?: string;
-}
-
-export type MobileTranscriptRuntimeEventKind = 'command' | 'task' | 'handoff' | 'runtime';
-
-export interface MobileTranscriptRuntimeEvent {
-  kind: MobileTranscriptRuntimeEventKind;
-  title: string;
-  summary: string;
-  status?: string;
-  task?: string;
-  source?: string;
-  changedFiles?: string[];
-  action?: string;
-  rawPreviewLines?: string[];
-  commandName?: string;
-  commandMessage?: string;
-  commandArgs?: string;
-  outputLabel?: string;
 }
 
 export interface MobileTranscriptSource {
@@ -146,7 +132,6 @@ export interface MobileTranscriptEntry {
   text: string;
   media?: MobileTranscriptMedia[];
   toolCalls?: MobileTranscriptToolCall[];
-  runtimeEvent?: MobileTranscriptRuntimeEvent;
   timestamp?: number;
   timestampLabel?: string;
   model?: string;
@@ -194,6 +179,7 @@ export interface MobileActionRequest {
   action: Extract<MobileControlActionKind, 'send' | 'steer' | 'stop' | 'approve' | 'deny' | 'pause' | 'resume' | 'watch' | 'resolve' | 'launch'>;
   sessionKey: string;
   clientMutationId?: string;
+  approvalId?: string;
   message?: string;
   attachments?: MobileActionAttachment[];
   runId?: string;
@@ -205,6 +191,7 @@ export interface MobileActionResponse {
   action: MobileActionRequest['action'];
   sessionKey: string;
   clientMutationId?: string;
+  approvalId?: string;
   status: 'queued' | 'completed' | 'unavailable' | 'sent' | 'error';
   note: string;
   runId?: string;

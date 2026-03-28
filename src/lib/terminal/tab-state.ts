@@ -4,6 +4,7 @@
  */
 
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import type { WorkspaceOrchestrationPacketBadge } from '@/lib/orchestrator/types';
 
 export interface PersistedChatCheckpoint {
   id: string;
@@ -33,6 +34,7 @@ export interface PersistedTab {
     body?: string | null;
     url?: string;
   };
+  orchestrationPacket?: WorkspaceOrchestrationPacketBadge | null;
   canvasTab?: {
     id: string;
     kind: string;
@@ -49,6 +51,8 @@ export interface PersistedTabState {
   savedAt: string; // ISO timestamp
 }
 
+export type PersistedRuntimeSessionKey = `codex:${string}` | `claude-code:${string}`;
+
 const API_PATH = '/api/panel/terminal-state';
 
 function hashScopeKey(value: string) {
@@ -61,6 +65,47 @@ function hashScopeKey(value: string) {
 
 export function buildRepoStateScope(repoPath: string) {
   return `repo-${hashScopeKey(repoPath)}`;
+}
+
+export function formatPersistedRuntimeSessionKey(
+  runtime?: PersistedTab['chatRuntime'],
+  sessionKey?: string | null,
+): PersistedRuntimeSessionKey | null {
+  const trimmed = sessionKey?.trim();
+  if (!trimmed || (runtime !== 'codex' && runtime !== 'claude-code')) return null;
+  return trimmed.startsWith(`${runtime}:`)
+    ? trimmed as PersistedRuntimeSessionKey
+    : `${runtime}:${trimmed}`;
+}
+
+export function stripPersistedRuntimeSessionKey(
+  runtime?: PersistedTab['chatRuntime'],
+  sessionKey?: string | null,
+) {
+  const trimmed = sessionKey?.trim();
+  if (!trimmed) return undefined;
+  if (runtime !== 'codex' && runtime !== 'claude-code') return trimmed;
+  return trimmed.startsWith(`${runtime}:`) ? trimmed.slice(`${runtime}:`.length) : trimmed;
+}
+
+export async function loadLiveRuntimeSessionKeys(): Promise<Set<PersistedRuntimeSessionKey>> {
+  try {
+    const res = await fetch('/api/runtime/inventory?includeOpenClaw=0&fresh=1', {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+    });
+    if (!res.ok) return new Set();
+    const data = await res.json() as { agents?: Array<{ sessionKey?: string; runtime?: string }> };
+    const keys = (data.agents ?? [])
+      .map((agent) => agent.sessionKey?.trim())
+      .filter((value): value is PersistedRuntimeSessionKey => {
+        if (typeof value !== 'string' || !value) return false;
+        return value.startsWith('codex:') || value.startsWith('claude-code:');
+      });
+    return new Set(keys);
+  } catch {
+    return new Set();
+  }
 }
 
 function buildStatePath(scope: string, repoPath?: string | null) {

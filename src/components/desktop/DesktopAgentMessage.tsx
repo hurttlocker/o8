@@ -1,6 +1,6 @@
 'use client';
 
-import { memo, useMemo, useState } from 'react';
+import { memo } from 'react';
 import {
   Check,
   FileCode2,
@@ -9,7 +9,6 @@ import {
   Globe,
   Image as ImageIcon,
   Search,
-  Sparkles,
   TerminalSquare,
   Wrench,
 } from 'lucide-react';
@@ -18,17 +17,11 @@ import { MessageActions } from './MessageActions';
 import type {
   MobileTranscriptEntry,
   MobileTranscriptMedia,
-  MobileTranscriptRuntimeEvent,
   MobileTranscriptToolCall,
 } from '@/lib/mobile/types';
-import {
-  sanitizeDesktopToolCalls,
-  sanitizeDesktopTranscriptEntry,
-} from '@/lib/chat/desktop-transcript-sanitizer';
 
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
-const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
 
 interface DesktopAgentMessageProps {
@@ -78,42 +71,86 @@ function stringifyUnknown(value: unknown): string {
   return '';
 }
 
+const INTERNAL_PROTOCOL_TAGS = [
+  /<<<BEGIN_UNTRUSTED_CHILD_RESULT>>>/gi,
+  /<<<END_UNTRUSTED_CHILD_RESULT>>>/gi,
+  /<\/?[a-z][a-z0-9]*(?:[_-][a-z0-9]+)+[^>]*>/gi,
+  /<\/?(?:command-name|local-command-(?:stdout|stderr|input|result)|task-notification|task-completion-event|runtime-context|begin-untrusted-child-result|end-untrusted-child-result|untrusted-child-result|task-event|command-output|command-result|status|summary|task|source|action)[^>]*>/gi,
+];
+
+function stripInternalProtocolMarkup(text: string) {
+  return INTERNAL_PROTOCOL_TAGS.reduce((next, pattern) => next.replace(pattern, ' '), text);
+}
+
+function collapseInternalTaskPayload(text: string) {
+  if (!/<(?:status|summary|task|source|action)>/i.test(text)) return text;
+
+  const summary = text.match(/<summary>([\s\S]*?)<\/summary>/i)?.[1]?.trim();
+  const status = text.match(/<status>([\s\S]*?)<\/status>/i)?.[1]?.trim();
+  const task = text.match(/<task>([\s\S]*?)<\/task>/i)?.[1]?.trim();
+
+  if (summary) {
+    if (status && !summary.toLowerCase().includes(status.toLowerCase())) {
+      return `${summary} (${status})`;
+    }
+    return summary;
+  }
+
+  if (task && status) return `${task} (${status})`;
+  return text;
+}
+
+function redactSensitiveTranscriptText(text: string) {
+  let next = text;
+  next = next.replace(/(\bAuthorization\s*:\s*)Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1Bearer [redacted]');
+  next = next.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b/gi, 'Bearer [redacted]');
+  next = next.replace(/\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|secret|password|passwd|token)\b(\s*[:=]\s*)([^\s"'`]+)/gi, '$1[redacted]');
+  next = next.replace(/([?&](?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|secret|password|passwd|token|auth|authorization|key)=)([^&\s]+)/gi, '$1[redacted]');
+  next = next.replace(/\b(?:ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9-]{16,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{12,}|ASIA[0-9A-Z]{12,}|AIza[0-9A-Za-z\-_]{20,})\b/g, '[redacted]');
+  return next;
+}
+
+function sanitizeTranscriptText(text: string) {
+  return redactSensitiveTranscriptText(stripInternalProtocolMarkup(collapseInternalTaskPayload(text)));
+}
+
 function toolDetail(tool: MobileTranscriptToolCall) {
   const args = tool.args ?? {};
   const name = tool.name.toLowerCase();
 
   if (name === 'exec' || name === 'exec_command') {
-    return firstString(args.command, args.cmd) ?? 'Terminal command';
+    const command = sanitizeTranscriptText(firstString(args.command, args.cmd) ?? '');
+    return command || 'Terminal command';
   }
   if (name === 'write_stdin') {
-    const chars = firstString(args.chars);
+    const chars = sanitizeTranscriptText(firstString(args.chars) ?? '');
     const sessionId = firstString(args.session_id, args.sessionId);
     if (chars) return `stdin: ${truncate(chars.replace(/\s+/g, ' '), 72)}`;
     return sessionId ? `Session ${sessionId}` : 'Terminal input';
   }
   if (name === 'read' || name === 'read_file') {
-    return firstString(args.file_path, args.path) ?? 'File read';
+    return sanitizeTranscriptText(firstString(args.file_path, args.path) ?? '') || 'File read';
   }
   if (name === 'write' || name === 'write_file' || name === 'edit' || name === 'edit_file') {
-    return firstString(args.file_path, args.path) ?? 'File edit';
+    return sanitizeTranscriptText(firstString(args.file_path, args.path) ?? '') || 'File edit';
   }
   if (name === 'search_web' || name === 'web_search' || name === 'cortex_search' || name === 'memory_search') {
-    return firstString(args.query, args.q) ?? 'Search';
+    return sanitizeTranscriptText(firstString(args.query, args.q) ?? '') || 'Search';
   }
   if (name === 'web_fetch' || name === 'fetch_url') {
-    return firstString(args.url, args.href) ?? 'Fetch';
+    return sanitizeTranscriptText(firstString(args.url, args.href) ?? '') || 'Fetch';
   }
   if (name === 'browser') {
     const action = firstString(args.action, args.kind, args.operation);
     const url = firstString(args.url, args.href, args.currentUrl);
-    if (action && url) return `${action} • ${url}`;
-    return action ?? url ?? 'Browser action';
+    if (action && url) return `${sanitizeTranscriptText(action)} • ${sanitizeTranscriptText(url)}`;
+    return sanitizeTranscriptText(action ?? url ?? '') || 'Browser action';
   }
   if (name === 'list_files' || name === 'ls' || name === 'glob') {
-    return firstString(args.path, args.pattern) ?? 'Workspace listing';
+    return sanitizeTranscriptText(firstString(args.path, args.pattern) ?? '') || 'Workspace listing';
   }
   if (name === 'image') {
-    return firstString(args.path, args.prompt) ?? 'Image task';
+    return sanitizeTranscriptText(firstString(args.path, args.prompt) ?? '') || 'Image task';
   }
 
   const fallback = firstString(
@@ -125,7 +162,7 @@ function toolDetail(tool: MobileTranscriptToolCall) {
     args.cmd,
     stringifyUnknown(args.input),
   );
-  return fallback ?? 'Tool activity';
+  return sanitizeTranscriptText(fallback ?? '') || 'Tool activity';
 }
 
 function toolLabel(tool: MobileTranscriptToolCall) {
@@ -174,11 +211,6 @@ function ToolIcon({ tool }: { tool: MobileTranscriptToolCall }) {
 }
 
 export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscriptToolCall[] }) {
-  const sanitizedToolCalls = useMemo(
-    () => sanitizeDesktopToolCalls(toolCalls) ?? [],
-    [toolCalls],
-  );
-
   return (
     <div style={{
       display: 'flex',
@@ -187,7 +219,7 @@ export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscrip
       width: '100%',
       maxWidth: '92%',
     }}>
-      {sanitizedToolCalls.map((tool, index) => (
+      {toolCalls.map((tool, index) => (
         <div
           key={`${tool.name}-${index}`}
           style={{
@@ -275,278 +307,6 @@ export function DesktopToolCallStack({ toolCalls }: { toolCalls: MobileTranscrip
           </div>
         </div>
       ))}
-    </div>
-  );
-}
-
-function RuntimeEventIcon({ event }: { event: MobileTranscriptRuntimeEvent }) {
-  if (event.kind === 'command') return <TerminalSquare size={14} strokeWidth={2} />;
-  if (event.kind === 'task') return <Wrench size={14} strokeWidth={2} />;
-  return <Sparkles size={14} strokeWidth={2} />;
-}
-
-function runtimeKindLabel(kind: MobileTranscriptRuntimeEvent['kind']) {
-  if (kind === 'command') return 'command';
-  if (kind === 'task') return 'background task';
-  if (kind === 'handoff') return 'handoff';
-  return 'runtime';
-}
-
-export function DesktopRuntimeEventCard({ event }: { event: MobileTranscriptRuntimeEvent }) {
-  const [expanded, setExpanded] = useState(false);
-  const detailLines = [
-    event.commandMessage && event.commandMessage !== event.commandName ? event.commandMessage : undefined,
-    event.commandArgs ? `Args: ${event.commandArgs}` : undefined,
-    event.outputLabel ? `Output: ${event.outputLabel}` : undefined,
-    ...(event.rawPreviewLines ?? []),
-  ].filter(Boolean) as string[];
-  const hasDetails = Boolean(event.action || detailLines.length > 0 || event.changedFiles?.length);
-
-  return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 10,
-      width: '100%',
-      maxWidth: '92%',
-      padding: '10px 12px',
-      background: THEME_PANEL_GLASS,
-      border: '1px solid var(--t-panel-border)',
-      borderRadius: 12,
-      boxShadow: 'var(--t-panel-shadow)',
-    }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-      }}>
-        <span style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 24,
-          height: 24,
-          borderRadius: 8,
-          background: THEME_ACCENT_SOFT,
-          color: THEME_ACCENT,
-          flexShrink: 0,
-        }}>
-          <RuntimeEventIcon event={event} />
-        </span>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{
-            fontSize: 12,
-            fontWeight: 700,
-            color: 'var(--t-text)',
-            letterSpacing: '-0.01em',
-          }}>
-            {event.title}
-          </div>
-          <div style={{
-            marginTop: 2,
-            fontSize: 11,
-            color: 'var(--t-text-secondary)',
-            lineHeight: 1.45,
-          }}>
-            {event.summary}
-          </div>
-        </div>
-      </div>
-
-      <div style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: 6,
-      }}>
-        <span style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          padding: '3px 8px',
-          borderRadius: 999,
-          background: THEME_ACCENT_SOFT,
-          color: THEME_ACCENT,
-          fontSize: 10,
-          fontWeight: 700,
-          letterSpacing: '0.02em',
-          textTransform: 'uppercase',
-        }}>
-          {runtimeKindLabel(event.kind)}
-        </span>
-        {event.status ? (
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            padding: '3px 8px',
-            borderRadius: 999,
-            background: 'rgba(37, 99, 235, 0.10)',
-            color: '#2563eb',
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-          }}>
-            {event.status}
-          </span>
-        ) : null}
-        {event.outputLabel ? (
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            padding: '3px 8px',
-            borderRadius: 999,
-            background: THEME_BG_CARD,
-            color: 'var(--t-text-secondary)',
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.02em',
-          }}>
-            {event.outputLabel}
-          </span>
-        ) : null}
-        {event.source ? (
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            padding: '3px 8px',
-            borderRadius: 999,
-            background: 'var(--t-divider-subtle)',
-            color: 'var(--t-text-secondary)',
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.02em',
-          }}>
-            {event.source}
-          </span>
-        ) : null}
-        {event.changedFiles?.length ? (
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            padding: '3px 8px',
-            borderRadius: 999,
-            background: THEME_BG_CARD,
-            color: 'var(--t-text-secondary)',
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.02em',
-          }}>
-            {event.changedFiles.length} file{event.changedFiles.length !== 1 ? 's' : ''}
-          </span>
-        ) : null}
-        {hasDetails ? (
-          <button
-            type="button"
-            onClick={() => setExpanded((value) => !value)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '3px 8px',
-              borderRadius: 999,
-              border: '1px solid var(--t-panel-border)',
-              background: expanded ? THEME_ACCENT_SOFT : THEME_BG_CARD,
-              color: expanded ? THEME_ACCENT : 'var(--t-text-secondary)',
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: '0.02em',
-              cursor: 'pointer',
-            }}
-          >
-            {expanded ? 'Hide details' : 'View details'}
-          </button>
-        ) : null}
-      </div>
-
-      {expanded && hasDetails ? (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-          padding: '10px 12px',
-          borderRadius: 12,
-          background: THEME_BG_CARD,
-          border: '1px solid var(--t-panel-border)',
-        }}>
-          {event.action ? (
-            <div>
-              <div style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: 'var(--t-text-muted)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.04em',
-                marginBottom: 4,
-              }}>
-                Delivery
-              </div>
-              <div style={{
-                fontSize: 11,
-                color: 'var(--t-text-secondary)',
-                lineHeight: 1.5,
-              }}>
-                {event.action}
-              </div>
-            </div>
-          ) : null}
-
-          {event.changedFiles?.length ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: 'var(--t-text-muted)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.04em',
-              }}>
-                Changed Files
-              </div>
-              {event.changedFiles.map((filePath) => (
-                <div
-                  key={filePath}
-                  style={{
-                    fontSize: 11,
-                    color: 'var(--t-text-secondary)',
-                    fontFamily: '"SF Mono", ui-monospace, monospace',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {filePath}
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          {detailLines.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <div style={{
-                fontSize: 10,
-                fontWeight: 700,
-                color: 'var(--t-text-muted)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.04em',
-              }}>
-                Details
-              </div>
-              <div style={{
-                padding: '8px 10px',
-                borderRadius: 10,
-                background: THEME_PANEL_GLASS,
-                border: '1px solid var(--t-panel-border)',
-                fontSize: 11,
-                lineHeight: 1.5,
-                color: 'var(--t-text-secondary)',
-                fontFamily: '"SF Mono", ui-monospace, monospace',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}>
-                {detailLines.join('\n')}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -680,14 +440,13 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   onOpenInCanvas,
   onRunInTerminal,
 }: DesktopAgentMessageProps) {
-  const sanitizedEntry = useMemo(() => sanitizeDesktopTranscriptEntry(entry), [entry]);
-  const isUser = sanitizedEntry.role === 'user';
-  const hasText = Boolean(sanitizedEntry.text.trim());
-  const hasMedia = Boolean(sanitizedEntry.media?.length);
-  const hasToolCalls = Boolean(sanitizedEntry.toolCalls?.length);
-  const hasRuntimeEvent = Boolean(sanitizedEntry.runtimeEvent);
+  const isUser = entry.role === 'user';
+  const displayText = sanitizeTranscriptText(entry.text);
+  const hasText = Boolean(displayText.trim());
+  const hasMedia = Boolean(entry.media?.length);
+  const hasToolCalls = Boolean(entry.toolCalls?.length);
 
-  if (sanitizedEntry.role === 'system' && sanitizedEntry.text.toLowerCase().includes('compaction')) {
+  if (entry.role === 'system' && entry.text.toLowerCase().includes('compaction')) {
     return (
       <div style={{
         display: 'inline-flex',
@@ -717,7 +476,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         alignItems: 'flex-end',
         gap: 8,
       }}>
-        {hasMedia ? <MediaGrid media={sanitizedEntry.media ?? []} tint="user" /> : null}
+        {hasMedia ? <MediaGrid media={entry.media ?? []} tint="user" /> : null}
         {hasText ? (
           <div style={{
             maxWidth: '82%',
@@ -732,16 +491,16 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
             lineHeight: 1.55,
             letterSpacing: '-0.01em',
           }}>
-            {sanitizedEntry.text}
+            {displayText}
           </div>
         ) : null}
-        {sanitizedEntry.timestampLabel ? (
+        {entry.timestampLabel ? (
           <span style={{
             fontSize: 10,
             color: 'var(--t-text-faint)',
             paddingRight: 4,
           }}>
-            {sanitizedEntry.timestampLabel}
+            {entry.timestampLabel}
           </span>
         ) : null}
       </div>
@@ -756,22 +515,20 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       gap: 8,
       animation: isLast ? 'llmFadeIn 180ms ease-out' : undefined,
     }}>
-      {hasRuntimeEvent ? <DesktopRuntimeEventCard event={sanitizedEntry.runtimeEvent!} /> : null}
-
       {hasText ? (
         <div style={{
           maxWidth: '92%',
-          color: sanitizedEntry.role === 'system' ? '#475569' : '#0f172a',
+          color: entry.role === 'system' ? '#475569' : '#0f172a',
           fontSize: 14,
           lineHeight: 1.65,
           wordBreak: 'break-word',
-          padding: sanitizedEntry.role === 'system' ? '10px 12px' : 0,
-          borderRadius: sanitizedEntry.role === 'system' ? 12 : 0,
-          background: sanitizedEntry.role === 'system' ? 'rgba(248, 250, 252, 0.98)' : 'transparent',
-          border: sanitizedEntry.role === 'system' ? '1px solid rgba(226, 232, 240, 0.95)' : 'none',
-          boxShadow: sanitizedEntry.role === 'system' ? '0 8px 20px rgba(15, 23, 42, 0.04)' : 'none',
+          padding: entry.role === 'system' ? '10px 12px' : 0,
+          borderRadius: entry.role === 'system' ? 12 : 0,
+          background: entry.role === 'system' ? 'rgba(248, 250, 252, 0.98)' : 'transparent',
+          border: entry.role === 'system' ? '1px solid rgba(226, 232, 240, 0.95)' : 'none',
+          boxShadow: entry.role === 'system' ? '0 8px 20px rgba(15, 23, 42, 0.04)' : 'none',
         }}>
-          {renderLLMMarkdown(sanitizedEntry.text, {
+          {renderLLMMarkdown(displayText, {
             onApplyToFile,
             onOpenInCanvas,
             onRunInTerminal,
@@ -779,22 +536,22 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         </div>
       ) : null}
 
-      {hasMedia ? <MediaGrid media={sanitizedEntry.media ?? []} tint="assistant" /> : null}
-      {hasToolCalls ? <DesktopToolCallStack toolCalls={sanitizedEntry.toolCalls ?? []} /> : null}
+      {hasMedia ? <MediaGrid media={entry.media ?? []} tint="assistant" /> : null}
+      {hasToolCalls ? <DesktopToolCallStack toolCalls={entry.toolCalls ?? []} /> : null}
 
-      {sanitizedEntry.role === 'assistant' && hasText ? (
+      {entry.role === 'assistant' && hasText ? (
         <div style={{ width: '100%', maxWidth: '92%' }}>
-          <MessageActions messageId={sanitizedEntry.id} messageText={sanitizedEntry.text} />
+          <MessageActions messageId={entry.id} messageText={displayText} />
         </div>
       ) : null}
 
-      {sanitizedEntry.timestampLabel ? (
+      {entry.timestampLabel ? (
         <span style={{
           fontSize: 10,
           color: 'var(--t-text-faint)',
           paddingLeft: 2,
         }}>
-          {sanitizedEntry.timestampLabel}
+          {entry.timestampLabel}
         </span>
       ) : null}
     </div>

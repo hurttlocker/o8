@@ -1,80 +1,133 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
+import { rejectLlmApproval, resumeLlmApproval } from '@/lib/approvals/llm';
+import {
+  createTestApproval,
+  getApproval,
+  listApprovals,
+  resolveApproval,
+} from '@/lib/approvals/store';
+import { invalidateInboxCache } from '@/lib/mobile/openclaw';
+import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-/**
- * Pending approvals store (in-memory for now).
- * Real approvals come from agent sessions; test approvals are injected here.
- */
-export interface PendingApproval {
-  id: string;
-  agent: string;
-  sessionKey: string;
-  title: string;
-  description: string;
-  command?: string;
-  risk: 'low' | 'medium' | 'high';
-  createdAt: number;
-  status: 'pending' | 'approved' | 'rejected';
+function invalidateApprovalCaches() {
+  invalidateCommandCenterSnapshotCaches();
+  invalidateInboxCache();
 }
 
-// In-memory store — survives across requests within the same server process
-const approvals = new Map<string, PendingApproval>();
-
 /**
- * GET /api/panel/approvals — list pending approvals
+ * GET /api/panel/approvals — list pending approvals from the shared queue.
  */
-export async function GET() {
-  const pending = Array.from(approvals.values())
-    .filter(a => a.status === 'pending')
-    .sort((a, b) => b.createdAt - a.createdAt);
+export async function GET(request: NextRequest) {
+  const sessionKey = request.nextUrl.searchParams.get('sessionKey')?.trim() || undefined;
+  const approvals = listApprovals({ status: 'pending', sessionKey });
 
-  return NextResponse.json({ approvals: pending }, {
+  return NextResponse.json({ approvals }, {
     headers: { 'Cache-Control': 'no-store, max-age=0' },
   });
 }
 
 /**
- * POST /api/panel/approvals — create test approval OR resolve one
+ * POST /api/panel/approvals — create test approval or resolve a shared approval.
  *
- * Create: { action: 'test' }
- * Resolve: { action: 'approve' | 'reject', id: string }
+ * Create: { action: 'test', sessionKey?: string }
+ * Resolve: { action: 'approve' | 'reject', id: string, editedCommand?: string }
  */
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
-  const action = body.action as string;
+  const action = typeof body.action === 'string' ? body.action : '';
 
   if (action === 'test') {
-    const id = `approval-${Date.now()}`;
-    const testApproval: PendingApproval = {
-      id,
-      agent: 'Niot',
-      sessionKey: 'agent:ace:main',
-      title: 'Execute shell command',
-      description: 'Niot wants to run a potentially destructive command as part of the Cortex refactor task.',
-      command: 'rm -rf node_modules && npm install && npm run build',
-      risk: 'medium',
-      createdAt: Date.now(),
-      status: 'pending',
-    };
-    approvals.set(id, testApproval);
-    return NextResponse.json({ ok: true, approval: testApproval });
+    const sessionKey = typeof body.sessionKey === 'string' ? body.sessionKey.trim() : undefined;
+    const approval = createTestApproval(sessionKey);
+    invalidateApprovalCaches();
+    await publishRealtimeMutation({
+      mutation: {
+        mutationId: `approval-create-${approval.id}`,
+        source: 'desktop',
+        action: 'approve',
+        sessionKey: approval.sessionKey,
+        surfaceId: approval.sessionKey,
+        status: 'pending',
+        note: `Approval requested: ${approval.title}`,
+        createdAt: new Date().toISOString(),
+      },
+      refreshTargets: ['global', 'mobileInbox'],
+      sessionKeys: [approval.sessionKey],
+      fresh: true,
+    });
+    return NextResponse.json({ ok: true, approval }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
   }
 
-  if (action === 'approve' || action === 'reject') {
-    const id = body.id as string;
-    const approval = approvals.get(id);
-    if (!approval) {
-      return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
-    }
-    approval.status = action === 'approve' ? 'approved' : 'rejected';
-
-    // In production, this would send the resolution to the agent's session
-    // e.g. steerOpenClawSession(approval.sessionKey, `Approved: ${approval.title}`)
-
-    return NextResponse.json({ ok: true, approval, resolved: action });
+  if (action !== 'approve' && action !== 'reject') {
+    return NextResponse.json({ ok: false, error: 'Unknown action' }, { status: 400 });
   }
 
-  return NextResponse.json({ ok: false, error: 'Unknown action' }, { status: 400 });
+  const id = typeof body.id === 'string' ? body.id.trim() : '';
+  if (!id) {
+    return NextResponse.json({ ok: false, error: 'Approval id is required' }, { status: 400 });
+  }
+
+  const editedCommand = typeof body.editedCommand === 'string' ? body.editedCommand : undefined;
+  const current = getApproval(id);
+  if (!current) {
+    return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
+  }
+  if (current.status !== 'pending') {
+    return NextResponse.json({ ok: true, approval: current, resolved: action, note: 'Approval was already resolved.' }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
+  }
+  const approval = resolveApproval(id, action, 'desktop');
+  if (!approval) {
+    return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
+  }
+  let decision;
+  try {
+    decision = action === 'approve'
+      ? await resumeLlmApproval(request.url, approval, { actor: 'desktop', editedCommand })
+      : rejectLlmApproval(approval, 'desktop');
+  } catch (error) {
+    return NextResponse.json({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Unable to resolve approval',
+    }, {
+      status: 500,
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
+  }
+
+  invalidateApprovalCaches();
+  await publishRealtimeMutation({
+    mutation: {
+      mutationId: `approval-${action}-${approval.id}`,
+      source: 'desktop',
+      action,
+      sessionKey: approval.sessionKey,
+      surfaceId: approval.sessionKey,
+      status: 'completed',
+      note: decision.note,
+      createdAt: new Date().toISOString(),
+      settledAt: new Date().toISOString(),
+    },
+    refreshTargets: ['global', 'mobileInbox', 'sessionHistory'],
+    sessionKeys: [approval.sessionKey],
+    fresh: true,
+  });
+
+  return NextResponse.json({
+    ok: true,
+    approval,
+    resolved: action,
+    note: decision.note,
+    assistantMessage: decision.assistantMessage,
+    nextApproval: decision.nextApproval,
+  }, {
+    headers: { 'Cache-Control': 'no-store, max-age=0' },
+  });
 }

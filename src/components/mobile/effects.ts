@@ -135,7 +135,7 @@ interface VisibilityRefreshArgs {
   documentVisibleRef: MutableRefObject<boolean>;
   selectedSessionKey?: string;
   loadHistory: (sessionKey: string, force?: boolean) => Promise<unknown>;
-  refreshInbox: () => Promise<unknown>;
+  refreshInbox: (fresh?: boolean) => Promise<unknown>;
 }
 
 export function trackVisibilityRefresh({

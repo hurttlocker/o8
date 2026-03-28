@@ -67,8 +67,12 @@ export interface CreateWorktreeOptions {
   agentType: AgentType;
   /** Human-readable task name (used for branch + dir naming) */
   taskName: string;
+  /** Explicit branch name to create/bind for this worktree */
+  branchName?: string;
   /** Base branch to create from (default: HEAD) */
   baseBranch?: string;
+  /** Force a real git worktree even for runtimes that usually self-manage */
+  managed?: boolean;
   /** Skip auto-setup (npm install, etc.) */
   skipSetup?: boolean;
   /** How env files should be bootstrapped into the worktree */

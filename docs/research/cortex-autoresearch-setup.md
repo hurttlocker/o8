@@ -897,3 +897,4 @@ That is enough to make Cortex Memory improvement measurable, repeatable, and com
 - Existing Cortex benchmark baseline: `docs/research/cortex-locomo-benchmark.md`
 - Existing Cortex merged rerun: `docs/research/cortex-combined-benchmark-2026-03-22.md`
 - Existing Cortex improvement plan: `docs/research/cortex-multi-hop-temporal-plan.md`
+- Memory architecture agenda: `docs/research/cortex-memory-research-agenda-2026-03-24.md`

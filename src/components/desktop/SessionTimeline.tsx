@@ -69,7 +69,9 @@ const DRILL_MIN_HEIGHT = 320;
 const DRILL_MAX_HEIGHT = 680;
 const DEFAULT_TIMELINE_REPO = 'hurttlocker/cortex-ide';
 const TIMELINE_BAR_HEIGHT = 20;
-const TIMELINE_ACTIVE_SEGMENT_MIN_PX = 4;
+const TIMELINE_ACTIVE_SEGMENT_MIN_PX = 7;
+const TIMELINE_THINKING_MIN_PX = 10;
+const TIMELINE_TESTING_MIN_PX = 8;
 // Keep the drill-down implementation in place, but disable dashboard
 // double-click entry until the interaction is ready to ship.
 const TIMELINE_DRILLDOWN_ENABLED = false;
@@ -104,9 +106,20 @@ function timelineSegmentLayer(kind: SegmentKind) {
 }
 
 function timelineSegmentMinWidth(kind: SegmentKind) {
-  if (kind === 'error') return 6;
-  if (kind === 'thinking' || kind === 'testing') return 5;
+  if (kind === 'error') return 7;
+  if (kind === 'thinking') return TIMELINE_THINKING_MIN_PX;
+  if (kind === 'testing') return TIMELINE_TESTING_MIN_PX;
   return TIMELINE_ACTIVE_SEGMENT_MIN_PX;
+}
+
+function timelineSegmentDisplayWidth(kind: SegmentKind, actualWidthPx: number) {
+  const minWidthPx = timelineSegmentMinWidth(kind);
+  if (actualWidthPx <= minWidthPx) return minWidthPx;
+  if (kind === 'coding' && actualWidthPx < 9) return 9;
+  if (kind === 'thinking' && actualWidthPx < 12) return 12;
+  if (kind === 'testing' && actualWidthPx < 10) return 10;
+  if (kind === 'error' && actualWidthPx < 8) return 8;
+  return actualWidthPx;
 }
 
 function timelineSegmentChrome(kind: SegmentKind, color: string, hovered: boolean) {
@@ -126,14 +139,14 @@ function timelineSegmentChrome(kind: SegmentKind, color: string, hovered: boolea
 
   if (kind === 'thinking') {
     return {
-      top: 5,
-      height: TIMELINE_BAR_HEIGHT - 10,
+      top: 3,
+      height: TIMELINE_BAR_HEIGHT - 6,
       borderRadius: 999,
       opacity: hovered ? 1 : 0.96,
-      background: `linear-gradient(180deg, rgba(255,255,255,0.64) 0%, ${color}e0 30%, ${color} 100%)`,
+      background: `linear-gradient(180deg, rgba(255,255,255,0.54) 0%, ${color}d9 26%, ${color} 100%)`,
       boxShadow: hovered
-        ? `0 0 0 1px rgba(255,255,255,0.72) inset, 0 0 0 1px ${color}50, 0 3px 10px ${color}30`
-        : `0 0 0 1px rgba(255,255,255,0.52) inset, 0 1px 6px ${color}22`,
+        ? `0 0 0 1px rgba(255,255,255,0.68) inset, 0 0 0 1px ${color}55, 0 3px 10px ${color}36`
+        : `0 0 0 1px rgba(255,255,255,0.44) inset, 0 1px 6px ${color}2a`,
       transform: hovered ? 'translateY(-1px)' : 'none',
     };
   }
@@ -338,13 +351,28 @@ function TimelineButton({ icon, label, onClick }: { icon: React.ReactNode; label
       aria-label={label}
       onClick={onClick}
       style={{
-        width: 24, height: 24, borderRadius: 12, border: 'none',
-        background: 'var(--t-divider)', color: 'var(--t-text)',
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        border: '1px solid var(--t-panel-border)',
+        background: 'var(--t-panel-hover)',
+        color: 'var(--t-text)',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        cursor: 'pointer', transition: 'background 120ms', flexShrink: 0, padding: 0,
+        cursor: 'pointer',
+        transition: 'background 140ms ease, border-color 140ms ease, transform 140ms ease',
+        flexShrink: 0,
+        padding: 0,
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-divider)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-divider)'; }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'var(--t-accent-soft)';
+        e.currentTarget.style.borderColor = 'var(--t-accent-border)';
+        e.currentTarget.style.transform = 'translateY(-1px)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'var(--t-panel-hover)';
+        e.currentTarget.style.borderColor = 'var(--t-panel-border)';
+        e.currentTarget.style.transform = 'none';
+      }}
     >
       {icon}
     </button>
@@ -401,7 +429,7 @@ export function SessionTimeline({
       const widthPct = (seg.durationMin / totalSpan) * 100;
       const actualWidthPx = barWidth > 0 ? (seg.durationMin / totalSpan) * barWidth : 0;
       const actualLeftPx = barWidth > 0 ? (seg.startMin / totalSpan) * barWidth : 0;
-      const displayWidthPx = barWidth > 0 ? Math.max(actualWidthPx, timelineSegmentMinWidth(seg.kind)) : 0;
+      const displayWidthPx = barWidth > 0 ? timelineSegmentDisplayWidth(seg.kind, actualWidthPx) : 0;
       const centeredLeftPx = actualLeftPx + (actualWidthPx / 2) - (displayWidthPx / 2);
       const displayLeftPx = barWidth > 0
         ? Math.min(Math.max(0, centeredLeftPx), Math.max(0, barWidth - displayWidthPx))
@@ -1063,11 +1091,11 @@ export function SessionTimeline({
               position: 'absolute',
               left: window.left,
               width: window.width,
-              top: 2,
-              height: TIMELINE_BAR_HEIGHT - 4,
-              borderRadius: 4,
-              background: 'linear-gradient(180deg, rgba(96, 165, 250, 0.18) 0%, rgba(37, 99, 235, 0.1) 100%)',
-              boxShadow: 'inset 0 0 0 1px rgba(147, 197, 253, 0.12)',
+              top: 1,
+              height: TIMELINE_BAR_HEIGHT - 2,
+              borderRadius: 6,
+              background: 'linear-gradient(180deg, var(--t-accent-soft-strong) 0%, var(--t-accent-soft) 100%)',
+              boxShadow: 'inset 0 0 0 1px var(--t-accent-ring), inset 0 1px 0 var(--t-divider-subtle)',
               pointerEvents: 'none',
               zIndex: 1,
             }}
@@ -1163,21 +1191,21 @@ export function SessionTimeline({
 
       {hoverCard && hoverClientX !== null && typeof document !== 'undefined' && createPortal(
         <div
-          style={{
-            position: 'fixed',
-            left: Math.min(
-              Math.max(12, hoverClientX - 148),
-              (typeof window !== 'undefined' ? window.innerWidth : 320) - 308,
+            style={{
+              position: 'fixed',
+              left: Math.min(
+                Math.max(12, hoverClientX - 148),
+                (typeof window !== 'undefined' ? window.innerWidth : 320) - 308,
             ),
             top: hoverBarTop + TIMELINE_BAR_HEIGHT + 12,
             width: 296,
             padding: '12px 12px 11px',
             borderRadius: 16,
-            background: 'rgba(255,255,255,0.78)',
+            background: 'var(--t-chrome)',
             backdropFilter: 'blur(24px) saturate(1.45)',
             WebkitBackdropFilter: 'blur(24px) saturate(1.45)',
-            border: '1px solid rgba(255,255,255,0.72)',
-            boxShadow: '0 18px 40px rgba(15, 23, 42, 0.14), 0 2px 10px rgba(15, 23, 42, 0.08)',
+            border: '1px solid var(--t-panel-border)',
+            boxShadow: 'var(--t-panel-shadow), inset 0 1px 0 var(--t-divider-subtle)',
             pointerEvents: 'none',
             zIndex: 10020,
           }}
@@ -1202,28 +1230,28 @@ export function SessionTimeline({
                 {hoverCard.kindLabel}
               </span>
               {hoverCard.statusLabel ? (
-                <span style={{ fontSize: 11, fontWeight: 600, color: '#64748b', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)', whiteSpace: 'nowrap' }}>
                   {hoverCard.statusLabel}
                 </span>
               ) : null}
             </div>
             {hoverCard.durationLabel ? (
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--t-text)', whiteSpace: 'nowrap' }}>
                 {hoverCard.durationLabel}
               </span>
             ) : null}
           </div>
 
-          <div style={{ fontSize: 13, fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
             {hoverCard.rangeLabel}
           </div>
 
-          <div style={{ marginTop: 5, fontSize: 12, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.01em' }}>
+          <div style={{ marginTop: 5, fontSize: 12, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
             {hoverCard.laneLabel}
           </div>
 
           {(hoverCard.runtimeLabel || hoverCard.locationLabel) ? (
-            <div style={{ marginTop: 3, fontSize: 11, color: '#475569', lineHeight: 1.35 }}>
+            <div style={{ marginTop: 3, fontSize: 11, color: 'var(--t-text-secondary)', lineHeight: 1.35 }}>
               {[hoverCard.runtimeLabel, hoverCard.locationLabel].filter(Boolean).join(' · ')}
             </div>
           ) : null}
@@ -1232,7 +1260,7 @@ export function SessionTimeline({
             <div style={{
               marginTop: 7,
               fontSize: 11,
-              color: '#334155',
+              color: 'var(--t-text-secondary)',
               lineHeight: 1.4,
               display: '-webkit-box',
               WebkitLineClamp: 2,

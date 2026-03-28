@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { performance } from 'node:perf_hooks';
 import { getOwnedCodexRuntimeTail } from '@/lib/codex/owned';
 import { getCodexRuntimeTail } from '@/lib/codex/sessions';
+import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
 import { mobileInboxSignature } from '@/lib/mobile/inbox-signature';
 import { getMobileInboxSnapshot } from '@/lib/mobile/openclaw';
@@ -66,6 +67,12 @@ async function resolveHistory(
 ): Promise<{ sessionKey: string; entries: MobileTranscriptEntry[]; replace?: boolean }> {
   const { sessionKey, limit: rawLimit } = req;
   const limit = Math.min(Math.max(rawLimit ?? 18, 1), 40);
+
+  if (sessionKey.startsWith('llm-chat:')) {
+    const transcript = loadMobileLlmChatHistory(sessionKey, limit).transcript;
+    const delta = applyDelta(transcript, req.sinceId);
+    return { sessionKey, ...delta };
+  }
 
   if (sessionKey.startsWith('codex-owned:')) {
     const tail = await getOwnedCodexRuntimeTail(sessionKey);

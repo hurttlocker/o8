@@ -18,7 +18,7 @@ import type { MobileState } from './useMobileState';
  * Manages all data-fetching: history loading, review packets, review files,
  * unified sync polling, visibility-based refresh.
  */
-export function useMobilePolling(state: MobileState, wsConnected: boolean) {
+export function useMobilePolling(state: MobileState, wsConnected: boolean, includeOpenClaw: boolean) {
   const {
     snapshot, setSnapshot,
     selectedSessionKey, selectedSession,
@@ -37,8 +37,8 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean) {
   } = state;
 
   const refreshInbox = useCallback(
-    () => refreshInboxSnapshot({ setSnapshot, setRefreshError }),
-    [setRefreshError, setSnapshot],
+    (fresh = false) => refreshInboxSnapshot({ setSnapshot, setRefreshError, includeOpenClaw, fresh }),
+    [includeOpenClaw, setRefreshError, setSnapshot],
   );
 
   const loadHistory = useCallback(

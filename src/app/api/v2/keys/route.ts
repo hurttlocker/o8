@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { requirePanelAuth } from '@/lib/panel/auth';
 
 // Config lives in ~/.cortex-ide/ so it survives app updates
 const CONFIG_DIR = join(homedir(), '.cortex-ide');
@@ -131,7 +132,10 @@ function maskKey(key: string): string {
 }
 
 // GET — list providers with masked keys
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const denied = requirePanelAuth(request);
+  if (denied) return denied;
+
   const envVars = parseEnvFile();
   // Also check process.env (may be set outside .env.local)
   const providers = PROVIDERS.map((p) => {
@@ -152,6 +156,9 @@ export async function GET() {
 
 // POST — set/update a key
 export async function POST(request: NextRequest) {
+  const denied = requirePanelAuth(request);
+  if (denied) return denied;
+
   const body = await request.json().catch(() => null);
   if (!body?.provider || !body?.key) {
     return NextResponse.json({ error: 'provider and key are required' }, { status: 400 });
@@ -184,6 +191,9 @@ export async function POST(request: NextRequest) {
 
 // DELETE — remove a key
 export async function DELETE(request: NextRequest) {
+  const denied = requirePanelAuth(request);
+  if (denied) return denied;
+
   const body = await request.json().catch(() => null);
   if (!body?.provider) {
     return NextResponse.json({ error: 'provider is required' }, { status: 400 });

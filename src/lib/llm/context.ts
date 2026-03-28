@@ -10,7 +10,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { getRenderedSkeletonCached } from '@/lib/skeleton';
 
-const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
+const DEFAULT_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 
 // Project rules files — checked in priority order, first found wins
 const RULES_FILES = [
@@ -22,6 +22,7 @@ const RULES_FILES = [
 ];
 
 interface WorkspaceContext {
+  repoRoot: string;
   repoName: string;
   branch: string;
   status: string;         // git status --short
@@ -37,27 +38,27 @@ function safeExec(cmd: string, cwd: string, timeoutMs = 3000): string {
   }
 }
 
-export function getWorkspaceContext(): WorkspaceContext {
-  const repoName = safeExec('basename $(git rev-parse --show-toplevel 2>/dev/null)', REPO_ROOT) || 'unknown';
-  const branch = safeExec('git branch --show-current', REPO_ROOT) || 'main';
-  const status = safeExec('git status --short --untracked-files=no', REPO_ROOT) || '(clean)';
-  const recentCommits = safeExec('git log --oneline -5 --no-decorate', REPO_ROOT) || '(no commits)';
+export function getWorkspaceContext(repoRoot = DEFAULT_REPO_ROOT): WorkspaceContext {
+  const repoName = safeExec('basename $(git rev-parse --show-toplevel 2>/dev/null)', repoRoot) || 'unknown';
+  const branch = safeExec('git branch --show-current', repoRoot) || 'main';
+  const status = safeExec('git status --short --untracked-files=no', repoRoot) || '(clean)';
+  const recentCommits = safeExec('git log --oneline -5 --no-decorate', repoRoot) || '(no commits)';
 
   // File tree — top level + key subdirs, truncated
-  const topLevel = safeExec('ls -1', REPO_ROOT);
-  const srcDirs = safeExec("find src -maxdepth 2 -type d 2>/dev/null | head -30", REPO_ROOT);
+  const topLevel = safeExec('ls -1', repoRoot);
+  const srcDirs = safeExec("find src -maxdepth 2 -type d 2>/dev/null | head -30", repoRoot);
   const fileTreeSummary = topLevel + (srcDirs ? '\n\nsrc/ structure:\n' + srcDirs : '');
 
-  return { repoName, branch, status, recentCommits, fileTreeSummary };
+  return { repoRoot, repoName, branch, status, recentCommits, fileTreeSummary };
 }
 
 /**
  * Load project rules from .cortexrules, .cursorrules, etc.
  * First file found wins. Max 4KB to prevent context bloat.
  */
-function loadProjectRules(): { content: string; source: string } | null {
+function loadProjectRules(repoRoot = DEFAULT_REPO_ROOT): { content: string; source: string } | null {
   for (const filename of RULES_FILES) {
-    const filepath = join(REPO_ROOT, filename);
+    const filepath = join(repoRoot, filename);
     if (existsSync(filepath)) {
       try {
         let content = readFileSync(filepath, 'utf-8').trim();
@@ -91,11 +92,12 @@ function extractChangedPaths(status: string): string[] {
 }
 
 export function buildSystemPrompt(ctx: WorkspaceContext): string {
-  const rules = loadProjectRules();
+  const repoRoot = ctx.repoRoot;
+  const rules = loadProjectRules(repoRoot);
 
   // Try skeleton map first, fall back to crude file tree
   const focusPaths = extractChangedPaths(ctx.status);
-  const skeleton = getRenderedSkeletonCached(REPO_ROOT, {
+  const skeleton = getRenderedSkeletonCached(repoRoot, {
     maxTokens: 3000,
     focusPaths,
   });
@@ -139,4 +141,18 @@ ${structureSection}
 
 ## Project Rules (from ${rules.source})
 ${rules.content}` : ''}`;
+}
+
+export function buildUnscopedSystemPrompt(): string {
+  return `You are an AI assistant integrated into Cortex IDE, a desktop coding environment.
+
+No registered repository is currently scoped to this chat. Do not assume a project name, branch, git status, file tree, or repo history.
+
+## Guidelines
+- Stay truthful about missing workspace scope.
+- If the user asks a repo-specific question, ask them to open or select the correct workspace repo first.
+- Do not invent file paths, branch names, or project structure.
+- Be concise and actionable.
+- Format code blocks with language tags for syntax highlighting.
+- When generating Mermaid diagrams, use simple syntax: short node IDs (A, B, C), avoid special characters in labels, use \`graph TD\` or \`flowchart TD\` for flow charts. Keep labels short and wrap in square brackets like \`A[Label]\`. Avoid pipes in labels.`;
 }

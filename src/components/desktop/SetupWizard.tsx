@@ -11,17 +11,11 @@ import {
   Globe,
   Zap,
   Copy,
-  X,
   Cpu,
   Layers,
   MessageSquare,
   Sparkles,
 } from 'lucide-react';
-import {
-  evaluateSetupCompletion,
-  normalizeSetupDetection,
-  type SetupCompletionGoal,
-} from '@/lib/setup/detection';
 
 // ── Types ──
 
@@ -68,6 +62,28 @@ export interface DetectionResult {
 
 type WizardMode = 'ready' | 'quick-setup' | 'full-wizard';
 type FullWizardPath = 'agents' | 'chat' | 'explore';
+
+const THEME_TEXT = 'var(--t-text)';
+const THEME_TEXT_SECONDARY = 'var(--t-text-secondary)';
+const THEME_TEXT_MUTED = 'var(--t-text-muted)';
+const THEME_TEXT_FAINT = 'var(--t-text-faint)';
+const THEME_PANEL = 'var(--t-panel)';
+const THEME_PANEL_BORDER = 'var(--t-panel-border)';
+const THEME_DIVIDER = 'var(--t-divider)';
+const THEME_DIVIDER_SUBTLE = 'var(--t-divider-subtle)';
+const THEME_ACCENT = 'var(--t-accent)';
+const THEME_ACCENT_SOFT = 'var(--t-accent-soft)';
+const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong)';
+const THEME_ACCENT_BORDER = 'var(--t-accent-border)';
+const THEME_ACCENT_RING = 'var(--t-accent-ring)';
+const THEME_SEARCH_BG = 'var(--t-search-bg)';
+const THEME_SEARCH_BORDER = 'var(--t-search-border)';
+const THEME_GLASS_ELEVATED = 'var(--t-glass-elevated, var(--t-panel-translucent))';
+const THEME_GLASS_MUTED = 'var(--t-glass-muted, var(--t-panel-translucent))';
+const THEME_GLASS_MUTED_STRONG = 'var(--t-glass-muted-strong, var(--t-panel))';
+const THEME_GLASS_BORDER_STRONG = 'var(--t-glass-border-strong, var(--t-panel-border))';
+const THEME_GLASS_SHADOW = 'var(--t-glass-shadow, var(--t-panel-shadow))';
+const THEME_SHELL_BACKDROP = 'var(--t-shell-backdrop, rgba(15, 23, 42, 0.16))';
 
 // ── Helpers ──
 
@@ -189,14 +205,14 @@ function GrayDot() {
       width: 20,
       height: 20,
       borderRadius: '50%',
-      background: 'rgba(148,163,184,0.18)',
+      background: THEME_DIVIDER_SUBTLE,
       flexShrink: 0,
     }}>
       <span style={{
         width: 6,
         height: 6,
         borderRadius: '50%',
-        background: '#94a3b8',
+        background: THEME_TEXT_FAINT,
       }} />
     </span>
   );
@@ -214,11 +230,11 @@ function CopyCommand({ command }: { command: string }) {
       gap: 8,
       padding: '10px 12px',
       borderRadius: 10,
-      background: 'rgba(15,23,42,0.06)',
-      border: '1px solid rgba(15,23,42,0.08)',
+      background: THEME_GLASS_MUTED,
+      border: `1px solid ${THEME_PANEL_BORDER}`,
       fontFamily: '"SF Mono", ui-monospace, monospace',
       fontSize: 12,
-      color: '#0f172a',
+      color: THEME_TEXT,
       lineHeight: '18px',
     }}>
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -238,8 +254,8 @@ function CopyCommand({ command }: { command: string }) {
           height: 28,
           borderRadius: 6,
           border: 'none',
-          background: copied ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.7)',
-          color: copied ? '#22c55e' : '#64748b',
+          background: copied ? 'rgba(34, 197, 94, 0.14)' : THEME_PANEL,
+          color: copied ? '#22c55e' : THEME_TEXT_MUTED,
           cursor: 'pointer',
           flexShrink: 0,
           transition: 'all 150ms ease',
@@ -262,8 +278,8 @@ function StepDots({ total, current }: { total: number; current: number }) {
           height: 6,
           borderRadius: 999,
           background: i === current
-            ? '#2563eb'
-            : i < current ? '#93c5fd' : 'rgba(148,163,184,0.25)',
+            ? THEME_ACCENT
+            : i < current ? THEME_ACCENT_SOFT_STRONG : THEME_DIVIDER,
           transition: 'all 300ms cubic-bezier(0.34, 1.56, 0.64, 1)',
         }} />
       ))}
@@ -304,26 +320,60 @@ function GlassButton({
     border: 'none',
     opacity: disabled ? 0.5 : 1,
     ...(variant === 'primary' ? {
-      background: 'linear-gradient(180deg, #3b82f6, #2563eb)',
+      background: `linear-gradient(180deg, #60a5fa 0%, ${THEME_ACCENT} 100%)`,
       color: '#fff',
-      boxShadow: '0 4px 14px rgba(37,99,235,0.35), inset 0 1px 0 rgba(255,255,255,0.2)',
+      boxShadow: `0 12px 28px ${THEME_ACCENT_RING}, inset 0 1px 0 rgba(255,255,255,0.2)`,
     } : variant === 'secondary' ? {
-      background: 'rgba(255,255,255,0.6)',
-      color: '#1d4ed8',
-      border: '1px solid rgba(59,130,246,0.2)',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+      background: THEME_GLASS_MUTED_STRONG,
+      color: THEME_TEXT,
+      border: `1px solid ${THEME_PANEL_BORDER}`,
+      boxShadow: '0 10px 24px rgba(0,0,0,0.06)',
     } : {
       background: 'transparent',
-      color: '#64748b',
+      color: THEME_TEXT_MUTED,
     }),
     ...overrideStyle,
   };
 
   return (
-    <button onClick={disabled ? undefined : onClick} style={base}>
+    <button disabled={disabled} onClick={disabled ? undefined : onClick} style={base}>
       {icon}
       {label}
     </button>
+  );
+}
+
+function SetupWizardStepFrame({
+  stepKey,
+  direction,
+  children,
+}: {
+  stepKey: string;
+  direction: 'forward' | 'back';
+  children: ReactNode;
+}) {
+  const [entering, setEntering] = useState(true);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setEntering(false), 50);
+    return () => window.clearTimeout(t);
+  }, []);
+
+  return (
+    <div
+      key={stepKey}
+      style={{
+        opacity: entering ? 0 : 1,
+        transform: entering
+          ? direction === 'forward'
+            ? 'translateY(12px) scale(0.985)'
+            : 'translateY(-12px) scale(0.985)'
+          : 'translateY(0) scale(1)',
+        transition: 'opacity 220ms ease, transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+      }}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -339,7 +389,7 @@ function ToolRow({ tool, index }: { tool: ToolDisplayInfo; index: number }) {
     }}>
       {tool.detected ? <AnimatedCheck delay={index * 80} /> : <GrayDot />}
       <span style={{
-        color: tool.detected ? '#0f172a' : '#94a3b8',
+        color: tool.detected ? THEME_TEXT : THEME_TEXT_MUTED,
         display: 'flex',
         alignItems: 'center',
         gap: 6,
@@ -353,10 +403,10 @@ function ToolRow({ tool, index }: { tool: ToolDisplayInfo; index: number }) {
         <span style={{
           fontSize: 10,
           fontWeight: 600,
-          color: '#64748b',
+          color: THEME_TEXT_MUTED,
           padding: '2px 6px',
           borderRadius: 999,
-          background: 'rgba(0,0,0,0.04)',
+          background: THEME_DIVIDER_SUBTLE,
         }}>
           v{tool.version}
         </span>
@@ -364,7 +414,7 @@ function ToolRow({ tool, index }: { tool: ToolDisplayInfo; index: number }) {
       {tool.detail && (
         <span style={{
           fontSize: 11,
-          color: '#64748b',
+          color: THEME_TEXT_MUTED,
           marginLeft: 'auto',
         }}>
           {tool.detail}
@@ -454,22 +504,22 @@ function MissingToolCard({
     <div style={{
       padding: '14px 16px',
       borderRadius: 14,
-      background: 'rgba(255,255,255,0.5)',
-      border: '1px solid rgba(147,197,253,0.18)',
+      background: THEME_GLASS_MUTED_STRONG,
+      border: `1px solid ${THEME_PANEL_BORDER}`,
       display: 'flex',
       flexDirection: 'column',
       gap: 8,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ color: '#2563eb' }}>{action.icon}</span>
-        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>{action.name}</span>
+        <span style={{ color: THEME_ACCENT }}>{action.icon}</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: THEME_TEXT }}>{action.name}</span>
         <button
           onClick={onSkip}
           style={{
             marginLeft: 'auto',
             fontSize: 11,
             fontWeight: 600,
-            color: '#94a3b8',
+            color: THEME_TEXT_MUTED,
             background: 'none',
             border: 'none',
             cursor: 'pointer',
@@ -479,7 +529,7 @@ function MissingToolCard({
           Skip
         </button>
       </div>
-      <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.65)', lineHeight: 1.5 }}>
+      <div style={{ fontSize: 12, color: THEME_TEXT_SECONDARY, lineHeight: 1.5 }}>
         {action.description}
       </div>
       {action.command && <CopyCommand command={action.command} />}
@@ -491,7 +541,7 @@ function MissingToolCard({
           style={{
             fontSize: 12,
             fontWeight: 600,
-            color: '#2563eb',
+            color: THEME_ACCENT,
             textDecoration: 'none',
             display: 'inline-flex',
             alignItems: 'center',
@@ -532,17 +582,17 @@ function PathChoiceCard({
         padding: '14px 16px',
         borderRadius: 14,
         border: selected
-          ? '1.5px solid rgba(59,130,246,0.5)'
-          : '1px solid rgba(147,197,253,0.18)',
+          ? `1.5px solid ${THEME_ACCENT_BORDER}`
+          : `1px solid ${THEME_PANEL_BORDER}`,
         background: selected
-          ? 'linear-gradient(180deg, rgba(239,246,255,0.7), rgba(191,219,254,0.3))'
-          : 'rgba(255,255,255,0.4)',
+          ? THEME_ACCENT_SOFT_STRONG
+          : THEME_GLASS_MUTED,
         cursor: 'pointer',
         textAlign: 'left',
         fontFamily: 'inherit',
         width: '100%',
         transition: 'all 200ms ease',
-        boxShadow: selected ? '0 4px 16px rgba(37,99,235,0.12)' : 'none',
+        boxShadow: selected ? `0 14px 30px ${THEME_ACCENT_RING}` : 'none',
       }}
     >
       <span style={{
@@ -552,23 +602,23 @@ function PathChoiceCard({
         width: 36,
         height: 36,
         borderRadius: 10,
-        background: selected ? 'rgba(37,99,235,0.1)' : 'rgba(148,163,184,0.1)',
-        color: selected ? '#2563eb' : '#94a3b8',
+        background: selected ? THEME_ACCENT_SOFT : THEME_DIVIDER_SUBTLE,
+        color: selected ? THEME_ACCENT : THEME_TEXT_MUTED,
         flexShrink: 0,
       }}>
         {icon}
       </span>
       <div>
-        <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.01em' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: THEME_TEXT, letterSpacing: '-0.01em' }}>
           {title}
         </div>
-        <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.6)', marginTop: 2, lineHeight: 1.4 }}>
+        <div style={{ fontSize: 12, color: THEME_TEXT_SECONDARY, marginTop: 2, lineHeight: 1.4 }}>
           {description}
         </div>
       </div>
       <ChevronRight size={16} strokeWidth={2} style={{
         marginLeft: 'auto',
-        color: selected ? '#2563eb' : '#cbd5e1',
+        color: selected ? THEME_ACCENT : THEME_TEXT_FAINT,
         flexShrink: 0,
       }} />
     </button>
@@ -577,17 +627,16 @@ function PathChoiceCard({
 
 // ── API key inline input ──
 
-function ApiKeyInput({ onSave }: { onSave: (provider: string, key: string) => Promise<void> | void }) {
+function ApiKeyInput({ onSave }: { onSave: (provider: string, key: string) => void }) {
   const [provider, setProvider] = useState('anthropic');
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const providers = [
-    { id: 'anthropic', name: 'Anthropic', prefix: 'sk-ant-' },
-    { id: 'openai', name: 'OpenAI', prefix: 'sk-' },
-    { id: 'google', name: 'Google AI', prefix: 'AI' },
+    { id: 'anthropic', name: 'Anthropic', env: 'ANTHROPIC_API_KEY', prefix: 'sk-ant-' },
+    { id: 'openai', name: 'OpenAI', env: 'OPENAI_API_KEY', prefix: 'sk-' },
+    { id: 'google', name: 'Google AI', env: 'GOOGLE_AI_API_KEY', prefix: 'AI' },
   ];
 
   const current = providers.find((p) => p.id === provider)!;
@@ -595,14 +644,10 @@ function ApiKeyInput({ onSave }: { onSave: (provider: string, key: string) => Pr
   const handleSave = async () => {
     if (!apiKey.trim()) return;
     setSaving(true);
-    setError(null);
     try {
-      await onSave(current.id, apiKey.trim());
+      onSave(current.env, apiKey.trim());
       setSaved(true);
-      setApiKey('');
       setTimeout(() => setSaved(false), 2000);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to save API key.');
     } finally {
       setSaving(false);
     }
@@ -612,15 +657,15 @@ function ApiKeyInput({ onSave }: { onSave: (provider: string, key: string) => Pr
     <div style={{
       padding: '14px 16px',
       borderRadius: 14,
-      background: 'rgba(255,255,255,0.5)',
-      border: '1px solid rgba(147,197,253,0.18)',
+      background: THEME_GLASS_MUTED_STRONG,
+      border: `1px solid ${THEME_PANEL_BORDER}`,
       display: 'flex',
       flexDirection: 'column',
       gap: 10,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ color: '#2563eb' }}><Key size={16} strokeWidth={2} /></span>
-        <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>API Key</span>
+        <span style={{ color: THEME_ACCENT }}><Key size={16} strokeWidth={2} /></span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: THEME_TEXT }}>API Key</span>
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
         {providers.map((p) => (
@@ -631,10 +676,10 @@ function ApiKeyInput({ onSave }: { onSave: (provider: string, key: string) => Pr
               padding: '4px 10px',
               borderRadius: 6,
               border: provider === p.id
-                ? '1px solid rgba(59,130,246,0.3)'
-                : '1px solid rgba(0,0,0,0.06)',
-              background: provider === p.id ? 'rgba(59,130,246,0.08)' : 'rgba(255,255,255,0.5)',
-              color: provider === p.id ? '#2563eb' : '#64748b',
+                ? `1px solid ${THEME_ACCENT_BORDER}`
+                : `1px solid ${THEME_DIVIDER}`,
+              background: provider === p.id ? THEME_ACCENT_SOFT : THEME_GLASS_MUTED,
+              color: provider === p.id ? THEME_ACCENT : THEME_TEXT_MUTED,
               fontSize: 11,
               fontWeight: 600,
               cursor: 'pointer',
@@ -655,11 +700,11 @@ function ApiKeyInput({ onSave }: { onSave: (provider: string, key: string) => Pr
             flex: 1,
             padding: '8px 10px',
             borderRadius: 8,
-            border: '1px solid rgba(0,0,0,0.08)',
-            background: 'rgba(255,255,255,0.7)',
+            border: `1px solid ${THEME_SEARCH_BORDER}`,
+            background: THEME_SEARCH_BG,
             fontSize: 12,
             fontFamily: '"SF Mono", ui-monospace, monospace',
-            color: '#0f172a',
+            color: THEME_TEXT,
             outline: 'none',
           }}
         />
@@ -671,11 +716,6 @@ function ApiKeyInput({ onSave }: { onSave: (provider: string, key: string) => Pr
           style={{ padding: '8px 16px', fontSize: 12 }}
         />
       </div>
-      {error ? (
-        <div style={{ fontSize: 11, color: '#dc2626', lineHeight: 1.4 }}>
-          {error}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -687,30 +727,21 @@ export const SetupWizard = memo(function SetupWizard({
   onComplete,
 }: {
   detection: DetectionResult;
-  onComplete: (setupComplete: boolean) => void;
+  onComplete: () => void;
 }) {
   const mode = useMemo(() => deriveWizardMode(detection), [detection]);
-  const [liveDetection, setLiveDetection] = useState(detection);
-  const toolList = useMemo(() => buildToolList(liveDetection), [liveDetection]);
-  const missingActions = useMemo(() => getMissingActions(liveDetection), [liveDetection]);
+  const toolList = useMemo(() => buildToolList(detection), [detection]);
+  const missingActions = useMemo(() => getMissingActions(detection), [detection]);
 
   const [step, setStep] = useState(0);
-  const [entering, setEntering] = useState(true);
   const [fullWizardPath, setFullWizardPath] = useState<FullWizardPath | null>(null);
   const [skippedSteps, setSkippedSteps] = useState<string[]>([]);
   const [animDirection, setAnimDirection] = useState<'forward' | 'back'>('forward');
-  const [rechecking, setRechecking] = useState(false);
-  const [setupError, setSetupError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setLiveDetection(detection);
-  }, [detection]);
-
-  useEffect(() => {
-    setEntering(true);
-    const t = setTimeout(() => setEntering(false), 50);
-    return () => clearTimeout(t);
-  }, [step]);
+  const remainingQuickSetupActions = useMemo(
+    () => missingActions.filter((action) => !skippedSteps.includes(action.id)),
+    [missingActions, skippedSteps],
+  );
+  const quickSetupComplete = remainingQuickSetupActions.length === 0;
 
   const totalSteps = useMemo(() => {
     if (mode === 'ready') return 1;
@@ -732,183 +763,6 @@ export const SetupWizard = memo(function SetupWizard({
     setSkippedSteps((prev) => [...prev, stepId]);
   }, []);
 
-  const handleDismiss = useCallback(() => {
-    onComplete(false);
-  }, [onComplete]);
-
-  const handleSuccessComplete = useCallback(() => {
-    onComplete(true);
-  }, [onComplete]);
-
-  const completionGoal = useMemo<SetupCompletionGoal | null>(() => {
-    if (mode === 'quick-setup') return 'quick-setup';
-    if (mode !== 'full-wizard') return null;
-    if (fullWizardPath === 'agents') return 'agents';
-    if (fullWizardPath === 'chat') return 'chat';
-    return null;
-  }, [fullWizardPath, mode]);
-
-  const completionState = useMemo(() => {
-    if (!completionGoal) return null;
-    return evaluateSetupCompletion(liveDetection, completionGoal);
-  }, [completionGoal, liveDetection]);
-
-  const recheckSetup = useCallback(async () => {
-    setRechecking(true);
-    setSetupError(null);
-    try {
-      const response = await fetch('/api/setup/detect', {
-        cache: 'no-store',
-        headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
-      });
-      if (!response.ok) {
-        throw new Error('Unable to recheck setup right now.');
-      }
-      const raw = await response.json() as Record<string, unknown>;
-      setLiveDetection(normalizeSetupDetection(raw));
-    } catch (err) {
-      setSetupError(err instanceof Error ? err.message : 'Unable to recheck setup right now.');
-    } finally {
-      setRechecking(false);
-    }
-  }, []);
-
-  const saveProviderKey = useCallback(async (provider: string, key: string) => {
-    const response = await fetch('/api/v2/keys', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ provider, key }),
-    });
-    const payload = await response.json().catch(() => null) as { error?: string } | null;
-    if (!response.ok) {
-      throw new Error(payload?.error || 'Unable to save API key.');
-    }
-    await recheckSetup();
-  }, [recheckSetup]);
-
-  const renderCompletionStep = useCallback((status: NonNullable<typeof completionState>) => {
-    if (status.complete) {
-      return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center' }}>
-          <div style={{
-            width: 56,
-            height: 56,
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 8px 24px rgba(34,197,94,0.3)',
-          }}>
-            <Check size={28} strokeWidth={3} color="#fff" />
-          </div>
-
-          <div style={{ textAlign: 'center' }}>
-            <div style={{
-              fontSize: 22,
-              fontWeight: 800,
-              color: '#0f172a',
-              letterSpacing: '-0.03em',
-              marginBottom: 6,
-            }}>
-              {status.title}
-            </div>
-            <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.6)', lineHeight: 1.6 }}>
-              {status.description}
-            </div>
-          </div>
-
-          <GlassButton label="Open Dashboard" onClick={handleSuccessComplete} icon={<Zap size={16} strokeWidth={2} />} />
-        </div>
-      );
-    }
-
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <div style={{
-            width: 56,
-            height: 56,
-            borderRadius: '50%',
-            background: 'linear-gradient(135deg, rgba(249,115,22,0.16), rgba(245,158,11,0.22))',
-            color: '#c2410c',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 10px 24px rgba(249,115,22,0.14)',
-          }}>
-            <X size={26} strokeWidth={2.5} />
-          </div>
-        </div>
-
-        <div style={{ textAlign: 'center' }}>
-          <div style={{
-            fontSize: 20,
-            fontWeight: 800,
-            color: '#0f172a',
-            letterSpacing: '-0.03em',
-            marginBottom: 6,
-          }}>
-            {status.title}
-          </div>
-          <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.62)', lineHeight: 1.6 }}>
-            {status.description}
-          </div>
-        </div>
-
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-          padding: '14px 16px',
-          borderRadius: 14,
-          background: 'rgba(255,255,255,0.52)',
-          border: '1px solid rgba(249,115,22,0.18)',
-        }}>
-          {status.missing.map((item) => (
-            <div
-              key={item}
-              style={{
-                display: 'flex',
-                gap: 8,
-                alignItems: 'flex-start',
-                fontSize: 12,
-                color: '#7c2d12',
-                lineHeight: 1.5,
-              }}
-            >
-              <span style={{ color: '#f97316', marginTop: 1 }}>•</span>
-              <span>{item}</span>
-            </div>
-          ))}
-        </div>
-
-        {setupError ? (
-          <div style={{ fontSize: 12, color: '#dc2626', textAlign: 'center', lineHeight: 1.5 }}>
-            {setupError}
-          </div>
-        ) : null}
-
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', flexWrap: 'wrap' }}>
-          {mode === 'full-wizard' ? (
-            <GlassButton label="Back" variant="ghost" onClick={goBack} />
-          ) : (
-            <span />
-          )}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <GlassButton
-              label={rechecking ? 'Checking…' : 'Recheck setup'}
-              variant="secondary"
-              onClick={() => { void recheckSetup(); }}
-              disabled={rechecking}
-            />
-            <GlassButton label="Open dashboard anyway" variant="ghost" onClick={handleDismiss} />
-          </div>
-        </div>
-      </div>
-    );
-  }, [goBack, handleDismiss, handleSuccessComplete, mode, recheckSetup, rechecking, setupError]);
-
   // ── Step content renderers ──
 
   const renderReady = () => (
@@ -917,13 +771,13 @@ export const SetupWizard = memo(function SetupWizard({
         <div style={{
           fontSize: 22,
           fontWeight: 800,
-          color: '#0f172a',
+          color: THEME_TEXT,
           letterSpacing: '-0.03em',
           marginBottom: 6,
         }}>
           Welcome to Cortex IDE
         </div>
-        <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.6)', lineHeight: 1.6 }}>
+        <div style={{ fontSize: 13, color: THEME_TEXT_SECONDARY, lineHeight: 1.6 }}>
           {detection.summary}
         </div>
       </div>
@@ -942,18 +796,18 @@ export const SetupWizard = memo(function SetupWizard({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
         <GlassButton
           label="Get Started"
-          onClick={handleSuccessComplete}
+          onClick={onComplete}
           icon={<Zap size={16} strokeWidth={2} />}
         />
         <button
           onClick={() => {
-            handleSuccessComplete();
+            onComplete();
             // Settings will be available from NavRail
           }}
           style={{
             fontSize: 12,
             fontWeight: 600,
-            color: '#64748b',
+            color: THEME_TEXT_MUTED,
             background: 'none',
             border: 'none',
             cursor: 'pointer',
@@ -975,13 +829,13 @@ export const SetupWizard = memo(function SetupWizard({
             <div style={{
               fontSize: 22,
               fontWeight: 800,
-              color: '#0f172a',
+              color: THEME_TEXT,
               letterSpacing: '-0.03em',
               marginBottom: 6,
             }}>
               Almost Ready
             </div>
-            <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.6)', lineHeight: 1.6 }}>
+            <div style={{ fontSize: 13, color: THEME_TEXT_SECONDARY, lineHeight: 1.6 }}>
               We found some tools on your machine. A few more things to set up.
             </div>
           </div>
@@ -994,7 +848,7 @@ export const SetupWizard = memo(function SetupWizard({
 
           <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
             <GlassButton label="Set up missing tools" onClick={goForward} icon={<ChevronRight size={16} strokeWidth={2} />} />
-            <GlassButton label="Skip all" variant="ghost" onClick={handleDismiss} />
+            <GlassButton label="Skip all" variant="ghost" onClick={onComplete} />
           </div>
         </div>
       );
@@ -1002,11 +856,42 @@ export const SetupWizard = memo(function SetupWizard({
 
     if (step === 1) {
       // Missing tools setup
-      const remaining = missingActions.filter((a) => !skippedSteps.includes(a.id));
-      if (remaining.length === 0) {
-        // All skipped or none missing, advance
-        goForward();
-        return null;
+      const remaining = remainingQuickSetupActions;
+
+      if (quickSetupComplete) {
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center' }}>
+            <div style={{
+              width: 56,
+              height: 56,
+              borderRadius: '50%',
+              background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 8px 24px rgba(34,197,94,0.3)',
+            }}>
+              <Check size={28} strokeWidth={3} color="#fff" />
+            </div>
+
+            <div style={{ textAlign: 'center' }}>
+              <div style={{
+                fontSize: 22,
+                fontWeight: 800,
+                color: THEME_TEXT,
+                letterSpacing: '-0.03em',
+                marginBottom: 6,
+              }}>
+                Setup complete
+              </div>
+              <div style={{ fontSize: 13, color: THEME_TEXT_SECONDARY, lineHeight: 1.6 }}>
+                All required setup items are resolved. You can open the dashboard now.
+              </div>
+            </div>
+
+            <GlassButton label="Open Dashboard" onClick={onComplete} icon={<Zap size={16} strokeWidth={2} />} />
+          </div>
+        );
       }
 
       return (
@@ -1015,16 +900,30 @@ export const SetupWizard = memo(function SetupWizard({
             <div style={{
               fontSize: 18,
               fontWeight: 800,
-              color: '#0f172a',
+              color: THEME_TEXT,
               letterSpacing: '-0.02em',
               marginBottom: 4,
             }}>
               Set Up Missing Tools
             </div>
-            <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.55)' }}>
+            <div style={{ fontSize: 12, color: THEME_TEXT_MUTED }}>
               Install what you need, skip the rest.
             </div>
           </div>
+
+          {remaining.length > 0 ? (
+            <div style={{
+              padding: '10px 12px',
+              borderRadius: 10,
+              border: '1px solid rgba(245,158,11,0.22)',
+              background: 'rgba(245,158,11,0.08)',
+              color: THEME_TEXT_SECONDARY,
+              fontSize: 11,
+              lineHeight: 1.45,
+            }}>
+              {remaining.length} setup item{remaining.length === 1 ? '' : 's'} still need attention before Cortex can claim the setup is ready.
+            </div>
+          ) : null}
 
           <div style={{
             display: 'flex',
@@ -1033,13 +932,18 @@ export const SetupWizard = memo(function SetupWizard({
             maxHeight: 320,
             overflowY: 'auto',
             scrollbarWidth: 'thin',
-            scrollbarColor: 'rgba(0,0,0,0.08) transparent',
+            scrollbarColor: 'var(--t-divider-strong) transparent',
           } as CSSProperties}>
             {remaining.map((action) =>
               action.id === 'api-keys' ? (
                 <div key={action.id}>
-                  <ApiKeyInput onSave={async (provider, key) => {
-                    await saveProviderKey(provider, key);
+                  <ApiKeyInput onSave={(env, key) => {
+                    // Save to .env.local via settings API
+                    fetch('/api/setup/config', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ [`env_${env}`]: key }),
+                    }).catch(() => {});
                     skipStep(action.id);
                   }} />
                   <button
@@ -1047,7 +951,7 @@ export const SetupWizard = memo(function SetupWizard({
                     style={{
                       fontSize: 11,
                       fontWeight: 600,
-                      color: '#94a3b8',
+                      color: THEME_TEXT_MUTED,
                       background: 'none',
                       border: 'none',
                       cursor: 'pointer',
@@ -1071,14 +975,51 @@ export const SetupWizard = memo(function SetupWizard({
 
           <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between' }}>
             <GlassButton label="Back" variant="ghost" onClick={goBack} />
-            <GlassButton label="Continue" onClick={goForward} icon={<ChevronRight size={16} strokeWidth={2} />} />
+            <GlassButton
+              label="Continue"
+              onClick={goForward}
+              icon={<ChevronRight size={16} strokeWidth={2} />}
+              disabled={!quickSetupComplete}
+            />
           </div>
         </div>
       );
     }
 
     // Step 2: Ready
-    return completionState ? renderCompletionStep(completionState) : null;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center' }}>
+        <div style={{
+          width: 56,
+          height: 56,
+          borderRadius: '50%',
+          background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 8px 24px rgba(34,197,94,0.3)',
+        }}>
+          <Check size={28} strokeWidth={3} color="#fff" />
+        </div>
+
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            fontSize: 22,
+            fontWeight: 800,
+            color: THEME_TEXT,
+            letterSpacing: '-0.03em',
+            marginBottom: 6,
+          }}>
+            You{"'"}re Ready
+          </div>
+          <div style={{ fontSize: 13, color: THEME_TEXT_SECONDARY, lineHeight: 1.6 }}>
+            Cortex IDE is set up. You can always configure more in Settings.
+          </div>
+        </div>
+
+        <GlassButton label="Open Dashboard" onClick={onComplete} icon={<Zap size={16} strokeWidth={2} />} />
+      </div>
+    );
   };
 
   const renderFullWizardStep = () => {
@@ -1090,13 +1031,13 @@ export const SetupWizard = memo(function SetupWizard({
             <div style={{
               fontSize: 22,
               fontWeight: 800,
-              color: '#0f172a',
+              color: THEME_TEXT,
               letterSpacing: '-0.03em',
               marginBottom: 6,
             }}>
               Welcome to Cortex IDE
             </div>
-            <div style={{ fontSize: 13, color: 'rgba(15,23,42,0.6)', lineHeight: 1.6 }}>
+            <div style={{ fontSize: 13, color: THEME_TEXT_SECONDARY, lineHeight: 1.6 }}>
               Your command center for AI engineering. What do you want to do?
             </div>
           </div>
@@ -1130,7 +1071,7 @@ export const SetupWizard = memo(function SetupWizard({
               label="Continue"
               onClick={() => {
                 if (fullWizardPath === 'explore') {
-                  handleDismiss();
+                  onComplete();
                 } else {
                   goForward();
                 }
@@ -1151,13 +1092,13 @@ export const SetupWizard = memo(function SetupWizard({
               <div style={{
                 fontSize: 18,
                 fontWeight: 800,
-                color: '#0f172a',
+                color: THEME_TEXT,
                 letterSpacing: '-0.02em',
                 marginBottom: 4,
               }}>
                 Install Agent Runtime
               </div>
-              <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.55)', lineHeight: 1.5 }}>
+              <div style={{ fontSize: 12, color: THEME_TEXT_MUTED, lineHeight: 1.5 }}>
                 Set up the tools that power your AI agents.
               </div>
             </div>
@@ -1208,18 +1149,24 @@ export const SetupWizard = memo(function SetupWizard({
             <div style={{
               fontSize: 18,
               fontWeight: 800,
-              color: '#0f172a',
+              color: THEME_TEXT,
               letterSpacing: '-0.02em',
               marginBottom: 4,
             }}>
               Connect Your AI Provider
             </div>
-            <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.55)', lineHeight: 1.5 }}>
+            <div style={{ fontSize: 12, color: THEME_TEXT_MUTED, lineHeight: 1.5 }}>
               Add an API key to start chatting with AI models.
             </div>
           </div>
 
-          <ApiKeyInput onSave={saveProviderKey} />
+          <ApiKeyInput onSave={(env, key) => {
+            fetch('/api/setup/config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ [`env_${env}`]: key }),
+            }).catch(() => {});
+          }} />
 
           <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between' }}>
             <GlassButton label="Back" variant="ghost" onClick={goBack} />
@@ -1237,13 +1184,13 @@ export const SetupWizard = memo(function SetupWizard({
             <div style={{
               fontSize: 18,
               fontWeight: 800,
-              color: '#0f172a',
+              color: THEME_TEXT,
               letterSpacing: '-0.02em',
               marginBottom: 4,
             }}>
               Optional: Persistent Memory
             </div>
-            <div style={{ fontSize: 12, color: 'rgba(15,23,42,0.55)', lineHeight: 1.5 }}>
+            <div style={{ fontSize: 12, color: THEME_TEXT_MUTED, lineHeight: 1.5 }}>
               Give your agents long-term memory and semantic search.
             </div>
           </div>
@@ -1278,7 +1225,39 @@ export const SetupWizard = memo(function SetupWizard({
     }
 
     // Step 3: Ready
-    return completionState ? renderCompletionStep(completionState) : null;
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignItems: 'center' }}>
+        <div style={{
+          width: 56,
+          height: 56,
+          borderRadius: '50%',
+          background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: '0 8px 24px rgba(34,197,94,0.3)',
+        }}>
+          <Check size={28} strokeWidth={3} color="#fff" />
+        </div>
+
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            fontSize: 22,
+            fontWeight: 800,
+            color: THEME_TEXT,
+            letterSpacing: '-0.03em',
+            marginBottom: 6,
+          }}>
+            You{"'"}re Ready
+          </div>
+          <div style={{ fontSize: 13, color: THEME_TEXT_SECONDARY, lineHeight: 1.6 }}>
+            Cortex IDE is set up and ready to go. You can always fine-tune settings later.
+          </div>
+        </div>
+
+        <GlassButton label="Open Dashboard" onClick={onComplete} icon={<Zap size={16} strokeWidth={2} />} />
+      </div>
+    );
   };
 
   const renderCurrentStep = () => {
@@ -1295,9 +1274,9 @@ export const SetupWizard = memo(function SetupWizard({
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'rgba(241,245,249,0.65)',
-      backdropFilter: 'blur(20px) saturate(1.5)',
-      WebkitBackdropFilter: 'blur(20px) saturate(1.5)',
+      background: THEME_SHELL_BACKDROP,
+      backdropFilter: 'blur(32px) saturate(1.04)',
+      WebkitBackdropFilter: 'blur(32px) saturate(1.04)',
     } as CSSProperties}>
       {/* Glass card */}
       <div style={{
@@ -1306,17 +1285,17 @@ export const SetupWizard = memo(function SetupWizard({
         margin: '0 20px',
         padding: '32px 28px 24px',
         borderRadius: 20,
-        background: 'linear-gradient(180deg, rgba(239,246,255,0.82), rgba(191,219,254,0.35))',
-        border: '1px solid rgba(147,197,253,0.28)',
-        backdropFilter: 'blur(28px) saturate(1.7)',
-        WebkitBackdropFilter: 'blur(28px) saturate(1.7)',
-        boxShadow: '0 32px 72px rgba(29,78,216,0.16), 0 12px 32px rgba(15,23,42,0.08), inset 0 1px 0 rgba(255,255,255,0.55)',
+        background: THEME_GLASS_ELEVATED,
+        border: `1px solid ${THEME_GLASS_BORDER_STRONG}`,
+        backdropFilter: 'blur(38px) saturate(1.06)',
+        WebkitBackdropFilter: 'blur(38px) saturate(1.06)',
+        boxShadow: THEME_GLASS_SHADOW,
         position: 'relative',
         overflow: 'hidden',
       } as CSSProperties}>
         {/* Skip button (top right) */}
         <button
-          onClick={handleDismiss}
+          onClick={onComplete}
           style={{
             position: 'absolute',
             top: 14,
@@ -1325,8 +1304,8 @@ export const SetupWizard = memo(function SetupWizard({
             height: 28,
             borderRadius: 8,
             border: 'none',
-            background: 'rgba(0,0,0,0.04)',
-            color: '#94a3b8',
+            background: THEME_GLASS_MUTED,
+            color: THEME_TEXT_MUTED,
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
@@ -1339,18 +1318,12 @@ export const SetupWizard = memo(function SetupWizard({
         </button>
 
         {/* Animated step content */}
-        <div
-          key={step}
-          style={{
-            opacity: entering ? 0 : 1,
-            transform: entering
-              ? `translateY(${animDirection === 'forward' ? 12 : -12}px)`
-              : 'translateY(0)',
-            transition: 'all 350ms cubic-bezier(0.34, 1.56, 0.64, 1)',
-          }}
+        <SetupWizardStepFrame
+          stepKey={`${mode}:${step}:${fullWizardPath ?? 'none'}`}
+          direction={animDirection}
         >
           {renderCurrentStep()}
-        </div>
+        </SetupWizardStepFrame>
 
         {/* Step dots */}
         {totalSteps > 1 && (

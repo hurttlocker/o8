@@ -26,6 +26,8 @@ type TargetConfig = {
 type BenchmarkConfig = {
   dataset: string;
   slice: string;
+  search_mode?: 'bm25' | 'hybrid' | 'semantic' | 'rrf';
+  embed_before_scoring?: boolean;
   answerable_categories: number[];
   import_flags: string[];
 };
@@ -360,35 +362,60 @@ function estimateCostUsd(model: string, packedTokens: number, answer: string): n
   return (packedTokens / 1_000_000) * rate.inputPerM + (outputTokens / 1_000_000) * rate.outputPerM;
 }
 
+function embedWithTimeout(dbPath: string, embedProvider: string): string {
+  const model = embedProvider.startsWith('ollama/')
+    ? embedProvider.slice('ollama/'.length)
+    : embedProvider;
+  return runCmd('python3', [
+    path.resolve(process.cwd(), 'scripts/research/embed_with_timeout.py'),
+    dbPath,
+    model,
+    '8',
+  ]);
+}
+
 function runQuestionSet(
   binaryPath: string,
   dbPath: string,
   questions: Question[],
   model: string,
+  searchMode: string,
+  embedProvider?: string,
 ): QuestionResult[] {
   return questions.map((question) => {
-    const search = runCmdJson<SearchResult[]>(binaryPath, [
+    const searchArgs = [
       '--db',
       dbPath,
       'search',
       question.question,
+      '--mode',
+      searchMode,
       '--limit',
       '5',
       '--json',
-    ]);
-    const ask = runCmdJson<AskResult>(binaryPath, [
+    ];
+    if (embedProvider && searchMode !== 'bm25') {
+      searchArgs.splice(searchArgs.length - 1, 0, '--embed', embedProvider);
+    }
+    const search = runCmdJson<SearchResult[]>(binaryPath, searchArgs);
+
+    const askArgs = [
       '--db',
       dbPath,
       'ask',
       question.question,
       '--mode',
-      'bm25',
+      searchMode,
       '--budget',
       '600',
       '--model',
       model,
       '--json',
-    ]);
+    ];
+    if (embedProvider && searchMode !== 'bm25') {
+      askArgs.splice(askArgs.length - 1, 0, '--embed', embedProvider);
+    }
+    const ask = runCmdJson<AskResult>(binaryPath, askArgs);
     const evidenceHit = search.slice(0, 5).some((result) =>
       question.evidence.some(
         (evidence) =>
@@ -521,6 +548,8 @@ async function main(): Promise<void> {
   const questions = renderCorpus(datasetPath, runDir, config.benchmark);
   const selectedModel =
     cli.benchmarkAnswerModel ?? config.models[config.session.quality_mode].benchmark_answer;
+  const searchMode = config.benchmark.search_mode ?? 'bm25';
+  const embedProvider = config.providers?.embed;
   const loopTargets = buildLoopTargets(config, config.session.max_loops);
   const loops: LoopSummary[] = [];
   let runningCost = 0;
@@ -535,6 +564,8 @@ async function main(): Promise<void> {
     target_ref: config.target.target_ref,
     quality_mode: config.session.quality_mode,
     selected_model: selectedModel,
+    search_mode: searchMode,
+    embed_provider: embedProvider ?? '',
     cost_cap_usd: config.session.cost_cap_usd,
     max_loops: config.session.max_loops,
   });
@@ -551,18 +582,31 @@ async function main(): Promise<void> {
     ensureDir(path.dirname(dbPath));
 
     const importStartedAt = Date.now();
-    const importOutput = runCmd(binaryPath, [
+    const importArgs = [
       '--db',
       dbPath,
       'import',
       path.join(runDir, 'corpus'),
       ...config.benchmark.import_flags,
-    ]);
+    ];
+    const importOutput = runCmd(binaryPath, importArgs);
     const importDurationSeconds = (Date.now() - importStartedAt) / 1000;
     fs.writeFileSync(path.join(runDir, 'benchmark', `${target.label}-import.log`), importOutput);
 
+    if (embedProvider && config.benchmark.embed_before_scoring !== false && searchMode !== 'bm25') {
+      const embedOutput = embedWithTimeout(dbPath, embedProvider);
+      fs.writeFileSync(path.join(runDir, 'benchmark', `${target.label}-embed.log`), embedOutput);
+    }
+
     const stats = runCmdJson<Record<string, unknown>>(binaryPath, ['--db', dbPath, 'stats']);
-    const questionResults = runQuestionSet(binaryPath, dbPath, questions, selectedModel);
+    const questionResults = runQuestionSet(
+      binaryPath,
+      dbPath,
+      questions,
+      selectedModel,
+      searchMode,
+      embedProvider,
+    );
     const evidenceHits = questionResults.filter((result) => result.evidenceHit).length;
     const nonDegradedAnswers = questionResults.filter((result) => !result.degraded).length;
     const exactMatches = questionResults.filter((result) => result.exactMatch).length;

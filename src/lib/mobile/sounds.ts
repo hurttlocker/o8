@@ -2,37 +2,65 @@
  * sounds.ts — Subtle audio feedback system.
  *
  * Uses Web Audio API to generate tones programmatically.
- * No external audio files needed. Muted by default, opt-in via settings.
+ * No external audio files needed. Enabled by default and controllable in settings.
  *
  * Inspired by iOS system sounds: short, muted, tasteful.
  */
 
-let audioCtx: AudioContext | null = null;
-let soundEnabled = false;
+const SOUND_STORAGE_KEY = 'cortex-ide:sounds';
+const SOUND_DEFAULT_ENABLED = true;
 
-function getCtx(): AudioContext | null {
+let audioCtx: AudioContext | null = null;
+let soundEnabled = SOUND_DEFAULT_ENABLED;
+
+function readSoundPreference() {
+  if (typeof window === 'undefined') {
+    return SOUND_DEFAULT_ENABLED;
+  }
+
+  const stored = window.localStorage.getItem(SOUND_STORAGE_KEY)
+    ?? window.sessionStorage.getItem(SOUND_STORAGE_KEY);
+  if (stored === '1') return true;
+  if (stored === '0') return false;
+  return SOUND_DEFAULT_ENABLED;
+}
+
+function persistSoundPreference(enabled: boolean) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(SOUND_STORAGE_KEY, enabled ? '1' : '0');
+  window.sessionStorage.setItem(SOUND_STORAGE_KEY, enabled ? '1' : '0');
+}
+
+async function getCtx(): Promise<AudioContext | null> {
   if (!soundEnabled) return null;
   if (!audioCtx) {
     try {
-      audioCtx = new AudioContext();
+      const AudioContextCtor = window.AudioContext
+        || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextCtor) return null;
+      audioCtx = new AudioContextCtor({ latencyHint: 'interactive' });
     } catch {
       return null;
     }
   }
   if (audioCtx.state === 'suspended') {
-    audioCtx.resume().catch(() => {});
+    try {
+      await audioCtx.resume();
+    } catch {
+      return null;
+    }
   }
   return audioCtx;
 }
 
-function playTone(
+async function playTone(
   frequency: number,
   duration: number,
   type: OscillatorType = 'sine',
   volume = 0.08,
   rampDown = true,
 ) {
-  const ctx = getCtx();
+  const ctx = await getCtx();
   if (!ctx) return;
 
   const osc = ctx.createOscillator();
@@ -54,33 +82,37 @@ function playTone(
 
 /** Agent completed its task — gentle ascending chime */
 export function playAgentComplete() {
-  playTone(523, 0.15, 'sine', 0.06);
-  setTimeout(() => playTone(659, 0.2, 'sine', 0.06), 120);
+  void playTone(523, 0.15, 'sine', 0.06);
+  setTimeout(() => { void playTone(659, 0.2, 'sine', 0.06); }, 120);
 }
 
 /** Approval needed — soft knock (two quick taps) */
 export function playApprovalNeeded() {
-  playTone(880, 0.06, 'triangle', 0.05);
-  setTimeout(() => playTone(880, 0.06, 'triangle', 0.05), 100);
+  void playTone(880, 0.06, 'triangle', 0.05);
+  setTimeout(() => { void playTone(880, 0.06, 'triangle', 0.05); }, 100);
 }
 
 /** Build failed — descending tone */
 export function playBuildFailed() {
-  playTone(440, 0.15, 'sine', 0.05);
-  setTimeout(() => playTone(330, 0.2, 'sine', 0.05), 130);
+  void playTone(440, 0.15, 'sine', 0.05);
+  setTimeout(() => { void playTone(330, 0.2, 'sine', 0.05); }, 130);
 }
 
 /** New message — barely-there tap */
 export function playMessageReceived() {
-  playTone(1047, 0.05, 'sine', 0.03);
+  void playTone(1047, 0.05, 'sine', 0.03);
+}
+
+/** Message sent — short upward chirp */
+export function playSendClick() {
+  void playTone(1320, 0.05, 'triangle', 0.055);
+  setTimeout(() => { void playTone(1760, 0.04, 'sine', 0.038); }, 22);
 }
 
 /** Enable/disable sounds */
 export function setSoundEnabled(enabled: boolean) {
   soundEnabled = enabled;
-  if (typeof sessionStorage !== 'undefined') {
-    sessionStorage.setItem('cortex-ide:sounds', enabled ? '1' : '0');
-  }
+  persistSoundPreference(enabled);
 }
 
 /** Check if sounds are enabled */
@@ -90,7 +122,6 @@ export function isSoundEnabled(): boolean {
 
 /** Initialize from stored preference */
 export function initSounds() {
-  if (typeof sessionStorage !== 'undefined') {
-    soundEnabled = sessionStorage.getItem('cortex-ide:sounds') === '1';
-  }
+  soundEnabled = readSoundPreference();
+  persistSoundPreference(soundEnabled);
 }

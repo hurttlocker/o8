@@ -144,6 +144,13 @@ function findRuntimeAgent(snapshot: Awaited<ReturnType<typeof getRuntimeInventor
   );
 }
 
+function prefersCliRuntimeInventory(surfaceId: string) {
+  return surfaceId.startsWith('codex:')
+    || surfaceId.startsWith('codex-owned:')
+    || surfaceId.startsWith('codex-discovered:')
+    || surfaceId.startsWith('claude-code:');
+}
+
 function unavailable(agent: AgentSummary, action: RuntimeActionKind, note: string): RuntimeActionResult {
   return {
     ok: false,
@@ -162,8 +169,10 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
     throw new Error('surfaceId is required');
   }
 
-  const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
-  const agent = findRuntimeAgent(snapshot, surfaceId);
+  const includeOpenClaw = !prefersCliRuntimeInventory(surfaceId);
+  const snapshot = await getRuntimeInventorySnapshot({ fresh: true, includeOpenClaw });
+  const fallbackSnapshot = await getRuntimeInventorySnapshot({ fresh: true, includeOpenClaw: !includeOpenClaw });
+  const agent = findRuntimeAgent(snapshot, surfaceId) ?? findRuntimeAgent(fallbackSnapshot, surfaceId);
   if (!agent) {
     throw new Error('Runtime surface not found.');
   }
@@ -243,6 +252,13 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
         }
 
         if (payload.action === 'stop' || payload.action === 'interrupt') {
+          if (!runtimeSurface.capabilities.interrupt) {
+            return unavailable(
+              agent,
+              payload.action,
+              'No live Codex process is attached to this discovered session, so there is nothing to interrupt.',
+            );
+          }
           const result = await runtime.interrupt(agent.sessionKey);
           return {
             ok: result.ok,

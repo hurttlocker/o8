@@ -51,25 +51,16 @@ import { MarkdownBody } from './MarkdownBody';
 import { IssueCreator } from './IssueCreator';
 import { GraphExplorer3D } from './GraphExplorer3D';
 import dynamic from 'next/dynamic';
+import { loader } from '@monaco-editor/react';
 
 const MonacoEditor = dynamic(() => import('@/lib/monaco-polyfills').then(() =>
-  import('@monaco-editor/react').then(async (mod) => {
-    const { loader } = mod;
-    const monaco = await import('monaco-editor');
-    loader.config({ monaco });
-    return mod.default;
-  })
+  import('@monaco-editor/react').then((mod) => mod.default)
 ), {
   ssr: false,
   loading: () => <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading editor…</div>,
 });
 const MonacoDiffEditor = dynamic(() => import('@/lib/monaco-polyfills').then(() =>
-  import('@monaco-editor/react').then(async (mod) => {
-    const { loader } = mod;
-    const monaco = await import('monaco-editor');
-    loader.config({ monaco });
-    return mod.DiffEditor;
-  })
+  import('@monaco-editor/react').then((mod) => mod.DiffEditor)
 ), {
   ssr: false,
   loading: () => <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 13, color: 'var(--t-text-muted)' }}>Loading diff…</div>,
@@ -1529,7 +1520,7 @@ const FileViewer = memo(function FileViewer({ filePath, workspace }: { filePath:
   const handleEditorMount = useCallback((editor: unknown) => {
     editorRef.current = editor;
 
-    import('monaco-editor').then((monaco) => {
+    loader.init().then((monaco) => {
       monacoRef.current = monaco;
       const ed = editor as import('monaco-editor').editor.IStandaloneCodeEditor;
 

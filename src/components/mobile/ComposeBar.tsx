@@ -19,6 +19,12 @@ import type { ComposeBarProps } from './types';
 import { ownedLifecycleLabel, ownedReviewDispositionLabel } from './utils';
 import { autocompleteSlashCommand, getSlashCommandSuggestions, isSlashCommandText } from '@/lib/slash-commands';
 
+function preserveMouseFocus(event: React.PointerEvent<HTMLButtonElement>) {
+  if (event.pointerType === 'mouse') {
+    event.preventDefault();
+  }
+}
+
 export const ComposeBar = memo(function ComposeBar({
   session,
   sessionKey,
@@ -314,7 +320,7 @@ export const ComposeBar = memo(function ComposeBar({
                 type="button"
                 style={sendButtonStyle(chatSendDisabled)}
                 disabled={chatSendDisabled}
-                onMouseDown={(event) => event.preventDefault()}
+                onPointerDown={preserveMouseFocus}
                 onClick={() => {
                   if (!sessionKey) {
                     return;
@@ -455,7 +461,7 @@ export const ComposeBar = memo(function ComposeBar({
                 type="button"
                 style={sendButtonStyle(ownedSendDisabled)}
                 disabled={ownedSendDisabled}
-                onMouseDown={(event) => event.preventDefault()}
+                onPointerDown={preserveMouseFocus}
                 onClick={() => {
                   if (!sessionKey) {
                     return;

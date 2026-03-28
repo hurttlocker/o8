@@ -17,7 +17,23 @@ import {
   subscribeNavRailHoverExpandEnabled,
   writeNavRailHoverExpandEnabled,
 } from '@/lib/appearance/nav-rail';
-import { readOpenClawBetaEnabled, writeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
+import {
+  appendOpenClawBetaQuery,
+  type OpenClawIntegrationMode,
+  type OpenClawIntegrationStatus,
+  readOpenClawBetaStatus,
+  readOpenClawBetaEnabled,
+  refreshOpenClawBetaStatus,
+  setOpenClawBetaMode,
+  subscribeOpenClawBetaEnabled,
+  subscribeOpenClawBetaStatus,
+} from '@/lib/connectors/openclaw-beta';
+import {
+  readOrchestratorRuntimePreference,
+  subscribeOrchestratorRuntimePreference,
+  writeOrchestratorRuntimePreference,
+} from '@/lib/orchestrator/preferences';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 // ── Types ──
 
@@ -110,6 +126,28 @@ async function fetchOpenClawGatewayStatus(): Promise<OpenClawGatewayStatus | nul
   } catch {
     return null;
   }
+}
+
+function useOpenClawBetaEnabledState() {
+  const [enabled, setEnabled] = useState(() => readOpenClawBetaEnabled());
+
+  useEffect(() => {
+    void refreshOpenClawBetaStatus().then((status) => setEnabled(status.effective_enabled));
+    return subscribeOpenClawBetaEnabled(setEnabled);
+  }, []);
+
+  return [enabled, setEnabled] as const;
+}
+
+function useOpenClawBetaStatusState() {
+  const [status, setStatus] = useState<OpenClawIntegrationStatus>(() => readOpenClawBetaStatus());
+
+  useEffect(() => {
+    void refreshOpenClawBetaStatus().then(setStatus);
+    return subscribeOpenClawBetaStatus(setStatus);
+  }, []);
+
+  return [status, setStatus] as const;
 }
 
 // ── SVG Icons ──
@@ -1130,7 +1168,8 @@ function GitHubTab({
 function OpenClawConnectionCard() {
   const [status, setStatus] = useState<OpenClawGatewayStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [enabled, setEnabled] = useState(() => readOpenClawBetaEnabled());
+  const [integrationStatus, setIntegrationStatus] = useOpenClawBetaStatusState();
+  const [modeBusy, setModeBusy] = useState<OpenClawIntegrationMode | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -1150,7 +1189,25 @@ function OpenClawConnectionCard() {
   const connected = status?.connected ?? false;
   const gatewayUrl = status?.gatewayUrl || '127.0.0.1:18789';
   const modeLabel = status?.mode === 'tailscale' ? 'Tailscale' : 'Local';
-  const statusLabel = !enabled ? 'Beta Off' : connected ? 'Connected' : 'Disconnected';
+  const effectiveEnabled = integrationStatus.effective_enabled;
+  const selectorMode = integrationStatus.mode;
+  const statusLabel = !effectiveEnabled ? 'Disabled' : connected ? 'Connected' : 'Disconnected';
+  const envOverride = integrationStatus.source === 'env' || integrationStatus.from === 'env';
+
+  const handleModeChange = useCallback(async (mode: OpenClawIntegrationMode) => {
+    setModeBusy(mode);
+    try {
+      const next = await setOpenClawBetaMode(mode);
+      setIntegrationStatus(next);
+    } catch (error) {
+      setIntegrationStatus((current) => ({
+        ...current,
+        error: error instanceof Error ? error.message : `Unable to set OpenClaw mode to ${mode}.`,
+      }));
+    } finally {
+      setModeBusy(null);
+    }
+  }, [setIntegrationStatus]);
 
   return (
     <div style={{
@@ -1198,8 +1255,8 @@ function OpenClawConnectionCard() {
               gap: 6,
               padding: '3px 8px',
               borderRadius: 999,
-              background: !enabled ? 'rgba(148, 163, 184, 0.14)' : connected ? 'rgba(34, 197, 94, 0.08)' : 'rgba(239, 68, 68, 0.08)',
-              color: !enabled ? '#475569' : connected ? '#166534' : '#b91c1c',
+              background: !effectiveEnabled ? 'rgba(148, 163, 184, 0.14)' : connected ? 'rgba(34, 197, 94, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+              color: !effectiveEnabled ? '#475569' : connected ? '#166534' : '#b91c1c',
               fontSize: 11,
               fontWeight: 700,
             }}>
@@ -1207,8 +1264,8 @@ function OpenClawConnectionCard() {
                 width: 8,
                 height: 8,
                 borderRadius: '50%',
-                background: !enabled ? '#94a3b8' : connected ? '#22c55e' : '#ef4444',
-                boxShadow: enabled && connected ? '0 0 10px rgba(34, 197, 94, 0.35)' : 'none',
+                background: !effectiveEnabled ? '#94a3b8' : connected ? '#22c55e' : '#ef4444',
+                boxShadow: effectiveEnabled && connected ? '0 0 10px rgba(34, 197, 94, 0.35)' : 'none',
               }} />
               {statusLabel}
             </span>
@@ -1216,39 +1273,61 @@ function OpenClawConnectionCard() {
           <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 4, lineHeight: 1.45 }}>
             {loading
               ? 'Checking gateway connection…'
-              : !enabled
-                ? 'Optional beta connector for personal OpenClaw sessions. Turn it on only if you want those mirrored into the IDE.'
+              : !effectiveEnabled
+                ? selectorMode === 'disabled'
+                  ? 'Cortex integration gate is disabled. OpenClaw-dependent memory behavior is off.'
+                  : 'Auto mode is currently not effective because OpenClaw is not configured.'
                 : connected
                   ? `Version ${normalizeVersion(status?.version, 'unknown')} · ${modeLabel} mode`
                   : 'Gateway not reachable. Run `openclaw gateway start`.'}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            const next = !enabled;
-            setEnabled(next);
-            writeOpenClawBetaEnabled(next);
-          }}
-          style={{
-            minWidth: 122,
-            padding: '8px 12px',
-            borderRadius: 10,
-            border: enabled ? '1px solid rgba(245, 158, 11, 0.18)' : '1px solid var(--t-panel-border)',
-            background: enabled ? 'rgba(245, 158, 11, 0.08)' : 'var(--t-panel)',
-            color: enabled ? '#b45309' : 'var(--t-text-secondary)',
-            fontSize: 11,
-            fontWeight: 700,
-            cursor: 'pointer',
-          }}
-        >
-          {enabled ? 'Disable Beta' : 'Enable Beta'}
-        </button>
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: 4,
+          borderRadius: 12,
+          border: '1px solid var(--t-panel-border)',
+          background: 'var(--t-panel-hover)',
+          flexShrink: 0,
+        }}>
+          {([
+            { mode: 'auto', label: 'Auto' },
+            { mode: 'enabled', label: 'On' },
+            { mode: 'disabled', label: 'Off' },
+          ] as Array<{ mode: OpenClawIntegrationMode; label: string }>).map((option) => {
+            const active = selectorMode === option.mode;
+            const busy = modeBusy === option.mode;
+            return (
+              <button
+                key={option.mode}
+                type="button"
+                onClick={() => { void handleModeChange(option.mode); }}
+                disabled={busy}
+                style={{
+                  minWidth: 54,
+                  padding: '7px 10px',
+                  borderRadius: 9,
+                  border: 'none',
+                  background: active ? THEME_ACCENT_SOFT : 'transparent',
+                  color: active ? THEME_ACCENT : 'var(--t-text-secondary)',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: busy ? 'default' : 'pointer',
+                  opacity: busy ? 0.6 : 1,
+                }}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {loading ? (
         <div style={{ fontSize: 12, color: 'var(--t-text-muted)' }}>Loading OpenClaw gateway details…</div>
-      ) : !enabled ? (
+      ) : !effectiveEnabled ? (
         <div style={{
           padding: 12,
           borderRadius: 10,
@@ -1258,9 +1337,12 @@ function OpenClawConnectionCard() {
           fontSize: 12,
           lineHeight: 1.5,
         }}>
-          OpenClaw is hidden from runtime inventory, session pickers, and agent surfaces while this beta connector is off.
+          OpenClaw is excluded from runtime inventory, session pickers, analytics, and agent surfaces while the Cortex gate is not effectively enabled.
           <div style={{ marginTop: 8, color: 'var(--t-text-muted)' }}>
             Gateway status: {connected ? `reachable at ${gatewayUrl}` : `not connected (${gatewayUrl})`}
+          </div>
+          <div style={{ marginTop: 6, color: 'var(--t-text-muted)' }}>
+            Cortex mode: <strong>{selectorMode}</strong>{integrationStatus.source ? ` · source ${integrationStatus.source}` : ''}{integrationStatus.from ? ` · from ${integrationStatus.from}` : ''}
           </div>
         </div>
       ) : connected ? (
@@ -1271,9 +1353,10 @@ function OpenClawConnectionCard() {
         }}>
           {[
             { label: 'Version', value: normalizeVersion(status?.version) },
-            { label: 'Mode', value: modeLabel },
+            { label: 'Gateway Mode', value: modeLabel },
+            { label: 'Cortex Gate', value: selectorMode },
             { label: 'Gateway URL', value: gatewayUrl },
-            { label: 'Uptime', value: status?.uptime || 'active' },
+            { label: 'Effective Enabled', value: integrationStatus.effective_enabled ? 'Yes' : 'No' },
           ].map((item) => (
             <div key={item.label} style={{
               padding: 12,
@@ -1300,6 +1383,22 @@ function OpenClawConnectionCard() {
           <div style={{ marginTop: 8, color: 'var(--t-text-muted)' }}>Expected endpoint: {gatewayUrl}</div>
         </div>
       )}
+
+      {integrationStatus.error || envOverride ? (
+        <div style={{
+          padding: 12,
+          borderRadius: 10,
+          background: envOverride ? 'rgba(59, 130, 246, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+          border: envOverride ? '1px solid rgba(59, 130, 246, 0.16)' : '1px solid rgba(239, 68, 68, 0.18)',
+          color: envOverride ? '#1d4ed8' : '#b91c1c',
+          fontSize: 12,
+          lineHeight: 1.5,
+        }}>
+          {integrationStatus.error
+            ? integrationStatus.error
+            : `OpenClaw mode is currently influenced by environment precedence (${integrationStatus.source ?? 'env'}${integrationStatus.from ? ` / ${integrationStatus.from}` : ''}).`}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1307,24 +1406,19 @@ function OpenClawConnectionCard() {
 function AboutTab() {
   const [gatewayStatus, setGatewayStatus] = useState<OpenClawGatewayStatus | null>(null);
   const [cortexVersion, setCortexVersion] = useState('');
+  const [openClawBetaEnabled] = useOpenClawBetaEnabledState();
+  const isProduction = process.env.NODE_ENV === 'production';
   const [platform] = useState(() => {
     if (typeof navigator !== 'undefined' && navigator.platform) return navigator.platform;
     return '—';
   });
-  const repoUrl = 'https://github.com/hurttlocker/cortex-ide';
-  const aboutLinks = [
-    { label: 'GitHub Repository', href: repoUrl },
-    { label: 'Latest Release', href: `${repoUrl}/releases/latest` },
-    { label: 'Issue Tracker', href: `${repoUrl}/issues` },
-  ];
-  const showDevTools = process.env.NODE_ENV !== 'production';
 
   useEffect(() => {
     let active = true;
 
     void (async () => {
       const [gatewayResult, cortexResult] = await Promise.allSettled([
-        fetchOpenClawGatewayStatus(),
+        openClawBetaEnabled ? fetchOpenClawGatewayStatus() : Promise.resolve<OpenClawGatewayStatus | null>(null),
         fetch('/api/v2/cortex/config'),
       ]);
 
@@ -1349,14 +1443,19 @@ function AboutTab() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [openClawBetaEnabled]);
 
   const systemInfo = [
     { label: 'Platform', value: platform !== '—' ? platform : gatewayStatus?.platform || '—' },
     { label: 'Node.js', value: gatewayStatus?.nodeVersion ? normalizeVersion(gatewayStatus.nodeVersion) : '—' },
-    { label: 'OpenClaw', value: gatewayStatus?.connected ? normalizeVersion(gatewayStatus.version) : 'Not connected' },
     { label: 'Cortex Memory', value: cortexVersion ? normalizeVersion(cortexVersion) : '—' },
   ];
+  if (openClawBetaEnabled) {
+    systemInfo.splice(2, 0, {
+      label: 'OpenClaw',
+      value: gatewayStatus?.connected ? normalizeVersion(gatewayStatus.version) : 'Not connected',
+    });
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 760 }}>
@@ -1381,7 +1480,7 @@ function AboutTab() {
           </span>
         </div>
         <p style={{ fontSize: 13, color: 'var(--t-text-secondary)', margin: '0 0 18px', lineHeight: 1.5 }}>
-          Local-first control plane for running, supervising, and reviewing coding agents.
+          Built with Next.js + Tauri · Powered by Cortex Memory
         </p>
 
         <div style={{
@@ -1412,18 +1511,20 @@ function AboutTab() {
       }}>
         <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', marginBottom: 6 }}>Links</div>
         <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: '0 0 14px', lineHeight: 1.5 }}>
-          Verified public endpoints for the Cortex IDE desktop release and repository.
+          Project resources and release surfaces.
         </p>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-          {aboutLinks.map((link) => (
+          {[
+            { label: 'GitHub', href: 'https://github.com/hurttlocker/cortex-ide' },
+            { label: 'Docs', href: 'https://github.com/hurttlocker/cortex-ide/tree/main/docs' },
+            { label: 'Releases', href: 'https://github.com/hurttlocker/cortex-ide/releases/latest' },
+          ].map((link) => (
             <a
               key={link.label}
               href={link.href}
               target="_blank"
               rel="noreferrer"
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
                 padding: '8px 12px',
                 borderRadius: 10,
                 border: '1px solid var(--t-panel-border)',
@@ -1440,15 +1541,15 @@ function AboutTab() {
         </div>
       </div>
 
-      {showDevTools && (
+      {!isProduction && (
         <div style={{
           background: 'var(--t-panel)',
           borderRadius: 14,
           border: '1px dashed rgba(239, 68, 68, 0.3)',
           padding: 24,
         }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', marginBottom: 4 }}>Dev Tools</div>
-          <p style={{ fontSize: 11, color: 'var(--t-text-muted)', margin: '0 0 14px' }}>Internal testing — hidden from production builds.</p>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', marginBottom: 4 }}>Developer Tools</div>
+          <p style={{ fontSize: 11, color: 'var(--t-text-muted)', margin: '0 0 14px' }}>Visible only in non-production builds.</p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             <button
               type="button"
@@ -1914,25 +2015,35 @@ function AgentsTab() {
   const [agents, setAgents] = useState<FleetAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingAgent, setEditingAgent] = useState<FleetAgent | null>(null);
+  const [openClawBetaEnabled] = useOpenClawBetaEnabledState();
+  const [orchestratorRuntime, setOrchestratorRuntime] = useState<OrchestratorRuntime>(() => readOrchestratorRuntimePreference());
 
   const fetchFleet = useCallback(async () => {
     try {
-      const res = await fetch('/api/openclaw/fleet');
+      const res = await fetch(appendOpenClawBetaQuery('/api/openclaw/fleet', openClawBetaEnabled));
       if (!res.ok) return;
       const data = await res.json();
       setSquads(data.squads || []);
       setAgents(data.agents || []);
     } catch { /* silent */ }
     finally { setLoading(false); }
-  }, []);
+  }, [openClawBetaEnabled]);
 
   useEffect(() => { fetchFleet(); }, [fetchFleet]);
+  useEffect(() => { setLoading(true); }, [openClawBetaEnabled]);
+  useEffect(() => subscribeOrchestratorRuntimePreference(setOrchestratorRuntime), []);
 
   // Auto-refresh every 30s
   useEffect(() => {
     const timer = setInterval(fetchFleet, 30000);
     return () => clearInterval(timer);
   }, [fetchFleet]);
+
+  useEffect(() => {
+    if (!openClawBetaEnabled && editingAgent?.runtime === 'openclaw') {
+      setEditingAgent(null);
+    }
+  }, [editingAgent, openClawBetaEnabled]);
 
   const handleSave = useCallback(async (agentId: string, changes: { model?: string }) => {
     if (!changes.model) return;
@@ -1975,6 +2086,11 @@ function AgentsTab() {
     finally { setTimeout(() => setKillingId(null), 500); }
   }, [fetchFleet]);
 
+  const handleOrchestratorRuntimeChange = useCallback((runtime: OrchestratorRuntime) => {
+    setOrchestratorRuntime(runtime);
+    writeOrchestratorRuntimePreference(runtime);
+  }, []);
+
   if (loading) {
     return (
       <div style={{ padding: 40, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
@@ -1994,6 +2110,71 @@ function AgentsTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{
+        background: 'var(--t-panel)',
+        borderRadius: 14,
+        padding: 20,
+        border: '1px solid var(--t-panel-border)',
+        boxShadow: 'var(--t-panel-shadow)',
+      }}>
+        <div style={{ marginBottom: 14 }}>
+          <h3 style={{ fontSize: 17, fontWeight: 700, color: 'var(--t-text)', margin: 0 }}>
+            Orchestrator Runtime
+          </h3>
+          <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: '4px 0 0', lineHeight: 1.5 }}>
+            `Cmd+J` mission control defaults new packets and live interventions to this CLI runtime. OpenClaw is excluded from Thoughts orchestration.
+          </p>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+          {([
+            { id: 'codex' as const, label: 'Codex', detail: 'Default planner runtime for packet launches and intervention lanes.' },
+            { id: 'claude-code' as const, label: 'Claude Code', detail: 'Use Claude Code as the default orchestrator lane when Thoughts opens new work.' },
+          ]).map((option) => {
+            const active = orchestratorRuntime === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => handleOrchestratorRuntimeChange(option.id)}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                  padding: '14px 15px',
+                  borderRadius: 12,
+                  border: active ? `1.5px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
+                  background: active ? THEME_ACCENT_SOFT : 'var(--t-bg-card, rgba(148, 163, 184, 0.08))',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  boxShadow: active ? `0 10px 24px ${THEME_ACCENT_RING}` : 'none',
+                }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)' }}>
+                  {option.label}
+                </span>
+                <span style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.45 }}>
+                  {option.detail}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {!openClawBetaEnabled && (
+        <div style={{
+          padding: '12px 14px',
+          borderRadius: 12,
+          background: 'rgba(148, 163, 184, 0.08)',
+          border: '1px solid rgba(148, 163, 184, 0.18)',
+          color: 'var(--t-text-secondary)',
+          fontSize: 12,
+          lineHeight: 1.5,
+        }}>
+          OpenClaw beta is off. This tab is showing Codex and Claude Code agents only.
+        </div>
+      )}
+
       {/* Summary bar */}
       <div style={{
         display: 'flex',
@@ -2020,13 +2201,17 @@ function AgentsTab() {
           <div style={{ fontSize: 22, fontWeight: 800, color: '#3b82f6' }}>{squads.length}</div>
           <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Squads</div>
         </div>
-        <div style={{ width: 1, background: 'var(--t-divider)' }} />
-        <div style={{ textAlign: 'center', flex: 1 }}>
-          <div style={{ fontSize: 22, fontWeight: 800, color: '#f59e0b' }}>
-            {agents.filter(a => a.runtime === 'openclaw').length}
-          </div>
-          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>OpenClaw</div>
-        </div>
+        {openClawBetaEnabled && (
+          <>
+            <div style={{ width: 1, background: 'var(--t-divider)' }} />
+            <div style={{ textAlign: 'center', flex: 1 }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: '#f59e0b' }}>
+                {agents.filter(a => a.runtime === 'openclaw').length}
+              </div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>OpenClaw</div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Agent groups */}
@@ -2912,40 +3097,6 @@ function CortexMemoryTab() {
   const recallMaxResults = config?.recallMaxResults ?? 7;
   const recallTokenBudget = config?.recallTokenBudget ?? 800;
   const recallMinConfidence = config?.recallMinConfidence ?? 0.3;
-  const saveNoteIsSuccess = saveNote === 'Saved' || saveNote.endsWith('complete');
-  const maintenanceActions: Array<{
-    id: string;
-    label: string;
-    desc: string;
-    cmd: string;
-    requiresConfirmation?: boolean;
-  }> = [
-    {
-      id: 'cleanup',
-      label: 'Cleanup',
-      desc: 'Permanently remove garbage memories and headless facts that pollute recall.',
-      cmd: 'cleanup',
-      requiresConfirmation: true,
-    },
-    {
-      id: 'lifecycle',
-      label: 'Lifecycle',
-      desc: 'Apply decay, promote, and conflict resolution policies.',
-      cmd: 'lifecycle run',
-    },
-    {
-      id: 'conflicts',
-      label: 'Find Conflicts',
-      desc: 'Detect contradictory facts.',
-      cmd: 'conflicts --limit 10',
-    },
-    {
-      id: 'optimize',
-      label: 'Optimize DB',
-      desc: 'VACUUM and ANALYZE the database.',
-      cmd: 'optimize',
-    },
-  ];
 
   return (
     <div style={{
@@ -3341,7 +3492,7 @@ function CortexMemoryTab() {
         {saveNote && (
           <div style={{
             fontSize: 12,
-            color: saveNoteIsSuccess ? '#10b981' : '#ef4444',
+            color: saveNote === 'Saved' ? '#10b981' : '#ef4444',
             marginTop: 8,
           }}>
             {saveNote}
@@ -3385,72 +3536,85 @@ function CortexMemoryTab() {
         <p style={{ fontSize: 11, color: 'var(--t-text-muted, #94a3b8)', margin: '0 0 12px', lineHeight: '1.4' }}>
           Run maintenance tasks to keep your memory healthy and search quality high.
         </p>
-        <p style={{ fontSize: 11, color: '#c2410c', margin: '0 0 12px', lineHeight: '1.5' }}>
-          Cleanup permanently deletes garbage memories and headless facts. It is useful when recall is noisy, but it cannot be undone.
-        </p>
+        <div style={{
+          marginBottom: 12,
+          padding: '10px 12px',
+          borderRadius: 10,
+          border: '1px solid rgba(245, 158, 11, 0.2)',
+          background: 'rgba(245, 158, 11, 0.08)',
+          color: 'var(--t-text-secondary, #64748b)',
+          fontSize: 11,
+          lineHeight: 1.45,
+        }}>
+          <strong style={{ color: 'var(--t-text, #0f172a)' }}>Cleanup is destructive.</strong> It permanently removes garbage memories and headless facts, which can change recall and search results until they are rebuilt.
+        </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {maintenanceActions.map(action => (
-            <button
-              key={action.id}
-              type="button"
-              title={action.desc}
-              disabled={actionRunning !== null}
-              onClick={async () => {
-                if (action.requiresConfirmation) {
-                  const confirmed = window.confirm(
-                    'Cleanup permanently removes garbage memories and headless facts from Cortex Memory.\n\nImpact: recall and search will stop surfacing those noisy or orphaned fragments, and the change cannot be undone.\n\nRun cleanup now?',
-                  );
-                  if (!confirmed) {
-                    return;
+          {[
+            { id: 'cleanup', label: 'Cleanup', desc: 'Remove garbage memories and headless facts', cmd: 'cleanup' },
+            { id: 'lifecycle', label: 'Lifecycle', desc: 'Apply decay, promote, and conflict resolution policies', cmd: 'lifecycle run' },
+            { id: 'conflicts', label: 'Find Conflicts', desc: 'Detect contradictory facts', cmd: 'conflicts --limit 10' },
+            { id: 'optimize', label: 'Optimize DB', desc: 'VACUUM and ANALYZE the database', cmd: 'optimize' },
+          ].map((action) => {
+              const isCleanup = action.id === 'cleanup';
+              return (
+              <button
+                key={action.id}
+                type="button"
+                title={isCleanup ? 'Permanently removes garbage memories and headless facts.' : action.desc}
+                disabled={actionRunning !== null}
+                onClick={async () => {
+                  if (isCleanup) {
+                    const confirmed = window.confirm(
+                      'Cleanup permanently removes garbage memories and headless facts.\n\nThis is destructive and cannot be undone. It can change recall and search results until memory is rebuilt.\n\nContinue?',
+                    );
+                    if (!confirmed) return;
                   }
-                }
-
-                setActionRunning(action.id);
-                try {
-                  const res = await fetch('/api/v2/cortex/action', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                  setActionRunning(action.id);
+                  try {
+                    const res = await fetch('/api/v2/cortex/action', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ command: action.cmd }),
                   });
-                  if (!res.ok) {
-                    throw new Error(`${action.label} failed`);
+                  if (res.ok) {
+                    setSaveNote(`${action.label} complete`);
+                    setTimeout(() => setSaveNote(''), 3000);
+                    void loadConfig();
                   }
-                  setSaveNote(`${action.label} complete`);
-                  setTimeout(() => setSaveNote(''), 3000);
-                  void loadConfig();
-                } catch {
-                  setSaveNote(`${action.label} failed`);
-                  setTimeout(() => setSaveNote(''), 3000);
-                } finally {
-                  setActionRunning(null);
-                }
+                } catch { /* ignore */ }
+                setActionRunning(null);
               }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                paddingTop: 8,
-                paddingBottom: 8,
-                paddingLeft: 14,
-                paddingRight: 14,
-                borderRadius: 10,
-                border: '1px solid var(--t-border, #e2e8f0)',
-                background: actionRunning === action.id ? 'var(--t-bg-card, #f8fafc)' : 'var(--t-bg, white)',
-                color: 'var(--t-text, #0f172a)',
-                fontSize: 12,
-                fontWeight: 500,
-                cursor: actionRunning ? 'wait' : 'pointer',
-                transition: 'all 150ms',
-                opacity: actionRunning && actionRunning !== action.id ? 0.5 : 1,
-              }}
-            >
-              {actionRunning === action.id ? '⏳' : '▸'} {action.label}
-            </button>
-          ))}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  paddingTop: 8,
+                  paddingBottom: 8,
+                  paddingLeft: 14,
+                  paddingRight: 14,
+                  borderRadius: 10,
+                  border: isCleanup ? '1px solid rgba(239, 68, 68, 0.2)' : '1px solid var(--t-border, #e2e8f0)',
+                  background: actionRunning === action.id
+                    ? 'var(--t-bg-card, #f8fafc)'
+                    : isCleanup
+                      ? 'rgba(254, 242, 242, 0.92)'
+                      : 'var(--t-bg, white)',
+                  color: isCleanup ? '#b91c1c' : 'var(--t-text, #0f172a)',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  cursor: actionRunning ? 'wait' : 'pointer',
+                  transition: 'all 150ms',
+                  opacity: actionRunning && actionRunning !== action.id ? 0.5 : 1,
+                }}
+              >
+                {actionRunning === action.id ? '⏳' : '▸'} {action.label}
+              </button>
+              );
+          })}
         </div>
         {saveNote && (
-          <div style={{ fontSize: 12, color: saveNoteIsSuccess ? '#10b981' : '#ef4444', marginTop: 8, fontWeight: 500 }}>
-            {saveNoteIsSuccess ? '✓' : '!'} {saveNote}
+          <div style={{ fontSize: 12, color: '#10b981', marginTop: 8, fontWeight: 500 }}>
+            ✓ {saveNote}
           </div>
         )}
       </div>

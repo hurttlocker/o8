@@ -1,42 +1,48 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { homedir } from 'node:os';
 import path from 'node:path';
-
-type PersistedChatRuntime = 'codex' | 'claude-code' | 'openclaw';
-
-type PersistedTab = {
-  id?: string;
-  label?: string;
-  kind?: 'terminal' | 'chat' | 'llm-chat';
-  chatRuntime?: PersistedChatRuntime;
-  chatSessionKey?: string;
-  chatModel?: string;
-  repoName?: string;
-  repoPath?: string;
-};
-
-type PersistedTabState = {
-  tabs?: PersistedTab[];
-  savedAt?: string;
-};
+import {
+  listCurrentIdeRepoPaths,
+  readIdeTerminalStateFiles,
+  type PersistedTabState,
+} from '@/lib/runtime/ide-terminal-state';
 
 export interface IdeRuntimeSessionDescriptor {
+  tabId: string;
   runtimeId: 'codex' | 'claude-code';
   sessionKey: string;
+  liveSessionKey?: string;
   label: string;
   model?: string;
   repoName?: string;
   repoPath?: string;
   scope: string;
   savedAt?: string;
+  isCurrentSession: boolean;
 }
-
-const TERMINAL_STATE_DIR = path.join(homedir(), '.cortex-ide', 'terminal-states');
 
 function canonicalizeSessionKey(runtime: 'codex' | 'claude-code', raw: string) {
   const trimmed = raw.trim();
   if (!trimmed) return null;
   return trimmed.startsWith(`${runtime}:`) ? trimmed : `${runtime}:${trimmed}`;
+}
+
+function syntheticSessionKey(runtime: 'codex' | 'claude-code', scope: string, tabId: string) {
+  return `${runtime}:ide-tab-${scope}-${tabId}`;
+}
+
+function scopePriority(scope: string) {
+  if (scope.startsWith('repo-')) return 3;
+  if (scope === 'tile-root') return 2;
+  return 1;
+}
+
+function descriptorIdentityKey(session: IdeRuntimeSessionDescriptor) {
+  if (session.liveSessionKey) {
+    return session.liveSessionKey;
+  }
+  const repoKey = session.repoPath?.trim().toLowerCase()
+    || session.repoName?.trim().toLowerCase()
+    || 'no-repo';
+  return `ghost:${session.runtimeId}:${repoKey}:${session.label.trim().toLowerCase()}`;
 }
 
 function scoreLabel(label: string) {
@@ -78,39 +84,47 @@ function decorateLabel(runtime: 'codex' | 'claude-code', label: string, repoName
   return trimmed;
 }
 
-export function listIdeRuntimeSessions(): IdeRuntimeSessionDescriptor[] {
-  if (!existsSync(TERMINAL_STATE_DIR)) return [];
-
+export function listIdeRuntimeTabs(): IdeRuntimeSessionDescriptor[] {
+  const currentRepoPaths = new Set(listCurrentIdeRepoPaths());
   const descriptors = new Map<string, IdeRuntimeSessionDescriptor>();
-  const files = readdirSync(TERMINAL_STATE_DIR).filter((file) => file.endsWith('.json'));
+  const files = readIdeTerminalStateFiles();
 
   for (const file of files) {
-    const filePath = path.join(TERMINAL_STATE_DIR, file);
     try {
-      const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as PersistedTabState;
-      const scope = file.replace(/\.json$/, '');
+      const parsed = {
+        activeTabId: file.activeTabId,
+        tabs: file.tabs,
+        savedAt: file.savedAt,
+      } satisfies PersistedTabState;
+      const scope = file.scope;
       for (const tab of parsed.tabs ?? []) {
         if (tab.kind !== 'chat') continue;
         if (tab.chatRuntime !== 'codex' && tab.chatRuntime !== 'claude-code') continue;
-        if (!tab.chatSessionKey) continue;
+        if (!tab.id?.trim()) continue;
 
-        const sessionKey = canonicalizeSessionKey(tab.chatRuntime, tab.chatSessionKey);
-        if (!sessionKey) continue;
+        const liveSessionKey = tab.chatSessionKey
+          ? canonicalizeSessionKey(tab.chatRuntime, tab.chatSessionKey)
+          : null;
+        const sessionKey = liveSessionKey ?? syntheticSessionKey(tab.chatRuntime, scope, tab.id);
 
         const next: IdeRuntimeSessionDescriptor = {
+          tabId: tab.id,
           runtimeId: tab.chatRuntime,
           sessionKey,
+          liveSessionKey: liveSessionKey ?? undefined,
           label: decorateLabel(tab.chatRuntime, tab.label?.trim() || runtimeDisplayName(tab.chatRuntime), tab.repoName, tab.repoPath),
           model: tab.chatModel,
           repoName: tab.repoName,
           repoPath: tab.repoPath,
           scope,
           savedAt: parsed.savedAt,
+          isCurrentSession: parsed.activeTabId === tab.id,
         };
 
-        const existing = descriptors.get(sessionKey);
+        const identityKey = descriptorIdentityKey(next);
+        const existing = descriptors.get(identityKey);
         if (!existing) {
-          descriptors.set(sessionKey, next);
+          descriptors.set(identityKey, next);
           continue;
         }
 
@@ -118,9 +132,26 @@ export function listIdeRuntimeSessions(): IdeRuntimeSessionDescriptor[] {
         const nextScore = scoreLabel(next.label);
         const existingTime = existing.savedAt ? new Date(existing.savedAt).getTime() : 0;
         const nextTime = next.savedAt ? new Date(next.savedAt).getTime() : 0;
+        const existingScope = scopePriority(existing.scope);
+        const nextScope = scopePriority(next.scope);
+        if (next.isCurrentSession && !existing.isCurrentSession) {
+          descriptors.set(identityKey, next);
+          continue;
+        }
+        if (next.liveSessionKey && !existing.liveSessionKey) {
+          descriptors.set(identityKey, next);
+          continue;
+        }
+        if (!next.liveSessionKey && existing.liveSessionKey) {
+          continue;
+        }
+        if (nextScope > existingScope) {
+          descriptors.set(identityKey, next);
+          continue;
+        }
 
         if (nextScore > existingScore || (nextScore === existingScore && nextTime >= existingTime)) {
-          descriptors.set(sessionKey, next);
+          descriptors.set(identityKey, next);
         }
       }
     } catch {
@@ -128,9 +159,23 @@ export function listIdeRuntimeSessions(): IdeRuntimeSessionDescriptor[] {
     }
   }
 
-  return [...descriptors.values()].sort((left, right) => {
-    const leftTime = left.savedAt ? new Date(left.savedAt).getTime() : 0;
-    const rightTime = right.savedAt ? new Date(right.savedAt).getTime() : 0;
-    return rightTime - leftTime;
-  });
+  return [...descriptors.values()]
+    .filter((session) => {
+      if (currentRepoPaths.size === 0) return true;
+      const repoPath = session.repoPath?.trim();
+      const normalizedRepoPath = repoPath ? path.normalize(repoPath).toLowerCase() : null;
+      if (!normalizedRepoPath) return false;
+      return currentRepoPaths.has(normalizedRepoPath);
+    })
+    .sort((left, right) => {
+      if (left.isCurrentSession && !right.isCurrentSession) return -1;
+      if (!left.isCurrentSession && right.isCurrentSession) return 1;
+      const leftTime = left.savedAt ? new Date(left.savedAt).getTime() : 0;
+      const rightTime = right.savedAt ? new Date(right.savedAt).getTime() : 0;
+      return rightTime - leftTime;
+    });
+}
+
+export function listIdeRuntimeSessions(): IdeRuntimeSessionDescriptor[] {
+  return listIdeRuntimeTabs().filter((session) => Boolean(session.liveSessionKey));
 }

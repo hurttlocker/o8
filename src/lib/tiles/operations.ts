@@ -91,6 +91,24 @@ export function getFirstLeaf(node: TileNode): TileLeafNode {
   return getFirstLeaf(node.children[0]);
 }
 
+/**
+ * Find the nearest sibling leaf of a given tile. When a tile is closed, focus
+ * should move to its sibling rather than the first leaf of the entire tree.
+ */
+export function findSiblingLeaf(root: TileNode, tileId: string): TileLeafNode | null {
+  if (isTileLeafNode(root)) return null;
+
+  const [first, second] = root.children;
+  if (isTileLeafNode(first) && first.id === tileId) {
+    return getFirstLeaf(second);
+  }
+  if (isTileLeafNode(second) && second.id === tileId) {
+    return getFirstLeaf(first);
+  }
+
+  return findSiblingLeaf(first, tileId) ?? findSiblingLeaf(second, tileId);
+}
+
 export function countLeaves(node: TileNode): number {
   if (isTileLeafNode(node)) {
     return 1;

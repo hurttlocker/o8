@@ -9,6 +9,8 @@ import {
 } from 'react';
 import type { RuntimeReviewPacket } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot, MobileReviewFileResponse, MobileTranscriptEntry } from '@/lib/mobile/types';
+import { sameMobileInboxSnapshot } from '@/lib/mobile/inbox-signature';
+import { filterInboxSnapshotByOpenClaw } from '@/lib/mobile/inbox-filter';
 import {
   agentDisplayName,
   compactLine,
@@ -62,6 +64,7 @@ import { useMobilePolling } from './mobile/hooks/useMobilePolling';
 import { useMobileScroll } from './mobile/hooks/useMobileScroll';
 import { useMobileStreaming } from './mobile/hooks/useMobileStreaming';
 import { useMobileActions } from './mobile/hooks/useMobileActions';
+import { useOpenClawBetaStatus } from './mobile/hooks/useOpenClawBetaStatus';
 import { ProactiveSurface, useProactiveItems } from './mobile/ProactiveSurface';
 import { CrossAgentPill } from './mobile/CrossAgentPill';
 
@@ -109,15 +112,16 @@ function MobileRemoteShellInner({
     sessionId: string | null;
     tab: 'chat' | 'terminal';
   }>({ sessionId: null, tab: 'chat' });
+  const { status: openClawStatus, enabled: openClawBetaEnabled } = useOpenClawBetaStatus();
 
   // ── All state lives in useMobileState ──
   const state = useMobileState({ initialSnapshot, initialTranscript, initialReviewFile, initialOwnedReviewPacket });
 
   // ── Streaming + WebSocket ──
-  const { wsConnected, wsConnectionState, sendTerminalAttach, sendTerminalInput } = useMobileStreaming(state);
+  const { wsConnected, wsConnectionState, sendTerminalAttach, sendTerminalInput } = useMobileStreaming(state, openClawBetaEnabled);
 
   // ── Data fetching + polling ──
-  const { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, stickyReviewFiles } = useMobilePolling(state, wsConnected);
+  const { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, stickyReviewFiles } = useMobilePolling(state, wsConnected, openClawBetaEnabled);
 
   // ── Action handlers ──
   const actions = useMobileActions(state, { wsConnected, refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, sendTerminalAttach, sendTerminalInput });
@@ -136,7 +140,7 @@ function MobileRemoteShellInner({
 
     async function refreshSoon() {
       try {
-        await refreshInbox();
+        await refreshInbox(true);
       } catch {
         // Shell-first bootstrap should stay honest and retry later.
       }
@@ -172,12 +176,13 @@ function MobileRemoteShellInner({
     composeFocused, composeHeight, waitingForResponse, hydrated,
     squadPickerOpen, expandedProject, streamingText,
     // Setters
-    setSelectedId, setActiveView, setSurfaceNote,
+    setSelectedId, setSelectedSessionKeyHint, setSelectedSessionFallback, setActiveView, setSurfaceNote,
     setDraftBySession, setPendingOwnedTurnBySession,
     setControlsOpen, setAlertsOpen, setSessionInfoOpen,
+    setPendingApprovals, setResolvedApprovals,
     setExpandedMedia, setComposeHeight, setWaitingForResponse,
     setExpandedProject, setDiffOpen,
-    setSquadPickerOpen,
+    setSquadPickerOpen, setSnapshot,
     // Refs
     composeRef, fileInputRef, transcriptBottomRef,
     lastAssistantCountRef, seenMessageIdsRef,
@@ -193,6 +198,8 @@ function MobileRemoteShellInner({
   const [prReviewOpen, setPrReviewOpen] = useState(false);
   const [prReviewNumber, setPrReviewNumber] = useState<number | null>(null);
   const [prReviewRepo, setPrReviewRepo] = useState('');
+  const openClawRefreshHandledRef = useRef(false);
+  const lastOpenClawEnabledRef = useRef(openClawBetaEnabled);
   // Proactive surface — context-aware cards at top of chat
   const openPR = useCallback((repo: string, prNumber: number) => {
     setPrReviewRepo(repo);
@@ -204,6 +211,49 @@ function MobileRemoteShellInner({
   // Cross-agent awareness
   const runningAgentCount = useMemo(() => snapshot.sessions.filter(s => s.status === 'running').length, [snapshot.sessions]);
   const totalAgentCount = snapshot.sessions.length;
+
+  useEffect(() => {
+    setSnapshot((current) => {
+      const filtered = filterInboxSnapshotByOpenClaw(current, openClawBetaEnabled);
+      return sameMobileInboxSnapshot(current, filtered) ? current : filtered;
+    });
+  }, [openClawBetaEnabled, setSnapshot]);
+
+  useEffect(() => {
+    setPendingApprovals(snapshot.approvals ?? []);
+    setResolvedApprovals((current) => {
+      const activeIds = new Set((snapshot.approvals ?? []).map((approval) => approval.id));
+      const next = Object.fromEntries(
+        Object.entries(current).filter(([approvalId]) => activeIds.has(approvalId)),
+      );
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+  }, [setPendingApprovals, setResolvedApprovals, snapshot.approvals]);
+
+  useEffect(() => {
+    const shouldForce = !openClawRefreshHandledRef.current || lastOpenClawEnabledRef.current !== openClawBetaEnabled;
+    openClawRefreshHandledRef.current = true;
+    lastOpenClawEnabledRef.current = openClawBetaEnabled;
+    void refreshInbox(shouldForce).catch(() => undefined);
+  }, [openClawBetaEnabled, refreshInbox]);
+
+  useEffect(() => {
+    if (openClawBetaEnabled) return;
+    if (selectedSession?.runtime !== 'openclaw') return;
+    if (selectedSessionKey && snapshot.sessions.some((session) => session.sessionKey === selectedSessionKey)) return;
+    const next = pickCurrentSession(snapshot);
+    setSelectedSessionKeyHint(next?.sessionKey ?? '');
+    setSelectedId(next?.id ?? '');
+    setSelectedSessionFallback(next ?? null);
+  }, [
+    openClawBetaEnabled,
+    selectedSession?.runtime,
+    selectedSessionKey,
+    setSelectedId,
+    setSelectedSessionFallback,
+    setSelectedSessionKeyHint,
+    snapshot,
+  ]);
 
   // ── Swipe right from left edge to go back to chat ──
   useSwipeBack(
@@ -332,7 +382,11 @@ function MobileRemoteShellInner({
     && selectedSession?.runtimeSurface?.lifecycle?.availability === 'ready-for-resume',
   );
   const worktreeRepoRoot = selectedReviewPacket?.repoPath
-    ? selectedReviewPacket.repoPath.replace(/^~(?=\/|$)/, require('os').homedir())
+    ? selectedReviewPacket.repoPath.replace(
+        /^~(?=\/|$)/,
+        // eslint-disable-next-line @typescript-eslint/no-require-imports -- repo paths arrive shortened with `~`, and this client-side expansion already exists in the mobile worktree flow.
+        require('os').homedir(),
+      )
     : null;
   const mobileWorktree = linkedWorktree ? {
     id: linkedWorktree.id,
@@ -422,7 +476,7 @@ function MobileRemoteShellInner({
           onToggleSquadPicker={() => setSquadPickerOpen(!squadPickerOpen)}
           onSessionFocus={actions.handleSessionFocus}
         />
-        <PullToRefresh onRefresh={async () => { refreshInbox(); await new Promise(r => setTimeout(r, 600)); }}>
+        <PullToRefresh onRefresh={async () => { await refreshInbox(true); await new Promise(r => setTimeout(r, 600)); }}>
         <PageTransition activeKey={activeView}>
         <div className="remodex-scroll-view">
           {activeView === 'fleet' ? (
@@ -437,7 +491,7 @@ function MobileRemoteShellInner({
             />
           ) : null}
           {activeView === 'settings' ? (
-            <SettingsView onBack={() => setActiveView('squad')} />
+            <SettingsView onBack={() => setActiveView('squad')} openClawStatus={openClawStatus} />
           ) : null}
           {activeView === 'memory' ? (
             <MemoryPage
@@ -471,13 +525,13 @@ function MobileRemoteShellInner({
                 setActiveView('squad');
               }}
               onApprove={(item) => {
-                if (item.sessionKey) {
-                  actions.runAction({ action: 'approve', sessionKey: item.sessionKey });
+                if (item.sessionKey && item.approvalId) {
+                  actions.runAction({ action: 'approve', sessionKey: item.sessionKey, approvalId: item.approvalId });
                 }
               }}
               onDeny={(item) => {
-                if (item.sessionKey) {
-                  actions.runAction({ action: 'deny', sessionKey: item.sessionKey });
+                if (item.sessionKey && item.approvalId) {
+                  actions.runAction({ action: 'deny', sessionKey: item.sessionKey, approvalId: item.approvalId });
                 }
               }}
               onReviewPR={(repoPath, prNumber) => {

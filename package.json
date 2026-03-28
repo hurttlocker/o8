@@ -9,10 +9,10 @@
     "dev": "next dev -p 3001",
     "dev:ws": "tsx src/ws-server.ts",
     "dev:all": "npm run dev & npm run dev:ws &",
-    "build": "next build",
+    "build": "sh -c 'env -u TURBOPACK NODE_ENV=production next build --webpack'",
     "start": "sh -c 'next start -p \"${PORT:-3001}\"'",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "rm -rf .next/types .next/dev/types && next typegen && tsc --noEmit",
     "research:session": "tsx scripts/research/run-cortex-autoresearch.ts --trigger on-demand --max-loops 1",
     "research:session:2": "tsx scripts/research/run-cortex-autoresearch.ts --trigger on-demand --max-loops 2",
     "research:session:3": "tsx scripts/research/run-cortex-autoresearch.ts --trigger on-demand --max-loops 3",
@@ -23,7 +23,7 @@
     "tauri:dev": "cargo tauri dev",
     "tauri:build": "cargo tauri build",
     "postinstall": "node scripts/postinstall.mjs",
-    "tauri:prebuild": "next build && node scripts/tauri-export.mjs"
+    "tauri:prebuild": "npm run build && node scripts/tauri-export.mjs"
   },
   "dependencies": {
     "@json-render/core": "^0.14.0",
