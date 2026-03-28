@@ -479,8 +479,8 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         {hasMedia ? <MediaGrid media={entry.media ?? []} tint="user" /> : null}
         {hasText ? (
           <div style={{
-            maxWidth: '82%',
-            padding: '11px 14px',
+            maxWidth: '100%',
+            padding: '12px 16px',
             borderRadius: '18px 18px 6px 18px',
             background: 'linear-gradient(180deg, #3b82f6 0%, #2563eb 100%)',
             color: '#ffffff',
@@ -507,6 +507,8 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
     );
   }
 
+  const hasThinking = Boolean(entry.thinking?.trim());
+
   return (
     <div style={{
       display: 'flex',
@@ -515,9 +517,31 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       gap: 8,
       animation: isLast ? 'llmFadeIn 180ms ease-out' : undefined,
     }}>
+      {hasThinking ? (
+        <div style={{
+          maxWidth: '100%',
+          fontSize: 11,
+          lineHeight: 1.5,
+          color: 'var(--t-text-muted, #94a3b8)',
+          fontStyle: 'italic',
+          fontWeight: 400,
+          letterSpacing: '-0.005em',
+          padding: '6px 10px',
+          borderRadius: 10,
+          background: 'var(--t-hover, rgba(148, 163, 184, 0.06))',
+          border: '1px solid var(--t-divider-subtle, rgba(148, 163, 184, 0.10))',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          overflow: 'hidden',
+          maxHeight: 120,
+        }}>
+          {sanitizeTranscriptText(entry.thinking!)}
+        </div>
+      ) : null}
+
       {hasText ? (
         <div style={{
-          maxWidth: '92%',
+          maxWidth: '100%',
           color: entry.role === 'system' ? '#475569' : '#0f172a',
           fontSize: 14,
           lineHeight: 1.65,
@@ -540,7 +564,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       {hasToolCalls ? <DesktopToolCallStack toolCalls={entry.toolCalls ?? []} /> : null}
 
       {entry.role === 'assistant' && hasText ? (
-        <div style={{ width: '100%', maxWidth: '92%' }}>
+        <div style={{ width: '100%' }}>
           <MessageActions messageId={entry.id} messageText={displayText} />
         </div>
       ) : null}

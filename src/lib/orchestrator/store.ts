@@ -48,6 +48,7 @@ function normalizeLaneBinding(value: unknown): OrchestratorLaneBinding | null {
     repoPath: typeof lane.repoPath === 'string' ? lane.repoPath : null,
     runtime: lane.runtime === 'claude-code' ? 'claude-code' : 'codex',
     sessionKey: typeof lane.sessionKey === 'string' ? lane.sessionKey : null,
+    laneId: typeof lane.laneId === 'string' ? lane.laneId : null,
     lastHeartbeatAt: typeof lane.lastHeartbeatAt === 'string' ? lane.lastHeartbeatAt : null,
     lastEventAt: typeof lane.lastEventAt === 'string' ? lane.lastEventAt : null,
     lastEventLabel: typeof lane.lastEventLabel === 'string' ? lane.lastEventLabel : null,
@@ -256,11 +257,19 @@ function normalizeRuntimeTruthStatus(status?: string | null) {
   return null;
 }
 
+export interface DomainLaneSummary {
+  laneId: string;
+  packetId: string;
+  status: string;
+  sessionKey: string | null;
+}
+
 export function reconcileOrchestratorMissionState(
   state: OrchestratorMissionState,
   inputs: {
     laneSnapshots: OrchestratorLaneSnapshot[];
     runtimeTruth: OrchestratorRuntimeTruth[];
+    domainLanes?: DomainLaneSummary[];
   },
 ) {
   const normalized = normalizeOrchestratorMissionState(state);
@@ -270,6 +279,12 @@ export function reconcileOrchestratorMissionState(
   const laneByPacketId = new Map(inputs.laneSnapshots.flatMap((snapshot) => snapshot.packetId ? [[snapshot.packetId, snapshot] as const] : []));
   const runtimeTruthBySession = new Map(inputs.runtimeTruth.map((truth) => [truth.sessionKey, truth] as const));
 
+  // ── Lane domain model (passed from server-side caller) ──
+  const domainLaneByPacketId: Map<string, { status: string; sessionKey: string | null; laneId: string }> | null =
+    inputs.domainLanes && inputs.domainLanes.length > 0
+      ? new Map(inputs.domainLanes.map((dl) => [dl.packetId, { status: dl.status, sessionKey: dl.sessionKey, laneId: dl.laneId }]))
+      : null;
+
   const reconciledPackets = packets.map((packet) => {
     const dependency = packetReleaseBlockedBy(packet, packets);
     const laneMatch = packet.lane
@@ -278,6 +293,8 @@ export function reconcileOrchestratorMissionState(
         ?? laneByPacketId.get(packet.id)
       : laneByPacketId.get(packet.id);
     const runtime = laneMatch?.sessionKey ? runtimeTruthBySession.get(laneMatch.sessionKey) : undefined;
+    const domainLane = domainLaneByPacketId?.get(packet.id) ?? null;
+    const laneId = domainLane?.laneId ?? packet.lane?.laneId ?? null;
     const next: OrchestratorPacket = {
       ...packet,
       lane: laneMatch
@@ -286,12 +303,15 @@ export function reconcileOrchestratorMissionState(
             tabId: laneMatch.tabId,
             repoPath: laneMatch.repoPath,
             runtime: laneMatch.runtime,
-            sessionKey: laneMatch.sessionKey,
+            sessionKey: laneMatch.sessionKey ?? domainLane?.sessionKey ?? null,
+            laneId,
             lastHeartbeatAt: laneMatch.lastActivityAt,
             lastEventAt: runtime?.lastEventAt ?? packet.lane?.lastEventAt ?? laneMatch.lastActivityAt ?? null,
             lastEventLabel: runtime?.currentTask ?? runtime?.workflowStageLabel ?? packet.lane?.lastEventLabel ?? null,
           }
-        : null,
+        : packet.lane?.laneId
+          ? { ...packet.lane, laneId, sessionKey: domainLane?.sessionKey ?? packet.lane?.sessionKey ?? null }
+          : null,
       lastEventAt: runtime?.lastEventAt ?? packet.lastEventAt ?? packet.lane?.lastHeartbeatAt ?? null,
       lastEventLabel: runtime?.currentTask ?? runtime?.workflowStageLabel ?? packet.lastEventLabel ?? packet.lane?.lastEventLabel ?? null,
       blockedReason: null,
@@ -324,6 +344,20 @@ export function reconcileOrchestratorMissionState(
       return next;
     }
 
+    // ── Lane domain model status takes priority when available ──
+    if (domainLane) {
+      const ds = domainLane.status;
+      if (ds === 'reviewing') { next.status = 'awaiting_review'; return next; }
+      if (ds === 'merging') { next.status = 'awaiting_review'; next.blockedReason = 'Merge in progress'; return next; }
+      if (ds === 'completed') { next.status = 'released'; next.releaseState = 'released'; return next; }
+      if (ds === 'archived') { next.status = 'archived'; return next; }
+      if (ds === 'running') { next.status = 'running'; return next; }
+      if (ds === 'launching') { next.status = 'launching'; return next; }
+      if (ds === 'awaiting_input') { next.status = 'blocked'; next.blockedReason = 'Awaiting operator input'; return next; }
+      if (ds === 'paused' && domainLane.sessionKey) { next.status = 'idle'; return next; }
+      if (ds === 'paused' && !domainLane.sessionKey) { next.status = 'recovering'; next.blockedReason = 'Session lost — re-launch to reattach.'; return next; }
+    }
+
     if (laneMatch) {
       const truthStatus = normalizeRuntimeTruthStatus(runtime?.status);
       if (truthStatus === 'awaiting_review') {
@@ -343,7 +377,7 @@ export function reconcileOrchestratorMissionState(
       return next;
     }
 
-    if (packet.lane && !laneMatch) {
+    if (packet.lane && !laneMatch && !domainLane) {
       next.status = 'recovering';
       next.blockedReason = STALE_LANE_REASON;
       return {

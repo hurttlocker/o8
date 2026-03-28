@@ -58,6 +58,15 @@ import {
   sendToOrchestrator,
   getOrchestratorSession,
 } from './lib/lane/orchestrator-session';
+import {
+  startSupervisorLoop,
+  stopSupervisorLoop,
+  registerWatchedAgent,
+  getWatchedAgents,
+  cleanupWatchedAgentsForRepo,
+  type SupervisorCallbacks,
+  type AgentUpdateEvent,
+} from './lib/supervisor/agent-supervisor';
 import type {
   RealtimeBatchMessage,
   RealtimeEventEnvelope,
@@ -193,6 +202,83 @@ interface OrchestratorSubscription {
 }
 
 const orchestratorSubscriptions = new Map<string, OrchestratorSubscription>(); // clientId → subscription
+
+// ── Agent Supervisor auto-message queue ──
+
+interface OrchestratorAutoMessage {
+  repoPath: string;
+  message: string;
+  createdAt: number;
+}
+
+const orchestratorAutoQueue: OrchestratorAutoMessage[] = [];
+const MAX_AUTO_QUEUE = 20;
+
+function queueOrchestratorEscalation(repoPath: string, message: string): void {
+  if (orchestratorAutoQueue.length >= MAX_AUTO_QUEUE) {
+    orchestratorAutoQueue.shift(); // Drop oldest
+    console.warn('[supervisor] Auto-message queue overflow — dropped oldest');
+  }
+  orchestratorAutoQueue.push({ repoPath, message, createdAt: Date.now() });
+  console.log(`[supervisor] Queued escalation for ${repoPath} (${orchestratorAutoQueue.length} in queue)`);
+  void drainOrchestratorAutoQueue();
+}
+
+async function drainOrchestratorAutoQueue(): Promise<void> {
+  if (orchestratorAutoQueue.length === 0) return;
+
+  const next = orchestratorAutoQueue[0];
+  let session = getOrchestratorSession(next.repoPath);
+  if (!session || session.status === 'dead') {
+    session = ensureOrchestratorSession(next.repoPath);
+  }
+  if (session.status === 'busy') return; // Wait for current message to finish
+
+  // Dequeue
+  orchestratorAutoQueue.shift();
+  console.log(`[supervisor] Draining auto-message for ${next.repoPath}`);
+
+  try {
+    await sendToOrchestrator(session, next.message, (event) => {
+      // Broadcast to all subscribed WS clients (same as handleOrchestratorSendMsg)
+      const subscribedClients: string[] = [];
+      for (const [cid, sub] of orchestratorSubscriptions) {
+        if (sub.sessionName === session!.sessionName) subscribedClients.push(cid);
+      }
+      if (subscribedClients.length === 0) return;
+
+      let wsMsg: string | null = null;
+      switch (event.type) {
+        case 'text':
+          wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'output', data: { text: event.text, repoPath: next.repoPath, thinking: false } });
+          break;
+        case 'thinking':
+          wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'output', data: { text: event.text, repoPath: next.repoPath, thinking: true } });
+          break;
+        case 'tool_use':
+          wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'output', data: { text: `[tool: ${event.name}]`, repoPath: next.repoPath, thinking: false } });
+          break;
+        case 'done':
+          wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'status', data: { status: 'ready', repoPath: next.repoPath } });
+          break;
+        case 'error':
+          wsMsg = JSON.stringify({ channel: 'orchestrator', event: 'error', data: { error: event.error, repoPath: next.repoPath } });
+          break;
+      }
+      if (wsMsg) {
+        for (const cid of subscribedClients) {
+          const c = clients.get(cid);
+          if (c) sendRaw(c, wsMsg);
+        }
+      }
+    });
+  } catch (err) {
+    console.error('[supervisor] Auto-message failed:', err);
+  }
+
+  // Continue draining
+  void drainOrchestratorAutoQueue();
+}
 
 // Orchestrator now uses structured JSON output (stream-json) instead of PTY.
 // See orchestrator-session.ts for the new approach.
@@ -1582,6 +1668,9 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
         }
       }
     });
+
+    // After user message completes, drain any queued supervisor escalations
+    void drainOrchestratorAutoQueue();
   } catch (err) {
     send(client, {
       channel: 'orchestrator',
@@ -2350,6 +2439,45 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  // ── Supervisor watch endpoint ──
+  if (req.url === '/supervisor/watch' && req.method === 'POST') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as {
+          surfaceId?: string;
+          repoPath?: string;
+          name?: string;
+          prompt?: string;
+        };
+        if (!body.surfaceId || !body.repoPath) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: false, error: 'surfaceId and repoPath required' }));
+          return;
+        }
+        registerWatchedAgent(
+          body.surfaceId,
+          body.repoPath,
+          body.name ?? 'Unnamed agent',
+          body.prompt ?? '',
+        );
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, watching: body.surfaceId }));
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'invalid json' }));
+      }
+    });
+    return;
+  }
+
   if (req.url === '/internal/realtime' && req.method === 'POST') {
     if (!isAuthorizedInternalRequest(req)) {
       res.writeHead(401);
@@ -2759,6 +2887,75 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 
 httpServer.listen(WS_PORT, '0.0.0.0', () => {
   console.log(`[ws-server] Cortex IDE WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+
+  // ── Start Agent Supervisor ──
+  const NEXT_ORIGIN = `http://localhost:${process.env.PORT || '3001'}`;
+  const supervisorCallbacks: SupervisorCallbacks = {
+    async fetchFleetStatus() {
+      const res = await fetch(`${NEXT_ORIGIN}/api/runtime/inventory?fresh=1&includeOpenClaw=0`, { signal: AbortSignal.timeout(8000) });
+      const data = await res.json() as { agents?: Array<Record<string, unknown>> };
+      return ((data.agents ?? []) as Array<Record<string, unknown>>)
+        .filter((a) => a.runtime === 'codex' || a.runtime === 'claude-code')
+        .map((a) => ({
+          sessionKey: a.sessionKey as string,
+          status: a.status as string,
+          name: a.name as string,
+          workspace: a.workspace as string,
+          currentTask: a.currentTask as string,
+        }));
+    },
+    async fetchTranscript(sessionKey, limit) {
+      const res = await fetch(`${NEXT_ORIGIN}/api/runtime/transcript?sessionKey=${encodeURIComponent(sessionKey)}&limit=${limit}`, { signal: AbortSignal.timeout(8000) });
+      const data = await res.json() as { transcript?: Array<Record<string, unknown>> };
+      return ((data.transcript ?? []) as Array<Record<string, unknown>>).map((e) => ({
+        id: (e.id as string) ?? '',
+        role: (e.role as string) ?? '',
+        text: (e.text as string) ?? '',
+        timestamp: e.timestamp as number | undefined,
+        timestampLabel: e.timestampLabel as string | undefined,
+        toolName: e.toolName as string | undefined,
+      }));
+    },
+    async steerAgent(surfaceId, message) {
+      await fetch(`${NEXT_ORIGIN}/api/runtime/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'steer', surfaceId, message }),
+        signal: AbortSignal.timeout(8000),
+      });
+    },
+    async interruptAgent(surfaceId) {
+      await fetch(`${NEXT_ORIGIN}/api/runtime/action`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'interrupt', surfaceId }),
+        signal: AbortSignal.timeout(8000),
+      });
+    },
+    async relaunchAgent(prompt, repoPath, taskName) {
+      const res = await fetch(`${NEXT_ORIGIN}/api/runtime/launch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runtime: 'codex', prompt, repoPath, cwd: repoPath, taskName }),
+        signal: AbortSignal.timeout(15000),
+      });
+      const data = await res.json() as { ok?: boolean; surfaceId?: string };
+      return data.ok ? (data.surfaceId as string) : null;
+    },
+    broadcastAgentUpdate(update: AgentUpdateEvent) {
+      const msg = JSON.stringify({
+        channel: 'orchestrator',
+        event: 'agent-update',
+        data: update,
+      });
+      for (const [cid, sub] of orchestratorSubscriptions) {
+        const c = clients.get(cid);
+        if (c) sendRaw(c, msg);
+      }
+    },
+    queueOrchestratorEscalation,
+  };
+  startSupervisorLoop(supervisorCallbacks);
 });
 
 // ── Graceful shutdown ──
@@ -2766,7 +2963,8 @@ httpServer.listen(WS_PORT, '0.0.0.0', () => {
 function shutdown(signal: string) {
   console.log(`[ws-server] ${signal} received — shutting down gracefully`);
 
-  // Stop stall detection
+  // Stop agent supervisor and stall detection
+  stopSupervisorLoop();
   clearInterval(stallCheckTimer);
   if (runtimeRefreshTimer) clearTimeout(runtimeRefreshTimer);
   if (mobileRefreshTimer) clearTimeout(mobileRefreshTimer);
