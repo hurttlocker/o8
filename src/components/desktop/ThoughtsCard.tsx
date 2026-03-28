@@ -468,6 +468,54 @@ export function ThoughtsCard({
     }
   }, [sessionTargets, targetAgent]);
 
+  // ── Repo issues for Mission Control ──
+
+  type RepoIssue = { number: number; title: string; url?: string; labels?: string[] };
+  const [repoIssues, setRepoIssues] = useState<RepoIssue[]>([]);
+  const [issuesLoading, setIssuesLoading] = useState(false); // eslint-disable-line @typescript-eslint/no-unused-vars -- reserved for loading indicator
+  const [issuesCollapsed, setIssuesCollapsed] = useState(false);
+  const [issuesShowAll, setIssuesShowAll] = useState(false);
+  const [expandedPacketId, setExpandedPacketId] = useState<string | null>(null);
+  const issuesRepoSlugRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!open || mode !== 'orchestrate' || workspaceTargets.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      // Resolve repo slug from the repos API (has remoteUrl)
+      try {
+        const reposRes = await fetch('/api/panel/repos');
+        if (!reposRes.ok || cancelled) return;
+        const reposData = await reposRes.json() as { repos?: Array<{ localPath: string; remoteUrl?: string }> };
+        const targetPath = workspaceTargets[0]?.localPath;
+        const matched = (reposData.repos ?? []).find((r) => r.localPath === targetPath);
+        if (!matched?.remoteUrl || cancelled) return;
+
+        const slug = matched.remoteUrl.replace(/\.git$/, '').split('/').slice(-2).join('/');
+        if (!slug || slug === issuesRepoSlugRef.current) return;
+        issuesRepoSlugRef.current = slug;
+
+        setIssuesLoading(true);
+        const issuesRes = await fetch(`/api/panel/issues?repo=${encodeURIComponent(slug)}`);
+        if (!issuesRes.ok || cancelled) { setIssuesLoading(false); return; }
+        const issuesData = await issuesRes.json() as { issues?: Array<{ number: number; title: string; state: string; url?: string; labels?: Array<{ name: string } | string> }> };
+        const openIssues = (issuesData.issues ?? [])
+          .filter((i) => i.state === 'open')
+          .slice(0, 12)
+          .map((i) => ({
+            number: i.number,
+            title: i.title,
+            url: i.url,
+            labels: (i.labels ?? []).map((l) => typeof l === 'string' ? l : l.name),
+          }));
+        if (!cancelled) setRepoIssues(openIssues);
+      } catch { /* silent */ }
+      if (!cancelled) setIssuesLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [open, mode, workspaceTargets]);
+
   // Center on first open
   useEffect(() => {
     if (docked) return;
@@ -892,6 +940,46 @@ export function ThoughtsCard({
       ],
     }));
   }, [preferredRuntime, updateMissionState, workspaceTargets]);
+
+  const handleCreatePacketFromIssue = useCallback((issue: { number: number; title: string }) => {
+    const target = workspaceTargets[0] ?? null;
+    updateMissionState((current) => ({
+      ...current,
+      packets: [
+        ...current.packets,
+        createDraftPacket(preferredRuntime, workspaceTargets, current.packets, {
+          title: issue.title,
+          summary: `#${issue.number} — ${issue.title}`,
+          workspaceTargetPath: target?.localPath ?? null,
+          branchTarget: target?.branch ?? 'main',
+          queueState: 'draft',
+        }),
+      ],
+    }));
+  }, [preferredRuntime, updateMissionState, workspaceTargets]);
+
+  const handleRemovePacketForIssue = useCallback((issueNumber: number) => {
+    updateMissionState((current) => ({
+      ...current,
+      packets: current.packets.filter((p) => !p.summary.includes(`#${issueNumber}`)),
+    }));
+  }, [updateMissionState]);
+
+  const handleLinkIssueToPacket = useCallback((issue: { number: number; title: string }) => {
+    // Link this issue into the currently expanded packet, or the last packet if none expanded
+    const targetId = expandedPacketId ?? missionState.packets[missionState.packets.length - 1]?.id;
+    if (!targetId) return;
+    updateMissionState((current) => ({
+      ...current,
+      packets: current.packets.map((p) => {
+        if (p.id !== targetId) return p;
+        const ref = `#${issue.number}`;
+        if (p.summary.includes(ref)) return p;
+        const nextSummary = p.summary ? `${p.summary}\n${ref} — ${issue.title}` : `${ref} — ${issue.title}`;
+        return { ...p, summary: nextSummary };
+      }),
+    }));
+  }, [expandedPacketId, missionState.packets, updateMissionState]);
 
   const patchPacket = useCallback((packetId: string, updater: (packet: OrchestratorPacket) => OrchestratorPacket) => {
     updateMissionState((current) => ({
@@ -1355,456 +1443,289 @@ export function ThoughtsCard({
 	                  </div>
 	                ) : null}
 
-	                <div style={{
-	                  display: 'flex',
-	                  alignItems: 'center',
-	                  justifyContent: 'space-between',
-	                  gap: 12,
-	                  padding: '0 2px',
-	                }}>
-	                  <div>
-	                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--t-text)' }}>
-	                      Work Packets
-	                    </div>
-	                    <div style={{ marginTop: 3, fontSize: 11, color: 'var(--t-text-muted)' }}>
-	                      Compact execution packets mapped onto visible workspace lanes.
-	                    </div>
-	                  </div>
-	                  <span style={{
-	                    padding: '4px 9px',
-	                    borderRadius: 999,
-	                    background: 'var(--t-divider-subtle)',
-	                    color: 'var(--t-text-secondary)',
-	                    fontSize: 10,
-	                    fontWeight: 700,
-	                  }}>
-	                    {missionState.packets.length} packet{missionState.packets.length === 1 ? '' : 's'}
-	                  </span>
-	                </div>
+	                {/* ── Repo Issues ── */}
+                {repoIssues.length > 0 ? (
+                  <div style={{
+                    padding: '14px 16px',
+                    borderRadius: 16,
+                    background: 'var(--t-panel)',
+                    border: '1px solid var(--t-panel-border)',
+                    boxShadow: '0 12px 28px rgba(15, 23, 42, 0.04)',
+                  }}>
+                    <button
+                      type="button"
+                      onClick={() => setIssuesCollapsed((v) => !v)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        width: '100%',
+                        border: 'none',
+                        background: 'transparent',
+                        padding: 0,
+                        cursor: 'pointer',
+                        marginBottom: issuesCollapsed ? 0 : 10,
+                      }}
+                    >
+                      <div style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--t-text-muted)' }}>
+                        Open Issues
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{
+                          padding: '2px 7px',
+                          borderRadius: 999,
+                          background: 'var(--t-divider-subtle)',
+                          color: 'var(--t-text-secondary)',
+                          fontSize: 10,
+                          fontWeight: 700,
+                        }}>
+                          {repoIssues.length}
+                        </span>
+                        <svg width={10} height={10} viewBox="0 0 10 10" fill="none" stroke="var(--t-text-muted)" strokeWidth="1.5" strokeLinecap="round" style={{ transform: issuesCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 150ms ease' }}>
+                          <path d="M2.5 3.5L5 6L7.5 3.5" />
+                        </svg>
+                      </div>
+                    </button>
+                    {!issuesCollapsed ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                        {(issuesShowAll ? repoIssues : repoIssues.slice(0, 5)).map((issue) => {
+                          const alreadyPacketed = missionState.packets.some(
+                            (p) => p.summary.includes(`#${issue.number}`) || p.title === issue.title,
+                          );
+                          return (
+                            <div
+                              key={issue.number}
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                padding: '6px 8px',
+                                borderRadius: 10,
+                                transition: 'background 120ms ease',
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-divider-subtle)'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                            >
+                              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-muted)', fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)', minWidth: 36, flexShrink: 0 }}>
+                                #{issue.number}
+                              </span>
+                              <span style={{ fontSize: 12, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
+                                {issue.title}
+                              </span>
+                              {alreadyPacketed ? (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+                                  <button type="button" onClick={() => handleLinkIssueToPacket(issue)} title="Link to current packet"
+                                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center' }}>
+                                    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="2" strokeLinecap="round" style={{ opacity: 0.5 }}>
+                                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                                    </svg>
+                                  </button>
+                                  <button type="button" onClick={() => handleRemovePacketForIssue(issue.number)} title="Remove packet"
+                                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px 4px', display: 'flex', alignItems: 'center' }}>
+                                    <span style={{ fontSize: 14, color: 'var(--t-text-muted)', opacity: 0.5, lineHeight: 1 }}>-</span>
+                                  </button>
+                                </div>
+                              ) : (
+                                <button type="button" onClick={() => handleCreatePacketFromIssue(issue)} title="Create work packet"
+                                  style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: '2px 4px', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
+                                  <span style={{ fontSize: 14, color: 'var(--t-text-muted)', opacity: 0.5, lineHeight: 1 }}>+</span>
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {repoIssues.length > 5 ? (
+                          <button
+                            type="button"
+                            onClick={() => setIssuesShowAll((v) => !v)}
+                            style={{
+                              border: 'none',
+                              background: 'transparent',
+                              color: 'var(--t-text-muted)',
+                              fontSize: 11,
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              padding: '6px 8px',
+                              textAlign: 'left',
+                            }}
+                          >
+                            {issuesShowAll ? 'Show less' : `Show all ${repoIssues.length} issues`}
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
 
-	                {missionState.packets.length === 0 ? (
-	                  <div style={{
-	                    padding: '18px 16px',
-	                    borderRadius: 16,
-	                    border: '1px dashed var(--t-panel-border)',
-	                    background: 'rgba(148, 163, 184, 0.06)',
-	                    color: 'var(--t-text-secondary)',
-	                    fontSize: 12,
-	                    lineHeight: 1.6,
-	                  }}>
-	                    Start with a mission prompt, then generate or add packets. Each packet can target a repo or worktree lane, pick a CLI runtime, and be launched explicitly into a workspace tab.
-	                  </div>
-	                ) : null}
+                {/* ── Work Packets ── */}
+                {missionState.packets.length === 0 ? (
+                  <div style={{
+                    padding: '18px 16px',
+                    borderRadius: 16,
+                    border: '1px dashed var(--t-panel-border)',
+                    background: 'rgba(148, 163, 184, 0.06)',
+                    color: 'var(--t-text-secondary)',
+                    fontSize: 12,
+                    lineHeight: 1.6,
+                    textAlign: 'center',
+                  }}>
+                    Add packets from issues above, or describe a mission and plan.
+                  </div>
+                ) : null}
 
-		                {missionState.packets.map((packet) => {
-		                  const statusMeta = orchestratorStatusTone(packet.status);
-		                  const dependencyValue = packetDependencyInput(packet.dependencyLabels);
-		                  const dependencyBlocker = packetReleaseBlockedBy(packet, missionState.packets);
-		                  const canLaunch = !packet.archivedAt && packet.releaseState !== 'released' && packet.queueState !== 'held' && !dependencyBlocker;
-		                  return (
-		                    <div
-	                      key={packet.id}
-	                      style={{
-	                        padding: '14px',
-	                        borderRadius: 18,
-	                        background: 'var(--t-panel)',
-	                        border: '1px solid var(--t-panel-border)',
-	                        boxShadow: '0 14px 30px rgba(15, 23, 42, 0.05)',
-	                        display: 'flex',
-	                        flexDirection: 'column',
-	                        gap: 12,
-	                      }}
-	                    >
-		                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-		                        <span style={{
-		                          display: 'inline-flex',
-		                          alignItems: 'center',
-		                          padding: '4px 8px',
-		                          borderRadius: 999,
-		                          background: 'var(--t-divider-subtle)',
-		                          color: 'var(--t-text-secondary)',
-		                          fontSize: 10,
-		                          fontWeight: 800,
-		                          textTransform: 'uppercase',
-		                          letterSpacing: '0.04em',
-		                        }}>
-		                          {packet.referenceLabel}
-		                        </span>
-		                        <input
-		                          value={packet.title}
-	                          onChange={(event) => patchPacket(packet.id, (current) => ({ ...current, title: event.target.value }))}
-	                          placeholder="Packet title"
-	                          style={{
-	                            flex: 1,
-	                            minWidth: 180,
-	                            border: 'none',
-	                            background: 'transparent',
-	                            fontSize: 15,
-	                            fontWeight: 700,
-	                            color: 'var(--t-text)',
-	                            outline: 'none',
-	                            letterSpacing: '-0.02em',
-	                          }}
-	                        />
-	                        <span style={{
-	                          display: 'inline-flex',
-	                          alignItems: 'center',
-	                          padding: '4px 9px',
-	                          borderRadius: 999,
-	                          background: statusMeta.background,
-	                          border: `1px solid ${statusMeta.border}`,
-	                          color: statusMeta.color,
-	                          fontSize: 10,
-	                          fontWeight: 800,
-	                          textTransform: 'uppercase',
-	                          letterSpacing: '0.04em',
-	                        }}>
-	                          {statusMeta.label}
-	                        </span>
-		                        {packet.lane ? (
-		                          <span style={{
-	                            display: 'inline-flex',
-	                            alignItems: 'center',
-	                            gap: 6,
-	                            padding: '4px 9px',
-	                            borderRadius: 999,
-	                            background: 'var(--t-divider-subtle)',
-	                            color: 'var(--t-text-secondary)',
-	                            fontSize: 10,
-	                            fontWeight: 700,
-	                          }}>
-		                            {packet.lane.sessionKey ? 'Lane bound' : 'Provisioning lane'}
-		                          </span>
-		                        ) : null}
-		                        <span style={{
-		                          display: 'inline-flex',
-		                          alignItems: 'center',
-		                          padding: '4px 8px',
-		                          borderRadius: 999,
-		                          background: packet.releaseState === 'released' ? 'rgba(22, 163, 74, 0.12)' : 'var(--t-divider-subtle)',
-		                          color: packet.releaseState === 'released' ? '#16a34a' : 'var(--t-text-secondary)',
-		                          fontSize: 10,
-		                          fontWeight: 700,
-		                        }}>
-		                          {packet.releaseState === 'released' ? 'Released' : 'Awaiting release'}
-		                        </span>
-		                      </div>
+                {missionState.packets.map((packet) => {
+                  const statusMeta = orchestratorStatusTone(packet.status);
+                  const runtimeMeta = orchestratorRuntimeTone(packet.runtime);
+                  const dependencyBlocker = packetReleaseBlockedBy(packet, missionState.packets);
+                  const canLaunch = !packet.archivedAt && packet.releaseState !== 'released' && packet.queueState !== 'held' && !dependencyBlocker;
+                  const isExpanded = expandedPacketId === packet.id;
+                  const targetLabel = workspaceTargets.find((t) => t.localPath === packet.workspaceTargetPath)?.label ?? null;
 
-	                      <textarea
-	                        value={packet.summary}
-	                        onChange={(event) => patchPacket(packet.id, (current) => ({ ...current, summary: event.target.value }))}
-	                        placeholder="What should this packet accomplish?"
-	                        rows={2}
-	                        style={{
-	                          width: '100%',
-	                          padding: '10px 12px',
-	                          borderRadius: 12,
-	                          border: '1px solid var(--t-input-border)',
-	                          background: 'var(--t-input-bg)',
-	                          fontSize: 12,
-	                          color: 'var(--t-text)',
-	                          resize: 'vertical',
-	                          outline: 'none',
-	                          lineHeight: 1.5,
-	                          boxSizing: 'border-box',
-	                        }}
-	                      />
+                  return (
+                    <div
+                      key={packet.id}
+                      style={{
+                        borderRadius: 14,
+                        background: 'var(--t-panel)',
+                        border: '1px solid var(--t-panel-border)',
+                        boxShadow: '0 8px 20px rgba(15, 23, 42, 0.04)',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {/* ── Compact row: always visible ── */}
+                      <button
+                        type="button"
+                        onClick={() => setExpandedPacketId(isExpanded ? null : packet.id)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          width: '100%',
+                          padding: '11px 14px',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                        }}
+                      >
+                        <span style={{ fontSize: 10, fontWeight: 800, color: runtimeMeta.color, padding: '2px 6px', borderRadius: 5, background: runtimeMeta.background, flexShrink: 0, letterSpacing: '0.02em' }}>
+                          {packet.referenceLabel}
+                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.01em' }}>
+                          {packet.title}
+                        </span>
+                        <span style={{ fontSize: 9, fontWeight: 800, color: statusMeta.color, padding: '3px 7px', borderRadius: 999, background: statusMeta.background, border: `1px solid ${statusMeta.border}`, textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0 }}>
+                          {statusMeta.label}
+                        </span>
+                        <svg width={10} height={10} viewBox="0 0 10 10" fill="none" stroke="var(--t-text-muted)" strokeWidth="1.5" strokeLinecap="round" style={{ flexShrink: 0, transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 150ms ease' }}>
+                          <path d="M2.5 3.5L5 6L7.5 3.5" />
+                        </svg>
+                      </button>
 
-	                      <div style={{
-	                        display: 'grid',
-	                        gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-	                        gap: 10,
-	                      }}>
-	                        <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-	                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-	                            Workspace Target
-	                          </span>
-	                          <select
-	                            value={packet.workspaceTargetPath ?? ''}
-	                            onChange={(event) => {
-	                              const nextTarget = workspaceTargets.find((target) => target.localPath === event.target.value) ?? null;
-	                              patchPacket(packet.id, (current) => ({
-	                                ...current,
-	                                workspaceTargetPath: nextTarget?.localPath ?? null,
-	                                branchTarget: nextTarget?.branch ?? current.branchTarget,
-	                              }));
-	                            }}
-	                            style={{
-	                              padding: '9px 10px',
-	                              borderRadius: 10,
-	                              border: '1px solid var(--t-input-border)',
-	                              background: 'var(--t-input-bg)',
-	                              color: 'var(--t-text)',
-	                              fontSize: 12,
-	                            }}
-	                          >
-	                            <option value="">No workspace target</option>
-	                            {workspaceTargets.map((target) => (
-	                              <option key={target.id} value={target.localPath}>
-	                                {target.label}
-	                              </option>
-	                            ))}
-	                          </select>
-	                        </label>
+                      {/* ── Expanded detail ── */}
+                      {isExpanded ? (
+                        <div style={{ padding: '0 14px 14px', display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid var(--t-divider-subtle)' }}>
+                          <div style={{ paddingTop: 10 }}>
+                            <textarea
+                              value={packet.summary}
+                              onChange={(event) => patchPacket(packet.id, (current) => ({ ...current, summary: event.target.value }))}
+                              placeholder="What should this packet accomplish?"
+                              rows={2}
+                              style={{
+                                width: '100%',
+                                padding: '9px 11px',
+                                borderRadius: 10,
+                                border: '1px solid var(--t-input-border)',
+                                background: 'var(--t-input-bg)',
+                                fontSize: 12,
+                                color: 'var(--t-text)',
+                                resize: 'vertical',
+                                outline: 'none',
+                                lineHeight: 1.5,
+                                boxSizing: 'border-box',
+                              }}
+                            />
+                          </div>
 
-	                        <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-	                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-	                            Branch / Worktree
-	                          </span>
-	                          <input
-	                            value={packet.branchTarget}
-	                            onChange={(event) => patchPacket(packet.id, (current) => ({ ...current, branchTarget: event.target.value }))}
-	                            placeholder="main or worktree branch"
-	                            style={{
-	                              padding: '9px 10px',
-	                              borderRadius: 10,
-	                              border: '1px solid var(--t-input-border)',
-	                              background: 'var(--t-input-bg)',
-	                              color: 'var(--t-text)',
-	                              fontSize: 12,
-	                              outline: 'none',
-	                            }}
-	                          />
-	                        </label>
+                          {/* Meta row */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <select
+                              value={packet.runtime}
+                              onChange={(event) => patchPacket(packet.id, (current) => ({ ...current, runtime: event.target.value === 'claude-code' ? 'claude-code' : 'codex' }))}
+                              style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--t-input-border)', background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 11 }}
+                            >
+                              <option value="codex">Codex</option>
+                              <option value="claude-code">Claude Code</option>
+                            </select>
+                            <select
+                              value={packet.workspaceTargetPath ?? ''}
+                              onChange={(event) => {
+                                const nextTarget = workspaceTargets.find((t) => t.localPath === event.target.value) ?? null;
+                                patchPacket(packet.id, (current) => ({ ...current, workspaceTargetPath: nextTarget?.localPath ?? null, branchTarget: nextTarget?.branch ?? current.branchTarget }));
+                              }}
+                              style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--t-input-border)', background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 11 }}
+                            >
+                              <option value="">No target</option>
+                              {workspaceTargets.map((t) => <option key={t.id} value={t.localPath}>{t.label}</option>)}
+                            </select>
+                            <input
+                              value={packet.branchTarget}
+                              onChange={(event) => patchPacket(packet.id, (current) => ({ ...current, branchTarget: event.target.value }))}
+                              placeholder="branch"
+                              style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--t-input-border)', background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 11, outline: 'none', width: 90 }}
+                            />
+                          </div>
 
-	                        <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-	                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-	                            Runtime
-	                          </span>
-	                          <select
-	                            value={packet.runtime}
-	                            onChange={(event) => patchPacket(packet.id, (current) => ({
-	                              ...current,
-	                              runtime: event.target.value === 'claude-code' ? 'claude-code' : 'codex',
-	                            }))}
-	                            style={{
-	                              padding: '9px 10px',
-	                              borderRadius: 10,
-	                              border: '1px solid var(--t-input-border)',
-	                              background: 'var(--t-input-bg)',
-	                              color: 'var(--t-text)',
-	                              fontSize: 12,
-	                            }}
-	                          >
-	                            <option value="codex">Codex</option>
-	                            <option value="claude-code">Claude Code</option>
-	                          </select>
-	                        </label>
+                          {/* Blocker notice */}
+                          {(packet.blockedReason || dependencyBlocker) ? (
+                            <div style={{ fontSize: 11, fontWeight: 600, color: '#b91c1c', padding: '7px 10px', borderRadius: 8, background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.12)' }}>
+                              {packet.blockedReason ?? `Waiting on ${dependencyBlocker?.referenceLabel}`}
+                            </div>
+                          ) : null}
 
-		                        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-		                          <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-		                            State
-		                          </span>
-		                          <div style={{
-		                            padding: '9px 10px',
-		                            borderRadius: 10,
-		                            border: '1px solid var(--t-input-border)',
-		                            background: 'var(--t-input-bg)',
-		                            color: 'var(--t-text)',
-		                            fontSize: 12,
-		                            lineHeight: 1.45,
-		                          }}>
-		                            {statusMeta.label}
-		                          </div>
-		                        </div>
-		                      </div>
-
-		                      <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-		                        <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--t-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-		                          Dependency Labels
-		                        </span>
-	                        <input
-	                          value={dependencyValue}
-	                          onChange={(event) => patchPacket(packet.id, (current) => ({
-	                            ...current,
-	                            dependencyLabels: parseDependencyInput(event.target.value),
-	                          }))}
-	                          placeholder="packet-1, backend-ready, needs-review"
-	                          style={{
-	                            padding: '9px 10px',
-	                            borderRadius: 10,
-	                            border: '1px solid var(--t-input-border)',
-	                            background: 'var(--t-input-bg)',
-	                            color: 'var(--t-text)',
-	                            fontSize: 12,
-	                            outline: 'none',
-	                          }}
-	                        />
-		                      </label>
-
-		                      {(packet.blockedReason || dependencyBlocker || packet.lastEventLabel) ? (
-		                        <div style={{
-		                          padding: '10px 12px',
-		                          borderRadius: 12,
-		                          background: packet.blockedReason || dependencyBlocker
-		                            ? 'rgba(239, 68, 68, 0.05)'
-		                            : 'var(--t-divider-subtle)',
-		                          border: packet.blockedReason || dependencyBlocker
-		                            ? '1px solid rgba(239, 68, 68, 0.12)'
-		                            : '1px solid var(--t-divider)',
-		                          display: 'flex',
-		                          flexDirection: 'column',
-		                          gap: 4,
-		                        }}>
-		                          {packet.blockedReason || dependencyBlocker ? (
-		                            <div style={{ fontSize: 11, fontWeight: 700, color: '#b91c1c' }}>
-		                              {packet.blockedReason ?? `Waiting on ${dependencyBlocker?.referenceLabel} to be released`}
-		                            </div>
-		                          ) : null}
-		                          {packet.lastEventLabel ? (
-		                            <div style={{ fontSize: 11, color: 'var(--t-text-secondary)' }}>
-		                              Last event: {packet.lastEventLabel}
-		                            </div>
-		                          ) : null}
-		                          {packet.lastEventAt ? (
-		                            <div style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>
-		                              Heartbeat: {packet.lastEventAt}
-		                            </div>
-		                          ) : null}
-		                        </div>
-		                      ) : null}
-
-		                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-		                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-	                          <span style={{
-	                            display: 'inline-flex',
-	                            alignItems: 'center',
-	                            gap: 6,
-	                            padding: '4px 9px',
-	                            borderRadius: 999,
-	                            background: 'var(--t-divider-subtle)',
-	                            color: 'var(--t-text-secondary)',
-	                            fontSize: 10,
-	                            fontWeight: 700,
-	                          }}>
-	                            {orchestratorRuntimeTone(packet.runtime).label}
-	                          </span>
-	                          {packet.workspaceTargetPath ? (
-	                            <span style={{
-	                              display: 'inline-flex',
-	                              alignItems: 'center',
-	                              padding: '4px 9px',
-	                              borderRadius: 999,
-	                              background: 'var(--t-divider-subtle)',
-	                              color: 'var(--t-text-secondary)',
-	                              fontSize: 10,
-	                              fontWeight: 700,
-	                            }}>
-	                              {workspaceTargets.find((target) => target.localPath === packet.workspaceTargetPath)?.label ?? packet.workspaceTargetPath}
-	                            </span>
-	                          ) : null}
-	                        </div>
-	                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-		                          <button
-		                            type="button"
-		                            onClick={() => patchPacket(packet.id, (current) => ({ ...current, queueState: 'queued', blockedReason: null, archivedAt: null }))}
-		                            style={{
-		                              border: '1px solid var(--t-panel-border)',
-		                              background: packet.queueState === 'queued' ? 'var(--t-panel-active)' : 'var(--t-panel)',
-		                              color: packet.queueState === 'queued' ? 'var(--t-text)' : 'var(--t-text-secondary)',
-		                              padding: '7px 10px',
-		                              borderRadius: 10,
-		                              fontSize: 11,
-	                              fontWeight: 700,
-	                              cursor: 'pointer',
-	                            }}
-	                          >
-	                            Queue
-	                          </button>
-		                          <button
-		                            type="button"
-		                            onClick={() => patchPacket(packet.id, (current) => ({ ...current, queueState: 'held', blockedReason: 'Held by operator' }))}
-		                            style={{
-		                              border: '1px solid var(--t-panel-border)',
-		                              background: packet.queueState === 'held' ? 'rgba(239, 68, 68, 0.08)' : 'var(--t-panel)',
-		                              color: packet.queueState === 'held' ? '#b91c1c' : 'var(--t-text-secondary)',
-		                              padding: '7px 10px',
-		                              borderRadius: 10,
-		                              fontSize: 11,
-	                              fontWeight: 700,
-	                              cursor: 'pointer',
-	                            }}
-	                          >
-	                            Hold
-	                          </button>
-		                          <button
-		                            type="button"
-		                            onClick={() => { void handleLaunchPacket(packet); }}
-		                            disabled={!canLaunch}
-		                            style={{
-		                              border: 'none',
-		                              background: canLaunch ? '#2563eb' : 'var(--t-divider)',
-		                              color: canLaunch ? '#fff' : 'var(--t-text-faint)',
-		                              padding: '7px 10px',
-		                              borderRadius: 10,
-		                              fontSize: 11,
-		                              fontWeight: 700,
-		                              cursor: canLaunch ? 'pointer' : 'default',
-		                            }}
-		                          >
-		                            Launch
-		                          </button>
-		                          <button
-		                            type="button"
-		                            onClick={() => patchPacket(packet.id, (current) => ({
-		                              ...current,
-		                              releaseState: current.releaseState === 'released' ? 'pending' : 'released',
-		                            }))}
-		                            style={{
-		                              border: '1px solid var(--t-panel-border)',
-		                              background: packet.releaseState === 'released' ? 'rgba(22, 163, 74, 0.08)' : 'var(--t-panel)',
-		                              color: packet.releaseState === 'released' ? '#15803d' : 'var(--t-text-secondary)',
-		                              padding: '7px 10px',
-		                              borderRadius: 10,
-		                              fontSize: 11,
-		                              fontWeight: 700,
-		                              cursor: 'pointer',
-		                            }}
-		                          >
-		                            {packet.releaseState === 'released' ? 'Revoke release' : 'Release'}
-		                          </button>
-		                          <button
-		                            type="button"
-		                            onClick={() => patchPacket(packet.id, (current) => ({
-		                              ...current,
-		                              archivedAt: current.archivedAt ? null : new Date().toISOString(),
-		                            }))}
-		                            style={{
-		                              border: '1px solid var(--t-panel-border)',
-		                              background: packet.archivedAt ? 'rgba(107, 114, 128, 0.12)' : 'var(--t-panel)',
-		                              color: packet.archivedAt ? '#4b5563' : 'var(--t-text-secondary)',
-		                              padding: '7px 10px',
-		                              borderRadius: 10,
-		                              fontSize: 11,
-		                              fontWeight: 700,
-		                              cursor: 'pointer',
-		                            }}
-		                          >
-		                            {packet.archivedAt ? 'Restore' : 'Archive'}
-		                          </button>
-		                          <button
-	                            type="button"
-	                            onClick={() => handleFocusPacket(packet)}
-	                            disabled={!packet.lane}
-	                            style={{
-	                              border: '1px solid var(--t-panel-border)',
-	                              background: packet.lane ? 'var(--t-panel-active)' : 'var(--t-panel)',
-	                              color: packet.lane ? 'var(--t-text)' : 'var(--t-text-muted)',
-	                              padding: '7px 10px',
-	                              borderRadius: 10,
-	                              fontSize: 11,
-	                              fontWeight: 700,
-	                              cursor: packet.lane ? 'pointer' : 'default',
-	                              opacity: packet.lane ? 1 : 0.6,
-	                            }}
-	                          >
-	                            Focus tab
-	                          </button>
-	                        </div>
-	                      </div>
-	                    </div>
-	                  );
-	                })}
+                          {/* Actions — only what matters */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            {!packet.lane ? (
+                              <button type="button" onClick={() => { void handleLaunchPacket(packet); }} disabled={!canLaunch}
+                                style={{ border: 'none', background: canLaunch ? '#2563eb' : 'var(--t-divider)', color: canLaunch ? '#fff' : 'var(--t-text-faint)', padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: canLaunch ? 'pointer' : 'default' }}>
+                                Launch
+                              </button>
+                            ) : (
+                              <button type="button" onClick={() => handleFocusPacket(packet)}
+                                style={{ border: 'none', background: '#2563eb', color: '#fff', padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                                Focus
+                              </button>
+                            )}
+                            {packet.queueState !== 'held' && !packet.lane ? (
+                              <button type="button" onClick={() => patchPacket(packet.id, (current) => ({ ...current, queueState: 'held', blockedReason: 'Held by operator' }))}
+                                style={{ border: '1px solid var(--t-panel-border)', background: 'var(--t-panel)', color: 'var(--t-text-secondary)', padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                                Hold
+                              </button>
+                            ) : packet.queueState === 'held' ? (
+                              <button type="button" onClick={() => patchPacket(packet.id, (current) => ({ ...current, queueState: 'queued', blockedReason: null }))}
+                                style={{ border: '1px solid rgba(239, 68, 68, 0.2)', background: 'rgba(239, 68, 68, 0.06)', color: '#b91c1c', padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+                                Unhold
+                              </button>
+                            ) : null}
+                            <button type="button"
+                              onClick={() => patchPacket(packet.id, (current) => ({ ...current, archivedAt: current.archivedAt ? null : new Date().toISOString() }))}
+                              style={{ border: '1px solid var(--t-panel-border)', background: 'var(--t-panel)', color: 'var(--t-text-muted)', padding: '6px 10px', borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: 'pointer', marginLeft: 'auto' }}>
+                              {packet.archivedAt ? 'Restore' : 'Archive'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Collapsed: show subtle meta line */
+                        <div style={{ padding: '0 14px 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{runtimeMeta.label}</span>
+                          {targetLabel ? <><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>·</span><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{targetLabel}</span></> : null}
+                          {packet.lane ? <><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>·</span><span style={{ fontSize: 10, color: '#22c55e', fontWeight: 600 }}>Live</span></> : null}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
 	              </div>
 	            ) : (
 	              <>
