@@ -53,6 +53,11 @@ import { getMobileInboxSnapshot } from './lib/mobile/openclaw';
 import { getSessionTranscript } from './lib/openclaw/chat';
 import { prewarmGatewayStatusCache } from './lib/openclaw/gateway-client';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
+import {
+  ensureOrchestratorSession,
+  sendToOrchestrator,
+  getOrchestratorSession,
+} from './lib/lane/orchestrator-session';
 import type {
   RealtimeBatchMessage,
   RealtimeEventEnvelope,
@@ -178,6 +183,19 @@ const terminalAttachments = new Map<string, TerminalAttachment>();
 const TERMINAL_BATCH_MS = 16; // batch PTY output every 16ms (60fps)
 const DASH_SESSION_ORPHAN_TTL_MS = 30 * 60 * 1000;
 const TERMINAL_SCROLLBACK_MAX_BYTES = 512 * 1024;
+
+// ── Orchestrator channel state ──
+
+interface OrchestratorSubscription {
+  clientId: string;
+  repoPath: string;
+  sessionName: string;
+}
+
+const orchestratorSubscriptions = new Map<string, OrchestratorSubscription>(); // clientId → subscription
+
+// Orchestrator now uses structured JSON output (stream-json) instead of PTY.
+// See orchestrator-session.ts for the new approach.
 
 function sanitizePtyEnv() {
   const env: Record<string, string> = {};
@@ -599,6 +617,8 @@ function isLossyMessage(json: string): boolean {
   if (json.includes('"channel":"chat"') && json.includes('"event":"delta"')) return true;
   // Terminal data frames are lossy (PTY output is best-effort)
   if (json.includes('"channel":"terminal"') && json.includes('"event":"data"')) return true;
+  // Orchestrator output chunks are lossy (intermediate deltas can be dropped)
+  if (json.includes('"channel":"orchestrator"') && json.includes('"event":"output"')) return true;
   return false;
 }
 
@@ -1421,7 +1441,170 @@ function handleClientMessage(client: ClientState, raw: string) {
     case 'agent-kill':
       handleAgentKill(client, msg);
       break;
+
+    // ── Orchestrator channel ──
+    case 'orchestrator-subscribe':
+      handleOrchestratorSubscribe(client, msg);
+      break;
+    case 'orchestrator-send':
+      handleOrchestratorSendMsg(client, msg);
+      break;
+    case 'orchestrator-status':
+      handleOrchestratorStatus(client, msg);
+      break;
+    case 'orchestrator-unsubscribe':
+      orchestratorSubscriptions.delete(client.id);
+      break;
   }
+}
+
+// ── Orchestrator channel handlers ──
+
+async function handleOrchestratorSubscribe(client: ClientState, msg: Record<string, unknown>) {
+  const repoPath = typeof msg.repoPath === 'string' ? msg.repoPath : null;
+  if (!repoPath) return;
+
+  try {
+    const session = ensureOrchestratorSession(repoPath);
+    orchestratorSubscriptions.set(client.id, {
+      clientId: client.id,
+      repoPath,
+      sessionName: session.sessionName,
+    });
+
+    // No PTY to hook — the new approach spawns a process per message
+    // and streams structured JSON events directly to WS subscribers.
+    send(client, {
+      channel: 'orchestrator',
+      event: 'status',
+      data: { status: session.status, repoPath, sessionName: session.sessionName },
+    });
+    console.log(`[ws-server] Client ${client.id} subscribed to orchestrator for ${repoPath}`);
+  } catch (err) {
+    send(client, {
+      channel: 'orchestrator',
+      event: 'error',
+      data: { error: err instanceof Error ? err.message : 'Failed to start orchestrator session', repoPath },
+    });
+  }
+}
+
+async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string, unknown>) {
+  const repoPath = typeof msg.repoPath === 'string' ? msg.repoPath : null;
+  const message = typeof msg.message === 'string' ? msg.message : null;
+  if (!repoPath || !message) return;
+
+  try {
+    let session = getOrchestratorSession(repoPath);
+    if (!session || session.status === 'dead') {
+      session = ensureOrchestratorSession(repoPath);
+    }
+
+    // Ensure subscription exists
+    if (!orchestratorSubscriptions.has(client.id)) {
+      orchestratorSubscriptions.set(client.id, {
+        clientId: client.id,
+        repoPath,
+        sessionName: session.sessionName,
+      });
+    }
+
+    // Emit busy status
+    const busyMsg = JSON.stringify({
+      channel: 'orchestrator',
+      event: 'status',
+      data: { status: 'busy', repoPath },
+    });
+    for (const [cid, sub] of orchestratorSubscriptions) {
+      if (sub.sessionName === session.sessionName) {
+        const c = clients.get(cid);
+        if (c) sendRaw(c, busyMsg);
+      }
+    }
+
+    // Spawn claude process and stream structured JSON events to subscribers
+    await sendToOrchestrator(session, message, (event) => {
+      // Find all subscribed clients for this session
+      const subscribedClients: string[] = [];
+      for (const [cid, sub] of orchestratorSubscriptions) {
+        if (sub.sessionName === session!.sessionName) subscribedClients.push(cid);
+      }
+      if (subscribedClients.length === 0) return;
+
+      let wsMsg: string | null = null;
+
+      switch (event.type) {
+        case 'text':
+          wsMsg = JSON.stringify({
+            channel: 'orchestrator',
+            event: 'output',
+            data: { text: event.text, repoPath, thinking: false },
+          });
+          break;
+
+        case 'thinking':
+          wsMsg = JSON.stringify({
+            channel: 'orchestrator',
+            event: 'output',
+            data: { text: event.text, repoPath, thinking: true },
+          });
+          break;
+
+        case 'tool_use':
+          wsMsg = JSON.stringify({
+            channel: 'orchestrator',
+            event: 'output',
+            data: { text: `[tool: ${event.name}]`, repoPath, thinking: false },
+          });
+          break;
+
+        case 'done':
+          wsMsg = JSON.stringify({
+            channel: 'orchestrator',
+            event: 'status',
+            data: { status: 'ready', repoPath },
+          });
+          break;
+
+        case 'error':
+          wsMsg = JSON.stringify({
+            channel: 'orchestrator',
+            event: 'error',
+            data: { error: event.error, repoPath },
+          });
+          break;
+      }
+
+      if (wsMsg) {
+        for (const cid of subscribedClients) {
+          const c = clients.get(cid);
+          if (c) sendRaw(c, wsMsg);
+        }
+      }
+    });
+  } catch (err) {
+    send(client, {
+      channel: 'orchestrator',
+      event: 'error',
+      data: { error: err instanceof Error ? err.message : 'Failed to send message', repoPath },
+    });
+  }
+}
+
+function handleOrchestratorStatus(client: ClientState, msg: Record<string, unknown>) {
+  const repoPath = typeof msg.repoPath === 'string' ? msg.repoPath : null;
+  if (!repoPath) return;
+
+  const session = getOrchestratorSession(repoPath);
+  send(client, {
+    channel: 'orchestrator',
+    event: 'status',
+    data: {
+      status: session?.status ?? 'dead',
+      repoPath,
+      sessionName: session?.sessionName ?? null,
+    },
+  });
 }
 
 async function syncClientInbox(client: ClientState) {
@@ -2127,7 +2310,8 @@ const httpServer = createServer((req, res) => {
       }
 
       try {
-        attachment.ptyProcess.write(`${command}\n`);
+        // PTY raw-mode TUIs (like Claude Code) interpret \r as Enter, not \n
+        attachment.ptyProcess.write(`${command}\r`);
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: true }));
       } catch (error) {
@@ -2135,6 +2319,34 @@ const httpServer = createServer((req, res) => {
         res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Failed to write to terminal' }));
       }
     });
+    return;
+  }
+
+  if (req.url?.startsWith('/terminal-scrollback') && req.method === 'GET') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+
+    const url = new URL(req.url, `http://127.0.0.1:${WS_PORT}`);
+    const sessionName = url.searchParams.get('sessionName')?.trim();
+    if (!sessionName) {
+      res.writeHead(400);
+      res.end('sessionName required');
+      return;
+    }
+
+    const attachment = terminalAttachments.get(sessionName);
+    if (!attachment) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'session not found' }));
+      return;
+    }
+
+    const scrollback = attachment.scrollbackChunks.join('');
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ scrollback }));
     return;
   }
 
@@ -2297,6 +2509,8 @@ wss.on('connection', (ws) => {
     for (const sessionName of client.terminalSessions) {
       removeClientFromTerminal(client.id, sessionName);
     }
+    // Clean up orchestrator subscription
+    orchestratorSubscriptions.delete(client.id);
     clients.delete(client.id);
     console.log(`[ws-server] Client disconnected: ${client.id} (${clients.size} total)`);
   });
