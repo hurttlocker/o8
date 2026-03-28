@@ -50,6 +50,7 @@ function readStoredThemeId() {
 
 function applyThemeVars(theme: ThemeTokens, animate: boolean) {
   const root = document.documentElement;
+  const body = document.body;
 
   if (animate) {
     let styleEl = document.getElementById('theme-transition');
@@ -72,6 +73,11 @@ function applyThemeVars(theme: ThemeTokens, animate: boolean) {
 
   for (const [key, value] of Object.entries(theme.cssVars)) {
     root.style.setProperty(key, value);
+  }
+  root.style.colorScheme = theme.colorScheme;
+  root.dataset.theme = theme.id;
+  if (body) {
+    body.dataset.theme = theme.id;
   }
 }
 

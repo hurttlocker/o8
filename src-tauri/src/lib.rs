@@ -5,6 +5,10 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Emitter, Manager,
 };
+#[cfg(target_os = "macos")]
+use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
+#[cfg(target_os = "windows")]
+use window_vibrancy::apply_blur;
 
 /// Desktop info exposed to the React frontend via invoke
 #[derive(Serialize)]
@@ -140,6 +144,18 @@ pub fn run() {
             // ── Window Close → Hide to Tray ──
             let app_handle = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {
+                #[cfg(target_os = "macos")]
+                if let Err(err) =
+                    apply_vibrancy(&window, NSVisualEffectMaterial::HudWindow, None, None)
+                {
+                    log::warn!("Failed to apply macOS vibrancy: {}", err);
+                }
+
+                #[cfg(target_os = "windows")]
+                if let Err(err) = apply_blur(&window, Some((24, 26, 30, 168))) {
+                    log::warn!("Failed to apply Windows blur: {}", err);
+                }
+
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                         // Hide instead of close — agents keep working
