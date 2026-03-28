@@ -9,6 +9,7 @@
  */
 
 import { getContextInjection, getCortexClient } from '@/lib/cortex/client';
+import type { CortexSearchResult } from '@/lib/cortex/types';
 
 interface RecallResult {
   text: string;
@@ -16,12 +17,187 @@ interface RecallResult {
   queryMs: number;
 }
 
+function tokenizeQuery(query: string): string[] {
+  const stopwords = new Set([
+    'what', 'have', 'with', 'from', 'that', 'this', 'your', 'about', 'into', 'does', 'here',
+    'there', 'specific', 'cortex', 'ide', 'code', 'ui', 'them', 'they', 'their', 'when',
+    'where', 'which', 'want', 'just', 'really', 'like', 'look', 'know', 'tell', 'show',
+  ]);
+
+  return Array.from(new Set(
+    query
+      .toLowerCase()
+      .match(/[a-z0-9]+/g) ?? []
+  ))
+    .map((token) => token === 'diffs' ? 'diff' : token)
+    .filter((token) => token.length >= 4)
+    .filter((token) => !stopwords.has(token));
+}
+
+function buildFallbackQueries(userMessage: string): string[] {
+  const tokens = tokenizeQuery(userMessage);
+  const querySet = new Set<string>();
+
+  if (tokens.length > 0) {
+    querySet.add(tokens.join(' '));
+  }
+
+  if (tokens.includes('diff')) {
+    querySet.add(`${tokens.filter((token) => token !== 'diff').join(' ')} diff additions deletions green blue`.trim());
+  }
+
+  if (tokens.includes('preference')) {
+    querySet.add(`${tokens.join(' ')} preference`.trim());
+  }
+
+  querySet.add(userMessage.trim());
+  return Array.from(querySet).filter(Boolean);
+}
+
+function scoreSearchHit(hit: CortexSearchResult, queryTokens: string[]): number {
+  const haystack = `${hit.content}\n${hit.snippet}`.toLowerCase();
+  const keywordMatches = queryTokens.reduce((count, token) => count + (haystack.includes(token) ? 1 : 0), 0);
+  const hasGreenAdd = /green[^\n]*addition|addition[^\n]*green/.test(haystack);
+  const hasBlueDelete = /blue[^\n]*deletion|deletion[^\n]*blue/.test(haystack);
+
+  const classBonus = hit.class === 'preference'
+    ? 1.4
+    : hit.class === 'decision'
+      ? 1.0
+      : hit.class === 'identity'
+        ? 0.4
+        : hit.class === 'rule'
+          ? -0.8
+          : hit.class === 'status'
+            ? -0.4
+            : 0;
+
+  const diffBonus = haystack.includes('diff') ? 0.7 : 0;
+  const colorBonus = (haystack.includes('green') || haystack.includes('blue') || haystack.includes('red')) ? 0.4 : 0;
+  const exactDiffPreferenceBonus = hasGreenAdd && hasBlueDelete ? 3.2 : 0;
+  const partialDiffPreferenceBonus = (hasGreenAdd || hasBlueDelete) ? 0.8 : 0;
+  const memoryBonus = hit.source_file.includes('/memory/') ? 0.2 : 0;
+
+  return hit.score + keywordMatches * 0.45 + classBonus + diffBonus + colorBonus + exactDiffPreferenceBonus + partialDiffPreferenceBonus + memoryBonus;
+}
+
+function summarizeSearchHit(hit: CortexSearchResult, queryTokens: string[]): string | null {
+  const loweredContent = hit.content.toLowerCase();
+  const lines = hit.content
+    .split('\n')
+    .map((line) => line.replace(/^[-*]\s*/, '').trim())
+    .filter(Boolean)
+    .filter((line) => !/session|commit|source|memory_id|line \d+/i.test(line));
+
+  const exactPreferenceLine = lines.find((line) =>
+    (/green.*addition|addition.*green/i.test(line))
+    && (/blue.*deletion|deletion.*blue/i.test(line))
+  );
+  if (exactPreferenceLine) {
+    return exactPreferenceLine;
+  }
+
+  const focusedDiffLine = lines.find((line) => {
+    const lowered = line.toLowerCase();
+    return lowered.includes('diff')
+      && (lowered.includes('green') || lowered.includes('blue') || lowered.includes('red') || lowered.includes('addition') || lowered.includes('deletion'));
+  });
+  if (focusedDiffLine) {
+    return focusedDiffLine;
+  }
+
+  const focusLines = lines.filter((line) => {
+    const lowered = line.toLowerCase();
+    return queryTokens.some((token) => lowered.includes(token))
+      || lowered.includes('diff')
+      || lowered.includes('addition')
+      || lowered.includes('deletion')
+      || lowered.includes('green')
+      || lowered.includes('blue')
+      || lowered.includes('red');
+  });
+
+  if (focusLines.length > 0) {
+    return focusLines.slice(0, 2).join(' ');
+  }
+
+  if (loweredContent.includes('green for additions') || loweredContent.includes('blue for deletions')) {
+    return lines.slice(0, 3).join(' ');
+  }
+
+  if (lines.length === 0) {
+    const snippet = hit.snippet.replace(/\s+/g, ' ').trim();
+    return snippet.length > 20 ? snippet : null;
+  }
+
+  return lines.slice(0, 2).join(' ');
+}
+
+async function fallbackSearchMemories(userMessage: string): Promise<RecallResult | null> {
+  try {
+    const client = getCortexClient();
+    const queryTokens = tokenizeQuery(userMessage);
+    const searchQueries = buildFallbackQueries(userMessage).slice(0, 3);
+    const resultMap = new Map<string, CortexSearchResult>();
+
+    const resultSets = await Promise.allSettled(
+      searchQueries.map((query) => client.search(query, 8)),
+    );
+
+    for (const settled of resultSets) {
+      if (settled.status !== 'fulfilled') continue;
+      for (const result of settled.value) {
+        const key = `${result.memory_id}|${result.source_file}|${result.source_line ?? 0}`;
+        if (!resultMap.has(key)) {
+          resultMap.set(key, result);
+        }
+      }
+    }
+
+    const candidates = Array.from(resultMap.values())
+      .filter((result) => result.score >= 1.05)
+      .filter((result) =>
+        result.class === 'preference'
+        || result.class === 'decision'
+        || result.class === 'identity'
+        || result.source_file.includes('/memory/')
+      )
+      .sort((a, b) => scoreSearchHit(b, queryTokens) - scoreSearchHit(a, queryTokens))
+      .map((result) => summarizeSearchHit(result, queryTokens))
+      .filter((value): value is string => Boolean(value))
+      .slice(0, 3);
+
+    if (candidates.length === 0) return null;
+
+    return {
+      text: [
+        '<cortex-facts>',
+        'Fallback recalled context from Cortex search:',
+        ...candidates.map((item) => `- ${item}`),
+        '</cortex-facts>',
+      ].join('\n'),
+      factCount: candidates.length,
+      queryMs: 0,
+    };
+  } catch (err) {
+    console.error('[memory-recall] Cortex search fallback failed:', err);
+    return null;
+  }
+}
+
 export async function recallMemories(userMessage: string): Promise<RecallResult | null> {
   const start = Date.now();
 
   try {
     const injection = await getContextInjection(userMessage);
-    if (!injection.contextBlock.trim()) return null;
+    if (!injection.contextBlock.trim()) {
+      const fallback = await fallbackSearchMemories(userMessage);
+      if (!fallback) return null;
+      return {
+        ...fallback,
+        queryMs: Date.now() - start,
+      };
+    }
 
     return {
       text: injection.contextBlock,

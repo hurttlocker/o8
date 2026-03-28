@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import '@/lib/ws-runtime-env';
 import WebSocket from 'ws';
 
 const execFileAsync = promisify(execFile);

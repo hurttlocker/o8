@@ -9,8 +9,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { execSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { resolveRepoScopeFromHeaders } from '@/lib/llm/repo-scope';
 
-const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const MAX_FILE_SIZE = 100_000; // 100KB max per file
 const MAX_FILES = 5; // max files per request
 
@@ -21,11 +21,16 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ files: [] });
   }
 
+  const { repoRoot } = await resolveRepoScopeFromHeaders(request.headers);
+  if (!repoRoot) {
+    return NextResponse.json({ files: [] });
+  }
+
   try {
     // Use git ls-files for fast, gitignore-aware search
     const raw = execSync(
       `git ls-files | grep -i "${q.replace(/"/g, '')}" | head -20`,
-      { cwd: REPO_ROOT, encoding: 'utf-8', timeout: 3000 },
+      { cwd: repoRoot, encoding: 'utf-8', timeout: 3000 },
     ).trim();
 
     const files = raw ? raw.split('\n').map(f => ({
@@ -46,13 +51,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'paths array required' }, { status: 400 });
   }
 
+  const { repoRoot } = await resolveRepoScopeFromHeaders(request.headers);
+  if (!repoRoot) {
+    return NextResponse.json({ error: 'No repository is scoped to this chat' }, { status: 400 });
+  }
+
   const paths: string[] = body.paths.slice(0, MAX_FILES);
   const results: { path: string; content: string; truncated: boolean; error?: string }[] = [];
 
   for (const filePath of paths) {
     // Security: prevent path traversal
-    const resolved = join(REPO_ROOT, filePath);
-    const rel = relative(REPO_ROOT, resolved);
+    const resolved = join(repoRoot, filePath);
+    const rel = relative(repoRoot, resolved);
     if (rel.startsWith('..') || rel.startsWith('/')) {
       results.push({ path: filePath, content: '', truncated: false, error: 'Path outside repo' });
       continue;

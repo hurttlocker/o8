@@ -30,9 +30,28 @@ import { WorkspaceSidePanel, type WorkspaceSidePanelRepo, type WorkspaceSidePane
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
+import type {
+  OrchestratorLaneBinding,
+  OrchestratorLaneSnapshot,
+  OrchestratorMissionState,
+  OrchestratorPacket,
+  OrchestratorRuntimeTruth,
+  OrchestratorWorkspaceTarget,
+  WorkspaceLaneState,
+  WorkspaceOrchestrationPacketBadge,
+} from '@/lib/orchestrator/types';
+import {
+  loadOrchestratorMissionState,
+  persistOrchestratorMissionState,
+  readOrchestratorMissionState,
+  reconcileOrchestratorMissionState,
+  subscribeOrchestratorMissionState,
+  updateOrchestratorMissionState,
+} from '@/lib/orchestrator/store';
 import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import { deriveWorkflowStage, describeWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
+
 
 /** Normalize the flat API response into the shape SetupWizard expects. */
 function normalizeDetection(raw: Record<string, unknown>): DetectionResult {
@@ -101,6 +120,26 @@ function compactSessionTargetText(value: string | null | undefined, max = 34) {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
+function sameWorkspaceLaneState(left: WorkspaceLaneState | null | undefined, right: WorkspaceLaneState | null | undefined) {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.tileId === right.tileId
+    && left.tabId === right.tabId
+    && left.kind === right.kind
+    && left.title === right.title
+    && left.subtitle === right.subtitle
+    && left.repoPath === right.repoPath
+    && left.branch === right.branch
+    && left.runtime === right.runtime
+    && left.sessionKey === right.sessionKey
+    && left.status === right.status
+    && left.transcriptState === right.transcriptState
+    && left.isAdHoc === right.isAdHoc
+    && left.packet?.packetId === right.packet?.packetId
+    && left.packet?.status === right.packet?.status
+    && left.packet?.runtime === right.packet?.runtime;
+}
+
 function workspaceSessionRuntimeLabel(session: MobileInboxSnapshot['sessions'][number]) {
   if (session.runtime === 'claude-code') return 'Claude Code';
   if (session.runtime === 'codex') return 'Codex';
@@ -111,6 +150,34 @@ function workspaceSessionRuntimeLabel(session: MobileInboxSnapshot['sessions'][n
 function shortRepoName(repo?: string | null) {
   if (!repo) return null;
   return repo.split('/').pop() ?? repo;
+}
+
+function buildOrchestrationPacketBadge(packet: OrchestratorPacket): WorkspaceOrchestrationPacketBadge {
+  return {
+    packetId: packet.id,
+    referenceLabel: packet.referenceLabel,
+    title: packet.title,
+    status: packet.status,
+    runtime: packet.runtime,
+    branchTarget: packet.branchTarget,
+  };
+}
+
+function buildOrchestrationPacketDraft(
+  mission: OrchestratorMissionState,
+  packet: OrchestratorPacket,
+  targetLabel?: string | null,
+) {
+  return [
+    `Mission: ${mission.summary || mission.prompt || packet.title}`,
+    `Packet ID: ${packet.referenceLabel}`,
+    `Packet: ${packet.title}`,
+    packet.summary ? `Summary: ${packet.summary}` : null,
+    targetLabel ? `Workspace target: ${targetLabel}` : null,
+    packet.branchTarget ? `Branch / worktree target: ${packet.branchTarget}` : null,
+    packet.dependencyLabels.length > 0 ? `Dependencies: ${packet.dependencyLabels.join(', ')}` : null,
+    'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',
+  ].filter((value): value is string => Boolean(value)).join('\n');
 }
 
 interface WorkspaceChatTargetOption {
@@ -248,6 +315,16 @@ function collectOpenTerminalRepoPaths(node: TileLayout['root'], excludeTileId?: 
   ];
 }
 
+function collectTerminalLeafIds(node: TileLayout['root']): string[] {
+  if (node.type === 'leaf') {
+    return node.content.kind === 'terminal' ? [node.id] : [];
+  }
+  return [
+    ...collectTerminalLeafIds(node.children[0]),
+    ...collectTerminalLeafIds(node.children[1]),
+  ];
+}
+
 function findCanvasLeafByRepoPath(node: TileLayout['root'], repoPath: string): TileLeafNode | null {
   if (node.type === 'leaf') {
     return node.content.kind === 'canvas' && node.content.repoPath === repoPath ? node : null;
@@ -357,7 +434,7 @@ function paletteSessionDetail(agent: PaletteAgentSummary) {
   const branchLabel = compactSessionTargetText(agent.branch, 24);
   const statusLabel = paletteWorkflowLabel(agent);
   const detailParts = [taskSummary, branchLabel, statusLabel].filter((value): value is string => Boolean(value));
-  return detailParts.join(' · ') || 'Open live session';
+  return detailParts.join(' · ') || 'Open live lane';
 }
 
 function repoReadinessDetail(entry: RepoRegistryEntry) {
@@ -535,6 +612,7 @@ import {
   createTileContent,
   deserializeTileLayout,
   findLeafByContentKind,
+  findSiblingLeaf,
   findTile,
   getFirstLeaf,
   replaceTileContent,
@@ -548,6 +626,7 @@ import {
 import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
 
 const TILE_LAYOUT_STORAGE_KEY = 'cortex-ide:dashboard-tiles:v1';
+const ACTIVE_TILE_STORAGE_KEY = 'cortex-ide:dashboard-active-tile:v1';
 const DEFAULT_LEFT_PANEL_WIDTH = 332;
 const DEFAULT_RIGHT_PANEL_WIDTH = 468;
 const MIN_RIGHT_PANEL_WIDTH = 360;
@@ -576,8 +655,10 @@ function DashboardInner() {
   const termCreatedRef = useRef(false);
   const terminalRef = useRef<TerminalHandle>(null);
   const workspaceTerminalHandlesRef = useRef<Map<string, TerminalTabHandle>>(new Map());
+  const pendingWorkspaceTerminalResolversRef = useRef<Map<string, (handle: TerminalTabHandle) => void>>(new Map());
   const [workspaceChatSessionByTileId, setWorkspaceChatSessionByTileId] = useState<Record<string, string | undefined>>({});
   const [workspaceChatSessionsByTileId, setWorkspaceChatSessionsByTileId] = useState<Record<string, MobileInboxSnapshot['sessions']>>({});
+  const [workspaceLaneByTileId, setWorkspaceLaneByTileId] = useState<Record<string, WorkspaceLaneState | null>>({});
   const [workspaceTerminalResetNonceByTileId, setWorkspaceTerminalResetNonceByTileId] = useState<Record<string, number>>({});
   const contextualPanelHandlesRef = useRef<Map<string, ContextualPanelHandle>>(new Map());
   const canvasStateByTileIdRef = useRef<Record<string, CanvasTileState>>({});
@@ -605,6 +686,7 @@ function DashboardInner() {
   const [workspaceSidePanelActivationKey, setWorkspaceSidePanelActivationKey] = useState(0);
   const [workspaceChatTargetKeyByRepoPath, setWorkspaceChatTargetKeyByRepoPath] = useState<Record<string, string>>({});
   const [thoughtsOpen, setThoughtsOpen] = useState(false);
+  const [thoughtsMissionState, setThoughtsMissionState] = useState<OrchestratorMissionState>(() => readOrchestratorMissionState());
   const [wsStatus, setWsStatus] = useState<WsConnectionState>('connecting');
   const [workspacePreviews, setWorkspacePreviews] = useState<DetectedLocalhostPreview[]>([]);
   const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
@@ -612,6 +694,44 @@ function DashboardInner() {
   const [tileLayoutHydrated, setTileLayoutHydrated] = useState(false);
   const lastWorkspacePanelViewRef = useRef<'diff' | 'review'>('diff');
   const lastMarkedWorkspaceReadRef = useRef<string>('');
+  const thoughtsPersistTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return subscribeOrchestratorMissionState(setThoughtsMissionState);
+  }, []);
+
+  useEffect(() => {
+    void loadOrchestratorMissionState().then(setThoughtsMissionState);
+    const handleFocus = () => {
+      void loadOrchestratorMissionState().then(setThoughtsMissionState);
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, []);
+
+  useEffect(() => () => {
+    if (thoughtsPersistTimerRef.current !== null) {
+      window.clearTimeout(thoughtsPersistTimerRef.current);
+    }
+  }, []);
+
+  const scheduleThoughtsMissionPersist = useCallback((next: OrchestratorMissionState) => {
+    if (thoughtsPersistTimerRef.current !== null) {
+      window.clearTimeout(thoughtsPersistTimerRef.current);
+    }
+    thoughtsPersistTimerRef.current = window.setTimeout(() => {
+      thoughtsPersistTimerRef.current = null;
+      void persistOrchestratorMissionState(next);
+    }, 180);
+  }, []);
+
+  const handleThoughtsMissionStateChange = useCallback((
+    next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState),
+  ) => {
+    const updated = updateOrchestratorMissionState(next);
+    setThoughtsMissionState(updated);
+    scheduleThoughtsMissionPersist(updated);
+  }, [scheduleThoughtsMissionPersist]);
 
   // ── Setup wizard state ──
   const [setupWizardOpen, setSetupWizardOpen] = useState(false);
@@ -717,6 +837,20 @@ function DashboardInner() {
     }
     return entries;
   }, [allRepoWorktrees, globalRepoEntries]);
+  const orchestratorWorkspaceTargets = useMemo<OrchestratorWorkspaceTarget[]>(
+    () => workspaceScopeEntries.map((entry) => ({
+      id: entry.localPath,
+      label: entry.isWorktree
+        ? `${entry.name} · ${entry.branch ?? 'worktree'}`
+        : entry.name,
+      repoName: entry.name,
+      localPath: entry.localPath,
+      branch: entry.branch ?? null,
+      isWorktree: entry.isWorktree ?? false,
+      worktreeStatus: entry.worktreeStatus ?? null,
+    })),
+    [workspaceScopeEntries],
+  );
   const workspaceTerminalPreferredRepo = useMemo(() => {
     const activeWorkspaceRepo = activeWorkspace
       ? globalRepoEntries.find((repo) => (
@@ -1050,6 +1184,15 @@ function DashboardInner() {
       }
       return next;
     }, {}));
+    setWorkspaceLaneByTileId((current) => Object.entries(current).reduce<Record<string, WorkspaceLaneState | null>>((next, [tileId, lane]) => {
+      if (affectedTerminalTileIds.has(tileId)) {
+        return next;
+      }
+      if (!lane || !pathBelongsToRepoScope(lane.repoPath, removedRepoPath)) {
+        next[tileId] = lane;
+      }
+      return next;
+    }, {}));
 
     if (activeSessionKey && removedSessionKeys.has(activeSessionKey)) {
       setActiveSessionKey(undefined);
@@ -1309,9 +1452,15 @@ function DashboardInner() {
   const registerWorkspaceTerminalHandle = useCallback((tileId: string, handle: TerminalTabHandle | null) => {
     if (handle) {
       workspaceTerminalHandlesRef.current.set(tileId, handle);
+      const resolver = pendingWorkspaceTerminalResolversRef.current.get(tileId);
+      if (resolver) {
+        pendingWorkspaceTerminalResolversRef.current.delete(tileId);
+        resolver(handle);
+      }
       return;
     }
     workspaceTerminalHandlesRef.current.delete(tileId);
+    pendingWorkspaceTerminalResolversRef.current.delete(tileId);
   }, []);
 
   const registerContextualPanelHandle = useCallback((tileId: string, handle: ContextualPanelHandle | null) => {
@@ -1432,6 +1581,7 @@ function DashboardInner() {
   }, [findPreferredWorkspaceTerminalTileId]);
 
   const activeWorkspaceChatSessionKey = useMemo(() => {
+    const openTerminalTileIds = new Set(collectTerminalLeafIds(tileLayout.root));
     if (activeTileId && workspaceChatSessionByTileId[activeTileId]) {
       return workspaceChatSessionByTileId[activeTileId];
     }
@@ -1442,8 +1592,25 @@ function DashboardInner() {
         return workspaceChatSessionByTileId[matchingTerminalLeaf.id];
       }
     }
-    return Object.values(workspaceChatSessionByTileId).find((value): value is string => Boolean(value)) ?? undefined;
+    return Object.entries(workspaceChatSessionByTileId)
+      .find(([tileId, value]) => openTerminalTileIds.has(tileId) && Boolean(value))?.[1];
   }, [activeTileId, tileLayout.root, workspaceChatSessionByTileId, workspaceTerminalPreferredRepo?.localPath]);
+  const activeWorkspaceLane = useMemo(() => {
+    const openTerminalTileIds = new Set(collectTerminalLeafIds(tileLayout.root));
+    if (activeTileId && workspaceLaneByTileId[activeTileId]) {
+      return workspaceLaneByTileId[activeTileId];
+    }
+    const preferredRepoPath = workspaceTerminalPreferredRepo?.localPath ?? null;
+    if (preferredRepoPath) {
+      const matchingTerminalLeaf = findTerminalLeafByRepoPath(tileLayout.root, preferredRepoPath);
+      if (matchingTerminalLeaf && workspaceLaneByTileId[matchingTerminalLeaf.id]) {
+        return workspaceLaneByTileId[matchingTerminalLeaf.id];
+      }
+    }
+    const fallback = Object.entries(workspaceLaneByTileId)
+      .find(([tileId, lane]) => openTerminalTileIds.has(tileId) && Boolean(lane))?.[1] ?? null;
+    return fallback;
+  }, [activeTileId, tileLayout.root, workspaceLaneByTileId, workspaceTerminalPreferredRepo?.localPath]);
 
   const workspaceChatSessions = useMemo(() => {
     if (activeTileId && workspaceChatSessionsByTileId[activeTileId]?.length) {
@@ -1458,6 +1625,16 @@ function DashboardInner() {
     }
     return Object.values(workspaceChatSessionsByTileId).find((sessions) => sessions.length > 0) ?? [];
   }, [activeTileId, tileLayout.root, workspaceChatSessionsByTileId, workspaceTerminalPreferredRepo?.localPath]);
+  const ideWorkspaceSessionsForSidebar = useMemo(() => {
+    const deduped = new Map<string, MobileInboxSnapshot['sessions'][number]>();
+    for (const sessions of Object.values(workspaceChatSessionsByTileId)) {
+      for (const session of sessions) {
+        if (!session?.sessionKey) continue;
+        deduped.set(session.sessionKey, session);
+      }
+    }
+    return [...deduped.values()];
+  }, [workspaceChatSessionsByTileId]);
   const workspaceChatTargets = useMemo(
     () => buildWorkspaceChatTargetOptions(workspaceChatSessions),
     [workspaceChatSessions],
@@ -1481,7 +1658,7 @@ function DashboardInner() {
     [activeWorkspaceChatTargetKey, workspaceChatTargets],
   );
   const workspaceChatTargetLabel = workspaceChatTargetOption?.label ?? null;
-  const showEmptyWorkspaceChatRail = globalRepoEntries.length === 0;
+  const showEmptyWorkspaceChatRail = globalRepoEntries.length === 0 && !activeWorkspaceLane;
   const activeSurfaceRepoPath = useMemo(() => {
     if (!activeTileId) return null;
     const activeTile = findTile(tileLayout.root, activeTileId);
@@ -1490,6 +1667,31 @@ function DashboardInner() {
     }
     return null;
   }, [activeTileId, tileLayout.root]);
+
+  useEffect(() => {
+    const openTerminalTileIds = new Set(collectTerminalLeafIds(tileLayout.root));
+    setWorkspaceChatSessionByTileId((current) => {
+      const next = Object.entries(current).reduce<Record<string, string | undefined>>((result, [tileId, value]) => {
+        if (openTerminalTileIds.has(tileId)) result[tileId] = value;
+        return result;
+      }, {});
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+    setWorkspaceChatSessionsByTileId((current) => {
+      const next = Object.entries(current).reduce<Record<string, MobileInboxSnapshot['sessions']>>((result, [tileId, value]) => {
+        if (openTerminalTileIds.has(tileId)) result[tileId] = value;
+        return result;
+      }, {});
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+    setWorkspaceLaneByTileId((current) => {
+      const next = Object.entries(current).reduce<Record<string, WorkspaceLaneState | null>>((result, [tileId, value]) => {
+        if (openTerminalTileIds.has(tileId)) result[tileId] = value;
+        return result;
+      }, {});
+      return Object.keys(next).length === Object.keys(current).length ? current : next;
+    });
+  }, [tileLayout.root]);
 
   useEffect(() => {
     const preferredRepoPath = workspaceTerminalPreferredRepo?.localPath ?? null;
@@ -1787,8 +1989,12 @@ function DashboardInner() {
     const restoreTimer = window.setTimeout(() => {
       const restored = deserializeTileLayout(window.localStorage.getItem(TILE_LAYOUT_STORAGE_KEY));
       const nextLayout = restored ?? createDefaultTileLayout();
+      const storedActiveTileId = window.localStorage.getItem(ACTIVE_TILE_STORAGE_KEY);
+      const restoredActiveTileId = storedActiveTileId && findTile(nextLayout.root, storedActiveTileId)
+        ? storedActiveTileId
+        : getFirstLeaf(nextLayout.root).id;
       setTileLayout(nextLayout);
-      setActiveTileId(getFirstLeaf(nextLayout.root).id);
+      setActiveTileId(restoredActiveTileId);
       setTileLayoutHydrated(true);
     }, 0);
 
@@ -1799,6 +2005,12 @@ function DashboardInner() {
     if (!tileLayoutHydrated || typeof window === 'undefined') return;
     window.localStorage.setItem(TILE_LAYOUT_STORAGE_KEY, serializeTileLayout(tileLayout));
   }, [tileLayout, tileLayoutHydrated]);
+
+  useEffect(() => {
+    if (!tileLayoutHydrated || typeof window === 'undefined' || !activeTileId) return;
+    if (!findTile(tileLayout.root, activeTileId)) return;
+    window.localStorage.setItem(ACTIVE_TILE_STORAGE_KEY, activeTileId);
+  }, [activeTileId, tileLayout.root, tileLayoutHydrated]);
 
   const lastPersistedIdeSurfaceSignatureRef = useRef('');
   useEffect(() => {
@@ -1854,8 +2066,9 @@ function DashboardInner() {
         return next;
       });
     }
-    const nextActive = getFirstLeaf(result.root).id;
     if (activeTileId === tileId || (activeTileId && !findTile(result.root, activeTileId))) {
+      const sibling = findSiblingLeaf(tileLayout.root, tileId);
+      const nextActive = (sibling && findTile(result.root, sibling.id)) ? sibling.id : getFirstLeaf(result.root).id;
       setActiveTileId(nextActive);
     }
   }, [activeTileId, tileLayout]);
@@ -1980,17 +2193,21 @@ function DashboardInner() {
     const preferredTileId = options?.preferredTileId ?? null;
     const initial = getPreferredWorkspaceTerminalTarget(repoPath, preferredTileId);
     if (initial) {
-      if (repoPath) {
-        setTerminalTileRepoScope(initial.tileId, repoPath);
-      }
       setActiveTileId(initial.tileId);
       return initial;
     }
 
+    const fallbackExisting = workspaceTerminalHandlesRef.current.entries().next().value as [string, TerminalTabHandle] | undefined;
+    if (fallbackExisting) {
+      const [tileId, handle] = fallbackExisting;
+      setActiveTileId(tileId);
+      return { tileId, handle };
+    }
+
     const ensuredTileId = ensureWorkspaceTerminalTile(repoPath, preferredTileId);
 
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 50));
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 100));
       const target = getPreferredWorkspaceTerminalTarget(repoPath, (ensuredTileId ?? preferredTileId) ?? undefined);
       if (target) {
         if (repoPath) {
@@ -2001,8 +2218,181 @@ function DashboardInner() {
       }
     }
 
-    return null;
+    if (ensuredTileId) {
+      const awaitedHandle = await new Promise<TerminalTabHandle | null>((resolve) => {
+        const timeoutId = window.setTimeout(() => {
+          pendingWorkspaceTerminalResolversRef.current.delete(ensuredTileId);
+          resolve(null);
+        }, 12_000);
+        pendingWorkspaceTerminalResolversRef.current.set(ensuredTileId, (handle) => {
+          window.clearTimeout(timeoutId);
+          resolve(handle);
+        });
+      });
+
+      if (awaitedHandle) {
+        if (repoPath) {
+          setTerminalTileRepoScope(ensuredTileId, repoPath);
+        }
+        setActiveTileId(ensuredTileId);
+        return { tileId: ensuredTileId, handle: awaitedHandle };
+      }
+    }
+
+    throw new Error('Unable to attach the packet to a workspace lane. The workspace surface did not become ready in time.');
   }, [ensureWorkspaceTerminalTile, getPreferredWorkspaceTerminalTarget, setTerminalTileRepoScope]);
+
+  const collectOrchestratorLaneSnapshots = useCallback((): OrchestratorLaneSnapshot[] => (
+    Array.from(workspaceTerminalHandlesRef.current.values()).flatMap((handle) => handle.getChatTabSnapshots())
+  ), []);
+
+  const areWorkspaceTerminalRestoresSettled = useCallback(() => {
+    const terminalTileIds = collectTerminalLeafIds(tileLayout.root);
+    if (terminalTileIds.length === 0) return false;
+    return terminalTileIds.every((tileId) => {
+      const handle = workspaceTerminalHandlesRef.current.get(tileId);
+      return handle?.isRestoreSettled() ?? false;
+    });
+  }, [tileLayout.root]);
+
+  const focusOrchestrationPacketLane = useCallback((packet: OrchestratorPacket) => {
+    if (!packet.lane) return;
+    const handle = workspaceTerminalHandlesRef.current.get(packet.lane.tileId);
+    if (!handle) return;
+    setActiveTileId(packet.lane.tileId);
+    handle.focusTab(packet.lane.tabId);
+  }, []);
+
+  const launchOrchestrationPacket = useCallback(async (packet: OrchestratorPacket): Promise<OrchestratorLaneBinding | null> => {
+    if (packet.lane) {
+      focusOrchestrationPacketLane(packet);
+      return packet.lane;
+    }
+
+    let targetScope = workspaceScopeEntries.find((entry) => entry.localPath === packet.workspaceTargetPath)
+      ?? workspaceTerminalPreferredRepo
+      ?? workspaceScopeEntries[0]
+      ?? null;
+    const rootRepo = targetScope?.isWorktree
+      ? globalRepoEntries.find((repo) => targetScope?.registryRepoId ? repo.id === targetScope.registryRepoId : targetScope.localPath.startsWith(`${repo.localPath}/`)) ?? null
+      : globalRepoEntries.find((repo) => repo.localPath === targetScope?.localPath) ?? null;
+
+    if (rootRepo) {
+      const currentBranch = targetScope?.branch ?? rootRepo.readiness?.currentBranch ?? rootRepo.defaultBranch ?? 'main';
+      const requestedBranch = packet.branchTarget.trim();
+      if (targetScope?.isWorktree && (!requestedBranch || requestedBranch === targetScope.branch)) {
+        // Existing targeted worktree already matches the packet target.
+      } else {
+      const existingWorktree = (allRepoWorktrees[rootRepo.localPath] ?? []).find((worktree) => worktree.branch === requestedBranch);
+      if (existingWorktree) {
+        targetScope = {
+          registryRepoId: rootRepo.id,
+          name: rootRepo.name,
+          localPath: existingWorktree.path,
+          branch: existingWorktree.branch,
+          readiness: null,
+          remoteUrl: rootRepo.remoteUrl ?? undefined,
+          isWorktree: true,
+          worktreeStatus: existingWorktree.status,
+        };
+      } else if (requestedBranch && requestedBranch !== currentBranch) {
+        const response = await fetch('/api/worktrees', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            repo: rootRepo.localPath,
+            agentType: packet.runtime,
+            taskName: `${packet.referenceLabel}-${packet.title}`,
+            branchName: requestedBranch,
+            baseBranch: currentBranch,
+            managed: packet.runtime === 'claude-code',
+            skipSetup: true,
+          }),
+        });
+        const payload = await response.json().catch(() => ({})) as { worktree?: WorktreeInfo; error?: string };
+        if (!response.ok || !payload.worktree) {
+          throw new Error(payload.error ?? 'Unable to create orchestrator worktree lane.');
+        }
+        setAllRepoWorktrees((current) => {
+          const existing = current[rootRepo.localPath] ?? [];
+          return {
+            ...current,
+            [rootRepo.localPath]: [
+              ...existing.filter((worktree) => worktree.id !== payload.worktree!.id),
+              payload.worktree!,
+            ],
+          };
+        });
+        targetScope = {
+          registryRepoId: rootRepo.id,
+          name: rootRepo.name,
+          localPath: payload.worktree.path,
+          branch: payload.worktree.branch,
+          readiness: null,
+          remoteUrl: rootRepo.remoteUrl ?? undefined,
+          isWorktree: true,
+          worktreeStatus: payload.worktree.status,
+        };
+      }
+      }
+    }
+
+    const repoPath = targetScope?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null;
+    const workspaceTarget = await waitForWorkspaceTerminalTarget({ repoPath });
+    if (!workspaceTarget) {
+      return null;
+    }
+
+    const tabId = workspaceTarget.handle.openCliChatSession({
+      runtime: packet.runtime,
+      repo: targetScope ? {
+        name: targetScope.name,
+        localPath: targetScope.localPath,
+        branch: targetScope.branch ?? 'main',
+        readiness: targetScope.readiness ?? null,
+        remoteUrl: targetScope.remoteUrl ?? undefined,
+        registryRepoId: targetScope.registryRepoId,
+        isWorktree: targetScope.isWorktree ?? false,
+        worktreeStatus: targetScope.worktreeStatus ?? null,
+      } : undefined,
+      initialText: buildOrchestrationPacketDraft(
+        thoughtsMissionState,
+        packet,
+        targetScope?.name ?? targetScope?.localPath ?? null,
+      ),
+      autoSend: true,
+      createNew: true,
+      label: packet.title,
+      orchestrationPacket: buildOrchestrationPacketBadge({
+        ...packet,
+        status: 'running',
+      }),
+    });
+
+    setActiveTileId(workspaceTarget.tileId);
+    return {
+      tileId: workspaceTarget.tileId,
+      tabId,
+      repoPath,
+      runtime: packet.runtime,
+    };
+  }, [
+    allRepoWorktrees,
+    focusOrchestrationPacketLane,
+    globalRepoEntries,
+    thoughtsMissionState,
+    waitForWorkspaceTerminalTarget,
+    workspaceScopeEntries,
+    workspaceTerminalPreferredRepo,
+  ]);
+
+  useEffect(() => {
+    thoughtsMissionState.packets.forEach((packet) => {
+      if (!packet.lane) return;
+      const handle = workspaceTerminalHandlesRef.current.get(packet.lane.tileId);
+      handle?.setOrchestrationPacket(packet.lane.tabId, buildOrchestrationPacketBadge(packet));
+    });
+  }, [thoughtsMissionState.packets]);
 
   const toggleContextualPanelTile = useCallback(() => {
     const existingLeaf = findLeafByContentKind(tileLayout.root, 'contextual-panel');
@@ -2777,11 +3167,24 @@ function DashboardInner() {
 
   const parsedAgents = useMemo(() => {
     try {
-      return JSON.parse(agentsJson) as Parameters<typeof ThoughtsCard>[0]['agents'];
+      return JSON.parse(agentsJson) as NonNullable<Parameters<typeof ThoughtsCard>[0]['agents']>;
     } catch {
-      return [] as Parameters<typeof ThoughtsCard>[0]['agents'];
+      return [] as NonNullable<Parameters<typeof ThoughtsCard>[0]['agents']>;
     }
   }, [agentsJson]);
+  const orchestratorRuntimeTruth = useMemo<OrchestratorRuntimeTruth[]>(
+    () => parsedAgents
+      .filter((agent) => agent.sessionKey && (agent.runtime === 'codex' || agent.runtime === 'claude-code'))
+      .map((agent) => ({
+        sessionKey: agent.sessionKey!,
+        runtime: agent.runtime === 'claude-code' ? 'claude-code' : 'codex',
+        status: agent.status ?? 'idle',
+        currentTask: agent.currentTask ?? null,
+        lastEventAt: agent.lastEventAt ?? null,
+        workflowStageLabel: null,
+      })),
+    [parsedAgents],
+  );
 
   const paletteAgents = useMemo(() => parsedAgents as unknown as PaletteAgentSummary[], [parsedAgents]);
   const selectedSessionAgent = useMemo(
@@ -2810,6 +3213,39 @@ function DashboardInner() {
       return Boolean(repoSlug && agent.pr?.number && agent.pr.state !== 'closed');
     }) ?? null;
   }, [globalRepo, scopedRepoAgents, selectedSessionAgent]);
+  useEffect(() => {
+    if (!tileLayoutHydrated) return;
+    if (workspaceTerminalHandlesRef.current.size === 0) return;
+    if (!areWorkspaceTerminalRestoresSettled()) return;
+    const reconciled = reconcileOrchestratorMissionState(thoughtsMissionState, {
+      laneSnapshots: collectOrchestratorLaneSnapshots(),
+      runtimeTruth: orchestratorRuntimeTruth,
+    });
+    const changed = JSON.stringify({
+      prompt: reconciled.prompt,
+      summary: reconciled.summary,
+      packets: reconciled.packets,
+      updatedAt: reconciled.updatedAt,
+    }) !== JSON.stringify({
+      prompt: thoughtsMissionState.prompt,
+      summary: thoughtsMissionState.summary,
+      packets: thoughtsMissionState.packets,
+      updatedAt: thoughtsMissionState.updatedAt,
+    });
+    if (changed) {
+      const updated = updateOrchestratorMissionState(reconciled);
+      setThoughtsMissionState(updated);
+      scheduleThoughtsMissionPersist(updated);
+    }
+  }, [
+    areWorkspaceTerminalRestoresSettled,
+    collectOrchestratorLaneSnapshots,
+    orchestratorRuntimeTruth,
+    scheduleThoughtsMissionPersist,
+    thoughtsMissionState,
+    tileLayoutHydrated,
+    workspaceChatSessionsByTileId,
+  ]);
   const currentIssueTarget = useMemo(() => {
     const seen = new Set<string>();
     const candidates = [selectedSessionAgent, ...scopedRepoAgents].filter((agent): agent is PaletteAgentSummary => {
@@ -3799,6 +4235,13 @@ function DashboardInner() {
                 return { ...current, [tileId]: sessions };
               });
             }}
+            onActiveLaneChange={(lane) => {
+              setWorkspaceLaneByTileId((current) => (
+                sameWorkspaceLaneState(current[tileId], lane)
+                  ? current
+                  : { ...current, [tileId]: lane }
+              ));
+            }}
             onRepoScopeChange={(repoPath) => setTerminalTileRepoScope(tileId, repoPath)}
             onActiveRepoContextChange={(repo) => {
               if (activeTileId !== tileId) return;
@@ -3910,6 +4353,11 @@ function DashboardInner() {
           onClose={() => handleCloseTile(tileId)}
           agents={parsedAgents}
           draftInjection={!thoughtsOpen ? thoughtsDraftInjection : null}
+          missionState={thoughtsMissionState}
+          workspaceTargets={orchestratorWorkspaceTargets}
+          onMissionStateChange={handleThoughtsMissionStateChange}
+          onLaunchPacket={launchOrchestrationPacket}
+          onFocusPacket={focusOrchestrationPacketLane}
         />
       ),
     },
@@ -3953,6 +4401,7 @@ function DashboardInner() {
     handleSelectPreviewTile,
     handleOpenCI,
     handleOpenGitLog,
+    handleThoughtsMissionStateChange,
     openWorkspaceSidePanel,
     parsedAgents,
     registerContextualPanelHandle,
@@ -3969,8 +4418,12 @@ function DashboardInner() {
     termWsConnected,
     tileLayout.root,
     thoughtsDraftInjection,
+    thoughtsMissionState,
     thoughtsOpen,
     activeTileId,
+    orchestratorWorkspaceTargets,
+    launchOrchestrationPacket,
+    focusOrchestrationPacketLane,
     workspaceTerminalResetNonceByTileId,
     workspacePreviews,
   ]);
@@ -4147,6 +4600,8 @@ function DashboardInner() {
           onAgentsUpdate={handleAgentsUpdate}
           onAgentKill={sendAgentKill}
           lifecycleEvents={lifecycleEvents}
+          orchestratorPackets={thoughtsMissionState.packets}
+          ideWorkspaceSessions={ideWorkspaceSessionsForSidebar}
         />
       </div>}
 
@@ -4311,21 +4766,23 @@ function DashboardInner() {
                 background: 'var(--t-bg)',
               }}
             >
-              <div
-                style={{
-                  maxWidth: 320,
-                  textAlign: 'center',
-                  color: 'var(--t-text-muted)',
-                  fontSize: 13,
-                  lineHeight: 1.6,
-                }}
-              >
-                No workspace chat is available because no repository is registered in Cortex. Add a repo first, then launch or restore a workspace session.
+                <div
+                  style={{
+                    maxWidth: 320,
+                    textAlign: 'center',
+                    color: 'var(--t-text-muted)',
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                  }}
+                >
+                No lane is available because no repository is registered in Cortex. Add a repo first, then launch or restore an orchestrated or ad hoc workspace lane.
+                </div>
               </div>
-            </div>
           ) : (
             <AgentPanelChat
               workspaceSessions={workspaceChatSessions}
+              workspaceLane={activeWorkspaceLane}
+              orchestratorPackets={thoughtsMissionState.packets}
               externalSessionKey={activeWorkspaceChatTargetKey ?? activeSessionKey}
               onSelectSession={handleSelectSession}
               draftInjection={desktopDraftInjection}
@@ -4395,6 +4852,11 @@ function DashboardInner() {
         onClose={() => setThoughtsOpen(false)}
         agents={parsedAgents}
         draftInjection={thoughtsOpen ? thoughtsDraftInjection : null}
+        missionState={thoughtsMissionState}
+        workspaceTargets={orchestratorWorkspaceTargets}
+        onMissionStateChange={handleThoughtsMissionStateChange}
+        onLaunchPacket={launchOrchestrationPacket}
+        onFocusPacket={focusOrchestrationPacketLane}
       />
 
       {/* ── First Launch Setup Wizard ── */}

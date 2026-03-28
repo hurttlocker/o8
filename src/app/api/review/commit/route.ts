@@ -1,11 +1,21 @@
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
+import { homedir } from 'node:os';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
+
+function resolveRoot(workspace?: string | null) {
+  if (!workspace) return REPO_ROOT;
+  return workspace.startsWith('~')
+    ? workspace.replace('~', homedir())
+    : workspace;
+}
+
 export async function POST(request: Request) {
-  let body: { message?: string };
+  let body: { message?: string; workspace?: string };
   try {
     body = await request.json();
   } catch {
@@ -13,6 +23,7 @@ export async function POST(request: Request) {
   }
 
   const message = body.message?.trim();
+  const root = resolveRoot(body.workspace);
   if (!message) {
     return NextResponse.json({ error: 'Commit message is required' }, { status: 400 });
   }
@@ -27,6 +38,7 @@ export async function POST(request: Request) {
     const status = execSync('git status --porcelain', {
       encoding: 'utf-8',
       timeout: 5000,
+      cwd: root,
     }).trim();
 
     if (!status) {
@@ -34,18 +46,20 @@ export async function POST(request: Request) {
     }
 
     // Stage all changes
-    execSync('git add -A', { encoding: 'utf-8', timeout: 10000 });
+    execSync('git add -A', { encoding: 'utf-8', timeout: 10000, cwd: root });
 
     // Commit with the provided message (use --message flag with array form to avoid injection)
     execSync(`git commit -m ${JSON.stringify(message)}`, {
       encoding: 'utf-8',
       timeout: 15000,
+      cwd: root,
     });
 
     // Get the commit hash
     const hash = execSync('git rev-parse --short HEAD', {
       encoding: 'utf-8',
       timeout: 5000,
+      cwd: root,
     }).trim();
 
     return NextResponse.json({ ok: true, hash, message });

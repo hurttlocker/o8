@@ -1,12 +1,16 @@
 export const dynamic = 'force-dynamic';
 
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { requirePanelAuth } from '@/lib/panel/auth';
 
 const execFileAsync = promisify(execFile);
 
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
+  const denied = requirePanelAuth(request);
+  if (denied) return denied;
+
   const { searchParams } = new URL(request.url);
   const repo = searchParams.get('repo');
 
@@ -22,7 +26,7 @@ export async function GET(request: Request) {
       '--jq', '.[0:5] | map({name: .description, environment: .environment, sha: .sha, createdAt: .created_at, state: (if .statuses_url then "pending" else "unknown" end)})',
     ], { timeout: 15_000, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' } });
 
-    let deployments = JSON.parse(stdout || '[]');
+    const deployments = JSON.parse(stdout || '[]');
 
     // Enrich with actual status for each deployment
     const enriched = await Promise.all(

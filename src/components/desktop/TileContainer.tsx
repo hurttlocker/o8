@@ -237,6 +237,10 @@ function TileLeafView({
 
   return (
     <div
+      data-testid={`tile-leaf-${node.id}`}
+      data-tile-id={node.id}
+      data-tile-kind={node.content.kind}
+      data-tile-active={active ? 'true' : 'false'}
       onMouseDown={() => onActivateTile(node.id)}
       style={{
         display: 'flex',
@@ -247,7 +251,7 @@ function TileLeafView({
         minWidth: 0,
         minHeight: 0,
         overflow: 'hidden',
-        borderWidth: active ? 1 : 0,
+        borderWidth: 1,
         borderStyle: 'solid',
         borderColor: active ? 'rgba(37,99,235,0.18)' : 'transparent',
         backgroundColor: 'var(--t-panel)',

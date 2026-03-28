@@ -8,17 +8,22 @@
 import { NextResponse } from 'next/server';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { homedir } from 'node:os';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const CORTEX_BIN = process.env.CORTEX_BINARY || join(process.env.HOME || require('os').homedir(), 'bin', 'cortex');
+const CORTEX_BIN = process.env.CORTEX_BINARY || join(process.env.HOME || homedir(), 'bin', 'cortex');
 
 const EXACT_COMMANDS = new Map<string, string[]>([
   ['cleanup', ['cleanup']],
   ['lifecycle run', ['lifecycle', 'run']],
   ['conflicts --limit 10', ['conflicts', '--limit', '10']],
   ['conflicts --json --limit 20', ['conflicts', '--json', '--limit', '20']],
+  ['integration openclaw --json', ['integration', 'openclaw', '--json']],
+  ['integration openclaw enable', ['integration', 'openclaw', 'enable']],
+  ['integration openclaw disable', ['integration', 'openclaw', 'disable']],
+  ['integration openclaw auto', ['integration', 'openclaw', 'auto']],
   ['optimize', ['optimize']],
   ['stats', ['stats']],
   ['doctor', ['doctor']],

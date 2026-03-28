@@ -15,9 +15,12 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextRequest } from 'next/server';
+import { createApproval } from '@/lib/approvals/store';
+import type { ApprovalRisk } from '@/lib/approvals/types';
 import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
-import { getWorkspaceContext, buildSystemPrompt } from '@/lib/llm/context';
+import { getWorkspaceContext, buildSystemPrompt, buildUnscopedSystemPrompt } from '@/lib/llm/context';
+import { resolveRepoScopeFromHeaders } from '@/lib/llm/repo-scope';
 import { recallMemories, extractAndStoreFacts } from '@/lib/llm/memory';
 import { toolsForAnthropic, toolsForOpenAI, toolsForGoogle, executeTool, APPROVAL_REQUIRED_TOOLS, classifyCommand, type ToolResult } from '@/lib/llm/tools';
 
@@ -293,28 +296,49 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
         const parsed = JSON.parse(raw.replace(/^,/, ''));
         const parts = parsed.candidates?.[0]?.content?.parts;
         if (parts) {
+          let thinkingText = '';
+          let contentText = '';
+          let imageText = '';
+          let toolCall: { name: string; args: Record<string, unknown> } | null = null;
+
           for (const part of parts) {
             // Google thinking/thought parts
             if (part.thought === true && part.text) {
-              return { type: 'thinking', text: part.text };
+              thinkingText += part.text;
+              continue;
             }
             if (part.functionCall) {
-              return {
-                type: 'tool_call',
-                toolName: part.functionCall.name,
-                toolId: part.functionCall.name + '-' + Date.now(),
+              toolCall = {
+                name: part.functionCall.name,
                 args: part.functionCall.args ?? {},
               };
+              continue;
             }
             if (part.text) {
-              return { type: 'content', text: part.text };
+              contentText += part.text;
+              continue;
             }
             if (part.inlineData) {
               // Gemini returns images as base64 inlineData
               const mime = part.inlineData.mimeType || 'image/png';
               const b64 = part.inlineData.data;
-              return { type: 'content', text: `\n![Generated Image](data:${mime};base64,${b64})\n` };
+              imageText += `\n![Generated Image](data:${mime};base64,${b64})\n`;
             }
+          }
+
+          if (contentText || imageText) {
+            return { type: 'content', text: `${contentText}${imageText}` };
+          }
+          if (toolCall) {
+            return {
+              type: 'tool_call',
+              toolName: toolCall.name,
+              toolId: toolCall.name + '-' + Date.now(),
+              args: toolCall.args,
+            };
+          }
+          if (thinkingText) {
+            return { type: 'thinking', text: thinkingText };
           }
         }
         if (parsed.usageMetadata) {
@@ -338,6 +362,40 @@ function resolveApiKey(provider: Provider): string | null {
   return process.env[config.envKey] ?? null;
 }
 
+function approvalRiskForCommand(command: string): ApprovalRisk {
+  const normalized = command.trim().toLowerCase();
+  if (/(^|\s)(rm\s+-rf|sudo|chmod\s+777|git\s+push\b.*--force|mkfs|dd\s+if=|shutdown|reboot)/.test(normalized)) {
+    return 'high';
+  }
+  if (/(npm|pnpm|yarn|docker|kubectl|vercel|netlify|git\s+checkout|git\s+clean)/.test(normalized)) {
+    return 'medium';
+  }
+  return 'low';
+}
+
+function approvalRiskForTool(toolName: string, args: Record<string, unknown>): ApprovalRisk {
+  if (toolName === 'run_terminal_command') {
+    return approvalRiskForCommand(String(args.command || ''));
+  }
+  if (toolName === 'delete_file') {
+    return 'high';
+  }
+  if (toolName === 'write_file' || toolName === 'edit_file' || toolName === 'create_pull_request') {
+    return 'medium';
+  }
+  return 'low';
+}
+
+function approvalTitleForTool(toolName: string) {
+  if (toolName === 'run_terminal_command') return 'Run terminal command';
+  if (toolName === 'write_file') return 'Write file';
+  if (toolName === 'edit_file') return 'Edit file';
+  if (toolName === 'delete_file') return 'Delete file';
+  if (toolName === 'create_github_issue') return 'Create GitHub issue';
+  if (toolName === 'create_pull_request') return 'Create pull request';
+  return `Execute ${toolName}`;
+}
+
 // ── Handler ──
 
 export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthContext | null) => {
@@ -349,18 +407,23 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     );
   }
 
-  const { model, provider, messages: rawMessages, approvedTools: approvedToolsList, disableTools } = body as {
+  const { model, provider, messages: rawMessages, approvedTools: approvedToolsList, disableTools, toolOverrides: rawToolOverrides } = body as {
     model: string;
     provider: Provider;
     messages: Message[];
     approvedTools?: string[];
     disableTools?: boolean;
+    toolOverrides?: Record<string, Record<string, unknown>>;
   };
   const approvedTools = new Set(approvedToolsList ?? []);
+  const toolOverrides = rawToolOverrides ?? {};
+  const tabId = request.headers.get('x-tab-id')?.trim() || '';
+  const { repoRoot: scopedRepoRoot } = await resolveRepoScopeFromHeaders(request.headers);
 
   // Inject workspace context as system prompt (Phase 1)
-  const wsContext = getWorkspaceContext();
-  let systemPrompt = buildSystemPrompt(wsContext);
+  let systemPrompt = scopedRepoRoot
+    ? buildSystemPrompt(getWorkspaceContext(scopedRepoRoot))
+    : buildUnscopedSystemPrompt();
 
   // Phase A: Cortex memory recall — search for relevant facts based on user's message
   let recallInfo: { factCount: number; queryMs: number } | null = null;
@@ -530,6 +593,10 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
             const toolResultParts: string[] = [];
 
             for (const tc of toolCalls) {
+              const toolOverride = toolOverrides[tc.name];
+              if (toolOverride && typeof toolOverride === 'object') {
+                tc.args = { ...tc.args, ...toolOverride };
+              }
               // Check if this tool requires user approval (skip if pre-approved)
               let needsApproval = APPROVAL_REQUIRED_TOOLS.has(tc.name) && !approvedTools.has(tc.name);
 
@@ -570,8 +637,10 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
                   try {
                     const { readFileSync, existsSync } = await import('node:fs');
                     const { join } = await import('node:path');
-                    const repoRoot = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
-                    const fullPath = join(repoRoot, filePath);
+                    if (!scopedRepoRoot) {
+                      throw new Error('No scoped repo');
+                    }
+                    const fullPath = join(scopedRepoRoot, filePath);
                     if (existsSync(fullPath)) {
                       const before = readFileSync(fullPath, 'utf-8');
                       summary = `Overwrite ${filePath} (${lineCount} lines)`;
@@ -593,8 +662,41 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
                   summary = `Delete file: ${tc.args.path}`;
                 }
 
+                const approval = tabId
+                  ? createApproval({
+                      source: 'llm-chat',
+                      runtime: 'chat',
+                      agent: 'Chat',
+                      sessionKey: `llm-chat:${tabId}`,
+                      title: approvalTitleForTool(tc.name),
+                      description: summary,
+                      summary,
+                      toolName: tc.name,
+                      args: tc.args,
+                      command: cmd || undefined,
+                      editable: tc.name === 'run_terminal_command',
+                      diff,
+                      risk: approvalRiskForTool(tc.name, tc.args),
+                      metadata: {
+                        Model: model,
+                        Tool: tc.name,
+                        ...(cmd ? { Command: cmd } : {}),
+                        ...(!cmd && tc.args.path ? { Path: String(tc.args.path) } : {}),
+                      },
+                      continuation: {
+                        kind: 'llm-chat',
+                        tabId,
+                        model,
+                        provider,
+                        messages: rawMessages,
+                        approvedTools: [...approvedTools],
+                      },
+                    })
+                  : null;
+
                 enqueue(JSON.stringify({
                   type: 'approval_required',
+                  id: approval?.id,
                   name: tc.name,
                   args: tc.args,
                   editable: tc.name === 'run_terminal_command',
@@ -612,7 +714,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
               enqueue(JSON.stringify({ type: 'tool_call', name: tc.name, status: 'running', args: tc.args }));
 
               // Execute the tool
-              const result: ToolResult = await executeTool(tc.name, tc.args);
+              const result: ToolResult = await executeTool(tc.name, tc.args, scopedRepoRoot);
 
               if (result.sources) {
                 allSources.push(...result.sources);

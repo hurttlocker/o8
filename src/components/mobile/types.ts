@@ -5,7 +5,7 @@ import type {
   RefObject,
   SetStateAction,
 } from 'react';
-import type { ApprovalRequest } from '@/lib/json-render/demo-specs';
+import type { MobileApprovalCard } from '@/lib/approvals/types';
 import type { ReviewChangedFile, RuntimeReviewPacket } from '@/lib/fleet/types';
 import type {
   MobileInboxSnapshot,
@@ -77,10 +77,10 @@ export interface SquadRailProps {
 }
 
 export interface ApprovalStackProps {
-  pendingApprovals: ApprovalRequest[];
+  pendingApprovals: MobileApprovalCard[];
   resolvedApprovals: Record<string, 'approved' | 'rejected'>;
-  onApprove: (approval: ApprovalRequest) => void;
-  onReject: (approval: ApprovalRequest) => void;
+  onApprove: (approval: MobileApprovalCard) => void;
+  onReject: (approval: MobileApprovalCard) => void;
 }
 
 export interface ChatViewProps {
@@ -157,7 +157,7 @@ export interface ControlsSheetProps {
   controlsOpen: boolean;
   selectedSession?: SessionSummary;
   selectedSessionKey?: string;
-  pendingApprovals: ApprovalRequest[];
+  pendingApprovals: MobileApprovalCard[];
   sessionSwitcher: SessionSummary[];
   reviewFiles: ReviewChangedFile[];
   surfaceRefreshing: boolean;

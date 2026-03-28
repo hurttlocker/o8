@@ -10,10 +10,6 @@ const palette = {
   juneBud: "#B7CF4F",
 };
 
-const GITHUB_REPO_URL = "https://github.com/hurttlocker/cortex-ide";
-const GITHUB_RELEASES_URL = `${GITHUB_REPO_URL}/releases`;
-const GITHUB_LATEST_RELEASE_URL = `${GITHUB_RELEASES_URL}/latest`;
-
 /* ─────────────────────── FEATURE DATA ─────────────────────── */
 
 const features = [
@@ -473,7 +469,7 @@ export default function CortexLanding() {
           </span>
         </div>
         <div style={s.navLinks}>
-          <a href={GITHUB_REPO_URL} target="_blank" rel="noreferrer" style={s.navLink}>
+          <a href="https://github.com/hurttlocker/cortex-ide" target="_blank" rel="noreferrer" style={s.navLink}>
             GitHub
           </a>
           <a href="#download" style={s.navCta}>
@@ -514,7 +510,7 @@ export default function CortexLanding() {
               ⬇ Download for Mac
             </a>
             <a
-              href={GITHUB_REPO_URL}
+              href="https://github.com/hurttlocker/cortex-ide"
               target="_blank"
               rel="noreferrer"
               style={s.ctaSecondary}
@@ -601,7 +597,7 @@ export default function CortexLanding() {
           Zero config. One binary. Local-first forever.
         </p>
         <div style={{ ...s.ctaRow, marginTop: 32 }}>
-          <a href={GITHUB_LATEST_RELEASE_URL} target="_blank" rel="noreferrer" style={{ ...s.ctaPrimary, padding: "16px 40px", fontSize: 16, color: palette.whiteChocolate }}>
+          <a href="https://github.com/hurttlocker/cortex-ide/releases/latest" target="_blank" rel="noreferrer" style={{ ...s.ctaPrimary, padding: "16px 40px", fontSize: 16, color: palette.whiteChocolate }}>
             ⬇ Download for macOS
           </a>
         </div>

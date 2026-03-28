@@ -11,41 +11,12 @@ export const dynamic = 'force-dynamic';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { NextResponse, type NextRequest } from 'next/server';
+import { requirePanelAuth } from '@/lib/panel/auth';
 import { requestRealtimeRefresh } from '@/lib/realtime/publisher';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import type { MergeResult } from '@/lib/worktree/types';
 
 const execFileAsync = promisify(execFile);
-
-const API_TOKEN = process.env.WS_TOKEN ?? 'cortex-ide';
-
-function isTrustedPanelRequest(req: NextRequest) {
-  const origin = req.headers.get('origin');
-  if (origin) {
-    try {
-      const url = new URL(origin);
-      if (url.hostname === 'localhost' || url.hostname === '127.0.0.1') return true;
-    } catch { /* ignore */ }
-    if (origin === req.nextUrl.origin) return true;
-  }
-  const fetchSite = req.headers.get('sec-fetch-site');
-  if (fetchSite === 'same-origin' || fetchSite === 'none') return true;
-  if (!origin && !fetchSite) return true;
-  return false;
-}
-
-function checkAuth(req: NextRequest): NextResponse | null {
-  if (isTrustedPanelRequest(req)) {
-    return null;
-  }
-
-  const auth = req.headers.get('authorization');
-  const token = auth?.startsWith('Bearer ') ? auth.slice(7) : req.nextUrl.searchParams.get('token');
-  if (token !== API_TOKEN) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-  return null;
-}
 
 interface MergeBody {
   repo: string;
@@ -60,7 +31,7 @@ interface MergeBody {
 }
 
 export async function POST(req: NextRequest) {
-  const denied = checkAuth(req);
+  const denied = requirePanelAuth(req);
   if (denied) return denied;
 
   let body: MergeBody;

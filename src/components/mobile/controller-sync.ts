@@ -13,8 +13,8 @@ import type {
   MobileRuntimeTailGroup,
   MobileTranscriptEntry,
 } from '@/lib/mobile/types';
+import { appendOpenClawBetaQuery } from '@/lib/connectors/openclaw-beta';
 import { sameMobileInboxSnapshot } from '@/lib/mobile/inbox-signature';
-import { shouldRetainCurrentMobileSnapshot, type RenderBootstrapSource, type RenderBootstrapState } from '@/lib/render/client-merge';
 import { readJson } from './utils';
 
 // ── Consolidated sync ──
@@ -177,13 +177,17 @@ export async function mobileSyncOnce({
 interface RefreshInboxArgs {
   setSnapshot: Dispatch<SetStateAction<MobileInboxSnapshot>>;
   setRefreshError: Dispatch<SetStateAction<string | null>>;
+  includeOpenClaw: boolean;
+  fresh?: boolean;
 }
 
 export async function refreshInboxSnapshot({
   setSnapshot,
   setRefreshError,
+  includeOpenClaw,
+  fresh = false,
 }: RefreshInboxArgs) {
-  const response = await fetch(`/api/mobile/bootstrap?_t=${Date.now()}`, {
+  const response = await fetch(appendOpenClawBetaQuery(`/api/mobile/inbox?${fresh ? 'fresh=1&' : ''}_t=${Date.now()}`, includeOpenClaw), {
     cache: 'no-store',
     headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
   });
@@ -191,16 +195,8 @@ export async function refreshInboxSnapshot({
     throw new Error(`HTTP ${response.status}`);
   }
 
-  const payload = (await response.json()) as {
-    snapshot: MobileInboxSnapshot;
-    source: RenderBootstrapSource;
-    state: RenderBootstrapState;
-  };
-  const nextSnapshot = payload.snapshot;
+  const nextSnapshot = await readJson<MobileInboxSnapshot>(response);
   setSnapshot((prev) => {
-    if (shouldRetainCurrentMobileSnapshot(prev, payload)) {
-      return prev;
-    }
     if (sameMobileInboxSnapshot(prev, nextSnapshot)) {
       return prev;
     }

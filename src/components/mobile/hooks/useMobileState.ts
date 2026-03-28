@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ApprovalRequest } from '@/lib/json-render/demo-specs';
+import type { MobileApprovalCard } from '@/lib/approvals/types';
 import type { RuntimeReviewPacket } from '@/lib/fleet/types';
 import type {
   MobileInboxSnapshot,
@@ -84,7 +84,7 @@ export function useMobileState(init: MobileStateInit) {
   const [controlsOpen, setControlsOpen] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
   const [sessionInfoOpen, setSessionInfoOpen] = useState(false);
-  const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<MobileApprovalCard[]>(() => initialSnapshot.approvals ?? []);
   const [resolvedApprovals, setResolvedApprovals] = useState<Record<string, 'approved' | 'rejected'>>({});
   const [surfaceRefreshing, setSurfaceRefreshing] = useState(false);
   const [expandedMedia, setExpandedMedia] = useState<MobileTranscriptMedia | null>(null);
@@ -120,6 +120,7 @@ export function useMobileState(init: MobileStateInit) {
   const seenMessageIdsRef = useRef<Set<string> | null>(null);
   const documentVisibleRef = useRef(true);
   const attachmentPreviewUrlsRef = useRef<Record<string, string>>({});
+  const recoveredSelectionRef = useRef<string>('');
 
   useEffect(() => {
     const nextPreviewUrls: Record<string, string> = {};
@@ -155,14 +156,17 @@ export function useMobileState(init: MobileStateInit) {
     [selectedId, selectedSessionKeyHint, snapshot],
   );
   const hasPinnedSelection = Boolean(selectedSessionKeyHint || selectedId || selectedSessionFallback?.sessionKey);
+  const liveFallbackSession = pickCurrentSession(snapshot);
   const selectedSession = selectedSessionFromSnapshot
-    ?? (hasPinnedSelection ? (selectedSessionFallback ?? undefined) : pickCurrentSession(snapshot));
+    ?? (snapshot.sessions.length === 0
+      ? (hasPinnedSelection ? (selectedSessionFallback ?? undefined) : liveFallbackSession)
+      : liveFallbackSession);
   const selectedSessionKey = selectedSessionFromSnapshot?.sessionKey
-    ?? (hasPinnedSelection
-      ? selectedSessionKeyHint || selectedSessionFallback?.sessionKey
-      : pickCurrentSession(snapshot)?.sessionKey);
+    ?? (snapshot.sessions.length === 0
+      ? (hasPinnedSelection ? selectedSessionKeyHint || selectedSessionFallback?.sessionKey : liveFallbackSession?.sessionKey)
+      : liveFallbackSession?.sessionKey);
   const isOpenClawSession = selectedSession?.runtime === 'openclaw';
-  const isChatSession = isOpenClawSession || selectedSession?.runtime === 'codex' || selectedSession?.runtime === 'claude-code';
+  const isChatSession = isOpenClawSession || selectedSession?.runtime === 'codex' || selectedSession?.runtime === 'claude-code' || selectedSession?.runtime === 'chat';
   const isOwnedCodexSession = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'owned';
   const selectedReviewPacket = selectedSessionKey && isOwnedCodexSession ? reviewPacketBySession[selectedSessionKey] ?? null : null;
   const selectedReviewPacketError = selectedSessionKey && isOwnedCodexSession ? reviewPacketErrorBySession[selectedSessionKey] ?? null : null;
@@ -221,14 +225,34 @@ export function useMobileState(init: MobileStateInit) {
 
   useEffect(() => {
     if (!selectedSessionFallback || selectedSessionFromSnapshot) return;
-    console.info('[mobile] selected session missing from latest snapshot; retaining pinned target', {
+    if (snapshot.sessions.length === 0) {
+      console.info('[mobile] selected session missing while live inventory is empty; keeping last known selection', {
+        missingId: selectedSessionFallback.id,
+        missingSessionKey: selectedSessionFallback.sessionKey,
+        selectedId,
+        selectedSessionKeyHint,
+      });
+      return;
+    }
+    const nextSession = pickCurrentSession(snapshot);
+    if (!nextSession) return;
+    const recoveryKey = `${selectedSessionFallback.sessionKey}->${nextSession.sessionKey}`;
+    if (recoveredSelectionRef.current === recoveryKey) return;
+    recoveredSelectionRef.current = recoveryKey;
+    console.info('[mobile] selected session missing from latest snapshot; recovering to live fallback', {
       missingId: selectedSessionFallback.id,
       missingSessionKey: selectedSessionFallback.sessionKey,
+      recoveredId: nextSession.id,
+      recoveredSessionKey: nextSession.sessionKey,
       selectedId,
       selectedSessionKeyHint,
       availableSessionKeys: snapshot.sessions.map((session) => session.sessionKey),
     });
-  }, [selectedId, selectedSessionFallback, selectedSessionFromSnapshot, selectedSessionKeyHint, snapshot.sessions]);
+    setSelectedId(nextSession.id);
+    setSelectedSessionKeyHint(nextSession.sessionKey);
+    setSelectedSessionFallback(nextSession);
+    setSurfaceNote(`Recovered to ${nextSession.name}. Previous session is no longer live.`);
+  }, [selectedId, selectedSessionFallback, selectedSessionFromSnapshot, selectedSessionKeyHint, setSelectedId, setSelectedSessionFallback, setSelectedSessionKeyHint, setSurfaceNote, snapshot]);
 
   return {
     // Core state + setters

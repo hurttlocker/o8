@@ -46,6 +46,17 @@ function sanitizeTaskName(name: string): string {
     .slice(0, 60);
 }
 
+function sanitizeBranchName(name: string) {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9/_-]/g, '-')
+    .replace(/\/+/g, '/')
+    .replace(/-+/g, '-')
+    .replace(/^[-/.]+|[-/.]+$/g, '')
+    .slice(0, 120);
+}
+
 export class WorktreeManager {
   private repoRoot: string;
   private worktreeBase: string;
@@ -76,9 +87,9 @@ export class WorktreeManager {
       taskId = `${taskId}-${suffix}`;
     }
 
-    const branchName = `worktree/${opts.agentType}/${taskId}`;
+    const branchName = sanitizeBranchName(opts.branchName?.trim() || `worktree/${opts.agentType}/${taskId}`);
 
-    if (opts.agentType === 'claude-code') {
+    if (opts.agentType === 'claude-code' && !opts.managed) {
       // Claude manages its own worktree — we just track it
       const claudeWorktreePath = path.join(this.repoRoot, CLAUDE_WORKTREE_DIR, taskId);
 

@@ -9,11 +9,11 @@
  */
 
 import { execSync } from 'node:child_process';
-import { readFileSync, writeFileSync, readdirSync, statSync, existsSync, unlinkSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, statSync, existsSync, unlinkSync, mkdirSync } from 'node:fs';
 import { join, relative, dirname } from 'node:path';
 import { createGithubIssue, readGithubIssueOrPr, createPullRequest } from '@/lib/github/tools';
 
-const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
+const DEFAULT_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 const MAX_FILE_SIZE = 50_000; // 50KB
 
 // ── Tool Definitions (provider-agnostic) ──
@@ -271,28 +271,36 @@ export interface ToolResult {
   sources?: { title: string; url?: string; path?: string }[];
 }
 
-export async function executeTool(name: string, args: Record<string, unknown>): Promise<ToolResult> {
+export async function executeTool(name: string, args: Record<string, unknown>, repoRoot: string | null = DEFAULT_REPO_ROOT): Promise<ToolResult> {
   switch (name) {
     case 'search_web': return await searchWeb(args.query as string);
-    case 'read_file': return readFile(args.path as string, args.startLine as number | undefined, args.endLine as number | undefined);
-    case 'list_files': return listFiles(args.path as string | undefined, args.pattern as string | undefined);
-    case 'search_code': return searchCode(args.query as string, args.filePattern as string | undefined, args.maxResults as number | undefined);
+    case 'read_file': return readFile(args.path as string, args.startLine as number | undefined, args.endLine as number | undefined, repoRoot);
+    case 'list_files': return listFiles(args.path as string | undefined, args.pattern as string | undefined, repoRoot);
+    case 'search_code': return searchCode(args.query as string, args.filePattern as string | undefined, args.maxResults as number | undefined, repoRoot);
     case 'create_github_issue': return await createGithubIssue(args as Parameters<typeof createGithubIssue>[0]);
     case 'read_github_issue_or_pr': return await readGithubIssueOrPr(args as Parameters<typeof readGithubIssueOrPr>[0]);
     case 'create_pull_request': return await createPullRequest(args as Parameters<typeof createPullRequest>[0]);
-    case 'write_file': return writeFile(args.path as string, args.content as string);
-    case 'edit_file': return editFile(args.path as string, args.oldText as string, args.newText as string);
-    case 'delete_file': return deleteFile(args.path as string);
-    case 'run_terminal_command': return runTerminalCommand(args.command as string, args.cwd as string | undefined);
+    case 'write_file': return writeFile(args.path as string, args.content as string, repoRoot);
+    case 'edit_file': return editFile(args.path as string, args.oldText as string, args.newText as string, repoRoot);
+    case 'delete_file': return deleteFile(args.path as string, repoRoot);
+    case 'run_terminal_command': return runTerminalCommand(args.command as string, args.cwd as string | undefined, repoRoot);
     default: return { content: `Unknown tool: ${name}` };
   }
 }
 
 // ── File Operation Tools ──
 
-function validatePath(path: string): { resolved: string; rel: string } | { error: string } {
-  const resolved = join(REPO_ROOT, path);
-  const rel = relative(REPO_ROOT, resolved);
+function requireRepoScope(repoRoot: string | null): repoRoot is string {
+  return Boolean(repoRoot);
+}
+
+function validatePath(path: string, repoRoot: string | null = DEFAULT_REPO_ROOT): { resolved: string; rel: string } | { error: string } {
+  if (!requireRepoScope(repoRoot)) {
+    return { error: 'Error: No repository is scoped to this chat' };
+  }
+
+  const resolved = join(repoRoot, path);
+  const rel = relative(repoRoot, resolved);
   if (rel.startsWith('..') || rel.startsWith('/')) {
     return { error: 'Error: Path must be within the repository' };
   }
@@ -306,8 +314,8 @@ function validatePath(path: string): { resolved: string; rel: string } | { error
   return { resolved, rel };
 }
 
-function writeFile(path: string, content: string): ToolResult {
-  const validation = validatePath(path);
+function writeFile(path: string, content: string, repoRoot: string | null = DEFAULT_REPO_ROOT): ToolResult {
+  const validation = validatePath(path, repoRoot);
   if ('error' in validation) return { content: validation.error };
 
   try {
@@ -334,8 +342,8 @@ function writeFile(path: string, content: string): ToolResult {
   }
 }
 
-function editFile(path: string, oldText: string, newText: string): ToolResult {
-  const validation = validatePath(path);
+function editFile(path: string, oldText: string, newText: string, repoRoot: string | null = DEFAULT_REPO_ROOT): ToolResult {
+  const validation = validatePath(path, repoRoot);
   if ('error' in validation) return { content: validation.error };
 
   try {
@@ -392,8 +400,8 @@ function editFile(path: string, oldText: string, newText: string): ToolResult {
   }
 }
 
-function deleteFile(path: string): ToolResult {
-  const validation = validatePath(path);
+function deleteFile(path: string, repoRoot: string | null = DEFAULT_REPO_ROOT): ToolResult {
+  const validation = validatePath(path, repoRoot);
   if ('error' in validation) return { content: validation.error };
 
   try {
@@ -425,7 +433,7 @@ function deleteFile(path: string): ToolResult {
 const MAX_OUTPUT = 10_000; // 10KB output cap for LLM
 const COMMAND_TIMEOUT = 30_000; // 30s timeout
 
-function runTerminalCommand(command: string, cwd?: string): ToolResult {
+function runTerminalCommand(command: string, cwd?: string, repoRoot: string | null = DEFAULT_REPO_ROOT): ToolResult {
   const classification = classifyCommand(command);
 
   if (classification.safety === 'blocked') {
@@ -433,10 +441,14 @@ function runTerminalCommand(command: string, cwd?: string): ToolResult {
   }
 
   // Resolve working directory
-  let workDir = REPO_ROOT;
+  if (!requireRepoScope(repoRoot)) {
+    return { content: 'Error: No repository is scoped to this chat' };
+  }
+
+  let workDir = repoRoot;
   if (cwd) {
-    const resolved = join(REPO_ROOT, cwd);
-    const rel = relative(REPO_ROOT, resolved);
+    const resolved = join(repoRoot, cwd);
+    const rel = relative(repoRoot, resolved);
     if (rel.startsWith('..') || rel.startsWith('/')) {
       return { content: 'Error: Working directory must be within the repository' };
     }
@@ -524,10 +536,14 @@ async function searchWeb(query: string): Promise<ToolResult> {
   }
 }
 
-function readFile(path: string, startLine?: number, endLine?: number): ToolResult {
+function readFile(path: string, startLine?: number, endLine?: number, repoRoot: string | null = DEFAULT_REPO_ROOT): ToolResult {
   try {
-    const resolved = join(REPO_ROOT, path);
-    const rel = relative(REPO_ROOT, resolved);
+    if (!requireRepoScope(repoRoot)) {
+      return { content: 'Error: No repository is scoped to this chat' };
+    }
+
+    const resolved = join(repoRoot, path);
+    const rel = relative(repoRoot, resolved);
     if (rel.startsWith('..') || rel.startsWith('/')) {
       return { content: 'Error: Path outside repository' };
     }
@@ -555,10 +571,14 @@ function readFile(path: string, startLine?: number, endLine?: number): ToolResul
   }
 }
 
-function listFiles(dirPath?: string, pattern?: string): ToolResult {
+function listFiles(dirPath?: string, pattern?: string, repoRoot: string | null = DEFAULT_REPO_ROOT): ToolResult {
   try {
-    const resolved = join(REPO_ROOT, dirPath || '.');
-    const rel = relative(REPO_ROOT, resolved);
+    if (!requireRepoScope(repoRoot)) {
+      return { content: 'Error: No repository is scoped to this chat' };
+    }
+
+    const resolved = join(repoRoot, dirPath || '.');
+    const rel = relative(repoRoot, resolved);
     if (rel.startsWith('..')) {
       return { content: 'Error: Path outside repository' };
     }
@@ -570,7 +590,7 @@ function listFiles(dirPath?: string, pattern?: string): ToolResult {
 
     const output = execSync(cmd, { encoding: 'utf-8', timeout: 5000 }).trim();
     const entries = output.split('\n').filter(Boolean).map(f => {
-      const relPath = relative(REPO_ROOT, f);
+      const relPath = relative(repoRoot, f);
       try {
         const s = statSync(f);
         return `${s.isDirectory() ? '📁' : '📄'} ${relPath}`;
@@ -585,12 +605,16 @@ function listFiles(dirPath?: string, pattern?: string): ToolResult {
   }
 }
 
-function searchCode(query: string, filePattern?: string, maxResults?: number): ToolResult {
+function searchCode(query: string, filePattern?: string, maxResults?: number, repoRoot: string | null = DEFAULT_REPO_ROOT): ToolResult {
   try {
+    if (!requireRepoScope(repoRoot)) {
+      return { content: 'Error: No repository is scoped to this chat' };
+    }
+
     const max = Math.min(maxResults || 10, 20);
-    let cmd = `cd "${REPO_ROOT}" && grep -rn --include="*.ts" --include="*.tsx" --include="*.js" --include="*.json" --include="*.md"`;
+    let cmd = `cd "${repoRoot}" && grep -rn --include="*.ts" --include="*.tsx" --include="*.js" --include="*.json" --include="*.md"`;
     if (filePattern) {
-      cmd = `cd "${REPO_ROOT}" && grep -rn --include="${filePattern}"`;
+      cmd = `cd "${repoRoot}" && grep -rn --include="${filePattern}"`;
     }
     cmd += ` "${query.replace(/"/g, '\\"')}" . | head -${max}`;
 

@@ -1,4 +1,9 @@
 import type { AgentSummary, EventSeverity } from '@/lib/fleet/types';
+import { approvalSeverity, listApprovals, toMobileApprovalCard } from '@/lib/approvals/store';
+import type { ApprovalRecord } from '@/lib/approvals/types';
+import { getServerOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta-server';
+import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
+import { listIdeLlmChatSessions } from '@/lib/runtime/ide-llm-chat-registry';
 import { getSessionActivity, getSessionTranscript } from '@/lib/openclaw/chat';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
@@ -7,9 +12,11 @@ import { invalidateMobileBootstrapBroker } from '@/lib/render/bootstrap';
 
 function sessionActions(agent: AgentSummary): MobileControlAction[] {
   const runtimeSurface = agent.runtimeSurface;
-  const canSteer = Boolean(runtimeSurface?.capabilities.sendInput);
+  const canSteer = agent.runtime === 'chat' ? true : Boolean(runtimeSurface?.capabilities.sendInput);
   const canStop = Boolean(runtimeSurface?.capabilities.interrupt);
-  const ownershipNote = agent.runtime === 'codex'
+  const ownershipNote = agent.runtime === 'chat'
+    ? 'This workspace LLM chat mirrors the desktop API chat tab. Mobile can read and send in this lane, but stop/interrupt is not wired here.'
+    : agent.runtime === 'codex'
     ? runtimeSurface?.ownership === 'owned'
       ? 'This owned Codex surface can resume between runs and interrupt a live run when one is active.'
       : 'This discovered Codex terminal is only actionable while its live local process is still attached.'
@@ -48,6 +55,29 @@ function sessionActions(agent: AgentSummary): MobileControlAction[] {
   ];
 }
 
+function approvalActions(approval: ApprovalRecord): MobileControlAction[] {
+  return [
+    {
+      kind: 'approve',
+      label: 'Approve',
+      sessionKey: approval.sessionKey,
+      available: true,
+    },
+    {
+      kind: 'deny',
+      label: 'Deny',
+      sessionKey: approval.sessionKey,
+      available: true,
+    },
+    {
+      kind: 'inspect',
+      label: 'Inspect',
+      sessionKey: approval.sessionKey,
+      available: true,
+    },
+  ];
+}
+
 function alertSeverity(agent: AgentSummary): EventSeverity {
   if (agent.status === 'blocked' || agent.status === 'failed') return 'critical';
   if (agent.alerts > 0 || agent.context.usedPercent >= 70) return 'warning';
@@ -62,6 +92,8 @@ function buildSessionLine(agent: AgentSummary, transcriptSnippet?: string) {
 }
 
 function mobileSessionPriority(agent: AgentSummary) {
+  if (agent.runtime === 'chat' && agent.isCurrentSession) return 99;
+  if (agent.runtime === 'chat') return 86;
   const isOwnedCodex = agent.runtime === 'codex' && agent.runtimeSurface?.ownership === 'owned';
   if (agent.isCurrentSession) return 100;
   if (isOwnedCodex && agent.status === 'running') return 96;
@@ -79,6 +111,10 @@ function mobileSessionPriority(agent: AgentSummary) {
 }
 
 function shouldExposeMobileSession(agent: AgentSummary) {
+  if (agent.runtime === 'chat') {
+    return Boolean(agent.isCurrentSession) || Boolean(agent.currentTask.trim());
+  }
+
   if (agent.runtime === 'openclaw') {
     return Boolean(agent.isCurrentSession)
       || ['running', 'reviewing', 'blocked', 'waiting'].includes(agent.status);
@@ -96,6 +132,9 @@ function shouldExposeMobileSession(agent: AgentSummary) {
 }
 
 function mobileSessionIdentity(agent: AgentSummary) {
+  if (agent.runtime === 'chat') {
+    return agent.sessionKey;
+  }
   if (agent.runtime === 'codex' && agent.runtimeSurface?.ownership === 'owned') {
     const repoSlug = agent.runtimeSurface.reviewContext?.repoSlug ?? agent.workspace;
     const branch = agent.runtimeSurface.reviewContext?.branch ?? agent.branch;
@@ -108,6 +147,20 @@ function summarizeTranscript(text: string) {
   const normalized = text.replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
   return normalized.length > 180 ? `${normalized.slice(0, 177)}…` : normalized;
+}
+
+function relativeMobileAge(isoLike: string | null | undefined) {
+  if (!isoLike) return 'just now';
+  const parsed = new Date(isoLike).getTime();
+  if (Number.isNaN(parsed)) return isoLike;
+  const delta = Math.max(0, Date.now() - parsed);
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  if (delta < minute) return 'just now';
+  if (delta < hour) return `${Math.max(1, Math.round(delta / minute))}m ago`;
+  if (delta < day) return `${Math.max(1, Math.round(delta / hour))}h ago`;
+  return `${Math.max(1, Math.round(delta / day))}d ago`;
 }
 
 let inboxCache: { snapshot: MobileInboxSnapshot; timestamp: number; includeOpenClaw: boolean } | null = null;
@@ -125,7 +178,7 @@ const INBOX_CACHE_TTL = 8000; // 8 seconds — generous idle TTL
 
 export async function getMobileInboxSnapshot(options: { fresh?: boolean; includeOpenClaw?: boolean } = {}): Promise<MobileInboxSnapshot> {
   const fresh = options.fresh ?? false;
-  const includeOpenClaw = options.includeOpenClaw ?? true;
+  const includeOpenClaw = options.includeOpenClaw ?? getServerOpenClawBetaEnabled({ fresh });
   const generation = inboxGeneration;
   if (!fresh && inboxCache && inboxCache.includeOpenClaw === includeOpenClaw && Date.now() - inboxCache.timestamp < INBOX_CACHE_TTL) {
     return inboxCache.snapshot;
@@ -155,7 +208,7 @@ export async function getMobileInboxSnapshot(options: { fresh?: boolean; include
 
 async function _fetchMobileInboxSnapshot(options: { fresh?: boolean; includeOpenClaw?: boolean } = {}): Promise<MobileInboxSnapshot> {
   const fresh = options.fresh ?? false;
-  const includeOpenClaw = options.includeOpenClaw ?? true;
+  const includeOpenClaw = options.includeOpenClaw ?? getServerOpenClawBetaEnabled({ fresh });
 
   const fleet = await getRuntimeInventorySnapshot({ fresh, includeOpenClaw });
   const orderedSessions = fleet.agents
@@ -179,7 +232,74 @@ async function _fetchMobileInboxSnapshot(options: { fresh?: boolean; includeOpen
     seenSessionIds.add(identity);
     sessions.push(agent);
   }
-  const primarySession = sessions.find((session) => session.sessionKey === fleet.meta.primarySessionKey)
+  const workspaceChats = listIdeLlmChatSessions();
+  for (const chat of workspaceChats) {
+    const currentTask = chat.lastMessage ? summarizeTranscript(chat.lastMessage) : '';
+    const session: AgentSummary = {
+      id: chat.sessionKey,
+      name: chat.label,
+      squadId: 'workspace-chat',
+      runtime: 'chat',
+      model: chat.model || 'Workspace Chat',
+      primaryModel: chat.model || 'Workspace Chat',
+      status: chat.isCurrentSession ? 'running' : 'idle',
+      currentTask,
+      workspace: chat.repoPath || '~/clawd',
+      branch: 'workspace',
+      sessionKey: chat.sessionKey,
+      approvalStatus: 'none',
+      lastEventAt: relativeMobileAge(chat.modifiedAt ?? chat.savedAt),
+      context: {
+        usedPercent: 0,
+        trend: 'stable',
+      },
+      alerts: 0,
+      sessionId: chat.tabId,
+      surfaceLabel: chat.label,
+      isCurrentSession: chat.isCurrentSession,
+      runtimeSurface: {
+        id: chat.sessionKey,
+        runtime: 'chat',
+        kind: 'chat-session',
+        ownership: 'owned',
+        title: chat.label,
+        cwd: chat.repoPath,
+        branch: 'workspace',
+        sourceLabel: 'Workspace LLM chat tab',
+        capabilities: {
+          attach: false,
+          readTail: true,
+          sendInput: true,
+          interrupt: false,
+          resize: false,
+          diffContext: true,
+          reviewContext: true,
+        },
+      },
+    };
+    if (!shouldExposeMobileSession(session)) continue;
+    const identity = mobileSessionIdentity(session);
+    if (seenSessionIds.has(identity)) continue;
+    seenSessionIds.add(identity);
+    sessions.push(session);
+  }
+  const pendingApprovals = listApprovals({ status: 'pending' });
+  const approvalsBySession = new Map<string, ApprovalRecord[]>();
+  for (const approval of pendingApprovals) {
+    const current = approvalsBySession.get(approval.sessionKey) ?? [];
+    approvalsBySession.set(approval.sessionKey, [...current, approval]);
+  }
+  for (let index = 0; index < sessions.length; index += 1) {
+    const session = sessions[index];
+    if (!approvalsBySession.has(session.sessionKey) || session.approvalStatus === 'pending') continue;
+    sessions[index] = {
+      ...session,
+      approvalStatus: 'pending',
+    };
+  }
+
+  const primarySession = sessions.find((session) => session.isCurrentSession)
+    ?? sessions.find((session) => session.sessionKey === fleet.meta.primarySessionKey)
     ?? sessions.find((session) => session.runtime === 'openclaw' && session.isCurrentSession)
     ?? sessions.find((session) => session.runtime === 'openclaw')
     ?? sessions[0];
@@ -195,7 +315,11 @@ async function _fetchMobileInboxSnapshot(options: { fresh?: boolean; includeOpen
 
   const [reviewSnapshot, primaryTranscript, ...activities] = await Promise.all([
     getWorkspaceReviewSnapshot({ fresh }).catch(() => null),
-    primarySession ? getSessionTranscript(primarySession.sessionKey, 3, fresh).catch(() => []) : Promise.resolve([]),
+    primarySession
+      ? primarySession.runtime === 'chat'
+        ? Promise.resolve(loadMobileLlmChatHistory(primarySession.sessionKey, 3).transcript)
+        : getSessionTranscript(primarySession.sessionKey, 3, fresh).catch(() => [])
+      : Promise.resolve([]),
     ...activityPromises,
   ]);
 
@@ -212,6 +336,7 @@ async function _fetchMobileInboxSnapshot(options: { fresh?: boolean; includeOpen
     : '';
 
   const items: MobileInboxItem[] = [];
+  const approvals = pendingApprovals.map(toMobileApprovalCard);
 
   if (primarySession) {
     items.push({
@@ -226,6 +351,23 @@ async function _fetchMobileInboxSnapshot(options: { fresh?: boolean; includeOpen
     });
   }
 
+  for (const approval of pendingApprovals) {
+    items.push({
+      id: `approval:${approval.id}`,
+      approvalId: approval.id,
+      kind: 'approval',
+      severity: approvalSeverity(approval.risk),
+      title: approval.title,
+      detail: approval.command
+        ? `${approval.description} • $ ${approval.command}`
+        : approval.description,
+      metadata: approval.metadata,
+      sessionKey: approval.sessionKey,
+      timestampLabel: relativeMobileAge(new Date(approval.createdAt).toISOString()),
+      actions: approvalActions(approval),
+    });
+  }
+
   for (const agent of sessions.filter((session) => session.sessionKey !== primarySession?.sessionKey)) {
     if (!['running', 'reviewing', 'blocked', 'failed'].includes(agent.status) && agent.alerts === 0) {
       continue;
@@ -233,7 +375,7 @@ async function _fetchMobileInboxSnapshot(options: { fresh?: boolean; includeOpen
 
     items.push({
       id: `alert:${agent.sessionKey}`,
-      kind: agent.approvalStatus === 'pending' ? 'approval' : 'alert',
+      kind: 'alert',
       severity: alertSeverity(agent),
       title: `${agent.name} • ${agent.surfaceLabel ?? agent.status}`,
       detail: `${agent.currentTask} • ${agent.lastEventAt}`,
@@ -295,7 +437,7 @@ async function _fetchMobileInboxSnapshot(options: { fresh?: boolean; includeOpen
   }
 
   const alerts = items.filter((item) => item.kind === 'alert' && item.severity !== 'info').length;
-  const approvals = items.filter((item) => item.kind === 'approval').length;
+  const approvalCount = pendingApprovals.length;
   const reviewItems = items.filter((item) => item.kind === 'review').length;
   const activeRuns = sessions.filter((agent) => ['running', 'reviewing', 'blocked', 'waiting', 'failed'].includes(agent.status)).length;
 
@@ -303,16 +445,17 @@ async function _fetchMobileInboxSnapshot(options: { fresh?: boolean; includeOpen
     generatedAt: new Date().toISOString(),
     mode: fleet.meta.mode,
     sourceLabel: fleet.meta.sourceLabel,
-    primarySessionKey: fleet.meta.primarySessionKey,
+    primarySessionKey: primarySession?.sessionKey,
     note:
       fleet.meta.mode === 'live'
         ? 'Mobile now speaks to a Cortex IDE control snapshot. OpenClaw remains the first actionable backing adapter, while IDE-owned Codex surfaces now expose lifecycle, review state, exact diff context, between-runs resume, and active-run interrupt on phone when the session is truly owned and running.'
         : fleet.meta.note,
     sessions,
+    approvals,
     items,
     summary: {
       alerts,
-      approvals,
+      approvals: approvalCount,
       reviewItems,
       activeRuns,
     },

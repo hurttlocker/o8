@@ -44,6 +44,7 @@ import { execSync, execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
+import '@/lib/ws-runtime-env';
 import { WebSocketServer, WebSocket } from 'ws';
 import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
 import { getBrowserInventorySnapshot, getBrowserProvider } from './lib/browser/inventory';

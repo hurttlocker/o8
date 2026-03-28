@@ -7,7 +7,7 @@ import { useWebSocket } from './useWebSocket';
 /**
  * Manages WebSocket connection + response waiting state.
  */
-export function useMobileStreaming(state: MobileState) {
+export function useMobileStreaming(state: MobileState, includeOpenClaw: boolean) {
   const {
     selectedSessionKey,
     selectedSession,
@@ -32,6 +32,7 @@ export function useMobileStreaming(state: MobileState) {
     sendTerminalDetach,
   } = useWebSocket({
     selectedSessionKey,
+    includeOpenClaw,
     setSnapshot,
     setRefreshError,
     setHistoryBySession,

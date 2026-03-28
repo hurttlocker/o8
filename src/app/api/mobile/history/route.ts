@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOwnedCodexRuntimeTail } from '@/lib/codex/owned';
 import { getCodexRuntimeTail } from '@/lib/codex/sessions';
+import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
 import type { MobileHistoryResponse, MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { getSessionTranscript } from '@/lib/openclaw/chat';
 import '@/lib/runtimes'; // Ensure runtimes are registered
@@ -50,6 +51,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    if (sessionKey.startsWith('llm-chat:')) {
+      return NextResponse.json(loadMobileLlmChatHistory(sessionKey, limit), {
+        headers: {
+          'Cache-Control': 'no-store, max-age=0',
+        },
+      });
+    }
+
     if (sessionKey.startsWith('codex-owned:')) {
       const tail = await getOwnedCodexRuntimeTail(sessionKey);
 

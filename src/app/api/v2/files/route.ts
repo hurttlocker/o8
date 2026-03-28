@@ -9,13 +9,24 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { join, relative, dirname } from 'node:path';
+import { relative, dirname, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
 
-const REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
+async function resolveRoot(workspace?: string | null) {
+  if (!workspace) return getDefaultLlmRepoRoot();
 
-function safePath(path: string): string | null {
-  const resolved = join(REPO_ROOT, path);
-  const rel = relative(REPO_ROOT, resolved);
+  const requestedPath = workspace.startsWith('~')
+    ? workspace.replace('~', homedir())
+    : workspace;
+
+  const { repoRoot } = await resolveRegisteredRepoScope(requestedPath);
+  return repoRoot;
+}
+
+function safePath(root: string, path: string): string | null {
+  const resolved = resolve(root, path);
+  const rel = relative(root, resolved);
   if (rel.startsWith('..') || rel.startsWith('/')) return null;
   return resolved;
 }
@@ -26,7 +37,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'path required' }, { status: 400 });
   }
 
-  const resolved = safePath(path);
+  const root = await resolveRoot(request.nextUrl.searchParams.get('workspace'));
+  if (!root) {
+    return NextResponse.json({ error: 'Workspace is not registered' }, { status: 400 });
+  }
+
+  const resolved = safePath(root, path);
   if (!resolved) {
     return NextResponse.json({ error: 'Path outside repository' }, { status: 400 });
   }
@@ -46,13 +62,17 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { path, content } = body as { path: string; content: string };
+    const { path, content, workspace } = body as { path: string; content: string; workspace?: string };
 
     if (!path || content === undefined) {
       return NextResponse.json({ error: 'path and content required' }, { status: 400 });
     }
 
-    const resolved = safePath(path);
+    const root = await resolveRoot(workspace);
+    if (!root) {
+      return NextResponse.json({ error: 'Workspace is not registered' }, { status: 400 });
+    }
+    const resolved = safePath(root, path);
     if (!resolved) {
       return NextResponse.json({ error: 'Path outside repository' }, { status: 400 });
     }

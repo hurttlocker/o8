@@ -2,10 +2,10 @@
  * useMobileActions — Action handler wrappers that bridge state to controller functions.
  * Extracted from shell to reduce orchestration noise.
  */
-import { useCallback } from 'react';
-import { demoApprovals } from '@/lib/json-render/demo-specs';
-import type { ApprovalRequest } from '@/lib/json-render/demo-specs';
+import { useCallback, useEffect } from 'react';
+import type { MobileApprovalCard } from '@/lib/approvals/types';
 import type { RuntimeReviewPacket } from '@/lib/fleet/types';
+import { initSounds, playSendClick as playMobileSendClick } from '@/lib/mobile/sounds';
 import type { MobileActionRequest, MobileActionResponse, MobileInboxSnapshot, MobileReviewFileResponse } from '@/lib/mobile/types';
 import type { MobileState } from './useMobileState';
 import {
@@ -27,47 +27,13 @@ import { compactLine } from '../utils';
 
 interface ActionDeps {
   wsConnected: boolean;
-  refreshInbox: () => Promise<MobileInboxSnapshot>;
+  refreshInbox: (fresh?: boolean) => Promise<MobileInboxSnapshot>;
   loadHistory: (sessionKey: string, force?: boolean) => Promise<unknown>;
   loadOwnedReviewPacket: (sessionKey: string, force?: boolean) => Promise<RuntimeReviewPacket | null | undefined>;
   loadReviewFile: (reviewPath: string, force?: boolean) => Promise<MobileReviewFileResponse['file'] | undefined>;
   reviewFiles: RuntimeReviewPacket['changedFiles'];
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
-}
-
-let sendClickAudioContext: AudioContext | null = null;
-
-function playSendClick() {
-  try {
-    const AudioContextCtor = window.AudioContext
-      || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioContextCtor) return;
-
-    if (!sendClickAudioContext || sendClickAudioContext.state === 'closed') {
-      sendClickAudioContext = new AudioContextCtor();
-    }
-
-    const ctx = sendClickAudioContext;
-    if (ctx.state === 'suspended') {
-      void ctx.resume().catch(() => undefined);
-    }
-
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.setValueAtTime(1800, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(600, ctx.currentTime + 0.04);
-    gain.gain.setValueAtTime(0.08, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.06);
-    osc.onended = () => {
-      osc.disconnect();
-      gain.disconnect();
-    };
-  } catch { /* audio not available */ }
 }
 
 export function useMobileActions(state: MobileState, deps: ActionDeps) {
@@ -97,6 +63,14 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
     setWaitingForResponse, setComposeFocused,
     composeRef, fileInputRef, lastAssistantCountRef,
   } = state;
+
+  useEffect(() => {
+    initSounds();
+  }, []);
+
+  const playSendClick = useCallback(() => {
+    playMobileSendClick();
+  }, []);
 
   const runAction = useCallback(async (payload: MobileActionRequest): Promise<MobileActionResponse | undefined> => {
     const clientMutationId = payload.clientMutationId
@@ -221,7 +195,7 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
       playSendClick,
       relaySlashCommand,
     });
-  }, [actionStateBySession, snapshot, draftBySession, draftAttachmentsBySession, state.historyBySession, state.selectedSession, selectedSessionKey, lastAssistantCountRef, setWaitingForResponse, setHistoryBySession, setDraftBySession, setDraftAttachmentsBySession, setPreEnhanceDraft, setSurfaceNote, setActionNoteBySession, runAction, loadHistory, relaySlashCommand]);
+  }, [actionStateBySession, snapshot, draftBySession, draftAttachmentsBySession, state.historyBySession, state.selectedSession, selectedSessionKey, lastAssistantCountRef, setWaitingForResponse, setHistoryBySession, setDraftBySession, setDraftAttachmentsBySession, setPreEnhanceDraft, setSurfaceNote, setActionNoteBySession, runAction, loadHistory, playSendClick, relaySlashCommand]);
 
   const handleOwnedResumeSubmit = useCallback(async (sessionKey: string) => {
     await submitOwnedResumeTurn({
@@ -230,7 +204,7 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
       setDraftBySession, setSurfaceNote, runAction, playSendClick,
       relaySlashCommand,
     });
-  }, [actionStateBySession, draftBySession, setActionNoteBySession, setPendingOwnedTurnBySession, setDraftBySession, setSurfaceNote, runAction, relaySlashCommand]);
+  }, [actionStateBySession, draftBySession, setActionNoteBySession, setPendingOwnedTurnBySession, setDraftBySession, setSurfaceNote, runAction, playSendClick, relaySlashCommand]);
 
   const handleEnhancePrompt = useCallback(async () => {
     await enhancePromptDraft({ selectedSessionKey, enhancing, draftBySession, setEnhancing, setPreEnhanceDraft, setDraftBySession, setSurfaceNote });
@@ -306,17 +280,33 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
     void loadReviewFile(reviewPath).catch(() => undefined);
   }, [setSelectedReviewFilePath, loadReviewFile]);
 
-  const handleApprovalDecision = useCallback((approval: ApprovalRequest, resolution: 'approved' | 'rejected') => {
+  const handleApprovalDecision = useCallback(async (approval: MobileApprovalCard, resolution: 'approved' | 'rejected') => {
     setResolvedApprovals((current) => ({ ...current, [approval.id]: resolution }));
-    setSurfaceNote(`${resolution === 'approved' ? '✅ Approved' : '❌ Rejected'}: ${approval.title}`);
-    window.setTimeout(() => setPendingApprovals((current) => current.filter((item) => item.id !== approval.id)), 1500);
-  }, [setResolvedApprovals, setSurfaceNote, setPendingApprovals]);
+    setSurfaceNote(`${resolution === 'approved' ? 'Approving' : 'Rejecting'}: ${approval.title}`);
+    try {
+      const result = await runAction({
+        action: resolution === 'approved' ? 'approve' : 'deny',
+        sessionKey: approval.sessionKey,
+        approvalId: approval.id,
+      });
+      setSurfaceNote(result?.note ?? `${resolution === 'approved' ? 'Approved' : 'Rejected'}: ${approval.title}`);
+      window.setTimeout(() => {
+        setPendingApprovals((current) => current.filter((item) => item.id !== approval.id));
+      }, 300);
+    } catch (error) {
+      setResolvedApprovals((current) => {
+        const next = { ...current };
+        delete next[approval.id];
+        return next;
+      });
+      setSurfaceNote(error instanceof Error ? error.message : `Unable to ${resolution === 'approved' ? 'approve' : 'reject'} this request.`);
+    }
+  }, [runAction, setPendingApprovals, setResolvedApprovals, setSurfaceNote]);
 
   const handleToggleApprovals = useCallback(() => {
-    setPendingApprovals((current) => (current.length > 0 ? [] : [...demoApprovals]));
-    setResolvedApprovals({});
+    setActiveView('activity');
     setControlsOpen(false);
-  }, [setPendingApprovals, setResolvedApprovals, setControlsOpen]);
+  }, [setActiveView, setControlsOpen]);
 
   const handleCopySelectedSessionKey = useCallback(() => {
     if (!selectedSessionKey) return;
@@ -336,17 +326,6 @@ export function useMobileActions(state: MobileState, deps: ActionDeps) {
     }
     void handleSurfaceRefresh();
   }, [selectedReviewFilePath, loadReviewFile, handleSurfaceRefresh]);
-
-  // Accept an optional explicit sessionKey override. ComposeBar passes its own
-  // sessionKey prop to avoid stale closure captures from snapshot races.
-  const withSelectedSession = useCallback(<Args extends unknown[]>(fn: (sessionKey: string, ...args: Args) => void | Promise<void>) =>
-    (explicitKey?: string, ...args: Args): void | Promise<void> => {
-      const key = (typeof explicitKey === 'string' && explicitKey) ? explicitKey : selectedSessionKey;
-      if (!key) return undefined;
-      console.info('[mobile] withSelectedSession', { explicitKey: explicitKey ?? null, selectedSessionKey, resolved: key });
-      return fn(key, ...args);
-    },
-  [selectedSessionKey]);
 
   const ownedReviewDisposition = selectedReviewPacket?.reviewDisposition;
 

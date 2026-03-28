@@ -69,6 +69,8 @@ export interface RuntimeSurfaceSummary {
   };
 }
 
+import type { WorkspaceOrchestrationPacketBadge } from '@/lib/orchestrator/types';
+
 export interface AgentActivity {
   /** One-line summary: "Editing auth.ts", "Running build", "Thinking…" */
   headline: string;
@@ -107,6 +109,7 @@ export interface AgentSummary {
   browserSurface?: BrowserSurfaceSummary;
   activity?: AgentActivity;
   tmuxSession?: string;
+  orchestrationPacket?: WorkspaceOrchestrationPacketBadge | null;
 }
 
 export interface SquadSummary {

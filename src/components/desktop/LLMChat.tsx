@@ -1567,6 +1567,21 @@ const SUGGESTED_PROMPTS = [
   { icon: '⚡', text: 'What could be optimized here?', description: 'Find performance improvements in the codebase' },
 ];
 
+function buildRepoRequestHeaders(preferredRepo?: {
+  name?: string;
+  localPath?: string;
+  branch?: string | null;
+  remoteUrl?: string | null;
+} | null): Record<string, string> {
+  const repoPath = preferredRepo?.localPath?.trim();
+  if (!repoPath) {
+    return {};
+  }
+  return {
+    'x-cortex-repo-path': repoPath,
+  };
+}
+
 function StreamingIndicator() {
   return (
     <div style={{
@@ -1670,7 +1685,9 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
     }
     applySearchTimeout.current = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/v2/context/files?q=${encodeURIComponent(query)}`);
+        const res = await fetch(`/api/v2/context/files?q=${encodeURIComponent(query)}`, {
+          headers: buildRepoRequestHeaders(preferredRepo ?? null),
+        });
         if (res.ok) {
           const data = await res.json();
           setApplyFileSuggestions(data.files ?? []);
@@ -1678,7 +1695,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
         }
       } catch { /* ignore */ }
     }, 100);
-  }, []);
+  }, [preferredRepo]);
 
   // Load chat history list
   const loadHistory = useCallback(async (search?: string) => {
@@ -1785,7 +1802,11 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
       const res = await fetch('/api/v2/files', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: applyPath.trim(), content: applyModal.code }),
+        body: JSON.stringify({
+          path: applyPath.trim(),
+          content: applyModal.code,
+          workspace: preferredRepo?.localPath ?? undefined,
+        }),
       });
       if (res.ok) {
         setApplyStatus('done');
@@ -1796,7 +1817,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
     } catch {
       setApplyStatus('error');
     }
-  }, [applyModal, applyPath]);
+  }, [applyModal, applyPath, preferredRepo]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -1975,7 +1996,9 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
       if (fileSearchTimeout.current) clearTimeout(fileSearchTimeout.current);
       fileSearchTimeout.current = setTimeout(async () => {
         try {
-          const res = await fetch(`/api/v2/context/files?q=${encodeURIComponent(query)}`);
+          const res = await fetch(`/api/v2/context/files?q=${encodeURIComponent(query)}`, {
+            headers: buildRepoRequestHeaders(preferredRepo ?? null),
+          });
           if (res.ok) {
             const data = await res.json();
             setFileSuggestions(data.files ?? []);
@@ -1998,7 +2021,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
     } else {
       setShowSlashPicker(false);
     }
-  }, []);
+  }, [preferredRepo]);
 
   // Handle image paste/drop
   const handleImageFile = useCallback((file: File) => {
@@ -2075,7 +2098,10 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
       try {
         const res = await fetch('/api/v2/context/files', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...buildRepoRequestHeaders(preferredRepo ?? null),
+          },
           body: JSON.stringify({ paths: allFiles }),
         });
         if (res.ok) {
@@ -2160,7 +2186,11 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
         try {
           res = await fetch('/api/v2/proxy/llm', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-tab-id': tabId },
+            headers: {
+              'Content-Type': 'application/json',
+              'x-tab-id': tabId,
+              ...buildRepoRequestHeaders(preferredRepo ?? null),
+            },
             body: reqBody,
             signal: controller.signal,
           });
@@ -2445,7 +2475,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
       setShowTypingIndicator(false);
       abortRef.current = null;
     }
-  }, [approvedToolsSet, attachedFiles, attachedImages, input, isStreaming, linkedIssue, messages, model, queuedContextCards, showTypingIndicator, streamContent, tabId]);
+  }, [approvedToolsSet, attachedFiles, attachedImages, input, isStreaming, linkedIssue, messages, model, preferredRepo, queuedContextCards, showTypingIndicator, streamContent, tabId]);
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort();

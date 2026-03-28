@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
+import { rejectLlmApproval, resumeLlmApproval } from '@/lib/approvals/llm';
+import { getApproval, listApprovals, resolveApproval } from '@/lib/approvals/store';
+import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import { invalidateInboxCache } from '@/lib/mobile/openclaw';
 import type { MobileActionRequest, MobileActionResponse } from '@/lib/mobile/types';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { launchCodexFromMobile, performRuntimeAction } from '@/lib/runtime/actions';
+import { readPersistedLlmChat, writePersistedLlmChat, type PersistedLlmChatHistory, type PersistedLlmChatMessage } from '@/lib/llm/chat-history-store';
 import { steerOpenClawSession } from '@/lib/openclaw/chat';
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
@@ -19,6 +23,252 @@ function previewMessage(message?: string) {
 function invalidateMutationCaches() {
   invalidateCommandCenterSnapshotCaches();
   invalidateInboxCache();
+}
+
+function providerForLlmModel(model?: string): 'openai' | 'anthropic' | 'google' {
+  if (!model) return 'openai';
+  if (model.startsWith('claude-')) return 'anthropic';
+  if (model.startsWith('gemini-')) return 'google';
+  return 'openai';
+}
+
+function buildLlmImagesMarkdown(attachments: MobileActionRequest['attachments']) {
+  const images = (attachments ?? []).filter((item) => item?.mimeType?.startsWith('image/') && item?.content);
+  if (!images.length) return '';
+  return images.map((item, index) => `![Image ${index + 1}](${item.content})`).join('\n');
+}
+
+function cleanProxyContent(text: string) {
+  return text
+    .replace(/^I'll use the \w+ tool[^\n]*\n*/gm, '')
+    .replace(/^I'll use the \w+ tool[^\n]*/gm, '')
+    .replace(/^Let me use[^\n]*tool[^\n]*\n*/gm, '')
+    .trim();
+}
+
+function buildLlmRequestMessages(history: PersistedLlmChatHistory, nextUserContent: string) {
+  const cleanMessages = (history.messages ?? [])
+    .filter((message) => {
+      if (message.isError || message.isPartial) return false;
+      if (!message.content?.trim()) return false;
+      if (message.content.startsWith('Error: ')) return false;
+      if (message.content.startsWith('Action cancelled:')) return false;
+      return true;
+    })
+    .map((message) => ({ role: message.role, content: message.content }));
+
+  const recentMessages = cleanMessages.length > 40
+    ? cleanMessages.slice(-40)
+    : cleanMessages;
+
+  return [
+    ...recentMessages,
+    { role: 'user', content: nextUserContent },
+  ];
+}
+
+async function runLlmChatTurn(request: NextRequest, payload: MobileActionRequest, clientMutationId: string) {
+  const sessionKey = payload.sessionKey.trim();
+  const tabId = sessionKey.replace(/^llm-chat:/, '');
+  const existing = readPersistedLlmChat(tabId)?.history ?? { messages: [] } satisfies PersistedLlmChatHistory;
+  const message = payload.message?.trim();
+  const imageMarkdown = buildLlmImagesMarkdown(payload.attachments);
+  const userContent = [message, imageMarkdown].filter(Boolean).join('\n\n').trim();
+
+  if (!userContent) {
+    return NextResponse.json(
+      { error: 'message or image attachment is required for llm-chat' },
+      { status: 400, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+    );
+  }
+
+  const model = existing.model || 'gpt-5.4';
+  const provider = providerForLlmModel(model);
+  const userMessage: PersistedLlmChatMessage = {
+    id: `user-${Date.now()}`,
+    role: 'user',
+    content: userContent,
+    timestamp: Date.now(),
+  };
+
+  let responseText = '';
+  let tokens: { input: number; output: number } | undefined;
+  let costUsd: number | undefined;
+  let thinkingText = '';
+  let toolCalls: MobileTranscriptToolCall[] = [];
+  let sources: MobileTranscriptSource[] = [];
+  let errorText: string | null = null;
+  let approvalRequired: { id?: string; summary?: string } | null = null;
+
+  const res = await fetch(new URL('/api/v2/proxy/llm', request.url), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-tab-id': tabId,
+    },
+    body: JSON.stringify({
+      model,
+      provider,
+      messages: buildLlmRequestMessages(existing, userContent),
+      approvedTools: [],
+    }),
+    cache: 'no-store',
+  });
+
+  if (!res.ok || !res.body) {
+    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+    const note = typeof body?.error === 'string' ? body.error : `HTTP ${res.status}`;
+    throw new Error(note);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const chunks = buffer.split('\n');
+    buffer = chunks.pop() ?? '';
+    for (const line of chunks) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6).trim();
+      if (!data || data === '[DONE]') continue;
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(data) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      if (parsed.type === 'content' && typeof parsed.text === 'string') {
+        responseText += parsed.text;
+      } else if (parsed.type === 'usage') {
+        tokens = {
+          input: typeof parsed.inputTokens === 'number' ? parsed.inputTokens : 0,
+          output: typeof parsed.outputTokens === 'number' ? parsed.outputTokens : 0,
+        };
+        costUsd = typeof parsed.costUsd === 'number' ? parsed.costUsd : undefined;
+      } else if (parsed.type === 'thinking' && typeof parsed.text === 'string') {
+        thinkingText += parsed.text;
+      } else if (parsed.type === 'tool_call' && typeof parsed.name === 'string') {
+        toolCalls = [...toolCalls, {
+          name: parsed.name,
+          args: parsed.args && typeof parsed.args === 'object' ? parsed.args as Record<string, unknown> : undefined,
+          status: 'done',
+        }];
+      } else if (parsed.type === 'sources' && Array.isArray(parsed.sources)) {
+        sources = parsed.sources as MobileTranscriptSource[];
+      } else if (parsed.type === 'approval_required') {
+        approvalRequired = {
+          id: typeof parsed.id === 'string' ? parsed.id : undefined,
+          summary: typeof parsed.summary === 'string' ? parsed.summary : undefined,
+        };
+      } else if (parsed.type === 'error' && typeof parsed.message === 'string') {
+        errorText = parsed.message;
+      }
+    }
+  }
+
+  const persistedMessages = [...(existing.messages ?? []), userMessage];
+
+  if (approvalRequired) {
+    const note = approvalRequired.summary || 'Approval required for this workspace chat tool call.';
+    writePersistedLlmChat(tabId, {
+      ...existing,
+      model,
+      messages: [
+        ...persistedMessages,
+        {
+          id: `approval-pending-${Date.now()}`,
+          role: 'assistant',
+          content: `Approval pending: ${note}`,
+          timestamp: Date.now(),
+          model,
+        },
+      ],
+    });
+    invalidateMutationCaches();
+    await publishMobileMutation(clientMutationId, {
+      action: payload.action,
+      sessionKey,
+      runtime: 'chat',
+      status: 'queued',
+      note,
+    });
+    return NextResponse.json({
+      ok: true,
+      action: payload.action,
+      sessionKey,
+      clientMutationId,
+      status: 'queued',
+      note,
+      approvalId: approvalRequired.id,
+    }, {
+      status: 200,
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
+  }
+
+  if (errorText) {
+    writePersistedLlmChat(tabId, {
+      ...existing,
+      model,
+      messages: [
+        ...persistedMessages,
+        {
+          id: `err-${Date.now()}`,
+          role: 'assistant',
+          content: `Error: ${errorText}`,
+          timestamp: Date.now(),
+          isError: true,
+          model,
+        },
+      ],
+    });
+    throw new Error(errorText);
+  }
+
+  const assistantMessage: PersistedLlmChatMessage = {
+    id: `asst-${Date.now()}`,
+    role: 'assistant',
+    content: cleanProxyContent(responseText),
+    model,
+    tokens,
+    costUsd,
+    timestamp: Date.now(),
+    toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+    sources: sources.length > 0 ? sources : undefined,
+    thinking: thinkingText || undefined,
+  };
+
+  writePersistedLlmChat(tabId, {
+    ...existing,
+    model,
+    messages: [...persistedMessages, assistantMessage],
+  });
+  invalidateMutationCaches();
+  await publishMobileMutation(clientMutationId, {
+    action: payload.action,
+    sessionKey,
+    runtime: 'chat',
+    status: 'completed',
+    note: 'Workspace chat responded.',
+  });
+
+  const response: MobileActionResponse = {
+    ok: true,
+    action: payload.action,
+    sessionKey,
+    clientMutationId,
+    status: 'completed',
+    note: 'Workspace chat responded.',
+  };
+
+  return NextResponse.json(response, {
+    status: 200,
+    headers: { 'Cache-Control': 'no-store, max-age=0' },
+  });
 }
 
 async function publishMobileMutation(
@@ -72,6 +322,10 @@ export async function POST(request: NextRequest) {
       attachmentCount: payload?.attachments?.length ?? 0,
       messagePreview: previewMessage(payload?.message),
     });
+
+    if (sessionKey.startsWith('llm-chat:') && (action === 'steer' || action === 'send')) {
+      return await runLlmChatTurn(request, payload, clientMutationId);
+    }
 
     // ── Send message to an OpenClaw agent session ──
     if (action === 'send') {
@@ -158,6 +412,66 @@ export async function POST(request: NextRequest) {
         note: result.note,
       });
       return NextResponse.json(response, {
+        status: 200,
+        headers: { 'Cache-Control': 'no-store, max-age=0' },
+      });
+    }
+
+    if (action === 'approve' || action === 'deny') {
+      const explicitApprovalId = payload?.approvalId?.trim();
+      const pendingForSession = explicitApprovalId
+        ? []
+        : listApprovals({ status: 'pending', sessionKey });
+      const approvalId = explicitApprovalId || (pendingForSession.length === 1 ? pendingForSession[0]?.id : '');
+      if (!approvalId) {
+        return NextResponse.json(
+          { ok: false, action, sessionKey, clientMutationId, status: 'unavailable', note: 'No pending approval found for this mobile session.' },
+          { status: 404, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+        );
+      }
+
+      const currentApproval = getApproval(approvalId);
+      if (!currentApproval) {
+        return NextResponse.json(
+          { ok: false, action, sessionKey, clientMutationId, status: 'unavailable', note: 'Approval not found.' },
+          { status: 404, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+        );
+      }
+      if (currentApproval.status !== 'pending') {
+        return NextResponse.json(
+          { ok: true, action, sessionKey, clientMutationId, status: 'completed', note: 'Approval was already resolved.' },
+          { status: 200, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+        );
+      }
+
+      const approval = resolveApproval(approvalId, action === 'approve' ? 'approve' : 'reject', 'mobile');
+      if (!approval) {
+        return NextResponse.json(
+          { ok: false, action, sessionKey, clientMutationId, status: 'unavailable', note: 'Approval not found.' },
+          { status: 404, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+        );
+      }
+      const decision = action === 'approve'
+        ? await resumeLlmApproval(request.url, approval, { actor: 'mobile' })
+        : rejectLlmApproval(approval, 'mobile');
+
+      invalidateMutationCaches();
+      await publishMobileMutation(clientMutationId, {
+        action,
+        sessionKey: approval.sessionKey,
+        runtime: approval.runtime,
+        status: 'completed',
+        note: decision.note,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        action,
+        sessionKey: approval.sessionKey,
+        clientMutationId,
+        status: 'completed',
+        note: decision.note,
+      }, {
         status: 200,
         headers: { 'Cache-Control': 'no-store, max-age=0' },
       });

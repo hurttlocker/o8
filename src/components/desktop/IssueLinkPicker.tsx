@@ -181,7 +181,8 @@ export function IssueLinkPickerModal({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 20,
+        padding: 'var(--cortex-dialog-overlay-padding)',
+        boxSizing: 'border-box',
       }}
       onClick={onClose}
     >
@@ -205,7 +206,7 @@ export function IssueLinkPickerModal({
             alignItems: 'flex-start',
             justifyContent: 'space-between',
             gap: 16,
-            padding: '18px 20px 14px',
+            padding: 'var(--cortex-dialog-header-padding)',
             borderBottom: '1px solid rgba(148, 163, 184, 0.14)',
           }}
         >
@@ -253,7 +254,7 @@ export function IssueLinkPickerModal({
           </button>
         </div>
 
-        <div style={{ padding: 18, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
+        <div style={{ padding: 'var(--cortex-dialog-body-padding)', display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: '1 1 220px' }}>
               <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -418,7 +419,7 @@ export function IssueLinkPickerModal({
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: 12,
-            padding: '14px 18px 18px',
+            padding: 'var(--cortex-dialog-footer-padding)',
             borderTop: '1px solid rgba(148, 163, 184, 0.14)',
           }}
         >
