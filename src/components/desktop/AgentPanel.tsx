@@ -174,11 +174,11 @@ interface CIHoverDetail {
   summaryLine: string | null;
 }
 
-const THEME_ACCENT = 'var(--t-accent, #ef4444)';
-const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(239, 68, 68, 0.08))';
-const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(239, 68, 68, 0.14))';
-const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(239, 68, 68, 0.22))';
-const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(239, 68, 68, 0.15))';
+const THEME_ACCENT = 'var(--t-accent, #2563eb)';
+const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
+const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(37, 99, 235, 0.14))';
+const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
+const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
 const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
 
@@ -506,7 +506,7 @@ function SidebarSection({
   headerAction?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  const tone = accent ?? '#ef4444';
+  const tone = accent ?? '#2563eb';
 
   return (
     <section style={{ borderTop: '1px solid var(--t-divider-subtle)' }}>
@@ -1263,7 +1263,7 @@ const AgentCard = memo(function AgentCard({
           return 'idle';
         };
         const statusGroups: { key: AgentStatus; label: string; color: string; agents: AgentDetail[] }[] = [
-          { key: 'in_progress', label: 'In Progress', color: '#ef4444', agents: [] },
+          { key: 'in_progress', label: 'In Progress', color: '#2563eb', agents: [] },
           { key: 'waiting', label: 'Waiting', color: '#b45309', agents: [] },
           { key: 'in_review', label: 'In Review', color: '#f59e0b', agents: [] },
           { key: 'merge_ready', label: 'Merge Ready', color: '#16a34a', agents: [] },
@@ -1548,7 +1548,7 @@ function relativeAge(dateStr: string): string {
 const FEED_ICON: Record<string, { icon: React.ReactNode; bg: string; color: string }> = {
   commit: { icon: <GitCommit size={11} strokeWidth={2} />, bg: 'rgba(34,197,94,0.08)', color: '#22c55e' },
   issue: { icon: <AlertCircle size={11} strokeWidth={2} />, bg: 'rgba(139,92,246,0.08)', color: '#8b5cf6' },
-  pr: { icon: <GitPullRequest size={11} strokeWidth={2} />, bg: 'rgba(239,68,68,0.08)', color: '#ef4444' },
+  pr: { icon: <GitPullRequest size={11} strokeWidth={2} />, bg: 'rgba(37,99,235,0.08)', color: '#2563eb' },
   ci_success: { icon: <CheckCircle2 size={11} strokeWidth={2} />, bg: 'rgba(34,197,94,0.08)', color: '#22c55e' },
   ci_failure: { icon: <XCircle size={11} strokeWidth={2} />, bg: 'rgba(239,68,68,0.08)', color: '#ef4444' },
   ci_pending: { icon: <Clock size={11} strokeWidth={2} />, bg: 'rgba(245,158,11,0.08)', color: '#f59e0b' },
@@ -4178,7 +4178,7 @@ export const AgentPanel = memo(function AgentPanel({
         <SidebarSection
           title="Workspaces"
           summary={workspacesSummary}
-          accent="#ef4444"
+          accent="#2563eb"
           open={reposOpen}
           onToggle={() => setReposOpen((current) => !current)}
           headerAction={(
