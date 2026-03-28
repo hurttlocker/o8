@@ -23,6 +23,10 @@ interface ChatHistoryEntry {
   savedAt: string;
   modifiedAt: string;
   starred: boolean;
+  repoName?: string | null;
+  repoPath?: string | null;
+  repoBranch?: string | null;
+  remoteUrl?: string | null;
 }
 
 export async function GET(request: NextRequest) {
@@ -46,9 +50,9 @@ export async function GET(request: NextRequest) {
         const lastMsg = messages[messages.length - 1];
 
         // Generate title from first user message
-        const title = firstUserMsg
+        const title = data.title || (firstUserMsg
           ? firstUserMsg.content.slice(0, 60).replace(/\n/g, ' ') + (firstUserMsg.content.length > 60 ? '...' : '')
-          : 'Untitled conversation';
+          : 'Untitled conversation');
 
         // Preview from last message
         const preview = lastMsg
@@ -58,7 +62,8 @@ export async function GET(request: NextRequest) {
         // Full-text search
         if (searchQuery) {
           const allText = messages.map(m => m.content).join(' ').toLowerCase();
-          if (!allText.includes(searchQuery) && !title.toLowerCase().includes(searchQuery)) {
+          const repoText = [data.repoName, data.repoPath, data.repoBranch].filter(Boolean).join(' ').toLowerCase();
+          if (!allText.includes(searchQuery) && !title.toLowerCase().includes(searchQuery) && !repoText.includes(searchQuery)) {
             continue;
           }
         }
@@ -72,6 +77,10 @@ export async function GET(request: NextRequest) {
           savedAt: data.savedAt || stat.mtime.toISOString(),
           modifiedAt: stat.mtime.toISOString(),
           starred: data.starred || false,
+          repoName: data.repoName || null,
+          repoPath: data.repoPath || null,
+          repoBranch: data.repoBranch || null,
+          remoteUrl: data.remoteUrl || null,
         });
       } catch { /* skip bad files */ }
     }

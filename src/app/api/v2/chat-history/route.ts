@@ -57,9 +57,19 @@ export async function POST(request: NextRequest) {
 
   // Preserve starred status from existing file
   let starred = false;
+  let title: string | undefined;
+  let repoName: string | undefined;
+  let repoPath: string | undefined;
+  let repoBranch: string | undefined;
+  let remoteUrl: string | null | undefined;
   try {
     const existing = JSON.parse(readFileSync(filePath, 'utf-8'));
     starred = existing.starred || false;
+    title = existing.title;
+    repoName = existing.repoName;
+    repoPath = existing.repoPath;
+    repoBranch = existing.repoBranch;
+    remoteUrl = existing.remoteUrl;
   } catch { /* new file */ }
 
   writeFileSync(filePath, JSON.stringify({
@@ -67,6 +77,11 @@ export async function POST(request: NextRequest) {
     model: body.model,
     savedAt: new Date().toISOString(),
     starred: body.starred ?? starred,
+    title: body.title ?? title,
+    repoName: body.repoName ?? repoName,
+    repoPath: body.repoPath ?? repoPath,
+    repoBranch: body.repoBranch ?? repoBranch,
+    remoteUrl: body.remoteUrl ?? remoteUrl ?? null,
   }));
 
   return NextResponse.json({ ok: true });
@@ -81,6 +96,10 @@ export async function PATCH(request: NextRequest) {
     const data = JSON.parse(readFileSync(filePath, 'utf-8'));
     if (body.starred !== undefined) data.starred = body.starred;
     if (body.title !== undefined) data.title = body.title;
+    if (body.repoName !== undefined) data.repoName = body.repoName;
+    if (body.repoPath !== undefined) data.repoPath = body.repoPath;
+    if (body.repoBranch !== undefined) data.repoBranch = body.repoBranch;
+    if (body.remoteUrl !== undefined) data.remoteUrl = body.remoteUrl;
     writeFileSync(filePath, JSON.stringify(data));
     return NextResponse.json({ ok: true });
   } catch {

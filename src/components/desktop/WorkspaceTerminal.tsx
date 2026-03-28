@@ -99,6 +99,7 @@ export interface TerminalTabHandle {
 interface WorkspaceTerminalProps {
   stateScope: string;
   defaultTab: 'llm-chat' | 'terminal';
+  autoCreateDefaultTab?: boolean;
   preferredRepo?: RegisteredRepo | null;
   splitCreated?: boolean;
   availableRepos?: RegisteredRepo[];
@@ -106,6 +107,7 @@ interface WorkspaceTerminalProps {
   onActiveChatSessionChange?: (sessionKey: string | null) => void;
   onChatSessionsChange?: (sessions: MobileInboxSnapshot['sessions']) => void;
   onRepoScopeChange?: (repoPath: string | null) => void;
+  onActiveRepoContextChange?: (repo: RegisteredRepo | null) => void;
   onSelectRepoScope?: (repo: RegisteredRepo) => void;
   onLaunchRepoAgent?: (repo: RegisteredRepo) => void | Promise<void>;
   onOpenRepoGitLog?: (repo: RegisteredRepo) => void;
@@ -169,6 +171,13 @@ function formatWorkspaceChatSessionKey(
   if (runtime === 'chat') return `llm-chat:${sessionKey}`;
   if (runtime !== 'codex' && runtime !== 'claude-code') return sessionKey;
   return `${runtime}:${sessionKey}`;
+}
+
+function generateLlmChatTabId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `llm-${crypto.randomUUID()}`;
+  }
+  return `llm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function fallbackWorkspaceChatSessionKey(
@@ -2408,6 +2417,7 @@ function workspaceInspectorIcon(kind?: CanvasTab['kind']) {
 const TabBar = memo(function TabBar({
   tabs,
   activeTabId,
+  launchRequestKey,
   onSelectTab,
   onCloseTab,
   onNewTab,
@@ -2418,6 +2428,7 @@ const TabBar = memo(function TabBar({
 }: {
   tabs: TerminalTab[];
   activeTabId: string;
+  launchRequestKey?: number;
   onSelectTab: (id: string) => void;
   onCloseTab: (id: string) => void;
   onNewTab: (agentId: string, repo?: RegisteredRepo) => void;
@@ -2432,6 +2443,12 @@ const TabBar = memo(function TabBar({
   const [repos, setRepos] = useState<RegisteredRepo[]>([]);
   const pickerRef = useRef<HTMLDivElement>(null);
 
+  const openLaunchPicker = () => {
+    setSelectedAgent(null);
+    setPickerStep('main');
+    setPickerOpen(true);
+  };
+
   // Close picker on outside click
   useEffect(() => {
     if (!pickerOpen) return;
@@ -2445,6 +2462,11 @@ const TabBar = memo(function TabBar({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [pickerOpen]);
+
+  useEffect(() => {
+    if (!launchRequestKey) return;
+    openLaunchPicker();
+  }, [launchRequestKey]);
 
   // Fetch repos when picker opens
   useEffect(() => {
@@ -2615,7 +2637,15 @@ const TabBar = memo(function TabBar({
       <div ref={pickerRef} style={{ position: 'relative', flexShrink: 0 }}>
         <button
           type="button"
-          onClick={() => setPickerOpen(!pickerOpen)}
+          onClick={() => {
+            if (pickerOpen) {
+              setPickerOpen(false);
+              setPickerStep('main');
+              setSelectedAgent(null);
+              return;
+            }
+            openLaunchPicker();
+          }}
           aria-label="Launch agent"
           title="Launch agent"
           style={{
@@ -3145,6 +3175,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     {
       stateScope,
       defaultTab,
+      autoCreateDefaultTab = true,
       preferredRepo = null,
       splitCreated = false,
       availableRepos = [],
@@ -3152,6 +3183,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       onActiveChatSessionChange,
       onChatSessionsChange,
       onRepoScopeChange,
+      onActiveRepoContextChange,
       onSelectRepoScope,
       onOpenRepoDiff,
       onInjectChatContext,
@@ -3499,7 +3531,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       tabCountRef.current += 1;
       const now = Date.now();
       return {
-        id: `llm-${tabCountRef.current}`,
+        id: generateLlmChatTabId(),
         label: 'Chat',
         kind: 'llm-chat',
         tmuxSession: null,
@@ -3531,7 +3563,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         const tabKind = st.kind ?? 'terminal';
 
         if (tabKind === 'llm-chat') {
-          const tabId = `llm-${tabCountRef.current}`;
+          const tabId = st.id?.trim() || generateLlmChatTabId();
           restoredTabs.push({
             id: tabId,
             label: st.label,
@@ -3698,7 +3730,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             if (cancelled) return;
             restoreSettledRef.current = true;
             setRestoreCompletedKey(restoreKey);
-          } else {
+          } else if (autoCreateDefaultTab) {
             if (cancelled) return;
             if (defaultTab === 'llm-chat') {
               const defaultChat = createDefaultChatTab();
@@ -3712,6 +3744,11 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             }
             restoreSettledRef.current = true;
             setRestoreCompletedKey(restoreKey);
+          } else {
+            setTabs([]);
+            setActiveTabId('');
+            restoreSettledRef.current = true;
+            setRestoreCompletedKey(restoreKey);
           }
         } catch {
           if (cancelled) return;
@@ -3723,7 +3760,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         cancelled = true;
         window.clearTimeout(urlDetectionTimer);
       };
-    }, [applyPersistedState, createDefaultChatTab, createDefaultShellTab, defaultTab, preferredRepo, requestTerminalForTab, restoreKey, splitCreated, stableRepoScope, stateScope, termWsConnected]);
+    }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createDefaultShellTab, defaultTab, preferredRepo, requestTerminalForTab, restoreKey, splitCreated, stableRepoScope, stateScope, termWsConnected]);
 
     useEffect(() => {
       if (tabs.length > 0 || !termWsConnected || splitCreated || !primaryRestoreSettled) return;
@@ -3735,6 +3772,11 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
               const restored = await applyPersistedState(saved);
               if (restored) return;
             }
+          }
+          if (!autoCreateDefaultTab) {
+            setTabs([]);
+            setActiveTabId('');
+            return;
           }
           if (defaultTab === 'llm-chat') {
             const fallbackChat = createDefaultChatTab();
@@ -3751,7 +3793,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         })();
       }, 250);
       return () => window.clearTimeout(timer);
-    }, [applyPersistedState, createDefaultChatTab, createDefaultShellTab, defaultTab, preferredRepo?.localPath, primaryRestoreSettled, requestTerminalForTab, splitCreated, stableRepoScope, tabs.length, termWsConnected]);
+    }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createDefaultShellTab, defaultTab, preferredRepo?.localPath, primaryRestoreSettled, requestTerminalForTab, splitCreated, stableRepoScope, tabs.length, termWsConnected]);
 
     // On reconnect, reattach existing terminal tabs without resetting chat state.
     useEffect(() => {
@@ -3862,7 +3904,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                   ...tab,
                   label: options.label ?? tab.label,
                   chatModel: options.modelId ?? tab.chatModel,
-                  chatContinueLatest: tab.chatContinueLatest ?? (resolvedRuntime === 'claude-code'),
+                  chatContinueLatest: tab.chatContinueLatest ?? false,
                   chatDraftInjection: injection ?? tab.chatDraftInjection,
                 }
               : tab
@@ -3881,7 +3923,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           chatRuntime: resolvedRuntime,
           chatSessionKey: undefined,
           chatModel: options.modelId ?? (resolvedRuntime === 'claude-code' ? CLAUDE_CLI_MODELS[0].id : CODEX_CLI_MODELS[0].id),
-          chatContinueLatest: resolvedRuntime === 'claude-code',
+          chatContinueLatest: false,
           chatDraftInjection: injection,
           chatCheckpoints: [],
           repo: options.repo,
@@ -3958,7 +4000,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         }
 
         tabCountRef.current += 1;
-        resolvedTabId = `llm-${tabCountRef.current}`;
+        resolvedTabId = generateLlmChatTabId();
         const now = Date.now();
         const newTab: TerminalTab = {
           id: resolvedTabId,
@@ -4207,7 +4249,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         kind: 'chat',
         tmuxSession: null,
         chatRuntime: runtime,
-        chatContinueLatest: runtime === 'claude-code',
+        chatContinueLatest: false,
         chatModel: runtime === 'claude-code' ? CLAUDE_CLI_MODELS[0].id : CODEX_CLI_MODELS[0].id,
         repo,
         linkedIssue: null,
@@ -4222,7 +4264,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
 
     const handleNewLLMChatTab = useCallback((repo?: RegisteredRepo) => {
       tabCountRef.current += 1;
-      const tabId = `llm-${tabCountRef.current}`;
+      const tabId = generateLlmChatTabId();
       const now = Date.now();
       const newTab: TerminalTab = {
         id: tabId,
@@ -4443,6 +4485,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     // Drag resize state
     const [previewHeight, setPreviewHeight] = useState(0.55); // 55% default for preview
     const [isDragging, setIsDragging] = useState(false);
+    const [launchRequestKey, setLaunchRequestKey] = useState(0);
     const containerDivRef = useRef<HTMLDivElement>(null);
     const activeTab = useMemo(
       () => visibleTabs.find((tab) => tab.id === effectiveActiveTabId) ?? null,
@@ -4486,7 +4529,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     }, [preferredRepo, visibleTabs]);
     const paneHasMixedRepos = paneRepoPaths.length > 1;
     const activeRepo = activeTab?.repo ?? visibleTabs.find((tab) => tab.repo)?.repo ?? preferredRepo ?? null;
-    const headerRepo = preferredRepo ?? activeRepo ?? null;
+    const headerRepo = activeRepo ?? preferredRepo ?? null;
     const isFreshSplitShell = splitCreated
       && visibleTabs.length === 1
       && activeTab?.kind === 'terminal'
@@ -4511,13 +4554,21 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         : null;
     const activeRepoDetails = useMemo(() => {
       if (!headerRepo) return null;
-      const preferredMatch = preferredRepo?.localPath === headerRepo.localPath ? preferredRepo : null;
       return {
-        branch: headerRepo.branch ?? preferredMatch?.branch ?? null,
-        readiness: headerRepo.readiness ?? preferredMatch?.readiness ?? null,
-        remoteUrl: headerRepo.remoteUrl ?? preferredMatch?.remoteUrl,
+        branch: activeRepo?.branch ?? headerRepo.branch ?? preferredRepo?.branch ?? null,
+        readiness: activeRepo?.readiness ?? headerRepo.readiness ?? preferredRepo?.readiness ?? null,
+        remoteUrl: activeRepo?.remoteUrl ?? headerRepo.remoteUrl ?? preferredRepo?.remoteUrl,
       };
-    }, [headerRepo, preferredRepo]);
+    }, [activeRepo, headerRepo, preferredRepo]);
+    const activeRepoContext = useMemo<RegisteredRepo | null>(() => {
+      if (!headerRepo) return null;
+      return {
+        ...headerRepo,
+        branch: activeRepoDetails?.branch ?? headerRepo.branch ?? null,
+        readiness: activeRepoDetails?.readiness ?? headerRepo.readiness ?? null,
+        remoteUrl: activeRepoDetails?.remoteUrl ?? headerRepo.remoteUrl,
+      };
+    }, [activeRepoDetails, headerRepo]);
     const selectableRepos = useMemo(() => {
       if (availableRepos.length > 0) return availableRepos;
       return preferredRepo ? [preferredRepo] : [];
@@ -4541,13 +4592,16 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       return () => observer.disconnect();
     }, [stateScope]);
     useEffect(() => {
-      const nextRepoScope = preferredRepo?.localPath ?? activeRepo?.localPath ?? null;
+      const nextRepoScope = activeRepo?.localPath ?? preferredRepo?.localPath ?? null;
       if (reportedRepoScopeRef.current === nextRepoScope) {
         return;
       }
       reportedRepoScopeRef.current = nextRepoScope;
       onRepoScopeChange?.(nextRepoScope);
     }, [activeRepo?.localPath, onRepoScopeChange, preferredRepo?.localPath]);
+    useEffect(() => {
+      onActiveRepoContextChange?.(activeRepoContext);
+    }, [activeRepoContext, onActiveRepoContextChange]);
 
     return (
       <div ref={containerDivRef} style={{
@@ -4677,20 +4731,19 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           </div>
         ) : null}
 
-        {(headerRepo || paneHasMixedRepos || isFreshSplitShell || selectableRepos.length > 0) ? (
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
-              minHeight: 38,
-              padding: '5px 12px',
-              borderBottom: '1px solid var(--t-divider-subtle)',
-              background: 'var(--t-chrome)',
-              flexShrink: 0,
-            }}
-          >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            minHeight: 38,
+            padding: '5px 12px',
+            borderBottom: '1px solid var(--t-divider-subtle)',
+            background: 'var(--t-chrome)',
+            flexShrink: 0,
+          }}
+        >
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
@@ -4705,7 +4758,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                   whiteSpace: 'nowrap',
                 }}
               >
-                {headerContextTitle}
+                {headerContextTitle || 'Workspace'}
               </div>
               {headerContextSubtitle ? (
                 <div
@@ -4947,11 +5000,11 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
               </div>
             </div>
           </div>
-        ) : null}
 
         <TabBar
           tabs={visibleTabs}
           activeTabId={effectiveActiveTabId}
+          launchRequestKey={launchRequestKey}
           onSelectTab={setActiveTabId}
           onCloseTab={handleCloseTab}
           onNewTab={handleNewTab}
@@ -4979,7 +5032,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                   onSummaryChange={handleUpdateLlmSummary}
                   onConsumeDraftInjection={(injectionId) => handleConsumeLlmDraftInjection(tab.id, injectionId)}
                   onLinkedIssueChange={(issue) => handleUpdateLinkedIssue(tab.id, issue)}
-                  onOpenHistoryChat={(historyTabId: string, title: string) => {
+                  onOpenHistoryChat={(historyTabId: string, title: string, historyRepo) => {
                     // Create a new tab that loads the history
                     tabCountRef.current += 1;
                     const now = Date.now();
@@ -4988,7 +5041,14 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                       label: title.slice(0, 20) + (title.length > 20 ? '...' : ''),
                       kind: 'llm-chat',
                       tmuxSession: null,
-                      repo: tab.repo,
+                      repo: historyRepo?.localPath || historyRepo?.name
+                        ? {
+                            name: historyRepo?.name ?? tab.repo?.name ?? 'repo',
+                            localPath: historyRepo?.localPath ?? tab.repo?.localPath ?? '',
+                            branch: historyRepo?.branch ?? tab.repo?.branch ?? null,
+                            remoteUrl: historyRepo?.remoteUrl ?? tab.repo?.remoteUrl,
+                          }
+                        : tab.repo,
                       linkedIssue: tab.linkedIssue ?? null,
                       createdAt: now,
                       lastActivity: now,
@@ -5102,16 +5162,69 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
 
           {/* Empty state when no tabs */}
           {visibleTabs.length === 0 && (
-            <div style={{
-              flex: 1,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--t-text-muted)',
-              fontSize: 14,
-            }}>
-              <TerminalIcon size={18} style={{ marginRight: 8 }} />
-              Connecting…
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: 24,
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 12,
+                  textAlign: 'center',
+                  maxWidth: 320,
+                }}
+              >
+                <div
+                  style={{
+                    width: 40,
+                    height: 40,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: 12,
+                    background: 'rgba(148, 163, 184, 0.08)',
+                    color: 'var(--t-text-muted)',
+                  }}
+                >
+                  <TerminalIcon size={18} />
+                </div>
+                <div style={{ color: 'var(--t-text-muted)', fontSize: 14, fontWeight: 600 }}>
+                  Workspace surface idle
+                </div>
+                <div style={{ color: 'var(--t-text-muted)', fontSize: 12, lineHeight: 1.5 }}>
+                  Open a terminal, chat, or canvas in this workspace. The shell can stay active in the background even when no terminal tab is open.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setLaunchRequestKey((value) => value + 1)}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    minHeight: 32,
+                    padding: '0 12px',
+                    borderRadius: 9,
+                    border: '1px solid rgba(59, 130, 246, 0.22)',
+                    background: 'rgba(59, 130, 246, 0.12)',
+                    color: 'var(--t-text-primary)',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <TerminalIcon size={14} />
+                  Launch workspace
+                </button>
+              </div>
             </div>
           )}
         </div>

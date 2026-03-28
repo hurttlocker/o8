@@ -8,11 +8,22 @@ import { fetchGitHubPullRequestSummaries, normalizeRepoSlug } from '@/lib/github
 import { listRepos } from '@/lib/repos/registry';
 import { getRepoReadiness } from '@/lib/repos/readiness';
 import type { RepoReadiness } from '@/lib/repos/types';
+import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
+import {
+  buildWorkspaceLifecycleId,
+  mutateWorkspaceLifecycleRecord,
+  syncWorkspaceLifecycleRecords,
+  type LiveWorkspaceLifecycleInput,
+} from '@/lib/workspace/lifecycle';
+import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import { deriveWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
 
-// PR data cache — shared across requests, per repo
 const prCache = new Map<string, { prs: PRData[]; ts: number }>();
-const PR_CACHE_TTL_MS = 60_000; // 60s — PRs change slowly
+const PR_CACHE_TTL_MS = 60_000;
+const branchCache = new Map<string, { branch: string; ts: number }>();
+const BRANCH_CACHE_TTL = 10_000;
+const diffCache = new Map<string, { data: { additions: number; deletions: number; changedFiles: number } | null; ts: number }>();
+const DIFF_CACHE_TTL = 30_000;
 
 interface PRData {
   number: number;
@@ -30,15 +41,18 @@ interface PRData {
 
 interface WorkspaceEntry {
   id: string;
+  workspaceId: string;
   agentName: string;
   agentStatus: string;
   sessionKey: string;
   workspace: string;
+  workspacePath: string;
+  repoPath: string;
   branch: string;
   repo: string;
-  // Local diff stats (uncommitted + recent commits, used when no PR)
+  runtime?: string;
+  currentTask?: string;
   localDiff?: { additions: number; deletions: number; changedFiles: number };
-  // PR data (null if no matching PR)
   pr: {
     number: number;
     title: string;
@@ -48,38 +62,82 @@ interface WorkspaceEntry {
     state: 'open' | 'merged' | 'closed';
     url: string;
   } | null;
-  // Derived status
   status: 'in_progress' | 'in_review' | 'done' | 'idle' | 'cancelled';
   readiness?: RepoReadiness;
   workflowStage?: WorkflowStageBadge | null;
+  lifecycle?: WorkspaceLifecycleRecordView;
 }
 
-function deriveRepo(workspace: string): string {
-  const path = workspace.replace(/^~\//, '');
-  if (path.includes('/.cortex-worktrees/')) {
-    const repoRoot = path.split('/.cortex-worktrees/')[0] ?? '';
+function shortenHomePath(filePath: string) {
+  return filePath.replace(/^\/Users\/[^/]+/, '~').replace(/^\/home\/[^/]+/, '~');
+}
+
+function normalizeScopePath(filePath?: string | null) {
+  const trimmed = filePath?.trim();
+  if (!trimmed) return null;
+  return resolveWorkspacePath(trimmed).replace(/\/+$/, '');
+}
+
+function pathBelongsToRegisteredRepo(candidatePath: string | null | undefined, repoRoots: Set<string>) {
+  const normalizedCandidate = normalizeScopePath(candidatePath);
+  if (!normalizedCandidate) return false;
+  for (const repoRoot of repoRoots) {
+    if (normalizedCandidate === repoRoot || normalizedCandidate.startsWith(`${repoRoot}/`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function buildLifecycleSummary(records: WorkspaceLifecycleRecordView[]): WorkspaceLifecycleSummaryView {
+  const active = records.filter((record) => !record.archivedAt);
+  const nextAttention = active
+    .filter((record) => record.attentionRank > 0)
+    .sort((left, right) => right.attentionRank - left.attentionRank)[0];
+  return {
+    unreadCount: active.reduce((sum, record) => sum + record.unreadCount, 0),
+    archivedCount: records.filter((record) => Boolean(record.archivedAt)).length,
+    nextAttentionWorkspaceId: nextAttention?.id ?? null,
+  };
+}
+
+function resolveWorkspacePath(workspace: string) {
+  return workspace.replace(/^~/, process.env.HOME || os.homedir());
+}
+
+function deriveRepoFromWorkspace(workspace: string) {
+  const filePath = workspace.replace(/^~\//, '');
+  if (filePath.includes('/.cortex-worktrees/')) {
+    const repoRoot = filePath.split('/.cortex-worktrees/')[0] ?? '';
     return repoRoot.split('/').pop() || '';
   }
-  if (path.includes('/.claude/worktrees/')) {
-    const repoRoot = path.split('/.claude/worktrees/')[0] ?? '';
+  if (filePath.includes('/.claude/worktrees/')) {
+    const repoRoot = filePath.split('/.claude/worktrees/')[0] ?? '';
     return repoRoot.split('/').pop() || '';
   }
-  if (path.includes('repos/')) {
-    const parts = path.split('repos/');
+  if (filePath.includes('repos/')) {
+    const parts = filePath.split('repos/');
     return parts[1]?.split('/')[0] || '';
   }
-  if (path.includes('projects/')) {
-    const parts = path.split('projects/');
+  if (filePath.includes('projects/')) {
+    const parts = filePath.split('projects/');
     return parts[1]?.split('/')[0] || '';
   }
   return '';
 }
 
-// Map OpenClaw agent session keys to the repos they actively work on
-// This is how the agent cards show the correct repo's diff
+function deriveRepoRootPath(workspace: string) {
+  const resolved = resolveWorkspacePath(workspace);
+  if (resolved.includes('/.cortex-worktrees/')) {
+    return resolved.split('/.cortex-worktrees/')[0] ?? resolved;
+  }
+  if (resolved.includes('/.claude/worktrees/')) {
+    return resolved.split('/.claude/worktrees/')[0] ?? resolved;
+  }
+  return resolved;
+}
+
 function getAgentActiveRepo(sessionKey: string): { repo: string; path: string } | null {
-  // Agent → repo mapping is auto-detected from the workspace root.
-  // Falls back to process.cwd() when CORTEX_IDE_WORKSPACE_ROOT is not set.
   const workspaceRoot = process.env.CORTEX_IDE_WORKSPACE_ROOT || process.cwd();
   const map: Record<string, { repo: string; path: string }> = {
     'agent:main:main': { repo: path.basename(workspaceRoot), path: workspaceRoot },
@@ -87,15 +145,7 @@ function getAgentActiveRepo(sessionKey: string): { repo: string; path: string } 
   return map[sessionKey] || null;
 }
 
-function resolveWorkspacePath(workspace: string): string {
-  return workspace.replace(/^~/, process.env.HOME || os.homedir());
-}
-
-// Resolve current git branch for a path
-const branchCache = new Map<string, { branch: string; ts: number }>();
-const BRANCH_CACHE_TTL = 10_000;
-
-function resolveGitBranch(repoPath: string): string {
+function resolveGitBranch(repoPath: string) {
   const now = Date.now();
   const cached = branchCache.get(repoPath);
   if (cached && now - cached.ts < BRANCH_CACHE_TTL) return cached.branch;
@@ -113,40 +163,33 @@ function resolveGitBranch(repoPath: string): string {
   }
 }
 
-// Cache to avoid re-running git on every poll (30s TTL)
-const diffCache = new Map<string, { data: { additions: number; deletions: number; changedFiles: number } | null; ts: number }>();
-const DIFF_CACHE_TTL = 30_000;
-
-function getLocalDiffStats(workspace: string): { additions: number; deletions: number; changedFiles: number } | null {
+function getLocalDiffStats(workspace: string) {
   try {
     const isDefault = workspace === 'unknown';
     const cwd = isDefault
       ? (process.env.CORTEX_IDE_WORKSPACE_ROOT || process.cwd())
       : resolveWorkspacePath(workspace);
-
-    // Check cache
     const cached = diffCache.get(cwd);
     if (cached && Date.now() - cached.ts < DIFF_CACHE_TTL) return cached.data;
 
-    // For agent workspaces (clawd): show only uncommitted changes
-    // For code repos (cortex-ide etc): origin/main..HEAD + uncommitted (resets on push)
     const cmd = isDefault
       ? 'git diff --shortstat 2>/dev/null'
       : 'git diff --shortstat origin/main..HEAD 2>/dev/null; git diff --shortstat 2>/dev/null';
     const diffStat = execSync(cmd, { cwd, encoding: 'utf-8', timeout: 5000 }).trim();
 
-    let additions = 0, deletions = 0, changedFiles = 0;
-
+    let additions = 0;
+    let deletions = 0;
+    let changedFiles = 0;
     for (const line of diffStat.split('\n').filter(Boolean)) {
       const filesMatch = line.match(/(\d+) files? changed/);
       const addMatch = line.match(/(\d+) insertions?\(\+\)/);
       const delMatch = line.match(/(\d+) deletions?\(-\)/);
-      if (filesMatch) changedFiles += parseInt(filesMatch[1]);
-      if (addMatch) additions += parseInt(addMatch[1]);
-      if (delMatch) deletions += parseInt(delMatch[1]);
+      if (filesMatch) changedFiles += parseInt(filesMatch[1], 10);
+      if (addMatch) additions += parseInt(addMatch[1], 10);
+      if (delMatch) deletions += parseInt(delMatch[1], 10);
     }
 
-    const result = (additions === 0 && deletions === 0) ? null : { additions, deletions, changedFiles };
+    const result = additions === 0 && deletions === 0 ? null : { additions, deletions, changedFiles };
     diffCache.set(cwd, { data: result, ts: Date.now() });
     return result;
   } catch {
@@ -154,172 +197,266 @@ function getLocalDiffStats(workspace: string): { additions: number; deletions: n
   }
 }
 
+function deriveWorkspaceStatus(params: {
+  runtimeStatus: string;
+  pr: PRData | null;
+}): WorkspaceEntry['status'] {
+  if (params.pr?.mergedAt) return 'done';
+  if (params.pr?.state.toLowerCase() === 'closed') return 'cancelled';
+  if (params.pr?.state.toLowerCase() === 'open') return 'in_review';
+  if (params.runtimeStatus === 'running' || params.runtimeStatus === 'reviewing' || params.runtimeStatus === 'waiting') {
+    return 'in_progress';
+  }
+  return 'idle';
+}
+
+function isVisibleWorkspaceAgent(agent: Awaited<ReturnType<typeof getRuntimeInventorySnapshot>>['agents'][number]) {
+  if (agent.runtime !== 'openclaw' && agent.runtime !== 'codex' && agent.runtime !== 'claude-code') {
+    return false;
+  }
+
+  const ownership = agent.runtimeSurface?.ownership ?? null;
+  if (ownership === 'owned') {
+    return true;
+  }
+
+  if (agent.runtime === 'openclaw') {
+    return Boolean(agent.isCurrentSession)
+      || ['running', 'reviewing', 'waiting', 'blocked', 'failed'].includes(agent.status);
+  }
+
+  if (ownership === 'discovered') {
+    return agent.status === 'running'
+      || Boolean(agent.runtimeSurface?.capabilities.interrupt)
+      || /live pid/i.test(agent.runtimeSurface?.sourceLabel ?? '');
+  }
+
+  return ['running', 'reviewing', 'waiting'].includes(agent.status);
+}
+
+async function collectWorkspaceLifecycle(includeOpenClaw: boolean) {
+  const [runtimeSnapshot, registeredRepos] = await Promise.all([
+    getRuntimeInventorySnapshot({ includeOpenClaw }),
+    listRepos().catch(() => []),
+  ]);
+
+  const repoSlugByName = new Map<string, string>();
+  const repoReadinessByName = new Map<string, RepoReadiness>();
+  const registeredRepoPaths = new Set(registeredRepos.map((entry) => normalizeScopePath(entry.localPath)).filter((value): value is string => Boolean(value)));
+  for (const entry of registeredRepos) {
+    const slug = normalizeRepoSlug(entry.remoteUrl);
+    if (slug) repoSlugByName.set(entry.name, slug);
+  }
+
+  await Promise.all(
+    registeredRepos.map(async (entry) => {
+      try {
+        repoReadinessByName.set(entry.name, await getRepoReadiness(entry));
+      } catch {
+        // Keep readiness optional if git/fs checks fail.
+      }
+    }),
+  );
+
+  const fallbackSlugMap: Record<string, string> = {
+    'cortex': 'hurttlocker/cortex',
+    'parasite-network': 'hurttlocker/parasite-network',
+    'spear-production': 'LavonTMCQ/spear-production',
+    'mybeautifulwife': 'LavonTMCQ/mybeautifulwife',
+  };
+
+  const liveAgents = runtimeSnapshot.agents
+    .filter((agent) => isVisibleWorkspaceAgent(agent));
+
+  const repoSet = new Set<string>();
+  const preparedAgents = liveAgents.map((agent) => {
+    const activeRepo = getAgentActiveRepo(agent.sessionKey);
+    const workspacePath = activeRepo?.path
+      ?? resolveWorkspacePath(agent.runtimeSurface?.cwd ?? agent.workspace);
+    const repoPath = activeRepo?.path ?? deriveRepoRootPath(workspacePath);
+    const repoSlug = agent.runtimeSurface?.reviewContext?.repoSlug?.trim() || null;
+    let repoName = repoSlug?.split('/').pop()?.trim()
+      || deriveRepoFromWorkspace(workspacePath)
+      || (agent.workspace === 'unknown' ? 'clawd' : '');
+    if (activeRepo && (!repoName || repoName === 'clawd')) {
+      repoName = activeRepo.repo;
+    }
+    if (repoName) repoSet.add(repoName);
+    const branchName = activeRepo
+      ? resolveGitBranch(activeRepo.path)
+      : agent.runtimeSurface?.branch?.replace(/^surface\//, '') || agent.branch.replace(/^surface\//, '');
+    return {
+      agent,
+      repoName,
+      repoPath,
+      workspacePath,
+      repoSlug,
+      branchName,
+    };
+  }).filter((prepared) => pathBelongsToRegisteredRepo(prepared.repoPath, registeredRepoPaths));
+
+  const prsByBranch = new Map<string, PRData & { ghRepo: string }>();
+  for (const repoName of repoSet) {
+    const ghRepo = repoSlugByName.get(repoName) ?? fallbackSlugMap[repoName] ?? '';
+    if (!ghRepo) continue;
+
+    try {
+      const cached = prCache.get(ghRepo);
+      let prs: PRData[];
+      if (cached && (Date.now() - cached.ts) < PR_CACHE_TTL_MS) {
+        prs = cached.prs;
+      } else {
+        prs = await fetchGitHubPullRequestSummaries(ghRepo, {
+          states: ['open', 'closed'],
+          limitPerState: 20,
+        }) as PRData[];
+        prCache.set(ghRepo, { prs, ts: Date.now() });
+      }
+      for (const pr of prs) {
+        prsByBranch.set(`${repoName}:${pr.headRefName}`, { ...pr, ghRepo });
+      }
+    } catch {
+      // Repo may not have PRs.
+    }
+  }
+
+  const workspaces: WorkspaceEntry[] = [];
+  const liveLifecycleInputs: LiveWorkspaceLifecycleInput[] = [];
+
+  for (const prepared of preparedAgents) {
+    const { agent, repoName, repoPath, workspacePath, repoSlug, branchName } = prepared;
+    if (!repoName) continue;
+    const pr = prsByBranch.get(`${repoName}:${branchName}`) || null;
+    const status = deriveWorkspaceStatus({ runtimeStatus: agent.status, pr });
+    const localDiff = (!pr && repoName !== 'clawd') ? getLocalDiffStats(workspacePath) : null;
+    const ghRepo = repoSlugByName.get(repoName) ?? fallbackSlugMap[repoName] ?? '';
+    const workflowStage = deriveWorkflowStage({
+      runtimeStatus: agent.status,
+      workspaceStatus: status === 'in_review' ? 'in_review' : status === 'done' ? 'done' : null,
+      readinessState: repoReadinessByName.get(repoName)?.state ?? null,
+      prState: pr?.mergedAt ? 'merged' : pr?.state ?? null,
+      hasMessages: Boolean(agent.currentTask?.trim()),
+      latestText: agent.currentTask ?? agent.runtimeSurface?.lifecycle?.summary ?? '',
+    });
+    const workspaceId = buildWorkspaceLifecycleId({
+      repoPath,
+      workspacePath,
+      branch: branchName,
+    });
+
+    workspaces.push({
+      id: agent.sessionKey || agent.name,
+      workspaceId,
+      agentName: agent.name,
+      agentStatus: agent.status,
+      sessionKey: agent.sessionKey,
+      workspace: shortenHomePath(workspacePath),
+      workspacePath,
+      repoPath,
+      branch: branchName,
+      repo: repoName,
+      runtime: agent.runtime,
+      currentTask: agent.currentTask,
+      localDiff: localDiff ?? undefined,
+      pr: pr ? {
+        number: pr.number,
+        title: pr.title,
+        additions: pr.additions,
+        deletions: pr.deletions,
+        changedFiles: pr.changedFiles,
+        state: pr.mergedAt ? 'merged' : pr.state.toLowerCase() === 'closed' ? 'closed' : 'open',
+        url: pr.url || `https://github.com/${ghRepo}/pull/${pr.number}`,
+      } : null,
+      status,
+      readiness: repoReadinessByName.get(repoName),
+      workflowStage,
+    });
+
+    liveLifecycleInputs.push({
+      id: workspaceId,
+      repo: repoName,
+      repoPath,
+      workspacePath,
+      branch: branchName,
+      repoSlug,
+      sessionKey: agent.sessionKey,
+      runtime: agent.runtime,
+      agentName: agent.name,
+      agentStatus: agent.status,
+      currentTask: agent.currentTask,
+      workspaceStatus: status,
+      workflowStage,
+    });
+  }
+
+  const lifecycle = syncWorkspaceLifecycleRecords(liveLifecycleInputs);
+  const filteredLifecycleRecords = lifecycle.records.filter((record) => (
+    pathBelongsToRegisteredRepo(record.repoPath, registeredRepoPaths)
+    || pathBelongsToRegisteredRepo(record.workspacePath, registeredRepoPaths)
+  ));
+  const lifecycleById = new Map(filteredLifecycleRecords.map((record) => [record.id, record]));
+  const enrichedWorkspaces = workspaces.map((workspace) => ({
+    ...workspace,
+    lifecycle: lifecycleById.get(workspace.workspaceId),
+  }));
+
+  return {
+    workspaces: enrichedWorkspaces,
+    repos: Array.from(repoSet),
+    lifecycle: {
+      records: filteredLifecycleRecords,
+      summary: buildLifecycleSummary(filteredLifecycleRecords),
+    },
+  };
+}
+
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url);
     const includeOpenClaw = url.searchParams.get('includeOpenClaw') !== '0';
-    // 1. Fetch agent sessions
-    let sessions: Array<{
-      name: string;
-      status: string;
-      sessionKey: string;
-      workspace: string;
-      branch: string;
-    }> = [];
-
-    try {
-      const inboxRes = await fetch(`http://localhost:3001/api/mobile/inbox?includeOpenClaw=${includeOpenClaw ? '1' : '0'}`, {
-        signal: AbortSignal.timeout(8000),
-      });
-      if (inboxRes.ok) {
-        const data = await inboxRes.json();
-        sessions = (data.sessions || []).map((s: Record<string, unknown>) => ({
-          name: (s.name as string) || '',
-          status: (s.status as string) || 'idle',
-          sessionKey: (s.sessionKey as string) || '',
-          workspace: (s.workspace as string) || 'unknown',
-          branch: (s.branch as string) || '',
-        }));
-      }
-    } catch { /* silent */ }
-
-    const registeredRepos = await listRepos().catch(() => []);
-    const repoSlugByName = new Map<string, string>();
-    const repoReadinessByName = new Map<string, RepoReadiness>();
-    for (const entry of registeredRepos) {
-      const slug = normalizeRepoSlug(entry.remoteUrl);
-      if (!slug) continue;
-      repoSlugByName.set(entry.name, slug);
-    }
-    await Promise.all(
-      registeredRepos.map(async (entry) => {
-        try {
-          repoReadinessByName.set(entry.name, await getRepoReadiness(entry));
-        } catch {
-          // Keep readiness optional if git/fs checks fail.
-        }
-      }),
-    );
-    const fallbackSlugMap: Record<string, string> = {
-      'cortex': 'hurttlocker/cortex',
-      'parasite-network': 'hurttlocker/parasite-network',
-      'spear-production': 'LavonTMCQ/spear-production',
-      'mybeautifulwife': 'LavonTMCQ/mybeautifulwife',
-    };
-
-    // 2. Collect unique repos from sessions + agent active repos
-    const repoSet = new Set<string>();
-    for (const s of sessions) {
-      const repo = deriveRepo(s.workspace);
-      if (repo) repoSet.add(repo);
-      const active = getAgentActiveRepo(s.sessionKey);
-      if (active) repoSet.add(active.repo);
-    }
-
-    // 3. Fetch PRs for each repo
-    const prsByBranch = new Map<string, PRData & { ghRepo: string }>();
-    for (const repoName of repoSet) {
-      const ghRepo = repoSlugByName.get(repoName) ?? fallbackSlugMap[repoName] ?? '';
-      if (!ghRepo) continue;
-
-      try {
-        const cached = prCache.get(ghRepo);
-        let prs: PRData[];
-        if (cached && (Date.now() - cached.ts) < PR_CACHE_TTL_MS) {
-          prs = cached.prs;
-        } else {
-          prs = await fetchGitHubPullRequestSummaries(ghRepo, {
-            states: ['open', 'closed'],
-            limitPerState: 20,
-          }) as PRData[];
-          prCache.set(ghRepo, { prs, ts: Date.now() });
-        }
-        for (const pr of prs) {
-          prsByBranch.set(`${repoName}:${pr.headRefName}`, { ...pr, ghRepo });
-        }
-      } catch { /* silent — repo may not have PRs */ }
-    }
-
-    // 4. Build workspace entries — join sessions with PRs
-    const workspaces: WorkspaceEntry[] = [];
-
-    for (const s of sessions) {
-      let repoName = deriveRepo(s.workspace);
-      // OpenClaw agents report workspace=unknown but work in ~/clawd
-      if (!repoName && s.workspace === 'unknown') {
-        repoName = 'clawd';
-      }
-      if (!repoName) continue;
-
-      // Resolve real git branch for OpenClaw agents with known repos
-      let branchName = s.branch.replace(/^surface\//, '');
-      const activeRepo = getAgentActiveRepo(s.sessionKey);
-      // If agent has a known active repo, always resolve the real git branch
-      // (OpenClaw surface branches like "current-q-chat", "discord-channel" aren't git branches)
-      if (activeRepo) {
-        branchName = resolveGitBranch(activeRepo.path);
-      }
-      const pr = prsByBranch.get(`${repoName}:${branchName}`) || null;
-
-      // Derive status
-      const isRunning = s.status === 'running' || s.status === 'watching' || s.status === 'healthy';
-      let status: WorkspaceEntry['status'];
-      if (pr?.mergedAt) {
-        status = 'done';
-      } else if (pr?.state.toLowerCase() === 'closed') {
-        status = 'cancelled';
-      } else if (pr?.state.toLowerCase() === 'open') {
-        status = 'in_review';
-      } else if (isRunning) {
-        status = 'in_progress';
-      } else {
-        status = 'idle';
-      }
-
-      // For agents without a PR, get local diff stats
-      // OpenClaw agents: use their active repo, not clawd workspace
-      let diffWorkspace = s.workspace;
-      if (activeRepo) {
-        diffWorkspace = activeRepo.path;
-        if (!repoName || repoName === 'clawd') repoName = activeRepo.repo;
-      }
-      const localDiff = (!pr && repoName !== 'clawd') ? getLocalDiffStats(diffWorkspace) : null;
-      const ghRepo = repoSlugByName.get(repoName) ?? fallbackSlugMap[repoName] ?? '';
-      // Activity classification removed — top timeline handles this
-
-      workspaces.push({
-        id: s.sessionKey || s.name,
-        agentName: s.name,
-        agentStatus: s.status,
-        sessionKey: s.sessionKey,
-        workspace: s.workspace,
-        branch: branchName,
-        repo: repoName,
-        localDiff: localDiff ?? undefined,
-        pr: pr ? {
-          number: pr.number,
-          title: pr.title,
-          additions: pr.additions,
-          deletions: pr.deletions,
-          changedFiles: pr.changedFiles,
-          state: pr.mergedAt ? 'merged' : pr.state.toLowerCase() === 'closed' ? 'closed' : 'open',
-          url: pr.url || `https://github.com/${ghRepo}/pull/${pr.number}`,
-        } : null,
-        status,
-        readiness: repoReadinessByName.get(repoName),
-        workflowStage: deriveWorkflowStage({
-          runtimeStatus: s.status,
-          workspaceStatus: status === 'in_review' ? 'in_review' : status === 'done' ? 'done' : null,
-          readinessState: repoReadinessByName.get(repoName)?.state ?? null,
-          prState: pr?.mergedAt ? 'merged' : pr?.state ?? null,
-          hasMessages: status !== 'idle',
-        }),
-      });
-    }
-
-    return NextResponse.json({ workspaces, repos: Array.from(repoSet) });
+    const result = await collectWorkspaceLifecycle(includeOpenClaw);
+    return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
-    return NextResponse.json({ error: message, workspaces: [], repos: [] }, { status: 200 });
+    return NextResponse.json(
+      {
+        error: message,
+        workspaces: [],
+        repos: [],
+        lifecycle: {
+          records: [] as WorkspaceLifecycleRecordView[],
+          summary: {
+            unreadCount: 0,
+            archivedCount: 0,
+            nextAttentionWorkspaceId: null,
+          } satisfies WorkspaceLifecycleSummaryView,
+        },
+      },
+      { status: 200 },
+    );
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = await req.json() as { action?: string; workspaceId?: string };
+    const workspaceId = body.workspaceId?.trim();
+    if (!workspaceId) {
+      return NextResponse.json({ error: 'workspaceId is required' }, { status: 400 });
+    }
+    if (body.action !== 'archive' && body.action !== 'restore' && body.action !== 'mark_read') {
+      return NextResponse.json({ error: 'Unsupported action' }, { status: 400 });
+    }
+
+    const result = mutateWorkspaceLifecycleRecord({
+      action: body.action,
+      workspaceId,
+    });
+    return NextResponse.json({ ok: true, ...result });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Unable to update workspace lifecycle' },
+      { status: 500 },
+    );
   }
 }

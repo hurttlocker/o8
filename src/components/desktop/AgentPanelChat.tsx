@@ -41,7 +41,7 @@ import type { ProjectGroup } from '@/components/mobile/types';
 import { buildProjectGroups } from '@/components/mobile/utils';
 import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, refreshOpenClawBetaStatus, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 import { CodeBlock } from './CodeBlock';
-import { DesktopRuntimeEventCard, DesktopToolCallStack } from './DesktopAgentMessage';
+import { DesktopToolCallStack } from './DesktopAgentMessage';
 import { DiffModal } from './DiffModal';
 import { MessageActions } from './MessageActions';
 import {
@@ -61,7 +61,6 @@ import type { ApprovalRecord } from '@/lib/approvals/types';
 import { formatModelLabel } from '@/lib/format';
 import { ttsEngine } from '@/lib/tts/engine';
 import { autocompleteSlashCommand, buildSlashTerminalInput, getSlashCommandSuggestions, isSlashCommandText } from '@/lib/slash-commands';
-import { sanitizeDesktopTranscriptEntries } from '@/lib/chat/desktop-transcript-sanitizer';
 
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
@@ -167,7 +166,9 @@ function sessionTaskLabel(session?: SessionSummary) {
     session.name,
     session.currentTask,
     session.activity?.headline,
-  ].filter((value): value is string => Boolean(value?.trim()));
+  ]
+    .map((value) => sanitizeTranscriptText(value ?? ''))
+    .filter((value): value is string => Boolean(value.trim()));
 
   for (const candidate of candidates) {
     const issueMatch = candidate.match(/\bIssue #\d+\b/i);
@@ -182,7 +183,7 @@ function sessionTaskLabel(session?: SessionSummary) {
 
 function sessionTaskSummary(session?: SessionSummary, max = 42) {
   if (!session) return null;
-  const taskSummary = session.currentTask?.trim();
+  const taskSummary = sanitizeTranscriptText(session.currentTask?.trim() ?? '');
   if (!taskSummary) return null;
   if (/^(hi|hey|hello|good (morning|afternoon|evening))\b/i.test(taskSummary)) return null;
   return compactLine(taskSummary, taskSummary, max);
@@ -205,7 +206,7 @@ function sessionStateChip(session?: SessionSummary): SessionPickerChip | null {
 function sessionPickerTitle(session?: SessionSummary) {
   if (!session) return 'Select session';
   if (session.runtime === 'openclaw') {
-    return compactLine(session.name ?? 'OpenClaw', 'OpenClaw', 36);
+    return compactLine(sanitizeTranscriptText(session.name ?? 'OpenClaw'), 'OpenClaw', 36);
   }
   const repoLabel = sessionRepoLabel(session);
   const runtimeLabel = sessionRuntimeLabel(session);
@@ -215,7 +216,7 @@ function sessionPickerTitle(session?: SessionSummary) {
 function sessionHeaderTitle(session?: SessionSummary) {
   if (!session) return 'Select session';
   if (session.runtime === 'openclaw') {
-    return compactLine(session.name ?? 'OpenClaw', 'OpenClaw', 36);
+    return compactLine(sanitizeTranscriptText(session.name ?? 'OpenClaw'), 'OpenClaw', 36);
   }
   const repoLabel = sessionRepoLabel(session);
   const runtimeLabel = sessionRuntimeLabel(session);
@@ -248,7 +249,7 @@ function sessionPickerRowSubtitle(session: SessionSummary) {
     branchLabel,
   ].filter((value): value is string => Boolean(value));
   if (parts.length > 0) return compactLine(parts.join(' · '), parts[0], 52);
-  return sessionLocalFolderLabel(session) ?? compactLine(session.currentTask, 'Session ready', 52);
+  return sessionLocalFolderLabel(session) ?? compactLine(sanitizeTranscriptText(session.currentTask ?? ''), 'Session ready', 52);
 }
 
 function sessionPickerChips(session?: SessionSummary): SessionPickerChip[] {
@@ -291,6 +292,7 @@ function buildPickerFallbackSnapshot(sessions: SessionSummary[], selectedKey: st
     sourceLabel: 'desktop-session-fallback',
     primarySessionKey: sessions.find((session) => session.sessionKey === selectedKey)?.sessionKey ?? sessions[0]?.sessionKey,
     sessions,
+    approvals: [],
     items: [],
     summary: {
       alerts: 0,
@@ -387,6 +389,49 @@ function buildGroupSourceCards(entries: MobileTranscriptEntry[]): GroupSourceCar
   return normalizeSidebarSourceCards(entries) as GroupSourceCard[];
 }
 
+const INTERNAL_PROTOCOL_TAGS = [
+  /<<<BEGIN_UNTRUSTED_CHILD_RESULT>>>/gi,
+  /<<<END_UNTRUSTED_CHILD_RESULT>>>/gi,
+  /<\/?[a-z][a-z0-9]*(?:[_-][a-z0-9]+)+[^>]*>/gi,
+  /<\/?(?:command-name|local-command-(?:stdout|stderr|input|result)|task-notification|task-completion-event|runtime-context|begin-untrusted-child-result|end-untrusted-child-result|untrusted-child-result|task-event|command-output|command-result|status|summary|task|source|action)[^>]*>/gi,
+];
+
+function stripInternalProtocolMarkup(text: string) {
+  return INTERNAL_PROTOCOL_TAGS.reduce((next, pattern) => next.replace(pattern, ' '), text);
+}
+
+function collapseInternalTaskPayload(text: string) {
+  if (!/<(?:status|summary|task|source|action)>/i.test(text)) return text;
+
+  const summary = text.match(/<summary>([\s\S]*?)<\/summary>/i)?.[1]?.trim();
+  const status = text.match(/<status>([\s\S]*?)<\/status>/i)?.[1]?.trim();
+  const task = text.match(/<task>([\s\S]*?)<\/task>/i)?.[1]?.trim();
+
+  if (summary) {
+    if (status && !summary.toLowerCase().includes(status.toLowerCase())) {
+      return `${summary} (${status})`;
+    }
+    return summary;
+  }
+
+  if (task && status) return `${task} (${status})`;
+  return text;
+}
+
+function redactSensitiveTranscriptText(text: string) {
+  let next = text;
+  next = next.replace(/(\bAuthorization\s*:\s*)Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1Bearer [redacted]');
+  next = next.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b/gi, 'Bearer [redacted]');
+  next = next.replace(/\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|secret|password|passwd|token)\b(\s*[:=]\s*)([^\s"'`]+)/gi, '$1[redacted]');
+  next = next.replace(/([?&](?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|secret|password|passwd|token|auth|authorization|key)=)([^&\s]+)/gi, '$1[redacted]');
+  next = next.replace(/\b(?:ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9-]{16,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{12,}|ASIA[0-9A-Z]{12,}|AIza[0-9A-Za-z\-_]{20,})\b/g, '[redacted]');
+  return next;
+}
+
+function sanitizeTranscriptText(text: string) {
+  return redactSensitiveTranscriptText(stripInternalProtocolMarkup(collapseInternalTaskPayload(text)));
+}
+
 function stripOperatorMarkdown(text: string) {
   return text
     .replace(/```[\s\S]*?```/g, ' ')
@@ -424,13 +469,13 @@ function shouldCollapseOperatorEntry(entry: MobileTranscriptEntry) {
 function buildOperatorSummary(text: string) {
   const lines = text
     .split('\n')
-    .map((line) => stripOperatorMarkdown(line))
+    .map((line) => stripOperatorMarkdown(sanitizeTranscriptText(line)))
     .filter(Boolean)
     .filter((line) => !/^thought for \d/i.test(line))
     .filter((line) => !/^(gemini|opus|claude code|codex)\b/i.test(line))
     .filter((line) => !/^\d{1,2}:\d{2}\s?(am|pm)$/i.test(line));
 
-  const headline = compactLine(lines[0] ?? stripOperatorMarkdown(text) ?? 'Long assistant note', 'Long assistant note', 180);
+  const headline = compactLine(lines[0] ?? stripOperatorMarkdown(sanitizeTranscriptText(text)) ?? 'Long assistant note', 'Long assistant note', 180);
   const details = lines
     .slice(1)
     .filter((line) => line !== headline)
@@ -558,15 +603,37 @@ interface BubbleProps {
 
 const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, onOpenMermaid, onRunInTerminal }: BubbleProps) {
   const isUser = entry.role === 'user';
-  const hasText = Boolean(entry.text.trim());
+  const displayText = sanitizeTranscriptText(entry.text);
+  const hasText = Boolean(displayText.trim());
   const hasMedia = Boolean(entry.media?.length);
   const hasToolCalls = Boolean(entry.toolCalls?.length);
   const isSlashCommand = isSlashCommandText(entry.text);
-  const runtimeEvent = useMemo(() => {
-    if (entry.runtimeEvent) return entry.runtimeEvent;
-    const fallback = parseRuntimeEventSummary(entry.text);
-    return fallback ? { kind: 'handoff' as const, ...fallback } : null;
-  }, [entry.runtimeEvent, entry.text]);
+  const runtimeEvent = useMemo(() => parseRuntimeEventSummary(entry.text), [entry.text]);
+  const displayRuntimeEvent = useMemo(() => {
+    if (!runtimeEvent) return null;
+
+    const rawPreviewLines = (runtimeEvent.rawPreviewLines ?? [])
+      .map((line) => sanitizeTranscriptText(line))
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    return {
+      ...runtimeEvent,
+      title: sanitizeTranscriptText(runtimeEvent.title),
+      summary: sanitizeTranscriptText(runtimeEvent.summary),
+      status: runtimeEvent.status ? sanitizeTranscriptText(runtimeEvent.status) : undefined,
+      task: runtimeEvent.task ? sanitizeTranscriptText(runtimeEvent.task) : undefined,
+      source: runtimeEvent.source ? sanitizeTranscriptText(runtimeEvent.source) : undefined,
+      action: runtimeEvent.action ? sanitizeTranscriptText(runtimeEvent.action) : undefined,
+      rawPreviewLines,
+    };
+  }, [runtimeEvent]);
+  const runtimeEventDisplay = displayRuntimeEvent ?? runtimeEvent;
+  const displayStatus = runtimeEventDisplay?.status;
+  const displaySource = runtimeEventDisplay?.source;
+  const displayAction = runtimeEventDisplay?.action;
+  const displayChangedFiles = runtimeEventDisplay?.changedFiles ?? [];
+  const displayPreviewLines = runtimeEventDisplay?.rawPreviewLines ?? [];
   const speakerChanged = !previousEntry || previousEntry.role !== entry.role;
   const showTimestamp = (() => {
     if (!previousEntry?.timestampLabel || !entry.timestampLabel) return speakerChanged;
@@ -577,11 +644,12 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
   })();
 
   const mdBlocks = useMemo(
-    () => hasText ? renderMarkdownBlocks(entry.text, onOpenMermaid, onRunInTerminal) : [],
-    [entry.text, hasText, onOpenMermaid, onRunInTerminal],
+    () => hasText ? renderMarkdownBlocks(displayText, onOpenMermaid, onRunInTerminal) : [],
+    [displayText, hasText, onOpenMermaid, onRunInTerminal],
   );
 
   const [activeBlock, setActiveBlock] = useState<number | null>(null);
+  const [handoffExpanded, setHandoffExpanded] = useState(false);
   const [operatorExpanded, setOperatorExpanded] = useState(false);
   const playingRef = useRef(false);
 
@@ -624,10 +692,234 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
     );
   }
 
-  if (!isUser && runtimeEvent) {
+  if (!isUser && runtimeEventDisplay) {
     return (
       <article className={`remodex-message-card remodex-message-card-assistant${isNew ? ' remodex-turn-new' : ''}`}>
-        <DesktopRuntimeEventCard event={runtimeEvent} />
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          padding: '2px 0',
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+          }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 28,
+              height: 28,
+              borderRadius: 10,
+              background: 'rgba(37, 99, 235, 0.10)',
+              color: '#2563eb',
+              flexShrink: 0,
+            }}>
+              <Sparkles size={15} strokeWidth={2.2} />
+            </span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{
+                fontSize: 12,
+                fontWeight: 700,
+                color: 'var(--t-text)',
+                letterSpacing: '-0.01em',
+              }}>
+                {runtimeEventDisplay.title}
+              </div>
+              <div style={{
+                marginTop: 2,
+                fontSize: 11,
+                color: 'var(--t-text-secondary)',
+                lineHeight: 1.45,
+              }}>
+                {runtimeEventDisplay.summary}
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 6,
+          }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '3px 8px',
+              borderRadius: 999,
+              background: THEME_ACCENT_SOFT,
+              color: THEME_ACCENT,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: '0.02em',
+            }}>
+              sub-agent
+            </span>
+            {displayStatus ? (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '3px 8px',
+                borderRadius: 999,
+                background: displayStatus.toLowerCase().includes('timed')
+                  ? 'rgba(245, 158, 11, 0.10)'
+                  : 'rgba(37, 99, 235, 0.10)',
+                color: displayStatus.toLowerCase().includes('timed') ? '#b45309' : '#2563eb',
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+              }}>
+                {displayStatus}
+              </span>
+            ) : null}
+            {displaySource ? (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '3px 8px',
+                borderRadius: 999,
+                background: 'var(--t-divider-subtle)',
+                color: 'var(--t-text-secondary)',
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.02em',
+              }}>
+                {displaySource}
+              </span>
+            ) : null}
+            {displayChangedFiles.length ? (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '3px 8px',
+                borderRadius: 999,
+                background: THEME_BG_CARD,
+                color: 'var(--t-text-secondary)',
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: '0.02em',
+              }}>
+                {displayChangedFiles.length} file{displayChangedFiles.length !== 1 ? 's' : ''}
+              </span>
+            ) : null}
+            {(displayAction || displayPreviewLines.length || displayChangedFiles.length) ? (
+                <button
+                  type="button"
+                  onClick={() => setHandoffExpanded((value) => !value)}
+                  style={{
+                    display: 'inline-flex',
+                  alignItems: 'center',
+                    gap: 5,
+                    padding: '3px 8px',
+                    borderRadius: 999,
+                    border: '1px solid var(--t-panel-border)',
+                    background: handoffExpanded ? THEME_ACCENT_SOFT : THEME_BG_CARD,
+                    color: handoffExpanded ? THEME_ACCENT : 'var(--t-text-secondary)',
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: '0.02em',
+                  cursor: 'pointer',
+                }}
+              >
+                {handoffExpanded ? 'Hide details' : 'View details'}
+              </button>
+            ) : null}
+          </div>
+
+          {handoffExpanded && (displayAction || displayPreviewLines.length || displayChangedFiles.length) ? (
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              padding: '10px 12px',
+              borderRadius: 12,
+              background: THEME_PANEL_GLASS,
+              border: '1px solid var(--t-panel-border)',
+            }}>
+              {displayAction ? (
+                <div>
+                  <div style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: 'var(--t-text-muted)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                    marginBottom: 4,
+                  }}>
+                    Delivery
+                  </div>
+                  <div style={{
+                    fontSize: 11,
+                    color: 'var(--t-text-secondary)',
+                    lineHeight: 1.5,
+                  }}>
+                    {displayAction}
+                  </div>
+                </div>
+              ) : null}
+
+              {displayChangedFiles.length ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: 'var(--t-text-muted)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}>
+                    Changed Files
+                  </div>
+                  {displayChangedFiles.map((filePath) => (
+                    <div
+                      key={filePath}
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--t-text-secondary)',
+                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {filePath}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+
+              {displayPreviewLines.length ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: 'var(--t-text-muted)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}>
+                    Payload Preview
+                  </div>
+                  <div style={{
+                    padding: '8px 10px',
+                    borderRadius: 10,
+                    background: THEME_BG_CARD,
+                    border: '1px solid var(--t-panel-border)',
+                    fontSize: 11,
+                    lineHeight: 1.5,
+                    color: 'var(--t-text-secondary)',
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}>
+                    {displayPreviewLines.join('\n')}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       </article>
     );
   }
@@ -653,7 +945,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
               className="remodex-rich-text"
               style={isSlashCommand ? { fontFamily: '"SF Mono", ui-monospace, monospace', fontSize: '0.88rem' } : undefined}
             >
-              {entry.text.split('\n').map((line, i) => (
+              {displayText.split('\n').map((line, i) => (
                 <p key={i} className="remodex-rich-paragraph">{line}</p>
               ))}
             </div>
@@ -849,7 +1141,7 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
         </div>
       ) : null}
       {entry.role === 'assistant' && hasText ? (
-        <MessageActions messageId={entry.id} messageText={entry.text} />
+        <MessageActions messageId={entry.id} messageText={displayText} />
       ) : null}
       {collapsedOperator ? (
         <div style={{ marginTop: 8 }}>
@@ -883,7 +1175,7 @@ interface RenderedBlock {
 }
 
 function renderMarkdownBlocks(text: string, onOpenMermaid?: (code: string) => void, onRunInTerminal?: (command: string) => void): RenderedBlock[] {
-  const lines = text.split('\n');
+  const lines = sanitizeTranscriptText(text).split('\n');
   const blocks: RenderedBlock[] = [];
   let i = 0;
 
@@ -1157,7 +1449,7 @@ function ChatImage({ src, alt }: { src: string; alt: string }) {
 }
 
 function renderInline(text: string): React.ReactNode {
-  const parts = text.split(/(!\[[^\]]*\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g);
+  const parts = sanitizeTranscriptText(text).split(/(!\[[^\]]*\]\([^)]+\)|`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\))/g);
   return parts.map((part, i) => {
     // Images: ![alt](url)
     const imgMatch = part.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
@@ -2297,8 +2589,9 @@ const ActiveTurnCard = memo(function ActiveTurnCard({
   onOpenMermaid?: (code: string) => void;
   onRunInTerminal?: (command: string) => void;
 }) {
+  const safeActivityHeadline = activityHeadline ? sanitizeTranscriptText(activityHeadline) : undefined;
   const mdBlocks = useMemo(
-    () => text.trim() ? renderMarkdownBlocks(text, onOpenMermaid, onRunInTerminal) : [],
+    () => text.trim() ? renderMarkdownBlocks(sanitizeTranscriptText(text), onOpenMermaid, onRunInTerminal) : [],
     [text, onOpenMermaid, onRunInTerminal],
   );
 
@@ -2339,14 +2632,14 @@ const ActiveTurnCard = memo(function ActiveTurnCard({
           <span style={{ color: 'rgba(37, 99, 235, 0.45)' }}>•</span>
           active turn
         </span>
-        {activityHeadline ? (
+        {safeActivityHeadline ? (
           <span style={{
             fontSize: 11,
             color: 'var(--t-text-secondary)',
             fontWeight: 600,
             lineHeight: 1.4,
           }}>
-            {activityHeadline}
+            {safeActivityHeadline}
           </span>
         ) : null}
       </div>
@@ -3258,10 +3551,11 @@ export function AgentPanelChat({
   const lastHeaderSessionRef = useRef<SessionSummary | null>(null);
   const lastAppliedExternalSessionKeyRef = useRef('');
   const lastNonEmptySessionsRef = useRef<SessionSummary[]>([]);
+  const workspaceScopeProvided = workspaceSessions !== undefined;
 
   const effectiveSessions = useMemo(
-    () => (workspaceSessions && workspaceSessions.length > 0 ? workspaceSessions : sessions),
-    [sessions, workspaceSessions],
+    () => (workspaceScopeProvided ? (workspaceSessions ?? []) : sessions),
+    [sessions, workspaceScopeProvided, workspaceSessions],
   );
 
   const selectedSession = useMemo(
@@ -3284,6 +3578,19 @@ export function AgentPanelChat({
       lastNonEmptySessionsRef.current = effectiveSessions;
     }
   }, [effectiveSessions]);
+
+  useEffect(() => {
+    if (!workspaceScopeProvided) return;
+    if (effectiveSessions.some((session) => session.sessionKey === selectedKey)) return;
+    if (!selectedKey && effectiveSessions.length === 0) return;
+    lastHeaderSessionRef.current = null;
+    setSelectedKey('');
+    setTranscript([]);
+    setApprovals([]);
+    setStreamingText('');
+    liveToolCallsRef.current = [];
+    setActiveToolCalls([]);
+  }, [effectiveSessions, selectedKey, workspaceScopeProvided]);
 
   useEffect(() => {
     if (selectedSession || effectiveSessions.length === 0) return;
@@ -3422,16 +3729,17 @@ export function AgentPanelChat({
   }, [selectedSession?.tmuxSession, sendTerminalAttach, sendTerminalDetach, supportsSlashTerminalRelay]);
 
   const stablePickerSessions = useMemo(() => {
+    if (workspaceScopeProvided) return effectiveSessions;
     if (effectiveSessions.length > 0) return effectiveSessions;
     if (loading || connectionState !== 'connected') return lastNonEmptySessionsRef.current;
     return [];
-  }, [connectionState, effectiveSessions, loading]);
+  }, [connectionState, effectiveSessions, loading, workspaceScopeProvided]);
 
   const pickerSnapshot = useMemo(
-    () => (workspaceSessions && workspaceSessions.length > 0
-      ? buildPickerFallbackSnapshot(workspaceSessions, selectedKey)
+    () => (workspaceScopeProvided
+      ? buildPickerFallbackSnapshot(workspaceSessions ?? [], selectedKey)
       : (snapshot && snapshot.sessions.length > 0 ? snapshot : buildPickerFallbackSnapshot(stablePickerSessions, selectedKey))),
-    [selectedKey, snapshot, stablePickerSessions, workspaceSessions],
+    [selectedKey, snapshot, stablePickerSessions, workspaceScopeProvided, workspaceSessions],
   );
 
   const projectGroups = useMemo(
@@ -3439,8 +3747,12 @@ export function AgentPanelChat({
     [pickerSnapshot, selectedSession]
   );
   const pickerEmptyStateLabel = useMemo(
-    () => ((loading || connectionState !== 'connected' || stablePickerSessions.length > 0) ? 'Refreshing sessions…' : 'No IDE sessions yet'),
-    [connectionState, loading, stablePickerSessions.length],
+    () => (
+      workspaceScopeProvided
+        ? 'No IDE sessions in this workspace'
+        : ((loading || connectionState !== 'connected' || stablePickerSessions.length > 0) ? 'Refreshing sessions…' : 'No IDE sessions yet')
+    ),
+    [connectionState, loading, stablePickerSessions.length, workspaceScopeProvided],
   );
   const fallbackLiveSession = useMemo(
     () => stablePickerSessions.find((session) => session.isCurrentSession) ?? stablePickerSessions[0] ?? null,
@@ -3481,13 +3793,10 @@ export function AgentPanelChat({
         : '#8e8e93';
 
   const currentAgentName = selectedSession ? getAgentName(selectedSession) : 'Assistant';
+  const showWorkspaceEmptyState = workspaceScopeProvided && !loading && effectiveSessions.length === 0;
   const sidebarCapabilities = useMemo<SidebarRuntimeCapabilities>(
     () => deriveSidebarRuntimeCapabilities(selectedSession),
     [selectedSession],
-  );
-  const sanitizedTranscript = useMemo(
-    () => sanitizeDesktopTranscriptEntries(transcript),
-    [transcript],
   );
   const liveActivityHeadline = useMemo(() => {
     const headline = selectedSession?.activity?.headline?.trim();
@@ -3499,12 +3808,12 @@ export function AgentPanelChat({
     if (!sidebarCapabilities.supportsToolEvents) return [];
     if (activeToolCalls.length > 0) return activeToolCalls;
 
-    const transcriptCalls = lastTurnToolCalls(sanitizedTranscript);
+    const transcriptCalls = lastTurnToolCalls(transcript);
     if (agentRunning && transcriptCalls.length > 0) return transcriptCalls;
 
     const activityTool = activityToLiveToolCall(selectedSession?.activity);
     return activityTool ? [activityTool] : [];
-  }, [activeToolCalls, agentRunning, sanitizedTranscript, selectedSession?.activity, sidebarCapabilities.supportsToolEvents]);
+  }, [activeToolCalls, agentRunning, selectedSession?.activity, sidebarCapabilities.supportsToolEvents, transcript]);
 
   const scrollToBottom = useCallback((force = false) => {
     if (!scrollRef.current) return;
@@ -3525,9 +3834,9 @@ export function AgentPanelChat({
       setSnapshot(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
       setSessions(prev => JSON.stringify(prev) === JSON.stringify(data.sessions) ? prev : data.sessions);
       initialInboxReadyRef.current = true;
-      const selectedStillExists = data.sessions.some((session: SessionSummary) => session.sessionKey === selectedKey);
+      const selectedStillExists = data.sessions.some((session) => session.sessionKey === selectedKey);
       if ((!selectedKey || !selectedStillExists) && data.sessions.length > 0) {
-        const primary = data.sessions.find((session: SessionSummary) => session.isCurrentSession) ?? data.sessions[0];
+        const primary = data.sessions.find(s => s.isCurrentSession) ?? data.sessions[0];
         setSelectedKey(primary.sessionKey);
       }
     } catch { /* silent */ }
@@ -4034,8 +4343,8 @@ export function AgentPanelChat({
   // ── Track agent running state ──
   // Agent is "running" after user sends until an assistant message arrives
   useEffect(() => {
-    if (sanitizedTranscript.length === 0) { setAgentRunning(false); return; }
-    const last = sanitizedTranscript[sanitizedTranscript.length - 1];
+    if (transcript.length === 0) { setAgentRunning(false); return; }
+    const last = transcript[transcript.length - 1];
     // If last message is user (or local optimistic) → agent is generating
     if ((last.role === 'user' || last.id.startsWith('local-')) && !isSlashCommandText(last.text)) {
       setAgentRunning(true);
@@ -4043,7 +4352,7 @@ export function AgentPanelChat({
     } else {
       setAgentRunning(false);
     }
-  }, [sanitizedTranscript]);
+  }, [transcript]);
 
   useEffect(() => {
     if (agentRunning || streamingText) return;
@@ -4075,11 +4384,15 @@ export function AgentPanelChat({
 
   // ── External session key (from Agent Panel click) ──
   useEffect(() => {
-    if (externalSessionKey && externalSessionKey !== lastAppliedExternalSessionKeyRef.current) {
+    if (!externalSessionKey) return;
+    if (workspaceScopeProvided && !effectiveSessions.some((session) => session.sessionKey === externalSessionKey)) {
+      return;
+    }
+    if (externalSessionKey !== lastAppliedExternalSessionKeyRef.current) {
       lastAppliedExternalSessionKeyRef.current = externalSessionKey;
       setSelectedKey(externalSessionKey);
     }
-  }, [externalSessionKey]);
+  }, [effectiveSessions, externalSessionKey, workspaceScopeProvided]);
 
   useEffect(() => {
     if (!draftInjection?.id) return;
@@ -4423,88 +4736,116 @@ export function AgentPanelChat({
         </div>
       ) : null}
 
-      <DesktopTranscriptPane
-        loading={loading}
-        transcript={sanitizedTranscript}
-        currentAgentName={currentAgentName}
-        onOpenMermaid={onOpenMermaid}
-        onRunInTerminal={onRunInTerminal}
-        streamingText={streamingText}
-        agentRunning={agentRunning}
-        activityHeadline={liveActivityHeadline}
-        liveToolCalls={liveToolCalls}
-        onOpenDiff={onOpenDiff ? onOpenDiff : () => setDiffOpen(true)}
-        onOpenFile={onOpenFile}
-        currentWorkspace={selectedSession?.workspace}
-        runtimeCapabilities={sidebarCapabilities}
-        approvals={approvals}
-        resolvingApprovalId={resolvingApprovalId}
-        onResolveApproval={handleApprovalResolve}
-        scrollRef={scrollRef}
-        handleScroll={handleScroll}
-        showScrollPill={showScrollPill}
-        scrollToBottom={scrollToBottom}
-        getIsNewEntry={getIsNewEntry}
-        topInset={wsConnected ? headerOverlayHeight + 8 : 12}
-      />
-      {/* ── Resize Handle ── */}
-      <div
-        onMouseDown={(e) => {
-          e.preventDefault();
-          const startY = e.clientY;
-          const startH = composeHeight;
-          const onMove = (ev: MouseEvent) => {
-            const delta = startY - ev.clientY;
-            setComposeHeight(Math.min(Math.max(startH + delta, 60), 400));
-          };
-          const onUp = () => {
-            document.removeEventListener('mousemove', onMove);
-            document.removeEventListener('mouseup', onUp);
-          };
-          document.addEventListener('mousemove', onMove);
-          document.addEventListener('mouseup', onUp);
-        }}
-        style={{
-          height: 8,
-          cursor: 'row-resize',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-        }}
-      >
-        <div style={{
-          width: 36,
-          height: 4,
-          borderRadius: 2,
-          backgroundColor: 'var(--t-divider)',
-          transition: 'background-color 150ms',
-        }} />
-      </div>
+      {showWorkspaceEmptyState ? (
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingTop: wsConnected ? headerOverlayHeight + 8 : 12,
+            paddingRight: 18,
+            paddingBottom: 18,
+            paddingLeft: 18,
+          }}
+        >
+          <div
+            className="remodex-loading-card"
+            style={{
+              maxWidth: 320,
+              textAlign: 'center',
+              lineHeight: 1.6,
+            }}
+          >
+            No workspace chat sessions are attached to this workspace. Open or launch a workspace session from the center surface.
+          </div>
+        </div>
+      ) : (
+        <>
+          <DesktopTranscriptPane
+            loading={loading}
+            transcript={transcript}
+            currentAgentName={currentAgentName}
+            onOpenMermaid={onOpenMermaid}
+            onRunInTerminal={onRunInTerminal}
+            streamingText={streamingText}
+            agentRunning={agentRunning}
+            activityHeadline={liveActivityHeadline}
+            liveToolCalls={liveToolCalls}
+            onOpenDiff={onOpenDiff ? onOpenDiff : () => setDiffOpen(true)}
+            onOpenFile={onOpenFile}
+            currentWorkspace={selectedSession?.workspace}
+            runtimeCapabilities={sidebarCapabilities}
+            approvals={approvals}
+            resolvingApprovalId={resolvingApprovalId}
+            onResolveApproval={handleApprovalResolve}
+            scrollRef={scrollRef}
+            handleScroll={handleScroll}
+            showScrollPill={showScrollPill}
+            scrollToBottom={scrollToBottom}
+            getIsNewEntry={getIsNewEntry}
+            topInset={wsConnected ? headerOverlayHeight + 8 : 12}
+          />
+          {/* ── Resize Handle ── */}
+          <div
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const startY = e.clientY;
+              const startH = composeHeight;
+              const onMove = (ev: MouseEvent) => {
+                const delta = startY - ev.clientY;
+                setComposeHeight(Math.min(Math.max(startH + delta, 60), 400));
+              };
+              const onUp = () => {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+              };
+              document.addEventListener('mousemove', onMove);
+              document.addEventListener('mouseup', onUp);
+            }}
+            style={{
+              height: 8,
+              cursor: 'row-resize',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <div style={{
+              width: 36,
+              height: 4,
+              borderRadius: 2,
+              backgroundColor: 'var(--t-divider)',
+              transition: 'background-color 150ms',
+            }} />
+          </div>
 
-      <DesktopComposePane
-        pendingFiles={pendingFiles}
-        removePendingFile={removePendingFile}
-        selectedSession={selectedSession}
-        composeRef={composeRef}
-        draft={draft}
-        setDraft={setDraft}
-        showSlashSuggestions={showSlashSuggestions}
-        slashSuggestions={slashSuggestions}
-        composeHeight={composeHeight}
-        currentAgentName={currentAgentName}
-        send={send}
-        fileInputRef={fileInputRef}
-        enhancing={enhancing}
-        enhance={enhance}
-        agentRunning={agentRunning}
-        streamingText={streamingText}
-        sending={sending}
-        stopping={stopping}
-        stopRun={stopRun}
-        chatSendDisabled={chatSendDisabled}
-        canInterruptSelected={canInterruptSelected}
-      />
+          <DesktopComposePane
+            pendingFiles={pendingFiles}
+            removePendingFile={removePendingFile}
+            selectedSession={selectedSession}
+            composeRef={composeRef}
+            draft={draft}
+            setDraft={setDraft}
+            showSlashSuggestions={showSlashSuggestions}
+            slashSuggestions={slashSuggestions}
+            composeHeight={composeHeight}
+            currentAgentName={currentAgentName}
+            send={send}
+            fileInputRef={fileInputRef}
+            enhancing={enhancing}
+            enhance={enhance}
+            agentRunning={agentRunning}
+            streamingText={streamingText}
+            sending={sending}
+            stopping={stopping}
+            stopRun={stopRun}
+            chatSendDisabled={chatSendDisabled}
+            canInterruptSelected={canInterruptSelected}
+          />
+        </>
+      )}
       {diffOpen ? <DiffModal onClose={() => setDiffOpen(false)} /> : null}
       <style>{`
         @keyframes sidebarActiveTurnIn {
