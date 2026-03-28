@@ -51,7 +51,7 @@ import { WorktreeBadge } from '@/components/mobile/WorktreeBadge';
 import { formatModelLabel } from '@/lib/format';
 import type { RuntimeSurfaceSummary } from '@/lib/fleet/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
-import type { RepoReadiness } from '@/lib/repos/types';
+import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import { isTauri } from '@/lib/tauri/bridge';
 import { deriveWorkflowStage, describeWorkflowStage, pickDominantWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
 
@@ -608,14 +608,28 @@ function ActivityDock({
   children,
 }: {
   title: string;
-  count: number;
+  count: number | null;
   summary: string;
   open: boolean;
   onToggle: () => void;
   children: React.ReactNode;
 }) {
   return (
-    <section style={{ flexShrink: 0, borderTop: '1px solid var(--t-divider-subtle)' }}>
+    <section
+      style={{
+        flexShrink: 0,
+        marginTop: 8,
+        borderRadius: 22,
+        border: open ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
+        background: `linear-gradient(180deg, ${THEME_PANEL_GLASS} 0%, ${THEME_BG_CARD} 100%)`,
+        boxShadow: open
+          ? `var(--t-panel-shadow), 0 0 0 1px ${THEME_ACCENT_RING}`
+          : 'var(--t-panel-shadow)',
+        backdropFilter: 'blur(22px)',
+        WebkitBackdropFilter: 'blur(22px)',
+        overflow: 'hidden',
+      }}
+    >
       <button
         type="button"
         onClick={onToggle}
@@ -623,8 +637,8 @@ function ActivityDock({
           width: '100%',
           display: 'flex',
           alignItems: 'center',
-          gap: 0,
-          padding: '10px 14px 8px',
+          gap: 10,
+          padding: '12px 14px 11px',
           border: 'none',
           background: 'transparent',
           cursor: 'pointer',
@@ -632,9 +646,33 @@ function ActivityDock({
           fontFamily: '-apple-system, system-ui, sans-serif',
         }}
       >
+        <span
+          style={{
+            width: 28,
+            height: 28,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            borderRadius: 999,
+            background: open ? THEME_ACCENT_SOFT : 'var(--t-divider-subtle)',
+            color: open ? THEME_ACCENT : 'var(--t-text-muted)',
+            flexShrink: 0,
+            transition: 'background 180ms ease, color 180ms ease',
+          }}
+        >
+          <ChevronDown
+            size={14}
+            strokeWidth={2.2}
+            style={{
+              transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
+              transition: 'transform 180ms cubic-bezier(0.32, 0.72, 0, 1)',
+            }}
+          />
+        </span>
         <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em' }}>{title}</span>
+            {count !== null ? (
               <span
                 style={{
                   display: 'inline-flex',
@@ -645,15 +683,16 @@ function ActivityDock({
                   paddingLeft: 6,
                   paddingRight: 6,
                   borderRadius: 999,
-                  background: 'var(--t-divider-subtle)',
-                  color: 'var(--t-text-secondary)',
+                  background: open ? THEME_ACCENT_SOFT : 'var(--t-divider-subtle)',
+                  color: open ? THEME_ACCENT : 'var(--t-text-secondary)',
                   fontSize: 10,
                   fontWeight: 700,
                   fontFamily: '"SF Mono", ui-monospace, monospace',
                 }}
               >
-              {count}
-            </span>
+                {count}
+              </span>
+            ) : null}
           </span>
         <span
           style={{
@@ -673,12 +712,18 @@ function ActivityDock({
       </button>
 
       {open ? (
-        <div style={{ paddingRight: 14, paddingBottom: 10, paddingLeft: 14 }}>
+        <div
+          style={{
+            padding: '0 10px 10px',
+            borderTop: '1px solid var(--t-divider-subtle)',
+          }}
+        >
           <div
             style={{
               maxHeight: 320,
               overflowY: 'auto',
-              background: 'transparent',
+              borderRadius: 18,
+              background: 'var(--t-bg-card)',
               scrollbarWidth: 'none',
             } as React.CSSProperties}
             className="hide-scrollbar"
@@ -1863,8 +1908,9 @@ const ActivityFeed = memo(function ActivityFeed({
 
   // Build unified timeline — commits now come from per-repo fetch, not parent prop
   const fallbackCommitItems = useMemo<ActivityItem[]>(() => {
-    if (extras.repoCommits.length > 0) return [];
-    const fallbackRepo = repo ?? externalPanelRepo ?? activeAgentRepo ?? null;
+    // Never leak local review commits into GitHub-scoped views.
+    if (repo || extras.repoCommits.length > 0) return [];
+    const fallbackRepo = externalPanelRepo ?? activeAgentRepo ?? null;
     return commits.slice(0, 10).map((commit, index) => ({
       kind: 'commit' as const,
       hash: commit.hash,
@@ -2026,12 +2072,20 @@ const ActivityFeed = memo(function ActivityFeed({
     }
     return groups;
   }, [filtered]);
+  const groupedHeaderStickyTop = repoPickerOpen ? 0 : 116;
+  const missingGitHubScope = allRepos.length === 0 && !externalPanelRepo && !activeAgentRepo;
 
   if (!items.length) {
     return (
       <div style={{ padding: '24px 14px', textAlign: 'center' }}>
-        <div style={{ fontSize: 12, color: 'var(--t-text-muted)', fontWeight: 500 }}>No recent activity</div>
-        <div style={{ fontSize: 11, color: 'var(--t-text-faint)', marginTop: 4 }}>Commits, issues, PRs, and CI runs will appear here</div>
+        <div style={{ fontSize: 12, color: 'var(--t-text-muted)', fontWeight: 500 }}>
+          {missingGitHubScope ? 'Connect GitHub to load repo activity' : 'No recent activity'}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--t-text-faint)', marginTop: 4 }}>
+          {missingGitHubScope
+            ? 'Authenticate GitHub and register a repository so issues, PRs, CI, and commits can flow here.'
+            : 'Commits, issues, PRs, and CI runs will appear here'}
+        </div>
       </div>
     );
   }
@@ -2043,108 +2097,134 @@ const ActivityFeed = memo(function ActivityFeed({
         position: 'sticky',
         top: 0,
         zIndex: 3,
-        background: 'var(--t-panel)',
-        borderBottom: '1px solid var(--t-divider-subtle)',
+        padding: '8px 8px 10px',
+        background: 'linear-gradient(180deg, var(--t-panel) 0%, rgba(255,255,255,0) 100%)',
       }}>
-        {/* Repo selector row */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '8px 10px 4px',
-        }}>
-          <button
-            type="button"
-            onClick={() => setRepoPickerOpen(v => !v)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '3px 8px 3px 6px',
-              borderRadius: 8,
-              border: '1px solid var(--t-divider-subtle)',
-              background: 'rgba(255, 255, 255, 0.6)',
-              backdropFilter: 'blur(12px)',
-              WebkitBackdropFilter: 'blur(12px)',
-              cursor: 'pointer',
-              fontFamily: '-apple-system, system-ui, sans-serif',
-              fontSize: 11,
-              fontWeight: 600,
-              color: 'var(--t-text)',
-              letterSpacing: '-0.01em',
-            }}
-          >
-            <Folder size={11} strokeWidth={2} style={{ color: '#2563eb' }} />
-            {repoLabel}
-            <ChevronDown size={10} strokeWidth={2} style={{
-              color: 'var(--t-text-muted)',
-              transform: repoPickerOpen ? 'rotate(180deg)' : 'none',
-              transition: 'transform 200ms cubic-bezier(0.32, 0.72, 0, 1)',
-            }} />
-          </button>
-
-          {/* Merge banner — only if there's an open PR on this repo */}
-          {extras.prs.some(p => p.kind === 'pr' && (p.state === 'open')) ? (() => {
-            const openPr = extras.prs.find(p => p.kind === 'pr' && p.state === 'open') as (ActivityItem & { kind: 'pr' }) | undefined;
-            if (!openPr) return null;
-            return (
-              <div style={{
-                marginLeft: 'auto',
+        <div
+          style={{
+            borderRadius: 20,
+            border: '1px solid var(--t-panel-border)',
+            background: `linear-gradient(180deg, ${THEME_PANEL_GLASS} 0%, ${THEME_BG_CARD} 100%)`,
+            boxShadow: 'var(--t-panel-shadow)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            overflow: 'hidden',
+          }}
+        >
+          {/* Repo selector row */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '10px 10px 6px',
+          }}>
+            <button
+              type="button"
+              onClick={() => setRepoPickerOpen(v => !v)}
+              style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 6,
-              }}>
-                <span style={{
-                  fontSize: 10,
-                  color: 'var(--t-text-muted)',
-                  fontFamily: '"SF Mono", ui-monospace, monospace',
-                }}>
-                  PR #{openPr.number}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => (onReviewPR ?? onSelectPR)?.(openPr.number, openPr.repo)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '3px 10px',
-                    borderRadius: 8,
-                    border: 'none',
-                    background: '#22c55e',
-                    color: '#fff',
-                    fontSize: 10,
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    fontFamily: '-apple-system, system-ui, sans-serif',
-                    letterSpacing: '-0.01em',
-                  }}
-                >
-                  <GitPullRequest size={10} strokeWidth={2.5} />
-                  Review
-                </button>
-              </div>
-            );
-          })() : null}
-        </div>
+                gap: 7,
+                minHeight: 34,
+                padding: '0 12px 0 10px',
+                borderRadius: 12,
+                border: '1px solid var(--t-panel-border)',
+                background: 'var(--t-chrome)',
+                backdropFilter: 'blur(14px)',
+                WebkitBackdropFilter: 'blur(14px)',
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+                fontSize: 11.5,
+                fontWeight: 700,
+                color: 'var(--t-text)',
+                letterSpacing: '-0.01em',
+              }}
+            >
+              <span
+                style={{
+                  width: 18,
+                  height: 18,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: 999,
+                  background: THEME_ACCENT_SOFT,
+                  color: THEME_ACCENT,
+                }}
+              >
+                <Folder size={11} strokeWidth={2} />
+              </span>
+              {repoLabel}
+              <ChevronDown size={10} strokeWidth={2} style={{
+                color: 'var(--t-text-muted)',
+                transform: repoPickerOpen ? 'rotate(180deg)' : 'none',
+                transition: 'transform 200ms cubic-bezier(0.32, 0.72, 0, 1)',
+              }} />
+            </button>
 
-        {/* Repo picker dropdown */}
-        {repoPickerOpen ? (
-          <div
-            style={{
-              margin: '2px 10px 6px',
-              borderRadius: 10,
-              border: '1px solid var(--t-divider-subtle)',
-              background: 'rgba(255, 255, 255, 0.95)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
-              maxHeight: 200,
-              overflowY: 'auto',
-              scrollbarWidth: 'none',
-            } as React.CSSProperties}
-            className="hide-scrollbar"
-          >
+            {/* Merge banner — only if there's an open PR on this repo */}
+            {extras.prs.some(p => p.kind === 'pr' && (p.state === 'open')) ? (() => {
+              const openPr = extras.prs.find(p => p.kind === 'pr' && p.state === 'open') as (ActivityItem & { kind: 'pr' }) | undefined;
+              if (!openPr) return null;
+              return (
+                <div style={{
+                  marginLeft: 'auto',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}>
+                  <span style={{
+                    fontSize: 10,
+                    color: 'var(--t-text-muted)',
+                    fontFamily: '"SF Mono", ui-monospace, monospace',
+                  }}>
+                    PR #{openPr.number}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => (onReviewPR ?? onSelectPR)?.(openPr.number, openPr.repo)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      minHeight: 30,
+                      padding: '0 10px',
+                      borderRadius: 999,
+                      border: 'none',
+                      background: '#22c55e',
+                      color: '#fff',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      letterSpacing: '-0.01em',
+                    }}
+                  >
+                    <GitPullRequest size={10} strokeWidth={2.5} />
+                    Review
+                  </button>
+                </div>
+              );
+            })() : null}
+          </div>
+
+          {/* Repo picker dropdown */}
+          {repoPickerOpen ? (
+            <div
+              style={{
+                margin: '0 10px 8px',
+                borderRadius: 14,
+                border: '1px solid var(--t-panel-border)',
+                background: 'var(--t-chrome)',
+                backdropFilter: 'blur(20px)',
+                WebkitBackdropFilter: 'blur(20px)',
+                boxShadow: 'var(--t-panel-shadow)',
+                maxHeight: 200,
+                overflowY: 'auto',
+                scrollbarWidth: 'none',
+              } as React.CSSProperties}
+              className="hide-scrollbar"
+            >
             {/* GitHub (all repos) option */}
             {(() => {
               const selected = isAllRepos;
@@ -2160,8 +2240,8 @@ const ActivityFeed = memo(function ActivityFeed({
                     padding: '7px 12px',
                     border: 'none',
                     borderBottom: '1px solid var(--t-divider-subtle)',
-                    background: selected ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
-                    color: selected ? '#2563eb' : 'var(--t-text)',
+                    background: selected ? THEME_ACCENT_SOFT : 'transparent',
+                    color: selected ? THEME_ACCENT : 'var(--t-text)',
                     fontSize: 12,
                     fontWeight: 600,
                     cursor: 'pointer',
@@ -2169,7 +2249,7 @@ const ActivityFeed = memo(function ActivityFeed({
                     textAlign: 'left',
                   }}
                 >
-                  <Globe size={12} strokeWidth={2} style={{ color: selected ? '#2563eb' : 'var(--t-text-muted)' }} />
+                  <Globe size={12} strokeWidth={2} style={{ color: selected ? THEME_ACCENT : 'var(--t-text-muted)' }} />
                   GitHub
                   <span style={{
                     marginLeft: 'auto',
@@ -2179,7 +2259,7 @@ const ActivityFeed = memo(function ActivityFeed({
                   }}>
                     registered
                   </span>
-                  {selected ? <CheckCircle2 size={12} strokeWidth={2} style={{ color: '#2563eb' }} /> : null}
+                  {selected ? <CheckCircle2 size={12} strokeWidth={2} style={{ color: THEME_ACCENT }} /> : null}
                 </button>
               );
             })()}
@@ -2198,8 +2278,8 @@ const ActivityFeed = memo(function ActivityFeed({
                     width: '100%',
                     padding: '7px 12px',
                     border: 'none',
-                    background: selected ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
-                    color: selected ? '#2563eb' : 'var(--t-text)',
+                    background: selected ? THEME_ACCENT_SOFT : 'transparent',
+                    color: selected ? THEME_ACCENT : 'var(--t-text)',
                     fontSize: 12,
                     fontWeight: selected ? 600 : 400,
                     cursor: 'pointer',
@@ -2207,7 +2287,7 @@ const ActivityFeed = memo(function ActivityFeed({
                     textAlign: 'left',
                   }}
                 >
-                  <Folder size={12} strokeWidth={2} style={{ color: selected ? '#2563eb' : 'var(--t-text-muted)' }} />
+                  <Folder size={12} strokeWidth={2} style={{ color: selected ? THEME_ACCENT : 'var(--t-text-muted)' }} />
                   {shortRepoLabel(r)}
                   <span style={{
                     marginLeft: 'auto',
@@ -2217,77 +2297,100 @@ const ActivityFeed = memo(function ActivityFeed({
                   }}>
                     {r.split('/').pop()}
                   </span>
-                  {selected ? <CheckCircle2 size={12} strokeWidth={2} style={{ color: '#2563eb' }} /> : null}
+                  {selected ? <CheckCircle2 size={12} strokeWidth={2} style={{ color: THEME_ACCENT }} /> : null}
                 </button>
               );
             })}
-          </div>
-        ) : null}
+            </div>
+          ) : null}
 
-        <div style={{
-          padding: '0 10px 6px',
-          fontSize: 10,
-          color: 'var(--t-text-faint)',
-          lineHeight: 1.35,
-        }}>
-          {scopeHelp}
-        </div>
-        {remoteScopeError ? (
           <div style={{
-            padding: '0 10px 6px',
-            fontSize: 10,
-            color: '#b45309',
-            lineHeight: 1.35,
+            padding: '0 10px 8px',
+            fontSize: 10.5,
+            color: 'var(--t-text-faint)',
+            lineHeight: 1.4,
           }}>
-            GitHub data warning: {remoteScopeError}
+            {scopeHelp}
           </div>
-        ) : null}
+          {remoteScopeError ? (
+            <div style={{
+              padding: '0 10px 8px',
+              fontSize: 10,
+              color: '#b45309',
+              lineHeight: 1.35,
+            }}>
+              GitHub data warning: {remoteScopeError}
+            </div>
+          ) : null}
 
-        {/* Filter tabs */}
-        <div style={{
-          display: 'flex',
-          gap: 1,
-          padding: '2px 10px 6px',
-        }}>
-          {FILTER_TABS.map((tab) => {
-            const active = filter === tab.key;
-            const count = counts[tab.key];
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                onClick={() => setFilter(tab.key)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '4px 8px',
-                  borderRadius: 8,
-                  border: 'none',
-                  background: active ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
-                  color: active ? '#2563eb' : 'var(--t-text-muted)',
-                  fontSize: 10,
-                  fontWeight: active ? 700 : 500,
-                  cursor: 'pointer',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                  transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
-                }}
-              >
-                {tab.icon}
-                {tab.label}
-                {count > 0 && tab.key !== 'all' ? (
-                  <span style={{
-                    fontSize: 9,
-                    fontWeight: 700,
-                    color: active ? '#2563eb' : 'var(--t-text-faint)',
-                    fontFamily: '"SF Mono", ui-monospace, monospace',
-                  }}>
-                    {count}
-                  </span>
-                ) : null}
-              </button>
-            );
-          })}
+          {/* Filter tabs */}
+          <div style={{ padding: '0 10px 10px' }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: 4,
+              borderRadius: 16,
+              border: '1px solid var(--t-panel-border)',
+              background: 'var(--t-panel-hover)',
+              boxShadow: 'inset 0 1px 0 var(--t-divider-subtle)',
+            }}>
+              {FILTER_TABS.map((tab) => {
+                const active = filter === tab.key;
+                const count = counts[tab.key];
+                return (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setFilter(tab.key)}
+                    aria-label={count > 0 && tab.key !== 'all' ? `${tab.label} ${count}` : tab.label}
+                    title={count > 0 && tab.key !== 'all' ? `${tab.label} ${count}` : tab.label}
+                    style={{
+                      position: 'relative',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 30,
+                      height: 28,
+                      padding: 0,
+                      borderRadius: 12,
+                      border: 'none',
+                      background: active ? THEME_ACCENT_SOFT : 'transparent',
+                      color: active ? THEME_ACCENT : 'var(--t-text-muted)',
+                      cursor: 'pointer',
+                      fontFamily: '-apple-system, system-ui, sans-serif',
+                      transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
+                    }}
+                  >
+                    {tab.icon}
+                    {count > 0 && tab.key !== 'all' ? (
+                      <span style={{
+                        position: 'absolute',
+                        top: -2,
+                        right: -2,
+                        minWidth: 14,
+                        height: 14,
+                        padding: '0 4px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 999,
+                        background: active ? THEME_ACCENT : 'rgba(148, 163, 184, 0.16)',
+                        color: active ? '#ffffff' : 'var(--t-text-faint)',
+                        boxShadow: '0 0 0 2px var(--t-panel)',
+                        fontSize: 9,
+                        fontWeight: 700,
+                        fontFamily: '"SF Mono", ui-monospace, monospace',
+                        lineHeight: 1,
+                      }}>
+                        {count}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -2308,8 +2411,8 @@ const ActivityFeed = memo(function ActivityFeed({
             color: 'var(--t-text-faint)',
             textTransform: 'uppercase',
             letterSpacing: '0.06em',
-            position: 'sticky',
-            top: 68,
+            position: repoPickerOpen ? 'relative' : 'sticky',
+            top: groupedHeaderStickyTop,
             background: 'var(--t-panel)',
             zIndex: 2,
           }}>
@@ -3559,6 +3662,7 @@ function MemoryTabContent({ onOpenMemory }: { onOpenMemory?: () => void }) {
 // ── Main Panel ──
 
 export const AgentPanel = memo(function AgentPanel({
+  activeSessionKey,
   selectedRepo,
   selectedRepoBranch,
   selectedRepoLocalPath,
@@ -3571,6 +3675,7 @@ export const AgentPanel = memo(function AgentPanel({
   onSelectCommit,
   onSelectPR,
   onReviewPR,
+  onRepoRemoved,
   onExpandWorkspace,
   onSelectFile,
   onOpenCI,
@@ -3582,6 +3687,7 @@ export const AgentPanel = memo(function AgentPanel({
   onAgentKill,
   lifecycleEvents,
 }: {
+  activeSessionKey?: string | null;
   selectedRepo?: string | null;
   selectedRepoBranch?: string | null;
   selectedRepoLocalPath?: string | null;
@@ -3602,6 +3708,7 @@ export const AgentPanel = memo(function AgentPanel({
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
   onReviewPR?: (prNumber: number, repo?: string) => void;
+  onRepoRemoved?: (repo: RepoRegistryEntry) => void;
   onExpandWorkspace?: (workspace: string, repo: string | null) => void;
   onSelectFile?: (filePath: string, workspace?: string) => void;
   onOpenCI?: (repo: string) => void;
@@ -3630,8 +3737,12 @@ export const AgentPanel = memo(function AgentPanel({
   const [activeRepo, setActiveRepo] = useState<string | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
   const [launchIntentNonce, setLaunchIntentNonce] = useState(0);
-  const [workspaceIntentNonce, setWorkspaceIntentNonce] = useState(0);
   const [addRepoIntentNonce, setAddRepoIntentNonce] = useState(0);
+  const [repoRegistryState, setRepoRegistryState] = useState({
+    loading: true,
+    count: 0,
+    hasError: false,
+  });
   const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
   const hasSelectedRepo = Boolean(selectedRepoLocalPath);
   const scopedRepo = hasSelectedRepo ? (selectedRepo ?? null) : activeRepo;
@@ -3767,6 +3878,8 @@ export const AgentPanel = memo(function AgentPanel({
 
         // Parse inventory
         let newAgents: AgentDetail[] = [];
+        let registeredRepoPaths = new Set<string>();
+        let hasRegisteredRepoSnapshot = false;
         if (invRes?.ok) {
           const data = await invRes.json();
           newAgents = data.agents ?? [];
@@ -3805,6 +3918,10 @@ export const AgentPanel = memo(function AgentPanel({
         const worktreeMap = new Map<string, WorktreeInfo>();
         if (repoRes?.ok) {
           const repoData = await repoRes.json() as { repos?: Array<{ localPath: string }> };
+          hasRegisteredRepoSnapshot = true;
+          registeredRepoPaths = new Set((repoData.repos ?? [])
+            .map((repo) => repo.localPath.trim().replace(/\/+$/, ''))
+            .filter(Boolean));
           const summaries = await Promise.all(
             (repoData.repos ?? []).map(async (repo) => {
               try {
@@ -3843,8 +3960,22 @@ export const AgentPanel = memo(function AgentPanel({
           };
         });
 
-        if (onAgentsUpdate) onAgentsUpdate(enriched);
-        setAgents(prev => arraysMatchBy(prev, enriched, agentFp) ? prev : enriched);
+        const filteredAgents = enriched.filter((agent) => {
+          if (!hasRegisteredRepoSnapshot) return true;
+          const repoScopedPath = agent.worktree?.path?.trim().replace(/\/+$/, '')
+            || agent.runtimeSurface?.cwd?.trim().replace(/\/+$/, '')
+            || null;
+          if (!repoScopedPath) return true;
+          for (const repoPath of registeredRepoPaths) {
+            if (repoScopedPath === repoPath || repoScopedPath.startsWith(`${repoPath}/`)) {
+              return true;
+            }
+          }
+          return false;
+        });
+
+        if (onAgentsUpdate) onAgentsUpdate(filteredAgents);
+        setAgents(prev => arraysMatchBy(prev, filteredAgents, agentFp) ? prev : filteredAgents);
       } catch { /* silent */ }
       finally {
         if (!inventoryLoadedRef.current) {
@@ -3869,28 +4000,29 @@ export const AgentPanel = memo(function AgentPanel({
 
   // Fetch recent commits
   useEffect(() => {
+    if (!effectiveScopedRepo) {
+      setCommits([]);
+      return;
+    }
+    const scopedRepo = effectiveScopedRepo;
+
     async function fetchCommits() {
       try {
-        const res = await fetch('/api/review/workspace');
+        const res = await fetch(`/api/panel/commits?repo=${encodeURIComponent(scopedRepo)}&limit=10`);
         if (!res.ok) return;
         const data = await res.json();
-        const raw: string[] = data.recentCommits ?? [];
-        const parsed = raw.map((line) => {
-          const spaceIdx = line.indexOf(' ');
-          const hash = line.slice(0, spaceIdx);
-          const rest = line.slice(spaceIdx + 1);
-          const ageMatch = rest.match(/\(([^)]+)\)$/);
-          const message = ageMatch ? rest.slice(0, ageMatch.index).trim() : rest;
-          const age = ageMatch ? ageMatch[1] : '';
-          return { hash, message, age };
-        });
+        const parsed = (data.commits ?? []).map((commit: { hash?: string; message?: string; date?: string }) => ({
+          hash: commit.hash ?? '',
+          message: commit.message ?? '',
+          age: commit.date ? relativeAge(commit.date) : '',
+        }));
         setCommits(prev => arraysMatchBy(prev, parsed, c => c.hash) ? prev : parsed);
       } catch { /* silent */ }
     }
     void fetchCommits();
     const id = setInterval(fetchCommits, 30_000);
     return () => clearInterval(id);
-  }, []);
+  }, [effectiveScopedRepo]);
 
   // Fetch GitHub issues + PRs in a single effect (same dep + same cadence)
   useEffect(() => {
@@ -3965,11 +4097,14 @@ export const AgentPanel = memo(function AgentPanel({
     [activeWorkspaceGroup, effectiveScopedRepo, workspaceGroups],
   );
   const currentLaunchRepoPath = hasSelectedRepo ? (selectedRepoLocalPath ?? repoLocalPath) : repoLocalPath;
-  const workspacesSummary = inventoryLoading
-    ? 'Loading repositories and workspaces...'
-    : trackedWorkspaceCount > 0 || reviewWorkspaceCount > 0
-      ? `${trackedWorkspaceCount} live · ${reviewWorkspaceCount} in review`
-      : null;
+  const hasRegisteredRepos = !repoRegistryState.loading && repoRegistryState.count > 0;
+  const workspacesSummary = !hasRegisteredRepos
+    ? null
+    : inventoryLoading
+      ? 'Loading repositories and workspaces...'
+      : trackedWorkspaceCount > 0 || reviewWorkspaceCount > 0
+        ? `${trackedWorkspaceCount} live · ${reviewWorkspaceCount} in review`
+        : null;
   const activityAgentRepoById = useMemo(
     () => new Map(agents.map((agent) => [agent.id, agentRepoSlug(agent)])),
     [agents],
@@ -3982,17 +4117,21 @@ export const AgentPanel = memo(function AgentPanel({
       return eventRepo === effectiveScopedRepo;
     });
   }, [activityAgentRepoById, effectiveScopedRepo, events]);
-  const activityItemCount = visibleActivityEvents.length + commits.length + issues.length + prs.length;
+  const hasGitHubScopedSummary = Boolean(effectiveScopedRepo);
+  const activityItemCount = hasGitHubScopedSummary
+    ? visibleActivityEvents.length + commits.length + issues.length + prs.length
+    : null;
   const activityDockTitle = effectiveScopedRepo ? 'Repo activity' : 'Activity';
-  const latestEventSummary = (prs[0] ? `PR #${prs[0].number} · ${prs[0].title}` : null)
-    ?? (issues[0] ? `Issue #${issues[0].number} · ${issues[0].title}` : null)
-    ?? (commits[0]?.message ?? compactActivitySummaryLabel(visibleActivityEvents[0]?.title));
+  const latestEventSummary = hasGitHubScopedSummary
+    ? (prs[0] ? `PR #${prs[0].number} · ${prs[0].title}` : null)
+      ?? (issues[0] ? `Issue #${issues[0].number} · ${issues[0].title}` : null)
+      ?? (commits[0]?.message ?? compactActivitySummaryLabel(visibleActivityEvents[0]?.title))
+    : (hasRegisteredRepos
+      ? 'GitHub activity across your registered repos.'
+      : 'Connect GitHub and add a repo to load activity.');
   const activitySummary = compactActivitySummaryLabel(latestEventSummary);
   const launchIntent = launchIntentNonce > 0 && currentLaunchRepoPath
     ? { repoPath: currentLaunchRepoPath, nonce: launchIntentNonce }
-    : null;
-  const workspaceIntent = workspaceIntentNonce > 0 && currentLaunchRepoPath
-    ? { repoPath: currentLaunchRepoPath, nonce: workspaceIntentNonce }
     : null;
   const addRepoIntent = addRepoIntentNonce > 0
     ? { nonce: addRepoIntentNonce }
@@ -4041,7 +4180,7 @@ export const AgentPanel = memo(function AgentPanel({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 4,
+                gap: 6,
               }}
             >
               <button
@@ -4077,46 +4216,6 @@ export const AgentPanel = memo(function AgentPanel({
                   const target = event.currentTarget;
                   target.style.background = 'transparent';
                   target.style.color = 'var(--t-text-muted)';
-                }}
-              >
-                <Folder size={15} strokeWidth={2.2} />
-              </button>
-              <button
-                type="button"
-                aria-label="Create workspace"
-                onClick={() => {
-                  if (!currentLaunchRepoPath) return;
-                  setReposOpen(true);
-                  setWorkspaceIntentNonce((current) => current + 1);
-                }}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 26,
-                  height: 26,
-                  padding: 0,
-                  borderRadius: 8,
-                  border: 'none',
-                  background: 'transparent',
-                  color: currentLaunchRepoPath ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
-                  cursor: currentLaunchRepoPath ? 'pointer' : 'default',
-                  opacity: currentLaunchRepoPath ? 1 : 0.45,
-                  appearance: 'none',
-                  WebkitAppearance: 'none',
-                  lineHeight: 0,
-                  transition: 'background 140ms ease, color 140ms ease',
-                }}
-                onMouseEnter={(event) => {
-                  if (!currentLaunchRepoPath) return;
-                  const target = event.currentTarget;
-                  target.style.background = 'var(--t-panel-hover)';
-                  target.style.color = 'var(--t-text)';
-                }}
-                onMouseLeave={(event) => {
-                  const target = event.currentTarget;
-                  target.style.background = 'transparent';
-                  target.style.color = currentLaunchRepoPath ? 'var(--t-text-muted)' : 'var(--t-text-faint)';
                 }}
               >
                 <Plus size={15} strokeWidth={2.2} />
@@ -4177,13 +4276,18 @@ export const AgentPanel = memo(function AgentPanel({
             onSelectSession={onSelectSession}
             onSelectPR={onSelectPR}
             onReviewPR={onReviewPR}
+            onRepoRemoved={(repo) => {
+              fetchNowRef.current();
+              onRepoRemoved?.(repo);
+            }}
             onLaunchWorkspaceAgent={onLaunchWorkspaceAgent}
+            onRegistryStateChange={setRepoRegistryState}
+            activeSessionKey={activeSessionKey}
             activeRepoLocalPath={currentLaunchRepoPath}
             activeWorkspacePath={activeWorkspacePath ?? selectedRepoLocalPath ?? null}
             sectionOpen={reposOpen}
             onSectionOpenChange={setReposOpen}
             launchIntent={launchIntent}
-            workspaceIntent={workspaceIntent}
             addIntent={addRepoIntent}
             hideHeader
           />
@@ -4194,6 +4298,9 @@ export const AgentPanel = memo(function AgentPanel({
             position: 'sticky',
             bottom: 0,
             marginTop: 10,
+            paddingLeft: 4,
+            paddingRight: 4,
+            paddingBottom: 2,
             background: 'var(--t-bg)',
             zIndex: 1,
           }}

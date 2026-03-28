@@ -12,10 +12,91 @@ import {
 import { enrichRepoReadiness, enrichRepoReadinessList } from '@/lib/repos/readiness';
 import { triggerScan, triggerScanIfStale, startChangePolling, stopChangePolling } from '@/lib/skeleton/autoscan';
 import { clearRepo as clearSkeletonCache } from '@/lib/skeleton/store';
+import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
+import { invalidateInboxCache } from '@/lib/mobile/openclaw';
+import { publishRealtimeMutation } from '@/lib/realtime/publisher';
+import { performRuntimeAction } from '@/lib/runtime/actions';
+import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
+import { removeRuntimeTerminalSessionsForRepoPath, getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
+import { pruneTerminalStateForRepoPath } from '@/lib/terminal/state-store';
+import { killTmuxSession } from '@/lib/terminal/tmux';
+import { removeWorkspaceLifecycleRecordsForRepoPath } from '@/lib/workspace/lifecycle';
 import type {
   RepoRegistryDeleteBody,
   RepoRegistryPostBody,
 } from '@/lib/repos/types';
+
+function normalizeScopePath(filePath?: string | null) {
+  const trimmed = filePath?.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/^~(?=\/|$)/, process.env.HOME ?? '').replace(/\/+$/, '');
+}
+
+function pathBelongsToRepoScope(candidatePath?: string | null, repoPath?: string | null) {
+  const candidate = normalizeScopePath(candidatePath);
+  const repo = normalizeScopePath(repoPath);
+  if (!candidate || !repo) return false;
+  return candidate === repo || candidate.startsWith(`${repo}/`);
+}
+
+function repoSlugFromRemote(remoteUrl?: string | null) {
+  const normalized = remoteUrl?.replace(/\.git$/, '').replace(/^git@github\.com:/, 'https://github.com/') ?? '';
+  const match = normalized.match(/github\.com\/([^/]+\/[^/]+)$/i);
+  return match?.[1] ?? null;
+}
+
+function agentBelongsToRepoScope(
+  agent: {
+    runtimeSurface?: { cwd?: string | null; reviewContext?: { repoSlug?: string | null } } | null;
+    worktree?: { path?: string | null } | null;
+    workspace?: string | null;
+  },
+  repo: { localPath: string; remoteUrl?: string | null; name: string },
+) {
+  const repoSlug = repoSlugFromRemote(repo.remoteUrl);
+  if (repoSlug && agent.runtimeSurface?.reviewContext?.repoSlug === repoSlug) {
+    return true;
+  }
+
+  const candidatePaths = [
+    agent.worktree?.path,
+    agent.runtimeSurface?.cwd,
+    agent.workspace?.startsWith('/') ? agent.workspace : null,
+  ];
+
+  return candidatePaths.some((candidatePath) => pathBelongsToRepoScope(candidatePath, repo.localPath));
+}
+
+async function stopRepoBoundRuntimeSessions(repo: { localPath: string; remoteUrl?: string | null; name: string }) {
+  const snapshot = await getRuntimeInventorySnapshot({ fresh: true, includeOpenClaw: true });
+  const targetAgents = snapshot.agents.filter((agent) => agentBelongsToRepoScope(agent, repo));
+  const stoppedSessionKeys = new Set<string>();
+
+  await Promise.allSettled(targetAgents.map(async (agent) => {
+    try {
+      await performRuntimeAction({
+        action: 'stop',
+        surfaceId: agent.runtimeSurface?.id ?? agent.sessionKey,
+      });
+      stoppedSessionKeys.add(agent.sessionKey);
+    } catch {
+      // Best effort: repo removal should still proceed.
+    }
+
+    const terminalBinding = getRuntimeTerminalSession(agent.sessionKey);
+    if (terminalBinding?.sessionName) {
+      await killTmuxSession(terminalBinding.sessionName).catch(() => undefined);
+    }
+  }));
+
+  const removedTerminalBindings = removeRuntimeTerminalSessionsForRepoPath(repo.localPath);
+
+  return {
+    targetedSessionCount: targetAgents.length,
+    stoppedSessionCount: stoppedSessionKeys.size,
+    removedTerminalBindings: removedTerminalBindings.length,
+  };
+}
 
 export async function GET() {
   try {
@@ -107,16 +188,46 @@ export async function DELETE(request: Request) {
     // Look up localPath before removal so we can clean up skeleton cache
     const repos = await listRepos();
     const toRemove = repos.find(r => r.id === body.id);
+    const stoppedSessions = toRemove
+      ? await stopRepoBoundRuntimeSessions(toRemove)
+      : { targetedSessionCount: 0, stoppedSessionCount: 0, removedTerminalBindings: 0 };
 
     await removeRepo(body.id);
 
     // Clean up skeleton/chunk cache + stop polling for this repo
     if (toRemove?.localPath) {
+      removeWorkspaceLifecycleRecordsForRepoPath(toRemove.localPath);
+      pruneTerminalStateForRepoPath(toRemove.localPath);
       clearSkeletonCache(toRemove.localPath);
       stopChangePolling(toRemove.localPath);
     }
 
-    return NextResponse.json({ ok: true, removedId: body.id });
+    invalidateCommandCenterSnapshotCaches();
+    invalidateInboxCache();
+    await publishRealtimeMutation({
+      mutation: {
+        mutationId: `repo-remove-${body.id}-${Date.now()}`,
+        source: 'desktop',
+        action: 'stop',
+        runtime: 'repo-registry',
+        surfaceId: body.id,
+        sessionKey: toRemove?.localPath,
+        status: 'completed',
+        note: toRemove
+          ? `Removed ${toRemove.name} from Cortex and stopped ${stoppedSessions.stoppedSessionCount}/${stoppedSessions.targetedSessionCount} repo-bound runtime session(s).`
+          : 'Repository removed from Cortex.',
+        createdAt: new Date().toISOString(),
+        settledAt: new Date().toISOString(),
+      },
+      refreshTargets: ['global', 'mobileInbox', 'sessionHistory'],
+      fresh: true,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      removedId: body.id,
+      stoppedSessions,
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Unable to remove repository.' },
