@@ -192,8 +192,8 @@ async function supervisorTick(): Promise<void> {
       await handleStatusChange(watched, currentStatus, now);
     }
 
-    // Stuck detection (only for running agents)
-    if (currentStatus === 'running') {
+    // Stuck detection (for running or waiting agents)
+    if (currentStatus === 'running' || currentStatus === 'waiting') {
       await checkStuck(watched, now);
     }
   }
@@ -440,8 +440,8 @@ function checkAllDone(): void {
     // Build summary
     const lines = agents.map((a) => {
       const duration = Math.round((Date.now() - a.registeredAt) / 1000);
-      const status = a.retryCount > MAX_RETRIES ? 'FAILED' : 'COMPLETED';
-      return `- "${a.name}" (${a.surfaceId}): ${status} (${formatDuration(duration)})`;
+      const label = a.lastStatus === 'failed' || a.lastStatus === 'interrupted' ? 'FAILED' : 'COMPLETED';
+      return `- "${a.name}" (${a.surfaceId}): ${label} (${formatDuration(duration)})`;
     });
 
     const allSucceeded = agents.every((a) => a.lastStatus === 'finished');
