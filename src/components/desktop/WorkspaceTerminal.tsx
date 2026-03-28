@@ -94,6 +94,7 @@ export interface TerminalTabHandle {
     autoSend?: boolean;
     createNew?: boolean;
     label?: string;
+    targetSessionKey?: string;
     orchestrationPacket?: WorkspaceOrchestrationPacketBadge | null;
   }) => string;
   injectIntoCliChat: (text: string, options?: {
