@@ -10,6 +10,7 @@
     "beforeBuildCommand": "npm run tauri:prebuild"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "Cortex IDE",
@@ -22,7 +23,7 @@
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "decorations": true,
-        "transparent": false,
+        "transparent": true,
         "dragDropEnabled": false
       }
     ],
