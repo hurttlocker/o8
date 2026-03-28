@@ -16,7 +16,7 @@ import {
 import { githubInstallationFetch } from './auth';
 import { getGitHubAppConfig } from './env';
 
-const GITHUB_SNAPSHOT_TTL_MS = 5 * 60_000;
+const GITHUB_SNAPSHOT_TTL_MS = 30_000; // 30s — agents create issues frequently
 
 function resourcePath(repoFullName: string, resource: GitHubSyncResource) {
   if (resource === 'issues') {
@@ -200,7 +200,7 @@ async function syncPullRequests(repoFullName: string) {
   markGitHubSyncSuccess(repoFullName, 'pull_requests', response.headers.get('etag'));
 }
 
-export async function ensureGitHubIssues(repoFullName: string) {
+export async function ensureGitHubIssues(repoFullName: string, options?: { fresh?: boolean }) {
   const config = getGitHubAppConfig();
   const current = listGitHubIssues(repoFullName);
   const syncState = readGitHubSyncState(repoFullName, 'issues');
@@ -213,7 +213,7 @@ export async function ensureGitHubIssues(repoFullName: string) {
     };
   }
 
-  if (current.length > 0 && isFresh(syncState?.lastSuccessfulAt)) {
+  if (!options?.fresh && current.length > 0 && isFresh(syncState?.lastSuccessfulAt)) {
     return { issues: current, error: syncState?.lastError ?? null, stale: false };
   }
 

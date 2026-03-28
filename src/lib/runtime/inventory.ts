@@ -243,6 +243,8 @@ function filterSnapshotToIdeSessions(snapshot: FleetSnapshot) {
   const agents = snapshot.agents
     .filter((agent) => {
       if (agent.runtime === 'openclaw') return true;
+      // Owned sessions (launched by orchestrator/API) are always visible — they don't need a pre-existing UI tab
+      if (agent.sessionKey?.startsWith('codex-owned:')) return true;
       return ideSessionByKey.has(agent.sessionKey) || isRegistryBackedRuntimeSession(agent.sessionKey);
     })
     .map((agent) => {
@@ -356,7 +358,9 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
   });
 
   const discovered = discoveredAll.filter(({ session }) => (
-    ideSessionByKey.has(session.sessionKey) || isRegistryBackedRuntimeSession(session.sessionKey)
+    session.sessionKey?.startsWith('codex-owned:')
+    || ideSessionByKey.has(session.sessionKey)
+    || isRegistryBackedRuntimeSession(session.sessionKey)
   ));
 
   const agents = discovered.map(({ runtime, session }) => mapRuntimeSessionToAgent(runtime, session, ideSessionByKey.get(session.sessionKey)));

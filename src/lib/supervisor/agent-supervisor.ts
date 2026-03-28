@@ -49,6 +49,7 @@ export interface AgentUpdateEvent {
   status: string;
   detail?: string;
   duration?: number;
+  repoPath?: string;
 }
 
 export interface SupervisorCallbacks {
@@ -105,6 +106,7 @@ export function registerWatchedAgent(
     name,
     status: 'launched',
     detail: `Agent "${name}" launched`,
+    repoPath,
   });
 }
 

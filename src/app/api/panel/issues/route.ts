@@ -40,7 +40,8 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Invalid repo format', issues: [] }, { status: 400 });
   }
 
-  const result = await ensureGitHubIssues(repo);
+  const fresh = searchParams.get('fresh') === '1';
+  const result = await ensureGitHubIssues(repo, { fresh });
   return NextResponse.json({
     issues: result.issues.map((issue) => ({
       number: issue.number,
