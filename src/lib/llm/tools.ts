@@ -163,6 +163,28 @@ export const TOOLS: ToolDef[] = [
       required: ['command'],
     },
   },
+  {
+    name: 'list_lanes',
+    description: 'List all active lanes. Lanes are durable work units binding a repo, branch, runtime, and session. Use to see what work is in progress.',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'lane_command',
+    description: 'Issue a command to the lane system. Available verbs: open_lane (create a new work lane), send_turn (send a message to a lane\'s session), interrupt (stop a lane\'s session), request_review (mark lane as needing review), create_pr (create a PR from a lane\'s worktree), merge (merge a lane\'s worktree), complete (mark done), archive (clean up). REQUIRES USER APPROVAL for create_pr, merge, and open_lane.',
+    parameters: {
+      type: 'object',
+      properties: {
+        verb: { type: 'string', description: 'Command verb: open_lane, send_turn, interrupt, request_review, create_pr, merge, complete, archive' },
+        laneId: { type: 'string', description: 'Lane ID (required for all verbs except open_lane)' },
+        message: { type: 'string', description: 'Message text (for send_turn)' },
+        repoPath: { type: 'string', description: 'Repository path (for open_lane)' },
+        branch: { type: 'string', description: 'Branch name (for open_lane)' },
+        runtime: { type: 'string', description: 'Runtime: codex or claude-code (for open_lane)' },
+        label: { type: 'string', description: 'Human-readable label (for open_lane)' },
+      },
+      required: ['verb'],
+    },
+  },
 ];
 
 // Tools that ALWAYS require user approval before execution
@@ -172,6 +194,7 @@ export const APPROVAL_REQUIRED_TOOLS = new Set([
   'write_file',
   'edit_file',
   'delete_file',
+  'lane_command', // dynamic — some verbs are read-only (send_turn), others mutate (merge, create_pr)
   // run_terminal_command uses dynamic approval — see classifyCommand()
 ]);
 
@@ -284,7 +307,49 @@ export async function executeTool(name: string, args: Record<string, unknown>, r
     case 'edit_file': return editFile(args.path as string, args.oldText as string, args.newText as string, repoRoot);
     case 'delete_file': return deleteFile(args.path as string, repoRoot);
     case 'run_terminal_command': return runTerminalCommand(args.command as string, args.cwd as string | undefined, repoRoot);
+    case 'list_lanes': return await executeListLanes();
+    case 'lane_command': return await executeLaneCommand(args);
     default: return { content: `Unknown tool: ${name}` };
+  }
+}
+
+async function executeListLanes(): Promise<ToolResult> {
+  try {
+    const { listActiveLanes } = await import('@/lib/lane/registry');
+    const lanes = listActiveLanes();
+    if (lanes.length === 0) {
+      return { content: 'No active lanes.' };
+    }
+    const summary = lanes.map((lane) =>
+      `- **${lane.label}** (${lane.id})\n  Status: ${lane.status} | Runtime: ${lane.runtime} | Branch: ${lane.branch}\n  Repo: ${lane.repoPath}${lane.sessionKey ? `\n  Session: ${lane.sessionKey}` : ''}${lane.packetId ? `\n  Packet: ${lane.packetId}` : ''}`,
+    ).join('\n\n');
+    return { content: `**Active Lanes (${lanes.length}):**\n\n${summary}` };
+  } catch (err) {
+    return { content: `Error listing lanes: ${err instanceof Error ? err.message : 'unknown'}` };
+  }
+}
+
+async function executeLaneCommand(args: Record<string, unknown>): Promise<ToolResult> {
+  const verb = args.verb as string;
+  if (!verb) return { content: 'Error: verb is required.' };
+
+  try {
+    const { dispatch } = await import('@/lib/lane/commands');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic command construction from LLM args
+    const command: any = { verb, actor: 'orchestrator' as const };
+
+    if (args.laneId) command.laneId = args.laneId;
+    if (args.message) command.message = args.message;
+    if (args.repoPath) command.repoPath = args.repoPath;
+    if (args.branch) command.branch = args.branch;
+    if (args.runtime) command.runtime = args.runtime;
+    if (args.label) command.label = args.label;
+
+    const result = await dispatch(command);
+    const laneInfo = result.lane ? `\nLane: ${result.lane.id} (${result.lane.status})` : '';
+    return { content: `${result.ok ? 'Success' : 'Failed'}: ${result.note}${laneInfo}` };
+  } catch (err) {
+    return { content: `Error executing lane command: ${err instanceof Error ? err.message : 'unknown'}` };
   }
 }
 

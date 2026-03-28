@@ -11,8 +11,9 @@
 import { createHash } from 'node:crypto';
 import { spawn, execSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import { existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 
 // ── Types ──
 
@@ -39,6 +40,86 @@ export type OrchestratorEvent =
 // ── Constants ──
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || join(homedir(), '.local', 'bin', 'claude');
+const MCP_SERVER_PATH = resolve(dirname(new URL(import.meta.url).pathname), '../mcp/cortex-mcp-server.ts');
+const MCP_CONFIG_DIR = join(homedir(), '.cortex-ide', 'mcp');
+
+/** Resolve repo slug from git remote, cached per session. */
+function detectRepoSlug(repoPath: string): string {
+  try {
+    const remote = execSync('git remote get-url origin', { cwd: repoPath, timeout: 3000, encoding: 'utf-8' }).trim();
+    const match = remote.match(/[:/]([^/]+\/[^/.]+?)(?:\.git)?$/);
+    return match?.[1] ?? '';
+  } catch { return ''; }
+}
+
+/** Generate a temporary MCP config file pointing to the Cortex MCP server. */
+function ensureMcpConfig(repoPath: string): string {
+  if (!existsSync(MCP_CONFIG_DIR)) mkdirSync(MCP_CONFIG_DIR, { recursive: true });
+
+  const configPath = join(MCP_CONFIG_DIR, `orchestrator-${repoHash(repoPath)}.json`);
+  const repoSlug = detectRepoSlug(repoPath);
+  const apiBase = `http://localhost:${process.env.PORT || '3001'}`;
+
+  // Use npx tsx to run the TS server directly in dev; in prod this would be compiled
+  const config = {
+    mcpServers: {
+      cortex: {
+        command: 'npx',
+        args: ['tsx', MCP_SERVER_PATH],
+        env: {
+          CORTEX_API_BASE: apiBase,
+          CORTEX_REPO_PATH: repoPath,
+          CORTEX_REPO_SLUG: repoSlug,
+        },
+      },
+    },
+  };
+
+  writeFileSync(configPath, JSON.stringify(config, null, 2));
+  console.log(`[orchestrator-session] MCP config written to ${configPath}`);
+  return configPath;
+}
+
+/** Appended to Claude Code's default system prompt on the first message only. */
+function buildOrchestratorSystemPrompt(repoPath: string): string {
+  const repoName = repoPath.split('/').filter(Boolean).pop() ?? repoPath;
+  return [
+    `You are the orchestrator for Cortex IDE — a command center for managing AI agent fleets.`,
+    `You are working inside the repo "${repoName}" at ${repoPath}.`,
+    ``,
+    `Your role:`,
+    `- You are the user's senior engineering partner. Think strategically, act precisely.`,
+    `- You have full access to this repo via Claude Code tools (read, write, edit, bash, grep, glob).`,
+    `- When the user asks you to build, fix, or change something — do it directly. Don't just describe what to do.`,
+    `- Be concise. Lead with action, not explanation. Skip preamble.`,
+    `- When you complete a task, say what you did in 1-2 sentences. Don't narrate every step.`,
+    ``,
+    `Context:`,
+    `- This conversation persists across messages via --resume. You have full conversation history.`,
+    `- The user may reference "lanes" (durable agent work units), "packets" (planned work items), or "runtimes" (Claude Code and Codex sessions). OpenClaw is a separate legacy system — ignore it.`,
+    `- You are running with --dangerously-skip-permissions so you can act autonomously. Use good judgment.`,
+    `- Prefer editing existing files over creating new ones. Follow the repo's existing patterns.`,
+    `- Run \`npx tsc --noEmit\` to verify TypeScript changes before reporting completion.`,
+    ``,
+    `Cortex tools available (via MCP):`,
+    `Awareness:`,
+    `- cortex_fleet_status — see all active Claude Code and Codex agent sessions`,
+    `- cortex_list_issues — GitHub issues for any repo`,
+    `- cortex_list_prs — open pull requests`,
+    `- cortex_ci_status — CI pipeline runs (GitHub Actions)`,
+    `- cortex_read_packets — current mission work packets and their status`,
+    `- cortex_update_packet — update a work packet (status, title, queue state, etc.)`,
+    `- cortex_list_approvals — pending approval requests from agents`,
+    `- cortex_resolve_approval — approve or reject a pending approval`,
+    `Delegation (Codex agents):`,
+    `- cortex_launch_agent — launch a new Codex agent with a task prompt. Returns a surfaceId for tracking.`,
+    `- cortex_steer_agent — send follow-up instructions to a running Codex agent`,
+    `- cortex_read_transcript — read what an agent has been doing (messages, tool calls, outputs)`,
+    `- cortex_interrupt_agent — stop a running agent that's going off-track`,
+    `When the user asks you to do parallel work or delegate tasks, launch Codex agents. You are Claude (the orchestrator) — Codex agents are your workers.`,
+    `For complex tasks, break work into parts and launch separate agents for each. Monitor their progress and steer if needed.`,
+  ].join('\n');
+}
 
 // ── Registry ──
 
@@ -104,16 +185,23 @@ export async function sendToOrchestrator(
 
   session.status = 'busy';
 
+  // Generate MCP config so Claude Code can use Cortex tools
+  const mcpConfigPath = ensureMcpConfig(session.repoPath);
+
   const args: string[] = [
     '-p', message,
     '--output-format', 'stream-json',
     '--dangerously-skip-permissions',
     '--verbose',
+    '--mcp-config', mcpConfigPath,
   ];
 
   // Resume existing conversation if we have a session ID
   if (session.claudeSessionId) {
     args.push('--resume', session.claudeSessionId);
+  } else {
+    // First message — inject orchestrator identity and context
+    args.push('--append-system-prompt', buildOrchestratorSystemPrompt(session.repoPath));
   }
 
   return new Promise<void>((resolve, reject) => {

@@ -47,6 +47,7 @@ import {
   reconcileOrchestratorMissionState,
   subscribeOrchestratorMissionState,
   updateOrchestratorMissionState,
+  type DomainLaneSummary,
 } from '@/lib/orchestrator/store';
 import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
@@ -2269,6 +2270,36 @@ function DashboardInner() {
       return packet.lane;
     }
 
+    // ── Create a lane for this packet ──
+    let laneId: string | null = null;
+    const laneApi = async (body: Record<string, unknown>) => {
+      try {
+        const res = await fetch('/api/lanes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        return await res.json().catch(() => ({})) as Record<string, unknown>;
+      } catch { return {}; }
+    };
+    try {
+      const laneData = await laneApi({
+        verb: 'open_lane',
+        repoPath: packet.workspaceTargetPath ?? workspaceTerminalPreferredRepo?.localPath ?? '',
+        branch: packet.branchTarget || 'main',
+        runtime: packet.runtime,
+        label: packet.title,
+        packetId: packet.id,
+        actor: 'user',
+      });
+      if (laneData.ok && laneData.laneId) {
+        laneId = laneData.laneId as string;
+        console.log(`[orchestrator] Lane created: ${laneId} for packet ${packet.referenceLabel}`);
+      }
+    } catch {
+      console.warn('[orchestrator] Lane creation failed, continuing without lane tracking');
+    }
+
     let targetScope = workspaceScopeEntries.find((entry) => entry.localPath === packet.workspaceTargetPath)
       ?? workspaceTerminalPreferredRepo
       ?? workspaceScopeEntries[0]
@@ -2338,8 +2369,15 @@ function DashboardInner() {
     }
 
     const repoPath = targetScope?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null;
+
+    // Update lane with worktree path if one was created
+    if (laneId && targetScope?.isWorktree && targetScope.localPath) {
+      void laneApi({ verb: 'bind_worktree', laneId, worktreePath: targetScope.localPath, actor: 'system' });
+    }
+
     const workspaceTarget = await waitForWorkspaceTerminalTarget({ repoPath });
     if (!workspaceTarget) {
+      if (laneId) void laneApi({ verb: 'request_review', laneId, actor: 'system' });
       return null;
     }
 
@@ -2370,11 +2408,18 @@ function DashboardInner() {
     });
 
     setActiveTileId(workspaceTarget.tileId);
+
+    // ── Notify the lane that a session was created ──
+    if (laneId) {
+      void laneApi({ verb: 'attach_session', laneId, sessionKey: tabId, actor: 'system' });
+    }
+
     return {
       tileId: workspaceTarget.tileId,
       tabId,
       repoPath,
       runtime: packet.runtime,
+      laneId,
     };
   }, [
     allRepoWorktrees,
@@ -3186,6 +3231,26 @@ function DashboardInner() {
     [parsedAgents],
   );
 
+  // ── Domain lane polling for reconciliation ──
+  const [domainLanes, setDomainLanes] = useState<DomainLaneSummary[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/lanes?active=true');
+        if (!res.ok || cancelled) return;
+        const data = await res.json() as { lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null }> };
+        const summaries: DomainLaneSummary[] = (data.lanes ?? [])
+          .filter((l): l is typeof l & { packetId: string } => Boolean(l.packetId))
+          .map((l) => ({ laneId: l.id, packetId: l.packetId, status: l.status, sessionKey: l.sessionKey }));
+        if (!cancelled) setDomainLanes(summaries);
+      } catch { /* silent */ }
+    };
+    void poll();
+    const interval = setInterval(poll, 15_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
+
   const paletteAgents = useMemo(() => parsedAgents as unknown as PaletteAgentSummary[], [parsedAgents]);
   const selectedSessionAgent = useMemo(
     () => paletteAgents.find((agent) => agent.sessionKey === activeSessionKey)
@@ -3220,6 +3285,7 @@ function DashboardInner() {
     const reconciled = reconcileOrchestratorMissionState(thoughtsMissionState, {
       laneSnapshots: collectOrchestratorLaneSnapshots(),
       runtimeTruth: orchestratorRuntimeTruth,
+      domainLanes,
     });
     const changed = JSON.stringify({
       prompt: reconciled.prompt,
@@ -3240,6 +3306,7 @@ function DashboardInner() {
   }, [
     areWorkspaceTerminalRestoresSettled,
     collectOrchestratorLaneSnapshots,
+    domainLanes,
     orchestratorRuntimeTruth,
     scheduleThoughtsMissionPersist,
     thoughtsMissionState,

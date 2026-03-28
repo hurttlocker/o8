@@ -135,6 +135,26 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
           break;
         }
 
+        case 'agent-update': {
+          const update = msg.data as {
+            surfaceId?: string;
+            name?: string;
+            status?: string;
+            detail?: string;
+            duration?: number;
+          } | undefined;
+          if (!update?.surfaceId) break;
+
+          setMessages(prev => [...prev, {
+            id: `agent-update-${update.surfaceId}-${Date.now()}`,
+            role: 'system',
+            text: update.detail ?? `Agent "${update.name ?? update.surfaceId}" is now ${update.status ?? 'unknown'}`,
+            timestamp: Date.now(),
+            timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          }]);
+          break;
+        }
+
         case 'error': {
           const error = typeof msg.data?.error === 'string' ? msg.data.error : 'Unknown error';
           console.error('[orchestrator-stream] Error:', error);
