@@ -142,6 +142,8 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
             status?: string;
             detail?: string;
             duration?: number;
+            repoPath?: string;
+            prompt?: string;
           } | undefined;
           if (!update?.surfaceId) break;
 
@@ -152,6 +154,11 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
             timestamp: Date.now(),
             timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           }]);
+
+          // Dispatch to dashboard so it can auto-open workspace tabs
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('cortex:agent-supervisor-update', { detail: update }));
+          }
           break;
         }
 

@@ -3652,7 +3652,8 @@ export function AgentPanelChat({
     if (primary && primary.sessionKey !== selectedKey) {
       setSelectedKey(primary.sessionKey);
     }
-  }, [effectiveSessions, selectedKey, selectedSession, snapshot?.primarySessionKey]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only auto-select when sessions change, not when selectedKey changes (avoids loop)
+  }, [effectiveSessions, snapshot?.primarySessionKey]);
 
   const streamingTextRef = useRef('');
 

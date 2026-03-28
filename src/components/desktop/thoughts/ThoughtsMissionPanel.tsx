@@ -102,21 +102,24 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
     if (!open || !visible || workspaceTargets.length === 0) return;
 
     let cancelled = false;
-    (async () => {
-      try {
-        const reposRes = await fetch('/api/panel/repos');
-        if (!reposRes.ok || cancelled) return;
-        const reposData = await reposRes.json() as { repos?: Array<{ localPath: string; remoteUrl?: string }> };
-        const targetPath = workspaceTargets[0]?.localPath;
-        const matched = (reposData.repos ?? []).find((repo) => repo.localPath === targetPath);
-        if (!matched?.remoteUrl || cancelled) return;
+    let resolvedSlug: string | null = null;
 
-        const slug = matched.remoteUrl.replace(/\.git$/, '').split('/').slice(-2).join('/');
-        if (!slug || slug === issuesRepoSlugRef.current) return;
-        issuesRepoSlugRef.current = slug;
+    const fetchIssues = async (fresh: boolean) => {
+      try {
+        if (!resolvedSlug) {
+          const reposRes = await fetch('/api/panel/repos');
+          if (!reposRes.ok || cancelled) return;
+          const reposData = await reposRes.json() as { repos?: Array<{ localPath: string; remoteUrl?: string }> };
+          const targetPath = workspaceTargets[0]?.localPath;
+          const matched = (reposData.repos ?? []).find((repo) => repo.localPath === targetPath);
+          if (!matched?.remoteUrl || cancelled) return;
+          resolvedSlug = matched.remoteUrl.replace(/\.git$/, '').split('/').slice(-2).join('/');
+        }
+        if (!resolvedSlug) return;
+        issuesRepoSlugRef.current = resolvedSlug;
 
         setIssuesLoading(true);
-        const issuesRes = await fetch(`/api/panel/issues?repo=${encodeURIComponent(slug)}`);
+        const issuesRes = await fetch(`/api/panel/issues?repo=${encodeURIComponent(resolvedSlug)}${fresh ? '&fresh=1' : ''}`);
         if (!issuesRes.ok || cancelled) { setIssuesLoading(false); return; }
         const issuesData = await issuesRes.json() as { issues?: Array<{ number: number; title: string; state: string; url?: string; labels?: Array<{ name: string } | string> }> };
         const openIssues = (issuesData.issues ?? [])
@@ -133,8 +136,15 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
         // silent
       }
       if (!cancelled) setIssuesLoading(false);
-    })();
-    return () => { cancelled = true; };
+    };
+
+    // Initial fetch
+    void fetchIssues(false);
+
+    // Re-poll every 30s with fresh=1 so new issues appear automatically
+    const pollTimer = setInterval(() => { void fetchIssues(true); }, 30_000);
+
+    return () => { cancelled = true; clearInterval(pollTimer); };
   }, [open, visible, workspaceTargets]);
 
   const updateMissionState = useCallback((
