@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What Is This
 
-**o8** (formerly Cortex IDE) is a Next.js 16 + Tauri v2 desktop app — a **multi-provider agent control plane**. Claude is always the orchestrator/brain; Codex is always the workhorse executing tasks in worktrees. The user talks to o8, o8 routes work across providers. It runs three agent runtimes (OpenClaw, Codex, Claude Code) through a universal CLI-based adapter interface, with separate desktop and mobile surfaces.
+**o8** (formerly Cortex IDE) is a Next.js 16 + Tauri v2 desktop app — **the governance layer for autonomous engineering teams**. Approvals, audit, organizational memory, and mobile operator control across any AI provider. Claude is the orchestrator/brain; Codex is the workhorse executing tasks in worktrees. It runs three agent runtimes (OpenClaw, Codex, Claude Code) through a universal CLI-based adapter interface, with separate desktop and mobile surfaces.
 
 See `docs/o8-product-brief.md` for the full product vision, monetization, and Karpathy alignment.
 
@@ -165,6 +165,7 @@ All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key famil
 - **Apple HIG**: 44px touch targets, 14px card radii, spring curves
 - **`as React.CSSProperties`** when using vendor-prefixed or non-standard CSS props
 - **Build for all three runtimes** — OpenClaw, Codex, Claude Code. Never commit to one provider.
+- **Don't build what models will commoditize** — Cost dashboards, context optimization, prompt tools, orchestration quality, and briefing features are table-stakes, never differentiators. Our moats are governance, organizational memory, and the operator approval surface.
 - **Console logging prefix**: `[feature-name]` (e.g., `[memory-recall]`, `[compaction]`)
 - **Commit prefix**: `feat:`, `fix:`, `refactor:`, `perf:`, `chore:`
 - **Public changelog safety**: Commit messages are synced (sanitized) to the public repo `hurttlocker/Rainwater`. When introducing a new internal codename, framework, or tool name, add it to BOTH the sed filter AND the blocklist in `.github/workflows/sync-changelog.yml`. The blocklist will fail the workflow if anything leaks.
