@@ -2814,6 +2814,7 @@ function DashboardInner() {
     }
     setWorkspaceSidePanelRepoPath(nextRepoPath);
     setWorkspaceSidePanelRepoContext(nextRepoContext);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- repoContext/repoPath are outputs, not inputs; including them creates a feedback loop
   }, [
     activeWorkspaceLane?.branch,
     activeWorkspaceLane?.repoPath,
@@ -2822,10 +2823,7 @@ function DashboardInner() {
     globalRepoEntry,
     rightPanelMode,
     workspaceSidePanelPullRequestNumber,
-    workspaceSidePanelRepoContext,
-    workspaceSidePanelRepoPath,
     workspaceSidePanelView,
-    workspaceTerminalPreferredRepo,
     workspaceTerminalPreferredRepo?.localPath,
   ]);
 
