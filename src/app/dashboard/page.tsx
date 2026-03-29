@@ -2774,15 +2774,33 @@ function DashboardInner() {
   useEffect(() => {
     if (rightPanelMode !== 'workspace') return;
     if (workspaceSidePanelPullRequestNumber) return;
-    const nextRepoContext = workspaceSidePanelRepoContext
-      ?? workspaceTerminalPreferredRepo
-      ?? (globalRepoEntry ? {
-        name: globalRepoEntry.name,
-        localPath: globalRepoEntry.localPath,
-        branch: globalRepoEntry.readiness?.currentBranch ?? globalRepoBranch,
-        readiness: globalRepoEntry.readiness ?? null,
-        remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
-      } : null);
+
+    // Lane-scoped context: when the active lane has branch info, use it
+    // so the review rail shows the selected lane's diff, not main's.
+    let nextRepoContext: WorkspaceSidePanelRepo | null = null;
+    if (activeWorkspaceLane?.repoPath && activeWorkspaceLane.branch) {
+      const laneName = activeWorkspaceLane.repoPath.split('/').pop() ?? 'repo';
+      nextRepoContext = {
+        name: laneName,
+        localPath: activeWorkspaceLane.repoPath,
+        branch: activeWorkspaceLane.branch,
+        readiness: null,
+        isWorktree: activeWorkspaceLane.branch !== 'main',
+      };
+    }
+
+    // Fall through to terminal/global when no lane branch context
+    if (!nextRepoContext) {
+      nextRepoContext = workspaceTerminalPreferredRepo
+        ?? (globalRepoEntry ? {
+          name: globalRepoEntry.name,
+          localPath: globalRepoEntry.localPath,
+          branch: globalRepoEntry.readiness?.currentBranch ?? globalRepoBranch,
+          readiness: globalRepoEntry.readiness ?? null,
+          remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
+        } : null);
+    }
+
     const nextRepoPath = nextRepoContext?.localPath
       ?? activeSurfaceRepoPath
       ?? workspaceTerminalPreferredRepo?.localPath
@@ -2794,6 +2812,8 @@ function DashboardInner() {
     setWorkspaceSidePanelRepoPath(nextRepoPath);
     setWorkspaceSidePanelRepoContext(nextRepoContext);
   }, [
+    activeWorkspaceLane?.branch,
+    activeWorkspaceLane?.repoPath,
     activeSurfaceRepoPath,
     globalRepoBranch,
     globalRepoEntry,
