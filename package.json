@@ -1,7 +1,7 @@
 {
   "name": "cortex-ide",
   "version": "0.1.0",
-  "productName": "Cortex IDE",
+  "productName": "o8",
   "private": true,
   "main": "src/app/layout.tsx",
   "scripts": {

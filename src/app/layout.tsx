@@ -2,7 +2,7 @@ import './globals.css';
 import type { Metadata } from 'next';
 
 export const metadata: Metadata = {
-  title: 'Cortex IDE',
+  title: 'o8',
   description: 'Mobile command surface for AI agent orchestration',
 };
 
