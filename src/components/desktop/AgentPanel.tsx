@@ -174,11 +174,11 @@ interface CIHoverDetail {
   summaryLine: string | null;
 }
 
-const THEME_ACCENT = 'var(--t-accent, #2563eb)';
-const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
-const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(37, 99, 235, 0.14))';
-const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
-const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
+const THEME_ACCENT = 'var(--t-accent, #ef4444)';
+const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(239, 68, 68, 0.08))';
+const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(239, 68, 68, 0.14))';
+const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(239, 68, 68, 0.22))';
+const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(239, 68, 68, 0.15))';
 const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
 
@@ -506,7 +506,7 @@ function SidebarSection({
   headerAction?: React.ReactNode;
   children: React.ReactNode;
 }) {
-  const tone = accent ?? '#2563eb';
+  const tone = accent ?? '#ef4444';
 
   return (
     <section style={{ borderTop: '1px solid var(--t-divider-subtle)' }}>
@@ -4178,7 +4178,7 @@ export const AgentPanel = memo(function AgentPanel({
         <SidebarSection
           title="Workspaces"
           summary={workspacesSummary}
-          accent="#2563eb"
+          accent="#ef4444"
           open={reposOpen}
           onToggle={() => setReposOpen((current) => !current)}
           headerAction={(
