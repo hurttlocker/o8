@@ -112,7 +112,7 @@ ${skeleton.text}
 ${ctx.fileTreeSummary}
 \`\`\``;
 
-  return `You are an AI assistant integrated into Cortex IDE, a desktop coding environment.
+  return `You are an AI assistant integrated into o8, a desktop coding environment.
 
 ## Current Workspace
 - **Repository:** ${ctx.repoName}
@@ -144,7 +144,7 @@ ${rules.content}` : ''}`;
 }
 
 export function buildUnscopedSystemPrompt(): string {
-  return `You are an AI assistant integrated into Cortex IDE, a desktop coding environment.
+  return `You are an AI assistant integrated into o8, a desktop coding environment.
 
 No registered repository is currently scoped to this chat. Do not assume a project name, branch, git status, file tree, or repo history.
 

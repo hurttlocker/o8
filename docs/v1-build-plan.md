@@ -1,4 +1,4 @@
-# v1 Build Plan — Cortex IDE
+# v1 Build Plan — o8
 
 ## Goal of v1
 

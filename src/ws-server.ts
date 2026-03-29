@@ -1,5 +1,5 @@
 /**
- * Unified WebSocket server for Cortex IDE mobile.
+ * Unified WebSocket server for o8 mobile.
  *
  * Runs alongside Next.js on port 3002. Multiplexes all real-time data
  * over a single WS connection per mobile client:
@@ -587,7 +587,7 @@ function connectGateway() {
           maxProtocol: 3,
           client: {
             id: 'gateway-client',
-            displayName: 'Cortex IDE WS Server',
+            displayName: 'o8 WS Server',
             version: '0.0.1',
             platform: process.platform,
             mode: 'backend',
@@ -2880,7 +2880,7 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
         // Retry once after a short delay
         setTimeout(() => {
           httpServer.listen(WS_PORT, '0.0.0.0', () => {
-            console.log(`[ws-server] Cortex IDE WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+            console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
           });
         }, 500);
       }
@@ -2900,7 +2900,7 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
 // managed by the stall detector and lifecycle system.
 
 httpServer.listen(WS_PORT, '0.0.0.0', () => {
-  console.log(`[ws-server] Cortex IDE WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+  console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
 
   // ── Start Agent Supervisor ──
   const NEXT_ORIGIN = `http://localhost:${process.env.PORT || '3001'}`;

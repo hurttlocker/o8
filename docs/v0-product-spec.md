@@ -1,4 +1,4 @@
-# v0 Product Spec — Cortex IDE
+# v0 Product Spec — o8 (Historical)
 
 ## Product goal
 

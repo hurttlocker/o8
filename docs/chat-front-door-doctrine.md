@@ -1,4 +1,4 @@
-# Chat-First Front Door Doctrine — Cortex IDE
+# Chat-First Front Door Doctrine — o8
 
 ## One-line thesis
 

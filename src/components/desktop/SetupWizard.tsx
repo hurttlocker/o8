@@ -775,7 +775,7 @@ export const SetupWizard = memo(function SetupWizard({
           letterSpacing: '-0.03em',
           marginBottom: 6,
         }}>
-          Welcome to Cortex IDE
+          Welcome to o8
         </div>
         <div style={{ fontSize: 13, color: THEME_TEXT_SECONDARY, lineHeight: 1.6 }}>
           {detection.summary}
@@ -1013,7 +1013,7 @@ export const SetupWizard = memo(function SetupWizard({
             You{"'"}re Ready
           </div>
           <div style={{ fontSize: 13, color: THEME_TEXT_SECONDARY, lineHeight: 1.6 }}>
-            Cortex IDE is set up. You can always configure more in Settings.
+            o8 is set up. You can always configure more in Settings.
           </div>
         </div>
 
@@ -1035,7 +1035,7 @@ export const SetupWizard = memo(function SetupWizard({
               letterSpacing: '-0.03em',
               marginBottom: 6,
             }}>
-              Welcome to Cortex IDE
+              Welcome to o8
             </div>
             <div style={{ fontSize: 13, color: THEME_TEXT_SECONDARY, lineHeight: 1.6 }}>
               Your command center for AI engineering. What do you want to do?
@@ -1251,7 +1251,7 @@ export const SetupWizard = memo(function SetupWizard({
             You{"'"}re Ready
           </div>
           <div style={{ fontSize: 13, color: THEME_TEXT_SECONDARY, lineHeight: 1.6 }}>
-            Cortex IDE is set up and ready to go. You can always fine-tune settings later.
+            o8 is set up and ready to go. You can always fine-tune settings later.
           </div>
         </div>
 

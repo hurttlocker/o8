@@ -20,7 +20,7 @@ function CommandCenterRouteFallback() {
           <div className="brand-lockup">
             <div className="brand-orb">C</div>
             <div>
-              <div className="eyebrow">Cortex IDE</div>
+              <div className="eyebrow">o8</div>
               <h1>Live runtime command center</h1>
             </div>
           </div>

@@ -1,10 +1,10 @@
-# Cortex IDE
+# o8
 
-Private working repository for **Cortex IDE**, an AI-native desktop app product.
+Private working repository for **o8**, an AI-native desktop app product.
 
 ## What this is
 
-Cortex IDE is a thesis for an **agent-native development environment**:
+o8 is a thesis for an **agent-native development environment**:
 
 - the unit of work is not just a file, but an **agent**
 - the product is not just an editor, but an **agent command center**
@@ -28,7 +28,7 @@ Do **not** begin as a full VS Code fork.
 - **OpenClaw / ACP runtimes** = execution substrate
 - **Git / GitHub / worktrees / terminals** = software delivery substrate
 - **Autonomous Tools** = native file, terminal, and github integration
-- **Cortex IDE** = operator surface that makes all of it legible and steerable
+- **o8** = operator surface that makes all of it legible and steerable
 
 ### Front-door rule
 The product should feel like a **beautiful, fluent AI chat surface on first contact**, then progressively reveal deeper review, runtime, and org-control layers.

@@ -51,8 +51,8 @@ The key architecture:
 - relay exists for routing
 - conversations and actions stay grounded in the desktop runtime
 
-### What matters for Cortex IDE
-This strongly supports a day-one mobile strategy for Cortex IDE.
+### What matters for o8
+This strongly supports a day-one mobile strategy for o8.
 
 Not “full IDE on phone.”
 Instead:
@@ -87,7 +87,7 @@ These two threads fit together cleanly.
 
 ## Working takeaway
 
-The strongest version of Cortex IDE is probably:
+The strongest version of o8 is probably:
 - desktop-first command center
 - mobile-first remote control for alerts and approvals
 - memory-native orchestration layer
