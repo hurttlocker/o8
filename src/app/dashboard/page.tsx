@@ -2258,6 +2258,47 @@ function DashboardInner() {
     throw new Error('Unable to attach the packet to a workspace lane. The workspace surface did not become ready in time.');
   }, [ensureWorkspaceTerminalTile, getPreferredWorkspaceTerminalTarget, setTerminalTileRepoScope]);
 
+  // ── Auto-open chat tabs for delegated lane sessions ──
+  const openedLaneSessionsRef = useRef(new Set<string>());
+  useEffect(() => {
+    async function checkLaneSessions() {
+      try {
+        const res = await fetch('/api/lanes?active=true');
+        if (!res.ok) return;
+        const data = await res.json();
+        const lanes = (data.lanes ?? []) as Array<{
+          id: string; label: string; sessionKey: string | null;
+          status: string; runtime: string; repoPath: string;
+          branch: string; worktreePath: string | null;
+        }>;
+
+        for (const lane of lanes) {
+          if (!lane.sessionKey) continue;
+          if (lane.status !== 'running' && lane.status !== 'launching') continue;
+          if (openedLaneSessionsRef.current.has(lane.sessionKey)) continue;
+
+          openedLaneSessionsRef.current.add(lane.sessionKey);
+
+          const target = await waitForWorkspaceTerminalTarget({ repoPath: lane.repoPath });
+          if (target) {
+            target.handle.openCliChatSession({
+              runtime: lane.runtime as 'codex' | 'claude-code',
+              targetSessionKey: lane.sessionKey,
+              label: lane.label || lane.branch,
+              createNew: true,
+            });
+            console.log(`[lane-tab-sync] Opened chat tab for lane ${lane.id} session ${lane.sessionKey}`);
+          }
+        }
+      } catch {
+        // Best-effort
+      }
+    }
+    checkLaneSessions();
+    const id = setInterval(checkLaneSessions, 8_000);
+    return () => clearInterval(id);
+  }, [waitForWorkspaceTerminalTarget]);
+
   const collectOrchestratorLaneSnapshots = useCallback((): OrchestratorLaneSnapshot[] => (
     Array.from(workspaceTerminalHandlesRef.current.values()).flatMap((handle) => handle.getChatTabSnapshots())
   ), []);
