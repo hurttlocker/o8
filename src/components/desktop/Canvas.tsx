@@ -171,6 +171,35 @@ export const Canvas = memo(function Canvas({
   embedded,
 }: CanvasProps) {
   const activeTab = tabs.find((t) => t.id === activeTabId) || null;
+  const tabScrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateScrollState = useCallback(() => {
+    const el = tabScrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 2);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+  }, []);
+
+  useEffect(() => {
+    updateScrollState();
+    const el = tabScrollRef.current;
+    if (!el) return;
+    el.addEventListener('scroll', updateScrollState, { passive: true });
+    const ro = new ResizeObserver(updateScrollState);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', updateScrollState);
+      ro.disconnect();
+    };
+  }, [tabs.length, updateScrollState]);
+
+  const scrollTabs = useCallback((direction: 'left' | 'right') => {
+    const el = tabScrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: direction === 'left' ? -160 : 160, behavior: 'smooth' });
+  }, []);
 
   if (tabs.length === 0) {
     return <CanvasEmpty />;
@@ -187,20 +216,74 @@ export const Canvas = memo(function Canvas({
     }}>
       {/* Tab bar — hidden when embedded in ContextualPanel */}
       {!embedded && <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 0,
+        position: 'relative',
         height: 36,
         flexShrink: 0,
         background: 'var(--t-panel-translucent)',
         backdropFilter: 'blur(20px) saturate(1.6)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
         borderBottom: '1px solid var(--t-divider)',
-        paddingLeft: 8,
-        paddingRight: 8,
-        overflowX: 'auto',
-        overflowY: 'hidden',
       }}>
+        {/* Scroll left arrow */}
+        {canScrollLeft && (
+          <div
+            onClick={() => scrollTabs('left')}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: 28,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'linear-gradient(to right, var(--t-panel-translucent) 60%, transparent)',
+              zIndex: 2,
+              cursor: 'pointer',
+              color: 'var(--t-text-secondary)',
+              transition: 'opacity 150ms ease',
+            }}
+          >
+            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </div>
+        )}
+        {/* Scroll right arrow */}
+        {canScrollRight && (
+          <div
+            onClick={() => scrollTabs('right')}
+            style={{
+              position: 'absolute',
+              right: 0,
+              top: 0,
+              bottom: 0,
+              width: 28,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'linear-gradient(to left, var(--t-panel-translucent) 60%, transparent)',
+              zIndex: 2,
+              cursor: 'pointer',
+              color: 'var(--t-text-secondary)',
+              transition: 'opacity 150ms ease',
+            }}
+          >
+            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </div>
+        )}
+        <div
+          ref={tabScrollRef}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 0,
+            height: '100%',
+            paddingLeft: 8,
+            paddingRight: 8,
+            overflowX: 'auto',
+            overflowY: 'hidden',
+            scrollbarWidth: 'none',
+          }}
+        >
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           return (
@@ -269,6 +352,7 @@ export const Canvas = memo(function Canvas({
             </div>
           );
         })}
+        </div>
       </div>}
 
       {/* Tab content */}
