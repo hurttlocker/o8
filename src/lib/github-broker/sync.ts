@@ -65,10 +65,12 @@ type GitHubIssuePayloadItem = {
 async function syncIssues(repoFullName: string) {
   const syncState = readGitHubSyncState(repoFullName, 'issues');
   const etag = syncState?.etag ?? null;
+  // Skip ETag when TTL has expired — forces a fresh fetch so pagination runs
+  const useEtag = etag && isFresh(syncState?.lastSuccessfulAt);
 
   // Fetch page 1 (with ETag for cache validation)
   const { response, installation } = await githubInstallationFetch(repoFullName, resourcePath(repoFullName, 'issues', 1), {
-    headers: etag ? { 'If-None-Match': etag } : undefined,
+    headers: useEtag ? { 'If-None-Match': etag } : undefined,
   });
 
   upsertGitHubInstallation({
@@ -141,8 +143,9 @@ async function syncIssues(repoFullName: string) {
 async function syncPullRequests(repoFullName: string) {
   const syncState = readGitHubSyncState(repoFullName, 'pull_requests');
   const etag = syncState?.etag ?? null;
+  const useEtag = etag && isFresh(syncState?.lastSuccessfulAt);
   const { response, installation } = await githubInstallationFetch(repoFullName, resourcePath(repoFullName, 'pull_requests'), {
-    headers: etag ? { 'If-None-Match': etag } : undefined,
+    headers: useEtag ? { 'If-None-Match': etag } : undefined,
   });
 
   upsertGitHubInstallation({
