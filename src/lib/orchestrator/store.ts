@@ -369,11 +369,29 @@ export function reconcileOrchestratorMissionState(
         next.blockedReason = runtime?.currentTask ?? `Runtime reported ${runtime?.status ?? 'blocked'}`;
         return next;
       }
-      if (truthStatus === 'running' || laneMatch.status === 'running') {
+      // Only trust 'running' if the agent is actually in the fleet snapshot
+      if (runtime && (truthStatus === 'running' || laneMatch.status === 'running')) {
         next.status = 'running';
         return next;
       }
-      next.status = laneMatch.sessionKey ? 'idle' : 'launching';
+      // Agent not in fleet but lane claims running → stale cache, mark idle
+      if (!runtime && laneMatch.status === 'running') {
+        next.status = 'idle';
+        return next;
+      }
+      if (laneMatch.sessionKey) {
+        next.status = 'idle';
+      } else {
+        // Launch timeout: if launching > 90s without a session, mark recovering
+        const lastActivity = packet.lane?.lastHeartbeatAt ?? packet.lastEventAt ?? null;
+        const launchAge = lastActivity ? Date.now() - new Date(lastActivity).getTime() : 0;
+        if (launchAge > 90_000) {
+          next.status = 'recovering';
+          next.blockedReason = 'Launch timed out — session never attached. Re-launch to retry.';
+        } else {
+          next.status = 'launching';
+        }
+      }
       return next;
     }
 

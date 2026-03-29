@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useWsConnectionState } from '../hooks/DesktopWebSocketContext';
 import {
   readOrchestratorRuntimePreference,
   subscribeOrchestratorRuntimePreference,
@@ -153,6 +154,9 @@ export function ThoughtsCard({
     return () => window.cancelAnimationFrame(frame);
   }, [docked, floatingShellWidth, minimized, open, size.h]);
 
+  const wsConnectionState = useWsConnectionState();
+  const wsConnected = wsConnectionState === 'connected';
+
   useEffect(() => {
     if (!open) return;
 
@@ -168,13 +172,15 @@ export function ThoughtsCard({
       }
     };
 
+    // Fetch immediately on open AND on WS reconnect (not just every 15s)
     pollApprovals();
+    if (approvalPollRef.current) clearInterval(approvalPollRef.current);
     approvalPollRef.current = setInterval(pollApprovals, 15_000);
 
     return () => {
       if (approvalPollRef.current) clearInterval(approvalPollRef.current);
     };
-  }, [open]);
+  }, [open, wsConnected]);
 
   const handleApprovalResolve = useCallback(async (id: string, action: 'approve' | 'reject') => {
     setResolvingId(id);
