@@ -678,7 +678,7 @@ function DashboardInner() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [chatVisible, setChatVisible] = useState(true);
-  const [rightPanelMode, setRightPanelMode] = useState<'chat' | 'workspace'>('workspace');
+  const [rightPanelMode, setRightPanelMode] = useState<'chat' | 'workspace'>('chat');
   const [workspaceSidePanelView, setWorkspaceSidePanelView] = useState<WorkspaceSidePanelView>('blank');
   const [workspaceSidePanelRepoPath, setWorkspaceSidePanelRepoPath] = useState<string | null>(null);
   const [workspaceSidePanelRepoContext, setWorkspaceSidePanelRepoContext] = useState<WorkspaceSidePanelRepo | null>(null);
