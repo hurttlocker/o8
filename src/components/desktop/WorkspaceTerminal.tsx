@@ -2726,6 +2726,23 @@ const TabBar = memo(function TabBar({
   const [selectedAgent, setSelectedAgent] = useState<typeof CLI_AGENTS[0] | null>(null);
   const [repos, setRepos] = useState<RegisteredRepo[]>([]);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const tabScrollRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+  const syncTabScroll = useCallback(() => {
+    const el = tabScrollRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 2);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+  }, []);
+  const scrollTabs = useCallback((dir: 'left' | 'right') => {
+    tabScrollRef.current?.scrollBy({ left: dir === 'left' ? -180 : 180, behavior: 'smooth' });
+  }, []);
+  // Check overflow after tabs change (deferred to avoid layout thrash)
+  useEffect(() => {
+    const raf = requestAnimationFrame(syncTabScroll);
+    return () => cancelAnimationFrame(raf);
+  }, [tabs.length, syncTabScroll]);
 
   const openLaunchPicker = () => {
     setSelectedAgent(null);
@@ -2774,8 +2791,32 @@ const TabBar = memo(function TabBar({
       zIndex: 10,
       position: 'relative',
     }}>
-      {/* Tabs */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', gap: 0 }}>
+      {/* Tabs — scrollable with transparent arrow overlays */}
+      <div style={{ position: 'relative', display: 'flex', flex: 1, overflow: 'hidden' }}>
+        {canScrollLeft && (
+          <div onClick={() => scrollTabs('left')} style={{
+            position: 'absolute', left: 0, top: 0, bottom: 0, width: 28, display: 'flex',
+            alignItems: 'center', justifyContent: 'center', zIndex: 3, cursor: 'pointer',
+            background: 'linear-gradient(to right, var(--t-chrome) 60%, transparent)',
+            color: 'var(--t-text-secondary)',
+          }}>
+            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </div>
+        )}
+        {canScrollRight && (
+          <div onClick={() => scrollTabs('right')} style={{
+            position: 'absolute', right: 0, top: 0, bottom: 0, width: 28, display: 'flex',
+            alignItems: 'center', justifyContent: 'center', zIndex: 3, cursor: 'pointer',
+            background: 'linear-gradient(to left, var(--t-chrome) 60%, transparent)',
+            color: 'var(--t-text-secondary)',
+          }}>
+            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+          </div>
+        )}
+        <div ref={tabScrollRef} onScroll={syncTabScroll} onMouseEnter={syncTabScroll} style={{
+          display: 'flex', flex: 1, gap: 0, overflowX: 'auto', overflowY: 'hidden',
+          scrollbarWidth: 'none',
+        }}>
         {tabs.map((tab) => {
           const isActive = tab.id === activeTabId;
           const agent = CLI_AGENTS.find(a => a.id === tab.cliAgent);
@@ -3001,6 +3042,7 @@ const TabBar = memo(function TabBar({
             </button>
           );
         })}
+        </div>
       </div>
 
       {/* Launch button */}
