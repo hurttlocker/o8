@@ -35,6 +35,8 @@ export interface PersistedTab {
     url?: string;
   };
   orchestrationPacket?: WorkspaceOrchestrationPacketBadge | null;
+  supervisorStatus?: string | null;
+  autoArchiveOnIdle?: boolean;
   canvasTab?: {
     id: string;
     kind: string;
@@ -51,7 +53,12 @@ export interface PersistedTabState {
   savedAt: string; // ISO timestamp
 }
 
-export type PersistedRuntimeSessionKey = `codex:${string}` | `claude-code:${string}`;
+export type PersistedRuntimeSessionKey =
+  | `codex:${string}`
+  | `codex-owned:${string}`
+  | `codex-discovered:${string}`
+  | `codex-live:${string}`
+  | `claude-code:${string}`;
 
 const API_PATH = '/api/panel/terminal-state';
 
@@ -73,6 +80,14 @@ export function formatPersistedRuntimeSessionKey(
 ): PersistedRuntimeSessionKey | null {
   const trimmed = sessionKey?.trim();
   if (!trimmed || (runtime !== 'codex' && runtime !== 'claude-code')) return null;
+  if (runtime === 'codex' && (
+    trimmed.startsWith('codex:')
+    || trimmed.startsWith('codex-owned:')
+    || trimmed.startsWith('codex-discovered:')
+    || trimmed.startsWith('codex-live:')
+  )) {
+    return trimmed as PersistedRuntimeSessionKey;
+  }
   return trimmed.startsWith(`${runtime}:`)
     ? trimmed as PersistedRuntimeSessionKey
     : `${runtime}:${trimmed}`;
@@ -85,6 +100,13 @@ export function stripPersistedRuntimeSessionKey(
   const trimmed = sessionKey?.trim();
   if (!trimmed) return undefined;
   if (runtime !== 'codex' && runtime !== 'claude-code') return trimmed;
+  if (runtime === 'codex' && (
+    trimmed.startsWith('codex-owned:')
+    || trimmed.startsWith('codex-discovered:')
+    || trimmed.startsWith('codex-live:')
+  )) {
+    return trimmed;
+  }
   return trimmed.startsWith(`${runtime}:`) ? trimmed.slice(`${runtime}:`.length) : trimmed;
 }
 
@@ -100,7 +122,11 @@ export async function loadLiveRuntimeSessionKeys(): Promise<Set<PersistedRuntime
       .map((agent) => agent.sessionKey?.trim())
       .filter((value): value is PersistedRuntimeSessionKey => {
         if (typeof value !== 'string' || !value) return false;
-        return value.startsWith('codex:') || value.startsWith('claude-code:');
+        return value.startsWith('codex:')
+          || value.startsWith('codex-owned:')
+          || value.startsWith('codex-discovered:')
+          || value.startsWith('codex-live:')
+          || value.startsWith('claude-code:');
       });
     return new Set(keys);
   } catch {

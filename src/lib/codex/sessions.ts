@@ -18,6 +18,7 @@ const CODEX_SESSIONS_ROOT = path.join(CODEX_HOME, 'sessions');
 const CODEX_SHELL_SNAPSHOTS_ROOT = path.join(CODEX_HOME, 'shell_snapshots');
 const CODEX_SOURCE_LABEL = 'Local Codex discovery';
 const RECENT_WINDOW_MS = 6 * 60 * 60_000;
+const DISCOVERED_STALE_WINDOW_MS = 24 * 60 * 60_000;
 const CODEX_DISCOVERED_FLEET_TTL_MS = 15_000;
 
 type CodexThreadRow = {
@@ -394,6 +395,15 @@ function classifyActivity(thread: CodexThreadRow, activity?: CodexThreadActivity
   return 'stale' as const;
 }
 
+function shouldExposeDiscoveredThread(thread: CodexThreadRow, activity?: CodexThreadActivity) {
+  if (activity?.active) return true;
+  const freshestActivityMs = Math.max(
+    thread.updated_at * 1000,
+    (activity?.lastLogTs ?? 0) * 1000,
+  );
+  return (Date.now() - freshestActivityMs) <= DISCOVERED_STALE_WINDOW_MS;
+}
+
 function deriveStatus(thread: CodexThreadRow, activity?: CodexThreadActivity): AgentSummary['status'] {
   const activityState = classifyActivity(thread, activity);
   if (activityState === 'active') return 'running';
@@ -595,9 +605,20 @@ export async function getCodexDiscoveredFleetAdditions(
     }
 
     const activityMap = await buildActivityMap(threads);
+    const visibleThreads = threads.filter((thread) => shouldExposeDiscoveredThread(thread, activityMap.get(thread.id)));
+    if (!visibleThreads.length) {
+      return {
+        agents: [],
+        squads: [],
+        events: [],
+        artifacts: [],
+        sourceLabel: CODEX_SOURCE_LABEL,
+        note: 'Codex discovery skipped stale local thread history with no live pid binding.',
+      };
+    }
     const liveProcesses = await queryAllLiveCodexProcesses();
 
-    const agents: AgentSummary[] = threads.map((thread) => {
+    const agents: AgentSummary[] = visibleThreads.map((thread) => {
       const activity = activityMap.get(thread.id);
       const surface = buildRuntimeSurface(thread, activity);
       const status = deriveStatus(thread, activity);
