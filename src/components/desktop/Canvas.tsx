@@ -187,6 +187,11 @@ export const Canvas = memo(function Canvas({
     if (!el) return;
     el.scrollBy({ left: direction === 'left' ? -160 : 160, behavior: 'smooth' });
   }, []);
+  // Check overflow after tabs change (deferred to avoid layout thrash)
+  useEffect(() => {
+    const raf = requestAnimationFrame(syncScrollState);
+    return () => cancelAnimationFrame(raf);
+  }, [tabs.length, syncScrollState]);
 
   if (tabs.length === 0) {
     return <CanvasEmpty />;
