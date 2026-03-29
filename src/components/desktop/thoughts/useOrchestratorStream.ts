@@ -13,6 +13,8 @@ interface OrchestratorStreamResult {
   connected: boolean;
 }
 
+let agentUpdateSeq = 0;
+
 const WS_TOKEN = 'cortex-ide';
 const WS_URL = typeof window !== 'undefined'
   ? `ws://${window.location.hostname}:3002/ws?token=${WS_TOKEN}`
@@ -85,6 +87,9 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
     };
 
     ws.onmessage = (event) => {
+      // Ignore messages from a stale/closed connection (StrictMode double-mount race)
+      if (ws !== wsRef.current) return;
+
       let msg: { channel?: string; event?: string; data?: Record<string, unknown> };
       try {
         msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
@@ -148,13 +153,22 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
           } | undefined;
           if (!update?.surfaceId) break;
 
-          setMessages(prev => [...prev, {
-            id: `agent-update-${update.surfaceId}-${Date.now()}`,
-            role: 'system',
-            text: update.detail ?? `Agent "${update.name ?? update.surfaceId}" is now ${update.status ?? 'unknown'}`,
-            timestamp: Date.now(),
-            timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          }]);
+          const detailText = update.detail ?? `Agent "${update.name ?? update.surfaceId}" is now ${update.status ?? 'unknown'}`;
+          setMessages(prev => {
+            // Dedup: skip if we already have an update for this surfaceId with the same detail
+            const isDupe = prev.some(m =>
+              m.id.startsWith(`agent-update-${update.surfaceId}`) &&
+              m.text === detailText
+            );
+            if (isDupe) return prev;
+            return [...prev, {
+              id: `agent-update-${update.surfaceId}-${++agentUpdateSeq}`,
+              role: 'system',
+              text: detailText,
+              timestamp: Date.now(),
+              timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            }];
+          });
 
           // Dispatch to dashboard so it can auto-open workspace tabs
           if (typeof window !== 'undefined') {
