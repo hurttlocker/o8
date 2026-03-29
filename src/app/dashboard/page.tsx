@@ -2259,43 +2259,49 @@ function DashboardInner() {
   }, [ensureWorkspaceTerminalTile, getPreferredWorkspaceTerminalTarget, setTerminalTileRepoScope]);
 
   // ── Auto-open chat tabs for delegated lane sessions ──
-  const openedLaneSessionsRef = useRef(new Set<string>());
+  // Uses a global queue on window that survives HMR rebuilds, plus periodic lane polling.
   useEffect(() => {
-    async function checkLaneSessions() {
+    const opened = ((globalThis as Record<string, unknown>).__o8_opened_lane_sessions as Set<string> | undefined)
+      ?? new Set<string>();
+    (globalThis as Record<string, unknown>).__o8_opened_lane_sessions = opened;
+
+    async function openTabForLane(lane: {
+      id: string; label: string; sessionKey: string;
+      runtime: string; repoPath: string;
+    }) {
+      if (opened.has(lane.sessionKey)) return;
+      opened.add(lane.sessionKey);
+      const target = await waitForWorkspaceTerminalTarget({ repoPath: lane.repoPath });
+      if (target) {
+        target.handle.openCliChatSession({
+          runtime: lane.runtime as 'codex' | 'claude-code',
+          targetSessionKey: lane.sessionKey,
+          label: lane.label,
+          createNew: true,
+        });
+        console.log(`[lane-tab-sync] Opened chat tab for lane ${lane.id} session ${lane.sessionKey}`);
+      }
+    }
+
+    async function pollLanes() {
       try {
         const res = await fetch('/api/lanes?active=true');
         if (!res.ok) return;
         const data = await res.json();
-        const lanes = (data.lanes ?? []) as Array<{
+        for (const lane of (data.lanes ?? []) as Array<{
           id: string; label: string; sessionKey: string | null;
           status: string; runtime: string; repoPath: string;
-          branch: string; worktreePath: string | null;
-        }>;
-
-        for (const lane of lanes) {
+        }>) {
           if (!lane.sessionKey) continue;
           if (lane.status !== 'running' && lane.status !== 'launching') continue;
-          if (openedLaneSessionsRef.current.has(lane.sessionKey)) continue;
-
-          openedLaneSessionsRef.current.add(lane.sessionKey);
-
-          const target = await waitForWorkspaceTerminalTarget({ repoPath: lane.repoPath });
-          if (target) {
-            target.handle.openCliChatSession({
-              runtime: lane.runtime as 'codex' | 'claude-code',
-              targetSessionKey: lane.sessionKey,
-              label: lane.label || lane.branch,
-              createNew: true,
-            });
-            console.log(`[lane-tab-sync] Opened chat tab for lane ${lane.id} session ${lane.sessionKey}`);
-          }
+          void openTabForLane({ ...lane, sessionKey: lane.sessionKey });
         }
-      } catch {
-        // Best-effort
-      }
+      } catch { /* best-effort */ }
     }
-    checkLaneSessions();
-    const id = setInterval(checkLaneSessions, 8_000);
+
+    // Poll immediately + every 6s
+    pollLanes();
+    const id = setInterval(pollLanes, 6_000);
     return () => clearInterval(id);
   }, [waitForWorkspaceTerminalTarget]);
 
