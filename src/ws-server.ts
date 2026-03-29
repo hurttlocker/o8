@@ -2325,6 +2325,20 @@ const httpServer = createServer((req, res) => {
     return;
   }
 
+  if (req.url?.startsWith('/terminal-alive') && req.method === 'GET') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+    const parsed = new URL(req.url, `http://127.0.0.1:${WS_PORT}`);
+    const sessionName = parsed.searchParams.get('session') ?? '';
+    const alive = sessionName ? terminalAttachments.has(sessionName) : false;
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ alive }));
+    return;
+  }
+
   if (req.url === '/terminal-signal' && req.method === 'POST') {
     if (!isAuthorizedInternalRequest(req)) {
       res.writeHead(401);

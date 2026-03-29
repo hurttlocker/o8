@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import { tmuxSessionName } from '@/lib/terminal/tmux';
-import { signalBridgeTerminalSession, spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
+import { isBridgeSessionAlive, signalBridgeTerminalSession, spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import type {
   AgentSummary,
   EventItem,
@@ -212,6 +212,15 @@ function isPidAlive(pid?: number) {
   } catch {
     return false;
   }
+}
+
+async function isOwnedRunAlive(run?: OwnedCodexRunRecord | null): Promise<boolean> {
+  if (!run) return false;
+  if (isPidAlive(run.pid)) return true;
+  if (run.tmuxSession) {
+    return isBridgeSessionAlive(run.tmuxSession);
+  }
+  return false;
 }
 
 async function validateWorkspace(targetCwd: string) {
@@ -515,8 +524,12 @@ function latestFinishedRun(session: OwnedCodexSessionRecord) {
     .sort((a, b) => (b.finishedAt ?? b.startedAt).localeCompare(a.finishedAt ?? a.startedAt))[0];
 }
 
-function deriveLifecycle(session: OwnedCodexSessionRecord): RuntimeSurfaceLifecycle {
-  const activeRun = session.activeRun && isPidAlive(session.activeRun.pid) ? session.activeRun : undefined;
+function deriveLifecycle(session: OwnedCodexSessionRecord, activeRunOverride?: boolean): RuntimeSurfaceLifecycle {
+  const activeRun = activeRunOverride === true
+    ? session.activeRun
+    : activeRunOverride === false
+      ? undefined
+      : (session.activeRun && isPidAlive(session.activeRun.pid) ? session.activeRun : undefined);
   const latest = latestFinishedRun(session);
 
   if (activeRun) {
@@ -585,7 +598,7 @@ async function refreshOwnedSession(session: OwnedCodexSessionRecord) {
       dirty = true;
     }
 
-    const runAlive = isPidAlive(run.pid);
+    const runAlive = await isOwnedRunAlive(run);
     if (runAlive) {
       if (run.outcome !== 'running') {
         run.outcome = 'running';
@@ -605,7 +618,7 @@ async function refreshOwnedSession(session: OwnedCodexSessionRecord) {
     }
   }
 
-  if (session.activeRun && !isPidAlive(session.activeRun.pid)) {
+  if (session.activeRun && !(await isOwnedRunAlive(session.activeRun))) {
     session.activeRun = undefined;
     dirty = true;
   }
@@ -1035,7 +1048,7 @@ export async function getOwnedCodexRuntimeTail(surfaceId: string) {
   }
 
   return {
-    surface: buildOwnedRuntimeSurface(session, Boolean(session.activeRun && isPidAlive(session.activeRun.pid))),
+    surface: buildOwnedRuntimeSurface(session, Boolean(session.activeRun)),
     entries: tail.entries,
     groups: tail.groups,
   };
@@ -1057,7 +1070,7 @@ export async function getOwnedCodexReviewPacket(surfaceId: string): Promise<Runt
   const lastRunEvidence = lastRunArtifacts && lastRun
     ? parseOwnedRunEvidence(lastRunArtifacts.stdoutRaw, lastRun, lastRunOutcome)
     : null;
-  const runtimeSurface = buildOwnedRuntimeSurface(session, Boolean(session.activeRun && isPidAlive(session.activeRun.pid)));
+  const runtimeSurface = buildOwnedRuntimeSurface(session, Boolean(session.activeRun));
   const linkedWorktree = await getWorktreeManager(session.repoPath).list()
     .then((worktrees) => worktrees.find((worktree) => worktree.sessionKey === session.surfaceId) ?? null)
     .catch(() => null);
@@ -1146,7 +1159,7 @@ export async function getOwnedCodexFleetAdditions(
   const agents: AgentSummary[] = sessions
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
     .map((session) => {
-      const running = Boolean(session.activeRun && isPidAlive(session.activeRun.pid));
+      const running = Boolean(session.activeRun);
       const status = deriveOwnedStatus(session);
       const runtimeSurface = buildOwnedRuntimeSurface(session, running);
       const lifecycle = runtimeSurface.lifecycle;

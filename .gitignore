@@ -12,6 +12,11 @@ artifacts/research/
 
 # Worktree isolation
 .cortex-worktrees/
+.claude/worktrees/
+
+# Smoke test artifacts
+test-results/
+tmp/
 src-tauri/target/
 mockups/
 mockups/
