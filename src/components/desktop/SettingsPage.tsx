@@ -82,7 +82,7 @@ interface GitHubDeviceFlowState {
 
 type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
-export type SettingsTab = 'connectors' | 'agents' | 'api-keys' | 'memory' | 'appearance' | 'about';
+export type SettingsTab = 'connectors' | 'agents' | 'api-keys' | 'memory' | 'appearance' | 'diagnostics' | 'about';
 
 interface OpenClawGatewayStatus {
   connected: boolean;
@@ -252,6 +252,14 @@ function KeyIcon() {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
       <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+    </svg>
+  );
+}
+
+function ActivityIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
     </svg>
   );
 }
@@ -4003,6 +4011,130 @@ function CortexMemoryTab() {
   );
 }
 
+// ── Diagnostics Tab — Cortex Doctor ──
+
+interface DiagnosticTool {
+  id: string;
+  detected: boolean;
+  version?: string;
+  path?: string;
+}
+
+function DiagnosticsTab() {
+  const [tools, setTools] = useState<DiagnosticTool[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [lastChecked, setLastChecked] = useState<string | null>(null);
+
+  const runDiagnostics = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/setup/detect');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json() as { tools?: DiagnosticTool[] };
+      setTools(data.tools ?? []);
+      setLastChecked(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to run diagnostics');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void runDiagnostics(); }, [runDiagnostics]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>Diagnostics</div>
+          <div style={{ fontSize: 12, color: 'var(--t-text-muted)', marginTop: 2 }}>
+            {lastChecked ? `Last checked at ${lastChecked}` : 'Runtime and tool health'}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => { void runDiagnostics(); }}
+          disabled={loading}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '6px 14px',
+            borderRadius: 8,
+            border: `1px solid ${THEME_ACCENT_BORDER}`,
+            background: THEME_ACCENT_SOFT,
+            color: THEME_ACCENT,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: loading ? 'wait' : 'pointer',
+            opacity: loading ? 0.6 : 1,
+          }}
+        >
+          {loading ? 'Checking...' : 'Re-run'}
+        </button>
+      </div>
+
+      {error ? (
+        <div style={{
+          padding: '12px 16px',
+          borderRadius: 10,
+          background: 'rgba(239, 68, 68, 0.06)',
+          border: '1px solid rgba(239, 68, 68, 0.15)',
+          color: '#ef4444',
+          fontSize: 13,
+        }}>
+          {error}
+        </div>
+      ) : null}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {tools.map((tool) => (
+          <div key={tool.id} style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '10px 14px',
+            borderRadius: 10,
+            background: 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
+            border: '1px solid var(--t-divider-subtle, rgba(148, 163, 184, 0.10))',
+          }}>
+            <div style={{
+              width: 8,
+              height: 8,
+              borderRadius: 999,
+              background: tool.detected ? '#22c55e' : '#ef4444',
+              flexShrink: 0,
+            }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}>{tool.id}</div>
+              {tool.path ? (
+                <div style={{ fontSize: 11, color: 'var(--t-text-muted)', fontFamily: '"SF Mono", ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {tool.path}
+                </div>
+              ) : null}
+            </div>
+            <div style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: tool.detected ? 'var(--t-text-secondary)' : '#ef4444',
+              fontFamily: '"SF Mono", ui-monospace, monospace',
+            }}>
+              {tool.detected ? (tool.version ?? 'detected') : 'not found'}
+            </div>
+          </div>
+        ))}
+        {!loading && tools.length === 0 && !error ? (
+          <div style={{ fontSize: 13, color: 'var(--t-text-muted)', padding: '20px 0', textAlign: 'center' }}>
+            No tools detected. Run diagnostics to check your environment.
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function AppearanceTab() {
   const { themeId, setTheme, themes: themeList } = useTheme();
   const [fleetMode, setFleetMode] = useState<'smart' | 'all'>(() => {
@@ -4450,6 +4582,7 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         <TabButton label="Agents" icon={<UsersIcon />} active={activeTab === 'agents'} onClick={() => setActiveTab('agents')} />
         <TabButton label="Memory" icon={<BrainIcon />} active={activeTab === 'memory'} onClick={() => setActiveTab('memory')} />
         <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
+        <TabButton label="Diagnostics" icon={<ActivityIcon />} active={activeTab === 'diagnostics'} onClick={() => setActiveTab('diagnostics')} />
         <TabButton label="About" icon={<InfoIcon />} active={activeTab === 'about'} onClick={() => setActiveTab('about')} />
       </div>
 
@@ -4489,6 +4622,9 @@ export function SettingsPage({ initialTab = 'connectors' }: { initialTab?: Setti
         )}
         {activeTab === 'appearance' && (
           <AppearanceTab />
+        )}
+        {activeTab === 'diagnostics' && (
+          <DiagnosticsTab />
         )}
         {activeTab === 'about' && (
           <AboutTab />
