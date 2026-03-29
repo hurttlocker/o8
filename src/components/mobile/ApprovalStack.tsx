@@ -32,7 +32,9 @@ export function ApprovalStack({
           borderRadius: 16,
           padding: '16px 18px',
           border: '1px solid rgba(0,0,0,0.06)',
-          borderLeft: `4px solid ${severityColor}`,
+          borderTopWidth: 3,
+          borderTopStyle: 'solid',
+          borderTopColor: severityColor,
           boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
         };
         const headerStyle: CSSProperties = {

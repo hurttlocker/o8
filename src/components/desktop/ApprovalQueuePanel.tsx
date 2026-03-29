@@ -456,29 +456,23 @@ export function ApprovalQueuePanel() {
   const [history, setHistory] = useState<ApprovalRecord[]>([]);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Fetch approvals
+  // Single fetch — splits pending vs resolved from one response
   const fetchApprovals = useCallback(async () => {
     try {
-      const [pendingRes, historyRes] = await Promise.all([
-        fetch('/api/panel/approvals'),
-        fetch('/api/panel/approvals?status=all'),
-      ]);
-      if (pendingRes.ok) {
-        const data = await pendingRes.json();
-        setPending(data.approvals ?? []);
-      }
-      if (historyRes.ok) {
-        const data = await historyRes.json();
-        const resolved = (data.approvals ?? [])
-          .filter((a: ApprovalRecord) => a.status !== 'pending')
-          .slice(0, HISTORY_LIMIT);
-        setHistory(resolved);
+      const res = await fetch('/api/panel/approvals?status=all');
+      if (res.ok) {
+        const data = await res.json();
+        const all = (data.approvals ?? []) as ApprovalRecord[];
+        setPending(all.filter((a) => a.status === 'pending'));
+        setHistory(all.filter((a) => a.status !== 'pending').slice(0, HISTORY_LIMIT));
       }
     } catch {
       // Silently fail — next poll will retry
     }
+    setLoaded(true);
   }, []);
 
   useEffect(() => {
@@ -557,10 +551,29 @@ export function ApprovalQueuePanel() {
         overflowY: 'auto',
         padding: '12px 16px',
       }}>
+        {/* Loading skeleton */}
+        {!loaded && pending.length === 0 && (
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            padding: '20px 0',
+          }}>
+            {[1, 2].map((i) => (
+              <div key={i} style={{
+                height: 120,
+                borderRadius: 14,
+                background: 'var(--t-hover, rgba(0,0,0,0.03))',
+                animation: 'pulse 1.5s ease-in-out infinite',
+              }} />
+            ))}
+          </div>
+        )}
+
         {/* Pending approvals */}
-        {pending.length === 0 ? (
+        {loaded && pending.length === 0 ? (
           <EmptyState />
-        ) : (
+        ) : pending.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {pending.map((approval) => (
               <ApprovalCard
@@ -571,7 +584,7 @@ export function ApprovalQueuePanel() {
               />
             ))}
           </div>
-        )}
+        ) : null}
 
         {/* History toggle */}
         {history.length > 0 && (

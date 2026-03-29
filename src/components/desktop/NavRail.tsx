@@ -107,7 +107,7 @@ function CortexLogo({ expanded }: { expanded: boolean }) {
           letterSpacing: '-0.02em',
         }}
       >
-        CORTEX
+        o8
       </motion.span>
     </div>
   );
