@@ -131,8 +131,15 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
             setStatus(newStatus);
 
             // When agent goes ready, finalize current assistant message
+            // and mark any running tools as done
             if (newStatus === 'ready' && currentAssistantRef.current) {
               flushCurrentAssistant();
+              const finalId = currentAssistantRef.current.id;
+              setMessages(prev => prev.map(m =>
+                m.id === finalId && m.toolCalls?.some(t => t.status === 'running')
+                  ? { ...m, toolCalls: m.toolCalls!.map(t => t.status === 'running' ? { ...t, status: 'done' } : t) }
+                  : m
+              ));
               currentAssistantRef.current = null;
             }
           } else if (newStatus === 'starting') {
@@ -174,6 +181,49 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('cortex:agent-supervisor-update', { detail: update }));
           }
+          break;
+        }
+
+        case 'tool-use': {
+          const toolName = typeof msg.data?.name === 'string' ? msg.data.name : 'unknown';
+
+          // Ensure we have a current assistant message to attach the tool call to
+          if (!currentAssistantRef.current) {
+            currentAssistantRef.current = {
+              id: `orch-assistant-${Date.now()}`,
+              chunks: [],
+              thinkingChunks: [],
+            };
+          }
+
+          // Append to messages with toolCalls
+          const current = currentAssistantRef.current;
+          const toolCall = { name: toolName, status: 'running' as const };
+          setMessages(prev => {
+            const idx = prev.findIndex(m => m.id === current.id);
+            if (idx >= 0) {
+              const next = [...prev];
+              const existing = next[idx];
+              const existingTools = existing.toolCalls ?? [];
+              // Mark previous running tools as done
+              const updatedTools = existingTools.map(t =>
+                t.status === 'running' ? { ...t, status: 'done' as const } : t,
+              );
+              next[idx] = { ...existing, toolCalls: [...updatedTools, toolCall] };
+              return next;
+            }
+            // New message with tool call
+            return [...prev, {
+              id: current.id,
+              role: 'assistant' as const,
+              text: '',
+              toolCalls: [toolCall],
+              timestamp: Date.now(),
+              timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            }];
+          });
+
+          if (statusRef.current !== 'busy') setStatus('busy');
           break;
         }
 
