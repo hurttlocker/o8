@@ -590,12 +590,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     autoRestoreAttemptedRef.current = true;
     void (async () => {
       try {
-        const res = await fetch('/api/v2/chat-history');
+        const res = await fetch('/api/v2/chat-history/list');
         if (!res.ok) return;
-        const data = await res.json() as { threads?: Array<{ tabId: string; updatedAt?: number }> };
-        const thoughtsThreads = (data.threads ?? [])
+        const data = await res.json() as { conversations?: Array<{ tabId: string; modifiedAt?: string }> };
+        const thoughtsThreads = (data.conversations ?? [])
           .filter((t) => t.tabId.startsWith('thoughts-'))
-          .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+          .sort((a, b) => new Date(b.modifiedAt ?? 0).getTime() - new Date(a.modifiedAt ?? 0).getTime());
         if (thoughtsThreads.length > 0) {
           const latest = thoughtsThreads[0];
           const histRes = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(latest.tabId)}`);

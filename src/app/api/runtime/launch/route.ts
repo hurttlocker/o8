@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
+    console.error('[runtime-launch]', runtimeName, error instanceof Error ? error.message : error);
     const clientMutationId = payload?.clientMutationId?.trim() || `mutation-${Date.now()}`;
     invalidateCommandCenterSnapshotCaches();
     invalidateInboxCache();

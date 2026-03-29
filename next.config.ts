@@ -32,6 +32,22 @@ const nextConfig: NextConfig = {
     ];
   },
   turbopack: {},
+  webpack: (config, { dev }) => {
+    if (dev) {
+      config.watchOptions = {
+        ...config.watchOptions,
+        ignored: [
+          '**/tmp/**',
+          '**/*.tsbuildinfo',
+          '**/*.log',
+          '**/*.png',
+          '**/artifacts/**',
+          '**/.playwright-mcp/**',
+        ],
+      };
+    }
+    return config;
+  },
   async rewrites() {
     return [
       {
