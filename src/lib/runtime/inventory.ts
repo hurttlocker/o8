@@ -221,6 +221,9 @@ function selectRepoFallbackAgents(agents: AgentSummary[], existingSessionKeys: S
     if (existingSessionKeys.has(agent.sessionKey)) continue;
     if (agent.runtime !== 'codex' && agent.runtime !== 'claude-code') continue;
     if (!['running', 'reviewing', 'waiting'].includes(agent.status)) continue;
+    // Only include IDE-owned sessions as fallbacks — discovered user-terminal
+    // sessions shouldn't appear as phantom agents when the runtime restarts.
+    if (!agent.sessionKey.startsWith('codex-owned:') && !isRegistryBackedRuntimeSession(agent.sessionKey)) continue;
 
     const workspaceKey = normalizeInventoryWorkspacePath(agent.runtimeSurface?.cwd ?? agent.workspace);
     if (!workspaceKey || !currentRepoPaths.has(workspaceKey)) continue;
