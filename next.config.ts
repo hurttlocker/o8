@@ -31,6 +31,7 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  turbopack: {},
   async rewrites() {
     return [
       {

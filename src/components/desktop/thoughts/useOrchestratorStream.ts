@@ -36,6 +36,7 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
   statusRef.current = status;
   const repoPathRef = useRef(repoPath);
   repoPathRef.current = repoPath;
+  const mountedRef = useRef(false);
 
   const flushCurrentAssistant = useCallback(() => {
     const current = currentAssistantRef.current;
@@ -183,10 +184,11 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
       wsRef.current = null;
       console.log('[orchestrator-stream] Disconnected');
 
-      // Auto-reconnect after 2s
+      // Auto-reconnect after 2s — but only if still mounted
       if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+      if (!mountedRef.current) return;
       reconnectTimerRef.current = setTimeout(() => {
-        if (repoPathRef.current) connect();
+        if (repoPathRef.current && mountedRef.current) connect();
       }, 2000);
     };
 
@@ -199,9 +201,11 @@ export function useOrchestratorStream(repoPath: string | null): OrchestratorStre
   useEffect(() => {
     if (!repoPath) return;
 
+    mountedRef.current = true;
     connect();
 
     return () => {
+      mountedRef.current = false;
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;

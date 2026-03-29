@@ -32,6 +32,8 @@ const WORKTREE_DIR_NAME = '.cortex-worktrees';
 const META_FILENAME = '.meta.json';
 const CLAUDE_WORKTREE_DIR = '.claude/worktrees';
 const STALE_THRESHOLD_MS = 24 * 60 * 60_000; // 24 hours
+const AUTO_PRUNE_COOLDOWN_MS = 6 * 60 * 60_000; // 6 hours
+let lastAutoPruneAt = 0;
 
 /**
  * Sanitize a task name into a safe directory/branch name.
@@ -76,6 +78,12 @@ export class WorktreeManager {
    * Codex/others: git worktree add + optional setup
    */
   async create(opts: CreateWorktreeOptions): Promise<WorktreeInfo> {
+    // Auto-prune stale worktrees (throttled to once per 6 hours)
+    if (Date.now() - lastAutoPruneAt > AUTO_PRUNE_COOLDOWN_MS) {
+      lastAutoPruneAt = Date.now();
+      this.prune().catch(() => {});
+    }
+
     let taskId = sanitizeTaskName(opts.taskName);
     const baseBranch = opts.baseBranch ?? await this.getCurrentBranch();
     const now = Date.now();
