@@ -678,7 +678,7 @@ function DashboardInner() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [chatVisible, setChatVisible] = useState(true);
-  const [rightPanelMode, setRightPanelMode] = useState<'chat' | 'workspace'>('chat');
+  const [rightPanelMode, setRightPanelMode] = useState<'chat' | 'workspace'>('workspace');
   const [workspaceSidePanelView, setWorkspaceSidePanelView] = useState<WorkspaceSidePanelView>('blank');
   const [workspaceSidePanelRepoPath, setWorkspaceSidePanelRepoPath] = useState<string | null>(null);
   const [workspaceSidePanelRepoContext, setWorkspaceSidePanelRepoContext] = useState<WorkspaceSidePanelRepo | null>(null);
@@ -2774,6 +2774,9 @@ function DashboardInner() {
   useEffect(() => {
     if (rightPanelMode !== 'workspace') return;
     if (workspaceSidePanelPullRequestNumber) return;
+    // [workspace-side-panel] Skip auto-sync when panel is in blank/idle state —
+    // repo context will be set explicitly when a view is opened via openWorkspaceSidePanel.
+    if (workspaceSidePanelView === 'blank') return;
 
     // Lane-scoped context: when the active lane has branch info, use it
     // so the review rail shows the selected lane's diff, not main's.
@@ -2821,6 +2824,7 @@ function DashboardInner() {
     workspaceSidePanelPullRequestNumber,
     workspaceSidePanelRepoContext,
     workspaceSidePanelRepoPath,
+    workspaceSidePanelView,
     workspaceTerminalPreferredRepo,
     workspaceTerminalPreferredRepo?.localPath,
   ]);
