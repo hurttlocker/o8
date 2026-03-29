@@ -22,7 +22,6 @@ import {
   X,
 } from 'lucide-react';
 import type { Alert, AlertType } from '@/lib/alerts/types';
-import { SEVERITY_COLOR } from '@/lib/alerts/types';
 
 const ICON_MAP: Record<AlertType, typeof Bell> = {
   stuck: Clock,
@@ -64,7 +63,7 @@ const AlertCard = memo(function AlertCard({
   onAction?: (alert: Alert) => void;
 }) {
   const Icon = ICON_MAP[alert.type] ?? Bell;
-  const color = SEVERITY_COLOR[alert.severity];
+  const color = '#2563eb';
   const age = formatAge(alert.timestamp);
 
   return (
