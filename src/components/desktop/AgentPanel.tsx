@@ -3797,6 +3797,7 @@ export const AgentPanel = memo(function AgentPanel({
         remoteUrl?: string | null;
         defaultBranch: string;
         setup: { installOnCreateWorkspace: boolean };
+        readiness?: { state: string; nextAction?: string } | null;
       }>;
     };
 
@@ -3807,6 +3808,11 @@ export const AgentPanel = memo(function AgentPanel({
 
     if (!repoEntry) {
       throw new Error(`No local checkout is registered for ${request.repo}. Open the repo locally before launching an agent on it.`);
+    }
+
+    // Repo readiness gate — block launch if repo is in a broken state
+    if (repoEntry.readiness?.state === 'blocked') {
+      throw new Error(`Repo ${request.repo} is blocked: ${repoEntry.readiness.nextAction ?? 'resolve the issue before launching an agent.'}`);
     }
 
     const prompt = request.kind === 'issue'

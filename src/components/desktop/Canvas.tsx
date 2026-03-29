@@ -1281,9 +1281,16 @@ const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: { sessio
               {msg.role}
             </div>
             <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {typeof msg.content === 'string'
-                ? msg.content.slice(0, 2000)
-                : JSON.stringify(msg.content).slice(0, 2000)}
+              {(() => {
+                const raw = typeof msg.content === 'string'
+                  ? msg.content.slice(0, 2000)
+                  : JSON.stringify(msg.content).slice(0, 2000);
+                // Redact credentials/tokens before rendering
+                return raw
+                  .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b/gi, 'Bearer [redacted]')
+                  .replace(/\b(?:api[_-]?key|access[_-]?token|secret|password|token)\b(\s*[:=]\s*)([^\s"'`]+)/gi, '$1[redacted]')
+                  .replace(/\b(?:ghp_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9-]{16,}|AKIA[0-9A-Z]{12,})\b/g, '[redacted]');
+              })()}
             </div>
           </div>
         ))
