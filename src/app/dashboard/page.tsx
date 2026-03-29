@@ -2405,6 +2405,7 @@ function DashboardInner() {
         ...packet,
         status: 'running',
       }),
+      autoArchiveOnIdle: true,
     });
 
     setActiveTileId(workspaceTarget.tileId);
@@ -2956,6 +2957,8 @@ function DashboardInner() {
     createNew?: boolean;
     label?: string;
     targetSessionKey?: string;
+    supervisorStatus?: string | null;
+    autoArchiveOnIdle?: boolean;
   }) => {
     const repos = globalRepoEntries.length > 0 ? globalRepoEntries : await loadRegisteredRepos();
     const repoEntry = repos.find((repo) => repo.localPath === request.repoPath);
@@ -2998,8 +3001,19 @@ function DashboardInner() {
       createNew: request.createNew ?? true,
       label: request.label,
       targetSessionKey: request.targetSessionKey,
+      supervisorStatus: request.supervisorStatus,
+      autoArchiveOnIdle: request.autoArchiveOnIdle,
     });
   }, [globalRepoEntries, loadRegisteredRepos, waitForWorkspaceTerminalTarget]);
+
+  const updateSupervisorWorkspaceTab = useCallback((surfaceId: string, status: string, label?: string) => {
+    for (const handle of workspaceTerminalHandlesRef.current.values()) {
+      if (handle?.updateChatRuntimeStatus(surfaceId, status, label)) {
+        return true;
+      }
+    }
+    return false;
+  }, []);
 
   // ── Auto-open workspace tab when orchestrator launches a Codex agent ──
   const openedSupervisorAgentsRef = useRef(new Set<string>());
@@ -3011,7 +3025,13 @@ function DashboardInner() {
         status?: string;
         repoPath?: string;
       }>).detail;
-      if (!detail?.surfaceId || detail.status !== 'launched' || !detail.repoPath) return;
+      if (!detail?.surfaceId || !detail.status) return;
+
+      if (detail.status !== 'launched') {
+        updateSupervisorWorkspaceTab(detail.surfaceId, detail.status, detail.name);
+        return;
+      }
+      if (!detail.repoPath) return;
 
       // Deduplicate — only open once per surfaceId
       if (openedSupervisorAgentsRef.current.has(detail.surfaceId)) return;
@@ -3024,6 +3044,8 @@ function DashboardInner() {
         createNew: true,
         autoSend: false,
         targetSessionKey: detail.surfaceId,
+        supervisorStatus: detail.status,
+        autoArchiveOnIdle: true,
       }).catch((err) => {
         console.error('[dashboard] Failed to auto-open tab for orchestrator agent:', err);
       });
@@ -3031,7 +3053,7 @@ function DashboardInner() {
 
     window.addEventListener('cortex:agent-supervisor-update', handleSupervisorUpdate);
     return () => window.removeEventListener('cortex:agent-supervisor-update', handleSupervisorUpdate);
-  }, [handleLaunchWorkspaceAgent]);
+  }, [handleLaunchWorkspaceAgent, updateSupervisorWorkspaceTab]);
 
   const handleLaunchWorkspaceRepoTask = useCallback(async (request: {
     kind: 'issue' | 'pr';
