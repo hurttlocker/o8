@@ -1,6 +1,6 @@
 ---
 name: smoke-tester
-description: Run end-to-end smoke tests on the running dev server. Checks dashboard load, panel rendering, API health, and console errors.
+description: Use this agent PROACTIVELY after making multiple changes, before committing, or when the user asks "does everything work." Checks dev server health, API endpoints, type safety, and project hygiene.
 model: sonnet
 tools: Bash, Read, Grep, Glob, WebFetch
 ---
