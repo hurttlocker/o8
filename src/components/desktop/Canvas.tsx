@@ -174,22 +174,33 @@ export const Canvas = memo(function Canvas({
   const tabScrollRef = useRef<HTMLDivElement>(null);
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
+  const scrollStateRef = useRef({ left: false, right: false });
 
   const updateScrollState = useCallback(() => {
     const el = tabScrollRef.current;
     if (!el) return;
-    setCanScrollLeft(el.scrollLeft > 2);
-    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+    const left = el.scrollLeft > 2;
+    const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+    if (left !== scrollStateRef.current.left) {
+      scrollStateRef.current.left = left;
+      setCanScrollLeft(left);
+    }
+    if (right !== scrollStateRef.current.right) {
+      scrollStateRef.current.right = right;
+      setCanScrollRight(right);
+    }
   }, []);
 
   useEffect(() => {
-    updateScrollState();
     const el = tabScrollRef.current;
     if (!el) return;
+    // Defer initial check to after paint so layout is stable
+    const raf = requestAnimationFrame(() => updateScrollState());
     el.addEventListener('scroll', updateScrollState, { passive: true });
-    const ro = new ResizeObserver(updateScrollState);
+    const ro = new ResizeObserver(() => requestAnimationFrame(updateScrollState));
     ro.observe(el);
     return () => {
+      cancelAnimationFrame(raf);
       el.removeEventListener('scroll', updateScrollState);
       ro.disconnect();
     };
