@@ -479,22 +479,32 @@ async function handleLaunchAgent(args: Record<string, unknown>): Promise<McpTool
     const repoPath = (args.repoPath as string) || REPO_PATH;
     if (!repoPath) return textResult('repoPath is required (not available from env either)', true);
 
-    const body: Record<string, unknown> = {
-      runtime: 'codex',
-      prompt,
-      repoPath,
-      cwd: repoPath,
-    };
-    if (args.taskName) body.taskName = args.taskName;
-    if (args.isolate) body.isolate = true;
-
-    const result = await apiFetch('/api/runtime/launch', {
+    // Route through the orchestrator delegation endpoint — this creates a lane
+    // with governance coverage before launching the Codex session.
+    const result = await apiFetch('/api/orchestrator/delegate', {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        prompt,
+        repoPath,
+        taskName: args.taskName || undefined,
+        isolate: args.isolate !== false, // Default true for delegated work
+      }),
     }) as Record<string, unknown>;
+
+    if (result.approvalId) {
+      // Policy engine requires approval before this delegation can proceed
+      return jsonResult({
+        ok: false,
+        laneId: result.laneId,
+        approvalId: result.approvalId,
+        note: result.note ?? 'Approval required before this agent can be launched.',
+        status: 'awaiting_approval',
+      });
+    }
 
     if (result.ok) {
       // Register with the supervisor for automatic monitoring
+      const surfaceId = result.surfaceId as string;
       try {
         const wsPort = process.env.WS_PORT || '3002';
         await fetch(`http://127.0.0.1:${wsPort}/supervisor/watch`, {
@@ -504,8 +514,9 @@ async function handleLaunchAgent(args: Record<string, unknown>): Promise<McpTool
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            surfaceId: result.surfaceId,
+            surfaceId,
             repoPath,
+            laneId: result.laneId,
             name: (args.taskName as string) || prompt.slice(0, 60),
             prompt,
           }),
@@ -517,14 +528,14 @@ async function handleLaunchAgent(args: Record<string, unknown>): Promise<McpTool
 
       return jsonResult({
         ok: true,
-        surfaceId: result.surfaceId,
-        runtime: result.runtime,
-        cwd: result.cwd,
+        laneId: result.laneId,
+        surfaceId,
+        branch: result.branch,
+        worktreePath: result.worktreePath ?? null,
         note: result.note,
-        worktree: result.worktree ?? null,
       });
     }
-    return textResult(`Launch failed: ${result.error ?? result.note ?? 'unknown error'}`, true);
+    return textResult(`Delegation failed: ${result.error ?? result.note ?? 'unknown error'}`, true);
   } catch (err) {
     return textResult(`Failed to launch agent: ${err}`, true);
   }

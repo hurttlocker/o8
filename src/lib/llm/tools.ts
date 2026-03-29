@@ -181,6 +181,7 @@ export const TOOLS: ToolDef[] = [
         branch: { type: 'string', description: 'Branch name (for open_lane)' },
         runtime: { type: 'string', description: 'Runtime: codex or claude-code (for open_lane)' },
         label: { type: 'string', description: 'Human-readable label (for open_lane)' },
+        reviewSummary: { type: 'string', description: 'Orchestrator review verdict (for merge/create_pr). Shown on the approval card so the operator understands what was done without reading code.' },
       },
       required: ['verb'],
     },
@@ -344,6 +345,7 @@ async function executeLaneCommand(args: Record<string, unknown>): Promise<ToolRe
     if (args.branch) command.branch = args.branch;
     if (args.runtime) command.runtime = args.runtime;
     if (args.label) command.label = args.label;
+    if (args.reviewSummary) command.reviewSummary = args.reviewSummary;
 
     const result = await dispatch(command);
     const laneInfo = result.lane ? `\nLane: ${result.lane.id} (${result.lane.status})` : '';
