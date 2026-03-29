@@ -167,6 +167,8 @@ export interface LaneCommandResult {
   laneId: string;
   note: string;
   lane?: Lane;
+  /** Set when the command requires human approval before proceeding */
+  approvalId?: string;
 }
 
 // ── Persisted State ──

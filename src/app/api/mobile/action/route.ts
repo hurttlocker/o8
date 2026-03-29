@@ -451,9 +451,53 @@ export async function POST(request: NextRequest) {
           { status: 404, headers: { 'Cache-Control': 'no-store, max-age=0' } },
         );
       }
-      const decision = action === 'approve'
-        ? await resumeLlmApproval(request.url, approval, { actor: 'mobile' })
-        : rejectLlmApproval(approval, 'mobile');
+      // Route approval resolution based on continuation type
+      let decisionNote = action === 'approve' ? 'Approved.' : 'Denied.';
+      const continuation = approval.continuation;
+
+      if (continuation?.kind === 'llm-chat') {
+        // LLM chat continuation — resume or reject the chat turn
+        const decision = action === 'approve'
+          ? await resumeLlmApproval(request.url, approval, { actor: 'mobile' })
+          : rejectLlmApproval(approval, 'mobile');
+        decisionNote = decision.note;
+      } else if (continuation?.kind === 'lane' && action === 'approve') {
+        // Lane continuation — re-dispatch the lane command
+        try {
+          const { dispatch } = await import('@/lib/lane/commands');
+          const result = await dispatch({
+            verb: continuation.verb,
+            laneId: continuation.laneId,
+            commitMessage: continuation.commitMessage,
+            actor: 'user', // approved by human, bypass policy re-check
+          } as Parameters<typeof dispatch>[0]);
+          decisionNote = result.note;
+        } catch (err) {
+          decisionNote = `Lane ${continuation.verb} failed: ${err instanceof Error ? err.message : 'unknown'}`;
+        }
+      } else if (continuation?.kind === 'runtime' && action === 'approve') {
+        // Runtime continuation — launch or resume the session
+        try {
+          if (continuation.action === 'launch' && continuation.prompt) {
+            const rt = getRuntime(continuation.runtimeId);
+            if (rt) {
+              const result = await rt.launch({
+                cwd: continuation.cwd || process.cwd(),
+                prompt: continuation.prompt,
+              });
+              decisionNote = result.note;
+            }
+          } else if (continuation.action === 'resume' && continuation.message) {
+            const rt = getRuntime(continuation.runtimeId);
+            if (rt) {
+              const result = await rt.resume(continuation.sessionKey, continuation.message);
+              decisionNote = result.note;
+            }
+          }
+        } catch (err) {
+          decisionNote = `Runtime action failed: ${err instanceof Error ? err.message : 'unknown'}`;
+        }
+      }
 
       invalidateMutationCaches();
       await publishMobileMutation(clientMutationId, {
@@ -461,7 +505,7 @@ export async function POST(request: NextRequest) {
         sessionKey: approval.sessionKey,
         runtime: approval.runtime,
         status: 'completed',
-        note: decision.note,
+        note: decisionNote,
       });
 
       return NextResponse.json({
@@ -470,7 +514,7 @@ export async function POST(request: NextRequest) {
         sessionKey: approval.sessionKey,
         clientMutationId,
         status: 'completed',
-        note: decision.note,
+        note: decisionNote,
       }, {
         status: 200,
         headers: { 'Cache-Control': 'no-store, max-age=0' },
