@@ -71,10 +71,18 @@ interface SharedWsContextValue extends SharedWsState, SharedWsCommands {
 
 const SharedWsContext = createContext<SharedWsContextValue | null>(null);
 
+/** Lightweight hook for components that only need WS connection state (e.g. approval polling). */
+export function useWsConnectionState(): WsConnectionState {
+  const ctx = useContext(SharedWsContext);
+  return ctx?.connectionState ?? 'disconnected';
+}
+
 // ── Provider ──
 
 export function DesktopWebSocketProvider({ children }: { children: ReactNode }) {
   const [connectionState, setConnectionState] = useState<WsConnectionState>('disconnected');
+  const connectionStateRef = useRef<WsConnectionState>(connectionState);
+  connectionStateRef.current = connectionState;
   const wsRef = useRef<WebSocket | null>(null);
   const backoffRef = useRef(INITIAL_BACKOFF);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -262,18 +270,20 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
 
       ws.onopen = () => {
         if (disposedRef.current) { ws.close(); return; }
+        const isReconnect = wsRef.current === null && connectionStateRef.current === 'reconnecting';
         wsRef.current = ws;
         // Re-subscribe to current session
         const key = activeSessionKeyRef.current;
         if (key) {
           ws.send(JSON.stringify({ type: 'subscribe', sessionKey: key }));
         }
-        const subscriptions: RealtimeSubscription[] = [{ stream: 'global', since: realtimeSeqByStreamRef.current.global }];
+        // On reconnect, reset seq counters to force fresh bootstrap snapshot
+        // so the client gets current agent statuses instead of stale cache
+        const globalSince = isReconnect ? 0 : (realtimeSeqByStreamRef.current.global ?? 0);
+        const subscriptions: RealtimeSubscription[] = [{ stream: 'global', since: globalSince }];
         if (key) {
-          subscriptions.push({
-            stream: `session:${key}`,
-            since: realtimeSeqByStreamRef.current[`session:${key}`],
-          });
+          const sessionSince = isReconnect ? 0 : (realtimeSeqByStreamRef.current[`session:${key}`] ?? 0);
+          subscriptions.push({ stream: `session:${key}`, since: sessionSince });
         }
         ws.send(JSON.stringify({ type: 'realtime-subscribe', subscriptions }));
         pingTimerRef.current = setInterval(() => {
