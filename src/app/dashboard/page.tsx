@@ -23,6 +23,7 @@ import { ContextualPanel, type ContextualPanelHandle } from '@/components/deskto
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { SettingsPage, type SettingsTab } from '@/components/desktop/SettingsPage';
+import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 import { AnalyticsPage } from '@/components/desktop/AnalyticsPage';
 import { ThoughtsCard } from '@/components/desktop/ThoughtsCard';
 import { SetupWizard, type DetectionResult } from '@/components/desktop/SetupWizard';
@@ -1965,6 +1966,20 @@ function DashboardInner() {
     dismissAll,
     updateAgents,
   } = useAlerts();
+
+  // ── Approval count for NavRail badge ──
+  const [approvalCount, setApprovalCount] = useState(0);
+  useEffect(() => {
+    function fetchCount() {
+      fetch('/api/panel/approvals')
+        .then((r) => r.json())
+        .then((data) => setApprovalCount(data.approvals?.length ?? 0))
+        .catch(() => {});
+    }
+    fetchCount();
+    const id = setInterval(fetchCount, 5_000);
+    return () => clearInterval(id);
+  }, []);
 
   // ── Cmd+J to toggle Thoughts Card ──
   useEffect(() => {
@@ -4667,6 +4682,7 @@ function DashboardInner() {
           }
         }}
         alertCount={unreadCount}
+        approvalCount={approvalCount}
         onAlertClick={() => setAlertTrayOpen(!alertTrayOpen)}
         alertTray={(
           <AlertTray
@@ -4793,6 +4809,12 @@ function DashboardInner() {
           </div>
         )}
 
+        {activeNavSection === 'approvals' && !showMemoryView && (
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            <ApprovalQueuePanel />
+          </div>
+        )}
+
         {showMemoryView && (
           <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
             <button
@@ -4826,7 +4848,7 @@ function DashboardInner() {
           </div>
         )}
 
-        {!showMemoryView && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (
+        {!showMemoryView && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && activeNavSection !== 'approvals' && (
           <TileContainer
             layout={tileLayout}
             activeTileId={activeTileId}

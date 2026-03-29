@@ -22,6 +22,9 @@ import {
   archiveLane,
 } from './registry';
 import { getLanePolicy, isProtectedBranch } from './policy';
+import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
+import { createApproval } from '@/lib/approvals/store';
+import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 
 export async function dispatch(command: LaneCommand): Promise<LaneCommandResult> {
   const actor: LaneEventActor = command.actor ?? 'user';
@@ -225,6 +228,51 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
       if (!lane.worktreePath) return { ok: false, laneId: command.laneId, note: 'No worktree to create PR from. Lane is on the main working tree.' };
 
+      // Policy gate — require approval for PR creation
+      const prPolicy = evaluatePolicy(buildPolicyContext('lane_command', { verb: 'create_pr', laneId: command.laneId }));
+      if (prPolicy.requiresApproval && actor !== 'user') {
+        const approval = createApproval({
+          source: 'runtime',
+          runtime: lane.runtime,
+          agent: lane.label || lane.branch,
+          sessionKey: lane.sessionKey || `lane:${lane.id}`,
+          title: 'Create pull request',
+          description: `Create PR from lane "${lane.label}" (${lane.branch} → ${lane.baseBranch})`,
+          summary: `Create PR: ${lane.branch} → ${lane.baseBranch}`,
+          risk: prPolicy.risk,
+          policyRuleId: prPolicy.ruleId,
+          metadata: {
+            Lane: lane.id,
+            Branch: lane.branch,
+            Base: lane.baseBranch,
+            Runtime: lane.runtime,
+          },
+          continuation: {
+            kind: 'lane',
+            laneId: command.laneId,
+            verb: 'create_pr',
+            commitMessage: command.commitMessage,
+          },
+        });
+        setLaneStatus(command.laneId, 'awaiting_input', actor, 'approval_required');
+        void publishRealtimeMutation({
+          mutation: {
+            mutationId: `approval-create-${approval.id}`,
+            source: 'desktop',
+            action: 'approve',
+            sessionKey: approval.sessionKey,
+            surfaceId: approval.sessionKey,
+            status: 'pending',
+            note: `Approval required: ${approval.title}`,
+            createdAt: new Date().toISOString(),
+          },
+          refreshTargets: ['global', 'mobileInbox'],
+          sessionKeys: [approval.sessionKey],
+          fresh: true,
+        });
+        return { ok: false, laneId: command.laneId, note: `Approval required: ${prPolicy.reason}`, approvalId: approval.id };
+      }
+
       setLaneStatus(command.laneId, 'merging', actor, 'creating_pr');
 
       try {
@@ -282,6 +330,51 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
       if (!lane.worktreePath) return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };
+
+      // Policy gate — require approval for merge
+      const mergePolicy = evaluatePolicy(buildPolicyContext('lane_command', { verb: 'merge', laneId: command.laneId }));
+      if (mergePolicy.requiresApproval && actor !== 'user') {
+        const approval = createApproval({
+          source: 'runtime',
+          runtime: lane.runtime,
+          agent: lane.label || lane.branch,
+          sessionKey: lane.sessionKey || `lane:${lane.id}`,
+          title: 'Merge lane',
+          description: `Merge lane "${lane.label}" (${lane.branch} → ${lane.baseBranch})`,
+          summary: `Merge: ${lane.branch} → ${lane.baseBranch}`,
+          risk: mergePolicy.risk,
+          policyRuleId: mergePolicy.ruleId,
+          metadata: {
+            Lane: lane.id,
+            Branch: lane.branch,
+            Base: lane.baseBranch,
+            Runtime: lane.runtime,
+          },
+          continuation: {
+            kind: 'lane',
+            laneId: command.laneId,
+            verb: 'merge',
+            commitMessage: command.commitMessage,
+          },
+        });
+        setLaneStatus(command.laneId, 'awaiting_input', actor, 'approval_required');
+        void publishRealtimeMutation({
+          mutation: {
+            mutationId: `approval-create-${approval.id}`,
+            source: 'desktop',
+            action: 'approve',
+            sessionKey: approval.sessionKey,
+            surfaceId: approval.sessionKey,
+            status: 'pending',
+            note: `Approval required: ${approval.title}`,
+            createdAt: new Date().toISOString(),
+          },
+          refreshTargets: ['global', 'mobileInbox'],
+          sessionKeys: [approval.sessionKey],
+          fresh: true,
+        });
+        return { ok: false, laneId: command.laneId, note: `Approval required: ${mergePolicy.reason}`, approvalId: approval.id };
+      }
 
       setLaneStatus(command.laneId, 'merging', actor, 'merging');
 

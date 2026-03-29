@@ -28,6 +28,29 @@ export interface LlmApprovalContinuation {
   approvedTools: string[];
 }
 
+export interface RuntimeApprovalContinuation {
+  kind: 'runtime';
+  runtimeId: string;
+  sessionKey: string;
+  /** What to do after approval: 'resume' sends a follow-up, 'launch' starts a new session */
+  action: 'resume' | 'launch';
+  /** Original prompt (for launch actions) */
+  prompt?: string;
+  /** Follow-up message (for resume actions) */
+  message?: string;
+  /** Working directory */
+  cwd?: string;
+}
+
+export interface LaneApprovalContinuation {
+  kind: 'lane';
+  laneId: string;
+  verb: 'merge' | 'create_pr';
+  commitMessage?: string;
+}
+
+export type ApprovalContinuation = LlmApprovalContinuation | RuntimeApprovalContinuation | LaneApprovalContinuation;
+
 export interface ApprovalRecord {
   id: string;
   source: ApprovalSource;
@@ -44,6 +67,8 @@ export interface ApprovalRecord {
   diff?: ApprovalDiffPreview;
   risk: ApprovalRisk;
   metadata?: Record<string, string>;
+  /** Policy rule that triggered this approval */
+  policyRuleId?: string;
   status: ApprovalStatus;
   createdAt: number;
   updatedAt: number;
@@ -55,7 +80,7 @@ export interface ApprovalRecord {
   };
   audit: ApprovalAuditEvent[];
   fingerprint: string;
-  continuation?: LlmApprovalContinuation;
+  continuation?: ApprovalContinuation;
 }
 
 export interface CreateApprovalInput {
@@ -73,7 +98,9 @@ export interface CreateApprovalInput {
   diff?: ApprovalDiffPreview;
   risk: ApprovalRisk;
   metadata?: Record<string, string>;
-  continuation?: LlmApprovalContinuation;
+  /** Policy rule that triggered this approval (from evaluatePolicy) */
+  policyRuleId?: string;
+  continuation?: ApprovalContinuation;
 }
 
 export interface MobileApprovalCard {
