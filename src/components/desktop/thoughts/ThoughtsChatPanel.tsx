@@ -567,8 +567,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, [resolvedRepoPath]);
 
   // Auto-persist on message changes
+  // Mirror displayMessages logic: in orchestrator mode, prefer orchStream.messages
+  // regardless of WS connection state (messages accumulate in the hook state)
   useEffect(() => {
-    const msgs = useStream ? orchStream.messages : chatMessages;
+    const msgs = isOrchestratorMode
+      ? (orchStream.messages.length > 0 ? orchStream.messages : chatMessages)
+      : chatMessages;
     if (msgs.length > 0 && isOrchestratorMode) {
       // Create thread ID on first message if none exists
       if (!threadId) {
@@ -579,7 +583,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         persistThread(msgs, threadId);
       }
     }
-  }, [chatMessages, orchStream.messages, useStream, isOrchestratorMode, threadId, persistThread]);
+  }, [chatMessages, orchStream.messages, isOrchestratorMode, threadId, persistThread]);
 
   // Auto-restore last orchestrator thread on mount (survives page reload)
   const autoRestoreAttemptedRef = useRef(false);
