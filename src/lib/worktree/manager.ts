@@ -458,11 +458,15 @@ export class WorktreeManager {
   // ── Private Helpers ──
 
   private async getCurrentBranch(): Promise<string> {
-    const { stdout } = await execFileAsync('git', ['branch', '--show-current'], {
-      cwd: this.repoRoot,
-      timeout: 5000,
-    });
-    return stdout.trim() || 'main';
+    try {
+      const { stdout } = await execFileAsync('git', ['branch', '--show-current'], {
+        cwd: this.repoRoot,
+        timeout: 5000,
+      });
+      return stdout.trim() || 'main';
+    } catch {
+      return 'main';
+    }
   }
 
   private async gitWorktreeList(): Promise<Array<{ path: string; branch?: string }>> {
