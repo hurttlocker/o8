@@ -93,7 +93,7 @@ export function UpdateBanner() {
     }}>
       <Download size={14} style={{ color: '#2563eb', flexShrink: 0 }} />
       <span style={{ flex: 1 }}>
-        <strong>Cortex IDE {update.version}</strong> is available
+        <strong>o8 {update.version}</strong> is available
         {update.notes ? ` — ${update.notes.slice(0, 80)}${update.notes.length > 80 ? '…' : ''}` : ''}
       </span>
       <button

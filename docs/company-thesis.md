@@ -1,4 +1,4 @@
-# Company Thesis — Cortex IDE
+# Company Thesis — o8
 
 ## One-line thesis
 

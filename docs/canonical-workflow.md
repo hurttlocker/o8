@@ -1,4 +1,4 @@
-# Cortex IDE — Canonical Task Workflow
+# o8 — Canonical Task Workflow
 
 > This is the foundational product workflow. All features serve this loop.
 > Last updated: 2026-03-16

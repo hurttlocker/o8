@@ -13,7 +13,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "Cortex IDE",
+        "title": "o8",
         "width": 1600,
         "height": 1024,
         "minWidth": 1180,
@@ -33,7 +33,7 @@
     "trayIcon": {
       "iconPath": "icons/icon.png",
       "iconAsTemplate": true,
-      "tooltip": "Cortex IDE"
+      "tooltip": "o8"
     }
   },
   "bundle": {

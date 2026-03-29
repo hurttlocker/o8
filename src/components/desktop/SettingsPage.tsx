@@ -1475,7 +1475,7 @@ function AboutTab() {
         padding: 24,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
-          <h3 style={{ fontSize: 22, fontWeight: 700, color: 'var(--t-text)', margin: 0 }}>Cortex IDE</h3>
+          <h3 style={{ fontSize: 22, fontWeight: 700, color: 'var(--t-text)', margin: 0 }}>o8</h3>
           <span style={{
             fontSize: 11,
             fontWeight: 700,
@@ -4170,7 +4170,7 @@ function AppearanceTab() {
             Theme
           </h3>
           <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: '4px 0 0' }}>
-            Choose how Cortex IDE looks. Accent colors and status indicators stay consistent across themes.
+            Choose how o8 looks. Accent colors and status indicators stay consistent across themes.
           </p>
         </div>
 

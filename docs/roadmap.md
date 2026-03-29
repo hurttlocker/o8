@@ -1,4 +1,4 @@
-# Roadmap — Cortex IDE
+# Roadmap — o8
 
 ## Guiding rule
 

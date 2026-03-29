@@ -220,7 +220,7 @@ async function wsRpc(
             maxProtocol: 3,
             client: {
               id: 'gateway-client',
-              displayName: 'Cortex IDE',
+              displayName: 'o8',
               version: '0.1.0',
               platform: process.platform,
               mode: 'backend',

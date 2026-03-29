@@ -561,7 +561,7 @@ const InspectorSidebar = memo(function InspectorSidebar({
             </>
           ) : selectedRuntimeSurface?.ownership === 'owned' ? (
             <>
-              <li>This Codex surface was launched by Cortex IDE and is tracked in the owned-session registry.</li>
+              <li>This Codex surface was launched by o8 and is tracked in the owned-session registry.</li>
               <li>Lifecycle now preserves current availability separately from last outcome.</li>
               <li>Input is truthful only between runs via resume; interrupt is truthful only while the run is active.</li>
               <li>The transport is JSON exec/resume, not fake keystroke injection into an arbitrary terminal.</li>
@@ -1120,7 +1120,7 @@ export function CommandCenterShell({
           <div className="brand-lockup">
             <div className="brand-orb">C</div>
             <div>
-              <div className="eyebrow">Cortex IDE</div>
+              <div className="eyebrow">o8</div>
               <h1>Live runtime command center</h1>
             </div>
           </div>
@@ -1327,7 +1327,7 @@ export function CommandCenterShell({
                   <div className="top-gap">
                     <div className="eyebrow">Owned Codex launch</div>
                     <p className="muted operator-note">
-                      This is the first truthful mutable Codex lane: Cortex IDE launches the session,
+                      This is the first truthful mutable Codex lane: o8 launches the session,
                       tracks ownership, resumes it between runs, and can interrupt the active process.
                     </p>
                     <form className="operator-form" onSubmit={handleOwnedCodexLaunch}>

@@ -8,6 +8,7 @@ build/
 coverage/
 *.log
 *.tsbuildinfo
+*.png
 artifacts/research/
 .playwright-mcp/
 
@@ -22,10 +23,16 @@ smoke-*.txt
 mobile-*.txt
 p1-*.txt
 playwright-workspace-snapshot.md
+
+# Build & deploy
 src-tauri/target/
-mockups/
-mockups/
-chocolate-*.png
-*.png
 .vercel
 out/
+
+# Design artifacts
+mockups/
+assets/mockups/
+branding/
+
+# Local settings
+.claude/settings.local.json

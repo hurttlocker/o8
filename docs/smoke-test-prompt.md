@@ -1,4 +1,4 @@
-# Cortex IDE — Reusable Smoke Test Prompt
+# o8 — Reusable Smoke Test Prompt
 
 Copy everything below the line and paste it into a fresh Claude Code conversation.
 

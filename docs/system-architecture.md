@@ -1,4 +1,4 @@
-# System Architecture — Cortex IDE
+# System Architecture — o8
 
 ## Architectural stance
 
