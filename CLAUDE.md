@@ -241,6 +241,21 @@ This app builds itself. Every code change triggers a hot reload that can kill li
 
 **Both Claude Code and Codex work in this repo.** Codex sessions can be spawned for isolated tasks. Use the runtime adapter system — never talk to a specific runtime directly.
 
+### Agent delegation (use proactively)
+
+Subagents are defined in `.claude/agents/` (project) and `~/.claude/agents/` (global). **Delegate automatically** — don't wait to be asked:
+
+| When you encounter... | Delegate to |
+|---|---|
+| Research, docs lookup, "what's the best way to..." | **researcher** (Haiku, cheap) |
+| Architecture review, system design, multi-file planning | **architect** (Opus, deep) |
+| "What changed?", git history, blame, branch analysis | **git-scout** (Haiku, fast) |
+| API health, typecheck, "does everything work?" | **smoke-tester** (Sonnet) |
+| Post-change review for bugs and rule violations | **reviewer** (Sonnet) |
+| Session discovery, gateway, adapter debugging | **runtime-debugger** (Sonnet) |
+
+Using subagents saves main context and runs cheaper models on tasks that don't need Opus.
+
 ## Documentation
 
 `docs/` contains architecture, strategy, and design decisions. Key ones:

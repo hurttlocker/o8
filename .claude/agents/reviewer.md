@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: Review recent code changes for bugs, render loops, security issues, and CLAUDE.md rule violations. Read-only.
+description: Use this agent PROACTIVELY after code changes to check for CLAUDE.md rule violations, render loops, security issues, and React anti-patterns. Read-only — never writes code.
 model: sonnet
 tools: Read, Grep, Glob, Bash
 ---

@@ -1,6 +1,6 @@
 ---
 name: runtime-debugger
-description: Debug runtime adapter issues — session discovery, WebSocket RPC, gateway communication, and agent lifecycle problems.
+description: Use this agent PROACTIVELY when debugging runtime adapter issues — session discovery failures, WebSocket RPC errors, gateway communication problems, stale/ghost agents, or agent lifecycle bugs.
 model: sonnet
 tools: Read, Grep, Glob, Bash
 ---
