@@ -71,6 +71,7 @@ const NAV_ITEMS: NavItem[] = [
 ];
 
 const SPRING = { type: 'spring' as const, stiffness: 400, damping: 30 };
+const BRAND_MARK_BLUE = '#2563eb';
 
 // ── Logo ──
 
@@ -79,20 +80,41 @@ function CortexLogo({ expanded }: { expanded: boolean }) {
     <div style={{
       display: 'flex',
       alignItems: 'center',
-      gap: 10,
+      gap: 8,
       padding: '4px 0',
       overflow: 'hidden',
       whiteSpace: 'nowrap',
     }}>
-      {/* Cortex brain logo */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/icons/icon-192x192.png"
-        alt="Cortex"
-        width={28}
-        height={28}
-        style={{ flexShrink: 0, borderRadius: 6 }}
-      />
+      <svg
+        width="24"
+        height="24"
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-hidden="true"
+        style={{ flexShrink: 0 }}
+      >
+        <circle
+          cx="7"
+          cy="12"
+          r="4.25"
+          stroke={BRAND_MARK_BLUE}
+          strokeWidth="2.25"
+        />
+        <circle
+          cx="16.5"
+          cy="8"
+          r="3.25"
+          stroke={BRAND_MARK_BLUE}
+          strokeWidth="2.25"
+        />
+        <circle
+          cx="16.5"
+          cy="16"
+          r="3.25"
+          stroke={BRAND_MARK_BLUE}
+          strokeWidth="2.25"
+        />
+      </svg>
       <motion.span
         initial={false}
         animate={{
@@ -103,7 +125,7 @@ function CortexLogo({ expanded }: { expanded: boolean }) {
         style={{
           fontSize: 14,
           fontWeight: 700,
-          color: 'var(--t-text)',
+          color: BRAND_MARK_BLUE,
           letterSpacing: '-0.02em',
         }}
       >
