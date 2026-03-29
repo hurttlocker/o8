@@ -24,6 +24,7 @@ const branchCache = new Map<string, { branch: string; ts: number }>();
 const BRANCH_CACHE_TTL = 10_000;
 const diffCache = new Map<string, { data: { additions: number; deletions: number; changedFiles: number } | null; ts: number }>();
 const DIFF_CACHE_TTL = 30_000;
+const STALE_WORKSPACE_AGE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 interface PRData {
   number: number;
@@ -63,6 +64,7 @@ interface WorkspaceEntry {
     url: string;
   } | null;
   status: 'in_progress' | 'in_review' | 'done' | 'idle' | 'cancelled';
+  stale?: boolean;
   readiness?: RepoReadiness;
   workflowStage?: WorkflowStageBadge | null;
   lifecycle?: WorkspaceLifecycleRecordView;
@@ -197,6 +199,15 @@ function getLocalDiffStats(workspace: string) {
   }
 }
 
+function isStaleWorkspace(status: string, lastEventAt?: string): boolean {
+  if (status !== 'idle') return false;
+  if (!lastEventAt) return false;
+  const hourMatch = lastEventAt.match(/^(\d+)h/);
+  if (hourMatch && parseInt(hourMatch[1], 10) >= 2) return true;
+  if (/^\d+d/.test(lastEventAt)) return true;
+  return false;
+}
+
 function deriveWorkspaceStatus(params: {
   runtimeStatus: string;
   pr: PRData | null;
@@ -293,7 +304,8 @@ async function collectWorkspaceLifecycle(includeOpenClaw: boolean) {
       repoSlug,
       branchName,
     };
-  }).filter((prepared) => pathBelongsToRegisteredRepo(prepared.repoPath, registeredRepoPaths));
+  }).filter((prepared) => pathBelongsToRegisteredRepo(prepared.repoPath, registeredRepoPaths))
+    .filter((prepared) => !prepared.branchName.startsWith('worktree-you-are-the-orchestrator-'));
 
   const prsByBranch = new Map<string, PRData & { ghRepo: string }>();
   for (const repoName of repoSet) {
@@ -368,6 +380,7 @@ async function collectWorkspaceLifecycle(includeOpenClaw: boolean) {
         url: pr.url || `https://github.com/${ghRepo}/pull/${pr.number}`,
       } : null,
       status,
+      stale: isStaleWorkspace(status, agent.lastEventAt),
       readiness: repoReadinessByName.get(repoName),
       workflowStage,
     });

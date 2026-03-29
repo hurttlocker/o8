@@ -4147,17 +4147,25 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         if (st.id === saved.activeTabId) restoredActiveTabId = tabId;
       }
 
+      // If the saved active tab was a canvas (file viewer), prefer a chat tab instead
+      const restoredActiveTab = restoredActiveTabId
+        ? restoredTabs.find((tab) => tab.id === restoredActiveTabId)
+        : null;
+      const effectiveRestoredActiveId = restoredActiveTab?.kind === 'canvas'
+        ? null
+        : restoredActiveTabId;
+
       let nextActiveId = '';
       if (defaultTab === 'llm-chat') {
         const restoredChat = restoredTabs.find((tab) => tab.kind === 'llm-chat');
         if (restoredChat) {
-          nextActiveId = restoredActiveTabId ?? restoredChat.id;
+          nextActiveId = effectiveRestoredActiveId ?? restoredChat.id;
           tabsRef.current = restoredTabs;
           setTabs(restoredTabs);
           setActiveTabId(nextActiveId);
         } else if (restoredTabs.length > 0) {
           const restoredCliChat = restoredTabs.find((tab) => tab.kind === 'chat');
-          nextActiveId = restoredActiveTabId ?? restoredCliChat?.id ?? restoredTabs[0]?.id ?? '';
+          nextActiveId = effectiveRestoredActiveId ?? restoredCliChat?.id ?? restoredTabs[0]?.id ?? '';
           tabsRef.current = restoredTabs;
           setTabs(restoredTabs);
           setActiveTabId(nextActiveId);
@@ -4170,8 +4178,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           setActiveTabId(nextActiveId);
         }
       } else {
+        const restoredCliChat = restoredTabs.find((tab) => tab.kind === 'chat');
         const restoredTerminal = restoredTabs.find((tab) => tab.kind === 'terminal');
-        nextActiveId = restoredActiveTabId ?? restoredTerminal?.id ?? restoredTabs[0]?.id ?? '';
+        nextActiveId = effectiveRestoredActiveId ?? restoredCliChat?.id ?? restoredTerminal?.id ?? restoredTabs[0]?.id ?? '';
         tabsRef.current = restoredTabs;
         setTabs(restoredTabs);
         setActiveTabId(nextActiveId);

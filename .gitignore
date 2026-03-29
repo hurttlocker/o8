@@ -18,6 +18,10 @@ artifacts/research/
 # Smoke test artifacts
 test-results/
 tmp/
+smoke-*.txt
+mobile-*.txt
+p1-*.txt
+playwright-workspace-snapshot.md
 src-tauri/target/
 mockups/
 mockups/
