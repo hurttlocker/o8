@@ -2586,6 +2586,32 @@ const ActivityFeed = memo(function ActivityFeed({
                     {item.state}
                   </span>
                 ) : null}
+                {item.kind === 'issue' ? (
+                  <button
+                    type="button"
+                    title={`Launch agent on #${item.number}`}
+                    onClick={(e) => { e.stopPropagation(); onLaunchTask?.({ kind: 'issue', repo: item.repo, number: item.number, title: item.title, body: item.body }); }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 22,
+                      height: 22,
+                      borderRadius: 6,
+                      border: 'none',
+                      background: 'transparent',
+                      color: 'var(--t-text-muted)',
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                      padding: 0,
+                      transition: 'color 120ms, background 120ms',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.color = '#2563eb'; e.currentTarget.style.background = 'rgba(37,99,235,0.08)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-muted)'; e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <PlayCircle size={13} strokeWidth={2} />
+                  </button>
+                ) : null}
                 {item.kind === 'issue' && item.state ? (
                   <span style={{
                     padding: '1px 6px',
