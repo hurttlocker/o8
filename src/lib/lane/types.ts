@@ -131,12 +131,16 @@ export type LaneCommand =
       verb: 'create_pr';
       laneId: string;
       commitMessage?: string;
+      /** Orchestrator review verdict — shown on the approval card */
+      reviewSummary?: string;
       actor?: LaneEventActor;
     }
   | {
       verb: 'merge';
       laneId: string;
       commitMessage?: string;
+      /** Orchestrator review verdict — shown on the approval card */
+      reviewSummary?: string;
       actor?: LaneEventActor;
     }
   | {
