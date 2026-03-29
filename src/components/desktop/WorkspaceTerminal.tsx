@@ -4262,7 +4262,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         kind: 'chat',
         tmuxSession: null,
         chatRuntime: resolvedRuntime,
-        chatSessionKey: undefined,
+        chatSessionKey: options.targetSessionKey ?? undefined,
         chatModel: options.modelId ?? (resolvedRuntime === 'claude-code' ? CLAUDE_CLI_MODELS[0].id : CODEX_CLI_MODELS[0].id),
         chatContinueLatest: false,
         chatDraftInjection: injection,
