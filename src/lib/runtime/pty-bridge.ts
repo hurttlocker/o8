@@ -38,6 +38,22 @@ export async function spawnBridgeTerminalSession(payload: SpawnBridgeTerminalReq
   return data;
 }
 
+export async function isBridgeSessionAlive(sessionName: string): Promise<boolean> {
+  try {
+    const response = await fetch(bridgeUrl(`/terminal-alive?session=${encodeURIComponent(sessionName)}`), {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${WS_TOKEN}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) return false;
+    const data = await response.json() as { alive?: boolean };
+    return data.alive === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function signalBridgeTerminalSession(sessionName: string, signal: 'SIGINT' | 'SIGTERM' = 'SIGTERM') {
   const response = await fetch(bridgeUrl('/terminal-signal'), {
     method: 'POST',
