@@ -2661,6 +2661,11 @@ function workspaceTabPrimaryLabel(tab: TerminalTab) {
   if (tab.orchestrationPacket) {
     return laneDisplayTitle(tab.orchestrationPacket, tab.kind);
   }
+  // Use explicit label if set (e.g., "Issue #303" from Activity Feed launch)
+  // before falling back to generic "Ad hoc chat" defaults.
+  if (tab.label && !/^ad\s*hoc/i.test(tab.label) && !/^chat-/.test(tab.label) && !/^terminal-/.test(tab.label)) {
+    return tab.label;
+  }
   if (tab.kind === 'llm-chat') {
     return adHocLaneTitle('llm-chat');
   }

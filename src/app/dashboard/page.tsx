@@ -3171,8 +3171,8 @@ function DashboardInner() {
         ].join('\n\n');
 
     const taskLabel = request.kind === 'issue'
-      ? `Issue #${request.number}`
-      : `PR #${request.number} review`;
+      ? `#${request.number} — ${request.title}`
+      : `PR #${request.number} — ${request.title}`;
 
     workspaceTarget.handle.openCliChatSession({
       runtime: undefined,
