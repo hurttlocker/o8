@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What Is This
 
-Cortex IDE is a Next.js 16 + Tauri v2 desktop app — a command center for managing AI agent fleets. Think "CEO dashboard for AI engineering teams." It runs three agent runtimes (OpenClaw, Codex, Claude Code) through a universal adapter interface, with separate desktop and mobile surfaces.
+**o8** (formerly Cortex IDE) is a Next.js 16 + Tauri v2 desktop app — a **multi-provider agent control plane**. Claude is always the orchestrator/brain; Codex is always the workhorse executing tasks in worktrees. The user talks to o8, o8 routes work across providers. It runs three agent runtimes (OpenClaw, Codex, Claude Code) through a universal CLI-based adapter interface, with separate desktop and mobile surfaces.
+
+See `docs/o8-product-brief.md` for the full product vision, monetization, and Karpathy alignment.
 
 ## Commands
 
@@ -198,9 +200,53 @@ Font: system-ui, SF Mono/Menlo for monospace
 - `npx tsc --noEmit` before every commit
 - `git push origin main` after each commit
 
+## Orchestrator Model
+
+**Claude is the orchestrator. Codex is the workhorse.** This is the core product decision.
+
+- Claude plans, reviews, routes, and maintains rhythm. It does NOT execute coding tasks in worktrees.
+- Codex (xhigh reasoning) executes scoped tasks in isolated worktrees, never touching main.
+- The orchestrator spawns and manages Codex sessions via the Codex CLI adapter, not Claude Code sessions.
+- Before any agent merge, the orchestrator reviews the diff — a trust layer before GitHub bots.
+- Advanced users can override routing, but the default is opinionated: Claude thinks, Codex builds.
+
+This lets users get more compute across both plans simultaneously instead of burning through one.
+
+## Development Workflow
+
+### Working on o8 (self-hosting)
+
+This app builds itself. Every code change triggers a hot reload that can kill live state (transcripts, orchestrator sessions). Accept this during dev — Tauri native shell will stabilize it.
+
+### Claude Code patterns for this repo
+
+**Session management:**
+- `claude -n "feature-name"` — name sessions for easy resume
+- `claude -c` — continue last session after a reload
+- `claude -w branch-name` — work in an isolated worktree (matches what agents do)
+
+**Subagents (`.claude/agents/`):**
+- Use for isolated tasks that would bloat main context (test runs, log analysis, large file reads)
+- Each gets its own context window, tools, and optionally a different model
+- Run `/agents` to create interactively
+
+**Hooks (`.claude/settings.json`):**
+- PostToolUse hooks for auto-formatting after edits
+- PreToolUse hooks to protect critical files
+- Notification hooks when Claude needs input
+
+**Monitoring:**
+- `/loop 5m check CI status` — background polling while working
+- `/cost` — track token usage per session
+
+**Both Claude Code and Codex work in this repo.** Codex sessions can be spawned for isolated tasks. Use the runtime adapter system — never talk to a specific runtime directly.
+
 ## Documentation
 
-`docs/` contains 26 files covering architecture, strategy, and design decisions. Key ones:
+`docs/` contains architecture, strategy, and design decisions. Key ones:
+- `docs/o8-product-brief.md` — **Start here.** Product vision, moats, monetization, v1 scope
+- `docs/company-thesis.md` — Company thesis and competitive positioning
+- `docs/v1-build-plan.md` — Karpathy thread mapped to exact product requirements
 - `docs/canonical-workflow.md` — Full product workflow
 - `docs/system-architecture.md` — Mermaid diagram of the full system
 - `docs/runtime-adapter-contract.md` — AgentRuntime interface evolution
