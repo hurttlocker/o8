@@ -16,13 +16,13 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest } from 'next/server';
 import { createApproval } from '@/lib/approvals/store';
-import type { ApprovalRisk } from '@/lib/approvals/types';
+import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
 import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
 import { getWorkspaceContext, buildSystemPrompt, buildUnscopedSystemPrompt } from '@/lib/llm/context';
 import { resolveRepoScopeFromHeaders } from '@/lib/llm/repo-scope';
 import { recallMemories, extractAndStoreFacts } from '@/lib/llm/memory';
-import { toolsForAnthropic, toolsForOpenAI, toolsForGoogle, executeTool, APPROVAL_REQUIRED_TOOLS, classifyCommand, type ToolResult } from '@/lib/llm/tools';
+import { toolsForAnthropic, toolsForOpenAI, toolsForGoogle, executeTool, type ToolResult } from '@/lib/llm/tools';
 
 // ── Pricing (per 1M tokens) ──
 
@@ -362,30 +362,6 @@ function resolveApiKey(provider: Provider): string | null {
   return process.env[config.envKey] ?? null;
 }
 
-function approvalRiskForCommand(command: string): ApprovalRisk {
-  const normalized = command.trim().toLowerCase();
-  if (/(^|\s)(rm\s+-rf|sudo|chmod\s+777|git\s+push\b.*--force|mkfs|dd\s+if=|shutdown|reboot)/.test(normalized)) {
-    return 'high';
-  }
-  if (/(npm|pnpm|yarn|docker|kubectl|vercel|netlify|git\s+checkout|git\s+clean)/.test(normalized)) {
-    return 'medium';
-  }
-  return 'low';
-}
-
-function approvalRiskForTool(toolName: string, args: Record<string, unknown>): ApprovalRisk {
-  if (toolName === 'run_terminal_command') {
-    return approvalRiskForCommand(String(args.command || ''));
-  }
-  if (toolName === 'delete_file') {
-    return 'high';
-  }
-  if (toolName === 'write_file' || toolName === 'edit_file' || toolName === 'create_pull_request') {
-    return 'medium';
-  }
-  return 'low';
-}
-
 function approvalTitleForTool(toolName: string) {
   if (toolName === 'run_terminal_command') return 'Run terminal command';
   if (toolName === 'write_file') return 'Write file';
@@ -393,6 +369,7 @@ function approvalTitleForTool(toolName: string) {
   if (toolName === 'delete_file') return 'Delete file';
   if (toolName === 'create_github_issue') return 'Create GitHub issue';
   if (toolName === 'create_pull_request') return 'Create pull request';
+  if (toolName === 'lane_command') return 'Lane command';
   return `Execute ${toolName}`;
 }
 
@@ -597,26 +574,27 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
               if (toolOverride && typeof toolOverride === 'object') {
                 tc.args = { ...tc.args, ...toolOverride };
               }
-              // Check if this tool requires user approval (skip if pre-approved)
-              let needsApproval = APPROVAL_REQUIRED_TOOLS.has(tc.name) && !approvedTools.has(tc.name);
+              // Evaluate action against governance policies (skip if pre-approved)
+              const policyCtx = buildPolicyContext(tc.name, tc.args, {
+                runtime: 'chat',
+                sessionKey: tabId ? `llm-chat:${tabId}` : undefined,
+              });
+              const policyResult = approvedTools.has(tc.name)
+                ? { requiresApproval: false, risk: 'low' as const, reason: 'Pre-approved', ruleId: 'pre-approved', blocked: false }
+                : evaluatePolicy(policyCtx);
 
-              // Dynamic approval for terminal commands based on safety classification
-              if (tc.name === 'run_terminal_command' && !approvedTools.has('run_terminal_command')) {
-                const cmd = (tc.args.command as string) || '';
-                const classification = classifyCommand(cmd);
-                if (classification.safety === 'blocked') {
-                  // Blocked: send result directly back to model as a refusal
-                  enqueue(JSON.stringify({ type: 'tool_result', name: tc.name, status: 'blocked', preview: `Blocked: ${classification.reason}` }));
-                  messages.push(
-                    { role: 'assistant', content: `I'll run the command: ${cmd}` },
-                    { role: 'user', content: `Tool "run_terminal_command" was BLOCKED for safety: ${classification.reason}. Do not attempt this command again. Suggest a safe alternative.` }
-                  );
-                  continue;
-                }
-                needsApproval = classification.safety === 'needs_approval';
+              // Blocked: reject entirely and tell the model to try something else
+              if (policyResult.blocked) {
+                const cmd = (tc.args.command as string) || tc.name;
+                enqueue(JSON.stringify({ type: 'tool_result', name: tc.name, status: 'blocked', preview: `Blocked: ${policyResult.reason}` }));
+                messages.push(
+                  { role: 'assistant', content: `I'll run: ${cmd}` },
+                  { role: 'user', content: `Tool "${tc.name}" was BLOCKED by policy "${policyResult.ruleId}": ${policyResult.reason}. Do not attempt this again. Suggest a safe alternative.` },
+                );
+                continue;
               }
 
-              if (needsApproval) {
+              if (policyResult.requiresApproval) {
                 const cmd = tc.name === 'run_terminal_command' ? (tc.args.command as string) : '';
 
                 // Build rich summary based on tool type
@@ -676,7 +654,8 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
                       command: cmd || undefined,
                       editable: tc.name === 'run_terminal_command',
                       diff,
-                      risk: approvalRiskForTool(tc.name, tc.args),
+                      risk: policyResult.risk,
+                      policyRuleId: policyResult.ruleId,
                       metadata: {
                         Model: model,
                         Tool: tc.name,

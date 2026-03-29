@@ -21,6 +21,7 @@ import {
   Bell,
   Lightbulb,
   Cable,
+  ShieldCheck,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -32,6 +33,7 @@ import {
 
 export type NavSection =
   | 'agents'
+  | 'approvals'
   | 'terminal'
   | 'memory'
   | 'analytics'
@@ -41,6 +43,7 @@ interface NavRailProps {
   activeSection: NavSection;
   onSectionChange: (section: NavSection) => void;
   alertCount?: number;
+  approvalCount?: number;
   onAlertClick?: () => void;
   alertTray?: ReactElement<{ desktopAnchorEl?: HTMLElement | null }> | null;
   thoughtsOpen?: boolean;
@@ -61,6 +64,7 @@ const EXPANDED_WIDTH = 200;
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'agents', label: 'Agents', icon: Users },
+  { id: 'approvals', label: 'Approvals', icon: ShieldCheck },
   { id: 'terminal', label: 'Terminal', icon: Terminal },
   { id: 'memory', label: 'Memory', icon: Brain },
   { id: 'analytics', label: 'Analytics', icon: BarChart3 },
@@ -116,11 +120,13 @@ function NavButton({
   active,
   expanded,
   onClick,
+  badge,
 }: {
   item: NavItem;
   active: boolean;
   expanded: boolean;
   onClick: () => void;
+  badge?: number;
 }) {
   const Icon = item.icon;
 
@@ -154,11 +160,32 @@ function NavButton({
         if (!active) e.currentTarget.style.background = 'transparent';
       }}
     >
-      <Icon
-        size={20}
-        strokeWidth={active ? 2.2 : 1.8}
-        style={{ flexShrink: 0 }}
-      />
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        <Icon
+          size={20}
+          strokeWidth={active ? 2.2 : 1.8}
+        />
+        {badge != null && badge > 0 ? (
+          <div style={{
+            position: 'absolute',
+            top: -4,
+            right: -6,
+            width: 16,
+            height: 16,
+            borderRadius: 8,
+            background: '#ef4444',
+            color: '#fff',
+            fontSize: 9,
+            fontWeight: 700,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            lineHeight: 1,
+          }}>
+            {badge > 9 ? '9+' : badge}
+          </div>
+        ) : null}
+      </div>
       <motion.span
         initial={false}
         animate={{
@@ -408,6 +435,7 @@ export function NavRail({
   activeSection,
   onSectionChange,
   alertCount = 0,
+  approvalCount = 0,
   onAlertClick,
   alertTray,
   thoughtsOpen,
@@ -475,6 +503,7 @@ export function NavRail({
             active={activeSection === item.id}
             expanded={expanded}
             onClick={() => onSectionChange(item.id)}
+            badge={item.id === 'approvals' ? approvalCount : undefined}
           />
         ))}
       </div>

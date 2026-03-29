@@ -165,6 +165,7 @@ export function createApproval(input: CreateApprovalInput) {
     diff: input.diff,
     risk: input.risk,
     metadata: input.metadata,
+    policyRuleId: input.policyRuleId,
     status: 'pending',
     createdAt,
     updatedAt: createdAt,

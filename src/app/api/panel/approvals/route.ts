@@ -7,6 +7,7 @@ import {
   listApprovals,
   resolveApproval,
 } from '@/lib/approvals/store';
+import { getRuntime } from '@/lib/runtimes/registry';
 import { invalidateInboxCache } from '@/lib/mobile/openclaw';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 
@@ -23,7 +24,9 @@ function invalidateApprovalCaches() {
  */
 export async function GET(request: NextRequest) {
   const sessionKey = request.nextUrl.searchParams.get('sessionKey')?.trim() || undefined;
-  const approvals = listApprovals({ status: 'pending', sessionKey });
+  const statusParam = request.nextUrl.searchParams.get('status')?.trim() || 'pending';
+  const status = statusParam === 'all' ? 'all' : 'pending';
+  const approvals = listApprovals({ status, sessionKey });
 
   return NextResponse.json({ approvals }, {
     headers: { 'Cache-Control': 'no-store, max-age=0' },
@@ -87,11 +90,48 @@ export async function POST(request: NextRequest) {
   if (!approval) {
     return NextResponse.json({ ok: false, error: 'Approval not found' }, { status: 404 });
   }
-  let decision;
+  // Route resolution based on continuation type
+  let decisionNote = action === 'approve' ? 'Approved.' : 'Denied.';
+  let assistantMessage: unknown = undefined;
+  let nextApproval: unknown = undefined;
+
+  const continuation = approval.continuation;
+
   try {
-    decision = action === 'approve'
-      ? await resumeLlmApproval(request.url, approval, { actor: 'desktop', editedCommand })
-      : rejectLlmApproval(approval, 'desktop');
+    if (continuation?.kind === 'llm-chat') {
+      // LLM chat continuation
+      const decision = action === 'approve'
+        ? await resumeLlmApproval(request.url, approval, { actor: 'desktop', editedCommand })
+        : rejectLlmApproval(approval, 'desktop');
+      decisionNote = decision.note;
+      assistantMessage = decision.assistantMessage;
+      nextApproval = decision.nextApproval;
+    } else if (continuation?.kind === 'lane' && action === 'approve') {
+      // Lane continuation — re-dispatch the lane command
+      const { dispatch } = await import('@/lib/lane/commands');
+      const result = await dispatch({
+        verb: continuation.verb,
+        laneId: continuation.laneId,
+        commitMessage: continuation.commitMessage,
+        actor: 'user',
+      } as Parameters<typeof dispatch>[0]);
+      decisionNote = result.note;
+    } else if (continuation?.kind === 'runtime' && action === 'approve') {
+      // Runtime continuation — launch or resume the session
+      if (continuation.action === 'launch' && continuation.prompt) {
+        const rt = getRuntime(continuation.runtimeId);
+        if (rt) {
+          const result = await rt.launch({ cwd: continuation.cwd || process.cwd(), prompt: continuation.prompt });
+          decisionNote = result.note;
+        }
+      } else if (continuation.action === 'resume' && continuation.message) {
+        const rt = getRuntime(continuation.runtimeId);
+        if (rt) {
+          const result = await rt.resume(continuation.sessionKey, continuation.message);
+          decisionNote = result.note;
+        }
+      }
+    }
   } catch (error) {
     return NextResponse.json({
       ok: false,
@@ -111,7 +151,7 @@ export async function POST(request: NextRequest) {
       sessionKey: approval.sessionKey,
       surfaceId: approval.sessionKey,
       status: 'completed',
-      note: decision.note,
+      note: decisionNote,
       createdAt: new Date().toISOString(),
       settledAt: new Date().toISOString(),
     },
@@ -124,9 +164,9 @@ export async function POST(request: NextRequest) {
     ok: true,
     approval,
     resolved: action,
-    note: decision.note,
-    assistantMessage: decision.assistantMessage,
-    nextApproval: decision.nextApproval,
+    note: decisionNote,
+    assistantMessage,
+    nextApproval,
   }, {
     headers: { 'Cache-Control': 'no-store, max-age=0' },
   });
