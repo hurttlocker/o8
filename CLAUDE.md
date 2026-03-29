@@ -247,12 +247,15 @@ Subagents are defined in `.claude/agents/` (project) and `~/.claude/agents/` (gl
 
 | When you encounter... | Delegate to |
 |---|---|
+| Product thinking, "should we...", "what if...", strategy | **brainstormer** (Opus, multi-turn) |
 | Research, docs lookup, "what's the best way to..." | **researcher** (Haiku, cheap) |
 | Architecture review, system design, multi-file planning | **architect** (Opus, deep) |
 | "What changed?", git history, blame, branch analysis | **git-scout** (Haiku, fast) |
 | API health, typecheck, "does everything work?" | **smoke-tester** (Sonnet) |
 | Post-change review for bugs and rule violations | **reviewer** (Sonnet) |
 | Session discovery, gateway, adapter debugging | **runtime-debugger** (Sonnet) |
+
+**Multi-turn brainstorming pattern:** When using the brainstormer agent, always do 2-3 turns via SendMessage before presenting results. Turn 1: explore + challenge. Turn 2: refine based on pushback. Turn 3: lock recommendation. Present the final synthesis to the user, not the raw back-and-forth.
 
 Using subagents saves main context and runs cheaper models on tasks that don't need Opus.
 
