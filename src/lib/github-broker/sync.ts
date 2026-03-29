@@ -18,9 +18,11 @@ import { getGitHubAppConfig } from './env';
 
 const GITHUB_SNAPSHOT_TTL_MS = 30_000; // 30s — agents create issues frequently
 
-function resourcePath(repoFullName: string, resource: GitHubSyncResource) {
+const MAX_ISSUE_PAGES = 5; // 5 pages * 100 = 500 issues max
+
+function resourcePath(repoFullName: string, resource: GitHubSyncResource, page = 1) {
   if (resource === 'issues') {
-    return `/repos/${repoFullName}/issues?state=open&per_page=50&sort=updated&direction=desc`;
+    return `/repos/${repoFullName}/issues?state=open&per_page=100&sort=updated&direction=desc&page=${page}`;
   }
   return `/repos/${repoFullName}/pulls?state=open&per_page=20&sort=updated&direction=desc`;
 }
@@ -42,10 +44,30 @@ function buildGitHubError(response: Response, bodyText: string) {
   return new Error(parts.join(' · '));
 }
 
+type GitHubIssuePayloadItem = {
+  id: number;
+  number: number;
+  title: string;
+  state: string;
+  body?: string | null;
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+  closed_at?: string | null;
+  user?: { login?: string | null } | null;
+  assignees?: Array<{ login?: string | null }>;
+  labels?: Array<{ name?: string | null; color?: string | null }>;
+  comments?: number;
+  pull_request?: unknown;
+  repository_url?: string;
+};
+
 async function syncIssues(repoFullName: string) {
   const syncState = readGitHubSyncState(repoFullName, 'issues');
   const etag = syncState?.etag ?? null;
-  const { response, installation } = await githubInstallationFetch(repoFullName, resourcePath(repoFullName, 'issues'), {
+
+  // Fetch page 1 (with ETag for cache validation)
+  const { response, installation } = await githubInstallationFetch(repoFullName, resourcePath(repoFullName, 'issues', 1), {
     headers: etag ? { 'If-None-Match': etag } : undefined,
   });
 
@@ -67,25 +89,29 @@ async function syncIssues(repoFullName: string) {
     throw buildGitHubError(response, bodyText);
   }
 
-  const payload = JSON.parse(bodyText) as Array<{
-    id: number;
-    number: number;
-    title: string;
-    state: string;
-    body?: string | null;
-    html_url: string;
-    created_at: string;
-    updated_at: string;
-    closed_at?: string | null;
-    user?: { login?: string | null } | null;
-    assignees?: Array<{ login?: string | null }>;
-    labels?: Array<{ name?: string | null; color?: string | null }>;
-    comments?: number;
-    pull_request?: unknown;
-    repository_url?: string;
-  }>;
+  const firstPage = JSON.parse(bodyText) as GitHubIssuePayloadItem[];
+  const allItems: GitHubIssuePayloadItem[] = [...firstPage];
+  let lastEtag = response.headers.get('etag');
 
-  const issues: GitHubIssueSnapshot[] = payload
+  // Paginate if first page was full (may have more)
+  if (firstPage.length >= 100) {
+    for (let page = 2; page <= MAX_ISSUE_PAGES; page++) {
+      const { response: pageResponse } = await githubInstallationFetch(
+        repoFullName,
+        resourcePath(repoFullName, 'issues', page),
+      );
+      const pageText = await pageResponse.text();
+      if (!pageResponse.ok) {
+        console.warn(`[github-broker] Issues page ${page} failed (${pageResponse.status}), stopping pagination`);
+        break;
+      }
+      const pageItems = JSON.parse(pageText) as GitHubIssuePayloadItem[];
+      allItems.push(...pageItems);
+      if (pageItems.length < 100) break; // last page
+    }
+  }
+
+  const issues: GitHubIssueSnapshot[] = allItems
     .filter((item) => !item.pull_request)
     .map((issue) => ({
       issueId: issue.id,
@@ -109,7 +135,7 @@ async function syncIssues(repoFullName: string) {
     }));
 
   replaceGitHubIssues(repoFullName, issues);
-  markGitHubSyncSuccess(repoFullName, 'issues', response.headers.get('etag'));
+  markGitHubSyncSuccess(repoFullName, 'issues', lastEtag);
 }
 
 async function syncPullRequests(repoFullName: string) {

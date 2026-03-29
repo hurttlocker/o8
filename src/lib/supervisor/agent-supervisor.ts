@@ -24,6 +24,10 @@ export interface WatchedAgent {
   completionReported: boolean;
   /** Set when all-done escalation has been sent for this agent's batch */
   batchReported: boolean;
+  /** Timestamp when a tentative 'finished' status was first observed (grace period) */
+  tentativeFinishedSince: number | null;
+  /** Transcript length snapshot taken when tentative finish started */
+  tentativeTranscriptLength: number;
 }
 
 export interface AgentStatusEntry {
@@ -69,6 +73,7 @@ const STUCK_THRESHOLD_MS = 2 * 60 * 1000;       // 2 min no transcript change
 const MAX_RETRIES = 1;                            // Auto-retry once on failure
 const MAX_STEERS = 2;                             // Auto-steer twice before escalate
 const COMPLETION_CLEANUP_MS = 60_000;             // Remove from watch 60s after done
+const COMPLETION_CONFIRM_MS = 15_000;             // 15s grace before confirming completion
 
 // ── State ──
 
@@ -98,6 +103,8 @@ export function registerWatchedAgent(
     steerCount: 0,
     completionReported: false,
     batchReported: false,
+    tentativeFinishedSince: null,
+    tentativeTranscriptLength: 0,
   });
   console.log(`[supervisor] Watching agent "${name}" (${surfaceId})`);
 
@@ -184,6 +191,56 @@ async function supervisorTick(): Promise<void> {
   for (const [surfaceId, watched] of watchedAgents) {
     const agent = fleetMap.get(surfaceId);
     const currentStatus = resolveStatus(agent, watched, now);
+
+    // ── Completion grace period ──
+    // Codex agents can briefly report idle/reviewing between tool calls.
+    // Require the 'finished' signal to persist for COMPLETION_CONFIRM_MS
+    // AND transcript must stop growing before we confirm completion.
+    if (currentStatus === 'finished' && !watched.completionReported) {
+      if (!watched.tentativeFinishedSince) {
+        // First time seeing 'finished' — start grace period
+        watched.tentativeFinishedSince = now;
+        try {
+          const entries = await callbacks.fetchTranscript(surfaceId, 5);
+          watched.tentativeTranscriptLength = entries.reduce(
+            (sum, e) => sum + (e.text?.length ?? 0), 0,
+          );
+        } catch {
+          watched.tentativeTranscriptLength = watched.lastTranscriptLength;
+        }
+        console.log(`[supervisor] "${watched.name}" tentatively finished — confirming over ${COMPLETION_CONFIRM_MS / 1000}s`);
+        continue;
+      }
+
+      const elapsed = now - watched.tentativeFinishedSince;
+      if (elapsed < COMPLETION_CONFIRM_MS) {
+        continue; // Still in grace period — wait
+      }
+
+      // Grace period elapsed — verify transcript hasn't grown
+      try {
+        const entries = await callbacks.fetchTranscript(surfaceId, 5);
+        const currentLength = entries.reduce(
+          (sum, e) => sum + (e.text?.length ?? 0), 0,
+        );
+        if (currentLength > watched.tentativeTranscriptLength) {
+          // Transcript grew — agent is still working, reset
+          watched.tentativeFinishedSince = null;
+          watched.lastTranscriptLength = currentLength;
+          watched.lastActivityAt = now;
+          console.log(`[supervisor] "${watched.name}" transcript grew during grace — still active`);
+          continue;
+        }
+      } catch { /* proceed with confirmation if fetch fails */ }
+
+      // Confirmed finished — clear tentative and fall through
+      watched.tentativeFinishedSince = null;
+      console.log(`[supervisor] "${watched.name}" completion confirmed after grace period`);
+    } else if (currentStatus !== 'finished' && watched.tentativeFinishedSince) {
+      // Status reverted to non-terminal — cancel tentative finish
+      console.log(`[supervisor] "${watched.name}" back to "${currentStatus}" — canceling tentative finish`);
+      watched.tentativeFinishedSince = null;
+    }
 
     // Status changed?
     if (currentStatus !== watched.lastStatus) {

@@ -282,14 +282,8 @@ export function replaceGitHubIssues(repoFullName: string, issues: GitHubIssueSna
       closed_at = excluded.closed_at
   `);
 
-  const closeMissing = sqlite.prepare(`
-    UPDATE github_issues
-    SET state = 'closed', closed_at = COALESCE(closed_at, datetime('now'))
-    WHERE repo_full_name = ?
-  `);
-
   const transaction = sqlite.transaction((nextIssues: GitHubIssueSnapshot[]) => {
-    closeMissing.run(repoFullName);
+    // Upsert all fetched issues first
     for (const issue of nextIssues) {
       upsert.run(
         issue.issueId,
@@ -307,6 +301,17 @@ export function replaceGitHubIssues(repoFullName: string, issues: GitHubIssueSna
         issue.updatedAt,
         issue.closedAt,
       );
+    }
+
+    // Only close issues NOT in the fetched set (they were closed on GitHub)
+    const fetchedIds = nextIssues.map((i) => i.issueId);
+    if (fetchedIds.length > 0) {
+      const placeholders = fetchedIds.map(() => '?').join(',');
+      sqlite.prepare(`
+        UPDATE github_issues
+        SET state = 'closed', closed_at = COALESCE(closed_at, datetime('now'))
+        WHERE repo_full_name = ? AND state = 'open' AND issue_id NOT IN (${placeholders})
+      `).run(repoFullName, ...fetchedIds);
     }
   });
 
