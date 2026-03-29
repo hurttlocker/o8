@@ -581,6 +581,48 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
   }, [chatMessages, orchStream.messages, useStream, isOrchestratorMode, threadId, persistThread]);
 
+  // Auto-restore last orchestrator thread on mount (survives page reload)
+  const autoRestoreAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (!isOrchestratorMode) return;
+    if (autoRestoreAttemptedRef.current) return;
+    if (orchStream.messages.length > 0 || chatMessages.length > 0) return;
+    autoRestoreAttemptedRef.current = true;
+    void (async () => {
+      try {
+        const res = await fetch('/api/v2/chat-history');
+        if (!res.ok) return;
+        const data = await res.json() as { threads?: Array<{ tabId: string; updatedAt?: number }> };
+        const thoughtsThreads = (data.threads ?? [])
+          .filter((t) => t.tabId.startsWith('thoughts-'))
+          .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+        if (thoughtsThreads.length > 0) {
+          const latest = thoughtsThreads[0];
+          const histRes = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(latest.tabId)}`);
+          if (!histRes.ok) return;
+          const histData = await histRes.json() as {
+            messages?: Array<{ id: string; role: string; content: string; timestamp?: number }>;
+          };
+          const msgs = (histData.messages ?? []).map((m) => ({
+            id: m.id,
+            role: m.role as MobileTranscriptEntry['role'],
+            text: m.content,
+            timestamp: m.timestamp ?? Date.now(),
+            timestampLabel: m.timestamp
+              ? new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : '',
+          }));
+          if (msgs.length > 0) {
+            setChatMessages(msgs);
+            setThreadId(latest.tabId);
+          }
+        }
+      } catch {
+        // silent — best-effort restore
+      }
+    })();
+  }, [isOrchestratorMode, orchStream.messages.length, chatMessages.length]);
+
   const handleLoadThread = useCallback(async (tabId: string) => {
     try {
       const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`);
