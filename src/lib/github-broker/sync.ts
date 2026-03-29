@@ -20,7 +20,7 @@ const GITHUB_SNAPSHOT_TTL_MS = 30_000; // 30s — agents create issues frequentl
 
 function resourcePath(repoFullName: string, resource: GitHubSyncResource) {
   if (resource === 'issues') {
-    return `/repos/${repoFullName}/issues?state=open&per_page=20&sort=updated&direction=desc`;
+    return `/repos/${repoFullName}/issues?state=open&per_page=50&sort=updated&direction=desc`;
   }
   return `/repos/${repoFullName}/pulls?state=open&per_page=20&sort=updated&direction=desc`;
 }

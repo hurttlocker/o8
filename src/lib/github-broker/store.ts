@@ -387,7 +387,7 @@ export function listGitHubIssues(repoFullName: string): GitHubIssueSnapshot[] {
     FROM github_issues
     WHERE repo_full_name = ? AND state = 'open'
     ORDER BY datetime(COALESCE(updated_at, created_at)) DESC
-    LIMIT 20
+    LIMIT 50
   `).all(repoFullName) as Array<{
     issueId: number;
     repoFullName: string;
