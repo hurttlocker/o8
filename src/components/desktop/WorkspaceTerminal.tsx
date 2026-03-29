@@ -1407,6 +1407,24 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
     return () => clearInterval(id);
   }, [active, fetchTranscript, normalizedSessionKey]);
 
+  // Fast retry for new runtime session tabs — polls every 1.5s until transcript arrives
+  const isRuntimeBound = Boolean(normalizedSessionKey && (chatRuntime === 'codex' || chatRuntime === 'claude-code'));
+  useEffect(() => {
+    if (!active || !isRuntimeBound) return;
+    if (messagesRef.current.length > 0) return;
+
+    const id = setInterval(() => {
+      if (messagesRef.current.length > 0) {
+        clearInterval(id);
+        return;
+      }
+      void fetchTranscript();
+    }, 1_500);
+
+    const timeout = setTimeout(() => clearInterval(id), 60_000);
+    return () => { clearInterval(id); clearTimeout(timeout); };
+  }, [active, isRuntimeBound, fetchTranscript]);
+
   const sendText = useCallback(async (inputText: string, options?: { baseMessages?: MobileTranscriptEntry[] }) => {
     const text = inputText.trim();
     if (!text || sending) return;
@@ -1928,6 +1946,50 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
         }}
       >
         {visibleMessages.length === 0 && !agentRunning ? (
+          isRuntimeBound ? (
+          /* Runtime-bound tab — waiting for agent transcript */
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '100%',
+            gap: 16,
+            animation: 'llmFadeIn 400ms ease-out',
+          }}>
+            <div style={{
+              width: 40,
+              height: 40,
+              borderRadius: 12,
+              background: 'rgba(37, 99, 235, 0.08)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
+              <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
+              </svg>
+            </div>
+            <div style={{
+              fontSize: 15,
+              fontWeight: 600,
+              color: 'var(--t-text)',
+              letterSpacing: '-0.01em',
+            }}>
+              Connecting to agent...
+            </div>
+            <div style={{
+              fontSize: 12,
+              color: 'var(--t-text-secondary)',
+              textAlign: 'center',
+              maxWidth: 320,
+              lineHeight: 1.5,
+            }}>
+              Waiting for transcript from the {runtimeLabel} session. You can type a message below to steer the agent.
+            </div>
+          </div>
+          ) : (
+          /* Empty LLM chat — greeting state */
           <div style={{
             display: 'flex',
             flexDirection: 'column',
@@ -2035,6 +2097,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
               ))}
             </div>
           </div>
+          )
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 720, marginLeft: 'auto', marginRight: 'auto' }}>
             {visibleMessages.map((message, index) => (
@@ -2263,7 +2326,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                   void handleSend();
                 }
               }}
-              placeholder={`Message ${runtimeLabel}...`}
+              placeholder={isRuntimeBound ? `Steer this ${runtimeLabel} agent...` : `Message ${runtimeLabel}...`}
               rows={1}
               style={{
                 width: '100%',
