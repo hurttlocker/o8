@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
 import path from 'path';
 import { listRepos } from '@/lib/repos/registry';
+import { buildRepoStateScope } from '@/lib/terminal/tab-state';
 
 const HOME = process.env.HOME ?? '/tmp';
 const STATE_DIR = path.join(HOME, '.cortex-ide');
@@ -62,6 +63,19 @@ function stateMatchesRepoPath(data: unknown, repoPath: string) {
     && (data as { tabs: Array<{ repoPath?: string }> }).tabs.some((tab) => tab.repoPath === repoPath);
 }
 
+function canonicalRepoScopeFromState(data: unknown) {
+  const tabs = Array.isArray((data as { tabs?: Array<{ repoPath?: string | null }> })?.tabs)
+    ? (data as { tabs: Array<{ repoPath?: string | null }> }).tabs
+    : [];
+  const repoPaths = Array.from(new Set(
+    tabs
+      .map((tab) => normalizeScopePath(tab.repoPath))
+      .filter((repoPath): repoPath is string => Boolean(repoPath)),
+  ));
+  if (repoPaths.length !== 1) return null;
+  return buildRepoStateScope(repoPaths[0]);
+}
+
 function repoStateStats(data: unknown, repoPath: string) {
   const tabs = Array.isArray((data as { tabs?: Array<{ repoPath?: string; kind?: string }> })?.tabs)
     ? (data as { tabs: Array<{ repoPath?: string; kind?: string }> }).tabs
@@ -112,6 +126,41 @@ function findLatestRepoState(repoPath: string, excludeFile?: string | null) {
   return candidates[0]?.data ?? null;
 }
 
+function findLatestNonEmptyState(excludeFile?: string | null) {
+  if (!existsSync(STATE_SCOPE_DIR)) {
+    return null;
+  }
+
+  const candidates = readdirSync(STATE_SCOPE_DIR)
+    .filter((file) => file.endsWith('.json'))
+    .map((file) => {
+      const fullPath = path.join(STATE_SCOPE_DIR, file);
+      if (excludeFile && fullPath === excludeFile) {
+        return null;
+      }
+      try {
+        const parsed = JSON.parse(readFileSync(fullPath, 'utf-8'));
+        const tabs = Array.isArray(parsed?.tabs) ? parsed.tabs : [];
+        if (tabs.length === 0) {
+          return null;
+        }
+        const savedAt = typeof parsed?.savedAt === 'string'
+          ? Date.parse(parsed.savedAt)
+          : statSync(fullPath).mtimeMs;
+        return {
+          savedAt: Number.isFinite(savedAt) ? savedAt : statSync(fullPath).mtimeMs,
+          data: parsed,
+        };
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry): entry is { savedAt: number; data: unknown } => Boolean(entry))
+    .sort((a, b) => b.savedAt - a.savedAt);
+
+  return candidates[0]?.data ?? null;
+}
+
 /** GET — load persisted tab state */
 export async function GET(request: Request) {
   try {
@@ -128,6 +177,24 @@ export async function GET(request: Request) {
       const data = filterStateToRegisteredRepos(JSON.parse(readFileSync(stateFile, 'utf-8')), repoRoots);
       if (!data) {
         return NextResponse.json(null, { status: 404 });
+      }
+      if (scope === 'tile-root') {
+        if (Array.isArray((data as { tabs?: unknown[] })?.tabs) && ((data as { tabs?: unknown[] }).tabs?.length ?? 0) === 0) {
+          const latestNonEmpty = findLatestNonEmptyState(stateFile);
+          if (latestNonEmpty) {
+            return NextResponse.json(latestNonEmpty);
+          }
+        }
+        const canonicalScope = canonicalRepoScopeFromState(data);
+        if (canonicalScope && canonicalScope !== scope) {
+          const canonicalFile = getStateFile(canonicalScope);
+          if (existsSync(canonicalFile)) {
+            const canonicalData = filterStateToRegisteredRepos(JSON.parse(readFileSync(canonicalFile, 'utf-8')), repoRoots);
+            if (canonicalData) {
+              return NextResponse.json(canonicalData);
+            }
+          }
+        }
       }
       if (!repoPath) {
         return NextResponse.json(data);
@@ -152,6 +219,13 @@ export async function GET(request: Request) {
         return NextResponse.json(null, { status: 404 });
       }
       return NextResponse.json(data);
+    }
+
+    if (scope === 'tile-root' && !repoPath) {
+      const latestNonEmpty = findLatestNonEmptyState();
+      if (latestNonEmpty) {
+        return NextResponse.json(latestNonEmpty);
+      }
     }
 
     if (repoPath) {
