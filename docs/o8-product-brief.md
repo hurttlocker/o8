@@ -2,7 +2,7 @@
 
 ## One sentence
 
-o8 is a multi-provider agent control plane that lets one operator orchestrate Claude + Codex from desktop or phone — so you get more compute, safer merges, and never burn one provider's context doing work another could handle.
+o8 is the governance layer for autonomous engineering teams — approvals, audit, organizational memory, and mobile operator control across any AI provider.
 
 ## The problem
 
@@ -43,21 +43,20 @@ They're coming from Cursor, terminal-only Claude Code, VS Code with Copilot, or 
 
 ## Why it wins (moats)
 
-### 1. Provider neutrality
-The only tool that makes Claude and Codex (and future runtimes) work together as a coordinated team. Anthropic won't build "use Codex as your workhorse." OpenAI won't build "use Claude as your brain." Neither has incentive to make the other a first-class citizen. o8 is Switzerland.
+### 1. Governance layer — trust without reading diffs
+Agents are getting autonomous fast. The scarce resource isn't code generation — it's human confidence that the code is safe to ship. o8 is the approval surface: orchestrator review summaries, workflow stage badges, audit trails, and policy enforcement (e.g., "nothing merges without human sign-off on database migrations"). This gets MORE valuable as models improve. Every increment in agent autonomy is an increment in demand for governance. No provider builds this because governance is inherently multi-stakeholder and provider-neutral.
 
-### 2. Session graph — cross-provider state
-When a Codex session was spawned by Claude responding to a GitHub issue triaged from your phone — that chain of context lives in o8. Not in Anthropic's servers, not in OpenAI's. No provider has the cross-session memory. They each only see their piece.
+### 2. Organizational memory — user-owned, cross-provider
+Provider memory is siloed and provider-owned. Anthropic sees Claude sessions. OpenAI sees Codex sessions. Neither sees the chain: a GitHub issue triaged on your phone that spawned a Claude plan that delegated three Codex worktrees. o8's session graph and Cortex memory layer are the user's data, portable across providers, persistent across sessions, and compounding over time. Switching costs grow with every session logged — not because of lock-in tricks, but because the memory is genuinely valuable and nobody else has it.
 
-### 3. Workflow layer — battle-tested orchestration
-The orchestrator-to-worktree-to-review pipeline, the lane model, the mobile inbox, the lifecycle system — these patterns came from actually running a multi-agent engineering org. Not from a design sprint. Every week the system runs, the workflow gets more refined in ways that are hard to reverse-engineer.
+### 3. Mobile operator surface — conduct work from anywhere
+The phone isn't a notification viewer. It's a control surface: approve merges, steer priorities, deny risky changes, spawn new work. No CLI tool works on mobile, no provider ships a mobile approval flow, and the value is obvious to anyone who's been paged at 2am. As agents need less instruction and more approval, the phone becomes the most natural operator device.
 
-### 4. Trust UX — legibility without reading code
-The product that wins isn't the one with the best diff viewer — it's the one that makes you not need it. Workflow stage badges, orchestrator review before merge, lifecycle tracking. Trust through progressive disclosure at every zoom level:
-- **Fleet** — all agents at a glance
-- **Squad** — grouped agents on related work
-- **Run** — single agent's current task, status, progress
-- **Evidence** — why the agent made this decision, traced through memory
+### What is NOT a moat (table stakes only)
+- Cost/context dashboards — models get cheaper every quarter
+- Briefing/repo scanning — commodity capability any wrapper can add
+- Orchestration quality — copyable implementation detail
+- Provider neutrality as a pitch — it's infrastructure, not positioning. Never headline "works with Claude AND Codex." Neutrality is plumbing for governance.
 
 ## Karpathy alignment
 
@@ -69,24 +68,24 @@ Building on Karpathy's thesis that the IDE is moving up a layer:
 | "We need a bigger IDE" | Desktop-first control tower, not an editor plugin |
 | "Org code" — reusable squad topologies, review chains | Team templates and workflow presets (v2+) |
 | "Legible at every zoom level" | Fleet → squad → run → evidence drilldown |
-| "Usage, cost, context stats" | Provider arbitrage visibility — show savings across Claude + Codex |
+| "Usage, cost, context stats" | Table-stakes visibility (not a differentiator — models get cheaper) |
 | "Mobile control with voice" | Mobile operator remote, not a phone IDE |
 
 ## v1 scope (solo operator)
 
 ### Ships in v1
 - Desktop control plane (Next.js + Tauri)
-- Opinionated Claude→Codex routing (Claude orchestrates, Codex executes)
+- Opinionated Claude→Codex routing (Claude orchestrates, Codex executes) — v1 wedge, not the durable product
 - Workspace lanes with live agent visibility
+- **Approval/governance engine** — policy rules, approval queue, audit log, escalation. This is the priority build.
 - Orchestrator that plans, delegates, and reviews before anything merges
 - Agents work in worktrees, never main
-- Mobile surface for conducting sessions from anywhere
+- Mobile surface as the primary approval interface (approve/deny/steer from phone)
 - Cortex memory for continuity across sessions and providers
 - GitHub integration — issues as intake, PRs as output
-- Cost/context visibility across providers
 
 ### Does NOT ship in v1
-- Team features, permissions, shared state
+- Team features, permissions, shared state (architecture supports it)
 - Org code / squad templates
 - Managed cloud orchestrator runtime
 - Token relay / API key management for end users
@@ -96,17 +95,17 @@ Architecture supports all of the above. UI doesn't expose it yet.
 
 ## Monetization
 
-### Tier 1: Cloud Sync — $15-20/month
-Session graph, memory, workspace state synced across devices. This is what makes mobile work. Without it, the phone is disconnected. With it, you pick up your phone and everything is there. Real infrastructure cost that justifies the price.
+### Adoption funnel: Free local app
+The desktop app is free. Users bring their own CLI plans (Claude Code, Codex). This is the adoption wedge — solo operators fall in love with the control plane and mobile surface. Do not try to monetize individuals competing with free CLI tools.
 
-### Tier 2: Team Context Layer — $25/seat/month (future)
-The 5-person team scenario. Shared orchestrator context, shared agent visibility, shared issue pipeline. "Everyone knows automatically in context." Org code lives here — reusable squad templates, review chains, escalation rules.
+### Tier 1: Cloud Sync — $15-20/month
+Session graph, memory, workspace state synced across devices. This is what makes mobile work. Without it, the phone is disconnected. With it, you pick up your phone and everything is there. This is a conversion funnel to the team tier, not the primary business.
+
+### Tier 2: Team Governance — $25/seat/month (the business)
+This is where the money is. Shared approval policies, audit logs, fleet visibility, shared organizational memory, escalation rules. The paying customer is the engineering manager who needs governance over a fleet of agents, not the individual developer. 5 seats at $25 = $125/mo per team. 8,000 teams = $1M ARR. The team path is 8x more capital-efficient than individual subscriptions.
 
 ### Tier 3: Managed Orchestrator Runtime — usage-based (future)
 Run the orchestrator in the cloud so agents keep working when your laptop is closed. Mobile triggers real work without a desktop running. Pay per orchestrator hour or per agent session spawned.
-
-### Not the core business but possible
-Token relay as convenience tax — for users who don't want to configure API keys. Small margin on tokens. Race to zero, so not a primary strategy.
 
 ## Connector philosophy
 
@@ -151,7 +150,7 @@ Orchestrator review → merge
 1. **Provider dependency** — Either provider could change CLI, pricing, or capabilities overnight. Mitigated by the runtime adapter abstraction.
 2. **Too broad too early** — Easy to build editor + PM tool + observability tool + memory tool simultaneously. Stay focused on the control plane.
 3. **Self-hosting pain** — Building the tool that builds itself means every code change triggers reloads that kill live state. Accept this until Tauri native shell stabilizes the experience.
-4. **Models get smarter** — Don't build what Claude 5 will do for free. Build the layer no single provider can offer: cross-provider orchestration, the session graph, the trust UX.
+4. **Models get smarter** — Don't build what Claude 5 will do for free. Governance, organizational memory, and the operator approval surface are the layers that get MORE valuable as models improve. Orchestration quality, cost dashboards, and briefing features are commodities — keep them as table stakes, never headline them.
 
 ## What we are NOT building
 
@@ -160,7 +159,8 @@ Orchestrator review → merge
 - Anything a single provider will ship natively
 - A project management tool
 - A CI/CD system
+- **Capabilities that models will commoditize** — cost dashboards, context window optimization, prompt engineering tools, orchestration quality, or briefing/summarization features are table-stakes utilities, never headline differentiators. Our moats are governance, organizational memory, and the operator approval surface.
 
 ## What we ARE building
 
-The control plane that sits above all providers and makes them work together — visible, steerable, safe, and operable from anywhere.
+The governance layer that sits above all providers — making autonomous engineering teams visible, auditable, approvable, and operable from anywhere.
