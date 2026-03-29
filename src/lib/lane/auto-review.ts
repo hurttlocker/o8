@@ -33,20 +33,32 @@ export function triggerAutoReview(lane: Lane): void {
 /**
  * Generate a diff summary for a lane's worktree compared to its base branch.
  */
+const MAX_DIFF_LINES = 200;
+
 function getDiffSummary(lane: Lane): string {
   const cwd = lane.worktreePath || lane.repoPath;
   try {
     // Get the diff stat
-    const stat = execSync(
-      `git diff --stat ${lane.baseBranch}...HEAD 2>/dev/null || git diff --stat HEAD~1 2>/dev/null`,
-      { cwd, timeout: 10_000, encoding: 'utf-8' },
-    ).trim();
+    let stat = '';
+    try {
+      stat = execSync(`git diff --stat ${lane.baseBranch}...HEAD`, { cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
+    } catch {
+      try {
+        stat = execSync('git diff --stat HEAD~1', { cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
+      } catch { /* no commits yet */ }
+    }
 
-    // Get a compact diff (limited to avoid token explosion)
-    const diff = execSync(
-      `git diff ${lane.baseBranch}...HEAD --no-color -U2 2>/dev/null | head -200 || git diff HEAD~1 --no-color -U2 2>/dev/null | head -200`,
-      { cwd, timeout: 10_000, encoding: 'utf-8' },
-    ).trim();
+    // Get a compact diff — truncate in Node.js instead of piping through head
+    let diff = '';
+    try {
+      const rawDiff = execSync(`git diff ${lane.baseBranch}...HEAD --no-color -U2`, { cwd, timeout: 10_000, encoding: 'utf-8' });
+      diff = rawDiff.split('\n').slice(0, MAX_DIFF_LINES).join('\n').trim();
+    } catch {
+      try {
+        const rawDiff = execSync('git diff HEAD~1 --no-color -U2', { cwd, timeout: 10_000, encoding: 'utf-8' });
+        diff = rawDiff.split('\n').slice(0, MAX_DIFF_LINES).join('\n').trim();
+      } catch { /* no commits yet */ }
+    }
 
     if (!stat && !diff) return 'No changes detected in the worktree.';
     return `## Diff summary\n\n\`\`\`\n${stat}\n\`\`\`\n\n## Changes\n\n\`\`\`diff\n${diff}\n\`\`\``;
