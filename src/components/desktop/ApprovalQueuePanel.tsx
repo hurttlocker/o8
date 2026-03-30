@@ -451,7 +451,7 @@ function EmptyState() {
 
 // ── Main Panel ──
 
-export function ApprovalQueuePanel({ onClose }: { onClose?: () => void } = {}) {
+export function ApprovalQueuePanel({ onClose, embedded }: { onClose?: () => void; embedded?: boolean } = {}) {
   const [pending, setPending] = useState<ApprovalRecord[]>([]);
   const [history, setHistory] = useState<ApprovalRecord[]>([]);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
@@ -502,6 +502,35 @@ export function ApprovalQueuePanel({ onClose }: { onClose?: () => void } = {}) {
     }
     setResolvingId(null);
   }, [fetchApprovals]);
+
+  // In embedded mode, skip the outer shell and header — just render content
+  if (embedded) {
+    // Hide entirely when empty and loaded (no need to show "All clear" inline)
+    if (loaded && pending.length === 0) return null;
+    return (
+      <div style={{ padding: '8px 12px' }}>
+        {!loaded && pending.length === 0 ? (
+          <div style={{
+            height: 60,
+            borderRadius: 14,
+            background: 'var(--t-hover, rgba(0,0,0,0.03))',
+            animation: 'pulse 1.5s ease-in-out infinite',
+          }} />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {pending.map((approval) => (
+              <ApprovalCard
+                key={approval.id}
+                approval={approval}
+                resolving={resolvingId === approval.id}
+                onResolve={handleResolve}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={{
