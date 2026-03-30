@@ -25,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import type { ReviewChangedFile, ReviewWorktreeSummary, WorkflowReviewSnapshot } from '@/lib/fleet/types';
+import { ApprovalQueuePanel } from './ApprovalQueuePanel';
 import type { RepoReadiness } from '@/lib/repos/types';
 import { deriveWorkflowStage, describeWorkflowStage, workflowBadge } from '@/lib/workflows/status';
 import { BlueGlassActionButton, BlueGlassHoverCard } from './BlueGlassHoverCard';
@@ -2074,11 +2075,21 @@ const ReviewTab = memo(function ReviewTab({
   }, [activePullRequest, allCommentContexts, injectPayload, repoSlug]);
 
   if (loading && !snapshot) {
-    return <div style={{ padding: 16, fontSize: 12, color: 'var(--t-text-muted)' }}>Loading review…</div>;
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <ApprovalQueuePanel embedded />
+        <div style={{ padding: 16, fontSize: 12, color: 'var(--t-text-muted)' }}>Loading review…</div>
+      </div>
+    );
   }
 
   if (!snapshot) {
-    return <div style={{ padding: 16, fontSize: 12, color: 'var(--t-text-muted)' }}>No review surface available yet</div>;
+    return (
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <ApprovalQueuePanel embedded />
+        <div style={{ padding: 16, fontSize: 12, color: 'var(--t-text-muted)' }}>No review surface available yet</div>
+      </div>
+    );
   }
 
   const scopeLabel = currentBranch
@@ -2087,6 +2098,7 @@ const ReviewTab = memo(function ReviewTab({
 
   return (
     <div className="cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto', paddingBottom: 10 }}>
+      <ApprovalQueuePanel embedded />
       <ReviewSection title="Review State">
         <ContextObjectCard itemKind="review-state" itemId={activePullRequest ? `pr:${activePullRequest.number}` : repo?.localPath ?? 'review-state'}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

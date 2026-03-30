@@ -679,7 +679,6 @@ function DashboardInner() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [chatVisible, setChatVisible] = useState(true);
-  const [approvalsSlideOpen, setApprovalsSlideOpen] = useState(false);
   const [rightPanelMode, setRightPanelMode] = useState<'chat' | 'workspace'>('workspace');
   const [workspaceSidePanelView, setWorkspaceSidePanelView] = useState<WorkspaceSidePanelView>('diff');
   const [workspaceSidePanelRepoPath, setWorkspaceSidePanelRepoPath] = useState<string | null>(null);
@@ -4727,7 +4726,10 @@ function DashboardInner() {
         activeSection={activeNavSection}
         onSectionChange={(section) => {
           if (section === 'approvals') {
-            setApprovalsSlideOpen((prev) => !prev);
+            // Open the Review tab in the right panel — approvals live there
+            setWorkspaceSidePanelView('review');
+            if (!chatVisible) setChatVisible(true);
+            setRightPanelMode('workspace');
             return;
           }
           setActiveNavSection(section);
@@ -5066,37 +5068,6 @@ function DashboardInner() {
         ) : null}
       </AnimatePresence>
 
-      {/* ── Approvals Slide-Over Panel ── */}
-      <AnimatePresence initial={false}>
-        {approvalsSlideOpen ? (
-          <motion.div
-            key="approvals-slide"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 20 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            style={{
-              display: 'flex',
-              height: '100%',
-              flexShrink: 0,
-              position: 'relative',
-            }}
-          >
-            <div style={{
-              width: 420,
-              flexShrink: 0,
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-              borderLeft: '1px solid var(--t-divider)',
-              background: 'var(--t-bg)',
-            }}>
-              <ApprovalQueuePanel onClose={() => setApprovalsSlideOpen(false)} />
-            </div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
 
       {/* ── Alert Toast (desktop only — urgent alerts slide in bottom-left near bell) ── */}
       <AlertToast alerts={activeAlerts} onAction={handleAlertAction} />
