@@ -278,9 +278,7 @@ function buildWorkspaceLaneState(
       ? 'missing'
       : !tab.chatSessionKey && (tab.chatMessages?.length ?? 0) === 0
         ? 'waiting_activity'
-        : tab.chatSessionKey && (tab.chatMessages?.length ?? 0) === 0
-          ? 'waiting_activity'
-          : 'ready';
+        : 'ready';
   return {
     tileId: stateScope,
     tabId: tab.id,
@@ -1946,8 +1944,8 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
         }}
       >
         {visibleMessages.length === 0 && !agentRunning ? (
-          isRuntimeBound ? (
-          /* Runtime-bound tab — waiting for agent transcript */
+          isRuntimeBound || tab.orchestrationPacket || chatRuntime === 'codex' || chatRuntime === 'claude-code' ? (
+          /* Runtime-bound, orchestrated, or agent-runtime tab — waiting for agent transcript */
           <div style={{
             display: 'flex',
             flexDirection: 'column',
