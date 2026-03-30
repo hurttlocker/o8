@@ -143,8 +143,8 @@ function mapIdeGhostRuntimeTabToAgent(session: IdeRuntimeSessionDescriptor): Age
   const workspace = shortenHomePath(session.repoPath ?? '~/clawd');
   const runtimeName = defaultRuntimeDisplayName(session.runtimeId);
   const currentTask = session.liveSessionKey
-    ? `Restored ${runtimeName} chat tab from IDE state. Waiting for live runtime reattachment.`
-    : `Restored ${runtimeName} chat tab from IDE state. No active runtime session is attached.`;
+    ? 'Reconnecting\u2026'
+    : 'Idle';
 
   return {
     id: session.sessionKey,
