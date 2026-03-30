@@ -85,6 +85,16 @@ const ORCHESTRATED_TAB_AUTO_ARCHIVE_MS = 10 * 60_000;
 
 type WorkspaceChatRuntime = 'codex' | 'claude-code' | 'openclaw' | 'chat';
 
+/** True when a tab is bound to an agent runtime (Codex or Claude Code), as
+ *  opposed to a plain LLM chat or OpenClaw session.  Use this single guard
+ *  everywhere instead of scattering `chatRuntime === 'codex'` checks. */
+export function isAgentRuntimeTab(
+  tab: TerminalTab | null | undefined,
+): tab is TerminalTab & { kind: 'chat'; chatRuntime: 'codex' | 'claude-code' } {
+  return tab?.kind === 'chat'
+    && (tab.chatRuntime === 'codex' || tab.chatRuntime === 'claude-code');
+}
+
 export interface TerminalTabHandle {
   writeToTerminal: (sessionName: string, data: string) => void;
   writeRaw: (sessionName: string, data: string) => void;
@@ -289,7 +299,7 @@ function buildWorkspaceLaneState(
       : null,
     repoPath: tab.repo?.localPath ?? preferredRepo?.localPath ?? null,
     branch: tab.repo?.branch ?? preferredRepo?.branch ?? null,
-    runtime: tab.orchestrationPacket?.runtime ?? (tab.chatRuntime === 'codex' || tab.chatRuntime === 'claude-code' ? tab.chatRuntime : null),
+    runtime: tab.orchestrationPacket?.runtime ?? (isAgentRuntimeTab(tab) ? tab.chatRuntime : null),
     sessionKey: normalizeWorkspaceChatSessionKey(tab.chatRuntime, tab.chatSessionKey),
     packet: tab.orchestrationPacket ?? null,
     status,
@@ -1406,7 +1416,8 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   }, [active, fetchTranscript, normalizedSessionKey]);
 
   // Fast retry for new runtime session tabs — polls every 1.5s until transcript arrives
-  const isRuntimeBound = Boolean(normalizedSessionKey && (chatRuntime === 'codex' || chatRuntime === 'claude-code'));
+  const isAgentTab = isAgentRuntimeTab(tab);
+  const isRuntimeBound = Boolean(normalizedSessionKey && isAgentTab);
   useEffect(() => {
     if (!active || !isRuntimeBound) return;
     if (messagesRef.current.length > 0) return;
@@ -1944,8 +1955,8 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
         }}
       >
         {visibleMessages.length === 0 && !agentRunning ? (
-          isRuntimeBound || tab.orchestrationPacket || chatRuntime === 'codex' || chatRuntime === 'claude-code' ? (
-          /* Runtime-bound, orchestrated, or agent-runtime tab — waiting for agent transcript */
+          isAgentTab ? (
+          /* Agent-runtime tab — waiting for agent transcript */
           <div style={{
             display: 'flex',
             flexDirection: 'column',
@@ -2324,7 +2335,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
                   void handleSend();
                 }
               }}
-              placeholder={isRuntimeBound ? `Steer this ${runtimeLabel} agent...` : `Message ${runtimeLabel}...`}
+              placeholder={isAgentTab ? `Steer this ${runtimeLabel} agent...` : `Message ${runtimeLabel}...`}
               rows={1}
               style={{
                 width: '100%',
@@ -3835,11 +3846,9 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       const preferredLocalPath = preferredRepo?.localPath ?? '';
       const preferredBranch = preferredRepo?.branch ?? 'main';
       const nextSessions: MobileInboxSnapshot['sessions'] = visibleTabs
-        .filter((tab) => (
-          tab.kind === 'chat' && (tab.chatRuntime === 'codex' || tab.chatRuntime === 'claude-code')
-        ))
+        .filter(isAgentRuntimeTab)
         .map((tab) => {
-          const runtime = tab.chatRuntime as 'codex' | 'claude-code';
+          const runtime = tab.chatRuntime;
           const prefixedKey = normalizeWorkspaceChatSessionKey(runtime, tab.chatSessionKey)
             ?? fallbackWorkspaceChatSessionKey(runtime, tab.id, stableRepoScope ?? stateScope);
           const repoSlug = repoSlugFromRemote(tab.repo?.remoteUrl);
@@ -4478,7 +4487,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           : null;
       const resolvedRuntime = options.runtime
         ?? targetRuntime
-        ?? (activeTab?.kind === 'chat' && (activeTab.chatRuntime === 'codex' || activeTab.chatRuntime === 'claude-code')
+        ?? (isAgentRuntimeTab(activeTab)
           ? activeTab.chatRuntime
           : (options.createNew ? 'codex' : 'claude-code'));
       const normalizedTargetSessionKey = options.targetSessionKey
@@ -4854,9 +4863,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         },
 	      getChatTabSnapshots: () => (
 	        tabsRef.current
-	          .filter((tab): tab is TerminalTab & { kind: 'chat'; chatRuntime: 'codex' | 'claude-code' } => (
-	            tab.kind === 'chat' && (tab.chatRuntime === 'codex' || tab.chatRuntime === 'claude-code')
-	          ))
+	          .filter(isAgentRuntimeTab)
 	          .map((tab) => ({
 	            tileId: stateScope,
 	            tabId: tab.id,
