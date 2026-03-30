@@ -3875,7 +3875,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
               ?? latestMessage?.text?.trim()
               ?? (hasLiveSession
                 ? ''
-                : `Restored ${runtime === 'claude-code' ? 'Claude Code' : 'Codex'} lane from IDE state. No live runtime is attached.`),
+                : 'Idle'),
             workspace: tab.repo?.localPath ?? preferredLocalPath,
             branch: tab.repo?.branch ?? preferredBranch,
             sessionKey: prefixedKey,
@@ -5551,22 +5551,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                       }}>
                         {activeOrchestrationPacket.referenceLabel}
                       </span>
-                    ) : (
-                      <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        padding: '4px 8px',
-                        borderRadius: 999,
-                        background: 'var(--t-divider-subtle)',
-                        color: 'var(--t-text-secondary)',
-                        fontSize: 10,
-                        fontWeight: 800,
-                        letterSpacing: '0.04em',
-                        textTransform: 'uppercase',
-                      }}>
-                        Ad hoc
-                      </span>
-                    )}
+                    ) : null}
 	                  {activeRuntimeTone ? (
                       <span style={{
                         display: 'inline-flex',
