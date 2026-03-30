@@ -286,8 +286,6 @@ function sessionPickerChips(session?: SessionSummary): SessionPickerChip[] {
   const chips: SessionPickerChip[] = [];
   if (session.orchestrationPacket?.referenceLabel) {
     chips.push({ label: session.orchestrationPacket.referenceLabel, tone: 'blue' });
-  } else {
-    chips.push({ label: 'Ad hoc', tone: 'slate' });
   }
   chips.push({
     label: sessionRuntimeLabel(session),
@@ -3872,8 +3870,6 @@ export function AgentPanelChat({
       const chips: SessionPickerChip[] = [];
       if (workspaceLane.packet?.referenceLabel) {
         chips.push({ label: workspaceLane.packet.referenceLabel, tone: 'blue' });
-      } else if (workspaceLane.isAdHoc) {
-        chips.push({ label: 'Ad hoc', tone: 'slate' });
       }
       if (runtimeTone) {
         chips.push({ label: runtimeTone.label, tone: workspaceLane.runtime === 'claude-code' ? 'purple' : 'green' });

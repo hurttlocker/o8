@@ -2888,7 +2888,7 @@ function RepoCard({
                             }}
                           >
                             {sessionsExpanded ? <ChevronDown size={12} strokeWidth={2.2} /> : <ChevronRight size={12} strokeWidth={2.2} />}
-                            <span>Ad hoc</span>
+                            <span>Sessions</span>
                             <span
                               style={{
                                 display: 'inline-flex',
@@ -2976,7 +2976,7 @@ function RepoCard({
                                           whiteSpace: 'nowrap',
                                         }}
                                       >
-                                        Ad hoc · {branchSessionLabel(agent)}
+                                        {branchSessionLabel(agent)}
                                       </span>
                                       <span
                                         style={{

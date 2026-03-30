@@ -5000,7 +5000,7 @@ function DashboardInner() {
                     lineHeight: 1.6,
                   }}
                 >
-                No lane is available because no repository is registered in Cortex. Add a repo first, then launch or restore an orchestrated or ad hoc workspace lane.
+                No lane is available because no repository is registered. Add a repo first, then launch or restore a workspace lane.
                 </div>
               </div>
           ) : (
