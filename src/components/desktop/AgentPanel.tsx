@@ -1713,14 +1713,35 @@ const ActivityFeed = memo(function ActivityFeed({
   }, [agentRepoById, events, isAllRepos, repo]);
 
   // Fetch issues, PRs, CI, and commits for selected repo(s)
+  const rateLimitPausedUntilRef = useRef<number>(0);
   useEffect(() => {
     async function fetchForRepo(r: string) {
+      // Skip if rate limited
+      if (Date.now() < rateLimitPausedUntilRef.current) {
+        return { issues: [], prs: [], ciRuns: [], commits: [], errors: ['GitHub rate limit — paused until reset'] };
+      }
       const [issuesRes, prsRes, ciRes, commitsRes] = await Promise.all([
         fetch(`/api/panel/issues?repo=${encodeURIComponent(r)}`).catch(() => null),
         fetch(`/api/panel/prs?repo=${encodeURIComponent(r)}`).catch(() => null),
         fetch(`/api/panel/ci?repo=${encodeURIComponent(r)}`).catch(() => null),
         fetch(`/api/panel/commits?repo=${encodeURIComponent(r)}`).catch(() => null),
       ]);
+      // Detect rate limiting from any response
+      for (const res of [issuesRes, prsRes, ciRes, commitsRes]) {
+        if (!res) continue;
+        if (res.status === 403 || res.status === 429) {
+          const retryAfter = res.headers.get('retry-after');
+          const resetHeader = res.headers.get('x-ratelimit-reset');
+          const pauseMs = retryAfter
+            ? Number(retryAfter) * 1000
+            : resetHeader
+              ? Math.max((Number(resetHeader) * 1000) - Date.now(), 60_000)
+              : 5 * 60_000; // default 5 min backoff
+          rateLimitPausedUntilRef.current = Date.now() + pauseMs;
+          console.log(`[activity-feed] GitHub rate limited — pausing for ${Math.round(pauseMs / 60_000)}m`);
+          break;
+        }
+      }
 
       const repoSlug = r.split('/').pop() ?? r;
       const errors: string[] = [];
@@ -1848,7 +1869,7 @@ const ActivityFeed = memo(function ActivityFeed({
       } catch { /* silent */ }
     }
     fetchExtras();
-    const id = setInterval(fetchExtras, 60_000);
+    const id = setInterval(fetchExtras, 120_000); // 2 min — conserve GitHub rate limit
     return () => clearInterval(id);
   }, [repo, isAllRepos, allRepos, refreshKey]);
 
@@ -2048,12 +2069,9 @@ const ActivityFeed = memo(function ActivityFeed({
       }}>
         <div
           style={{
-            borderRadius: 20,
-            border: '1px solid var(--t-panel-border)',
-            background: `linear-gradient(180deg, ${THEME_PANEL_GLASS} 0%, ${THEME_BG_CARD} 100%)`,
-            boxShadow: 'var(--t-panel-shadow)',
-            backdropFilter: 'blur(24px)',
-            WebkitBackdropFilter: 'blur(24px)',
+            borderRadius: 14,
+            border: '0.5px solid var(--t-divider-subtle)',
+            background: 'var(--t-chrome)',
             overflow: 'hidden',
           }}
         >
@@ -2061,8 +2079,9 @@ const ActivityFeed = memo(function ActivityFeed({
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 8,
-            padding: '10px 10px 6px',
+            gap: 6,
+            padding: '8px 8px 6px',
+            flexWrap: 'wrap',
           }}>
             <button
               type="button"
@@ -2070,18 +2089,16 @@ const ActivityFeed = memo(function ActivityFeed({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 7,
-                minHeight: 34,
-                padding: '0 12px 0 10px',
-                borderRadius: 12,
-                border: '1px solid var(--t-panel-border)',
-                background: 'var(--t-chrome)',
-                backdropFilter: 'blur(14px)',
-                WebkitBackdropFilter: 'blur(14px)',
+                gap: 5,
+                minHeight: 28,
+                padding: '0 10px 0 8px',
+                borderRadius: 8,
+                border: '0.5px solid var(--t-divider-subtle)',
+                background: 'var(--t-panel)',
                 cursor: 'pointer',
                 fontFamily: '-apple-system, system-ui, sans-serif',
-                fontSize: 11.5,
-                fontWeight: 700,
+                fontSize: 11,
+                fontWeight: 600,
                 color: 'var(--t-text)',
                 letterSpacing: '-0.01em',
               }}
@@ -2133,12 +2150,12 @@ const ActivityFeed = memo(function ActivityFeed({
                       display: 'flex',
                       alignItems: 'center',
                       gap: 4,
-                      minHeight: 30,
-                      padding: '0 10px',
-                      borderRadius: 999,
+                      minHeight: 26,
+                      padding: '0 8px',
+                      borderRadius: 7,
                       border: 'none',
-                      background: '#22c55e',
-                      color: '#fff',
+                      background: 'rgba(34, 197, 94, 0.1)',
+                      color: '#16a34a',
                       fontSize: 10,
                       fontWeight: 700,
                       cursor: 'pointer',
@@ -2251,35 +2268,34 @@ const ActivityFeed = memo(function ActivityFeed({
           ) : null}
 
           <div style={{
-            padding: '0 10px 8px',
-            fontSize: 10.5,
+            padding: '0 8px 6px',
+            fontSize: 10,
             color: 'var(--t-text-faint)',
-            lineHeight: 1.4,
+            lineHeight: 1.35,
           }}>
             {scopeHelp}
           </div>
           {remoteScopeError ? (
             <div style={{
-              padding: '0 10px 8px',
-              fontSize: 10,
-              color: '#b45309',
+              padding: '0 8px 6px',
+              fontSize: 9,
+              color: '#9ca3af',
               lineHeight: 1.35,
             }}>
-              GitHub data warning: {remoteScopeError}
+              {remoteScopeError.includes('rate limit') ? 'GitHub API paused — will resume automatically' : 'GitHub sync delayed'}
             </div>
           ) : null}
 
           {/* Filter tabs */}
-          <div style={{ padding: '0 10px 10px' }}>
+          <div style={{ padding: '0 8px 8px' }}>
             <div style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 6,
-              padding: 4,
-              borderRadius: 16,
-              border: '1px solid var(--t-panel-border)',
-              background: 'var(--t-panel-hover)',
-              boxShadow: 'inset 0 1px 0 var(--t-divider-subtle)',
+              gap: 4,
+              padding: 3,
+              borderRadius: 10,
+              border: '0.5px solid var(--t-divider-subtle)',
+              background: 'var(--t-panel)',
             }}>
               {FILTER_TABS.map((tab) => {
                 const active = filter === tab.key;
@@ -2296,16 +2312,16 @@ const ActivityFeed = memo(function ActivityFeed({
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      width: 30,
-                      height: 28,
+                      width: 26,
+                      height: 24,
                       padding: 0,
-                      borderRadius: 12,
+                      borderRadius: 7,
                       border: 'none',
-                      background: active ? THEME_ACCENT_SOFT : 'transparent',
-                      color: active ? THEME_ACCENT : 'var(--t-text-muted)',
+                      background: active ? 'var(--t-hover)' : 'transparent',
+                      color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
                       cursor: 'pointer',
                       fontFamily: '-apple-system, system-ui, sans-serif',
-                      transition: 'all 150ms cubic-bezier(0.32, 0.72, 0, 1)',
+                      transition: 'all 120ms ease',
                     }}
                   >
                     {tab.icon}
