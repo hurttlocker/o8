@@ -233,9 +233,12 @@ export async function submitSteerTurn({
   const targetSession = snapshot.sessions.find((session) => session.sessionKey === sessionKey)
     ?? (selectedSession?.sessionKey === sessionKey ? selectedSession : undefined);
   if (targetSession && targetSession.runtimeSurface?.capabilities.sendInput === false) {
+    const unavailableNote = targetSession.currentTask === 'Reconnecting…'
+      ? 'Reconnecting… Input will be available once the desktop runtime reattaches.'
+      : 'Idle. There is no live desktop runtime attached to this session yet.';
     setActionNoteBySession((current) => ({
       ...current,
-      [sessionKey]: `${targetSession.name} is restored from desktop state, but there is no live runtime attached to send into yet.`,
+      [sessionKey]: unavailableNote,
     }));
     return;
   }

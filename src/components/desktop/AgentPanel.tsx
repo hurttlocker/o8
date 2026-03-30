@@ -509,7 +509,7 @@ function SidebarSection({
   const tone = accent ?? '#ef4444';
 
   return (
-    <section style={{ borderTop: '1px solid var(--t-divider-subtle)' }}>
+    <section style={{ borderTop: 'none' }}>
       <div style={{ display: 'flex', alignItems: 'stretch', gap: 6, paddingRight: 14 }}>
         <button
           type="button"
@@ -620,15 +620,7 @@ function ActivityDock({
     <section
       style={{
         flexShrink: 0,
-        marginTop: 8,
-        borderRadius: 22,
-        border: open ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
-        background: `linear-gradient(180deg, ${THEME_PANEL_GLASS} 0%, ${THEME_BG_CARD} 100%)`,
-        boxShadow: open
-          ? `var(--t-panel-shadow), 0 0 0 1px ${THEME_ACCENT_RING}`
-          : 'var(--t-panel-shadow)',
-        backdropFilter: 'blur(22px)',
-        WebkitBackdropFilter: 'blur(22px)',
+        marginTop: 4,
         overflow: 'hidden',
       }}
     >
@@ -639,8 +631,8 @@ function ActivityDock({
           width: '100%',
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
-          padding: '12px 14px 11px',
+          gap: 8,
+          padding: '8px 14px',
           border: 'none',
           background: 'transparent',
           cursor: 'pointer',
@@ -648,84 +640,41 @@ function ActivityDock({
           fontFamily: '-apple-system, system-ui, sans-serif',
         }}
       >
-        <span
+        <ChevronDown
+          size={12}
+          strokeWidth={2.2}
+          color="var(--t-text-muted)"
           style={{
-            width: 28,
-            height: 28,
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderRadius: 999,
-            background: open ? THEME_ACCENT_SOFT : 'var(--t-divider-subtle)',
-            color: open ? THEME_ACCENT : 'var(--t-text-muted)',
             flexShrink: 0,
-            transition: 'background 180ms ease, color 180ms ease',
+            transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
+            transition: 'transform 180ms cubic-bezier(0.32, 0.72, 0, 1)',
           }}
-        >
-          <ChevronDown
-            size={14}
-            strokeWidth={2.2}
+        />
+        <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--t-text-secondary)' }}>{title}</span>
+        {count !== null ? (
+          <span
             style={{
-              transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
-              transition: 'transform 180ms cubic-bezier(0.32, 0.72, 0, 1)',
-            }}
-          />
-        </span>
-        <span style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 13, fontWeight: 700, letterSpacing: '-0.01em' }}>{title}</span>
-            {count !== null ? (
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 18,
-                  height: 18,
-                  paddingLeft: 6,
-                  paddingRight: 6,
-                  borderRadius: 999,
-                  background: open ? THEME_ACCENT_SOFT : 'var(--t-divider-subtle)',
-                  color: open ? THEME_ACCENT : 'var(--t-text-secondary)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                  fontFamily: '"SF Mono", ui-monospace, monospace',
-                }}
-              >
-                {count}
-              </span>
-            ) : null}
-          </span>
-        <span
-          style={{
-            display: 'block',
-            marginTop: 2,
-            fontSize: 10,
-              lineHeight: 1.35,
+              fontSize: 10,
+              fontWeight: 600,
               color: 'var(--t-text-faint)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+              fontFamily: '"SF Mono", ui-monospace, monospace',
             }}
           >
-            {summary}
+            {count}
           </span>
-        </span>
+        ) : null}
       </button>
 
       {open ? (
         <div
           style={{
-            padding: '0 10px 10px',
-            borderTop: '1px solid var(--t-divider-subtle)',
+            padding: '0 14px 10px',
           }}
         >
           <div
             style={{
               maxHeight: 320,
               overflowY: 'auto',
-              borderRadius: 18,
-              background: 'var(--t-bg-card)',
               scrollbarWidth: 'none',
             } as React.CSSProperties}
             className="hide-scrollbar"
@@ -4182,7 +4131,7 @@ export const AgentPanel = memo(function AgentPanel({
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      background: 'var(--t-bg)',
+      background: 'transparent',
     } as React.CSSProperties}
     >
       {/* ── Titlebar spacer ── */}
@@ -4337,11 +4286,10 @@ export const AgentPanel = memo(function AgentPanel({
           style={{
             position: 'sticky',
             bottom: 0,
-            marginTop: 10,
+            marginTop: 4,
             paddingLeft: 4,
             paddingRight: 4,
             paddingBottom: 2,
-            background: 'var(--t-bg)',
             zIndex: 1,
           }}
         >

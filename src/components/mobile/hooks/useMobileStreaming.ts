@@ -11,6 +11,7 @@ export function useMobileStreaming(state: MobileState, includeOpenClaw: boolean)
   const {
     selectedSessionKey,
     selectedSession,
+    selectedReviewPacket,
     setSnapshot, setRefreshError,
     setHistoryBySession,
     setStreamingText, streamingTextRef,
@@ -23,15 +24,23 @@ export function useMobileStreaming(state: MobileState, includeOpenClaw: boolean)
     setHydrated,
   } = state;
 
+  const selectedRepoPath = selectedReviewPacket?.repoPath
+    ?? selectedSession?.runtimeSurface?.cwd
+    ?? selectedSession?.workspace
+    ?? null;
+
   // WebSocket connection
   const {
     connectionState: wsConnectionState,
+    orchestratorStatus,
+    orchestratorNote,
     sendTerminalAttach,
     sendTerminalInput,
     sendTerminalResize,
     sendTerminalDetach,
   } = useWebSocket({
     selectedSessionKey,
+    selectedRepoPath,
     includeOpenClaw,
     setSnapshot,
     setRefreshError,
@@ -72,6 +81,8 @@ export function useMobileStreaming(state: MobileState, includeOpenClaw: boolean)
   return {
     wsConnected,
     wsConnectionState,
+    orchestratorStatus,
+    orchestratorNote,
     sendTerminalInput,
     sendTerminalResize,
     sendTerminalAttach,

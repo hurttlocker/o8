@@ -4798,7 +4798,6 @@ function DashboardInner() {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        borderRight: '1px solid var(--t-divider)',
         position: 'relative',
       }}>
         <AgentPanel
@@ -4834,6 +4833,8 @@ function DashboardInner() {
       {/* ── Left drag handle ── */}
       {sidebarVisible && <div
         onMouseDown={startLeftDrag}
+        onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '1'; }}
+        onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '0'; }}
         style={{
           width: 6,
           cursor: 'col-resize',
@@ -4849,7 +4850,8 @@ function DashboardInner() {
           height: 40,
           borderRadius: 2,
           backgroundColor: 'var(--t-drag-handle)',
-          transition: 'background-color 150ms',
+          opacity: 0,
+          transition: 'opacity 150ms',
         }} />
       </div>}
 
@@ -4861,6 +4863,8 @@ function DashboardInner() {
         overflow: 'hidden',
         position: 'relative',
         minWidth: 0,
+        background: '#ffffff',
+        borderRadius: '8px 8px 0 0',
       }}>
         {activeNavSection === 'settings' && !showMemoryView && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
@@ -4936,6 +4940,8 @@ function DashboardInner() {
           >
             <div
               onMouseDown={startRightDrag}
+              onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '1'; }}
+              onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '0'; }}
               style={{
                 width: 6,
                 cursor: 'col-resize',
@@ -4951,7 +4957,8 @@ function DashboardInner() {
                 height: 40,
                 borderRadius: 2,
                 backgroundColor: 'var(--t-drag-handle)',
-                transition: 'background-color 150ms',
+                opacity: 0,
+                transition: 'opacity 150ms',
               }} />
             </div>
 
@@ -4963,7 +4970,6 @@ function DashboardInner() {
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
-                borderLeft: '1px solid var(--t-divider)',
               }}
             >
               <AnimatePresence initial={false} mode="wait">

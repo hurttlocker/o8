@@ -1,8 +1,6 @@
 'use client';
 import {
-  useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -20,10 +18,9 @@ import {
 import dynamic from 'next/dynamic';
 import { ChatView } from './mobile/ChatView';
 import { ComposeBar } from './mobile/ComposeBar';
-import { RuntimeBar } from './mobile/RuntimeBar';
 import { SquadRail } from './mobile/SquadRail';
-import { SurfaceStatus } from './mobile/SurfaceStatus';
 import { TopBar } from './mobile/TopBar';
+import { MobileFloatingActionButton } from './mobile/ReferencePrimitives';
 
 import { ShimmerCard } from './mobile/ShimmerCard';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
@@ -36,7 +33,6 @@ const ApprovalStack = dynamic(() => import('./mobile/ApprovalStack').then((m) =>
 const ControlsSheet = dynamic(() => import('./mobile/ControlsSheet').then((m) => ({ default: m.ControlsSheet })), { ssr: false, ...shimmerFallback });
 const CostsDashboard = dynamic(() => import('./mobile/CostsDashboard').then((m) => ({ default: m.CostsDashboard })), { ssr: false, ...shimmerFallback });
 const DiffOverlay = dynamic(() => import('./mobile/DiffOverlay').then((m) => ({ default: m.DiffOverlay })), { ssr: false, ...shimmerFallback });
-const TokenUsageSummary = dynamic(() => import('./mobile/TokenUsageSummary').then((m) => ({ default: m.TokenUsageSummary })), { ssr: false, ...shimmerFallback });
 const MobileTerminal = dynamic(() => import('./mobile/MobileTerminal').then((m) => ({ default: m.MobileTerminal })), { ssr: false, ...shimmerFallback });
 const WorktreeActions = dynamic(() => import('./mobile/WorktreeActions').then((m) => ({ default: m.WorktreeActions })), { ssr: false, ...shimmerFallback });
 const FleetView = dynamic(() => import('./mobile/FleetView').then((m) => ({ default: m.FleetView })), { ssr: false, ...shimmerFallback });
@@ -65,8 +61,11 @@ import { useMobileScroll } from './mobile/hooks/useMobileScroll';
 import { useMobileStreaming } from './mobile/hooks/useMobileStreaming';
 import { useMobileActions } from './mobile/hooks/useMobileActions';
 import { useOpenClawBetaStatus } from './mobile/hooks/useOpenClawBetaStatus';
-import { ProactiveSurface, useProactiveItems } from './mobile/ProactiveSurface';
-import { CrossAgentPill } from './mobile/CrossAgentPill';
+import {
+  mobileShellStyle,
+  neomorphicButtonStyle,
+  neomorphicSurfaceStyle,
+} from './mobile/neomorph';
 
 export function MobileRemoteShell(props: MobileRemoteShellProps) {
   return (
@@ -118,7 +117,11 @@ function MobileRemoteShellInner({
   const state = useMobileState({ initialSnapshot, initialTranscript, initialReviewFile, initialOwnedReviewPacket });
 
   // ── Streaming + WebSocket ──
-  const { wsConnected, wsConnectionState, sendTerminalAttach, sendTerminalInput } = useMobileStreaming(state, openClawBetaEnabled);
+  const {
+    wsConnected,
+    sendTerminalAttach,
+    sendTerminalInput,
+  } = useMobileStreaming(state, openClawBetaEnabled);
 
   // ── Data fetching + polling ──
   const { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, stickyReviewFiles } = useMobilePolling(state, wsConnected, openClawBetaEnabled);
@@ -174,15 +177,14 @@ function MobileRemoteShellInner({
     surfaceRefreshing, expandedMedia, scrollY,
     isScrolling, headerVisible, viewportTopOffset,
     composeFocused, composeHeight, waitingForResponse, hydrated,
-    squadPickerOpen, expandedProject, streamingText,
+    streamingText,
     // Setters
     setSelectedId, setSelectedSessionKeyHint, setSelectedSessionFallback, setActiveView, setSurfaceNote,
     setDraftBySession, setPendingOwnedTurnBySession,
     setControlsOpen, setAlertsOpen, setSessionInfoOpen,
     setPendingApprovals, setResolvedApprovals,
     setExpandedMedia, setComposeHeight, setWaitingForResponse,
-    setExpandedProject, setDiffOpen,
-    setSquadPickerOpen, setSnapshot,
+    setDiffOpen, setSnapshot,
     // Refs
     composeRef, fileInputRef, transcriptBottomRef,
     lastAssistantCountRef, seenMessageIdsRef,
@@ -200,17 +202,6 @@ function MobileRemoteShellInner({
   const [prReviewRepo, setPrReviewRepo] = useState('');
   const openClawRefreshHandledRef = useRef(false);
   const lastOpenClawEnabledRef = useRef(openClawBetaEnabled);
-  // Proactive surface — context-aware cards at top of chat
-  const openPR = useCallback((repo: string, prNumber: number) => {
-    setPrReviewRepo(repo);
-    setPrReviewNumber(prNumber);
-    setPrReviewOpen(true);
-  }, []);
-  const { items: proactiveItems, dismiss: dismissProactive } = useProactiveItems(snapshot.sessions, openPR);
-
-  // Cross-agent awareness
-  const runningAgentCount = useMemo(() => snapshot.sessions.filter(s => s.status === 'running').length, [snapshot.sessions]);
-  const totalAgentCount = snapshot.sessions.length;
 
   useEffect(() => {
     setSnapshot((current) => {
@@ -344,35 +335,19 @@ function MobileRemoteShellInner({
   // ── UI layout values ──
   const sessionSwitcher = snapshot.sessions.slice(0, 5);
   const headerProgress = Math.min(scrollY / 88, 1);
-  // Hysteresis: go compact at 15%, un-compact at 5% — prevents flicker at threshold
-  const [isHeaderCompact, setIsHeaderCompact] = useState(false);
-  useEffect(() => {
-    if (!isHeaderCompact && headerProgress > 0.15) setIsHeaderCompact(true);
-    else if (isHeaderCompact && headerProgress < 0.05) setIsHeaderCompact(false);
-  }, [headerProgress, isHeaderCompact]);
   const isComposerPrimed = isChatSession && (composeFocused || transcriptAttachments.length > 0);
-  // RuntimeBar only visible when at bottom of chat + keyboard closed
-  const [isAtBottom, setIsAtBottom] = useState(true);
-  useEffect(() => {
-    const check = () => {
-      const dist = document.documentElement.scrollHeight - window.scrollY - window.innerHeight;
-      setIsAtBottom(dist < 140);
-    };
-    window.addEventListener('scroll', check, { passive: true });
-    check();
-    return () => window.removeEventListener('scroll', check);
-  }, []);
   const ownedAvailability = selectedSession?.runtimeSurface?.lifecycle?.availability;
   const ownedReviewDisposition = selectedReviewPacket?.reviewDisposition;
   const ownedQueuedTurn = Boolean(pendingOwnedTurn) || transcriptActionState === 'steering';
   const canResumeOwnedCodex = Boolean(isOwnedCodexSession && selectedSession?.runtimeSurface?.capabilities.sendInput && !ownedQueuedTurn);
   const canInterruptOwnedCodex = Boolean(isOwnedCodexSession && selectedSession?.runtimeSurface?.capabilities.interrupt);
   const hasTerminalSession = Boolean(selectedSession?.tmuxSession);
+  const isIndexView = activeView === 'squad';
+  const isThreadView = activeView === 'chat';
+  const isAuxView = !isIndexView && !isThreadView;
   const detailTab = detailTabState.sessionId === selectedSession?.id
     ? detailTabState.tab
-    : hasTerminalSession
-      ? 'terminal'
-      : 'chat';
+    : 'chat';
   const terminalActive = hasTerminalSession && detailTab === 'terminal';
   const linkedWorktree = selectedReviewPacket?.worktree;
   const showWorktreeActions = Boolean(
@@ -415,7 +390,7 @@ function MobileRemoteShellInner({
     return () => observer.disconnect();
   }, [setComposeHeight]);
 
-  const shellStyle = {
+  const shellVars = {
     '--remodex-header-progress': headerProgress.toFixed(3),
     '--remodex-compose-active': isComposerPrimed ? '1' : '0',
     '--remodex-viewport-top-offset': `${viewportTopOffset}px`,
@@ -425,28 +400,26 @@ function MobileRemoteShellInner({
   // ── Render ──
   return (
     <ThemeProvider>
-    <div className="mobile-wrap remodex-mobile-page" style={shellStyle}>
-      <div className="remodex-phone-shell">
-        {/* Frosted status bar — solid at clock, gentle fade */}
-        <div className="remodex-frost-bar" style={{
-          position: 'fixed',
-          top: 0, left: 0, right: 0,
-          height: 'calc(env(safe-area-inset-top, 0px) + 56px)',
-          background: 'linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(255,255,255,0.97) 25%, rgba(255,255,255,0.8) 45%, rgba(255,255,255,0.4) 70%, rgba(255,255,255,0.1) 85%, rgba(255,255,255,0) 100%)',
-          zIndex: 7,
-          pointerEvents: 'none',
-        }} />
+    <div
+      className="mobile-wrap remodex-mobile-page"
+      style={{ ...mobileShellStyle, ...shellVars }}
+    >
+      <div
+        className="remodex-phone-shell"
+        style={{
+          position: 'relative',
+          maxWidth: 720,
+          minHeight: '100vh',
+          marginLeft: 'auto',
+          marginRight: 'auto',
+        }}
+      >
         <TopBar
-          snapshot={snapshot}
           selectedSession={selectedSession}
-          selectedReviewPacket={selectedReviewPacket}
-          isOwnedCodexSession={isOwnedCodexSession}
-          isHeaderCompact={isHeaderCompact}
           headerVisible={headerVisible}
           pendingApprovalsCount={pendingApprovals.length}
-          wsConnectionState={wsConnectionState}
+          activeView={activeView}
           compactLine={compactLine}
-          squadPickerOpen={squadPickerOpen}
           activeScreen={activeView === 'costs' ? 'costs' : activeView === 'fleet' ? 'fleet' : activeView === 'activity' ? 'approvals' : activeView === 'settings' ? 'settings' : activeView === 'memory' ? 'memory' : activeView === 'issues' ? 'issues' : 'chat'}
           onNavigate={(screen: MobileScreen) => {
             switch (screen) {
@@ -473,8 +446,8 @@ function MobileRemoteShellInner({
                 break;
             }
           }}
-          onToggleSquadPicker={() => setSquadPickerOpen(!squadPickerOpen)}
-          onSessionFocus={actions.handleSessionFocus}
+          onBackToIndex={() => setActiveView('squad')}
+          onOpenControls={() => setControlsOpen(true)}
         />
         <PullToRefresh onRefresh={async () => { await refreshInbox(true); await new Promise(r => setTimeout(r, 600)); }}>
         <PageTransition activeKey={activeView}>
@@ -551,53 +524,37 @@ function MobileRemoteShellInner({
               compactLine={compactLine}
             />
           ) : null}
-          {activeView !== 'costs' && activeView !== 'fleet' && activeView !== 'memory' && activeView !== 'issues' ? (
-            <TokenUsageSummary snapshot={snapshot} onViewCosts={() => setActiveView('costs')} />
-          ) : null}
-          {activeView !== 'costs' && activeView !== 'fleet' && activeView !== 'memory' && activeView !== 'issues' ? (
+          {isIndexView ? (
             <SquadRail
               snapshot={snapshot}
-              expandedProject={expandedProject}
               selectedSession={selectedSession}
               onSessionFocus={actions.handleSessionFocus}
-              onProjectToggle={(workspace) => setExpandedProject(workspace)}
-              onCostsView={() => setActiveView('costs')}
-              agentDisplayName={agentDisplayName}
+              onLaunch={() => setLaunchOpen(true)}
+              compactLine={compactLine}
             />
           ) : null}
-          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' && activeView !== 'issues' ? (
-          <SurfaceStatus
-            snapshot={snapshot}
-            selectedSession={selectedSession}
-            selectedReviewPacket={selectedReviewPacket}
-            isOwnedCodexSession={isOwnedCodexSession}
-            refreshError={refreshError}
-            surfaceNote={surfaceNote}
-            transcriptError={transcriptError}
-            selectedReviewPacketError={selectedReviewPacketError}
-          />
-          ) : null}
-          {hasTerminalSession && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' && activeView !== 'issues' ? (
+          {hasTerminalSession && isThreadView ? (
             <div
               style={{
                 display: 'flex',
                 gap: 8,
-                padding: '8px 14px 0',
+                paddingTop: 8,
+                paddingRight: 14,
+                paddingBottom: 0,
+                paddingLeft: 14,
               }}
             >
               <button
                 type="button"
                 onClick={() => setDetailTabState({ sessionId: selectedSession?.id ?? null, tab: 'terminal' })}
                 style={{
+                  ...neomorphicButtonStyle(detailTab === 'terminal' ? 'red' : 'slate', detailTab === 'terminal'),
                   flex: 1,
-                  minHeight: 36,
-                  borderRadius: 12,
-                  border: detailTab === 'terminal' ? '1px solid rgba(239, 68, 68, 0.18)' : '1px solid rgba(15, 23, 42, 0.08)',
-                  background: detailTab === 'terminal' ? 'rgba(239, 68, 68, 0.08)' : 'rgba(255, 255, 255, 0.72)',
-                  color: detailTab === 'terminal' ? '#b91c1c' : '#475569',
+                  minHeight: 44,
                   fontSize: 12,
                   fontWeight: 700,
                   cursor: 'pointer',
+                  letterSpacing: '-0.01em',
                 }}
               >
                 Terminal
@@ -606,28 +563,30 @@ function MobileRemoteShellInner({
                 type="button"
                 onClick={() => setDetailTabState({ sessionId: selectedSession?.id ?? null, tab: 'chat' })}
                 style={{
+                  ...neomorphicButtonStyle(detailTab === 'chat' ? 'blue' : 'slate', detailTab === 'chat'),
                   flex: 1,
-                  minHeight: 36,
-                  borderRadius: 12,
-                  border: detailTab === 'chat' ? '1px solid rgba(239, 68, 68, 0.18)' : '1px solid rgba(15, 23, 42, 0.08)',
-                  background: detailTab === 'chat' ? 'rgba(239, 68, 68, 0.08)' : 'rgba(255, 255, 255, 0.72)',
-                  color: detailTab === 'chat' ? '#b91c1c' : '#475569',
+                  minHeight: 44,
                   fontSize: 12,
                   fontWeight: 700,
                   cursor: 'pointer',
+                  letterSpacing: '-0.01em',
                 }}
               >
                 Chat
               </button>
             </div>
           ) : null}
-          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' && activeView !== 'issues' ? (
+          {isThreadView ? (
           terminalActive ? (
             <MobileTerminal tmuxSession={selectedSession!.tmuxSession!} />
           ) : (
             <>
-              {/* Proactive surface — ambient awareness cards */}
-              <ProactiveSurface items={proactiveItems} onDismiss={dismissProactive} />
+              {[refreshError, surfaceNote, transcriptError, selectedReviewPacketError]
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((note, index) => (
+                  <p key={`${note}-${index}`} className="remodex-reference-thread-note">{note}</p>
+                ))}
               <ChatView
                 transcriptEntries={transcriptEntries}
                 selectedSession={selectedSession}
@@ -685,19 +644,25 @@ function MobileRemoteShellInner({
         </div>
         </PageTransition>
         </PullToRefresh>
+        {isIndexView ? (
+          <div className="remodex-reference-fab-wrap">
+            <MobileFloatingActionButton label="Launch new remote session" onClick={() => setLaunchOpen(true)}>
+              +
+            </MobileFloatingActionButton>
+          </div>
+        ) : null}
         <div ref={bottomDockRef} className="remodex-bottom-dock" data-active={isComposerPrimed ? 'true' : 'false'} data-scrolling={isScrolling && !isComposerPrimed ? 'true' : 'false'}>
-          {!terminalActive && activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' && activeView !== 'issues' ? (
-            <div className="remodex-compose-shell">
-              {/* Cross-agent awareness — whisper-thin, barely there */}
-              {runningAgentCount > 0 || totalAgentCount > 1 ? (
-                <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 1 }}>
-                  <CrossAgentPill
-                    runningCount={runningAgentCount}
-                    totalCount={totalAgentCount}
-                    onTap={() => setActiveView('fleet')}
-                  />
-                </div>
-              ) : null}
+          {!terminalActive && isThreadView ? (
+            <div
+              className="remodex-compose-shell"
+              style={neomorphicSurfaceStyle('slate', {
+                paddingTop: 10,
+                paddingRight: 10,
+                paddingBottom: 10,
+                paddingLeft: 10,
+                borderRadius: 26,
+              })}
+            >
               <ComposeBar
                 session={selectedSession}
                 sessionKey={selectedSessionKey}
@@ -725,26 +690,6 @@ function MobileRemoteShellInner({
                 onModelPillTap={() => setSessionInfoOpen(true)}
                 streamingText={streamingText}
                 agentRunning={waitingForResponse}
-              />
-            </div>
-          ) : null}
-          {/* RuntimeBar — only when at bottom + keyboard closed + chat view */}
-          {activeView !== 'fleet' && activeView !== 'costs' && activeView !== 'activity' && activeView !== 'settings' && activeView !== 'memory' && activeView !== 'issues' && !isComposerPrimed ? (
-            <div style={{
-              transition: 'opacity 250ms ease, max-height 250ms ease',
-              opacity: isAtBottom ? 1 : 0,
-              maxHeight: isAtBottom ? 40 : 0,
-              overflow: 'hidden',
-              pointerEvents: isAtBottom ? 'auto' : 'none',
-            }}>
-              <RuntimeBar
-                snapshot={snapshot}
-                selectedSession={selectedSession}
-                selectedReviewPacket={selectedReviewPacket}
-                isOwnedCodexSession={isOwnedCodexSession}
-                compactLine={compactLine}
-                reviewFiles={reviewFiles}
-                onOpenDiff={actions.openDiffViewer}
               />
             </div>
           ) : null}
@@ -866,10 +811,8 @@ function MobileRemoteShellInner({
           setLaunchOpen(false);
           refreshInbox();
           if (surfaceId) {
-            // Navigate to chat with the newly launched agent
             setTimeout(() => {
               actions.handleSessionFocus(surfaceId);
-              setActiveView('squad');
             }, 500);
           }
         }}

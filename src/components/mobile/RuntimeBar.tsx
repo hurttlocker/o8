@@ -1,8 +1,13 @@
 import { memo, useMemo } from 'react';
 import type { RuntimeBarProps } from './types';
 import { sessionStatusSummary } from './utils';
+import {
+  MOBILE_MONO_FONT,
+  MOBILE_SYSTEM_FONT,
+  neomorphicButtonStyle,
+  neomorphicSurfaceStyle,
+} from './neomorph';
 
-/* ── repo name prettifier ────────────────────────────── */
 const REPO_DISPLAY: Record<string, string> = {
   'cortex-ide': 'Cortex IDE',
   'cortex': 'Cortex',
@@ -43,114 +48,173 @@ export const RuntimeBar = memo(function RuntimeBar({
     return prettyRepo(slug);
   }, [snapshot.review, selectedReviewPacket, selectedSession]);
 
-  const totalAdd = reviewFiles?.reduce((s, f) => s + (f.additions ?? 0), 0) ?? 0;
-  const totalDel = reviewFiles?.reduce((s, f) => s + (f.deletions ?? 0), 0) ?? 0;
+  const totalAdd = reviewFiles?.reduce((sum, file) => sum + (file.additions ?? 0), 0) ?? 0;
+  const totalDel = reviewFiles?.reduce((sum, file) => sum + (file.deletions ?? 0), 0) ?? 0;
   const hasDiff = totalAdd > 0 || totalDel > 0;
-
-  const toneColor = status.tone === 'critical' ? '#ff3b30'
-    : status.tone === 'high' ? '#ff9f0a'
-    : status.tone === 'watch' ? '#ffcc00'
-    : '#34c759';
+  const tone = status.tone === 'critical'
+    ? 'red'
+    : status.tone === 'high' || status.tone === 'watch'
+      ? 'orange'
+      : 'green';
+  const toneColor = tone === 'red' ? '#ef4444' : tone === 'orange' ? '#f59e0b' : '#16a34a';
 
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 6,
-      padding: '8px 14px 12px',
-    }}>
-      {/* Status dot */}
-      <span style={{
-        width: 6, height: 6, borderRadius: '50%',
-        background: toneColor,
-        flexShrink: 0,
-      }} />
-
-      {/* Repo pill */}
-      {repo && (
-        <span style={{
-          padding: '3px 8px',
-          borderRadius: 6,
-          background: 'rgba(0,122,255,0.06)',
-          border: '1px solid rgba(0,122,255,0.1)',
-          fontSize: 11, fontWeight: 600,
-          color: '#007aff',
-          fontFamily: '-apple-system, system-ui, sans-serif',
-          flexShrink: 0,
-          maxWidth: 100,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {repo}
-        </span>
-      )}
-
-      {/* Branch pill */}
-      <span style={{
-        display: 'flex', alignItems: 'center', gap: 3,
-        padding: '3px 8px',
-        borderRadius: 6,
-        background: 'rgba(0,0,0,0.03)',
-        border: '1px solid rgba(0,0,0,0.06)',
-        fontSize: 11, fontWeight: 500,
-        color: '#64748b',
-        fontFamily: '"SF Mono", ui-monospace, monospace',
-        flexShrink: 1, minWidth: 0,
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
-          stroke="#8e8e93" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-          style={{ flexShrink: 0 }}>
-          <line x1="6" y1="3" x2="6" y2="15" />
-          <circle cx="18" cy="6" r="3" />
-          <circle cx="6" cy="18" r="3" />
-          <path d="M18 9a9 9 0 0 1-9 9" />
-        </svg>
-        {branch}
-      </span>
-
-      {/* Spacer */}
-      <span style={{ flex: 1 }} />
-
-      {/* Diff pill — tappable */}
-      {hasDiff && (
-        <button
-          type="button"
-          onClick={onOpenDiff}
+    <div
+      style={{
+        paddingTop: 8,
+        paddingRight: 14,
+        paddingBottom: 12,
+        paddingLeft: 14,
+      }}
+    >
+      <div
+        style={neomorphicSurfaceStyle(tone, {
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          paddingTop: 10,
+          paddingRight: 12,
+          paddingBottom: 10,
+          paddingLeft: 12,
+          borderRadius: 20,
+        })}
+      >
+        <span
           style={{
-            display: 'flex', alignItems: 'center', gap: 4,
-            padding: '3px 8px',
-            borderRadius: 6,
-            background: 'rgba(0,0,0,0.03)',
-            border: '1px solid rgba(0,0,0,0.06)',
-            cursor: 'pointer',
-            WebkitTapHighlightColor: 'transparent',
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            backgroundColor: toneColor,
+            boxShadow: `0 0 10px ${toneColor}33`,
+            flexShrink: 0,
+          }}
+        />
+
+        {repo ? (
+          <span
+            style={{
+              ...neomorphicSurfaceStyle('blue', {
+                maxWidth: 110,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                paddingTop: 6,
+                paddingRight: 10,
+                paddingBottom: 6,
+                paddingLeft: 10,
+                borderRadius: 14,
+              }),
+              fontSize: 11,
+              fontWeight: 700,
+              color: '#1d4ed8',
+              fontFamily: MOBILE_SYSTEM_FONT,
+              letterSpacing: '-0.01em',
+              flexShrink: 0,
+            }}
+          >
+            {repo}
+          </span>
+        ) : null}
+
+        <span
+          style={{
+            ...neomorphicSurfaceStyle('slate', {
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              minWidth: 0,
+              paddingTop: 6,
+              paddingRight: 10,
+              paddingBottom: 6,
+              paddingLeft: 10,
+              borderRadius: 14,
+            }),
+            fontSize: 11,
+            fontWeight: 600,
+            color: '#475569',
+            fontFamily: MOBILE_MONO_FONT,
+            letterSpacing: '-0.01em',
+            flexShrink: 1,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#64748b"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ flexShrink: 0 }}
+          >
+            <line x1="6" y1="3" x2="6" y2="15" />
+            <circle cx="18" cy="6" r="3" />
+            <circle cx="6" cy="18" r="3" />
+            <path d="M18 9a9 9 0 0 1-9 9" />
+          </svg>
+          {branch}
+        </span>
+
+        <span style={{ flex: 1 }} />
+
+        {hasDiff ? (
+          <button
+            type="button"
+            onClick={onOpenDiff}
+            style={{
+              ...neomorphicButtonStyle('slate', false, {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                paddingTop: 6,
+                paddingRight: 10,
+                paddingBottom: 6,
+                paddingLeft: 10,
+                cursor: 'pointer',
+              }),
+              fontFamily: MOBILE_MONO_FONT,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: '#16a34a',
+                letterSpacing: '-0.01em',
+              }}
+            >
+              {`+${totalAdd}`}
+            </span>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: '#ef4444',
+                letterSpacing: '-0.01em',
+              }}
+            >
+              {`-${totalDel}`}
+            </span>
+          </button>
+        ) : null}
+
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 700,
+            color: toneColor,
+            fontFamily: MOBILE_MONO_FONT,
+            letterSpacing: '-0.01em',
             flexShrink: 0,
           }}
         >
-          <span style={{
-            fontSize: 11, fontWeight: 700, color: '#34c759',
-            fontFamily: '"SF Mono", ui-monospace, monospace',
-          }}>
-            +{totalAdd}
-          </span>
-          <span style={{
-            fontSize: 11, fontWeight: 700, color: '#ff3b30',
-            fontFamily: '"SF Mono", ui-monospace, monospace',
-          }}>
-            -{totalDel}
-          </span>
-        </button>
-      )}
-
-      {/* Context % */}
-      <span style={{
-        fontSize: 10, fontWeight: 600,
-        color: toneColor,
-        fontFamily: '"SF Mono", ui-monospace, monospace',
-        flexShrink: 0,
-      }}>
-        {status.headline}
-      </span>
+          {status.headline}
+        </span>
+      </div>
     </div>
   );
 });

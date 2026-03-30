@@ -362,10 +362,8 @@ export function TitleBar({
         alignItems: 'center',
         padding: '0 12px',
         gap: 4,
-        background: 'var(--t-chrome)',
-        backdropFilter: 'blur(20px) saturate(1.6)',
-        WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-        borderBottom: '1px solid var(--t-divider)',
+        background: 'transparent',
+        borderBottom: '0.5px solid rgba(0, 0, 0, 0.04)',
         zIndex: 9000,
         position: 'relative',
         ['WebkitAppRegion' as string]: 'drag',
@@ -429,26 +427,24 @@ export function TitleBar({
                 gap: 6,
                 padding: '6px 16px',
                 borderRadius: 10,
-                border: '1px solid var(--t-search-border)',
-                background: 'var(--t-search-bg)',
+                border: 'none',
+                background: 'rgba(0, 0, 0, 0.03)',
                 color: 'var(--t-text-muted)',
                 fontSize: 13,
                 fontWeight: 500,
                 letterSpacing: '-0.01em',
                 cursor: 'pointer',
                 WebkitTapHighlightColor: 'transparent',
-                transition: 'background 150ms ease, border-color 150ms ease',
+                transition: 'background 150ms ease',
                 width: '100%',
                 justifyContent: 'center',
                 ['WebkitAppRegion' as string]: 'no-drag',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--t-hover)';
-                e.currentTarget.style.borderColor = 'var(--t-input-border)';
+                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.06)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'var(--t-search-bg)';
-                e.currentTarget.style.borderColor = 'var(--t-search-border)';
+                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.03)';
               }}
             >
               <IconSearch />
@@ -490,26 +486,23 @@ export function TitleBar({
               gap: 6,
               padding: '6px 12px',
               borderRadius: 10,
-              border: '1px solid var(--t-divider)',
-              background: openMenuOpen ? 'var(--t-panel)' : 'var(--t-panel-translucent)',
-              boxShadow: openMenuOpen ? '0 12px 26px rgba(0,0,0,0.18)' : 'none',
+              border: 'none',
+              background: openMenuOpen ? 'rgba(0, 0, 0, 0.06)' : 'transparent',
               cursor: 'pointer',
               fontFamily: '-apple-system, system-ui, sans-serif',
               fontSize: 12,
               fontWeight: 600,
               color: openMenuOpen ? 'var(--t-text)' : 'var(--t-text-secondary)',
-              transition: 'background 150ms ease, border-color 150ms ease, box-shadow 150ms ease, color 150ms ease',
+              transition: 'background 150ms ease, color 150ms ease',
               whiteSpace: 'nowrap',
             }}
             onMouseEnter={(e) => {
               if (!openMenuOpen) {
-                e.currentTarget.style.background = 'var(--t-hover)';
+                e.currentTarget.style.background = 'rgba(0, 0, 0, 0.04)';
               }
-              e.currentTarget.style.borderColor = 'var(--t-divider-strong)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = openMenuOpen ? 'var(--t-panel)' : 'var(--t-panel-translucent)';
-              e.currentTarget.style.borderColor = 'var(--t-divider)';
+              e.currentTarget.style.background = openMenuOpen ? 'rgba(0, 0, 0, 0.06)' : 'transparent';
             }}
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

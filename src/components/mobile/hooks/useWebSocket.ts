@@ -18,6 +18,7 @@ import type {
   MobileInboxSnapshot,
   MobileTranscriptEntry,
 } from '@/lib/mobile/types';
+import { formatStreamingPreview } from '../utils';
 import { filterInboxSnapshotByOpenClaw } from '@/lib/mobile/inbox-filter';
 import { sameMobileInboxSnapshot } from '@/lib/mobile/inbox-signature';
 import type {
@@ -27,11 +28,13 @@ import type {
   RealtimeSubscription,
   SessionHistoryRealtimePayload,
 } from '@/lib/realtime/types';
+import type { MobileOrchestratorStatus } from '../types';
 
 export type WsConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
 
 interface UseWebSocketArgs {
   selectedSessionKey?: string;
+  selectedRepoPath?: string | null;
   includeOpenClaw: boolean;
   setSnapshot: Dispatch<SetStateAction<MobileInboxSnapshot>>;
   setRefreshError: Dispatch<SetStateAction<string | null>>;
@@ -48,6 +51,8 @@ interface UseWebSocketArgs {
 interface UseWebSocketResult {
   connectionState: WsConnectionState;
   isConnected: boolean;
+  orchestratorStatus: MobileOrchestratorStatus;
+  orchestratorNote: string | null;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
@@ -80,6 +85,7 @@ function getWsUrl(): string {
 
 export function useWebSocket({
   selectedSessionKey,
+  selectedRepoPath,
   includeOpenClaw,
   setSnapshot,
   setRefreshError,
@@ -93,12 +99,16 @@ export function useWebSocket({
   pendingMutationIdBySessionRef,
 }: UseWebSocketArgs): UseWebSocketResult {
   const [connectionState, setConnectionState] = useState<WsConnectionState>('disconnected');
+  const [orchestratorStatus, setOrchestratorStatus] = useState<MobileOrchestratorStatus>('hidden');
+  const [orchestratorNote, setOrchestratorNote] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const backoffRef = useRef(INITIAL_BACKOFF);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const disposedRef = useRef(false);
   const sessionKeyRef = useRef(selectedSessionKey);
+  const repoPathRef = useRef<string | null>(selectedRepoPath ?? null);
+  const subscribedRepoPathRef = useRef<string | null>(null);
   const includeOpenClawRef = useRef(includeOpenClaw);
   const realtimeSeqByStreamRef = useRef<Record<string, number>>({});
 
@@ -126,6 +136,9 @@ export function useWebSocket({
   useEffect(() => {
     sessionKeyRef.current = selectedSessionKey;
   }, [selectedSessionKey]);
+  useEffect(() => {
+    repoPathRef.current = selectedRepoPath ?? null;
+  }, [selectedRepoPath]);
 
   const applyInboxSnapshot = useCallback((inbox: MobileInboxSnapshot) => {
     const filtered = filterInboxSnapshotByOpenClaw(inbox, includeOpenClawRef.current);
@@ -183,6 +196,37 @@ export function useWebSocket({
       wsRef.current.send(JSON.stringify({ type: 'realtime-subscribe', subscriptions }));
     }
   }, [selectedSessionKey]);
+
+  useEffect(() => {
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+
+    const nextRepoPath = selectedRepoPath?.trim() || null;
+    const currentRepoPath = subscribedRepoPathRef.current;
+
+    if (currentRepoPath && currentRepoPath !== nextRepoPath) {
+      wsRef.current.send(JSON.stringify({ type: 'orchestrator-unsubscribe' }));
+      subscribedRepoPathRef.current = null;
+    }
+
+    if (!nextRepoPath) {
+      /* eslint-disable react-hooks/set-state-in-effect -- clearing the selected repo should immediately clear the visible orchestrator state to avoid stale cross-repo status. */
+      setOrchestratorStatus('hidden');
+      setOrchestratorNote(null);
+      /* eslint-enable react-hooks/set-state-in-effect */
+      return;
+    }
+
+    if (currentRepoPath === nextRepoPath) {
+      wsRef.current.send(JSON.stringify({ type: 'orchestrator-status', repoPath: nextRepoPath }));
+      return;
+    }
+
+    setOrchestratorStatus('connecting');
+    setOrchestratorNote('Linking mobile to the desktop orchestrator.');
+    wsRef.current.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath: nextRepoPath }));
+    wsRef.current.send(JSON.stringify({ type: 'orchestrator-status', repoPath: nextRepoPath }));
+    subscribedRepoPathRef.current = nextRepoPath;
+  }, [selectedRepoPath]);
 
   const sendTerminalAttach = useCallback((sessionName: string, cols: number, rows: number) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -343,6 +387,53 @@ export function useWebSocket({
         case 'pong':
           // Keepalive acknowledged
           break;
+
+        case 'orchestrator':
+          if (eventType === 'status') {
+            const nextStatus = data?.status;
+            if (
+              nextStatus === 'ready'
+              || nextStatus === 'busy'
+              || nextStatus === 'dead'
+            ) {
+              setOrchestratorStatus(nextStatus);
+              setOrchestratorNote(
+                nextStatus === 'busy'
+                  ? 'Desktop orchestrator is routing work.'
+                  : nextStatus === 'ready'
+                    ? 'Desktop orchestrator is linked and idle.'
+                    : 'Desktop orchestrator is unavailable for this repo.',
+              );
+            } else {
+              setOrchestratorStatus('connecting');
+            }
+          } else if (eventType === 'tool-use') {
+            const toolName = typeof data?.name === 'string' ? data.name : 'tool';
+            setOrchestratorStatus('busy');
+            setOrchestratorNote(`Orchestrator is using ${toolName}.`);
+          } else if (eventType === 'agent-update') {
+            const detail = typeof data?.detail === 'string' ? data.detail : null;
+            const name = typeof data?.name === 'string' ? data.name : 'Agent';
+            const statusText = typeof data?.status === 'string' ? data.status : 'updated';
+            setOrchestratorStatus('busy');
+            setOrchestratorNote(detail ?? `${name} ${statusText}.`);
+          } else if (eventType === 'output') {
+            const text = typeof data?.text === 'string' ? data.text : '';
+            const thinking = data?.thinking === true;
+            if (text) {
+              setOrchestratorStatus('busy');
+              setOrchestratorNote(
+                thinking
+                  ? 'Desktop orchestrator is planning the next move.'
+                  : formatStreamingPreview(text),
+              );
+            }
+          } else if (eventType === 'error') {
+            const error = typeof data?.error === 'string' ? data.error : 'Desktop orchestrator error.';
+            setOrchestratorStatus('error');
+            setOrchestratorNote(error);
+          }
+          break;
       }
     }
 
@@ -358,6 +449,17 @@ export function useWebSocket({
         // Subscribe to current session
         if (sessionKeyRef.current) {
           ws.send(JSON.stringify({ type: 'subscribe', sessionKey: sessionKeyRef.current }));
+        }
+        if (repoPathRef.current) {
+          setOrchestratorStatus('connecting');
+          setOrchestratorNote('Linking mobile to the desktop orchestrator.');
+          ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath: repoPathRef.current }));
+          ws.send(JSON.stringify({ type: 'orchestrator-status', repoPath: repoPathRef.current }));
+          subscribedRepoPathRef.current = repoPathRef.current;
+        } else {
+          setOrchestratorStatus('hidden');
+          setOrchestratorNote(null);
+          subscribedRepoPathRef.current = null;
         }
         const subscriptions: RealtimeSubscription[] = [{ stream: 'global', since: realtimeSeqByStreamRef.current.global }];
         if (sessionKeyRef.current) {
@@ -382,6 +484,14 @@ export function useWebSocket({
         if (pingTimerRef.current) { clearInterval(pingTimerRef.current); pingTimerRef.current = null; }
         if (!disposedRef.current) {
           setConnectionState('reconnecting');
+          if (repoPathRef.current) {
+            setOrchestratorStatus('connecting');
+            setOrchestratorNote('Reconnecting mobile to the desktop orchestrator.');
+          } else {
+            setOrchestratorStatus('hidden');
+            setOrchestratorNote(null);
+          }
+          subscribedRepoPathRef.current = null;
           streamingTextRefRef.current.current = '';
           setStreamingTextRef.current('');
           // Exponential backoff reconnect
@@ -406,6 +516,9 @@ export function useWebSocket({
       if (pingTimerRef.current) { clearInterval(pingTimerRef.current); pingTimerRef.current = null; }
       if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
       setConnectionState('disconnected');
+      setOrchestratorStatus('hidden');
+      setOrchestratorNote(null);
+      subscribedRepoPathRef.current = null;
     };
   }, [
     applyInboxSnapshot,
@@ -417,6 +530,8 @@ export function useWebSocket({
   return {
     connectionState,
     isConnected: connectionState === 'connected',
+    orchestratorStatus,
+    orchestratorNote,
     sendTerminalAttach,
     sendTerminalInput,
     sendTerminalResize,
