@@ -451,7 +451,7 @@ function EmptyState() {
 
 // ── Main Panel ──
 
-export function ApprovalQueuePanel() {
+export function ApprovalQueuePanel({ onClose }: { onClose?: () => void } = {}) {
   const [pending, setPending] = useState<ApprovalRecord[]>([]);
   const [history, setHistory] = useState<ApprovalRecord[]>([]);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
@@ -543,6 +543,31 @@ export function ApprovalQueuePanel() {
             </span>
           )}
         </div>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              color: 'var(--t-text-secondary)',
+              transition: 'background 140ms ease',
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--t-panel-hover)'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+          >
+            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6L6 18" /><path d="M6 6l12 12" />
+            </svg>
+          </button>
+        )}
       </div>
 
       {/* Content */}
