@@ -115,6 +115,18 @@ interface GatewayConfig {
   configFound: boolean;
 }
 
+function normalizeOrchestratorRepoPath(repoPath: string | null): string | null {
+  const trimmed = repoPath?.trim();
+  if (!trimmed) return null;
+  const home = process.env.HOME ?? homedir();
+  const expanded = trimmed === '~'
+    ? home
+    : trimmed.startsWith('~/') && home
+      ? join(home, trimmed.slice(2))
+      : trimmed;
+  return resolve(expanded);
+}
+
 function loadGatewayConfig(): GatewayConfig {
   const home = process.env.HOME ?? homedir();
   const configPath = join(home, '.openclaw', 'openclaw.json');
@@ -1547,7 +1559,7 @@ function handleClientMessage(client: ClientState, raw: string) {
 // ── Orchestrator channel handlers ──
 
 async function handleOrchestratorSubscribe(client: ClientState, msg: Record<string, unknown>) {
-  const repoPath = typeof msg.repoPath === 'string' ? msg.repoPath : null;
+  const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
   if (!repoPath) return;
 
   try {
@@ -1576,7 +1588,7 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
 }
 
 async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string, unknown>) {
-  const repoPath = typeof msg.repoPath === 'string' ? msg.repoPath : null;
+  const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
   const message = typeof msg.message === 'string' ? msg.message : null;
   if (!repoPath || !message) return;
 
@@ -1681,7 +1693,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
 }
 
 function handleOrchestratorStatus(client: ClientState, msg: Record<string, unknown>) {
-  const repoPath = typeof msg.repoPath === 'string' ? msg.repoPath : null;
+  const repoPath = normalizeOrchestratorRepoPath(typeof msg.repoPath === 'string' ? msg.repoPath : null);
   if (!repoPath) return;
 
   const session = getOrchestratorSession(repoPath);

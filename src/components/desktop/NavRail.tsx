@@ -1,33 +1,25 @@
 'use client';
-/* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/no-unused-expressions -- nav rail keeps dormant playground affordances during migration */
 
 /**
- * NavRail — Slim left navigation rail, adapted from MisterADA PlaygroundGlassNav.
+ * NavRail — Slim fixed-width left navigation rail.
  *
- * Hover-expand from 56px → 200px with framer-motion spring.
- * Icon-only collapsed, icon+label expanded.
- * Glass frosted background matching the Cortex IDE design system.
+ * Compact icon-only rail with Phosphor duotone icons in neomorphic containers.
+ * Fixed at 44px — no hover-expand.
  */
 
-import { useState, useEffect, createContext, useContext, useCallback, cloneElement, isValidElement, type ReactNode, type ReactElement } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect, cloneElement, isValidElement, type ReactElement } from 'react';
 import {
-  Box,
-  Users,
+  UsersThree,
   Terminal,
-  Settings,
+  GearSix,
   Brain,
-  BarChart3,
+  ChartBar,
   Bell,
   Lightbulb,
-  Cable,
+  Plugs,
   ShieldCheck,
-  type LucideIcon,
-} from 'lucide-react';
-import {
-  readNavRailHoverExpandEnabled,
-  subscribeNavRailHoverExpandEnabled,
-} from '@/lib/appearance/nav-rail';
+} from '@phosphor-icons/react';
+import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 
 // ── Types ──
 
@@ -54,83 +46,90 @@ interface NavRailProps {
 interface NavItem {
   id: NavSection;
   label: string;
-  icon: LucideIcon;
+  icon: PhosphorIcon;
 }
 
 // ── Constants ──
 
-const COLLAPSED_WIDTH = 56;
-const EXPANDED_WIDTH = 200;
+const RAIL_WIDTH = 44;
 
 const NAV_ITEMS: NavItem[] = [
-  { id: 'agents', label: 'Agents', icon: Users },
+  { id: 'agents', label: 'Agents', icon: UsersThree },
   { id: 'approvals', label: 'Approvals', icon: ShieldCheck },
   { id: 'terminal', label: 'Terminal', icon: Terminal },
   { id: 'memory', label: 'Memory', icon: Brain },
-  { id: 'analytics', label: 'Analytics', icon: BarChart3 },
+  { id: 'analytics', label: 'Analytics', icon: ChartBar },
 ];
 
-const SPRING = { type: 'spring' as const, stiffness: 400, damping: 30 };
 const BRAND_MARK_BLUE = '#2563eb';
+
+// ── Neomorphic icon container styles ──
+
+const NEO_INACTIVE = {
+  background: 'rgba(255, 255, 255, 0.55)',
+  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
+};
+const NEO_ACTIVE = {
+  background: 'rgba(255, 255, 255, 0.95)',
+  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+};
+const NEO_HOVER = {
+  background: 'rgba(255, 255, 255, 0.8)',
+  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+};
+
+function neoIconStyle(active: boolean): React.CSSProperties {
+  const preset = active ? NEO_ACTIVE : NEO_INACTIVE;
+  return {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    background: preset.background,
+    boxShadow: preset.boxShadow,
+    transition: 'box-shadow 150ms ease, background 150ms ease',
+  };
+}
+
+function applyNeoHover(el: HTMLElement, active: boolean) {
+  if (!active) {
+    el.style.background = NEO_HOVER.background;
+    el.style.boxShadow = NEO_HOVER.boxShadow;
+  }
+}
+
+function resetNeoHover(el: HTMLElement, active: boolean) {
+  if (!active) {
+    el.style.background = NEO_INACTIVE.background;
+    el.style.boxShadow = NEO_INACTIVE.boxShadow;
+  }
+}
 
 // ── Logo ──
 
-function CortexLogo({ expanded }: { expanded: boolean }) {
+function CortexLogo() {
   return (
     <div style={{
       display: 'flex',
       alignItems: 'center',
-      gap: 8,
-      padding: '4px 0',
-      overflow: 'hidden',
-      whiteSpace: 'nowrap',
+      justifyContent: 'center',
+      padding: '2px 0',
     }}>
       <svg
-        width="24"
-        height="24"
+        width="20"
+        height="20"
         viewBox="0 0 24 24"
         fill="none"
         aria-hidden="true"
         style={{ flexShrink: 0 }}
       >
-        <circle
-          cx="7"
-          cy="12"
-          r="4.25"
-          stroke={BRAND_MARK_BLUE}
-          strokeWidth="2.25"
-        />
-        <circle
-          cx="16.5"
-          cy="8"
-          r="3.25"
-          stroke={BRAND_MARK_BLUE}
-          strokeWidth="2.25"
-        />
-        <circle
-          cx="16.5"
-          cy="16"
-          r="3.25"
-          stroke={BRAND_MARK_BLUE}
-          strokeWidth="2.25"
-        />
+        <circle cx="7" cy="12" r="4.25" stroke={BRAND_MARK_BLUE} strokeWidth="2.25" />
+        <circle cx="16.5" cy="8" r="3.25" stroke={BRAND_MARK_BLUE} strokeWidth="2.25" />
+        <circle cx="16.5" cy="16" r="3.25" stroke={BRAND_MARK_BLUE} strokeWidth="2.25" />
       </svg>
-      <motion.span
-        initial={false}
-        animate={{
-          opacity: expanded ? 1 : 0,
-          display: expanded ? 'inline-block' : 'none',
-        }}
-        transition={{ duration: 0.15 }}
-        style={{
-          fontSize: 14,
-          fontWeight: 700,
-          color: BRAND_MARK_BLUE,
-          letterSpacing: '-0.02em',
-        }}
-      >
-        o8
-      </motion.span>
     </div>
   );
 }
@@ -140,17 +139,15 @@ function CortexLogo({ expanded }: { expanded: boolean }) {
 function NavButton({
   item,
   active,
-  expanded,
   onClick,
   badge,
 }: {
   item: NavItem;
   active: boolean;
-  expanded: boolean;
   onClick: () => void;
   badge?: number;
 }) {
-  const Icon = item.icon;
+  const IconComponent = item.icon;
 
   return (
     <button
@@ -158,71 +155,55 @@ function NavButton({
       onClick={onClick}
       aria-label={item.label}
       aria-current={active ? 'page' : undefined}
+      title={item.label}
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 10,
+        justifyContent: 'center',
         width: '100%',
-        padding: '10px 12px',
-        borderRadius: 12,
+        padding: '4px 0',
         border: 'none',
-        background: active ? 'var(--t-panel-active)' : 'transparent',
-        color: active ? 'var(--t-text)' : 'var(--t-text-secondary)',
+        background: 'transparent',
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
-        transition: 'background 150ms ease, color 150ms ease',
-        overflow: 'hidden',
-        whiteSpace: 'nowrap',
-        minHeight: 44,
+        position: 'relative',
       }}
       onMouseEnter={(e) => {
-        if (!active) e.currentTarget.style.background = 'var(--t-hover)';
+        const neo = e.currentTarget.querySelector('[data-neo]') as HTMLElement;
+        if (neo) applyNeoHover(neo, active);
       }}
       onMouseLeave={(e) => {
-        if (!active) e.currentTarget.style.background = 'transparent';
+        const neo = e.currentTarget.querySelector('[data-neo]') as HTMLElement;
+        if (neo) resetNeoHover(neo, active);
       }}
     >
-      <div style={{ position: 'relative', flexShrink: 0 }}>
-        <Icon
-          size={20}
-          strokeWidth={active ? 2.2 : 1.8}
+      <div data-neo="" style={neoIconStyle(active)}>
+        <IconComponent
+          size={18}
+          weight={active ? 'duotone' : 'regular'}
+          color={active ? 'var(--t-text)' : 'var(--t-text-secondary)'}
         />
-        {badge != null && badge > 0 ? (
-          <div style={{
-            position: 'absolute',
-            top: -4,
-            right: -6,
-            width: 16,
-            height: 16,
-            borderRadius: 8,
-            background: '#ef4444',
-            color: '#fff',
-            fontSize: 9,
-            fontWeight: 700,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            lineHeight: 1,
-          }}>
-            {badge > 9 ? '9+' : badge}
-          </div>
-        ) : null}
       </div>
-      <motion.span
-        initial={false}
-        animate={{
-          opacity: expanded ? 1 : 0,
-          display: expanded ? 'inline-block' : 'none',
-        }}
-        transition={{ duration: 0.12 }}
-        style={{
-          fontSize: 13,
-          fontWeight: active ? 600 : 500,
-          letterSpacing: '-0.01em',
-        }}
-      >
-        {item.label}
-      </motion.span>
+      {badge != null && badge > 0 ? (
+        <div style={{
+          position: 'absolute',
+          top: 2,
+          right: 2,
+          width: 14,
+          height: 14,
+          borderRadius: 7,
+          background: '#ef4444',
+          color: '#fff',
+          fontSize: 8,
+          fontWeight: 700,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          lineHeight: 1,
+        }}>
+          {badge > 9 ? '9+' : badge}
+        </div>
+      ) : null}
     </button>
   );
 }
@@ -230,83 +211,75 @@ function NavButton({
 // ── Utility Button (bottom) ──
 
 function UtilButton({
-  icon: Icon,
+  icon: IconComponent,
   label,
-  expanded,
   onClick,
   badge,
   active,
   tint,
 }: {
-  icon: LucideIcon;
+  icon: PhosphorIcon;
   label: string;
-  expanded: boolean;
   onClick?: () => void;
   badge?: number;
   active?: boolean;
   tint?: string;
 }) {
-  const activeColor = tint ?? '#2563eb';
+  const activeColor = tint ?? BRAND_MARK_BLUE;
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={label}
+      title={label}
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 10,
+        justifyContent: 'center',
         width: '100%',
-        padding: '10px 12px',
-        borderRadius: 12,
+        padding: '4px 0',
         border: 'none',
-        background: active ? (tint ? `${tint}14` : 'rgba(37, 99, 235, 0.08)') : 'transparent',
-        color: active ? activeColor : (tint ?? 'var(--t-text-secondary)'),
+        background: 'transparent',
         cursor: 'pointer',
         WebkitTapHighlightColor: 'transparent',
-        transition: 'background 150ms ease',
-        overflow: 'hidden',
-        whiteSpace: 'nowrap',
-        minHeight: 44,
         position: 'relative',
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+      onMouseEnter={(e) => {
+        const neo = e.currentTarget.querySelector('[data-neo]') as HTMLElement;
+        if (neo) applyNeoHover(neo, !!active);
+      }}
+      onMouseLeave={(e) => {
+        const neo = e.currentTarget.querySelector('[data-neo]') as HTMLElement;
+        if (neo) resetNeoHover(neo, !!active);
+      }}
     >
-      <div style={{ position: 'relative', flexShrink: 0 }}>
-        <Icon size={20} strokeWidth={1.8} />
-        {badge && badge > 0 ? (
-          <div style={{
-            position: 'absolute',
-            top: -4,
-            right: -6,
-            width: 16,
-            height: 16,
-            borderRadius: 8,
-            background: '#2563eb',
-            color: '#fff',
-            fontSize: 9,
-            fontWeight: 700,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            lineHeight: 1,
-          }}>
-            {badge > 9 ? '9+' : badge}
-          </div>
-        ) : null}
+      <div data-neo="" style={neoIconStyle(!!active)}>
+        <IconComponent
+          size={18}
+          weight={active ? 'duotone' : 'regular'}
+          color={active ? activeColor : (tint ?? 'var(--t-text-secondary)')}
+        />
       </div>
-      <motion.span
-        initial={false}
-        animate={{
-          opacity: expanded ? 1 : 0,
-          display: expanded ? 'inline-block' : 'none',
-        }}
-        transition={{ duration: 0.12 }}
-        style={{ fontSize: 13, fontWeight: 500, letterSpacing: '-0.01em' }}
-      >
-        {label}
-      </motion.span>
+      {badge && badge > 0 ? (
+        <div style={{
+          position: 'absolute',
+          top: 2,
+          right: 2,
+          width: 14,
+          height: 14,
+          borderRadius: 7,
+          background: BRAND_MARK_BLUE,
+          color: '#fff',
+          fontSize: 8,
+          fontWeight: 700,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          lineHeight: 1,
+        }}>
+          {badge > 9 ? '9+' : badge}
+        </div>
+      ) : null}
     </button>
   );
 }
@@ -319,9 +292,9 @@ interface PortGroup {
   ports: number[];
 }
 
-// ── Ports Footer ──
+// ── Ports Footer (collapsed-only) ──
 
-function PortsFooter({ expanded, onPortPreview }: { expanded: boolean; onPortPreview?: (port: number, url: string, repo?: string) => void }) {
+function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: string, repo?: string) => void }) {
   const [groups, setGroups] = useState<PortGroup[]>([]);
   const [total, setTotal] = useState(0);
 
@@ -344,109 +317,37 @@ function PortsFooter({ expanded, onPortPreview }: { expanded: boolean; onPortPre
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      {/* Separator */}
       <div style={{
         height: 1,
-        background: 'var(--t-divider)',
-        margin: '4px 12px',
+        width: 24,
+        background: 'var(--t-divider-subtle)',
+        margin: '4px auto',
       }} />
-
-      {/* Header */}
       <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '4px 12px',
-        overflow: 'hidden',
-        whiteSpace: 'nowrap',
+        display: 'flex', justifyContent: 'center', padding: '2px 0',
       }}>
-        <Cable size={14} strokeWidth={1.8} style={{ color: '#22c55e', flexShrink: 0 }} />
-        <motion.span
-          initial={false}
-          animate={{ opacity: expanded ? 1 : 0, display: expanded ? 'inline-block' : 'none' }}
-          transition={{ duration: 0.12 }}
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: 'var(--t-text-secondary)',
-            letterSpacing: '-0.01em',
+        <div
+          title={groups.flatMap(g => g.ports.map(p => `${g.repo}: ${p}`)).join('\n')}
+          onClick={() => {
+            if (groups.length > 0 && groups[0].ports.length > 0) {
+              const port = groups[0].ports[0];
+              const url = `http://localhost:${port}`;
+              onPortPreview ? onPortPreview(port, url, groups[0].repo) : window.open(url, '_blank');
+            }
           }}
-        >
-          Ports
-        </motion.span>
-        <motion.span
-          initial={false}
-          animate={{ opacity: expanded ? 1 : 0, display: expanded ? 'inline-block' : 'none' }}
-          transition={{ duration: 0.12 }}
           style={{
-            fontSize: 10,
-            fontWeight: 700,
-            color: '#22c55e',
-            marginLeft: 'auto',
+            width: 22, height: 22, borderRadius: 6,
+            background: 'rgba(34,197,94,0.1)',
+            border: '1px solid rgba(34,197,94,0.2)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 10, fontWeight: 700, color: '#16a34a',
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+            cursor: 'pointer',
           }}
         >
           {total}
-        </motion.span>
-      </div>
-
-      {/* Port groups */}
-      {expanded ? (
-        /* Expanded: full port pills grouped by repo */
-        groups.map((group) => (
-          <div key={group.repo} style={{ padding: '0 12px', overflow: 'hidden' }}>
-            <div style={{
-              fontSize: 9, fontWeight: 600, color: 'var(--t-text-faint)',
-              textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 2,
-            }}>
-              {group.repo}
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-              {group.ports.map((port) => (
-                <button
-                  key={port}
-                  type="button"
-                  onClick={() => {
-                    const url = `http://localhost:${port}`;
-                    onPortPreview ? onPortPreview(port, url, group.repo) : window.open(url, '_blank');
-                  }}
-                  title={`Preview localhost:${port}`}
-                  style={{
-                    padding: '2px 6px', borderRadius: 4,
-                    border: '1px solid rgba(34,197,94,0.15)',
-                    background: 'rgba(34,197,94,0.06)',
-                    color: '#16a34a', fontSize: 10, fontWeight: 600,
-                    fontFamily: '"SF Mono", ui-monospace, monospace',
-                    cursor: 'pointer', transition: 'background 120ms ease',
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(34,197,94,0.12)'; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(34,197,94,0.06)'; }}
-                >
-                  {port}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))
-      ) : (
-        /* Collapsed: single green count badge */
-        <div style={{
-          display: 'flex', justifyContent: 'center', padding: '2px 0',
-        }}>
-          <div
-            title={groups.flatMap(g => g.ports.map(p => `${g.repo}: ${p}`)).join('\n')}
-            style={{
-              width: 22, height: 22, borderRadius: 6,
-              background: 'rgba(34,197,94,0.1)',
-              border: '1px solid rgba(34,197,94,0.2)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 10, fontWeight: 700, color: '#16a34a',
-              fontFamily: '"SF Mono", ui-monospace, monospace',
-            }}
-          >
-            {total}
-          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -464,38 +365,25 @@ export function NavRail({
   onThoughtsToggle,
   onPortPreview,
 }: NavRailProps) {
-  const [expanded, setExpanded] = useState(false);
-  const [hoverExpandEnabled, setHoverExpandEnabled] = useState(() => readNavRailHoverExpandEnabled());
   const [alertAnchorEl, setAlertAnchorEl] = useState<HTMLDivElement | null>(null);
   const alertTrayNode = alertTray && isValidElement(alertTray)
     ? cloneElement(alertTray, { desktopAnchorEl: alertAnchorEl })
     : alertTray;
 
-  useEffect(() => subscribeNavRailHoverExpandEnabled(setHoverExpandEnabled), []);
-
   return (
-    <motion.nav
-      initial={false}
-      animate={{ width: expanded && hoverExpandEnabled ? EXPANDED_WIDTH : COLLAPSED_WIDTH }}
-      transition={SPRING}
-      onMouseEnter={() => {
-        if (hoverExpandEnabled) setExpanded(true);
-      }}
-      onMouseLeave={() => {
-        if (hoverExpandEnabled) setExpanded(false);
-      }}
+    <nav
       aria-label="Main navigation"
       style={{
+        width: RAIL_WIDTH,
         height: '100%',
         flexShrink: 0,
         display: 'flex',
         flexDirection: 'column',
         justifyContent: 'space-between',
-        padding: '16px 8px',
+        padding: '12px 4px',
         background: 'var(--t-chrome-nav)',
         backdropFilter: 'blur(20px) saturate(1.4)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
-        borderRight: '1px solid var(--t-divider)',
         position: 'relative',
         zIndex: 40,
         overflowX: 'visible',
@@ -504,17 +392,18 @@ export function NavRail({
       }}
     >
       {/* Top — Logo + Nav Items */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
         {/* Logo */}
-        <div style={{ padding: '4px 12px 12px', marginBottom: 4 }}>
-          <CortexLogo expanded={expanded} />
+        <div style={{ paddingTop: 2, paddingBottom: 8 }}>
+          <CortexLogo />
         </div>
 
         {/* Separator */}
         <div style={{
           height: 1,
-          background: 'var(--t-divider)',
-          margin: '4px 12px',
+          width: 24,
+          background: 'var(--t-divider-subtle)',
+          marginBottom: 6,
         }} />
 
         {/* Main nav */}
@@ -523,7 +412,6 @@ export function NavRail({
             key={item.id}
             item={item}
             active={activeSection === item.id}
-            expanded={expanded}
             onClick={() => onSectionChange(item.id)}
             badge={item.id === 'approvals' ? approvalCount : undefined}
           />
@@ -531,35 +419,31 @@ export function NavRail({
       </div>
 
       {/* Bottom — Ports + Thoughts + Alerts + Settings */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, position: 'relative' }}>
-        {/* Ports footer — pinned above utils */}
-        <PortsFooter expanded={expanded} onPortPreview={onPortPreview} />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center', position: 'relative' }}>
+        <PortsFooter onPortPreview={onPortPreview} />
 
         <UtilButton
           icon={Lightbulb}
           label="Thoughts"
-          expanded={expanded}
           onClick={onThoughtsToggle}
           active={thoughtsOpen}
         />
-        <div ref={setAlertAnchorEl} style={{ position: 'relative' }}>
+        <div ref={setAlertAnchorEl} style={{ position: 'relative', width: '100%' }}>
           <UtilButton
             icon={Bell}
             label="Alerts"
-            expanded={expanded}
             onClick={onAlertClick}
             badge={alertCount}
           />
           {alertTrayNode}
         </div>
         <UtilButton
-          icon={Settings}
+          icon={GearSix}
           label="Settings"
-          expanded={expanded}
           onClick={() => onSectionChange('settings')}
           tint="#ef4444"
         />
       </div>
-    </motion.nav>
+    </nav>
   );
 }

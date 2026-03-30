@@ -69,9 +69,9 @@ const DRILL_MIN_HEIGHT = 320;
 const DRILL_MAX_HEIGHT = 680;
 const DEFAULT_TIMELINE_REPO = 'hurttlocker/cortex-ide';
 const TIMELINE_BAR_HEIGHT = 20;
-const TIMELINE_ACTIVE_SEGMENT_MIN_PX = 7;
-const TIMELINE_THINKING_MIN_PX = 10;
-const TIMELINE_TESTING_MIN_PX = 8;
+const TIMELINE_ACTIVE_SEGMENT_MIN_PX = 20;
+const TIMELINE_THINKING_MIN_PX = 20;
+const TIMELINE_TESTING_MIN_PX = 20;
 // Keep the drill-down implementation in place, but disable dashboard
 // double-click entry until the interaction is ready to ship.
 const TIMELINE_DRILLDOWN_ENABLED = false;
@@ -122,59 +122,16 @@ function timelineSegmentDisplayWidth(kind: SegmentKind, actualWidthPx: number) {
   return actualWidthPx;
 }
 
-function timelineSegmentChrome(kind: SegmentKind, color: string, hovered: boolean) {
-  if (kind === 'coding') {
-    return {
-      top: 2,
-      height: TIMELINE_BAR_HEIGHT - 4,
-      borderRadius: 4,
-      opacity: hovered ? 1 : 0.98,
-      background: `linear-gradient(180deg, rgba(255,255,255,0.22) 0%, ${color} 24%, ${color} 100%)`,
-      boxShadow: hovered
-        ? `0 0 0 1px rgba(255,255,255,0.48) inset, 0 0 0 1px ${color}55, 0 3px 12px ${color}35`
-        : `0 0 0 1px rgba(255,255,255,0.34) inset, 0 1px 7px ${color}2c`,
-      transform: hovered ? 'translateY(-1px)' : 'none',
-    };
-  }
-
-  if (kind === 'thinking') {
-    return {
-      top: 3,
-      height: TIMELINE_BAR_HEIGHT - 6,
-      borderRadius: 999,
-      opacity: hovered ? 1 : 0.96,
-      background: `linear-gradient(180deg, rgba(255,255,255,0.54) 0%, ${color}d9 26%, ${color} 100%)`,
-      boxShadow: hovered
-        ? `0 0 0 1px rgba(255,255,255,0.68) inset, 0 0 0 1px ${color}55, 0 3px 10px ${color}36`
-        : `0 0 0 1px rgba(255,255,255,0.44) inset, 0 1px 6px ${color}2a`,
-      transform: hovered ? 'translateY(-1px)' : 'none',
-    };
-  }
-
-  if (kind === 'testing') {
-    return {
-      top: 4,
-      height: TIMELINE_BAR_HEIGHT - 8,
-      borderRadius: 999,
-      opacity: hovered ? 1 : 0.97,
-      background: `linear-gradient(180deg, rgba(255,255,255,0.42) 0%, ${color}e5 24%, ${color} 100%)`,
-      boxShadow: hovered
-        ? `0 0 0 1px rgba(255,255,255,0.62) inset, 0 0 0 1px ${color}50, 0 3px 10px ${color}30`
-        : `0 0 0 1px rgba(255,255,255,0.4) inset, 0 1px 6px ${color}24`,
-      transform: hovered ? 'translateY(-1px)' : 'none',
-    };
-  }
-
+function timelineSegmentChrome(_kind: SegmentKind, color: string, hovered: boolean) {
+  // Watercolor: uniform height, wide feathered edges, no hard boundaries
   return {
-    top: 1,
-    height: TIMELINE_BAR_HEIGHT - 2,
+    top: 2,
+    height: TIMELINE_BAR_HEIGHT - 4,
     borderRadius: 999,
-    opacity: 1,
-    background: `linear-gradient(180deg, rgba(255,255,255,0.4) 0%, ${color} 28%, #dc2626 100%)`,
-    boxShadow: hovered
-      ? '0 0 0 1px rgba(255,255,255,0.64) inset, 0 0 0 1px rgba(239,68,68,0.52), 0 4px 12px rgba(239,68,68,0.36)'
-      : '0 0 0 1px rgba(255,255,255,0.42) inset, 0 2px 8px rgba(239,68,68,0.28)',
-    transform: hovered ? 'translateY(-1px)' : 'none',
+    opacity: hovered ? 0.95 : 0.7,
+    background: `linear-gradient(90deg, ${color}00 0%, ${color}90 20%, ${color} 40%, ${color} 60%, ${color}90 80%, ${color}00 100%)`,
+    boxShadow: 'none',
+    transform: 'none',
   };
 }
 
@@ -1038,18 +995,18 @@ export function SessionTimeline({
     );
   }
 
+  if (!hasActivity) return null;
+
   return (
     <div style={{
-      height: 36,
+      height: 32,
       flexShrink: 0,
       display: 'flex',
       alignItems: 'center',
       padding: '0 16px 0 90px',
       gap: 12,
-      background: 'var(--t-chrome-timeline)',
-      backdropFilter: 'blur(12px)',
-      WebkitBackdropFilter: 'blur(12px)',
-      borderBottom: '1px solid var(--t-divider-subtle)',
+      background: 'transparent',
+      borderBottom: '0.5px solid rgba(0, 0, 0, 0.04)',
       fontSize: 11,
       fontWeight: 500,
       color: 'var(--t-text-secondary)',
@@ -1130,15 +1087,15 @@ export function SessionTimeline({
               key={entry.index}
               style={{
                 position: 'absolute',
-                left: barWidth > 0 ? entry.displayLeftPx : `${entry.leftPct}%`,
-                width: barWidth > 0 ? entry.displayWidthPx : `${entry.widthPct}%`,
+                left: barWidth > 0 ? Math.max(0, entry.displayLeftPx - 4) : `${entry.leftPct}%`,
+                width: barWidth > 0 ? entry.displayWidthPx + 8 : `${entry.widthPct}%`,
                 top: chrome.top,
                 height: chrome.height,
                 background: chrome.background,
                 opacity: chrome.opacity,
-                transition: 'opacity 60ms ease-out, transform 80ms ease-out, box-shadow 80ms ease-out',
+                transition: 'opacity 120ms ease-out',
                 borderRadius: chrome.borderRadius,
-                boxShadow: chrome.boxShadow,
+                boxShadow: 'none',
                 transform: chrome.transform,
                 zIndex: isHovered ? 8 : entry.layer + 3,
               }}
@@ -1171,8 +1128,7 @@ export function SessionTimeline({
 
       {/* Right — Legend dots */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-        {hasActivity ? (
-          (['thinking', 'coding', 'testing', 'error'] as SegmentKind[]).map((kind) => {
+        {(['thinking', 'coding', 'testing', 'error'] as SegmentKind[]).map((kind) => {
             const total = kindTotals[kind];
             if (!total) return null;
             return (
@@ -1181,12 +1137,7 @@ export function SessionTimeline({
                 <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{formatDuration(total)}</span>
               </div>
             );
-          })
-        ) : (
-          <span style={{ fontSize: 10, color: 'var(--t-text-faint)', whiteSpace: 'nowrap' }}>
-            No IDE activity yet
-          </span>
-        )}
+          })}
       </div>
 
       {hoverCard && hoverClientX !== null && typeof document !== 'undefined' && createPortal(

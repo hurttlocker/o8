@@ -2822,7 +2822,7 @@ export function WorkspaceSidePanel({
         minHeight: 0,
         display: 'flex',
         flexDirection: 'column',
-        background: THEME_PANEL_GLASS,
+        background: 'transparent',
       }}
     >
       <div
@@ -2831,7 +2831,7 @@ export function WorkspaceSidePanel({
           alignItems: 'center',
           gap: 10,
           padding: '10px 12px',
-          borderBottom: '1px solid var(--t-divider)',
+          borderBottom: '0.5px solid rgba(0, 0, 0, 0.04)',
           flexShrink: 0,
         }}
       >

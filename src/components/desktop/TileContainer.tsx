@@ -49,6 +49,8 @@ function ResizeHandle({
   return (
     <div
       onMouseDown={onMouseDown}
+      onMouseEnter={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '1'; }}
+      onMouseLeave={(e) => { const bar = e.currentTarget.firstElementChild as HTMLElement; if (bar) bar.style.opacity = '0'; }}
       style={{
         width: isVertical ? HANDLE_SIZE : '100%',
         height: isVertical ? '100%' : HANDLE_SIZE,
@@ -67,6 +69,8 @@ function ResizeHandle({
         height: isVertical ? 42 : 3,
         borderRadius: 999,
         backgroundColor: 'var(--t-drag-handle)',
+        opacity: 0,
+        transition: 'opacity 150ms ease',
       }} />
     </div>
   );
@@ -209,7 +213,7 @@ export function TileContainer({
       minWidth: 0,
       minHeight: 0,
       overflow: 'hidden',
-      backgroundColor: 'var(--t-bg-subtle)',
+      backgroundColor: '#ffffff',
     }}>
       {renderNode(layout.root)}
     </div>
@@ -251,10 +255,10 @@ function TileLeafView({
         minWidth: 0,
         minHeight: 0,
         overflow: 'hidden',
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: active ? 'rgba(37,99,235,0.18)' : 'transparent',
-        backgroundColor: 'var(--t-panel)',
+        borderWidth: 0,
+        borderStyle: 'none',
+        borderColor: 'transparent',
+        backgroundColor: 'transparent',
       }}
     >
       {!definition?.hideHeader && (

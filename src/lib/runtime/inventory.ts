@@ -179,8 +179,8 @@ function mapIdeGhostRuntimeTabToAgent(session: IdeRuntimeSessionDescriptor): Age
       cwd: workspace,
       branch: 'unknown',
       sourceLabel: session.liveSessionKey
-        ? 'IDE chat tab restored without a currently live runtime session'
-        : 'IDE chat tab restored from desktop state only',
+        ? 'Reconnecting…'
+        : 'Idle',
       capabilities: {
         attach: false,
         readTail: true,
