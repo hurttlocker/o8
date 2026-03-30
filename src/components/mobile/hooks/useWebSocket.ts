@@ -19,7 +19,6 @@ import type {
   MobileTranscriptEntry,
 } from '@/lib/mobile/types';
 import { formatStreamingPreview } from '../utils';
-import { filterInboxSnapshotByOpenClaw } from '@/lib/mobile/inbox-filter';
 import { sameMobileInboxSnapshot } from '@/lib/mobile/inbox-signature';
 import type {
   MobileInboxRealtimeSnapshotPayload,
@@ -35,7 +34,6 @@ export type WsConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'd
 interface UseWebSocketArgs {
   selectedSessionKey?: string;
   selectedRepoPath?: string | null;
-  includeOpenClaw: boolean;
   setSnapshot: Dispatch<SetStateAction<MobileInboxSnapshot>>;
   setRefreshError: Dispatch<SetStateAction<string | null>>;
   setHistoryBySession: Dispatch<SetStateAction<Record<string, MobileTranscriptEntry[]>>>;
@@ -86,7 +84,6 @@ function getWsUrl(): string {
 export function useWebSocket({
   selectedSessionKey,
   selectedRepoPath,
-  includeOpenClaw,
   setSnapshot,
   setRefreshError,
   setHistoryBySession,
@@ -109,7 +106,6 @@ export function useWebSocket({
   const sessionKeyRef = useRef(selectedSessionKey);
   const repoPathRef = useRef<string | null>(selectedRepoPath ?? null);
   const subscribedRepoPathRef = useRef<string | null>(null);
-  const includeOpenClawRef = useRef(includeOpenClaw);
   const realtimeSeqByStreamRef = useRef<Record<string, number>>({});
 
   // Stable refs for state setters so the connection effect never re-fires
@@ -130,7 +126,6 @@ export function useWebSocket({
   useEffect(() => { setActionNoteBySessionRef.current = setActionNoteBySession; }, [setActionNoteBySession]);
   useEffect(() => { setRealtimeMutationsByIdRef.current = setRealtimeMutationsById; }, [setRealtimeMutationsById]);
   useEffect(() => { streamingTextRefRef.current = streamingTextRef; }, [streamingTextRef]);
-  useEffect(() => { includeOpenClawRef.current = includeOpenClaw; }, [includeOpenClaw]);
 
   // Keep session key ref current
   useEffect(() => {
@@ -141,10 +136,9 @@ export function useWebSocket({
   }, [selectedRepoPath]);
 
   const applyInboxSnapshot = useCallback((inbox: MobileInboxSnapshot) => {
-    const filtered = filterInboxSnapshotByOpenClaw(inbox, includeOpenClawRef.current);
     setSnapshotRef.current((prev) => {
-      if (sameMobileInboxSnapshot(prev, filtered)) return prev;
-      return filtered;
+      if (sameMobileInboxSnapshot(prev, inbox)) return prev;
+      return inbox;
     });
   }, []);
 

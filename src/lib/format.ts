@@ -4,7 +4,7 @@
 
 export function formatModelLabel(model: string): string {
   return model
-    // Vendor-prefixed (from openclaw config)
+    // Vendor-prefixed model ids from runtime and config surfaces
     .replace('openai-codex/gpt-5.4', 'Codex 5.4')
     .replace('openai-codex/gpt-5.3-codex', 'Codex 5.3')
     .replace('anthropic/claude-opus-4-6', 'Opus 4.6')

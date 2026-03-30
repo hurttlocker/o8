@@ -141,11 +141,13 @@ function NavButton({
   active,
   onClick,
   badge,
+  onPrefetch,
 }: {
   item: NavItem;
   active: boolean;
   onClick: () => void;
   badge?: number;
+  onPrefetch?: () => void;
 }) {
   const IconComponent = item.icon;
 
@@ -171,6 +173,7 @@ function NavButton({
       onMouseEnter={(e) => {
         const neo = e.currentTarget.querySelector('[data-neo]') as HTMLElement;
         if (neo) applyNeoHover(neo, active);
+        onPrefetch?.();
       }}
       onMouseLeave={(e) => {
         const neo = e.currentTarget.querySelector('[data-neo]') as HTMLElement;
@@ -414,6 +417,11 @@ export function NavRail({
             active={activeSection === item.id}
             onClick={() => onSectionChange(item.id)}
             badge={item.id === 'approvals' ? approvalCount : undefined}
+            onPrefetch={
+              item.id === 'settings' ? () => { import('@/components/desktop/SettingsPage'); }
+              : item.id === 'analytics' ? () => { import('@/components/desktop/AnalyticsPage'); }
+              : undefined
+            }
           />
         ))}
       </div>

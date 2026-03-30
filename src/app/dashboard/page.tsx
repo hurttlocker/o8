@@ -1,18 +1,18 @@
 'use client';
 /* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DesktopWebSocketProvider, useSharedDesktopWs, type WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from '@/components/desktop/hooks/useDesktopWebSocket';
 import type { TerminalHandle } from '@/components/desktop/LiveOutput';
-import { WorkspaceTerminal, type TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
+import type { TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
 // WorkspacesPanel merged into AgentPanel — unified agent+workspace view
 import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
-import { Canvas, type CanvasTab } from '@/components/desktop/Canvas';
+import type { CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch, type CommandPaletteAction, type CommandPaletteStateTone } from '@/components/shared/UniversalSearch';
-import { GraphExplorer3D } from '@/components/desktop/GraphExplorer3D';
+// GraphExplorer3D lazy-loaded below
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { UpdateBanner } from '@/components/desktop/UpdateBanner';
 import { ThemeProvider } from '@/lib/theme/context';
@@ -22,11 +22,12 @@ import { NavRail, type NavSection } from '@/components/desktop/NavRail';
 import { ContextualPanel, type ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
-import { SettingsPage, type SettingsTab } from '@/components/desktop/SettingsPage';
+import { readTimelineVisible, subscribeTimelineVisible } from '@/lib/appearance/timeline';
+import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
-import { AnalyticsPage } from '@/components/desktop/AnalyticsPage';
-import { ThoughtsCard } from '@/components/desktop/ThoughtsCard';
-import { SetupWizard, type DetectionResult } from '@/components/desktop/SetupWizard';
+// AnalyticsPage lazy-loaded below
+import type { DetectionResult } from '@/components/desktop/SetupWizard';
+import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import { WorkspaceSidePanel, type WorkspaceSidePanelRepo, type WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
@@ -54,6 +55,14 @@ import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import { deriveWorkflowStage, describeWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
 
+/* ── Lazy-loaded heavy components (code-split for faster initial paint) ── */
+const LazyWorkspaceTerminal = lazy(() => import('@/components/desktop/WorkspaceTerminal').then(m => ({ default: m.WorkspaceTerminal })));
+const LazyCanvas = lazy(() => import('@/components/desktop/Canvas').then(m => ({ default: m.Canvas })));
+const LazySettingsPage = lazy(() => import('@/components/desktop/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const LazyAnalyticsPage = lazy(() => import('@/components/desktop/AnalyticsPage').then(m => ({ default: m.AnalyticsPage })));
+const LazyGraphExplorer3D = lazy(() => import('@/components/desktop/GraphExplorer3D').then(m => ({ default: m.GraphExplorer3D })));
+const LazyThoughtsCard = lazy(() => import('@/components/desktop/ThoughtsCard').then(m => ({ default: m.ThoughtsCard })));
+const LazySetupWizard = lazy(() => import('@/components/desktop/SetupWizard').then(m => ({ default: m.SetupWizard })));
 
 /** Normalize the flat API response into the shape SetupWizard expects. */
 function normalizeDetection(raw: Record<string, unknown>): DetectionResult {
@@ -80,12 +89,6 @@ function normalizeDetection(raw: Record<string, unknown>): DetectionResult {
 
   return {
     tools: {
-      openclaw: {
-        ...mkTool('openclaw'),
-        // Config exists with version/agents = detected, even if HTTP probe was slow
-        detected: (findTool('openclaw')?.detected) || Boolean(findTool('openclaw')?.version) || Boolean(findTool('openclaw')?.details?.configFound),
-        agentCount: (findTool('openclaw')?.details?.agentCount as number) ?? 0,
-      },
       codex: { ...mkTool('codex'), threads: (findTool('codex')?.details?.threads as number) ?? 0 },
       claudeCode: { ...mkTool('claude-code'), recentSessions: (findTool('claude-code')?.details?.recentSessions as number) ?? 0 },
       gemini: mkTool('gemini'),
@@ -145,7 +148,6 @@ function sameWorkspaceLaneState(left: WorkspaceLaneState | null | undefined, rig
 function workspaceSessionRuntimeLabel(session: MobileInboxSnapshot['sessions'][number]) {
   if (session.runtime === 'claude-code') return 'Claude Code';
   if (session.runtime === 'codex') return 'Codex';
-  if (session.runtime === 'openclaw') return 'OpenClaw';
   return 'Chat';
 }
 
@@ -414,7 +416,6 @@ function formatAttentionDetail(agent: PaletteAgentSummary) {
 function paletteSessionRuntime(agent: PaletteAgentSummary) {
   if (agent.runtime === 'claude-code') return 'Claude Code';
   if (agent.runtime === 'codex') return 'Codex';
-  if (agent.runtime === 'openclaw') return 'OpenClaw';
   return agent.name;
 }
 
@@ -629,7 +630,7 @@ import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/type
 
 const TILE_LAYOUT_STORAGE_KEY = 'cortex-ide:dashboard-tiles:v1';
 const ACTIVE_TILE_STORAGE_KEY = 'cortex-ide:dashboard-active-tile:v1';
-const DEFAULT_LEFT_PANEL_WIDTH = 332;
+const DEFAULT_LEFT_PANEL_WIDTH = 280;
 const DEFAULT_RIGHT_PANEL_WIDTH = 468;
 const MIN_RIGHT_PANEL_WIDTH = 360;
 const MAX_RIGHT_PANEL_WIDTH = 600;
@@ -678,6 +679,7 @@ function DashboardInner() {
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('connectors');
   const [searchOpen, setSearchOpen] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [timelineVisible, setTimelineVisible] = useState(() => readTimelineVisible());
   const [chatVisible, setChatVisible] = useState(true);
   const [rightPanelMode, setRightPanelMode] = useState<'chat' | 'workspace'>('workspace');
   const [workspaceSidePanelView, setWorkspaceSidePanelView] = useState<WorkspaceSidePanelView>('diff');
@@ -697,6 +699,26 @@ function DashboardInner() {
   const lastWorkspacePanelViewRef = useRef<'diff' | 'review'>('diff');
   const lastMarkedWorkspaceReadRef = useRef<string>('');
   const thoughtsPersistTimerRef = useRef<number | null>(null);
+
+  useEffect(() => subscribeTimelineVisible(setTimelineVisible), []);
+
+  // ── Prefetch heavy lazy chunks on idle so Suspense fallbacks are never visible ──
+  useEffect(() => {
+    if (typeof requestIdleCallback === 'undefined') {
+      const timer = setTimeout(() => {
+        import('@/components/desktop/WorkspaceTerminal');
+        import('@/components/desktop/Canvas');
+        import('@/components/desktop/ThoughtsCard');
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+    const id = requestIdleCallback(() => {
+      import('@/components/desktop/WorkspaceTerminal');
+      import('@/components/desktop/Canvas');
+      import('@/components/desktop/ThoughtsCard');
+    });
+    return () => cancelIdleCallback(id);
+  }, []);
 
   useEffect(() => {
     return subscribeOrchestratorMissionState(setThoughtsMissionState);
@@ -1267,14 +1289,15 @@ function DashboardInner() {
   }, [globalRepoEntry]);
 
   useEffect(() => {
-    void refreshSelectedRepoWorktrees();
+    // Defer worktree refresh — not needed for initial shell paint
+    const initTimer = setTimeout(() => { void refreshSelectedRepoWorktrees(); }, 1_500);
     if (!globalRepoEntry?.localPath) {
-      return;
+      return () => clearTimeout(initTimer);
     }
     const intervalId = window.setInterval(() => {
       void refreshSelectedRepoWorktrees();
     }, 30_000);
-    return () => window.clearInterval(intervalId);
+    return () => { clearTimeout(initTimer); window.clearInterval(intervalId); };
   }, [globalRepoEntry?.localPath, refreshSelectedRepoWorktrees, selectedRepoWorktreeRefreshNonce]);
 
   useEffect(() => {
@@ -1296,20 +1319,22 @@ function DashboardInner() {
       if (!active) return;
       setAllRepoWorktrees(Object.fromEntries(entries));
     }
-    void fetchAllRepoWorktrees();
-    const intervalId = window.setInterval(() => { void fetchAllRepoWorktrees(); }, 45_000);
+    // Defer all-repo worktree scan — heavy operation, not needed for first paint
+    const initTimer = setTimeout(() => { void fetchAllRepoWorktrees(); }, 4_000);
+    const intervalId = window.setInterval(() => { void fetchAllRepoWorktrees(); }, 60_000);
     return () => {
       active = false;
+      clearTimeout(initTimer);
       window.clearInterval(intervalId);
     };
   }, [globalRepoEntries]);
 
   useEffect(() => {
-    void refreshWorkspaceLifecycle();
+    const initTimer = setTimeout(() => { void refreshWorkspaceLifecycle(); }, 2_500);
     const intervalId = window.setInterval(() => {
       void refreshWorkspaceLifecycle();
     }, 30_000);
-    return () => window.clearInterval(intervalId);
+    return () => { clearTimeout(initTimer); window.clearInterval(intervalId); };
   }, [refreshWorkspaceLifecycle]);
 
   useEffect(() => {
@@ -1976,9 +2001,10 @@ function DashboardInner() {
         .then((data) => setApprovalCount(data.approvals?.length ?? 0))
         .catch(() => {});
     }
-    fetchCount();
-    const id = setInterval(fetchCount, 5_000);
-    return () => clearInterval(id);
+    // Defer — approval badge is not critical for first paint
+    const initTimer = setTimeout(fetchCount, 3_000);
+    const id = setInterval(fetchCount, 30_000);
+    return () => { clearTimeout(initTimer); clearInterval(id); };
   }, []);
 
   // ── Cmd+J to toggle Thoughts Card ──
@@ -2310,10 +2336,10 @@ function DashboardInner() {
       } catch { /* best-effort */ }
     }
 
-    // Poll immediately + every 6s
-    pollLanes();
-    const id = setInterval(pollLanes, 6_000);
-    return () => clearInterval(id);
+    // Poll after a short delay, then every 15s (WS delivers real-time updates; this is a safety net)
+    const initTimer = setTimeout(pollLanes, 2_000);
+    const id = setInterval(pollLanes, 15_000);
+    return () => { clearTimeout(initTimer); clearInterval(id); };
   }, [waitForWorkspaceTerminalTarget]);
 
   const collectOrchestratorLaneSnapshots = useCallback((): OrchestratorLaneSnapshot[] => (
@@ -3363,9 +3389,9 @@ function DashboardInner() {
 
   const parsedAgents = useMemo(() => {
     try {
-      return JSON.parse(agentsJson) as NonNullable<Parameters<typeof ThoughtsCard>[0]['agents']>;
+      return JSON.parse(agentsJson) as FleetAgent[];
     } catch {
-      return [] as NonNullable<Parameters<typeof ThoughtsCard>[0]['agents']>;
+      return [] as FleetAgent[];
     }
   }, [agentsJson]);
   const orchestratorRuntimeTruth = useMemo<OrchestratorRuntimeTruth[]>(
@@ -3382,7 +3408,7 @@ function DashboardInner() {
     [parsedAgents],
   );
 
-  // ── Domain lane polling for reconciliation ──
+  // ── Domain lane polling for reconciliation (deferred — not needed for first paint) ──
   const [domainLanes, setDomainLanes] = useState<DomainLaneSummary[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -3397,9 +3423,10 @@ function DashboardInner() {
         if (!cancelled) setDomainLanes(summaries);
       } catch { /* silent */ }
     };
-    void poll();
-    const interval = setInterval(poll, 15_000);
-    return () => { cancelled = true; clearInterval(interval); };
+    // Defer initial fetch — lane tab-sync poll covers the first few seconds
+    const initTimer = setTimeout(poll, 5_000);
+    const interval = setInterval(poll, 30_000);
+    return () => { cancelled = true; clearTimeout(initTimer); clearInterval(interval); };
   }, []);
 
   const paletteAgents = useMemo(() => parsedAgents as unknown as PaletteAgentSummary[], [parsedAgents]);
@@ -4422,7 +4449,8 @@ function DashboardInner() {
         const openRepoPaths = Array.from(new Set(collectOpenTerminalRepoPaths(tileLayout.root, tileId)));
 
         return (
-          <WorkspaceTerminal
+          <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(180deg, rgba(6,10,18,0.98) 0%, rgba(12,18,30,0.98) 100%)', color: '#94a3b8', fontSize: 13 }}>Loading workspace...</div>}>
+          <LazyWorkspaceTerminal
             key={`workspace-terminal:${tileId}:${workspaceTerminalResetNonceByTileId[tileId] ?? 0}`}
             ref={(handle) => registerWorkspaceTerminalHandle(tileId, handle)}
             stateScope={tileId}
@@ -4520,6 +4548,7 @@ function DashboardInner() {
             onPreviewSelection={handlePreviewSelection}
             showPreviewPane={false}
           />
+          </Suspense>
         );
       },
     },
@@ -4547,7 +4576,8 @@ function DashboardInner() {
           : null;
 
         return (
-          <Canvas
+          <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading inspector...</div>}>
+          <LazyCanvas
             tabs={tileState.tabs}
             activeTabId={tileState.activeTabId}
             onSelectTab={(tabId) => selectCanvasTab(tileId, tabId)}
@@ -4557,6 +4587,7 @@ function DashboardInner() {
             onSelectCommit={handleSelectCommit}
             onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
           />
+          </Suspense>
         );
       },
     },
@@ -4565,7 +4596,8 @@ function DashboardInner() {
       description: 'Docked command surface for tasks, approvals, and fast agent chat.',
       singleton: true,
       render: ({ tileId }) => (
-        <ThoughtsCard
+        <Suspense fallback={null}>
+        <LazyThoughtsCard
           open
           docked
           onClose={() => handleCloseTile(tileId)}
@@ -4577,6 +4609,7 @@ function DashboardInner() {
           onLaunchPacket={launchOrchestrationPacket}
           onFocusPacket={focusOrchestrationPacketLane}
         />
+        </Suspense>
       ),
     },
     'contextual-panel': {
@@ -4701,7 +4734,7 @@ function DashboardInner() {
       />
 
       {/* ── Session Timeline ── */}
-      <SessionTimeline
+      {timelineVisible && <SessionTimeline
         repoPath={globalRepoEntry?.localPath ?? activeWorkspace ?? null}
         repoName={globalRepoEntry?.name ?? null}
         onExpand={() => {
@@ -4712,7 +4745,7 @@ function DashboardInner() {
             resourceId: 'session',
           });
         }}
-      />
+      />}
 
       {/* ── Main Layout (horizontal) ── */}
       <div style={{
@@ -4868,13 +4901,17 @@ function DashboardInner() {
       }}>
         {activeNavSection === 'settings' && !showMemoryView && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
-            <SettingsPage initialTab={settingsInitialTab} />
+            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading settings...</div>}>
+            <LazySettingsPage initialTab={settingsInitialTab} />
+            </Suspense>
           </div>
         )}
 
         {activeNavSection === 'analytics' && !showMemoryView && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
-            <AnalyticsPage />
+            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading analytics...</div>}>
+            <LazyAnalyticsPage />
+            </Suspense>
           </div>
         )}
 
@@ -4907,7 +4944,9 @@ function DashboardInner() {
             >
               ← Back to Workspace
             </button>
-            <GraphExplorer3D />
+            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading memory graph...</div>}>
+            <LazyGraphExplorer3D />
+            </Suspense>
           </div>
         )}
 
@@ -5080,7 +5119,8 @@ function DashboardInner() {
       </div>{/* end main layout */}
 
       {/* ── Thoughts Card (floating overlay — sits on top of everything) ── */}
-      <ThoughtsCard
+      <Suspense fallback={null}>
+      <LazyThoughtsCard
         open={thoughtsOpen}
         onClose={() => setThoughtsOpen(false)}
         agents={parsedAgents}
@@ -5091,10 +5131,13 @@ function DashboardInner() {
         onLaunchPacket={launchOrchestrationPacket}
         onFocusPacket={focusOrchestrationPacketLane}
       />
+      </Suspense>
 
       {/* ── First Launch Setup Wizard ── */}
       {setupWizardOpen && setupDetection && (
-        <SetupWizard detection={setupDetection} onComplete={handleSetupComplete} />
+        <Suspense fallback={null}>
+        <LazySetupWizard detection={setupDetection} onComplete={handleSetupComplete} />
+        </Suspense>
       )}
     </div>
   );

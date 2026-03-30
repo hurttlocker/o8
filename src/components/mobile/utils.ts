@@ -218,7 +218,7 @@ export function threadLaneLabel(session: SessionSummary) {
   if (session.runtime === 'codex' && session.runtimeSurface?.ownership === 'owned') return 'Codex';
   if (session.runtime === 'claude-code') return 'Claude Code';
   if (session.runtime === 'chat') return 'Chat';
-  return session.runtime === 'openclaw' ? 'OpenClaw' : 'Session';
+  return 'Session';
 }
 
 export function threadLaneState(session: SessionSummary) {
@@ -794,7 +794,7 @@ function projectSessionPriority(session: SessionSummary, selectedSession?: Sessi
 }
 
 export function projectDisplayName(workspace: string, sessions: SessionSummary[]): string {
-  if (sessions.length === 1 && sessions[0]?.runtime !== 'openclaw') {
+  if (sessions.length === 1) {
     const label = sessions[0]?.name?.trim();
     if (label) return label;
   }
@@ -816,7 +816,7 @@ export function projectSummary(sessions: SessionSummary[]): string {
         ? 'Claude Code'
         : session.runtime === 'chat'
           ? 'Chat'
-          : 'OpenClaw';
+          : 'Session';
     runtimeCounts.set(label, (runtimeCounts.get(label) ?? 0) + 1);
     if (session.status === 'running' || session.status === 'reviewing') {
       runningCount += 1;

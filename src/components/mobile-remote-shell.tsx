@@ -8,7 +8,6 @@ import {
 import type { RuntimeReviewPacket } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot, MobileReviewFileResponse, MobileTranscriptEntry } from '@/lib/mobile/types';
 import { sameMobileInboxSnapshot } from '@/lib/mobile/inbox-signature';
-import { filterInboxSnapshotByOpenClaw } from '@/lib/mobile/inbox-filter';
 import {
   agentDisplayName,
   compactLine,
@@ -60,7 +59,6 @@ import { useMobilePolling } from './mobile/hooks/useMobilePolling';
 import { useMobileScroll } from './mobile/hooks/useMobileScroll';
 import { useMobileStreaming } from './mobile/hooks/useMobileStreaming';
 import { useMobileActions } from './mobile/hooks/useMobileActions';
-import { useOpenClawBetaStatus } from './mobile/hooks/useOpenClawBetaStatus';
 import {
   mobileShellStyle,
   neomorphicButtonStyle,
@@ -111,7 +109,6 @@ function MobileRemoteShellInner({
     sessionId: string | null;
     tab: 'chat' | 'terminal';
   }>({ sessionId: null, tab: 'chat' });
-  const { status: openClawStatus, enabled: openClawBetaEnabled } = useOpenClawBetaStatus();
 
   // ── All state lives in useMobileState ──
   const state = useMobileState({ initialSnapshot, initialTranscript, initialReviewFile, initialOwnedReviewPacket });
@@ -121,10 +118,10 @@ function MobileRemoteShellInner({
     wsConnected,
     sendTerminalAttach,
     sendTerminalInput,
-  } = useMobileStreaming(state, openClawBetaEnabled);
+  } = useMobileStreaming(state);
 
   // ── Data fetching + polling ──
-  const { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, stickyReviewFiles } = useMobilePolling(state, wsConnected, openClawBetaEnabled);
+  const { refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, stickyReviewFiles } = useMobilePolling(state, wsConnected);
 
   // ── Action handlers ──
   const actions = useMobileActions(state, { wsConnected, refreshInbox, loadHistory, loadOwnedReviewPacket, loadReviewFile, reviewFiles, sendTerminalAttach, sendTerminalInput });
@@ -200,15 +197,6 @@ function MobileRemoteShellInner({
   const [prReviewOpen, setPrReviewOpen] = useState(false);
   const [prReviewNumber, setPrReviewNumber] = useState<number | null>(null);
   const [prReviewRepo, setPrReviewRepo] = useState('');
-  const openClawRefreshHandledRef = useRef(false);
-  const lastOpenClawEnabledRef = useRef(openClawBetaEnabled);
-
-  useEffect(() => {
-    setSnapshot((current) => {
-      const filtered = filterInboxSnapshotByOpenClaw(current, openClawBetaEnabled);
-      return sameMobileInboxSnapshot(current, filtered) ? current : filtered;
-    });
-  }, [openClawBetaEnabled, setSnapshot]);
 
   useEffect(() => {
     setPendingApprovals(snapshot.approvals ?? []);
@@ -222,29 +210,8 @@ function MobileRemoteShellInner({
   }, [setPendingApprovals, setResolvedApprovals, snapshot.approvals]);
 
   useEffect(() => {
-    const shouldForce = !openClawRefreshHandledRef.current || lastOpenClawEnabledRef.current !== openClawBetaEnabled;
-    openClawRefreshHandledRef.current = true;
-    lastOpenClawEnabledRef.current = openClawBetaEnabled;
-    void refreshInbox(shouldForce).catch(() => undefined);
-  }, [openClawBetaEnabled, refreshInbox]);
-
-  useEffect(() => {
-    if (openClawBetaEnabled) return;
-    if (selectedSession?.runtime !== 'openclaw') return;
-    if (selectedSessionKey && snapshot.sessions.some((session) => session.sessionKey === selectedSessionKey)) return;
-    const next = pickCurrentSession(snapshot);
-    setSelectedSessionKeyHint(next?.sessionKey ?? '');
-    setSelectedId(next?.id ?? '');
-    setSelectedSessionFallback(next ?? null);
-  }, [
-    openClawBetaEnabled,
-    selectedSession?.runtime,
-    selectedSessionKey,
-    setSelectedId,
-    setSelectedSessionFallback,
-    setSelectedSessionKeyHint,
-    snapshot,
-  ]);
+    void refreshInbox(true).catch(() => undefined);
+  }, [refreshInbox]);
 
   // ── Swipe right from left edge to go back to chat ──
   useSwipeBack(
@@ -464,7 +431,7 @@ function MobileRemoteShellInner({
             />
           ) : null}
           {activeView === 'settings' ? (
-            <SettingsView onBack={() => setActiveView('squad')} openClawStatus={openClawStatus} />
+            <SettingsView onBack={() => setActiveView('squad')} />
           ) : null}
           {activeView === 'memory' ? (
             <MemoryPage

@@ -4,8 +4,6 @@ import { getBrowserInventorySnapshot } from '@/lib/browser/inventory';
 import { invalidateOwnedCodexFleetCache } from '@/lib/codex/owned';
 import { invalidateCodexDiscoveredFleetCache } from '@/lib/codex/sessions';
 import type { FleetSnapshot, WorkflowReviewSnapshot } from '@/lib/fleet/types';
-import { invalidateGatewayStatusCache } from '@/lib/openclaw/gateway-client';
-import { invalidateClaudeCodeFleetCache } from '@/lib/openclaw/fleet';
 import { getWorkspaceReviewSnapshot, invalidateReviewSnapshotCache } from '@/lib/review/workspace';
 import { getRuntimeInventorySnapshot, invalidateRuntimeInventoryCache } from '@/lib/runtime/inventory';
 import { invalidateCommandCenterBootstrapBroker } from '@/lib/render/bootstrap';
@@ -36,8 +34,6 @@ let reviewGeneration = 0;
 let browserGeneration = 0;
 
 export function invalidateCommandCenterSnapshotCaches() {
-  invalidateGatewayStatusCache();
-  invalidateClaudeCodeFleetCache();
   invalidateOwnedCodexFleetCache();
   invalidateCodexDiscoveredFleetCache();
   invalidateRuntimeInventoryCache();

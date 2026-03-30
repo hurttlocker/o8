@@ -2,7 +2,8 @@
  * Mobile API — Barrel Export
  */
 
-export { getMobileInboxSnapshot } from './openclaw';
+export { getMobileInboxSnapshot, invalidateInboxCache } from './inbox';
+export { getMobileSessionTranscript } from './history';
 
 export type {
   MobileInboxSnapshot,

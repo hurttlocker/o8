@@ -11,13 +11,12 @@ export const dynamic = 'force-dynamic';
  * GET /api/panel/analytics?hours=24
  *
  * Returns comprehensive cost/usage analytics aggregated across:
- * - OpenClaw chat sessions
  * - Codex CLI owned sessions
  * - Claude Code sessions
  * - IDE LLM chat usage logs
  */
 
-type SurfaceKey = 'OpenClaw Chat' | 'Codex CLI' | 'Claude Code' | 'IDE LLM Chat';
+type SurfaceKey = 'Codex CLI' | 'Claude Code' | 'IDE LLM Chat';
 
 interface HourBucket {
   hour: string;
@@ -64,7 +63,7 @@ interface SessionAccumulator {
   active: boolean;
 }
 
-const SURFACES: SurfaceKey[] = ['OpenClaw Chat', 'Codex CLI', 'Claude Code', 'IDE LLM Chat'];
+const SURFACES: SurfaceKey[] = ['Codex CLI', 'Claude Code', 'IDE LLM Chat'];
 const ACTIVE_WINDOW_MS = 5 * 60 * 1000;
 const ANTHROPIC_DEFAULT_PRICING = {
   inputPerToken: 3 / 1_000_000,
@@ -191,36 +190,6 @@ function createSession(id: string, agent: string, surface: SurfaceKey, active: b
   };
 }
 
-function discoverOpenClawAgents(): Record<string, string> {
-  const agentDirs: Record<string, string> = {};
-  const configPath = join(homedir(), '.openclaw', 'openclaw.json');
-
-  try {
-    const configRaw = readFileSync(configPath, 'utf-8');
-    const config = JSON.parse(configRaw) as {
-      agents?: { list?: Array<{ id: string; name?: string }> };
-    };
-    const agentList = (config.agents?.list ?? []) as Array<{ id: string; name?: string }>;
-    for (const agent of agentList) {
-      if (!agent?.id) continue;
-      agentDirs[agent.id] = agent.name ?? agent.id;
-    }
-  } catch {
-    // fall through to directory discovery
-  }
-
-  const agentsRoot = join(homedir(), '.openclaw', 'agents');
-  try {
-    for (const dir of readdirSync(agentsRoot)) {
-      if (!agentDirs[dir]) agentDirs[dir] = dir;
-    }
-  } catch {
-    // ignore missing agents dir
-  }
-
-  return agentDirs;
-}
-
 function discoverIdeChatSessions(sinceTs: number): Array<{ id: string; model: string }> {
   const historyDir = join(homedir(), '.cortex-ide', 'chat-history');
   const sessions: Array<{ id: string; model: string }> = [];
@@ -252,11 +221,8 @@ function discoverIdeChatSessions(sinceTs: number): Array<{ id: string; model: st
 export async function GET(request: NextRequest) {
   try {
     const hours = parseInt(request.nextUrl.searchParams.get('hours') || '24', 10);
-    const includeOpenClaw = request.nextUrl.searchParams.get('includeOpenClaw') !== '0';
     const sinceTs = Date.now() - hours * 60 * 60 * 1000;
-    const visibleSurfaces = includeOpenClaw
-      ? SURFACES
-      : SURFACES.filter((surface) => surface !== 'OpenClaw Chat');
+    const visibleSurfaces = SURFACES;
 
     const hourlyMap = new Map<string, HourBucket>();
     const modelMap = new Map<string, ModelBreakdown>();
@@ -340,83 +306,6 @@ export async function GET(request: NextRequest) {
         active: session.active,
       });
     };
-
-    // ── OpenClaw chat sessions ────────────────────────────────────────────────
-    if (includeOpenClaw) {
-      const openClawAgents = discoverOpenClawAgents();
-      const sessionsRoot = join(homedir(), '.openclaw', 'agents');
-
-      for (const [agentId, agentName] of Object.entries(openClawAgents)) {
-        const sessionsDir = join(sessionsRoot, agentId, 'sessions');
-        const files = safeReadDir(sessionsDir).filter((file) => file.endsWith('.jsonl'));
-
-        for (const file of files) {
-          const filePath = join(sessionsDir, file);
-
-          try {
-            const stat = statSync(filePath);
-            if (stat.mtimeMs < sinceTs) continue;
-
-            const session = createSession(
-              basename(file, '.jsonl'),
-              agentName,
-              'OpenClaw Chat',
-              (Date.now() - stat.mtimeMs) < ACTIVE_WINDOW_MS,
-            );
-
-            const lines = readFileSync(filePath, 'utf-8').split('\n').filter(Boolean);
-            for (const line of lines) {
-              try {
-                const parsed = JSON.parse(line) as Record<string, unknown>;
-                const message = (parsed.message ?? {}) as Record<string, unknown>;
-                const usage = (message.usage ?? {}) as Record<string, unknown>;
-                const costData = (usage.cost ?? {}) as Record<string, unknown>;
-                const ts = parseTimestamp(parsed.timestamp ?? message.timestamp, stat.mtimeMs);
-                if (ts < sinceTs) continue;
-
-                const cost = firstFiniteNumber(costData.total, costData.usdTotal) ?? 0;
-                const inputTokens = numberOrZero(usage.input);
-                const outputTokens = numberOrZero(usage.output);
-                const cacheTokens = numberOrZero(usage.cacheRead);
-                const cacheWriteTokens = numberOrZero(usage.cacheWrite);
-
-                if (cost === 0 && inputTokens === 0 && outputTokens === 0 && cacheTokens === 0 && cacheWriteTokens === 0) {
-                  continue;
-                }
-
-                const model = String(message.model ?? message.api ?? 'unknown');
-                const normalizedModel = recordUsage({
-                  ts,
-                  cost,
-                  inputTokens,
-                  outputTokens,
-                  cacheTokens,
-                  cacheWriteTokens,
-                  model,
-                  agent: agentName,
-                  surface: 'OpenClaw Chat',
-                });
-
-                session.cost += cost;
-                session.messages += 1;
-                session.inputTokens += inputTokens;
-                session.outputTokens += outputTokens;
-                session.cacheTokens += cacheTokens;
-                session.cacheWriteTokens += cacheWriteTokens;
-                session.models.add(normalizedModel);
-                if (session.model === 'unknown' || session.model === '') session.model = model;
-              } catch {
-                // skip malformed lines
-              }
-            }
-
-            finalizeSession(session);
-          } catch {
-            // skip unreadable files
-          }
-        }
-      }
-    }
 
     // ── Codex CLI sessions ────────────────────────────────────────────────────
     const codexRoots = [

@@ -7,11 +7,9 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   const fleetMode = req.nextUrl.searchParams.get('fleetMode') as 'smart' | 'all' | null;
   const fresh = req.nextUrl.searchParams.get('fresh') === '1';
-  const includeOpenClaw = req.nextUrl.searchParams.get('includeOpenClaw') !== '0';
   const snapshot = await getRuntimeInventorySnapshot({
     fleetMode: fleetMode ?? 'smart',
     fresh,
-    includeOpenClaw,
   });
 
   return NextResponse.json(snapshot, {

@@ -5,8 +5,7 @@ import { getCodexRuntimeTail } from '@/lib/codex/sessions';
 import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
 import { mobileInboxSignature } from '@/lib/mobile/inbox-signature';
-import { getMobileInboxSnapshot } from '@/lib/mobile/openclaw';
-import { getSessionTranscript } from '@/lib/openclaw/chat';
+import { getMobileInboxSnapshot } from '@/lib/mobile/inbox';
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
 import { getReviewFileDetail } from '@/lib/review/workspace';
@@ -154,11 +153,7 @@ async function resolveHistory(
       return { sessionKey, ...delta };
     }
   }
-
-  // OpenClaw sessions
-  const transcript = await getSessionTranscript(sessionKey, limit);
-  const delta = applyDelta(transcript, req.sinceId);
-  return { sessionKey, ...delta };
+  return { sessionKey, entries: [], replace: true };
 }
 
 function applyDelta(entries: MobileTranscriptEntry[], sinceId?: string): {

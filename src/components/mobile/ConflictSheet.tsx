@@ -26,7 +26,6 @@ const SEVERITY_COLORS = {
 const AGENT_COLORS: Record<string, string> = {
   'claude-code': '#cc785c',
   'codex': '#10a37f',
-  'openclaw': '#ff3b30',
 };
 
 export const ConflictSheet = memo(function ConflictSheet({

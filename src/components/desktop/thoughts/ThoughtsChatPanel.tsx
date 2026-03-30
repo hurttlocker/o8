@@ -212,7 +212,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     if (sessionKey.startsWith('claude-code:') || sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-owned:') || sessionKey.startsWith('codex-discovered:')) {
       return `/api/runtime/transcript?sessionKey=${encodeURIComponent(sessionKey)}&limit=20`;
     }
-    // OpenClaw sessions use the mobile history API
+    // Other session types fall back to the mobile history API.
     return `/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=20&fresh=1`;
   }, []);
 

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
-import { invalidateInboxCache } from '@/lib/mobile/openclaw';
+import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { launchRuntimeSurface, type RuntimeLaunchRequest } from '@/lib/runtime/actions';
 

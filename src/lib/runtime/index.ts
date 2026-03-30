@@ -10,8 +10,6 @@ export type {
   RuntimeActionResult,
 } from './actions';
 
-export { openClawAdapterContract } from './adapter';
-
 export type {
   RuntimeKind,
   RuntimeCapabilities,

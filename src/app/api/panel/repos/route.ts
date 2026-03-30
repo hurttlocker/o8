@@ -13,7 +13,7 @@ import { enrichRepoReadiness, enrichRepoReadinessList } from '@/lib/repos/readin
 import { triggerScan, triggerScanIfStale, startChangePolling, stopChangePolling } from '@/lib/skeleton/autoscan';
 import { clearRepo as clearSkeletonCache } from '@/lib/skeleton/store';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
-import { invalidateInboxCache } from '@/lib/mobile/openclaw';
+import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { performRuntimeAction } from '@/lib/runtime/actions';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
@@ -71,7 +71,7 @@ function agentBelongsToRepoScope(
 
 async function stopRepoBoundRuntimeSessions(repo: { localPath: string; remoteUrl?: string | null; name: string }) {
   const snapshot = await Promise.race([
-    getRuntimeInventorySnapshot({ fresh: true, includeOpenClaw: true }),
+    getRuntimeInventorySnapshot({ fresh: true }),
     new Promise<Awaited<ReturnType<typeof getRuntimeInventorySnapshot>>>((_, reject) => {
       setTimeout(() => reject(new Error('Runtime inventory timed out.')), RUNTIME_CLEANUP_TIMEOUT_MS);
     }),

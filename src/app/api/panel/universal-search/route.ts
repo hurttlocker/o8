@@ -8,8 +8,6 @@ import { ensureGitHubIssues, resolveRepoSlug } from '@/lib/github-broker';
 const HOME = process.env.HOME || os.homedir();
 const CORTEX_BINARY = process.env.CORTEX_BINARY || `${HOME}/bin/cortex`;
 const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || `process.cwd()`;
-const GATEWAY_TOKEN = process.env.OPENCLAW_GATEWAY_TOKEN || '';
-const GATEWAY_PORT = process.env.OPENCLAW_GATEWAY_PORT || '18789';
 
 // ── Result types ──
 
@@ -69,53 +67,8 @@ function searchSymbolsProvider(query: string, workspace?: string): UniversalResu
 // ── Search providers ──
 
 async function searchConversations(query: string): Promise<UniversalResult[]> {
-  if (!GATEWAY_TOKEN) return [];
-  const results: UniversalResult[] = [];
-  try {
-    // Use gateway to list recent sessions and grep their transcripts
-    const raw = execQuiet(
-      `curl -sf -H "Authorization: Bearer ${GATEWAY_TOKEN}" "http://127.0.0.1:${GATEWAY_PORT}/api/sessions?limit=20" 2>/dev/null`,
-      { timeout: 3000 },
-    );
-    if (!raw) return [];
-    const data = JSON.parse(raw);
-    const sessions = data.sessions ?? data ?? [];
-
-    for (const session of sessions.slice(0, 10)) {
-      const key = session.key ?? session.sessionKey;
-      if (!key) continue;
-      // Fetch last 30 messages and grep
-      try {
-        const histRaw = execQuiet(
-          `curl -sf -H "Authorization: Bearer ${GATEWAY_TOKEN}" "http://127.0.0.1:${GATEWAY_PORT}/api/sessions/${encodeURIComponent(key)}/history?limit=30" 2>/dev/null`,
-          { timeout: 2000 },
-        );
-        if (!histRaw) continue;
-        const hist = JSON.parse(histRaw);
-        const messages = hist.messages ?? hist ?? [];
-        const lowerQuery = query.toLowerCase();
-        for (const msg of messages) {
-          const content = typeof msg.content === 'string'
-            ? msg.content
-            : Array.isArray(msg.content)
-              ? msg.content.map((c: { text?: string }) => c.text ?? '').join(' ')
-              : '';
-          if (content.toLowerCase().includes(lowerQuery)) {
-            const snippet = extractSnippet(content, query, 120);
-            results.push({
-              kind: 'conversation',
-              title: `${msg.role === 'user' ? 'You' : 'Agent'} in ${session.displayName ?? key}`,
-              detail: snippet,
-              target: { sessionKey: key },
-              score: 0.7,
-            });
-            break; // One match per session
-          }
-        }
-      } catch { /* skip */ }
-    }
-  } catch { /* gateway unavailable */ }
-  return results.slice(0, 5);
+  void query;
+  return [];
 }
 
 function searchMemory(query: string): UniversalResult[] {

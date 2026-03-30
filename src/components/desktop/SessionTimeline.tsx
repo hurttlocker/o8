@@ -136,7 +136,6 @@ function timelineSegmentChrome(_kind: SegmentKind, color: string, hovered: boole
 }
 
 function runtimeLabel(runtime: string | null | undefined): string {
-  if (runtime === 'openclaw') return 'OpenClaw';
   if (runtime === 'claude-code') return 'Claude Code';
   if (runtime === 'codex') return 'Codex';
   return runtime || 'Runtime';
@@ -156,8 +155,6 @@ function cleanTaskLabel(task: string | null | undefined): string | null {
     .replace(/^IDE-owned Codex session ready for the next input via resume\.?\s*/i, '')
     .replace(/^Live Codex terminal verified via pid\/log mapping on s\d+\.\s*/i, '')
     .replace(/^Live Codex terminal detected on s\d+\.\s*/i, '')
-    .replace(/^Existing OpenClaw session mirrored into the control plane\.?\s*/i, '')
-    .replace(/^Shared channel surface attached to the same OpenClaw runtime\.?\s*/i, '')
     .replace(/^Recent automation surface; useful for visibility, not the primary operator lane\.?\s*/i, '')
     .replace(/^Mirroring the live Q ↔ Mister conversation, not spawning a fresh session\.?\s*/i, '')
     .trim();
@@ -176,9 +173,6 @@ function humanizeStatus(status: string | null | undefined): string {
 function timelineMatchesAgent(agentName: string, session: AgentSummary): boolean {
   const key = session.sessionKey.toLowerCase();
   const name = (session.name || '').toLowerCase();
-  if (agentName === 'Main') return session.runtime === 'openclaw' && key.startsWith('agent:main:');
-  if (agentName === 'Agent 2') return session.runtime === 'openclaw' && (key.startsWith('agent:ace:') || name.includes('ace'));
-  if (agentName === 'Agent 3') return session.runtime === 'openclaw' && (key.startsWith('agent:hawk:') || name.includes('hawk'));
   if (agentName === 'codex') return session.runtime === 'codex';
   const loweredAgent = agentName.toLowerCase();
   return name.includes(loweredAgent) || key.includes(loweredAgent);
@@ -212,7 +206,7 @@ function useTimelineData() {
 
   const fetchData = useCallback(async () => {
     try {
-      const res = await fetch('/api/panel/timeline?includeOpenClaw=1');
+      const res = await fetch('/api/panel/timeline');
       if (res.ok) {
         const data = await res.json();
         setWindowMinutes(data.windowMinutes ?? 0);
@@ -263,7 +257,7 @@ function useTimelineSessions() {
 
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch('/api/mobile/inbox?includeOpenClaw=1');
+      const res = await fetch('/api/mobile/inbox');
       if (!res.ok) return;
       const data = await res.json() as MobileInboxSnapshot;
       setSessions(data.sessions ?? []);

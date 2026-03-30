@@ -4,8 +4,8 @@
  * AnalyticsPage — Cost & Usage Dashboard
  *
  * Full-width workspace view showing spend, token usage,
- * and agent efficiency metrics across all surfaces:
- * OpenClaw Chat, Codex CLI, Claude Code, IDE LLM Chat.
+ * and agent efficiency metrics across all supported surfaces:
+ * Codex CLI, Claude Code, and IDE LLM Chat.
  *
  * Layout:
  *   Hero metrics row → Hourly/Daily chart → Surface breakdown →
@@ -14,8 +14,6 @@
 
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, BarChart3, Clock, Cpu, DollarSign, Layers, TrendingUp, Zap } from 'lucide-react';
-import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, refreshOpenClawBetaStatus, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
-
 interface Totals {
   cost: number;
   messages: number;
@@ -92,7 +90,6 @@ const AGENT_COLORS: Record<string, string> = {
 };
 
 const SURFACE_COLORS: Record<string, string> = {
-  'OpenClaw Chat': '#111827',
   'Codex CLI': '#2563eb',
   'Claude Code': '#f59e0b',
   'IDE LLM Chat': '#7c3aed',
@@ -494,24 +491,18 @@ export const AnalyticsPage = memo(function AnalyticsPage() {
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedRange, setSelectedRange] = useState(24);
-  const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
-
-  useEffect(() => {
-    void refreshOpenClawBetaStatus().then((status) => setOpenClawBetaEnabled(status.effective_enabled));
-    return subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled);
-  }, []);
 
   const fetchData = useCallback(async (hours: number) => {
     setLoading(true);
     try {
-      const res = await fetch(appendOpenClawBetaQuery(`/api/panel/analytics?hours=${hours}`, openClawBetaEnabled));
+      const res = await fetch(`/api/panel/analytics?hours=${hours}`);
       if (res.ok) {
         const json = await res.json();
         setData(json);
       }
     } catch { /* silent */ }
     finally { setLoading(false); }
-  }, [openClawBetaEnabled]);
+  }, []);
 
   useEffect(() => {
     fetchData(selectedRange);

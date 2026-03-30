@@ -44,10 +44,8 @@ import type {
   MobileTranscriptMedia,
   MobileTranscriptToolCall,
 } from '@/lib/mobile/types';
-import { filterInboxSnapshotByOpenClaw } from '@/lib/mobile/inbox-filter';
 import type { ProjectGroup } from '@/components/mobile/types';
 import { buildProjectGroups } from '@/components/mobile/utils';
-import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, refreshOpenClawBetaStatus, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 import { CodeBlock } from './CodeBlock';
 import { DesktopToolCallStack } from './DesktopAgentMessage';
 import { DiffModal } from './DiffModal';
@@ -126,9 +124,6 @@ function getAgentName(s: SessionSummary): string {
 
 function sessionDisplayModel(session?: SessionSummary) {
   if (!session) return 'Live';
-  if (session.runtime === 'openclaw') {
-    return formatModelLabel(session.primaryModel ?? session.model ?? session.heartbeatModel ?? 'OpenClaw');
-  }
   if (session.runtime === 'chat') {
     return formatModelLabel(session.model ?? 'Workspace Chat');
   }
@@ -170,7 +165,6 @@ function sessionRuntimeLabel(session: SessionSummary) {
   if (session.runtime === 'claude-code') return 'Claude Code';
   if (session.runtime === 'codex') return 'Codex';
   if (session.runtime === 'chat') return 'Chat';
-  if (session.runtime === 'openclaw') return 'OpenClaw';
   return 'Session';
 }
 
@@ -1707,14 +1701,11 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
             const singleSession = isSingle ? group.sessions[0] : null;
             const groupTitle = singleSession ? sessionPickerTitle(singleSession) : group.projectName;
             const groupSubtitle = singleSession ? sessionPickerRowSubtitle(singleSession) : group.summary;
-            const isGroupMainOpenClaw = group.sessions.some((s) => s.runtime === 'openclaw' && s.sessionKey === 'agent:main:main');
-            const dotColor = isGroupMainOpenClaw
-              ? '#2563eb'
-              : group.hasRunning
-                ? '#34c759'
-                : group.bestContextPct >= 75
-                  ? '#ff9f0a'
-                  : '#8e8e93';
+            const dotColor = group.hasRunning
+              ? '#34c759'
+              : group.bestContextPct >= 75
+                ? '#ff9f0a'
+                : '#8e8e93';
 
             return (
               <div key={group.workspace}>
@@ -1818,9 +1809,8 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                       const isActive = session.sessionKey === selectedSession?.sessionKey;
                       const isRunning = session.status === 'running' || session.status === 'reviewing';
                       const sessionPercent = Math.round(session.context?.usedPercent ?? 0);
-                      const isSessionMainOpenClaw = session.runtime === 'openclaw' && session.sessionKey === 'agent:main:main';
-                      const isSessionReviewing = !isSessionMainOpenClaw && !isRunning && session.status === 'reviewing';
-                      const sDotColor = isSessionMainOpenClaw ? '#2563eb' : isRunning ? '#34c759' : isSessionReviewing ? '#a78bfa' : sessionPercent >= 75 ? '#ff9f0a' : '#8e8e93';
+                      const isSessionReviewing = !isRunning && session.status === 'reviewing';
+                      const sDotColor = isRunning ? '#34c759' : isSessionReviewing ? '#a78bfa' : sessionPercent >= 75 ? '#ff9f0a' : '#8e8e93';
                       const name = sessionPickerTitle(session);
                       const subtitle = sessionPickerRowSubtitle(session);
 
@@ -3508,7 +3498,6 @@ export function AgentPanelChat({
   const [activeToolCalls, setActiveToolCalls] = useState<MobileTranscriptToolCall[]>([]);
   const [approvals, setApprovals] = useState<SidebarApproval[]>([]);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
-  const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
   // wsConnected is derived from the WS hook below
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -3602,12 +3591,8 @@ export function AgentPanelChat({
   }, [selectedKey]);
 
   useEffect(() => {
-    void refreshOpenClawBetaStatus().then((status) => setOpenClawBetaEnabled(status.effective_enabled));
-    return subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled);
-  }, []);
-  useEffect(() => {
     initialInboxReadyRef.current = false;
-  }, [openClawBetaEnabled]);
+  }, []);
 
   // ── WebSocket — real-time updates ──
   const wsCallbacks = useMemo<DesktopWsCallbacks>(() => ({
@@ -3652,8 +3637,7 @@ export function AgentPanelChat({
     },
     onInboxUpdate: (data: Record<string, unknown>) => {
       if (!initialInboxReadyRef.current) return;
-      if (!openClawBetaEnabled) return;
-      const inbox = filterInboxSnapshotByOpenClaw(data as unknown as MobileInboxSnapshot, openClawBetaEnabled);
+      const inbox = data as unknown as MobileInboxSnapshot;
       if (inbox?.sessions) {
         setSnapshot(inbox);
         setSessions(inbox.sessions);
@@ -3694,7 +3678,7 @@ export function AgentPanelChat({
         setDiffStats({ additions: d.additions, deletions: d.deletions ?? 0, files: d.files ?? 0 });
       }
     },
-  }), [openClawBetaEnabled, selectedKey]);
+  }), [selectedKey]);
 
   const {
     isConnected: wsConnected,
@@ -3855,13 +3839,10 @@ export function AgentPanelChat({
     ];
   }, [headerSession, selectedOrchestratorPacket, workspaceLane]);
 
-  const isMainOpenClaw = headerSession?.runtime === 'openclaw' && headerSession?.sessionKey === 'agent:main:main';
-  const connectionDotColor = isMainOpenClaw
-    ? '#2563eb'
-    : workspaceLane?.status
-      ? orchestratorStatusTone(workspaceLane.status).dot
-      : selectedOrchestratorPacket
-        ? orchestratorStatusTone(selectedOrchestratorPacket.status).dot
+  const connectionDotColor = workspaceLane?.status
+    ? orchestratorStatusTone(workspaceLane.status).dot
+    : selectedOrchestratorPacket
+      ? orchestratorStatusTone(selectedOrchestratorPacket.status).dot
       : headerSession?.status === 'running'
         ? '#34c759'
         : headerSession?.status === 'reviewing'
@@ -3907,9 +3888,9 @@ export function AgentPanelChat({
   // ── Fetch sessions ──
   const fetchSessions = useCallback(async () => {
     try {
-      const res = await fetch(appendOpenClawBetaQuery('/api/mobile/inbox', openClawBetaEnabled));
+      const res = await fetch('/api/mobile/inbox');
       if (!res.ok) return;
-      const data = filterInboxSnapshotByOpenClaw((await res.json()) as MobileInboxSnapshot, openClawBetaEnabled);
+      const data = (await res.json()) as MobileInboxSnapshot;
       setSnapshot(prev => JSON.stringify(prev) === JSON.stringify(data) ? prev : data);
       setSessions(prev => JSON.stringify(prev) === JSON.stringify(data.sessions) ? prev : data.sessions);
       initialInboxReadyRef.current = true;
@@ -3919,7 +3900,7 @@ export function AgentPanelChat({
         setSelectedKey(primary.sessionKey);
       }
     } catch { /* silent */ }
-  }, [openClawBetaEnabled, selectedKey]);
+  }, [selectedKey]);
 
   // ── Fetch transcript ──
   const fetchTranscript = useCallback(async (key: string) => {

@@ -165,8 +165,7 @@ export function useMobileState(init: MobileStateInit) {
     ?? (snapshot.sessions.length === 0
       ? (hasPinnedSelection ? selectedSessionKeyHint || selectedSessionFallback?.sessionKey : liveFallbackSession?.sessionKey)
       : liveFallbackSession?.sessionKey);
-  const isOpenClawSession = selectedSession?.runtime === 'openclaw';
-  const isChatSession = isOpenClawSession || selectedSession?.runtime === 'codex' || selectedSession?.runtime === 'claude-code' || selectedSession?.runtime === 'chat';
+  const isChatSession = selectedSession?.runtime === 'codex' || selectedSession?.runtime === 'claude-code' || selectedSession?.runtime === 'chat';
   const isOwnedCodexSession = selectedSession?.runtime === 'codex' && selectedSession?.runtimeSurface?.ownership === 'owned';
   const selectedReviewPacket = selectedSessionKey && isOwnedCodexSession ? reviewPacketBySession[selectedSessionKey] ?? null : null;
   const selectedReviewPacketError = selectedSessionKey && isOwnedCodexSession ? reviewPacketErrorBySession[selectedSessionKey] ?? null : null;
@@ -329,7 +328,7 @@ export function useMobileState(init: MobileStateInit) {
 
     // Derived
     selectedSession, selectedSessionKey,
-    isOpenClawSession, isChatSession, isOwnedCodexSession,
+    isChatSession, isOwnedCodexSession,
     selectedReviewPacket, selectedReviewPacketError,
   };
 }
