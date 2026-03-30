@@ -679,6 +679,7 @@ function DashboardInner() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [chatVisible, setChatVisible] = useState(true);
+  const [approvalsSlideOpen, setApprovalsSlideOpen] = useState(false);
   const [rightPanelMode, setRightPanelMode] = useState<'chat' | 'workspace'>('workspace');
   const [workspaceSidePanelView, setWorkspaceSidePanelView] = useState<WorkspaceSidePanelView>('diff');
   const [workspaceSidePanelRepoPath, setWorkspaceSidePanelRepoPath] = useState<string | null>(null);
@@ -4725,6 +4726,10 @@ function DashboardInner() {
       {sidebarVisible && <NavRail
         activeSection={activeNavSection}
         onSectionChange={(section) => {
+          if (section === 'approvals') {
+            setApprovalsSlideOpen((prev) => !prev);
+            return;
+          }
           setActiveNavSection(section);
           // Always show chat when switching nav sections
           if (!chatVisible) setChatVisible(true);
@@ -4867,12 +4872,6 @@ function DashboardInner() {
           </div>
         )}
 
-        {activeNavSection === 'approvals' && !showMemoryView && (
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            <ApprovalQueuePanel />
-          </div>
-        )}
-
         {showMemoryView && (
           <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
             <button
@@ -4906,7 +4905,7 @@ function DashboardInner() {
           </div>
         )}
 
-        {!showMemoryView && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && activeNavSection !== 'approvals' && (
+        {!showMemoryView && activeNavSection !== 'settings' && activeNavSection !== 'analytics' && (
           <TileContainer
             layout={tileLayout}
             activeTileId={activeTileId}
@@ -5062,6 +5061,38 @@ function DashboardInner() {
                   )}
                 </motion.div>
               </AnimatePresence>
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      {/* ── Approvals Slide-Over Panel ── */}
+      <AnimatePresence initial={false}>
+        {approvalsSlideOpen ? (
+          <motion.div
+            key="approvals-slide"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            style={{
+              display: 'flex',
+              height: '100%',
+              flexShrink: 0,
+              position: 'relative',
+            }}
+          >
+            <div style={{
+              width: 420,
+              flexShrink: 0,
+              height: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              borderLeft: '1px solid var(--t-divider)',
+              background: 'var(--t-bg)',
+            }}>
+              <ApprovalQueuePanel onClose={() => setApprovalsSlideOpen(false)} />
             </div>
           </motion.div>
         ) : null}
