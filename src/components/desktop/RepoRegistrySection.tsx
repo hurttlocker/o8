@@ -1690,15 +1690,26 @@ function RepoCard({
     )),
     [orchestratorPackets, repo.localPath],
   );
+  const [showAllBranches, setShowAllBranches] = useState(false);
   const visibleBranches = useMemo(
-    () => branches.filter((branch) => (
-      branch.isWorktree
-      || !branch.current
-      || Boolean(agentsByBranch?.get(branch.name)?.length)
-      || repoScopedPackets.some((packet) => packet.branchTarget.trim() === branch.name)
-      || (branch.current && repoScopedPackets.some((packet) => packet.branchTarget.trim() === '' || packet.branchTarget.trim() === branch.name))
-    )),
-    [agentsByBranch, branches, repoScopedPackets],
+    () => branches.filter((branch) => {
+      const hasAgent = Boolean(agentsByBranch?.get(branch.name)?.length);
+      const isPacketTarget = repoScopedPackets.some((packet) => packet.branchTarget.trim() === branch.name);
+      // Worktree branches only show when they have an active agent or packet
+      if (branch.isWorktree && !hasAgent && !isPacketTarget && !showAllBranches) return false;
+      return (
+        branch.isWorktree
+        || !branch.current
+        || hasAgent
+        || isPacketTarget
+        || (branch.current && repoScopedPackets.some((packet) => packet.branchTarget.trim() === '' || packet.branchTarget.trim() === branch.name))
+      );
+    }),
+    [agentsByBranch, branches, repoScopedPackets, showAllBranches],
+  );
+  const hiddenBranchCount = useMemo(
+    () => branches.filter((b) => b.isWorktree && !visibleBranches.some((vb) => vb.name === b.name)).length,
+    [branches, visibleBranches],
   );
   const unmatchedRepoPackets = useMemo(
     () => repoScopedPackets.filter((packet) => !visibleBranches.some((branch) => packetMatchesBranch(packet, repo, branch, agentsByBranch?.get(branch.name) ?? []))),
@@ -3311,6 +3322,42 @@ function RepoCard({
               ) : null}
             </div>
           ) : (
+            <>
+            {hiddenBranchCount > 0 && !showAllBranches && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setShowAllBranches(true); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  width: '100%',
+                  padding: '6px 7px',
+                  marginTop: 2,
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--t-text-tertiary)',
+                  fontSize: 10.5,
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                  borderRadius: 8,
+                  transition: 'background 140ms ease, color 140ms ease',
+                }}
+                onMouseEnter={(e) => {
+                  const target = e.currentTarget as HTMLButtonElement;
+                  target.style.color = 'var(--t-text-muted)';
+                  target.style.background = 'var(--t-panel-hover)';
+                }}
+                onMouseLeave={(e) => {
+                  const target = e.currentTarget as HTMLButtonElement;
+                  target.style.color = 'var(--t-text-tertiary)';
+                  target.style.background = 'transparent';
+                }}
+              >
+                + {hiddenBranchCount} worktree{hiddenBranchCount !== 1 ? 's' : ''}
+              </button>
+            )}
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); setCreateBranchOpen(true); }}
@@ -3345,6 +3392,7 @@ function RepoCard({
               <Plus size={11} strokeWidth={2} />
               New branch
             </button>
+            </>
           )}
 
           {/* Dirty check dialog — appears when checkout blocked by uncommitted changes */}
