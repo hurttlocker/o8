@@ -617,9 +617,13 @@ function ActivityDock({
   return (
     <section
       style={{
-        flexShrink: 0,
+        flexShrink: 1,
+        flexGrow: 1,
         marginTop: 4,
         overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: 0,
       }}
     >
       <button
@@ -667,13 +671,20 @@ function ActivityDock({
         <div
           style={{
             padding: '0 14px 10px',
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
           }}
         >
           <div
             style={{
-              maxHeight: 320,
+              flex: 1,
+              minHeight: 0,
               overflowY: 'auto',
               scrollbarWidth: 'none',
+              maskImage: 'linear-gradient(to bottom, transparent 0px, black 18px, black calc(100% - 8px), transparent 100%)',
+              WebkitMaskImage: 'linear-gradient(to bottom, transparent 0px, black 18px, black calc(100% - 8px), transparent 100%)',
             } as React.CSSProperties}
             className="hide-scrollbar"
           >
@@ -2064,8 +2075,8 @@ const ActivityFeed = memo(function ActivityFeed({
         position: 'sticky',
         top: 0,
         zIndex: 3,
-        padding: '8px 8px 10px',
-        background: 'linear-gradient(180deg, var(--t-panel) 0%, rgba(255,255,255,0) 100%)',
+        padding: '8px 8px 6px',
+        background: 'var(--t-panel, #f5f7fb)',
       }}>
         <div
           style={{
@@ -4286,13 +4297,14 @@ export const AgentPanel = memo(function AgentPanel({
 
         <div
           style={{
-            position: 'sticky',
-            bottom: 0,
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
             marginTop: 4,
             paddingLeft: 4,
             paddingRight: 4,
             paddingBottom: 2,
-            zIndex: 1,
           }}
         >
           <ActivityDock
