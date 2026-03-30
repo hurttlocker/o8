@@ -22,7 +22,7 @@ export interface PersistedTab {
   repoName?: string;
   repoPath?: string;
   tmuxSession?: string; // last known tmux session name (may still be alive)
-  chatRuntime?: 'codex' | 'claude-code' | 'openclaw'; // for kind='chat' (CLI Session)
+  chatRuntime?: 'codex' | 'claude-code'; // for kind='chat' (CLI Session)
   chatSessionKey?: string; // for kind='chat' (CLI Session)
   chatModel?: string;
   chatContinueLatest?: boolean;
@@ -112,7 +112,7 @@ export function stripPersistedRuntimeSessionKey(
 
 export async function loadLiveRuntimeSessionKeys(): Promise<Set<PersistedRuntimeSessionKey>> {
   try {
-    const res = await fetch('/api/runtime/inventory?includeOpenClaw=0&fresh=1', {
+    const res = await fetch('/api/runtime/inventory?fresh=1', {
       cache: 'no-store',
       headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
     });

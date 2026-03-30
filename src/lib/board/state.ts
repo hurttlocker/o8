@@ -624,7 +624,7 @@ function buildArchivedRuntimeSnapshot(task: BoardTask, archivedAt: string): Boar
 async function resolveLiveTaskView(state: BoardState, taskId: string): Promise<BoardTaskView> {
   const columnId = requireTaskColumnId(state, taskId);
   const [agents, worktrees] = await Promise.all([
-    getRuntimeInventorySnapshot({ includeOpenClaw: false })
+    getRuntimeInventorySnapshot()
       .then((snapshot) => snapshot.agents)
       .catch(() => [] as AgentSummary[]),
     getWorktreeManager(state.repoPath).list().catch(() => [] as WorktreeInfo[]),
@@ -810,12 +810,9 @@ function findRuntimeSessionForTask(task: BoardTask, agents: AgentSummary[]) {
   const surfaceId = task.bindings.runtimeSurfaceId || task.bindings.sessionId;
   if (!surfaceId) return null;
   return agents.find((agent) => (
-    agent.runtime !== 'openclaw'
-    && (
-      agent.runtimeSurface?.id === surfaceId
-      || agent.sessionKey === surfaceId
-      || agent.id === surfaceId
-    )
+    agent.runtimeSurface?.id === surfaceId
+    || agent.sessionKey === surfaceId
+    || agent.id === surfaceId
   )) ?? null;
 }
 
@@ -892,7 +889,7 @@ function buildBoardTaskView(
 export async function getBoardSnapshot(repoPath: string): Promise<BoardSnapshot> {
   const state = await loadBoardState(repoPath);
   const [runtimeSnapshot, worktrees] = await Promise.all([
-    getRuntimeInventorySnapshot({ includeOpenClaw: false }),
+    getRuntimeInventorySnapshot(),
     getWorktreeManager(state.repoPath).list().catch(() => []),
   ]);
 

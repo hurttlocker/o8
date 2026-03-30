@@ -8,7 +8,7 @@ import {
   resolveApproval,
 } from '@/lib/approvals/store';
 import { getRuntime } from '@/lib/runtimes/registry';
-import { invalidateInboxCache } from '@/lib/mobile/openclaw';
+import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 
 export const runtime = 'nodejs';

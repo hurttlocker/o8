@@ -1,6 +1,5 @@
 import type { AgentSummary } from '@/lib/fleet/types';
 import { continueOwnedCodexSession, interruptOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
-import { abortOpenClawSession, steerOpenClawSession } from '@/lib/openclaw/chat';
 import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime, type RuntimeId } from '@/lib/runtimes';
@@ -147,13 +146,6 @@ function findRuntimeAgent(snapshot: Awaited<ReturnType<typeof getRuntimeInventor
   );
 }
 
-function prefersCliRuntimeInventory(surfaceId: string) {
-  return surfaceId.startsWith('codex:')
-    || surfaceId.startsWith('codex-owned:')
-    || surfaceId.startsWith('codex-discovered:')
-    || surfaceId.startsWith('claude-code:');
-}
-
 function unavailable(agent: AgentSummary, action: RuntimeActionKind, note: string): RuntimeActionResult {
   return {
     ok: false,
@@ -172,10 +164,8 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
     throw new Error('surfaceId is required');
   }
 
-  const includeOpenClaw = !prefersCliRuntimeInventory(surfaceId);
-  const snapshot = await getRuntimeInventorySnapshot({ fresh: true, includeOpenClaw });
-  const fallbackSnapshot = await getRuntimeInventorySnapshot({ fresh: true, includeOpenClaw: !includeOpenClaw });
-  const agent = findRuntimeAgent(snapshot, surfaceId) ?? findRuntimeAgent(fallbackSnapshot, surfaceId);
+  const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+  const agent = findRuntimeAgent(snapshot, surfaceId);
   if (!agent) {
     throw new Error('Runtime surface not found.');
   }
@@ -186,50 +176,6 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
   }
 
   switch (agent.runtime) {
-    case 'openclaw': {
-      if (payload.action === 'steer') {
-        const message = payload.message?.trim();
-        const attachments = Array.isArray(payload.attachments)
-          ? payload.attachments.filter((item) => item?.content && item?.mimeType && item?.fileName)
-          : [];
-        if (!message && attachments.length === 0) {
-          throw new Error('message or image attachment is required for steer');
-        }
-        const result = await steerOpenClawSession(agent.sessionKey, message, attachments);
-        return {
-          ok: true,
-          action: payload.action,
-          surfaceId: runtimeSurface.id,
-          runtime: agent.runtime,
-          clientMutationId: payload.clientMutationId,
-          status: 'queued',
-          note: 'Sent.',
-          runId: result.runId,
-        };
-      }
-
-      if (payload.action === 'stop') {
-        const result = await abortOpenClawSession(agent.sessionKey, payload.runId?.trim());
-        return {
-          ok: true,
-          action: payload.action,
-          surfaceId: runtimeSurface.id,
-          runtime: agent.runtime,
-          clientMutationId: payload.clientMutationId,
-          status: 'completed',
-          note: result.aborted
-            ? 'Stop request sent to the active run for this session.'
-            : 'No active run was in flight for this session.',
-          aborted: result.aborted,
-        };
-      }
-
-      return unavailable(
-        agent,
-        payload.action,
-        `${payload.action} is part of the runtime control contract, but it is not wired truthfully on the OpenClaw-backed lane yet.`,
-      );
-    }
     case 'codex': {
       if (runtimeSurface.ownership !== 'owned') {
         const runtime = getRuntime('codex');

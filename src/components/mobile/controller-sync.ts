@@ -13,7 +13,6 @@ import type {
   MobileRuntimeTailGroup,
   MobileTranscriptEntry,
 } from '@/lib/mobile/types';
-import { appendOpenClawBetaQuery } from '@/lib/connectors/openclaw-beta';
 import { sameMobileInboxSnapshot } from '@/lib/mobile/inbox-signature';
 import { readJson } from './utils';
 
@@ -177,17 +176,15 @@ export async function mobileSyncOnce({
 interface RefreshInboxArgs {
   setSnapshot: Dispatch<SetStateAction<MobileInboxSnapshot>>;
   setRefreshError: Dispatch<SetStateAction<string | null>>;
-  includeOpenClaw: boolean;
   fresh?: boolean;
 }
 
 export async function refreshInboxSnapshot({
   setSnapshot,
   setRefreshError,
-  includeOpenClaw,
   fresh = false,
 }: RefreshInboxArgs) {
-  const response = await fetch(appendOpenClawBetaQuery(`/api/mobile/inbox?${fresh ? 'fresh=1&' : ''}_t=${Date.now()}`, includeOpenClaw), {
+  const response = await fetch(`/api/mobile/inbox?${fresh ? 'fresh=1&' : ''}_t=${Date.now()}`, {
     cache: 'no-store',
     headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
   });

@@ -285,7 +285,7 @@ async function handleFleetStatus(args: Record<string, unknown>): Promise<McpTool
     const fresh = args.fresh ? '1' : '';
     const data = await apiFetch(`/api/runtime/inventory?fresh=${fresh}`) as Record<string, unknown>;
     const allAgents = (data.agents ?? []) as Array<Record<string, unknown>>;
-    // Filter to Claude Code and Codex only — OpenClaw is a separate system
+    // Filter to the supported local coding runtimes only.
     const agents = allAgents.filter((a) => a.runtime === 'claude-code' || a.runtime === 'codex');
     // Return a concise summary
     const summary = agents.map((a) => ({

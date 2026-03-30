@@ -700,7 +700,7 @@ export function LiveOutput({
   const runtimeLabel = standaloneTerminal ? ''
     : agentRuntime === 'claude-code' ? 'Claude Code'
     : agentRuntime === 'codex' ? 'Codex'
-    : 'OpenClaw';
+    : 'Runtime';
 
   const headerName = standaloneTerminal ? 'Terminal' : (agentName ?? 'Agent');
 

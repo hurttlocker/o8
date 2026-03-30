@@ -98,7 +98,7 @@ function buildOrchestratorSystemPrompt(repoPath: string): string {
     ``,
     `Context:`,
     `- This conversation persists across messages via --resume. You have full conversation history.`,
-    `- The user may reference "lanes" (durable agent work units), "packets" (planned work items), or "runtimes" (Claude Code and Codex sessions). OpenClaw is a separate legacy system — ignore it.`,
+    `- The user may reference "lanes" (durable agent work units), "packets" (planned work items), or "runtimes" (Claude Code and Codex sessions). Stay focused on the active CLI runtimes.`,
     `- You are running with --dangerously-skip-permissions so you can act autonomously. Use good judgment.`,
     `- Prefer editing existing files over creating new ones. Follow the repo's existing patterns.`,
     `- Run \`npx tsc --noEmit\` to verify TypeScript changes before reporting completion.`,

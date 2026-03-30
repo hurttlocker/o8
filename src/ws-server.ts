@@ -4,11 +4,10 @@
  * Runs alongside Next.js on port 3002. Multiplexes all real-time data
  * over a single WS connection per mobile client:
  *
- *   Mobile Client ←WS:3002→ This Server ←WS:18789→ OpenClaw Gateway
- *                                        ←HTTP:3001→ Next.js (sync API)
+ *   Mobile Client ←WS:3002→ This Server ←HTTP:3001→ Next.js (sync API)
  *
  * Channels:
- *   chat    — streaming text deltas (from gateway WS)
+ *   chat    — streaming text deltas
  *   inbox   — session list updates (pushed on change)
  *   history — transcript updates (pushed on change)
  *   review  — review file updates (pushed on change)
@@ -49,9 +48,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
 import { getBrowserInventorySnapshot, getBrowserProvider } from './lib/browser/inventory';
 import { getCommandCenterSnapshotWithOptions } from './lib/command-center/snapshot';
-import { getMobileInboxSnapshot } from './lib/mobile/openclaw';
-import { getSessionTranscript } from './lib/openclaw/chat';
-import { prewarmGatewayStatusCache } from './lib/openclaw/gateway-client';
+import type { MobileInboxSnapshot, MobileTranscriptEntry } from './lib/mobile/types';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import {
   ensureOrchestratorSession,
@@ -109,12 +106,6 @@ const BACKPRESSURE_LIMIT = 64 * 1024; // 64KB — queue durable messages if clie
 const BACKPRESSURE_QUEUE_LIMIT = 32; // max queued messages per client before oldest are dropped
 const BACKPRESSURE_FLUSH_MS = 50; // check interval to flush queued messages
 
-interface GatewayConfig {
-  port: number;
-  token?: string;
-  configFound: boolean;
-}
-
 function normalizeOrchestratorRepoPath(repoPath: string | null): string | null {
   const trimmed = repoPath?.trim();
   if (!trimmed) return null;
@@ -125,18 +116,6 @@ function normalizeOrchestratorRepoPath(repoPath: string | null): string | null {
       ? join(home, trimmed.slice(2))
       : trimmed;
   return resolve(expanded);
-}
-
-function loadGatewayConfig(): GatewayConfig {
-  const home = process.env.HOME ?? homedir();
-  const configPath = join(home, '.openclaw', 'openclaw.json');
-  try {
-    const raw = readFileSync(configPath, 'utf-8');
-    const config = JSON.parse(raw);
-    return { port: config?.gateway?.port ?? 18789, token: config?.gateway?.auth?.token, configFound: true };
-  } catch {
-    return { port: 18789, configFound: false };
-  }
 }
 
 // ── Types ──
@@ -164,6 +143,34 @@ interface ClientState {
   backpressureQueue: string[];
   /** Timer that periodically flushes the backpressure queue */
   flushTimer: ReturnType<typeof setInterval> | null;
+}
+
+const EMPTY_MOBILE_INBOX: MobileInboxSnapshot = {
+  generatedAt: '',
+  mode: 'live',
+  sourceLabel: 'Local runtime websocket bridge',
+  note: 'Live runtime updates come from the local Codex and Claude Code inventory.',
+  sessions: [],
+  approvals: [],
+  items: [],
+  summary: {
+    alerts: 0,
+    approvals: 0,
+    reviewItems: 0,
+    activeRuns: 0,
+  },
+};
+
+async function getMobileInboxSnapshot(_options: { fresh?: boolean } = {}) {
+  void _options;
+  return EMPTY_MOBILE_INBOX;
+}
+
+async function getSessionTranscript(_sessionKey: string, _limit: number, _fresh: boolean) {
+  void _sessionKey;
+  void _limit;
+  void _fresh;
+  return [] as MobileTranscriptEntry[];
 }
 
 // ── Terminal attachment state ──
@@ -541,140 +548,7 @@ function spawnTmuxAttachPty(
   }
 }
 
-// ── Gateway connection (singleton) ──
-
-const gatewayConfig = loadGatewayConfig();
-let gatewayWs: WebSocket | null = null;
-let gatewayConnecting = false;
-let gatewayBackoff = 1000;
-let gatewayAuthFailures = 0;
-const GATEWAY_MAX_AUTH_FAILURES = 3; // Stop retrying after 3 consecutive auth rejections
-let gatewayReconnectTimer: ReturnType<typeof setTimeout> | null = null;
-const gatewayInstanceId = randomUUID();
-let gatewayRequestCounter = 0;
 const chatListeners = new Set<(delta: ChatDelta) => void>();
-
-function connectGateway() {
-  if (gatewayConnecting || gatewayWs?.readyState === WebSocket.OPEN) return;
-
-  // Don't attempt connection if no config file exists (fresh machine)
-  if (!gatewayConfig.configFound) {
-    console.log('[ws-server] No openclaw.json found — skipping gateway connection. Run the setup wizard or install OpenClaw to configure.');
-    return;
-  }
-
-  // Don't retry after repeated auth failures (bad/missing token)
-  if (gatewayAuthFailures >= GATEWAY_MAX_AUTH_FAILURES) {
-    console.log(`[ws-server] Gateway auth failed ${gatewayAuthFailures} times — stopping retries. Fix credentials and restart, or use the setup wizard.`);
-    return;
-  }
-
-  gatewayConnecting = true;
-
-  const url = `ws://127.0.0.1:${gatewayConfig.port}`;
-  console.log(`[ws-server] Connecting to gateway at ${url}`);
-
-  const ws = new WebSocket(url);
-
-  ws.on('open', () => {
-    console.log('[ws-server] Gateway WS connected');
-    gatewayBackoff = 1000;
-  });
-
-  ws.on('message', (raw) => {
-    const str = typeof raw === 'string' ? raw : raw.toString();
-    let parsed: Record<string, unknown>;
-    try { parsed = JSON.parse(str); } catch { return; }
-
-    // Handle connect.challenge
-    if (parsed.type === 'event' && parsed.event === 'connect.challenge') {
-      const nonce = (parsed.payload as { nonce?: string })?.nonce;
-      if (!nonce) { ws.close(); return; }
-      ws.send(JSON.stringify({
-        type: 'req',
-        id: `cortex-ws-${++gatewayRequestCounter}`,
-        method: 'connect',
-        params: {
-          minProtocol: 3,
-          maxProtocol: 3,
-          client: {
-            id: 'gateway-client',
-            displayName: 'o8 WS Server',
-            version: '0.0.1',
-            platform: process.platform,
-            mode: 'backend',
-            instanceId: gatewayInstanceId,
-          },
-          caps: [],
-          auth: gatewayConfig.token ? { token: gatewayConfig.token } : undefined,
-          role: 'operator',
-          scopes: ['operator.read'],
-        },
-      }));
-      return;
-    }
-
-    // Handle connect response
-    if (parsed.type === 'res') {
-      if (parsed.ok) {
-        console.log('[ws-server] Gateway authenticated');
-        gatewayConnecting = false;
-        gatewayAuthFailures = 0; // Reset on successful auth
-      } else {
-        gatewayAuthFailures++;
-        const msg = (parsed.error as { message?: string })?.message ?? 'unknown error';
-        console.error(`[ws-server] Gateway auth failed (${gatewayAuthFailures}/${GATEWAY_MAX_AUTH_FAILURES}): ${msg}`);
-        ws.close();
-      }
-      return;
-    }
-
-    // Handle chat events
-    if (parsed.type === 'event' && parsed.event === 'chat') {
-      const delta = parsed.payload as ChatDelta;
-      if (delta?.sessionKey) {
-        for (const listener of chatListeners) {
-          try { listener(delta); } catch { /* ignore */ }
-        }
-      }
-    }
-
-    // Handle session events — push inbox on any session state change
-    if (parsed.type === 'event' && (
-      parsed.event === 'session.updated' ||
-      parsed.event === 'session.created' ||
-      parsed.event === 'session.deleted' ||
-      parsed.event === 'agent.status'
-    )) {
-      // Debounce: push inbox to all clients after a short delay
-      scheduleEventDrivenInboxPush();
-      scheduleRealtimeRuntimeRefresh({ reason: String(parsed.event), fresh: true });
-      scheduleRealtimeMobileInboxRefresh(250, true);
-    }
-  });
-
-  ws.on('close', () => {
-    console.log('[ws-server] Gateway WS closed');
-    gatewayWs = null;
-    gatewayConnecting = false;
-    scheduleGatewayReconnect();
-  });
-
-  ws.on('error', (err) => {
-    console.error('[ws-server] Gateway WS error:', err.message);
-  });
-
-  gatewayWs = ws;
-}
-
-function scheduleGatewayReconnect() {
-  if (gatewayReconnectTimer) return;
-  gatewayReconnectTimer = setTimeout(() => {
-    gatewayReconnectTimer = null;
-    connectGateway();
-  }, gatewayBackoff);
-  gatewayBackoff = Math.min(gatewayBackoff * 2, 30_000);
-}
 
 // ── Sync helpers ──
 
@@ -2107,7 +1981,7 @@ const agentLifecycleState = new Map<string, {
 
 // ── Stall Detection ──
 // Only monitor launched agent terminals (cortex-codex-*, cortex-claude-*)
-// NOT dashboard terminals (cortex-dash-*) or OpenClaw cron agents
+// NOT dashboard terminals (cortex-dash-*) or background helper sessions
 const STALL_THRESHOLD_MS = 5 * 60 * 1000; // 5 minutes with no output
 const STALL_CHECK_INTERVAL_MS = 30 * 1000; // check every 30s
 const STALL_GRACE_MS = 60 * 1000; // ignore first 60s after creation (agent startup)
@@ -2116,7 +1990,7 @@ function isMonitoredAgent(sessionName: string): boolean {
   // Only monitor IDE-launched agent terminals
   // cortex-codex-* and cortex-claude-* are launched agents
   // cortex-dash-* are user dashboard terminals — not monitored
-  // OpenClaw agents (agent:main:*, agent:ace:*, etc.) are cron/heartbeat — not monitored
+  // Background helper sessions are not monitored
   return sessionName.startsWith('cortex-codex-') || sessionName.startsWith('cortex-claude-');
 }
 
@@ -2211,9 +2085,7 @@ function terminateTerminalSession(sessionName: string, signal: string = 'SIGTERM
     return;
   } catch { /* no tmux session */ }
 
-  // 3. Try OpenClaw session interrupt (for OpenClaw agents)
-  // OpenClaw agents don't have PTYs — they run through the gateway
-  // For now, broadcast the kill state; the frontend can steer via the API
+  // 3. No PTY or tmux session remains — broadcast the kill state so the UI can reconcile.
   if (sessionName.startsWith('cortex-')) {
     console.log(`[ws-server] No live PTY found for ${sessionName} — skipping stale kill broadcast`);
     return;
@@ -2589,7 +2461,7 @@ const httpServer = createServer((req, res) => {
     res.end(JSON.stringify({
       status: 'ok',
       clients: clients.size,
-      gateway: gatewayWs?.readyState === WebSocket.OPEN ? 'connected' : 'disconnected',
+      gateway: 'disabled',
     }));
     return;
   }
@@ -2640,7 +2512,7 @@ wss.on('connection', (ws) => {
     event: 'connected',
     data: {
       clientId: client.id,
-      gateway: gatewayWs?.readyState === WebSocket.OPEN ? 'connected' : 'connecting',
+      gateway: 'disabled',
       realtimeSeq,
     },
   });
@@ -2873,8 +2745,6 @@ if (reviewPollTimer.unref) reviewPollTimer.unref();
 // - cortex-codex-*/cortex-claude-* sessions persist indefinitely (stall detector manages them).
 
 // Start everything
-connectGateway();
-prewarmGatewayStatusCache();
 startPollingLoops();
 startBrowserDiscoveryRealtimeLoop();
 startAttachedBrowserRefreshLoop();
@@ -2918,7 +2788,7 @@ httpServer.listen(WS_PORT, '0.0.0.0', () => {
   const NEXT_ORIGIN = `http://localhost:${process.env.PORT || '3001'}`;
   const supervisorCallbacks: SupervisorCallbacks = {
     async fetchFleetStatus() {
-      const res = await fetch(`${NEXT_ORIGIN}/api/runtime/inventory?fresh=1&includeOpenClaw=0`, { signal: AbortSignal.timeout(8000) });
+      const res = await fetch(`${NEXT_ORIGIN}/api/runtime/inventory?fresh=1`, { signal: AbortSignal.timeout(8000) });
       const data = await res.json() as { agents?: Array<Record<string, unknown>> };
       return ((data.agents ?? []) as Array<Record<string, unknown>>)
         .filter((a) => a.runtime === 'codex' || a.runtime === 'claude-code')
@@ -3000,12 +2870,6 @@ function shutdown(signal: string) {
   sessionHistoryTimers.clear();
   if (browserDiscoveryTimer) clearInterval(browserDiscoveryTimer);
   if (attachedBrowserRefreshTimer) clearInterval(attachedBrowserRefreshTimer);
-
-  // Close gateway connection
-  if (gatewayWs) {
-    gatewayWs.close(1001, 'server shutting down');
-    gatewayWs = null;
-  }
 
   // Destroy all terminal PTY handles (tmux sessions persist independently)
   for (const [, att] of terminalAttachments) {

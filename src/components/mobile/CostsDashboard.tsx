@@ -93,7 +93,7 @@ export const CostsDashboard = memo(function CostsDashboard({
   compactLine,
 }: CostsDashboardProps) {
   const ocSessions = useMemo(() =>
-    snapshot.sessions.filter(s => s.runtime === 'openclaw' && s.tokenUsage),
+    snapshot.sessions.filter(s => s.tokenUsage),
     [snapshot.sessions]
   );
   const codexSessions = useMemo(() =>

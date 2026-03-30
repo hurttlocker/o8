@@ -7,7 +7,6 @@ export const dynamic = 'force-dynamic';
 function runtimeIdFromSessionKey(sessionKey: string): string | null {
   if (sessionKey.startsWith('claude-code:')) return 'claude-code';
   if (sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-owned:') || sessionKey.startsWith('codex-discovered:')) return 'codex';
-  if (sessionKey.startsWith('openclaw:')) return 'openclaw';
   return null;
 }
 

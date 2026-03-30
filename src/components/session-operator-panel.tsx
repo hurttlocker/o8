@@ -86,30 +86,13 @@ function lastOutcomeLabel(agent: AgentSummary) {
 }
 
 function activeRunHint(agent: AgentSummary) {
-  if (agent.runtime !== 'openclaw') {
-    if (agent.runtimeSurface?.ownership === 'owned') {
-      return agent.status === 'running'
-        ? 'This IDE-owned Codex run is active right now, so interrupt is the truthful control. The next input becomes available only after the run settles.'
-        : 'This IDE-owned Codex session is between runs. The truthful next step is to resume it with the next input, not inject live keystrokes.';
-    }
-
-    return 'This surface is currently read-only. The first truthful lane is attach/read-tail; input and interrupt stay disabled until we can prove an owned-session seam.';
+  if (agent.runtimeSurface?.ownership === 'owned') {
+    return agent.status === 'running'
+      ? 'This IDE-owned Codex run is active right now, so interrupt is the truthful control. The next input becomes available only after the run settles.'
+      : 'This IDE-owned Codex session is between runs. The truthful next step is to resume it with the next input, not inject live keystrokes.';
   }
 
-  switch (agent.status) {
-    case 'running':
-      return 'Live surface looks active right now. Steer and abort should both behave like real operator actions.';
-    case 'reviewing':
-      return 'Surface looks warm/recent. Abort may still help, but it can also no-op if the run already settled.';
-    case 'waiting':
-      return 'Surface is visible but not clearly hot. Steer is safe; abort is mostly a guardrail.';
-    case 'blocked':
-      return 'Surface is blocked. Steer can supply correction context; abort is mostly cleanup.';
-    case 'idle':
-    case 'failed':
-    default:
-      return 'Surface looks idle. Steer will queue a new turn on the existing session; abort likely does nothing.';
-  }
+  return 'This surface is currently read-only. The first truthful lane is attach/read-tail; input and interrupt stay disabled until we can prove an owned-session seam.';
 }
 
 function reviewDispositionTone(disposition: RuntimeReviewPacket['reviewDisposition']) {
@@ -169,7 +152,6 @@ const OperatorActionsPanel = memo(function OperatorActionsPanel({
   agent,
   compact,
   runtimeSurface,
-  isOpenClaw,
   isOwnedCodex,
   hasActionLane,
   liveRunVisible,
@@ -192,7 +174,6 @@ const OperatorActionsPanel = memo(function OperatorActionsPanel({
   agent: AgentSummary;
   compact: boolean;
   runtimeSurface: AgentSummary['runtimeSurface'];
-  isOpenClaw: boolean;
   isOwnedCodex: boolean;
   hasActionLane: boolean;
   liveRunVisible: boolean;
@@ -218,23 +199,17 @@ const OperatorActionsPanel = memo(function OperatorActionsPanel({
         <div>
           <span>Operator actions</span>
           <strong>
-            {isOpenClaw
-              ? 'Explicit runtime control'
-              : isOwnedCodex
-                ? 'Owned Codex control'
-                : 'Read-only runtime watch'}
+            {isOwnedCodex ? 'Owned Codex control' : 'Read-only runtime watch'}
           </strong>
         </div>
         <span className={`status-pill ${hasActionLane ? 'status-running' : 'status-warning'}`}>
-          {isOpenClaw ? 'chat.send / chat.abort' : isOwnedCodex ? 'exec resume / interrupt' : 'attach / read-tail'}
+          {isOwnedCodex ? 'exec resume / interrupt' : 'attach / read-tail'}
         </span>
       </div>
       <p className="muted operator-note">
-        {isOpenClaw
-          ? 'This is the first truthful control lane: explicit steer and stop only. Opening the UI still does not create a ghost session or auto-deliver anything back to Telegram.'
-          : isOwnedCodex
-            ? `${runtimeSurface?.sourceLabel ?? 'Runtime surface'} was launched by Cortex IDE. The truthful mutable lane is: launch → resume between runs → interrupt while active.`
-            : `${runtimeSurface?.sourceLabel ?? 'Runtime surface'} is visible inside the same product, but mutation stays disabled until we can prove an owned-session seam.`}
+        {isOwnedCodex
+          ? `${runtimeSurface?.sourceLabel ?? 'Runtime surface'} was launched by Cortex IDE. The truthful mutable lane is: launch → resume between runs → interrupt while active.`
+          : `${runtimeSurface?.sourceLabel ?? 'Runtime surface'} is visible inside the same product, but mutation stays disabled until we can prove an owned-session seam.`}
       </p>
       <div className="operator-state-grid">
         <div className="operator-state-card">
@@ -243,31 +218,25 @@ const OperatorActionsPanel = memo(function OperatorActionsPanel({
           <p className="muted">{activeRunHint(agent)}</p>
         </div>
         <div className="operator-state-card">
-          <span>{isOpenClaw ? 'Abort lane' : isOwnedCodex ? 'Last outcome / action lane' : 'Attach lane'}</span>
+          <span>{isOwnedCodex ? 'Last outcome / action lane' : 'Attach lane'}</span>
           <strong>
-            {isOpenClaw
-              ? (liveRunVisible ? 'armed' : 'idle-ish')
-              : isOwnedCodex
-                ? `${ownedLastOutcomeLabel} • ${canInterrupt ? 'interruptable' : canSendInput ? 'ready' : 'warming'}`
-                : runtimeSurface?.capabilities.attach ? 'readable' : 'unavailable'}
+            {isOwnedCodex
+              ? `${ownedLastOutcomeLabel} • ${canInterrupt ? 'interruptable' : canSendInput ? 'ready' : 'warming'}`
+              : runtimeSurface?.capabilities.attach ? 'readable' : 'unavailable'}
           </strong>
           <p className="muted">
-            {isOpenClaw
-              ? 'Fleet state is heuristic-driven, so abort can still no-op even when the surface looks warm.'
-              : isOwnedCodex
-                ? 'Owned Codex now preserves the last outcome separately from current availability, so interrupted / finished / failed runs do not collapse into the same vague state.'
-                : 'This is a truthful first pass: runtime watch is available, but only IDE-owned surfaces may eventually become mutable.'}
+            {isOwnedCodex
+              ? 'Owned Codex now preserves the last outcome separately from current availability, so interrupted / finished / failed runs do not collapse into the same vague state.'
+              : 'This is a truthful first pass: runtime watch is available, but only IDE-owned surfaces may eventually become mutable.'}
           </p>
         </div>
         <div className="operator-state-card">
           <span>Readable log</span>
           <strong>{historyLoading ? 'loading' : isOwnedCodex ? `${ownedGroupsLength || historyLength} grouped turns` : `${historyLength} entries`}</strong>
           <p className="muted">
-            {isOpenClaw
-              ? 'Only user/assistant/system text survives here. Hidden thinking and tool blobs stay out.'
-              : isOwnedCodex
-                ? `Recovered from ${runtimeSurface?.tailSourceLabel ?? 'owned runtime logs'} and grouped into launch/resume turns with explicit outcomes.`
-                : `Recovered from ${runtimeSurface?.tailSourceLabel ?? 'runtime metadata'} and summarized into a bounded readable tail.`}
+            {isOwnedCodex
+              ? `Recovered from ${runtimeSurface?.tailSourceLabel ?? 'owned runtime logs'} and grouped into launch/resume turns with explicit outcomes.`
+              : `Recovered from ${runtimeSurface?.tailSourceLabel ?? 'runtime metadata'} and summarized into a bounded readable tail.`}
           </p>
         </div>
       </div>
@@ -279,16 +248,14 @@ const OperatorActionsPanel = memo(function OperatorActionsPanel({
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             rows={compact ? 3 : 4}
-            placeholder={isOpenClaw
-              ? `Steer ${agent.name} without creating a new session…`
-              : `Send the next input to ${agent.name} by resuming the owned Codex session…`}
+            placeholder={`Send the next input to ${agent.name} by resuming the owned Codex session…`}
           />
           <div className="operator-actions queue-toolbar">
             <button className="button-primary" type="submit" disabled={actionState !== 'idle' || !draft.trim() || !canSendInput}>
-              {actionState === 'sending' ? (isOpenClaw ? 'Steering…' : 'Resuming…') : (isOpenClaw ? 'Steer session' : 'Send next input')}
+              {actionState === 'sending' ? 'Resuming…' : 'Send next input'}
             </button>
             <button type="button" onClick={onStop} disabled={actionState !== 'idle' || !canInterrupt}>
-              {actionState === 'stopping' ? (isOpenClaw ? 'Stopping…' : 'Interrupting…') : (isOpenClaw ? 'Stop active run' : 'Interrupt run')}
+              {actionState === 'stopping' ? 'Interrupting…' : 'Interrupt run'}
             </button>
             <button type="button" onClick={onRefreshTranscript} disabled={historyLoading || actionState !== 'idle'}>
               {historyLoading ? 'Refreshing…' : 'Refresh log'}
@@ -314,14 +281,12 @@ const OperatorActionsPanel = memo(function OperatorActionsPanel({
 });
 
 const RuntimeTailPanel = memo(function RuntimeTailPanel({
-  isOpenClaw,
   isOwnedCodex,
   historyLoading,
   historyError,
   history,
   ownedGroups,
 }: {
-  isOpenClaw: boolean;
   isOwnedCodex: boolean;
   historyLoading: boolean;
   historyError: string | null;
@@ -332,17 +297,13 @@ const RuntimeTailPanel = memo(function RuntimeTailPanel({
     <div className="inset-card inspector-block tool-shell terminal-shell">
       <div className="row space-between compact-row operator-header-row">
         <div>
-          <span>{isOpenClaw ? 'Session log' : 'Runtime tail'}</span>
-          <strong>{isOpenClaw ? 'Sanitized transcript' : 'Readable Codex tail'}</strong>
+          <span>Runtime tail</span>
+          <strong>Readable Codex tail</strong>
         </div>
-        <span className="status-pill status-healthy">{isOpenClaw ? 'history' : 'tail'}</span>
+        <span className="status-pill status-healthy">tail</span>
       </div>
       <p className="muted operator-note">
-        {isOpenClaw ? (
-          <>
-            Pulled from OpenClaw <span className="mono">chat.history</span>. Hidden thinking and raw tool internals are intentionally omitted here.
-          </>
-        ) : isOwnedCodex ? (
+        {isOwnedCodex ? (
           <>
             Recovered from <span className="mono">IDE-owned Codex exec/resume JSON logs</span> and summarized across turns.
           </>
@@ -406,14 +367,12 @@ const RuntimeTailPanel = memo(function RuntimeTailPanel({
           ))}
         </div>
       ) : historyLoading ? (
-        <p className="muted operator-note">{isOpenClaw ? 'Loading transcript…' : 'Loading runtime tail…'}</p>
+        <p className="muted operator-note">Loading runtime tail…</p>
       ) : (
         <p className="muted operator-note">
-          {isOpenClaw
-            ? 'No visible transcript text is available for this session yet. That usually means the freshest activity was tool-heavy/internal or compaction trimmed the readable turns, not that the bridge is broken.'
-            : isOwnedCodex
-              ? 'No readable owned-session entries were recovered yet. That usually means the launch/resume run has not emitted completed JSON items yet, not that the registry is broken.'
-              : 'No readable tail entries were recovered yet. That usually means the session has not emitted recent readable events, not that discovery failed.'}
+          {isOwnedCodex
+            ? 'No readable owned-session entries were recovered yet. That usually means the launch/resume run has not emitted completed JSON items yet, not that the registry is broken.'
+            : 'No readable tail entries were recovered yet. That usually means the session has not emitted recent readable events, not that discovery failed.'}
         </p>
       )}
     </div>
@@ -671,14 +630,13 @@ export function SessionOperatorPanel({
   const liveRunVisible = ['running', 'reviewing'].includes(agent.status);
   const runtimeSurface = agent.runtimeSurface;
   const browserSurface = agent.browserSurface ?? runtimeSurface?.browserSurface;
-  const isOpenClaw = agent.runtime === 'openclaw';
   const isOwnedCodex = agent.runtime === 'codex' && runtimeSurface?.ownership === 'owned';
   const agentSessionRef = useRef(agent.sessionKey);
   const reviewSurfaceRef = useRef(runtimeSurface?.id ?? '');
   const transcriptRequestRef = useRef(0);
   const reviewPacketRequestRef = useRef(0);
   const reviewFileRequestRef = useRef(0);
-  const hasActionLane = isOpenClaw || isOwnedCodex;
+  const hasActionLane = isOwnedCodex;
   const canSendInput = Boolean(runtimeSurface?.capabilities.sendInput);
   const canInterrupt = Boolean(runtimeSurface?.capabilities.interrupt);
   const ownedLifecycleLabel = lifecycleLabel(agent);
@@ -723,25 +681,7 @@ export function SessionOperatorPanel({
     const requestId = ++transcriptRequestRef.current;
     setHistoryLoading(true);
     try {
-      if (isOpenClaw) {
-        const response = await fetch(
-          `/api/openclaw/history?sessionKey=${encodeURIComponent(agent.sessionKey)}&limit=${transcriptLimit}${fresh ? '&fresh=1' : ''}`,
-          {
-            cache: 'no-store',
-          },
-        );
-        const payload = await readJson<{ transcript?: SessionTranscriptEntry[] }>(response);
-        if (agentSessionRef.current !== agent.sessionKey || transcriptRequestRef.current !== requestId) return;
-        setHistory(
-          (payload.transcript ?? []).map((entry) => ({
-            id: entry.id,
-            label: roleLabel(entry.role),
-            text: entry.text,
-            timestampLabel: entry.timestampLabel,
-          })),
-        );
-        setOwnedGroups([]);
-      } else if (runtimeSurface?.capabilities.readTail) {
+      if (runtimeSurface?.capabilities.readTail) {
         const response = await fetch(`/api/runtime/tail?surfaceId=${encodeURIComponent(runtimeSurface.id)}`, {
           cache: 'no-store',
         });
@@ -763,7 +703,7 @@ export function SessionOperatorPanel({
         setHistoryLoading(false);
       }
     }
-  }, [agent.sessionKey, isOpenClaw, runtimeSurface, transcriptLimit]);
+  }, [agent.sessionKey, runtimeSurface, transcriptLimit]);
 
   const loadReviewPacket = useCallback(async () => {
     if (!isOwnedCodex || !runtimeSurface?.id) {
@@ -970,7 +910,6 @@ export function SessionOperatorPanel({
         agent={agent}
         compact={compact}
         runtimeSurface={runtimeSurface}
-        isOpenClaw={isOpenClaw}
         isOwnedCodex={isOwnedCodex}
         hasActionLane={hasActionLane}
         liveRunVisible={liveRunVisible}
@@ -1065,7 +1004,6 @@ export function SessionOperatorPanel({
       ) : null}
 
       <RuntimeTailPanel
-        isOpenClaw={isOpenClaw}
         isOwnedCodex={isOwnedCodex}
         historyLoading={historyLoading}
         historyError={historyError}

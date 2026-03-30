@@ -64,59 +64,6 @@ async function safeFetch(url: string, timeoutMs = 2000): Promise<Response | null
   }
 }
 
-function detectOpenClaw(): DetectedTool {
-  const home = homedir();
-  const configPath = join(home, '.openclaw', 'openclaw.json');
-  
-  let detected = false;
-  let version: string | undefined;
-  let agentCount = 0;
-  let port = 18789;
-
-  try {
-    if (existsSync(configPath)) {
-      const raw = readFileSync(configPath, 'utf-8');
-      const config = JSON.parse(raw) as {
-        gateway?: { port?: number };
-        agents?: { list?: unknown[] };
-        version?: string;
-      };
-      port = config.gateway?.port ?? 18789;
-      agentCount = config.agents?.list?.length ?? 0;
-      version = config.version;
-    }
-  } catch {
-    // ignore
-  }
-
-  // Probe gateway
-  const probeUrl = `http://127.0.0.1:${port}/`;
-  safeFetch(probeUrl, 2000).then(res => {
-    if (res?.ok) detected = true;
-  });
-
-  // Fallback version from package.json
-  if (!version) {
-    try {
-      const pkgPath = join(home, 'openclaw', 'package.json');
-      if (existsSync(pkgPath)) {
-        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { version?: string };
-        version = pkg.version;
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  return {
-    id: 'openclaw',
-    name: 'OpenClaw Gateway',
-    detected,
-    version,
-    details: { agentCount, port },
-  };
-}
-
 function detectCodex(): DetectedTool {
   const home = homedir();
   const path = safeWhich('codex');
@@ -327,12 +274,6 @@ function detectApiKeys(): DetectedTool {
 function buildSummary(tools: DetectedTool[]): string {
   const parts: string[] = [];
 
-  const openclaw = tools.find(t => t.id === 'openclaw');
-  if (openclaw?.detected) {
-    const agentCount = (openclaw.details?.agentCount as number) ?? 0;
-    parts.push(`OpenClaw beta connected (${agentCount} agents)`);
-  }
-
   const claudeCode = tools.find(t => t.id === 'claude-code');
   if (claudeCode?.detected) {
     const sessionCount = (claudeCode.details?.sessionCount as number) ?? 0;
@@ -366,7 +307,6 @@ function buildSummary(tools: DetectedTool[]): string {
 
 export async function GET() {
   const tools: DetectedTool[] = [
-    detectOpenClaw(),
     detectCodex(),
     detectClaudeCode(),
     detectGemini(),
@@ -375,7 +315,7 @@ export async function GET() {
     detectApiKeys(),
   ];
 
-  const hasAgentSurface = tools.some(t => t.id === 'openclaw' && t.detected);
+  const hasAgentSurface = false;
   const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'gemini'].includes(t.id) && t.detected);
   const hasApiKey = tools.some(t => t.id === 'api-keys' && t.detected);
   const hasMemory = tools.some(t => t.id === 'cortex' && t.detected);

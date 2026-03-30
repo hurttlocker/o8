@@ -42,7 +42,6 @@ interface ApiKeyStatus {
 
 export interface DetectionResult {
   tools: {
-    openclaw: ToolDetection;
     codex: ToolDetection;
     claudeCode: ToolDetection;
     gemini: ToolDetection;
@@ -108,14 +107,6 @@ function buildToolList(detection: DetectionResult): ToolDisplayInfo[] {
   const configuredKeys = apiKeys.filter((k) => k.configured);
 
   return [
-    {
-      id: 'openclaw',
-      name: 'OpenClaw Connector (Beta)',
-      detected: tools.openclaw.detected,
-      version: tools.openclaw.version,
-      detail: tools.openclaw.agentCount ? `${tools.openclaw.agentCount} agents` : undefined,
-      icon: <Layers size={16} strokeWidth={2} />,
-    },
     {
       id: 'codex',
       name: 'Codex CLI',
@@ -438,16 +429,6 @@ interface MissingToolAction {
 function getMissingActions(detection: DetectionResult): MissingToolAction[] {
   const actions: MissingToolAction[] = [];
   const { tools, apiKeys } = detection;
-
-  if (!tools.openclaw.detected) {
-    actions.push({
-      id: 'openclaw',
-      name: 'OpenClaw Connector (Beta)',
-      description: 'Optional beta connector for mirroring personal OpenClaw sessions into the IDE.',
-      command: 'npm i -g openclaw && openclaw gateway start',
-      icon: <Layers size={16} strokeWidth={2} />,
-    });
-  }
 
   if (!tools.codex.detected && !tools.claudeCode.detected) {
     actions.push({
@@ -1046,7 +1027,7 @@ export const SetupWizard = memo(function SetupWizard({
             <PathChoiceCard
               icon={<Terminal size={18} strokeWidth={2} />}
               title="I want AI agents working on my code"
-              description="Install OpenClaw + a CLI agent to start automating engineering work."
+              description="Install a CLI agent to start automating engineering work."
               selected={fullWizardPath === 'agents'}
               onClick={() => setFullWizardPath('agents')}
             />
@@ -1103,16 +1084,6 @@ export const SetupWizard = memo(function SetupWizard({
               </div>
             </div>
 
-            <MissingToolCard
-              action={{
-                id: 'openclaw',
-                name: 'OpenClaw Connector (Beta)',
-                description: 'Optional beta connector for mirroring personal OpenClaw sessions into the IDE.',
-                command: 'npm i -g openclaw && openclaw gateway start',
-                icon: <Layers size={16} strokeWidth={2} />,
-              }}
-              onSkip={() => skipStep('openclaw')}
-            />
             <MissingToolCard
               action={{
                 id: 'codex',

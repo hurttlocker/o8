@@ -161,7 +161,7 @@ export const sentryTriagePullRequestTemplate = {
       produces: ['context_bundle'],
       runtimeAssignment: {
         strategy: 'prefer',
-        allowedRuntimes: ['claude-code', 'codex', 'openclaw'],
+        allowedRuntimes: ['claude-code', 'codex'],
         preferredRuntimes: ['claude-code', 'codex'],
         capabilityRequirements: [
           { capability: 'read_sentry', importance: 'required', reason: 'Need incident data.' },
@@ -197,7 +197,7 @@ export const sentryTriagePullRequestTemplate = {
       produces: ['triage_note'],
       runtimeAssignment: {
         strategy: 'prefer',
-        allowedRuntimes: ['claude-code', 'codex', 'openclaw'],
+        allowedRuntimes: ['claude-code', 'codex'],
         preferredRuntimes: ['claude-code', 'codex'],
         capabilityRequirements: [
           { capability: 'read_sentry', importance: 'required', reason: 'Need incident details.' },
@@ -294,7 +294,7 @@ export const sentryTriagePullRequestTemplate = {
       produces: ['fix_plan'],
       runtimeAssignment: {
         strategy: 'prefer',
-        allowedRuntimes: ['claude-code', 'codex', 'openclaw'],
+        allowedRuntimes: ['claude-code', 'codex'],
         preferredRuntimes: ['claude-code', 'codex'],
         capabilityRequirements: [
           { capability: 'read_repo', importance: 'required', reason: 'Need file-level planning context.' },
@@ -316,7 +316,7 @@ export const sentryTriagePullRequestTemplate = {
       produces: ['patch_branch'],
       runtimeAssignment: {
         strategy: 'prefer',
-        allowedRuntimes: ['claude-code', 'codex', 'openclaw'],
+        allowedRuntimes: ['claude-code', 'codex'],
         preferredRuntimes: ['claude-code', 'codex'],
         capabilityRequirements: [
           { capability: 'create_branch', importance: 'required', reason: 'Need an isolated fix branch.' },
@@ -350,7 +350,7 @@ export const sentryTriagePullRequestTemplate = {
       produces: ['review_report'],
       runtimeAssignment: {
         strategy: 'prefer',
-        allowedRuntimes: ['claude-code', 'codex', 'openclaw'],
+        allowedRuntimes: ['claude-code', 'codex'],
         preferredRuntimes: ['codex', 'claude-code'],
         capabilityRequirements: [
           { capability: 'review_diff', importance: 'required', reason: 'Need structured diff review.' },
@@ -385,7 +385,7 @@ export const sentryTriagePullRequestTemplate = {
       produces: ['test_report'],
       runtimeAssignment: {
         strategy: 'prefer',
-        allowedRuntimes: ['claude-code', 'codex', 'openclaw'],
+        allowedRuntimes: ['claude-code', 'codex'],
         preferredRuntimes: ['claude-code', 'codex'],
         capabilityRequirements: [
           { capability: 'run_tests', importance: 'required', reason: 'Need validation evidence.' },
@@ -418,7 +418,7 @@ export const sentryTriagePullRequestTemplate = {
       produces: ['pull_request'],
       runtimeAssignment: {
         strategy: 'first_supported',
-        allowedRuntimes: ['claude-code', 'codex', 'openclaw'],
+        allowedRuntimes: ['claude-code', 'codex'],
         preferredRuntimes: ['claude-code', 'codex'],
         capabilityRequirements: [
           { capability: 'create_pr', importance: 'required', reason: 'Need to publish the patch for human merge.' },
@@ -439,7 +439,7 @@ export const sentryTriagePullRequestTemplate = {
       produces: ['closure_note'],
       runtimeAssignment: {
         strategy: 'first_supported',
-        allowedRuntimes: ['claude-code', 'codex', 'openclaw'],
+        allowedRuntimes: ['claude-code', 'codex'],
         preferredRuntimes: ['claude-code', 'codex'],
         capabilityRequirements: [
           { capability: 'close_issue', importance: 'required', reason: 'Need to resolve the incident in the tracker.' },

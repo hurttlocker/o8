@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { dispatch } from '@/lib/lane/commands';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
-import { invalidateInboxCache } from '@/lib/mobile/openclaw';
+import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { createHash } from 'node:crypto';
 
 export const runtime = 'nodejs';

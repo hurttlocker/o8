@@ -222,18 +222,13 @@ function deriveWorkspaceStatus(params: {
 }
 
 function isVisibleWorkspaceAgent(agent: Awaited<ReturnType<typeof getRuntimeInventorySnapshot>>['agents'][number]) {
-  if (agent.runtime !== 'openclaw' && agent.runtime !== 'codex' && agent.runtime !== 'claude-code') {
+  if (agent.runtime !== 'codex' && agent.runtime !== 'claude-code') {
     return false;
   }
 
   const ownership = agent.runtimeSurface?.ownership ?? null;
   if (ownership === 'owned') {
     return true;
-  }
-
-  if (agent.runtime === 'openclaw') {
-    return Boolean(agent.isCurrentSession)
-      || ['running', 'reviewing', 'waiting', 'blocked', 'failed'].includes(agent.status);
   }
 
   if (ownership === 'discovered') {
@@ -245,9 +240,9 @@ function isVisibleWorkspaceAgent(agent: Awaited<ReturnType<typeof getRuntimeInve
   return ['running', 'reviewing', 'waiting'].includes(agent.status);
 }
 
-async function collectWorkspaceLifecycle(includeOpenClaw: boolean) {
+async function collectWorkspaceLifecycle() {
   const [runtimeSnapshot, registeredRepos] = await Promise.all([
-    getRuntimeInventorySnapshot({ includeOpenClaw }),
+    getRuntimeInventorySnapshot(),
     listRepos().catch(() => []),
   ]);
 
@@ -425,9 +420,7 @@ async function collectWorkspaceLifecycle(includeOpenClaw: boolean) {
 
 export async function GET(req: Request) {
   try {
-    const url = new URL(req.url);
-    const includeOpenClaw = url.searchParams.get('includeOpenClaw') !== '0';
-    const result = await collectWorkspaceLifecycle(includeOpenClaw);
+    const result = await collectWorkspaceLifecycle();
     return NextResponse.json(result);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';

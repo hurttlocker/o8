@@ -244,14 +244,14 @@ export async function submitSteerTurn({
   }
 
   // Infer runtime from session key prefix when snapshot lookup misses.
-  // This prevents falling through to the OpenClaw steer path when the
+  // This prevents falling through to the wrong runtime path when the
   // snapshot is stale but the session key clearly indicates a Codex/Claude session.
   const inferredRuntime = targetSession?.runtime
     ?? (sessionKey.startsWith('codex-owned:') ? 'codex'
       : sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-discovered:') ? 'codex'
       : sessionKey.startsWith('llm-chat:') ? 'chat'
       : sessionKey.startsWith('claude-code:') ? 'claude-code'
-      : 'openclaw');
+      : 'chat');
   const inferredOwnership = targetSession?.runtimeSurface?.ownership
     ?? (sessionKey.startsWith('codex-owned:') ? 'owned'
       : sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-discovered:') ? 'discovered'
@@ -261,7 +261,7 @@ export async function submitSteerTurn({
   const isOwnedCodex = inferredRuntime === 'codex' && inferredOwnership === 'owned';
   const isClaudeCode = inferredRuntime === 'claude-code';
   const isWorkspaceChat = inferredRuntime === 'chat';
-  const isChat = inferredRuntime === 'openclaw' || isDiscoveredCodex || isOwnedCodex || isClaudeCode || isWorkspaceChat;
+  const isChat = isDiscoveredCodex || isOwnedCodex || isClaudeCode || isWorkspaceChat;
   if (!isChat) {
     setActionNoteBySession((current) => ({ ...current, [sessionKey]: 'Cannot send to this session type.' }));
     return;
