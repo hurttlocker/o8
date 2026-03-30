@@ -14,7 +14,6 @@ import {
   FolderOpen,
   GitBranch,
   GitPullRequest,
-  MoreHorizontal,
   Play,
   Plus,
   PlayCircle,
@@ -547,26 +546,7 @@ function SetupModeButton({
   );
 }
 
-function OverflowDotsIcon({ color = 'currentColor' }: { color?: string }) {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color,
-        fontSize: 18,
-        lineHeight: 1,
-        fontWeight: 700,
-        letterSpacing: '-0.08em',
-        transform: 'translateY(-1px)',
-      }}
-    >
-      ...
-    </span>
-  );
-}
+// OverflowDotsIcon removed — overflow menu killed in favor of inline minus button
 
 interface BranchAgent {
   name: string;
@@ -830,8 +810,7 @@ function RepoCard({
 }) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [cardWidth, setCardWidth] = useState(0);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [menuRect, setMenuRect] = useState<DOMRect | null>(null);
+  // menuOpen/menuRect removed — overflow menu killed in favor of inline minus button
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [draftSetup, setDraftSetup] = useState<RepoSetupConfig>(repo.setup);
   const [saving, setSaving] = useState(false);
