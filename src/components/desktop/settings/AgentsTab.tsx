@@ -266,8 +266,103 @@ export function AgentsTab() {
     grouped.get(key)!.push(agent);
   }
 
+  const [mcpInstalled, setMcpInstalled] = useState<boolean | null>(null);
+  const [mcpInstalling, setMcpInstalling] = useState(false);
+  const [mcpNote, setMcpNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/operator/install')
+      .then(r => r.json())
+      .then(data => setMcpInstalled(Boolean(data.installed)))
+      .catch(() => setMcpInstalled(false));
+  }, []);
+
+  const handleInstallMcp = useCallback(async () => {
+    setMcpInstalling(true);
+    setMcpNote(null);
+    try {
+      const res = await fetch('/api/operator/install', { method: 'POST' });
+      const data = await res.json();
+      if (data.ok) {
+        setMcpInstalled(true);
+        setMcpNote(data.note ?? 'Installed. Restart Claude Code to activate.');
+      } else {
+        setMcpNote(data.error ?? 'Install failed.');
+      }
+    } catch {
+      setMcpNote('Unable to install MCP config.');
+    } finally {
+      setMcpInstalling(false);
+    }
+  }, []);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Claude Code Connection */}
+      <div style={{
+        background: 'var(--t-panel)',
+        borderRadius: 14,
+        padding: 20,
+        border: '1px solid var(--t-panel-border)',
+        boxShadow: 'var(--t-panel-shadow)',
+      }}>
+        <div style={{ marginBottom: 14 }}>
+          <h3 style={{ fontSize: 17, fontWeight: 700, color: 'var(--t-text)', margin: 0 }}>
+            Claude Code Connection
+          </h3>
+          <p style={{ fontSize: 12, color: 'var(--t-text-muted)', margin: '4px 0 0', lineHeight: 1.5 }}>
+            Connect your Claude Code terminal to o8. Gives Claude Code 5 operator tools: send tasks, check status, approve/reject, read history.
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {mcpInstalled ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '6px 12px', borderRadius: 8,
+                background: 'rgba(34, 197, 94, 0.08)', color: '#16a34a',
+                fontSize: 12, fontWeight: 600,
+              }}>
+                <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                Connected
+              </span>
+              <button
+                type="button"
+                onClick={handleInstallMcp}
+                disabled={mcpInstalling}
+                style={{
+                  border: 'none', background: 'transparent', color: 'var(--t-text-muted)',
+                  fontSize: 11, cursor: 'pointer', padding: '4px 8px',
+                }}
+              >
+                Reinstall
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleInstallMcp}
+              disabled={mcpInstalling || mcpInstalled === null}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '8px 16px', borderRadius: 8,
+                border: `1px solid ${THEME_ACCENT_BORDER}`,
+                background: THEME_ACCENT_SOFT,
+                color: THEME_ACCENT,
+                fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              {mcpInstalling ? 'Installing...' : 'Connect Claude Code'}
+            </button>
+          )}
+        </div>
+        {mcpNote ? (
+          <p style={{ fontSize: 11, color: 'var(--t-text-muted)', margin: '8px 0 0', lineHeight: 1.4 }}>
+            {mcpNote}
+          </p>
+        ) : null}
+      </div>
+
       <div style={{
         background: 'var(--t-panel)',
         borderRadius: 14,
