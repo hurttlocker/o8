@@ -3,6 +3,28 @@
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio, ArrowUp, ArrowDown, Square, AlertCircle, RotateCcw, GitCommit, CheckCircle2 } from 'lucide-react';
+/* ── Raw Phosphor SVG icons (React components render as empty boxes in Tauri webview) ── */
+function PhosphorPlay({ size = 14 }: { size?: number }) {
+  return (<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} fill="currentColor" viewBox="0 0 256 256" style={{ display: 'block', flexShrink: 0 }}><path d="M240,128a15.74,15.74,0,0,1-7.6,13.51L88.32,229.65a16,16,0,0,1-16.2.3A15.86,15.86,0,0,1,64,216.13V39.87a15.86,15.86,0,0,1,8.12-13.82,16,16,0,0,1,16.2.3L232.4,114.49A15.74,15.74,0,0,1,240,128Z" /></svg>);
+}
+function PhosphorSplitVertical({ size = 14 }: { size?: number }) {
+  return (<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} fill="currentColor" viewBox="0 0 256 256" style={{ display: 'block', flexShrink: 0 }}><path d="M208,144H48a8,8,0,0,0,0,16h72v32H96a8,8,0,0,0-5.66,13.66l32,32a8,8,0,0,0,11.32,0l32-32A8,8,0,0,0,160,192H136V160h72a8,8,0,0,0,0-16Zm-80,76.69L115.31,208h25.38ZM48,112H208a8,8,0,0,0,0-16H136V64h24a8,8,0,0,0,5.66-13.66l-32-32a8,8,0,0,0-11.32,0l-32,32A8,8,0,0,0,96,64h24V96H48a8,8,0,0,0,0,16Zm80-76.69L140.69,48H115.31Z" /></svg>);
+}
+function PhosphorSplitHorizontal({ size = 14 }: { size?: number }) {
+  return (<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} fill="currentColor" viewBox="0 0 256 256" style={{ display: 'block', flexShrink: 0 }}><path d="M104,40a8,8,0,0,0-8,8v72H64V96a8,8,0,0,0-13.66-5.66l-32,32a8,8,0,0,0,0,11.32l32,32A8,8,0,0,0,64,160V136H96v72a8,8,0,0,0,16,0V48A8,8,0,0,0,104,40ZM48,140.69,35.31,128,48,115.31Zm189.66-18.35-32-32A8,8,0,0,0,192,96v24H160V48a8,8,0,0,0-16,0V208a8,8,0,0,0,16,0V136h32v24a8,8,0,0,0,13.66,5.66l32-32A8,8,0,0,0,237.66,122.34ZM208,140.69V115.31L220.69,128Z" /></svg>);
+}
+function PhosphorXCircle({ size = 14 }: { size?: number }) {
+  return (<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} fill="currentColor" viewBox="0 0 256 256" style={{ display: 'block', flexShrink: 0 }}><path d="M165.66,101.66,139.31,128l26.35,26.34a8,8,0,0,1-11.32,11.32L128,139.31l-26.34,26.35a8,8,0,0,1-11.32-11.32L116.69,128,90.34,101.66a8,8,0,0,1,11.32-11.32L128,116.69l26.34-26.35a8,8,0,0,1,11.32,11.32ZM232,128A104,104,0,1,1,128,24,104.11,104.11,0,0,1,232,128Zm-16,0a88,88,0,1,0-88,88A88.1,88.1,0,0,0,216,128Z" /></svg>);
+}
+function PhosphorCaretLeft({ size = 12 }: { size?: number }) {
+  return (<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} fill="currentColor" viewBox="0 0 256 256" style={{ display: 'block', flexShrink: 0 }}><path d="M165.66,202.34a8,8,0,0,1-11.32,11.32l-80-80a8,8,0,0,1,0-11.32l80-80a8,8,0,0,1,11.32,11.32L91.31,128Z" /></svg>);
+}
+function PhosphorCaretRight({ size = 12 }: { size?: number }) {
+  return (<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} fill="currentColor" viewBox="0 0 256 256" style={{ display: 'block', flexShrink: 0 }}><path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z" /></svg>);
+}
+function PhosphorXBold({ size = 10 }: { size?: number }) {
+  return (<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} fill="currentColor" viewBox="0 0 256 256" style={{ display: 'block', flexShrink: 0 }}><path d="M208.49,191.51a12,12,0,0,1-17,17L128,145,64.49,208.49a12,12,0,0,1-17-17L111,128,47.51,64.49a12,12,0,0,1,17-17L128,111l63.51-63.52a12,12,0,0,1,17,17L145,128Z" /></svg>);
+}
 import LLMChat, { ChainOfThought, MessageBubble, type LLMMessage } from './LLMChat';
 import { IssueLinkPickerModal, buildLinkedIssueContext, type LinkedIssueRef } from './IssueLinkPicker';
 import { Canvas, type CanvasRepoTaskLaunchRequest, type CanvasTab } from './Canvas';
@@ -55,8 +77,8 @@ export interface TerminalTab {
   createdAt: number; // timestamp for elapsed time
   lastActivity: number; // timestamp of last terminal output
   // Chat-specific fields
-  chatRuntime?: 'codex' | 'claude-code' | 'openclaw';
-  chatSessionKey?: string; // OpenClaw session key or CLI session ID
+  chatRuntime?: 'codex' | 'claude-code';
+  chatSessionKey?: string; // CLI session ID
   chatModel?: string;
   chatContinueLatest?: boolean;
   chatDraftInjection?: { id: string; text: string; autoSend?: boolean; reason?: string };
@@ -83,10 +105,10 @@ const LOCALHOST_RE = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{3,5})
 const IGNORED_PORTS = new Set([3000, 3002]); // 3000 = Next.js dev, 3002 = WS server
 const ORCHESTRATED_TAB_AUTO_ARCHIVE_MS = 10 * 60_000;
 
-type WorkspaceChatRuntime = 'codex' | 'claude-code' | 'openclaw' | 'chat';
+type WorkspaceChatRuntime = 'codex' | 'claude-code' | 'chat';
 
 /** True when a tab is bound to an agent runtime (Codex or Claude Code), as
- *  opposed to a plain LLM chat or OpenClaw session.  Use this single guard
+ *  opposed to a plain LLM chat session. Use this single guard
  *  everywhere instead of scattering `chatRuntime === 'codex'` checks. */
 export function isAgentRuntimeTab(
   tab: TerminalTab | null | undefined,
@@ -675,33 +697,6 @@ function CodexTabIcon({ size = 13 }: { size?: number }) {
         d="M12 10.45V16.05"
         stroke="#8ea3bd"
         strokeWidth="1.55"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
-function OpenClawTabIcon({ size = 13 }: { size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      aria-hidden="true"
-      style={{ display: 'block', flexShrink: 0 }}
-    >
-      <path
-        d="M12 2.7 19 5.3v6.15c0 4.95-3.45 8.3-7 9.85-3.55-1.55-7-4.9-7-9.85V5.3L12 2.7Z"
-        stroke="#7aa2ff"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M8.45 12.4c.55-1.8 1.55-2.95 3.55-3.95M12.05 16.15c.45-1.95 1.55-3.45 3.35-4.95"
-        stroke="#7aa2ff"
-        strokeWidth="1.7"
         strokeLinecap="round"
       />
     </svg>
@@ -1352,7 +1347,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   const chatModel = tab.chatModel;
   const linkedIssue = tab.linkedIssue ?? null;
   const runtimeLabels = useMemo(
-    () => ({ 'codex': 'Codex', 'claude-code': 'Claude Code', 'openclaw': 'OpenClaw' } as const),
+    () => ({ 'codex': 'Codex', 'claude-code': 'Claude Code' } as const),
     [],
   );
   const availableModels = useMemo(
@@ -1517,7 +1512,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
           model: selectedModel?.id,
         };
       } else {
-        throw new Error('OpenClaw workspace sessions are no longer supported here.');
+        throw new Error('Unsupported workspace runtime session.');
       }
 
       const assistantId = `msg-${Date.now()}-assistant`;
@@ -1859,7 +1854,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
     onConsumeDraftInjection(tabId, injection.id);
   }, [onConsumeDraftInjection, sendText, tab.chatDraftInjection, tabId]);
 
-  const runtimeLabel = runtimeLabels[tab.chatRuntime ?? 'openclaw'];
+  const runtimeLabel = runtimeLabels[tab.chatRuntime ?? 'codex'];
   const llmMessages = useMemo<LLMMessage[]>(
     () => messages.map((message) => ({
       id: message.id,
@@ -2781,6 +2776,10 @@ const TabBar = memo(function TabBar({
   onNewLLMChatTab,
   scopedRepo,
   onRegisterRepo,
+  onSplitVertical,
+  onSplitHorizontal,
+  canCloseTile,
+  onCloseTile,
 }: {
   tabs: TerminalTab[];
   activeTabId: string;
@@ -2792,6 +2791,10 @@ const TabBar = memo(function TabBar({
   onNewLLMChatTab: (repo?: RegisteredRepo) => void;
   scopedRepo?: RegisteredRepo | null;
   onRegisterRepo?: (localPath: string) => void;
+  onSplitVertical?: () => void;
+  onSplitHorizontal?: () => void;
+  canCloseTile?: boolean;
+  onCloseTile?: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerStep, setPickerStep] = useState<'main' | 'terminal' | 'session' | 'repo'>('main');
@@ -2854,10 +2857,9 @@ const TabBar = memo(function TabBar({
     <div style={{
       display: 'flex',
       alignItems: 'stretch',
-      height: 36,
-      marginTop: 0,
+      height: 32,
       background: 'var(--t-chrome)',
-      borderBottom: '1px solid var(--t-divider)',
+      borderBottom: '0.5px solid var(--t-divider-subtle)',
       flexShrink: 0,
       overflow: 'visible',
       zIndex: 10,
@@ -2872,7 +2874,7 @@ const TabBar = memo(function TabBar({
             background: 'linear-gradient(to right, var(--t-chrome) 60%, transparent)',
             color: 'var(--t-text-secondary)',
           }}>
-            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            <PhosphorCaretLeft size={12} />
           </div>
         )}
         {canScrollRight && (
@@ -2882,7 +2884,7 @@ const TabBar = memo(function TabBar({
             background: 'linear-gradient(to left, var(--t-chrome) 60%, transparent)',
             color: 'var(--t-text-secondary)',
           }}>
-            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+            <PhosphorCaretRight size={12} />
           </div>
         )}
         <div ref={tabScrollRef} onScroll={syncTabScroll} onMouseEnter={syncTabScroll} style={{
@@ -2929,158 +2931,34 @@ const TabBar = memo(function TabBar({
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: 8,
+                gap: 5,
                 paddingTop: 0,
-                paddingRight: 12,
+                paddingRight: 10,
                 paddingBottom: 0,
-                paddingLeft: 12,
+                paddingLeft: 10,
                 height: '100%',
                 border: 'none',
-                borderRight: 'none',
-                background: isActive ? 'var(--t-panel-translucent)' : 'transparent',
-                color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
-                fontSize: 13,
+                background: 'transparent',
+                color: isActive ? 'var(--t-text)' : 'var(--t-text-muted)',
+                fontSize: 12,
                 fontWeight: isActive ? 600 : 400,
                 fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
+                letterSpacing: '-0.008em',
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
-                transition: 'background 100ms, color 100ms',
-                borderBottom: isActive ? `2px solid ${THEME_ACCENT}` : '2px solid transparent',
+                transition: 'color 120ms ease, border-color 120ms ease',
+                borderBottom: isActive ? '1.5px solid var(--t-accent, #2563eb)' : '1.5px solid transparent',
               }}
             >
-              {tab.kind === 'llm-chat' ? (
-                <CortexMarkIcon />
-              ) : tab.kind === 'chat' ? (
-                tab.chatRuntime === 'codex' ? (
-                  <CodexTabIcon />
-                ) : tab.chatRuntime === 'claude-code' ? (
-                  <ClaudeTabIcon />
-                ) : tab.chatRuntime === 'openclaw' ? (
-                  <OpenClawTabIcon />
-                ) : (
-                  <CortexMarkIcon />
-                )
-              ) : tab.kind === 'canvas' ? (
-                workspaceInspectorIcon(tab.canvasTab?.kind)
-              ) : tab.cliAgent === 'shell' ? (
-                <TerminalIcon size={12} style={{ color: '#94a3b8' }} />
-              ) : (
-                <AgentDot color={agent?.color ?? '#64748b'} />
-              )}
-                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0, gap: taskMeta ? 1 : 0 }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                    <span style={{
-                      maxWidth: 220,
-                      overflow: 'hidden',
-                      whiteSpace: 'nowrap',
-                      textOverflow: 'ellipsis',
-                      fontWeight: taskMeta || chatTabMeta?.summary ? 600 : undefined,
-                      letterSpacing: '-0.01em',
-                    }}>
-                      {primaryLabel}
-                    </span>
-                    {runtimeTone ? (
-                      <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        padding: '1px 6px',
-                        borderRadius: 999,
-                        background: runtimeTone.background,
-                        border: `1px solid ${runtimeTone.border}`,
-                        color: runtimeTone.color,
-                        fontSize: 9,
-                        fontWeight: 800,
-                        letterSpacing: '0.03em',
-                        textTransform: 'uppercase',
-                        flexShrink: 0,
-                      }}>
-                        {runtimeTone.shortLabel}
-                      </span>
-                    ) : null}
-                    {tab.orchestrationPacket ? (
-                      <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        padding: '1px 6px',
-                        borderRadius: 999,
-                        background: 'var(--t-divider-subtle)',
-                        color: 'var(--t-text-secondary)',
-                        fontSize: 9,
-                        fontWeight: 800,
-                        letterSpacing: '0.03em',
-                        textTransform: 'uppercase',
-                        flexShrink: 0,
-                      }}>
-                        {tab.orchestrationPacket.referenceLabel}
-                      </span>
-                    ) : null}
-                    {orchestrationTone ? (
-                      <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        padding: '1px 6px',
-                        borderRadius: 999,
-                        background: orchestrationTone.background,
-                        border: `1px solid ${orchestrationTone.border}`,
-                        color: orchestrationTone.color,
-                        fontSize: 9,
-                        fontWeight: 800,
-                        letterSpacing: '0.03em',
-                        textTransform: 'uppercase',
-                        flexShrink: 0,
-                      }}>
-                        {orchestrationTone.label}
-                      </span>
-                    ) : null}
-                  </span>
-                {showSecondaryRow ? (
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                    {tabDetail ? (
-                      <span style={{
-                        maxWidth: 220,
-                        overflow: 'hidden',
-                        whiteSpace: 'nowrap',
-                        textOverflow: 'ellipsis',
-                        color: 'var(--t-text-faint)',
-                        fontSize: 10,
-                        fontWeight: 500,
-                      }}>
-                        {tabDetail}
-                      </span>
-                    ) : null}
-                    {taskMeta && taskState ? (
-                      <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        padding: '1px 6px',
-                        borderRadius: 999,
-                        background: taskState.background,
-                        color: taskState.color,
-                        fontSize: 10,
-                        fontWeight: 700,
-                        letterSpacing: '0.01em',
-                      }}>
-                        {taskState.label}
-                      </span>
-                    ) : null}
-                    {checkpointCount > 0 ? (
-                      <span style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        padding: '1px 6px',
-                        borderRadius: 999,
-                        background: 'rgba(37, 99, 235, 0.12)',
-                        color: '#2563eb',
-                        fontSize: 10,
-                        fontWeight: 700,
-                        letterSpacing: '0.01em',
-                      }}>
-                        {checkpointCount} cp
-                      </span>
-                    ) : null}
-                  </span>
-                ) : null}
-              </span>
+              {/* Icons removed — text-only minimal tabs */}
+                <span style={{
+                  maxWidth: 160,
+                  overflow: 'hidden',
+                  whiteSpace: 'nowrap',
+                  textOverflow: 'ellipsis',
+                }}>
+                  {primaryLabel}
+                </span>
               {tabs.length > 1 && (
                 <span
                   onClick={(e) => { e.stopPropagation(); onCloseTab(tab.id); }}
@@ -3108,7 +2986,7 @@ const TabBar = memo(function TabBar({
                     (e.target as HTMLElement).style.color = '#475569';
                   }}
                 >
-                  <X size={10} />
+                  <PhosphorXBold size={10} />
                 </span>
               )}
             </button>
@@ -3158,15 +3036,7 @@ const TabBar = memo(function TabBar({
             }
           }}
         >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 12 12"
-            aria-hidden="true"
-            style={{ display: 'block', flexShrink: 0 }}
-          >
-            <path d="M3.2 2.4L9 6L3.2 9.6V2.4Z" fill="currentColor" />
-          </svg>
+          <PhosphorPlay size={13} />
         </button>
 
         {/* Picker dropdown */}
@@ -3648,6 +3518,63 @@ const TabBar = memo(function TabBar({
           </div>
         )}
       </div>
+
+      {/* Compact split / close controls */}
+      {(onSplitVertical || onSplitHorizontal || (canCloseTile && onCloseTile)) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 1, paddingRight: 6, flexShrink: 0, borderLeft: '0.5px solid var(--t-divider-subtle)', marginLeft: 2, paddingLeft: 4 }}>
+          {onSplitVertical && (
+            <button
+              type="button"
+              onClick={onSplitVertical}
+              aria-label="Split vertically"
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 22, height: 22, borderRadius: 6, border: 'none',
+                background: 'transparent', color: 'var(--t-text-faint)', cursor: 'pointer',
+                transition: 'background 100ms, color 100ms',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; e.currentTarget.style.color = 'var(--t-text-secondary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-text-faint)'; }}
+            >
+              <PhosphorSplitVertical size={14} />
+            </button>
+          )}
+          {onSplitHorizontal && (
+            <button
+              type="button"
+              onClick={onSplitHorizontal}
+              aria-label="Split horizontally"
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 22, height: 22, borderRadius: 6, border: 'none',
+                background: 'transparent', color: 'var(--t-text-faint)', cursor: 'pointer',
+                transition: 'background 100ms, color 100ms',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; e.currentTarget.style.color = 'var(--t-text-secondary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-text-faint)'; }}
+            >
+              <PhosphorSplitHorizontal size={14} />
+            </button>
+          )}
+          {canCloseTile && onCloseTile && (
+            <button
+              type="button"
+              onClick={onCloseTile}
+              aria-label="Close tile"
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                width: 22, height: 22, borderRadius: 6, border: 'none',
+                background: 'transparent', color: 'var(--t-text-faint)', cursor: 'pointer',
+                transition: 'background 100ms, color 100ms',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)'; e.currentTarget.style.color = '#ef4444'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-text-faint)'; }}
+            >
+              <PhosphorXCircle size={14} />
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 });
@@ -4961,9 +4888,14 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         createdAt: now,
         lastActivity: now,
       };
-      setTabs(prev => [...prev, newTab]);
+      setTabs(prev => {
+        const nextTabs = [...prev, newTab];
+        // Persist immediately — the debounced effect may not fire before a reload
+        persistTabsNow(nextTabs, tabId);
+        return nextTabs;
+      });
       setActiveTabId(tabId);
-    }, [preferredRepo]);
+    }, [persistTabsNow, preferredRepo]);
 
     const handleUpdateChatMessages = useCallback((tabId: string, messages: MobileTranscriptEntry[]) => {
       setTabs((prev) => prev.map((tab) => {
@@ -5494,15 +5426,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
 
         <div
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
-            minHeight: 38,
-            padding: '5px 12px',
-            borderBottom: '1px solid var(--t-divider-subtle)',
-            background: 'var(--t-chrome)',
-            flexShrink: 0,
+            display: 'none',
           }}
         >
 	            <div style={{ flex: 1, minWidth: 0 }}>
@@ -5826,6 +5750,10 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
           onNewLLMChatTab={handleNewLLMChatTab}
           scopedRepo={preferredRepo ?? activeRepo ?? null}
           onRegisterRepo={handleRegisterRepo}
+          onSplitVertical={onSplitVertical}
+          onSplitHorizontal={onSplitHorizontal}
+          canCloseTile={canCloseTile}
+          onCloseTile={onCloseTile}
         />
 
         {/* Terminal panels — all mounted, only active is visible */}

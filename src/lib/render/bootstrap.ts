@@ -3,7 +3,7 @@ import type { CommandCenterSnapshot } from '@/lib/command-center/snapshot';
 import { getCommandCenterSnapshotWithOptions } from '@/lib/command-center/snapshot';
 import type { RenderBootstrapSource, RenderBootstrapState } from '@/lib/render/client-merge';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
-import { getMobileInboxSnapshot } from '@/lib/mobile/openclaw';
+import { getMobileInboxSnapshot } from '@/lib/mobile/inbox';
 import type { FleetSnapshot } from '@/lib/fleet/types';
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';

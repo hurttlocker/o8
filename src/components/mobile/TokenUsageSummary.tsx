@@ -4,7 +4,7 @@ import { memo } from 'react';
 import type { TokenUsageSummaryProps } from './types';
 
 export const TokenUsageSummary = memo(function TokenUsageSummary({ snapshot, onViewCosts }: TokenUsageSummaryProps) {
-  const tracked = snapshot.sessions.filter((session) => session.runtime === 'openclaw' && session.tokenUsage);
+  const tracked = snapshot.sessions.filter((session) => session.tokenUsage);
   const total = tracked.reduce((sum, session) => sum + (session.tokenUsage?.totalTokens ?? 0), 0);
 
   // Use context.usedPercent when available (weighted average across sessions).

@@ -35,10 +35,8 @@ export {
 // To add a new runtime: import it and call registerRuntime().
 
 import { registerRuntime } from './registry';
-import { openclawRuntime } from './openclaw';
 import { codexRuntime } from './codex';
 import { claudeCodeRuntime } from './claude-code';
 
-registerRuntime(openclawRuntime);
 registerRuntime(codexRuntime);
 registerRuntime(claudeCodeRuntime);

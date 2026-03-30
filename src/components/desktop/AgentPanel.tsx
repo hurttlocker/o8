@@ -16,7 +16,6 @@ import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
 import { createPortal } from 'react-dom';
 import { BlueGlassActionButton, BlueGlassHoverCard, BlueGlassMetricPill, BlueGlassSparklineLane } from './BlueGlassHoverCard';
-import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, refreshOpenClawBetaStatus, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 import {
   ArrowRight,
   AlertCircle,
@@ -265,7 +264,6 @@ function agentCardSurfaceLabel(agent: AgentDetail, repo: string): string {
   const nameLower = (agent.name || '').toLowerCase();
   const modelLower = (agent.model || '').toLowerCase();
 
-  if (repo === 'openclaw') return firstSurfaceWord;
   if (nameLower.includes('codex') || modelLower.includes('codex')) return 'Codex';
   if (nameLower.includes('claude')) return 'Claude';
   if (nameLower.includes('telegram')) return 'Telegram';
@@ -398,32 +396,32 @@ interface WorkspaceGroup {
 function deriveRepo(workspace: string): string {
   const path = workspace.replace(/^~\//, '');
 
-  // Unknown or empty workspace — group under OpenClaw
-  if (!path || path === 'unknown') return 'openclaw';
+  // Unknown or empty workspace — group under a generic workspace bucket
+  if (!path || path === 'unknown') return 'workspace';
 
   if (path.includes('/.cortex-worktrees/')) {
     const repoRoot = path.split('/.cortex-worktrees/')[0] ?? '';
-    return repoRoot.split('/').pop() || 'openclaw';
+    return repoRoot.split('/').pop() || 'workspace';
   }
   if (path.includes('/.claude/worktrees/')) {
     const repoRoot = path.split('/.claude/worktrees/')[0] ?? '';
-    return repoRoot.split('/').pop() || 'openclaw';
+    return repoRoot.split('/').pop() || 'workspace';
   }
 
   // Explicit repo path
   if (path.includes('repos/')) {
     const parts = path.split('repos/');
-    return parts[1]?.split('/')[0] || path.split('/').pop() || 'openclaw';
+    return parts[1]?.split('/')[0] || path.split('/').pop() || 'workspace';
   }
   if (path.includes('projects/')) {
     const parts = path.split('projects/');
-    return parts[1]?.split('/')[0] || path.split('/').pop() || 'openclaw';
+    return parts[1]?.split('/')[0] || path.split('/').pop() || 'workspace';
   }
 
   // Main workspace
-  if (path === 'clawd') return 'openclaw';
+  if (path === 'clawd') return 'workspace';
 
-  return path.split('/').pop() || 'openclaw';
+  return path.split('/').pop() || 'workspace';
 }
 
 function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
@@ -439,7 +437,7 @@ function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
   for (const [workspace, wsAgents] of groupMap) {
     const repo = deriveRepo(workspace);
     const repoDisplayNames: Record<string, string> = {
-      'openclaw': 'OpenClaw',
+      'workspace': 'Workspace',
       'cortex-ide': 'Cortex IDE',
       'cortex': 'Cortex',
       'parasite-network': 'Parasite Network',
@@ -855,11 +853,11 @@ const AgentCard = memo(function AgentCard({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          color: group.repo === 'openclaw' ? THEME_ACCENT : 'var(--t-text-secondary)',
+          color: group.repo === 'workspace' ? THEME_ACCENT : 'var(--t-text-secondary)',
           flexShrink: 0,
           marginTop: 2,
         }}>
-          {group.repo === 'openclaw' ? (
+          {group.repo === 'workspace' ? (
             <Monitor size={expanded ? 14 : 13} strokeWidth={2} />
           ) : (
             <svg width={expanded ? 14 : 13} height={expanded ? 14 : 13} viewBox="0 0 24 24" fill="currentColor" style={{ display: 'block' }}>
@@ -1241,14 +1239,11 @@ const AgentCard = memo(function AgentCard({
           const agentDot = isFailed ? '#ef4444' : isStalled ? '#f97316' : isMergeReady ? '#16a34a' : isCompleted ? '#22c55e' : isRunning ? '#22c55e' : isReviewing ? '#a78bfa' : isWaiting ? '#b45309' : '#9ca3af';
 
           // Agent display info
-          const isOpenClawGroup = group.repo === 'openclaw';
           const nameLower = (agent.name || '').toLowerCase();
           const modelLower = (agent.model || '').toLowerCase();
           const isCodex = nameLower.includes('codex') || modelLower.includes('codex');
           const isClaudeCode = nameLower.includes('claude code') || nameLower.includes('claude-code');
-          const fullName = isOpenClawGroup
-            ? (agent.surfaceLabel || agent.name)
-            : isCodex ? 'Codex'
+          const fullName = isCodex ? 'Codex'
             : isClaudeCode ? 'Claude Code'
             : (agent.surfaceLabel || agent.name);
 
@@ -3724,14 +3719,8 @@ export const AgentPanel = memo(function AgentPanel({
     count: 0,
     hasError: false,
   });
-  const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
   const hasSelectedRepo = Boolean(selectedRepoLocalPath);
   const scopedRepo = hasSelectedRepo ? (selectedRepo ?? null) : activeRepo;
-
-  useEffect(() => {
-    void refreshOpenClawBetaStatus().then((status) => setOpenClawBetaEnabled(status.effective_enabled));
-    return subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled);
-  }, []);
 
   const launchRepoTask = useCallback(async (request: RepoTaskLaunchRequest) => {
     if (onLaunchWorkspaceTask) {
@@ -3810,8 +3799,8 @@ export const AgentPanel = memo(function AgentPanel({
   // Build workspace groups from agents
   const workspaceGroups = buildWorkspaceGroups(agents);
   const inferredRepo = useMemo(() => {
-    const preferredGroup = workspaceGroups.find((group) => group.hasRunning && group.repo !== 'openclaw')
-      ?? workspaceGroups.find((group) => group.repo !== 'openclaw')
+    const preferredGroup = workspaceGroups.find((group) => group.hasRunning && group.repo !== 'workspace')
+      ?? workspaceGroups.find((group) => group.repo !== 'workspace')
       ?? null;
     return preferredGroup?.repo ?? null;
   }, [workspaceGroups]);
@@ -3855,11 +3844,8 @@ export const AgentPanel = memo(function AgentPanel({
       try {
         // Fetch inventory, workspace enrichments, and registered repos in parallel
         const [invRes, wsRes, repoRes] = await Promise.all([
-          fetch(appendOpenClawBetaQuery(
-            `/api/runtime/inventory?fleetMode=${typeof window !== 'undefined' ? localStorage.getItem('cortex-ide-fleet-mode') ?? 'smart' : 'smart'}`,
-            openClawBetaEnabled,
-          )).catch(() => null),
-          fetch(appendOpenClawBetaQuery('/api/panel/workspaces', openClawBetaEnabled)).catch(() => null),
+          fetch(`/api/runtime/inventory?fleetMode=${typeof window !== 'undefined' ? localStorage.getItem('cortex-ide-fleet-mode') ?? 'smart' : 'smart'}`).catch(() => null),
+          fetch('/api/panel/workspaces').catch(() => null),
           fetch('/api/panel/repos').catch(() => null),
         ]);
 
@@ -3983,7 +3969,7 @@ export const AgentPanel = memo(function AgentPanel({
     const ms = wsConnected ? 60_000 : 30_000;
     const id = setInterval(fetchAll, ms);
     return () => { clearInterval(id); if (debounceTimer) clearTimeout(debounceTimer); };
-  }, [openClawBetaEnabled, wsConnected]);
+  }, [wsConnected]);
 
   // Fetch recent commits
   useEffect(() => {
@@ -4066,12 +4052,12 @@ export const AgentPanel = memo(function AgentPanel({
     [expandedGroup, workspaceGroups],
   );
   const trackedWorkspaceCount = useMemo(
-    () => workspaceGroups.filter((group) => group.repo !== 'openclaw').length,
+    () => workspaceGroups.filter((group) => group.repo !== 'workspace').length,
     [workspaceGroups],
   );
   const reviewWorkspaceCount = useMemo(
     () => workspaceGroups.filter((group) => (
-      group.repo !== 'openclaw'
+      group.repo !== 'workspace'
       && group.agents.some((agent) => agent.workspaceStatus === 'in_review' || agent.status === 'reviewing')
     )).length,
     [workspaceGroups],
@@ -4255,7 +4241,7 @@ export const AgentPanel = memo(function AgentPanel({
               fontSize: 11,
               color: THEME_ACCENT,
             }}>
-              OpenClaw connected, loading live workspaces...
+              Loading live workspaces...
             </div>
           ) : null}
           <RepoRegistrySection

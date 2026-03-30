@@ -12,7 +12,6 @@ import type { EventItem, FleetSnapshot, SquadSummary, WorkflowReviewSnapshot } f
 import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from '@/components/desktop/hooks/useDesktopWebSocket';
 import { shouldRetainCurrentCommandCenterSnapshot } from '@/lib/render/client-merge';
-import { openClawAdapterContract } from '@/lib/runtime/adapter';
 import { RealtimeEntityStore } from '@/lib/realtime/store';
 import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
 
@@ -526,7 +525,7 @@ const InspectorSidebar = memo(function InspectorSidebar({
       </div>
 
       <div className="inspector-block">
-        <span>{selectedAgent.runtime === 'openclaw' ? 'Session key' : 'Runtime surface id'}</span>
+        <span>Runtime surface id</span>
         <strong className="mono">{selectedRuntimeSurface?.id ?? selectedAgent.sessionKey}</strong>
         <p className="muted">Session id: {selectedAgent.sessionId ?? 'unknown'}</p>
       </div>
@@ -542,24 +541,15 @@ const InspectorSidebar = memo(function InspectorSidebar({
           <div>
             <span>Runtime surface</span>
             <strong>
-              {selectedAgent.runtime === 'openclaw'
-                ? openClawAdapterContract.displayName
-                : selectedRuntimeSurface?.sourceLabel ?? 'Runtime discovery'}
+              {selectedRuntimeSurface?.sourceLabel ?? 'Runtime discovery'}
             </strong>
           </div>
-          <span className={`status-pill ${selectedAgent.runtime === 'openclaw' ? 'status-healthy' : selectedRuntimeSurface?.ownership === 'owned' ? 'status-healthy' : 'status-warning'}`}>
-            {selectedAgent.runtime === 'openclaw' ? 'live bridge v1' : selectedRuntimeSurface?.ownership === 'owned' ? 'owned launch lane' : 'read-tail spike'}
+          <span className={`status-pill ${selectedRuntimeSurface?.ownership === 'owned' ? 'status-healthy' : 'status-warning'}`}>
+            {selectedRuntimeSurface?.ownership === 'owned' ? 'owned launch lane' : 'read-tail spike'}
           </span>
         </div>
         <ul className="bullet-list muted">
-          {selectedAgent.runtime === 'openclaw' ? (
-            <>
-              <li>Current mode mirrors existing sessions, starting with this one.</li>
-              <li>Steer + stop are now wired through the real OpenClaw gateway on explicit click only.</li>
-              <li>Spawn remains an explicit future action, not an automatic side effect.</li>
-              <li>Pause remains unsupported until runtime semantics are clean across providers.</li>
-            </>
-          ) : selectedRuntimeSurface?.ownership === 'owned' ? (
+          {selectedRuntimeSurface?.ownership === 'owned' ? (
             <>
               <li>This Codex surface was launched by o8 and is tracked in the owned-session registry.</li>
               <li>Lifecycle now preserves current availability separately from last outcome.</li>
@@ -644,28 +634,7 @@ const InspectorSidebar = memo(function InspectorSidebar({
       <div className="inset-card inspector-block">
         <span>Runtime trace</span>
         <pre className="terminal-preview">
-          {selectedAgent.runtime === 'openclaw'
-            ? `$ openclaw status --json
-> source=${fleetSourceLabel}
-> primary_session=${primarySessionKey ?? 'unknown'}
-> selected_session=${selectedAgent.sessionKey}
-> ownership=${selectedRuntimeSurface?.ownership ?? 'provider'}
-> percent_used=${formatPercent(selectedAgent.context.usedPercent)}
-> tokens=${formatTokens(selectedAgent.tokenUsage?.totalTokens)}
-
-$ openclaw gateway call chat.history --json --params '${JSON.stringify({
-                sessionKey: selectedAgent.sessionKey,
-                limit: 10,
-              })}'
-$ openclaw gateway call chat.send --json --params '${JSON.stringify({
-                sessionKey: selectedAgent.sessionKey,
-                message: '...',
-                idempotencyKey: '<uuid>',
-              })}'
-$ openclaw gateway call chat.abort --json --params '${JSON.stringify({
-                sessionKey: selectedAgent.sessionKey,
-              })}'`
-            : selectedRuntimeSurface?.ownership === 'owned'
+          {selectedRuntimeSurface?.ownership === 'owned'
               ? `$ POST /api/runtime/launch { runtime: "codex", cwd: "${selectedRuntimeSurface?.cwd ?? selectedAgent.workspace}", prompt: "..." }
 > selected_surface=${selectedRuntimeSurface?.id ?? selectedAgent.sessionKey}
 > source=${selectedRuntimeSurface?.sourceLabel ?? 'Owned Codex launch registry'}
@@ -1125,10 +1094,7 @@ export function CommandCenterShell({
             </div>
           </div>
           <p className="hero-copy">
-            First live bridge mode: mirror existing OpenClaw sessions into the control plane, starting
-            with this Q ↔ Mister chat, while also surfacing recent local Codex terminals as truthful
-            read-only runtime depth. New sessions belong behind explicit spawn actions, not silent UI side
-            effects.
+            Surface live Codex and Claude Code sessions inside one control plane without pretending the UI owns work it did not launch. New sessions belong behind explicit spawn actions, not silent UI side effects.
           </p>
         </div>
         <div className="command-strip">
@@ -1315,9 +1281,7 @@ export function CommandCenterShell({
                   <div className="eyebrow">Session model</div>
                   <h3>Mirror first, spawn explicitly</h3>
                   <p className="muted">
-                    The first live bridge should show what OpenClaw is already doing, especially this
-                    active session. Spawning belongs behind an explicit action so the UI never creates
-                    ghost work or fake context.
+                    The live bridge should show what the active local runtimes are already doing. Spawning belongs behind an explicit action so the UI never creates ghost work or fake context.
                   </p>
                   <ul className="bullet-list muted">
                     <li>Primary mirror: {fleet.meta.primarySessionKey ?? 'unknown'}</li>

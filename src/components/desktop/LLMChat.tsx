@@ -2579,7 +2579,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
       display: 'flex',
       flexDirection: 'row',
       height: '100%',
-      background: 'var(--t-bg-gradient)',
+      background: '#ffffff',
       fontFamily: '-apple-system, system-ui, sans-serif',
       overflow: 'hidden',
     }}>

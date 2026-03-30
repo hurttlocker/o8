@@ -49,7 +49,9 @@ import {
 } from 'lucide-react';
 import { MarkdownBody } from './MarkdownBody';
 import { IssueCreator } from './IssueCreator';
-import { GraphExplorer3D } from './GraphExplorer3D';
+// GraphExplorer3D lazy-loaded — only needed for 'memory' tab kind
+import { lazy, Suspense } from 'react';
+const LazyGraphExplorer3D = lazy(() => import('./GraphExplorer3D').then(m => ({ default: m.GraphExplorer3D })));
 import dynamic from 'next/dynamic';
 import { loader } from '@monaco-editor/react';
 
@@ -75,7 +77,6 @@ import {
 import { useTheme } from '@/lib/theme/context';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
-import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, refreshOpenClawBetaStatus, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import { deriveWorkflowStage, describeWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
 
@@ -117,12 +118,6 @@ const REPLAY_CARD_BACKGROUND = 'linear-gradient(180deg, var(--t-panel-translucen
 
 function sessionReplayRuntimePalette(runtime?: string) {
   switch (runtime) {
-    case 'OpenClaw':
-      return {
-        color: THEME_ACCENT,
-        background: THEME_ACCENT_SOFT,
-        border: THEME_ACCENT_BORDER,
-      };
     case 'Codex':
       return {
         color: '#4ade80',
@@ -444,7 +439,7 @@ const TabContent = memo(function TabContent({
     case 'deploy':
       return <DeployViewer project={tab.meta?.project} />;
     case 'memory':
-      return <GraphExplorer3D />;
+      return <Suspense fallback={null}><LazyGraphExplorer3D /></Suspense>;
     case 'welcome':
       return <CanvasEmpty />;
     case 'timeline':
@@ -485,7 +480,6 @@ function timelineReplayTime(minutesSinceAnchor: number): string {
 }
 
 function timelineReplayRuntimeLabel(runtime: string | null | undefined): string {
-  if (runtime === 'openclaw') return 'OpenClaw';
   if (runtime === 'claude-code') return 'Claude Code';
   if (runtime === 'codex') return 'Codex';
   return runtime || 'Runtime';
@@ -505,8 +499,6 @@ function timelineReplayTask(task: string | null | undefined): string | null {
     .replace(/^IDE-owned Codex session ready for the next input via resume\.?\s*/i, '')
     .replace(/^Live Codex terminal verified via pid\/log mapping on s\d+\.\s*/i, '')
     .replace(/^Live Codex terminal detected on s\d+\.\s*/i, '')
-    .replace(/^Existing OpenClaw session mirrored into the control plane\.?\s*/i, '')
-    .replace(/^Shared channel surface attached to the same OpenClaw runtime\.?\s*/i, '')
     .replace(/^Recent automation surface; useful for visibility, not the primary operator lane\.?\s*/i, '')
     .replace(/^Mirroring the live Q ↔ Mister conversation, not spawning a fresh session\.?\s*/i, '')
     .trim();
@@ -515,9 +507,6 @@ function timelineReplayTask(task: string | null | undefined): string | null {
 function timelineReplayMatchesAgent(agentName: string, session: AgentSummary): boolean {
   const key = session.sessionKey.toLowerCase();
   const name = (session.name || '').toLowerCase();
-  if (agentName === 'Main') return session.runtime === 'openclaw' && key.startsWith('agent:main:');
-  if (agentName === 'Agent 2') return session.runtime === 'openclaw' && (key.startsWith('agent:ace:') || name.includes('ace'));
-  if (agentName === 'Agent 3') return session.runtime === 'openclaw' && (key.startsWith('agent:hawk:') || name.includes('hawk'));
   if (agentName === 'codex') return session.runtime === 'codex';
   const loweredAgent = agentName.toLowerCase();
   return name.includes(loweredAgent) || key.includes(loweredAgent);
@@ -550,12 +539,6 @@ function TimelineExpanded() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [generatedAt, setGeneratedAt] = useState<string | null>(null);
-  const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
-
-  useEffect(() => {
-    void refreshOpenClawBetaStatus().then((status) => setOpenClawBetaEnabled(status.effective_enabled));
-    return subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled);
-  }, []);
 
   useEffect(() => {
     let active = true;
@@ -564,8 +547,8 @@ function TimelineExpanded() {
         if (segments.length === 0) setLoading(true);
         setError(null);
         const [timelineRes, inboxRes] = await Promise.all([
-          fetch(appendOpenClawBetaQuery('/api/panel/timeline', openClawBetaEnabled), { cache: 'no-store' }).catch(() => null),
-          fetch(appendOpenClawBetaQuery('/api/mobile/inbox', openClawBetaEnabled), { cache: 'no-store' }).catch(() => null),
+          fetch('/api/panel/timeline', { cache: 'no-store' }).catch(() => null),
+          fetch('/api/mobile/inbox', { cache: 'no-store' }).catch(() => null),
         ]);
 
         if (timelineRes?.ok) {
@@ -600,7 +583,7 @@ function TimelineExpanded() {
       active = false;
       clearInterval(interval);
     };
-  }, [openClawBetaEnabled]);
+  }, []);
 
   useEffect(() => {
     const node = containerRef.current;

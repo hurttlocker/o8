@@ -3,7 +3,6 @@ import { getOwnedCodexRuntimeTail } from '@/lib/codex/owned';
 import { getCodexRuntimeTail } from '@/lib/codex/sessions';
 import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
 import type { MobileHistoryResponse, MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
-import { getSessionTranscript } from '@/lib/openclaw/chat';
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
 
@@ -196,20 +195,12 @@ export async function GET(request: NextRequest) {
         );
       }
     }
-
-    // OpenClaw sessions — use gateway chat.history
-    const fresh = request.nextUrl.searchParams.get('fresh') === '1';
-    const transcript = await getSessionTranscript(sessionKey, limit, fresh);
-    const payload: MobileHistoryResponse = {
-      sessionKey,
-      transcript,
-    };
-
-    return NextResponse.json(payload, {
-      headers: {
-        'Cache-Control': 'no-store, max-age=0',
+    return NextResponse.json(
+      {
+        error: `Unsupported mobile session: ${sessionKey}`,
       },
-    });
+      { status: 400 },
+    );
   } catch (error) {
     return NextResponse.json(
       {

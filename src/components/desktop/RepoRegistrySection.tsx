@@ -31,7 +31,6 @@ import type {
   RepoSetupEnvMode,
   ValidatedRepoCandidate,
 } from '@/lib/repos/types';
-import { appendOpenClawBetaQuery, readOpenClawBetaEnabled, refreshOpenClawBetaStatus, subscribeOpenClawBetaEnabled } from '@/lib/connectors/openclaw-beta';
 import {
   FOCUS_REPO_SETUP_EVENT,
   OPEN_REPO_WORKSPACE_EVENT,
@@ -671,14 +670,6 @@ function runtimeBadgeTone(runtime?: string | null) {
         color: '#8b5cf6',
         background: 'rgba(139, 92, 246, 0.12)',
         border: 'rgba(139, 92, 246, 0.18)',
-      };
-    case 'openclaw':
-      return {
-        label: 'OpenClaw',
-        shortLabel: 'OC',
-        color: '#2563eb',
-        background: 'rgba(37, 99, 235, 0.12)',
-        border: 'rgba(37, 99, 235, 0.18)',
       };
     default:
       return {
@@ -1442,14 +1433,14 @@ function RepoCard({
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        padding: compactLayout ? '2px 8px' : '3px 9px',
+        padding: compactLayout ? '1px 6px' : '2px 7px',
         borderRadius: 999,
-        background: THEME_ACCENT_SOFT,
-        border: `1px solid ${THEME_ACCENT_BORDER}`,
-        color: THEME_ACCENT,
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: '0.04em',
+        background: 'var(--t-divider-subtle)',
+        border: 'none',
+        color: 'var(--t-text-secondary)',
+        fontSize: 9,
+        fontWeight: 600,
+        letterSpacing: '0.02em',
         textTransform: 'uppercase',
         flexShrink: 0,
       }}
@@ -1721,50 +1712,47 @@ function RepoCard({
     || headerMetaBadges.length > 0
     || Boolean(repo.readiness?.summary)
   );
-  const menuTrigger = (
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
+
+  const removeTrigger = (
     <button
       type="button"
       onClick={(e) => {
         e.stopPropagation();
-        const rect = e.currentTarget.getBoundingClientRect();
-        setMenuRect(rect);
-        setMenuOpen((v) => !v);
+        setConfirmingRemove(true);
       }}
       style={{
-        display: 'flex',
+        display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
         width: 26,
         height: 26,
         borderRadius: 8,
-        border: menuOpen ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
-        background: menuOpen
-          ? THEME_ACCENT_SOFT
-          : THEME_BG_CARD,
-        color: menuOpen ? THEME_ACCENT : 'var(--t-text-secondary)',
+        border: 'none',
+        background: 'transparent',
+        color: '#9ca3af',
         cursor: 'pointer',
         flexShrink: 0,
-        transition: 'all 140ms ease',
-      }}
+        fontSize: 18,
+        fontWeight: 300,
+        lineHeight: 0,
+        fontFamily: '-apple-system, system-ui, sans-serif',
+        appearance: 'none',
+        WebkitAppearance: 'none',
+        marginRight: -2,
+        transition: 'background 140ms ease, color 140ms ease',
+      } as React.CSSProperties}
       onMouseEnter={(e) => {
-        const target = e.currentTarget;
-        if (!menuOpen) {
-          target.style.background = THEME_ACCENT_SOFT;
-          target.style.borderColor = THEME_ACCENT_BORDER;
-          target.style.color = THEME_ACCENT;
-        }
+        e.currentTarget.style.color = '#ef4444';
+        e.currentTarget.style.background = 'rgba(239, 68, 68, 0.06)';
       }}
       onMouseLeave={(e) => {
-        const target = e.currentTarget;
-        if (!menuOpen) {
-          target.style.background = THEME_BG_CARD;
-          target.style.borderColor = 'var(--t-panel-border)';
-          target.style.color = 'var(--t-text-secondary)';
-        }
+        e.currentTarget.style.color = '#9ca3af';
+        e.currentTarget.style.background = 'transparent';
       }}
-      aria-label={`Open actions for ${repo.name}`}
+      aria-label={`Remove ${repo.name}`}
     >
-      <OverflowDotsIcon color="currentColor" />
+      &minus;
     </button>
   );
 
@@ -1869,7 +1857,7 @@ function RepoCard({
               ) : shortenPath(repo.localPath)}
             </div>
           </div>
-          {menuTrigger}
+          {removeTrigger}
         </div>
       </div>
 
@@ -2028,66 +2016,47 @@ function RepoCard({
         </BlueGlassHoverCard>
       ) : null}
 
-      {/* Overflow menu dropdown */}
-      {menuOpen && menuRect && typeof document !== 'undefined' ? createPortal(
-        <>
-          <div
-            onClick={() => setMenuOpen(false)}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: 9997,
-            }}
-          />
-          <div
-            style={{
-              position: 'fixed',
-              top: Math.round(menuRect.bottom + 8),
-              left: Math.round(menuRect.right - 184),
-              zIndex: 9998,
-              minWidth: 184,
-              padding: '6px 0',
-              borderRadius: 14,
-              border: '1px solid var(--t-panel-border)',
-              background: THEME_PANEL_GLASS,
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              boxShadow: 'var(--t-panel-shadow)',
-            }}
-          >
-            {[
-              ...(githubUrl ? [{ label: 'Open on GitHub', icon: <ExternalLink size={12} strokeWidth={2} />, action: () => { onOpenGitHub(repo); setMenuOpen(false); } }] : []),
-              { label: 'Open folder', icon: <FolderOpen size={12} strokeWidth={2} />, action: () => { void handleOpenDesktopPath('finder', repo.localPath); setMenuOpen(false); } },
-              { label: 'Copy repo path', icon: <Copy size={12} strokeWidth={2} />, action: () => { void handleCopyPath(repo.localPath, 'repo path'); setMenuOpen(false); } },
-              { label: 'Remove from Cortex', icon: <Trash2 size={12} strokeWidth={2} />, action: () => { onRemove(repo); setMenuOpen(false); }, danger: true },
-            ].map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                onClick={item.action}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  width: '100%',
-                  padding: '9px 14px',
-                  border: 'none',
-                  background: 'transparent',
-                  color: (item as { danger?: boolean }).danger ? '#ef4444' : 'var(--t-text)',
-                  fontSize: 12,
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  fontFamily: '-apple-system, system-ui, sans-serif',
-                  textAlign: 'left',
-                }}
-              >
-                <span style={{ color: (item as { danger?: boolean }).danger ? '#ef4444' : 'var(--t-text-muted)', display: 'flex' }}>{item.icon}</span>
-                {item.label}
-              </button>
-            ))}
+      {/* Inline remove confirmation strip */}
+      {confirmingRemove ? (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            padding: '6px 14px',
+            background: 'rgba(239, 68, 68, 0.04)',
+            borderBottom: '1px solid rgba(239, 68, 68, 0.1)',
+          }}
+        >
+          <span style={{ fontSize: 11, color: 'var(--t-text-secondary)', fontWeight: 500 }}>
+            Remove {repo.name}?
+          </span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setConfirmingRemove(false); }}
+              style={{
+                border: 'none', background: 'transparent', color: 'var(--t-text-muted)',
+                fontSize: 11, fontWeight: 500, cursor: 'pointer', padding: '2px 6px',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onRemove(repo); setConfirmingRemove(false); }}
+              style={{
+                border: 'none', background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444',
+                fontSize: 11, fontWeight: 600, cursor: 'pointer', padding: '2px 8px',
+                borderRadius: 6, fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              Remove
+            </button>
           </div>
-        </>,
-        document.body,
+        </div>
       ) : null}
 
       {/* Expanded content */}
@@ -3323,7 +3292,7 @@ function RepoCard({
             </div>
           ) : (
             <>
-            {hiddenBranchCount > 0 && !showAllBranches && (
+            {hiddenBranchCount > 0 && !showAllBranches && visibleBranches.length > 0 && (
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); setShowAllBranches(true); }}
@@ -3965,7 +3934,6 @@ export function RepoRegistrySection({
   const handledLaunchIntentNonceRef = useRef<number | null>(null);
   const handledWorkspaceIntentNonceRef = useRef<number | null>(null);
   const handledAddIntentNonceRef = useRef<number | null>(null);
-  const [openClawBetaEnabled, setOpenClawBetaEnabled] = useState(() => readOpenClawBetaEnabled());
 
   useEffect(() => {
     try {
@@ -3973,11 +3941,6 @@ export function RepoRegistrySection({
       else sessionStorage.removeItem('cortex-repo-expanded-id');
     } catch { /* ignore */ }
   }, [expandedRepoId]);
-
-  useEffect(() => {
-    void refreshOpenClawBetaStatus().then((status) => setOpenClawBetaEnabled(status.effective_enabled));
-    return subscribeOpenClawBetaEnabled(setOpenClawBetaEnabled);
-  }, []);
 
   useEffect(() => {
     try {
@@ -4037,7 +4000,7 @@ export function RepoRegistrySection({
       return;
     }
     function fetchAgentBranches() {
-      fetch(appendOpenClawBetaQuery('/api/panel/workspaces', openClawBetaEnabled))
+      fetch('/api/panel/workspaces')
         .then(r => r.json())
         .then((data: { workspaces?: Array<{
           repo: string;
@@ -4093,7 +4056,7 @@ export function RepoRegistrySection({
     fetchAgentBranches();
     const id = setInterval(fetchAgentBranches, 30_000);
     return () => clearInterval(id);
-  }, [ideWorkspaceSessions, openClawBetaEnabled]);
+  }, [ideWorkspaceSessions]);
 
   // ── Port data for running indicators (#170) ──
   const [portsByRepo, setPortsByRepo] = useState<Map<string, number[]>>(new Map());

@@ -7,15 +7,14 @@ export const dynamic = 'force-dynamic';
  * Routes based on user plan:
  *   - BYOK / self-hosted → pass through to /api/v2/proxy/llm (uses user's own API keys)
  *   - Managed (subscriber) → same proxy route but uses our platform keys + meters tokens
- *   - Local runtime (OpenClaw/Codex/Claude Code) → routes to respective runtime send endpoint
+ *   - Local runtime (Codex/Claude Code) → routes to respective runtime send endpoint
  *
- * The 3 legacy routes stay for backward compat:
+ * The legacy routes stay for backward compat:
  *   - /api/claude-code/send
  *   - /api/codex/send
- *   - /api/mobile/action (OpenClaw chat.send)
  *
  * Body: {
- *   target: 'llm' | 'openclaw' | 'codex' | 'claude-code',
+ *   target: 'llm' | 'codex' | 'claude-code',
  *   model?: string,
  *   provider?: 'anthropic' | 'openai' | 'google',
  *   messages?: Message[],
@@ -75,30 +74,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     });
   }
 
-  // ── Route 2: OpenClaw Agent Chat ──
-  if (target === 'openclaw') {
-    if (!body.sessionKey || !body.message) {
-      return NextResponse.json(
-        { error: 'sessionKey and message are required for target=openclaw' },
-        { status: 400 },
-      );
-    }
-
-    const res = await fetch(`${baseUrl}/api/mobile/action`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionKey: body.sessionKey,
-        action: 'send',
-        message: body.message,
-      }),
-    });
-
-    const data = await res.json().catch(() => ({}));
-    return NextResponse.json(data, { status: res.status });
-  }
-
-  // ── Route 3: Codex CLI ──
+  // ── Route 2: Codex CLI ──
   if (target === 'codex') {
     if (!body.message) {
       return NextResponse.json(
@@ -121,7 +97,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     return NextResponse.json(data, { status: res.status });
   }
 
-  // ── Route 4: Claude Code CLI ──
+  // ── Route 3: Claude Code CLI ──
   if (target === 'claude-code') {
     if (!body.message) {
       return NextResponse.json(
@@ -145,7 +121,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   }
 
   return NextResponse.json(
-    { error: `Unknown target: ${target}. Use llm, openclaw, codex, or claude-code.` },
+    { error: `Unknown target: ${target}. Use llm, codex, or claude-code.` },
     { status: 400 },
   );
 });

@@ -1,5 +1,4 @@
 export type BrowserProviderId =
-  | 'openclaw'
   | 'playwright'
   | 'cdp'
   | 'webkit'

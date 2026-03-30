@@ -20,7 +20,6 @@ interface WorktreeSummaryProps {
 const AGENT_COLORS: Record<string, string> = {
   'claude-code': '#cc785c',  // Claude warm orange
   'codex': '#10a37f',        // Codex green
-  'openclaw': '#ff3b30',     // OpenClaw red
 };
 
 export const WorktreeSummary = memo(function WorktreeSummary({

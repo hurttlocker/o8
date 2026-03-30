@@ -462,6 +462,107 @@ function PanelTab({
   );
 }
 
+const FILES_TAB_OPTIONS: { id: WorkspacePanelTabId; label: string }[] = [
+  { id: 'changes', label: 'Changes' },
+  { id: 'files', label: 'All Files' },
+  { id: 'env', label: 'Env' },
+];
+
+function FilesTabDropdown({
+  activeTab,
+  onSelectTab,
+}: {
+  activeTab: WorkspacePanelTabId;
+  onSelectTab: (tab: WorkspacePanelTabId) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const isFilesGroup = activeTab === 'changes' || activeTab === 'files' || activeTab === 'env';
+  const activeOption = FILES_TAB_OPTIONS.find((o) => o.id === activeTab) ?? FILES_TAB_OPTIONS[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        type="button"
+        onClick={() => {
+          if (!isFilesGroup) {
+            onSelectTab('changes');
+          } else {
+            setOpen((v) => !v);
+          }
+        }}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 3,
+          padding: '6px 8px',
+          borderRadius: 999,
+          border: 'none',
+          background: isFilesGroup ? 'var(--t-hover)' : 'transparent',
+          color: isFilesGroup ? 'var(--t-text)' : 'var(--t-text-secondary)',
+          fontSize: 10,
+          fontWeight: 700,
+          cursor: 'pointer',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {isFilesGroup ? activeOption.label : 'Changes'}
+        <svg width={8} height={8} viewBox="0 0 256 256" fill="currentColor" style={{ display: 'block', opacity: 0.5 }}><path d="M216.49,104.49l-80,80a12,12,0,0,1-17,0l-80-80a12,12,0,0,1,17-17L128,159,199.51,87.51a12,12,0,0,1,17,17Z" /></svg>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute',
+          top: 'calc(100% + 4px)',
+          left: 0,
+          minWidth: 120,
+          padding: '4px',
+          borderRadius: 10,
+          border: '1px solid var(--t-panel-border)',
+          background: 'rgba(255, 255, 255, 0.96)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.12), 0 0 0 0.5px rgba(0,0,0,0.06)',
+          zIndex: 100,
+        } as React.CSSProperties}>
+          {FILES_TAB_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => { onSelectTab(option.id); setOpen(false); }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                width: '100%',
+                padding: '6px 10px',
+                borderRadius: 6,
+                border: 'none',
+                background: activeTab === option.id ? 'var(--t-hover)' : 'transparent',
+                color: activeTab === option.id ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                fontSize: 11,
+                fontWeight: activeTab === option.id ? 600 : 500,
+                cursor: 'pointer',
+                fontFamily: '-apple-system, system-ui, sans-serif',
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ContextActionChip({
   label,
   onClick,
@@ -2867,15 +2968,16 @@ export function WorkspaceSidePanel({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 6,
+          gap: 4,
           padding: '8px 10px',
           borderBottom: '1px solid var(--t-divider-subtle)',
           flexShrink: 0,
         }}
       >
-        <PanelTab active={activeTab === 'changes'} label="Changes" onClick={() => setActiveTab('changes')} />
-        <PanelTab active={activeTab === 'files'} label="All Files" onClick={() => setActiveTab('files')} />
-        <PanelTab active={activeTab === 'env'} label="Env" onClick={() => setActiveTab('env')} />
+        <FilesTabDropdown
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+        />
         <PanelTab active={activeTab === 'review'} label="Review" onClick={() => setActiveTab('review')} />
         <PanelTab active={activeTab === 'git-log'} label="Git Log" onClick={() => setActiveTab('git-log')} />
       </div>

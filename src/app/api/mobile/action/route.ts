@@ -3,12 +3,11 @@ import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snap
 import { rejectLlmApproval, resumeLlmApproval } from '@/lib/approvals/llm';
 import { getApproval, listApprovals, resolveApproval } from '@/lib/approvals/store';
 import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mobile/types';
-import { invalidateInboxCache } from '@/lib/mobile/openclaw';
+import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import type { MobileActionRequest, MobileActionResponse } from '@/lib/mobile/types';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { launchCodexFromMobile, performRuntimeAction } from '@/lib/runtime/actions';
 import { readPersistedLlmChat, writePersistedLlmChat, type PersistedLlmChatHistory, type PersistedLlmChatMessage } from '@/lib/llm/chat-history-store';
-import { steerOpenClawSession } from '@/lib/openclaw/chat';
 import '@/lib/runtimes'; // Ensure runtimes are registered
 import { getRuntime } from '@/lib/runtimes/registry';
 
@@ -327,53 +326,11 @@ export async function POST(request: NextRequest) {
       return await runLlmChatTurn(request, payload, clientMutationId);
     }
 
-    // ── Send message to an OpenClaw agent session ──
     if (action === 'send') {
-      const message = (payload as unknown as Record<string, unknown>)?.message as string | undefined;
-      if (!message?.trim()) {
-        return NextResponse.json(
-          { error: 'message is required for send' },
-          { status: 400, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-        );
-      }
-      try {
-        const result = await steerOpenClawSession(sessionKey, message.trim());
-        const response: MobileActionResponse = {
-          ok: true,
-          action: 'send',
-          sessionKey,
-          clientMutationId,
-          status: 'sent',
-          note: `Message sent to ${sessionKey}`,
-          runId: (result as Record<string, unknown>)?.runId as string | undefined,
-        };
-        invalidateMutationCaches();
-        await publishMobileMutation(clientMutationId, {
-          action: 'send',
-          sessionKey,
-          runtime: 'openclaw',
-          status: 'queued',
-          note: response.note,
-        });
-        console.info('[mobile/action] send queued', { sessionKey, clientMutationId, runId: response.runId ?? null });
-        return NextResponse.json(response, {
-          headers: { 'Cache-Control': 'no-store, max-age=0' },
-        });
-      } catch (err) {
-        const note = err instanceof Error ? err.message : 'Send failed';
-        await publishMobileMutation(clientMutationId, {
-          action: 'send',
-          sessionKey,
-          runtime: 'openclaw',
-          status: 'failed',
-          note,
-        });
-        console.warn('[mobile/action] send failed', { sessionKey, clientMutationId, note });
-        return NextResponse.json(
-          { ok: false, action: 'send', sessionKey, clientMutationId, status: 'error', note },
-          { status: 500, headers: { 'Cache-Control': 'no-store, max-age=0' } },
-        );
-      }
+      return NextResponse.json(
+        { error: 'send is no longer supported on mobile runtime sessions. Use steer instead.' },
+        { status: 400, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+      );
     }
 
     if (action === 'launch') {
@@ -600,8 +557,8 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Route 3: Discovered Codex sessions — send directly to Codex CLI
-      // NOT through OpenClaw gateway (discovered sessions aren't gateway sessions)
+      // Route 3: Discovered Codex sessions — send directly to Codex CLI.
+      // These sessions are local terminals, not provider-backed runtime lanes.
       if (sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-discovered:')) {
         const threadId = sessionKey.replace(/^codex:/, '').replace(/^codex-discovered:/, '');
         try {
@@ -777,7 +734,7 @@ export async function POST(request: NextRequest) {
     await publishMobileMutation(clientMutationId, {
       action,
       sessionKey,
-      runtime: sessionKey.startsWith('codex') ? 'codex' : 'openclaw',
+      runtime: result.runtime,
       status: result.ok ? (result.status === 'queued' ? 'queued' : 'completed') : 'failed',
       note: result.note,
     });

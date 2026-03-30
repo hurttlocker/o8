@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback, memo } from 'react';
-import type { OpenClawIntegrationStatus } from '@/lib/connectors/openclaw-beta';
 import { initSounds, isSoundEnabled, setSoundEnabled } from '@/lib/mobile/sounds';
 import { useTheme } from './ThemeContext';
 
@@ -65,7 +64,6 @@ function AppearanceSection() {
 
 interface SettingsViewProps {
   onBack: () => void;
-  openClawStatus: OpenClawIntegrationStatus;
 }
 
 interface GatewayStatus {
@@ -247,7 +245,7 @@ function StatusDot({ connected }: { connected: boolean }) {
   );
 }
 
-export const SettingsView = memo(function SettingsView({ onBack, openClawStatus }: SettingsViewProps) {
+export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewProps) {
   const [gateway, setGateway] = useState<GatewayStatus | null>(null);
   const [github, setGitHub] = useState<GitHubStatus | null>(null);
   const [notifications, setNotifications] = useState(true);
@@ -341,7 +339,7 @@ export const SettingsView = memo(function SettingsView({ onBack, openClawStatus 
         }}>
           <StatusDot connected={gateway?.connected ?? false} />
           <span style={{ fontSize: 12, color: '#8e8e93', fontWeight: 500 }}>
-            {gateway?.connected ? 'Live connection to OpenClaw gateway' : 'Not connected'}
+            {gateway?.connected ? 'Desktop runtime bridge available' : 'Not connected'}
           </span>
         </div>
       </SettingsGroup>
@@ -413,13 +411,6 @@ export const SettingsView = memo(function SettingsView({ onBack, openClawStatus 
       {/* Runtimes */}
       <SettingsGroup label="Runtimes">
         <SettingsRow
-          label="OpenClaw Beta"
-          value={openClawStatus.effective_enabled ? 'Enabled' : 'Disabled'}
-          detail={openClawStatus.error
-            ? `Desktop-managed mirror unavailable: ${openClawStatus.error}`
-            : `Read-only mirror of desktop Cortex integration · mode ${openClawStatus.mode}`}
-        />
-        <SettingsRow
           label="Codex"
           detail="OpenAI coding agent"
           action={() => {}}
@@ -427,11 +418,6 @@ export const SettingsView = memo(function SettingsView({ onBack, openClawStatus 
         <SettingsRow
           label="Claude Code"
           detail="Anthropic coding agent"
-          action={() => {}}
-        />
-        <SettingsRow
-          label="OpenClaw"
-          detail="Gateway-managed agents"
           action={() => {}}
           last
         />
@@ -455,10 +441,9 @@ export const SettingsView = memo(function SettingsView({ onBack, openClawStatus 
       {/* About */}
       <SettingsGroup label="About">
         <SettingsRow label="Version" value="1.0.0" />
-        <SettingsRow label="OpenClaw" value={gateway?.version || '…'} />
         <SettingsRow
           label="Documentation"
-          action={() => window.open('https://docs.openclaw.ai', '_blank')}
+          action={() => window.open(process.env.NEXT_PUBLIC_REPO_URL || 'https://github.com/hurttlocker/cortex-ide', '_blank')}
         />
         <SettingsRow
           label="GitHub"

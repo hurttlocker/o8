@@ -32,7 +32,6 @@ const QUERIES = [
   { q: 'cortex ide dashboard tauri', cat: 'Projects' },
   { q: 'spear production workflow', cat: 'Projects' },
   { q: 'trading options QQQ SPY market', cat: 'Projects' },
-  { q: 'openclaw gateway agent runtime', cat: 'Projects' },
   { q: 'eyes web antiflammi health', cat: 'Projects' },
   // Config
   { q: 'config key token secret env', cat: 'Config' },

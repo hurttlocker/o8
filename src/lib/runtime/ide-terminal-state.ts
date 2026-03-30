@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { listIdeSurfaceRepoPaths } from '@/lib/runtime/ide-surface-state';
 
-export type PersistedChatRuntime = 'codex' | 'claude-code' | 'openclaw';
+export type PersistedChatRuntime = 'codex' | 'claude-code';
 
 export type PersistedTab = {
   id?: string;

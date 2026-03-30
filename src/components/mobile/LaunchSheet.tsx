@@ -17,13 +17,11 @@ interface LaunchSheetProps {
 const RUNTIMES = [
   { id: 'codex', label: 'Codex', color: '#34c759' },
   { id: 'claude-code', label: 'Claude Code', color: '#af52de' },
-  { id: 'openclaw', label: 'OpenClaw', color: '#007aff' },
 ] as const;
 
 const RUNTIME_ICONS: Record<string, string> = {
   'codex': 'M13 2L3 14h9l-1 8 10-12h-9l1-8z', // bolt
   'claude-code': 'M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z M9 21h6', // brain
-  'openclaw': 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z', // shield
 };
 
 function shortRepoName(name: string): string {

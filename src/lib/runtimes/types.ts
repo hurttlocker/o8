@@ -9,7 +9,7 @@ import type { BrowserSurfaceSummary } from '@/lib/browser/types';
  * Adding a new agent = one file implementing AgentRuntime.
  */
 
-export type RuntimeId = 'openclaw' | 'codex' | 'claude-code' | (string & {});
+export type RuntimeId = 'codex' | 'claude-code' | (string & {});
 
 // ── Capabilities ──
 

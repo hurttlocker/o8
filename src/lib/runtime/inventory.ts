@@ -1,7 +1,6 @@
 import path from 'node:path';
 import type { AgentRuntime, RuntimeSession } from '@/lib/runtimes/types';
 import type { AgentSummary, EventItem, FleetSnapshot, SquadSummary } from '@/lib/fleet/types';
-import { getOpenClawFleetSnapshot } from '@/lib/openclaw/fleet';
 import { codexRuntime } from '@/lib/runtimes/codex';
 import { claudeCodeRuntime } from '@/lib/runtimes/claude-code';
 import { listCurrentIdeRepoPaths } from '@/lib/runtime/ide-terminal-state';
@@ -237,100 +236,6 @@ function selectRepoFallbackAgents(agents: AgentSummary[], existingSessionKeys: S
   return selected;
 }
 
-function filterSnapshotToIdeSessions(snapshot: FleetSnapshot) {
-  const ideSessions = listIdeRuntimeSessions();
-  const ideTabs = listIdeRuntimeTabs();
-  const ideSessionByKey = new Map(ideSessions.map((session) => [session.liveSessionKey ?? session.sessionKey, session]));
-  const keepAgentIds = new Set<string>();
-
-  const agents = snapshot.agents
-    .filter((agent) => {
-      if (agent.runtime === 'openclaw') return true;
-      // Owned sessions (launched by orchestrator/API) are always visible — they don't need a pre-existing UI tab
-      if (agent.sessionKey?.startsWith('codex-owned:')) return true;
-      return ideSessionByKey.has(agent.sessionKey) || isRegistryBackedRuntimeSession(agent.sessionKey);
-    })
-    .map((agent) => {
-      if (agent.runtime === 'openclaw') {
-        keepAgentIds.add(agent.id);
-        return agent;
-      }
-
-      const ideSession = ideSessionByKey.get(agent.sessionKey);
-      const next = ideSession
-        ? {
-            ...agent,
-            name: ideSession.label || agent.name,
-            model: ideSession.model || agent.model,
-            primaryModel: ideSession.model || agent.primaryModel || agent.model,
-            workspace: ideSession.repoPath ? shortenHomePath(ideSession.repoPath) : agent.workspace,
-            runtimeSurface: agent.runtimeSurface
-              ? {
-                  ...agent.runtimeSurface,
-                  title: ideSession.label || agent.runtimeSurface.title,
-                  cwd: ideSession.repoPath ? shortenHomePath(ideSession.repoPath) : agent.runtimeSurface.cwd,
-                }
-              : agent.runtimeSurface,
-          }
-        : agent;
-      keepAgentIds.add(next.id);
-      return next;
-    });
-
-  const fallbackAgents = selectRepoFallbackAgents(snapshot.agents, new Set(agents.map((agent) => agent.sessionKey)));
-  for (const agent of fallbackAgents) {
-    keepAgentIds.add(agent.id);
-    agents.push(agent);
-  }
-
-  const liveAgentKeys = new Set(
-    agents
-      .filter((agent) => agent.runtime !== 'openclaw')
-      .map((agent) => agent.sessionKey),
-  );
-  const ghostAgents = ideTabs
-    .filter((tab) => !tab.liveSessionKey || !liveAgentKeys.has(tab.liveSessionKey))
-    .map(mapIdeGhostRuntimeTabToAgent);
-  for (const ghost of ghostAgents) {
-    keepAgentIds.add(ghost.id);
-    agents.push(ghost);
-  }
-
-  const squads = snapshot.squads
-    .map((squad) => {
-      const members = squad.members.filter((member) => keepAgentIds.has(member));
-      if (members.length === 0) return null;
-      const memberAgents = agents.filter((agent) => members.includes(agent.id));
-      return {
-        ...squad,
-        members,
-        liveSessions: members.length,
-        blockers: memberAgents.filter((agent) => agent.status === 'blocked' || agent.status === 'failed').length,
-        alerts: memberAgents.reduce((sum, agent) => sum + agent.alerts, 0),
-      };
-    })
-    .filter((squad): squad is SquadSummary => Boolean(squad));
-
-  const events = snapshot.events.filter((event) => !event.agentId || keepAgentIds.has(event.agentId));
-  const artifacts = snapshot.artifacts.filter((artifact) => !artifact.agentId || keepAgentIds.has(artifact.agentId));
-  const primarySessionKey = agents.find((agent) => agent.runtime === 'openclaw' && agent.isCurrentSession)?.sessionKey
-    ?? agents.find((agent) => agent.isCurrentSession)?.sessionKey
-    ?? agents.find((agent) => agent.status === 'running')?.sessionKey
-    ?? agents[0]?.sessionKey;
-
-  return {
-    ...snapshot,
-    agents,
-    squads,
-    events,
-    artifacts,
-    meta: {
-      ...snapshot.meta,
-      primarySessionKey,
-    },
-  };
-}
-
 async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
   const runtimes: AgentRuntime[] = [codexRuntime, claudeCodeRuntime].filter((runtime) => runtime.capabilities.discover);
   const ideSessions = listIdeRuntimeSessions();
@@ -430,9 +335,12 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
       sourceLabel: runtimes.length > 0
         ? `runtime inventory • ${runtimes.map((runtime) => runtime.displayName).join(' + ')}`
         : 'runtime inventory • local CLI runtimes',
-      gatewayLabel: 'OpenClaw beta connector disabled',
+      gatewayLabel: 'Runtime inventory ready',
+      gatewayFreshness: 'fresh',
+      gatewayReachable: true,
       mirrorMode: 'current-session-first',
-      note: 'OpenClaw beta connector disabled. Showing Codex and Claude Code surfaces only.',
+      observablePending: false,
+      note: 'Showing Codex and Claude Code runtime surfaces only.',
       primarySessionKey,
     },
     squads,
@@ -443,12 +351,11 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
 }
 
 export async function getRuntimeInventorySnapshot(
-  options: { fleetMode?: 'smart' | 'all'; fresh?: boolean; includeOpenClaw?: boolean } = {},
+  options: { fleetMode?: 'smart' | 'all'; fresh?: boolean } = {},
 ): Promise<FleetSnapshot> {
   const fleetMode = options.fleetMode ?? 'smart';
   const fresh = options.fresh ?? false;
-  const includeOpenClaw = options.includeOpenClaw ?? true;
-  const cacheKey = `${fleetMode}:${includeOpenClaw ? 'with-openclaw' : 'cli-only'}`;
+  const cacheKey = fleetMode;
   const now = Date.now();
   const generation = runtimeInventoryGeneration;
 
@@ -463,10 +370,7 @@ export async function getRuntimeInventorySnapshot(
   }
 
   const promise = (async () => {
-    const rawSnapshot = includeOpenClaw
-      ? await getOpenClawFleetSnapshot({ fleetMode, fresh })
-      : await buildCliRuntimeSnapshot();
-    const snapshot = includeOpenClaw ? filterSnapshotToIdeSessions(rawSnapshot) : rawSnapshot;
+    const snapshot = await buildCliRuntimeSnapshot();
 
     // ── Reconcile lanes with discovered sessions ���─
     try {
@@ -488,7 +392,8 @@ export async function getRuntimeInventorySnapshot(
     }
 
     const canCache = snapshot.meta.mode === 'live'
-      && (!includeOpenClaw || (snapshot.meta.gatewayFreshness === 'fresh' && !snapshot.meta.observablePending));
+      && snapshot.meta.gatewayFreshness === 'fresh'
+      && !snapshot.meta.observablePending;
     if (generation === runtimeInventoryGeneration && canCache) {
       runtimeInventoryCache.set(cacheKey, { snapshot, cachedAt: Date.now() });
     }

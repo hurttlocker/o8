@@ -33,7 +33,7 @@ const features = [
   },
   {
     title: "Runtime Agnostic",
-    desc: "Codex. Claude Code. OpenClaw. Gemini. Any ACP runtime. One control plane for all of them.",
+    desc: "Codex. Claude Code. Gemini. Any ACP runtime. One control plane for all of them.",
     color: palette.portlandOrange,
     icon: "⚡",
   },

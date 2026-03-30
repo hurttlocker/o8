@@ -225,7 +225,7 @@ export function resolveApproval(id: string, action: 'approve' | 'reject', actor:
 function inferApprovalRuntime(sessionKey: string) {
   if (sessionKey.startsWith('claude-code:')) return 'claude-code';
   if (sessionKey.startsWith('codex')) return 'codex';
-  return 'openclaw';
+  return 'codex';
 }
 
 export function createTestApproval(sessionKey = 'codex:thoughts-test') {

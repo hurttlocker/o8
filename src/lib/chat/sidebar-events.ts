@@ -50,19 +50,16 @@ export function deriveSidebarRuntimeCapabilities(
   const runtimeCapabilities = session?.runtimeSurface?.capabilities;
   const reviewContext = Boolean(session?.runtimeSurface?.capabilities.reviewContext);
 
-  const supportsLiveText = runtime === 'openclaw'
-    || runtime === 'codex'
+  const supportsLiveText = runtime === 'codex'
     || runtime === 'claude-code'
     || Boolean(runtimeCapabilities?.readTail);
 
-  const supportsToolEvents = runtime === 'openclaw'
-    || runtime === 'codex'
+  const supportsToolEvents = runtime === 'codex'
     || runtime === 'claude-code'
     || Boolean(runtimeCapabilities?.sendInput);
 
   const supportsSourceCards = supportsToolEvents || reviewContext;
-  const supportsApprovals = runtime === 'openclaw'
-    || runtime === 'codex'
+  const supportsApprovals = runtime === 'codex'
     || runtime === 'claude-code'
     || session?.approvalStatus === 'pending';
 
