@@ -150,9 +150,10 @@ All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key famil
 - **Never use the OpenClaw CLI for status/session queries** — `openclaw status --json` and `openclaw gateway call status --json` hang indefinitely on some configurations. Use WebSocket RPC via `wsRpc()` in `src/lib/openclaw/gateway-client.ts` instead. The gateway WebSocket (`ws://127.0.0.1:{port}`) with challenge-response auth returns sessions in <500ms. CLI is kept ONLY as a last-resort fallback with a 10s timeout.
 - **Never spread `...statusResult` AFTER session data in `runStatusSnapshot()`** — the `status` RPC response has its own `sessions` key that will clobber real session data from `sessions.list`. Always spread it BEFORE so our keys win.
 - **Never use CSS classes** — inline styles only (`style={{ }}` props). iOS Safari reliability issue. This is permanent.
-- **Never use emoji** — Lucide icons only across all surfaces
+- **Never use emoji** — Phosphor icons (raw SVG) across all surfaces
 - **Never use Material Design patterns** — no borderLeft accents, no MD elevation
-- **Never use Lucide React components in Tauri webview** — use raw `<svg>` elements (they render as empty boxes in Tauri)
+- **Never use React icon components in Tauri webview** — neither `@phosphor-icons/react` nor `lucide-react` render correctly. Extract SVG path data from `@phosphor-icons/react/dist/defs/` and use raw `<svg>` elements. For simple actions (plus/minus), prefer HTML entities.
+- **Never use dropdown overflow menus ("...")** — use inline actions with confirmation strips instead
 - **Never put early `return null` before hooks** — all hooks must run in same order every render
 - **Never use CSS shorthand** — use `paddingTop`/`paddingLeft`, not `padding: "8px 16px"` (React 19 warns on mixed shorthand/longhand)
 - **Never throw in API routes** — return structured error responses
