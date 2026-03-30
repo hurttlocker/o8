@@ -2268,16 +2268,26 @@ function DashboardInner() {
     async function openTabForLane(lane: {
       id: string; label: string; sessionKey: string;
       runtime: string; repoPath: string;
+      status?: string; branch?: string;
     }) {
       if (opened.has(lane.sessionKey)) return;
       opened.add(lane.sessionKey);
       const target = await waitForWorkspaceTerminalTarget({ repoPath: lane.repoPath });
       if (target) {
+        const laneRuntime = lane.runtime as 'codex' | 'claude-code';
         target.handle.openCliChatSession({
-          runtime: lane.runtime as 'codex' | 'claude-code',
+          runtime: laneRuntime,
           targetSessionKey: lane.sessionKey,
           label: lane.label,
           createNew: true,
+          orchestrationPacket: {
+            packetId: lane.id,
+            referenceLabel: lane.label,
+            title: lane.label,
+            status: (lane.status === 'running' ? 'running' : 'launching') as 'running' | 'launching',
+            runtime: laneRuntime,
+            branchTarget: lane.branch ?? null,
+          },
         });
         console.log(`[lane-tab-sync] Opened chat tab for lane ${lane.id} session ${lane.sessionKey}`);
       }
@@ -2291,6 +2301,7 @@ function DashboardInner() {
         for (const lane of (data.lanes ?? []) as Array<{
           id: string; label: string; sessionKey: string | null;
           status: string; runtime: string; repoPath: string;
+          branch?: string;
         }>) {
           if (!lane.sessionKey) continue;
           if (lane.status !== 'running' && lane.status !== 'launching') continue;
