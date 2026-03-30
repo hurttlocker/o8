@@ -14,7 +14,7 @@ interface SpeedDialProps {
 const MENU_ITEMS: { screen: MobileScreen; label: string; iconPath: string }[] = [
   {
     screen: 'chat',
-    label: 'Chat',
+    label: 'Code',
     iconPath: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
   },
   {
@@ -63,25 +63,27 @@ export const SpeedDialButton = memo(function SpeedDialButton({
 
   return (
     <div ref={menuRef} style={{ position: 'relative', flexShrink: 0, display: 'flex', alignItems: 'center' }}>
-      {/* Blue glass hamburger button */}
+      {/* Soft floating menu button */}
       <button
         type="button"
         onClick={() => setOpen(v => !v)}
         aria-label="Navigation menu"
         style={{
-          width: 36, height: 36,
-          borderRadius: 12,
-          background: open ? 'rgba(0,122,255,0.15)' : 'rgba(0,122,255,0.08)',
-          backdropFilter: 'blur(20px) saturate(1.6)',
-          WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-          border: '1px solid rgba(0,122,255,0.15)',
-          color: '#007aff',
+          width: 42, height: 42,
+          borderRadius: 999,
+          background: open ? 'rgba(255,255,255,0.94)' : 'rgba(255,255,255,0.78)',
+          backdropFilter: 'blur(18px) saturate(1.08)',
+          WebkitBackdropFilter: 'blur(18px) saturate(1.08)',
+          border: '1px solid rgba(255,255,255,0.72)',
+          color: '#2f2b27',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           cursor: 'pointer',
-          boxShadow: '0 2px 12px rgba(0,122,255,0.12)',
-          transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
+          boxShadow: open
+            ? '0 12px 30px rgba(71, 61, 51, 0.12), inset 0 1px 0 rgba(255,255,255,0.88)'
+            : '0 8px 24px rgba(71, 61, 51, 0.08), inset 0 1px 0 rgba(255,255,255,0.76)',
+          transition: 'background 220ms ease, box-shadow 220ms ease, transform 180ms ease',
           WebkitTapHighlightColor: 'transparent',
           position: 'relative',
         }}
@@ -93,19 +95,19 @@ export const SpeedDialButton = memo(function SpeedDialButton({
         }}>
           <span style={{
             display: 'block', width: 16, height: 1.5, borderRadius: 1,
-            background: '#007aff',
+            background: 'currentColor',
             transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
             transform: open ? 'translateY(5.25px) rotate(45deg)' : 'none',
           }} />
           <span style={{
             display: 'block', width: 12, height: 1.5, borderRadius: 1,
-            background: '#007aff',
+            background: 'currentColor',
             transition: 'all 200ms ease',
             opacity: open ? 0 : 1,
           }} />
           <span style={{
             display: 'block', width: 16, height: 1.5, borderRadius: 1,
-            background: '#007aff',
+            background: 'currentColor',
             transition: 'all 250ms cubic-bezier(0.32, 0.72, 0, 1)',
             transform: open ? 'translateY(-5.25px) rotate(-45deg)' : 'none',
           }} />
@@ -115,10 +117,10 @@ export const SpeedDialButton = memo(function SpeedDialButton({
           <span style={{
             position: 'absolute', top: -4, right: -4,
             width: 16, height: 16, borderRadius: '50%',
-            background: '#ff3b30', color: '#fff',
+            background: '#171717', color: '#fff',
             fontSize: 9, fontWeight: 700,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: '2px solid #fff',
+            border: '2px solid #f7f3eb',
           }}>
             {approvalCount}
           </span>
@@ -134,9 +136,9 @@ export const SpeedDialButton = memo(function SpeedDialButton({
             style={{
               position: 'fixed',
               inset: 0,
-              background: 'rgba(0,122,255,0.03)',
-              backdropFilter: 'blur(12px) saturate(1.4)',
-              WebkitBackdropFilter: 'blur(12px) saturate(1.4)',
+              background: 'rgba(247,243,235,0.34)',
+              backdropFilter: 'blur(10px) saturate(1.04)',
+              WebkitBackdropFilter: 'blur(10px) saturate(1.04)',
               animation: 'menuFrostIn 200ms ease',
               zIndex: 9997,
             }}
@@ -146,11 +148,11 @@ export const SpeedDialButton = memo(function SpeedDialButton({
           <div style={{
             position: 'fixed',
             top: 'calc(env(safe-area-inset-top, 0px) + 52px)',
-            left: 14,
+            left: 16,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'flex-start',
-            gap: 6,
+            gap: 10,
             zIndex: 9999,
           }}>
           {MENU_ITEMS.map((item) => {
@@ -186,16 +188,18 @@ export const SpeedDialButton = memo(function SpeedDialButton({
               >
                 {/* Label pill */}
                 <span style={{
-                  padding: '8px 14px',
-                  borderRadius: 18,
-                  background: isActive ? 'rgba(0,122,255,0.15)' : 'rgba(0,122,255,0.08)',
-                  border: isActive ? '1px solid rgba(0,122,255,0.25)' : '1px solid rgba(0,122,255,0.1)',
-                  color: isActive ? '#007aff' : 'rgba(0,80,200,0.7)',
+                  padding: '10px 15px',
+                  borderRadius: 999,
+                  background: isActive ? 'rgba(255,255,255,0.96)' : 'rgba(255,255,255,0.82)',
+                  border: '1px solid rgba(255,255,255,0.72)',
+                  color: '#2f2b27',
                   fontSize: 13,
-                  fontWeight: 600,
+                  fontWeight: isActive ? 700 : 600,
                   fontFamily: '-apple-system, system-ui, sans-serif',
                   letterSpacing: '-0.01em',
-                  boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+                  boxShadow: isActive
+                    ? '0 12px 30px rgba(71, 61, 51, 0.12)'
+                    : '0 8px 20px rgba(71, 61, 51, 0.08)',
                   position: 'relative',
                   pointerEvents: 'none',
                 }}>
@@ -204,7 +208,7 @@ export const SpeedDialButton = memo(function SpeedDialButton({
                     <span style={{
                       position: 'absolute', top: -5, right: -5,
                       width: 16, height: 16, borderRadius: '50%',
-                      background: '#ff3b30', color: '#fff',
+                      background: '#171717', color: '#fff',
                       fontSize: 9, fontWeight: 700,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}>
@@ -215,18 +219,21 @@ export const SpeedDialButton = memo(function SpeedDialButton({
 
                 {/* Icon circle */}
                 <span style={{
-                  width: 36, height: 36,
-                  borderRadius: 12,
-                  background: isActive ? 'rgba(0,122,255,0.15)' : 'rgba(0,122,255,0.08)',
-                  border: isActive ? '1px solid rgba(0,122,255,0.25)' : '1px solid rgba(0,122,255,0.1)',
+                  width: 42, height: 42,
+                  borderRadius: 999,
+                  background: isActive ? 'rgba(255,255,255,0.96)' : 'rgba(255,255,255,0.82)',
+                  border: '1px solid rgba(255,255,255,0.72)',
+                  color: '#2f2b27',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+                  boxShadow: isActive
+                    ? '0 12px 30px rgba(71, 61, 51, 0.12)'
+                    : '0 8px 20px rgba(71, 61, 51, 0.08)',
                   pointerEvents: 'none',
                 }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-                    stroke={isActive ? '#007aff' : 'rgba(0,80,200,0.5)'}
+                    stroke="currentColor"
                     strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d={item.iconPath} />
                   </svg>

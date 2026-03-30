@@ -5286,3 +5286,663 @@ body:has(.remodex-diff-overlay) {
     box-shadow: 0 0 4px rgba(52, 211, 153, 0.02), inset 0 0 4px rgba(52, 211, 153, 0.01);
   }
 }
+
+/* Mobile reference pass */
+.remodex-mobile-page {
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.8), transparent 44%),
+    linear-gradient(180deg, #fbf8f2 0%, #f7f3eb 52%, #f4efe6 100%);
+  color: #2f2b27;
+  padding: 0 0 34px;
+}
+
+.remodex-phone-shell {
+  min-height: 100vh;
+  padding: calc(env(safe-area-inset-top, 0px) + var(--remodex-viewport-top-offset, 0px) + 74px) 0 18px;
+}
+
+.remodex-scroll-view {
+  gap: 0;
+  padding: 0 18px calc(var(--remodex-compose-height, 120px) + env(safe-area-inset-bottom, 0px) + 42px);
+}
+
+.remodex-reference-top-veil {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  width: min(100dvw, 430px);
+  height: calc(env(safe-area-inset-top, 0px) + 118px);
+  transform: translateX(-50%);
+  background:
+    linear-gradient(180deg, rgba(251, 248, 242, 0.98) 0%, rgba(251, 248, 242, 0.92) 30%, rgba(251, 248, 242, 0.72) 58%, rgba(251, 248, 242, 0.28) 82%, rgba(251, 248, 242, 0) 100%);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  pointer-events: none;
+  z-index: 10;
+}
+
+.remodex-reference-header {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 8px);
+  left: 50%;
+  width: min(calc(100dvw - 28px), 390px);
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 42px;
+  align-items: center;
+  gap: 12px;
+  z-index: 12;
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+.remodex-reference-header-copy {
+  min-width: 0;
+  text-align: center;
+}
+
+.remodex-reference-header-copy h1,
+.remodex-reference-header-copy p {
+  margin: 0;
+}
+
+.remodex-reference-header-copy h1 {
+  color: #2d2925;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 1.06rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.remodex-reference-header-copy p {
+  margin-top: 2px;
+  color: rgba(78, 69, 60, 0.64);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 0.74rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.remodex-reference-header-spacer {
+  display: block;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.remodex-reference-circle-button {
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #342f2a;
+  box-shadow: 0 10px 24px rgba(71, 61, 51, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.84);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  transition: transform 160ms ease, background 220ms ease, box-shadow 220ms ease;
+}
+
+.remodex-reference-circle-button:active {
+  transform: translateY(1px) scale(0.97);
+}
+
+.remodex-reference-circle-button-dark {
+  border-color: rgba(23, 23, 23, 0.92);
+  background: #171717;
+  color: #ffffff;
+  box-shadow: 0 18px 32px rgba(23, 23, 23, 0.24);
+}
+
+.remodex-reference-list-screen {
+  display: grid;
+  gap: 28px;
+  min-height: calc(100vh - 160px);
+  padding-top: 18px;
+}
+
+.remodex-reference-list-group {
+  display: grid;
+  gap: 8px;
+}
+
+.remodex-reference-list-stack {
+  display: grid;
+  gap: 6px;
+}
+
+.remodex-reference-section-label {
+  margin: 0;
+  color: rgba(88, 79, 70, 0.56);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 0.94rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.remodex-reference-list-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.remodex-reference-list-row-copy {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 4px;
+}
+
+.remodex-reference-list-row-title {
+  color: #2f2b27;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 1.02rem;
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.remodex-reference-list-row-selected .remodex-reference-list-row-title {
+  font-weight: 700;
+}
+
+.remodex-reference-list-row-subtitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(98, 89, 80, 0.62);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.remodex-reference-list-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(76, 67, 57, 0.54);
+}
+
+.remodex-reference-list-row-trailing {
+  color: rgba(136, 128, 119, 0.72);
+  flex-shrink: 0;
+}
+
+.remodex-reference-empty-copy {
+  margin: 6px 0 0;
+  color: rgba(98, 89, 80, 0.68);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.remodex-reference-fab-wrap {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+  width: min(calc(100dvw - 28px), 390px);
+  transform: translateX(-50%);
+  display: flex;
+  justify-content: flex-end;
+  pointer-events: none;
+  z-index: 14;
+}
+
+.remodex-reference-fab {
+  width: 58px;
+  height: 58px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  background: #171717;
+  color: #ffffff;
+  font-size: 2rem;
+  line-height: 1;
+  box-shadow: 0 18px 34px rgba(23, 23, 23, 0.24);
+  pointer-events: auto;
+}
+
+.remodex-reference-thread-note {
+  margin: 0 0 14px;
+  padding: 12px 15px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.66);
+  color: rgba(79, 70, 60, 0.76);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  box-shadow: 0 12px 24px rgba(71, 61, 51, 0.06);
+}
+
+.remodex-message-stack {
+  display: block;
+  min-height: 0;
+  padding-top: 8px;
+}
+
+.remodex-message-stack > [data-index] {
+  padding-bottom: 1.2rem;
+}
+
+.remodex-message-card {
+  gap: 0.82rem;
+  padding: 0;
+}
+
+.remodex-rich-text {
+  gap: 0.82rem;
+}
+
+.remodex-rich-paragraph,
+.remodex-rich-heading,
+.remodex-rich-list,
+.remodex-loading-card {
+  color: #2f2a24;
+  font-family: 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, ui-serif, serif;
+}
+
+.remodex-rich-paragraph,
+.remodex-rich-list,
+.remodex-loading-card {
+  font-size: 1.06rem;
+  line-height: 1.66;
+  letter-spacing: 0.002em;
+}
+
+.remodex-rich-heading {
+  font-size: 1.08rem;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+
+.remodex-rich-heading-2,
+.remodex-rich-heading-3 {
+  text-transform: none;
+  color: rgba(65, 57, 48, 0.82);
+  letter-spacing: -0.01em;
+}
+
+.remodex-rich-list {
+  gap: 0.5rem;
+  padding-left: 1.2rem;
+}
+
+.remodex-rich-text code {
+  padding: 0.12rem 0.34rem;
+  border-radius: 0.4rem;
+  background: rgba(114, 103, 91, 0.09);
+  color: #3f382f;
+}
+
+.remodex-user-turn-wrap {
+  gap: 8px;
+}
+
+.remodex-user-bubble {
+  max-width: 84%;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 18px;
+  background: #e9e3d8;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.44);
+  color: #39332c;
+}
+
+.remodex-user-bubble .remodex-rich-text,
+.remodex-user-bubble .remodex-rich-paragraph,
+.remodex-user-bubble .remodex-rich-list,
+.remodex-user-bubble .remodex-rich-heading {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+}
+
+.remodex-user-bubble .remodex-rich-paragraph,
+.remodex-user-bubble .remodex-rich-list {
+  font-size: 0.98rem;
+  line-height: 1.48;
+}
+
+.remodex-turn-time {
+  display: none;
+}
+
+.remodex-reference-activity-row {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(117, 108, 98, 0.76);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 500;
+}
+
+.remodex-reference-activity-row-chevron {
+  transition: transform 180ms ease;
+}
+
+.remodex-reference-activity-row-chevron-open {
+  transform: rotate(90deg);
+}
+
+.remodex-reference-tool-detail-stack {
+  display: grid;
+  gap: 8px;
+  margin-top: -2px;
+}
+
+.remodex-reference-tool-detail {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: 0 10px 18px rgba(71, 61, 51, 0.05);
+}
+
+.remodex-reference-tool-name {
+  color: rgba(98, 89, 80, 0.62);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.remodex-reference-tool-copy {
+  color: #463f36;
+  font-family: 'SFMono-Regular', ui-monospace, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.remodex-reference-artifact-button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.remodex-reference-artifact-button[role='button'] {
+  cursor: pointer;
+}
+
+.remodex-reference-artifact-button:not([role='button']) {
+  cursor: default;
+}
+
+.remodex-reference-artifact-card {
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(234, 228, 218, 0.96);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 16px 28px rgba(71, 61, 51, 0.08);
+}
+
+.remodex-reference-artifact-card-head {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid rgba(236, 230, 221, 0.88);
+}
+
+.remodex-reference-artifact-action {
+  color: rgba(95, 86, 77, 0.66);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.remodex-reference-artifact-path {
+  color: #3d362f;
+  font-family: 'SFMono-Regular', ui-monospace, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.77rem;
+  line-height: 1.45;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.remodex-reference-artifact-preview {
+  display: grid;
+  background: #fcfaf6;
+}
+
+.remodex-reference-artifact-line {
+  padding: 4px 14px;
+}
+
+.remodex-reference-artifact-line code {
+  color: #433c34;
+  font-family: 'SFMono-Regular', ui-monospace, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.76rem;
+  line-height: 1.52;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.remodex-reference-artifact-line-add {
+  background: rgba(226, 244, 228, 0.92);
+}
+
+.remodex-reference-artifact-line-add code {
+  color: #2f6e36;
+}
+
+.remodex-reference-artifact-line-remove {
+  background: rgba(252, 236, 232, 0.9);
+}
+
+.remodex-reference-artifact-line-remove code {
+  color: #9a4d45;
+}
+
+.remodex-reference-artifact-line-meta,
+.remodex-reference-artifact-line-hunk {
+  background: rgba(244, 239, 231, 0.96);
+}
+
+.remodex-reference-artifact-line-meta code,
+.remodex-reference-artifact-line-hunk code {
+  color: rgba(95, 86, 77, 0.82);
+}
+
+.remodex-bottom-dock {
+  left: 50%;
+  width: min(calc(100dvw - 24px), 394px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+  padding: 0;
+  z-index: 13;
+}
+
+.remodex-compose-shell {
+  padding: 10px 12px 12px !important;
+  border-radius: 28px !important;
+  border: 1px solid rgba(255, 255, 255, 0.76);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 18px 38px rgba(71, 61, 51, 0.12);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.remodex-compose-shell::before {
+  inset: 1px;
+  border-radius: 27px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.44), rgba(255, 255, 255, 0.08));
+}
+
+.remodex-compose-surface-reference {
+  gap: 12px;
+  min-height: 86px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.remodex-compose-input {
+  min-height: 34px;
+  max-height: 160px;
+  color: #302a24;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
+.remodex-compose-input::placeholder {
+  color: rgba(124, 114, 104, 0.64);
+}
+
+.remodex-reference-compose-row {
+  justify-content: space-between;
+}
+
+.remodex-reference-compose-mode {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(242, 236, 225, 0.96);
+  color: #4d4439;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.remodex-reference-compose-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.remodex-reference-compose-plus,
+.remodex-reference-compose-primary {
+  width: 38px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 0;
+}
+
+.remodex-reference-compose-plus {
+  background: rgba(242, 236, 225, 0.96);
+  color: #423930;
+}
+
+.remodex-reference-compose-primary {
+  background: #171717;
+  color: #ffffff;
+  box-shadow: 0 14px 28px rgba(23, 23, 23, 0.18);
+}
+
+.remodex-reference-compose-primary:disabled {
+  background: rgba(23, 23, 23, 0.28);
+  box-shadow: none;
+}
+
+.remodex-reference-slash-menu {
+  display: grid;
+  gap: 2px;
+  padding: 8px 0;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 14px 28px rgba(71, 61, 51, 0.1);
+}
+
+.remodex-reference-slash-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.remodex-reference-slash-command {
+  color: #433c34;
+  font-family: 'SFMono-Regular', ui-monospace, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.remodex-reference-slash-description {
+  color: rgba(109, 99, 89, 0.7);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 0.76rem;
+}
+
+.remodex-attachment-pill {
+  border: 1px solid rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 12px 24px rgba(71, 61, 51, 0.08);
+}
+
+.remodex-attachment-pill-copy span {
+  color: rgba(106, 96, 86, 0.66);
+}
+
+.remodex-watch-card {
+  gap: 0.8rem;
+}
+
+.remodex-inline-action-note {
+  margin: 8px 4px 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  color: rgba(106, 96, 86, 0.72);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  font-size: 0.8rem;
+}
+
+.remodex-loading-card {
+  padding: 18px 0 8px;
+}
+
+.remodex-typing-bubble,
+.remodex-streaming-card {
+  border-left: 0;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.76);
+  box-shadow: 0 14px 28px rgba(71, 61, 51, 0.08);
+}
+
+.remodex-typing-bubble-label,
+.remodex-streaming-preview,
+.remodex-message-header,
+.remodex-speaker-label {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+}

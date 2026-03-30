@@ -30,6 +30,14 @@ import {
   Sparkles,
   Square,
 } from 'lucide-react';
+import {
+  PaperPlaneRight,
+  Stop,
+  SpinnerGap,
+  PlusCircle,
+  MagicWand,
+  CaretDown,
+} from '@phosphor-icons/react';
 import type {
   MobileInboxSnapshot,
   MobileTranscriptEntry,
@@ -76,6 +84,17 @@ const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
 const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
 const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
+
+const O_PLACEHOLDERS = [
+  'Orchestrate something...',
+  'Operate on this repo...',
+  'Outline the next step...',
+  'Optimize this workflow...',
+  'Observe the agent output...',
+  'Order a new task...',
+  'Organize the worktree...',
+  'Orient the mission...',
+];
 
 // ── Types ──
 
@@ -1546,161 +1565,95 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
   return (
     <header
       style={{
-        position: 'relative',
         display: 'flex',
         alignItems: 'center',
-        gap: '8px',
-        padding: '8px 10px',
-        borderBottom: '1px solid var(--t-divider)',
-        background: 'linear-gradient(180deg, var(--t-panel) 0%, var(--t-panel-translucent) 100%)',
-        backdropFilter: 'blur(24px) saturate(1.25)',
-        WebkitBackdropFilter: 'blur(24px) saturate(1.25)',
-        boxShadow: 'var(--t-panel-shadow)',
+        justifyContent: 'space-between',
+        height: 44,
+        paddingLeft: 16,
+        paddingRight: 12,
+        backgroundColor: 'transparent',
+        borderBottomWidth: '0.5px',
+        borderBottomStyle: 'solid',
+        borderBottomColor: 'rgba(0, 0, 0, 0.04)',
         zIndex: 10,
+        position: 'relative',
       }}
     >
       <div ref={pickerRef} style={{ minWidth: 0, flex: 1, position: 'relative' }}>
         <button
           type="button"
           onClick={() => setPickerOpen((p) => !p)}
-          className="desktop-session-pill"
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: 8,
             width: '100%',
-            padding: '7px 9px',
+            paddingTop: 6,
+            paddingBottom: 6,
+            paddingLeft: 8,
+            paddingRight: 8,
             margin: 0,
-            border: pickerOpen ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
-            borderRadius: 15,
-            background: pickerOpen
-              ? THEME_ACCENT_SOFT
-              : THEME_PANEL_GLASS,
+            borderWidth: 0,
+            borderRadius: 10,
+            backgroundColor: 'transparent',
             cursor: 'pointer',
-            textAlign: 'left',
+            textAlign: 'left' as const,
             WebkitTapHighlightColor: 'transparent',
-            transition: 'background 180ms ease, border-color 180ms ease, box-shadow 180ms ease',
-            boxShadow: pickerOpen
-              ? `0 10px 24px ${THEME_ACCENT_RING}`
-              : '0 6px 16px rgba(15, 23, 42, 0.08)',
+            transition: 'background-color 150ms ease',
           }}
           onMouseEnter={(e) => {
-            if (!pickerOpen) {
-              e.currentTarget.style.background = THEME_ACCENT_SOFT;
-              e.currentTarget.style.borderColor = THEME_ACCENT_BORDER;
-            }
+            e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.03)';
           }}
           onMouseLeave={(e) => {
-            if (!pickerOpen) {
-              e.currentTarget.style.background = THEME_PANEL_GLASS;
-              e.currentTarget.style.borderColor = 'var(--t-panel-border)';
-            }
+            e.currentTarget.style.backgroundColor = 'transparent';
           }}
           aria-label="Switch lane"
           aria-expanded={pickerOpen}
         >
-          <span style={{ position: 'relative', width: 8, height: 8, flexShrink: 0 }}>
-            {connectionDotColor === '#ff9f0a' && (
-              <span style={{
-                position: 'absolute', inset: 0, borderRadius: '50%',
-                background: '#a78bfa',
-                animation: 'reviewingRing 2s cubic-bezier(0.4, 0, 0.2, 1) infinite',
-              }} />
-            )}
-            <span style={{
-              position: 'relative', display: 'block',
-              width: 8, height: 8, borderRadius: '50%',
-              backgroundColor: connectionDotColor === '#ff9f0a' ? undefined : connectionDotColor,
-              background: connectionDotColor === '#ff9f0a' ? 'linear-gradient(135deg, #f59e0b, #a78bfa)' : connectionDotColor,
-              boxShadow: connectionDotColor === '#34c759' ? '0 0 8px rgba(52, 199, 89, 0.35)'
-                : connectionDotColor === '#2563eb' ? '0 0 8px rgba(37, 99, 235, 0.28)'
-                : connectionDotColor === '#ff9f0a' ? '0 0 8px rgba(167, 139, 250, 0.38)'
-                : 'none',
-              animation: connectionDotColor === '#ff9f0a' ? 'reviewingBreathe 2.4s ease-in-out infinite' : 'none',
-            }} />
+          <span style={{
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            flexShrink: 0,
+            backgroundColor: connectionDotColor,
+            animation: (connectionDotColor === '#ff9f0a' || connectionDotColor === '#f59e0b')
+              ? 'reviewingBreathe 2.4s ease-in-out infinite' : 'none',
+          }} />
+          <span style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: '#111827',
+            letterSpacing: '-0.02em',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            minWidth: 0,
+          }}>
+            {activeTitle}
           </span>
-          <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <div style={{
-              fontSize: 12.5,
-              fontWeight: 680,
-              color: 'var(--t-text)',
-              letterSpacing: '-0.02em',
-              lineHeight: 1.15,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}>
-              {activeTitle}
-            </div>
-            {activeSubtitle ? (
-              <div style={{
-                fontSize: 10,
-                color: 'var(--t-text-muted)',
-                lineHeight: 1.15,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
+          <div style={{ flex: 1 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            {activeChips.length > 0 ? (
+              <span style={{
+                fontSize: 11,
+                fontWeight: 500,
+                color: 'var(--t-text-faint)',
+                letterSpacing: '-0.01em',
                 whiteSpace: 'nowrap',
               }}>
-                {activeSubtitle}
-              </div>
+                {activeChips.map((chip) => chip.label).join(' · ')}
+              </span>
             ) : null}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, marginLeft: 6 }}>
-            {activeChips.length > 0 ? (
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-                justifyContent: 'flex-end',
-                flexShrink: 0,
-              }}>
-                {activeChips.map((chip) => {
-                  const chipStyle = sessionChipStyles(chip.tone);
-                  return (
-                    <span
-                      key={`${chip.tone}:${chip.label}`}
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 3,
-                        padding: '1px 6px',
-                        borderRadius: 999,
-                        fontSize: 9,
-                        fontWeight: 700,
-                        lineHeight: 1.15,
-                        letterSpacing: '-0.01em',
-                        whiteSpace: 'nowrap',
-                        ...chipStyle,
-                      }}
-                    >
-                      {chip.label}
-                    </span>
-                  );
-                })}
-              </div>
-            ) : null}
-            <span
+            <CaretDown
+              size={12}
+              weight="bold"
+              color="var(--t-text-faint)"
               style={{
-                width: 18,
-                height: 18,
-                borderRadius: 999,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: pickerOpen ? THEME_ACCENT_SOFT_STRONG : 'var(--t-divider-subtle)',
-                color: pickerOpen ? THEME_ACCENT : 'var(--t-text-faint)',
                 flexShrink: 0,
+                transition: 'transform 200ms cubic-bezier(0.32, 0.72, 0, 1)',
+                transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
               }}
-            >
-              <ChevronDown
-                size={12}
-                strokeWidth={2}
-                style={{
-                  transition: 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
-                  transform: pickerOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                }}
-              />
-            </span>
+            />
           </div>
         </button>
 
@@ -1708,21 +1661,25 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
           <div
             style={{
               position: 'absolute',
-              top: 'calc(100% + 6px)',
-              left: '-4px',
-              right: '-4px',
-              zIndex: 100,
-              borderRadius: '18px',
-              border: `1px solid ${THEME_ACCENT_BORDER}`,
-              background: THEME_PANEL_GLASS,
-              backdropFilter: 'blur(40px) saturate(1.6)',
-              WebkitBackdropFilter: 'blur(40px) saturate(1.6)',
-              boxShadow: 'var(--t-panel-shadow)',
-              padding: '8px',
-              maxHeight: '60vh',
+              top: '100%',
+              left: 0,
+              marginTop: 4,
+              minWidth: 280,
+              maxWidth: 340,
+              maxHeight: 360,
               overflowY: 'auto',
-              WebkitOverflowScrolling: 'touch',
-            }}
+              paddingTop: 6,
+              paddingRight: 6,
+              paddingBottom: 6,
+              paddingLeft: 6,
+              borderRadius: 12,
+              backgroundColor: 'rgba(255, 255, 255, 0.96)',
+              backdropFilter: 'blur(20px) saturate(1.8)',
+              WebkitBackdropFilter: 'blur(20px) saturate(1.8)',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.06)',
+              scrollbarWidth: 'none',
+              zIndex: 100,
+            } as React.CSSProperties}
           >
             {projectGroups.length === 0 ? (
               <div style={{
@@ -1730,12 +1687,15 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                 alignItems: 'center',
                 justifyContent: 'center',
                 minHeight: 76,
-                padding: '10px 12px',
-                borderRadius: 14,
+                paddingTop: 10,
+                paddingBottom: 10,
+                paddingLeft: 12,
+                paddingRight: 12,
+                borderRadius: 10,
                 color: 'var(--t-text-muted)',
                 fontSize: 12,
                 fontWeight: 500,
-                background: THEME_BG_CARD,
+                backgroundColor: 'rgba(0, 0, 0, 0.03)',
               }}>
                 {emptyStateLabel}
               </div>
@@ -1768,68 +1728,68 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                       setExpandedGroup(isExpanded ? null : group.workspace);
                     }
                   }}
+                  onMouseEnter={(e) => {
+                    if (!(containsSelected && !isExpanded)) e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.03)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!(containsSelected && !isExpanded)) e.currentTarget.style.backgroundColor = 'transparent';
+                  }}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '10px',
+                    gap: 8,
                     width: '100%',
-                    padding: '10px 12px',
-                    border: 'none',
-                    borderRadius: '12px',
-                    background: containsSelected && !isExpanded
-                      ? 'rgba(37, 99, 235, 0.08)'
+                    paddingTop: 8,
+                    paddingBottom: 8,
+                    paddingLeft: 10,
+                    paddingRight: 10,
+                    borderWidth: 0,
+                    borderRadius: 8,
+                    backgroundColor: containsSelected && !isExpanded
+                      ? 'rgba(37, 99, 235, 0.06)'
                       : 'transparent',
                     cursor: 'pointer',
-                    textAlign: 'left',
-                    transition: 'background 120ms ease',
-                    minHeight: '44px',
+                    textAlign: 'left' as const,
+                    transition: 'background-color 120ms ease',
+                    minHeight: 44,
                   }}
                 >
-                  {(() => {
-                    const isGroupReviewing = !isGroupMainOpenClaw && !group.hasRunning && group.sessions.some((s) => s.status === 'reviewing');
-                    return (
-                      <span style={{ position: 'relative', width: '8px', height: '8px', flexShrink: 0 }}>
-                        {isGroupReviewing && (
-                          <span style={{
-                            position: 'absolute', inset: 0, borderRadius: '50%',
-                            background: '#a78bfa',
-                            animation: 'reviewingRing 2s cubic-bezier(0.4, 0, 0.2, 1) infinite',
-                          }} />
-                        )}
-                        <span style={{
-                          position: 'relative', display: 'block',
-                          width: '8px', height: '8px', borderRadius: '50%',
-                          background: isGroupReviewing ? 'linear-gradient(135deg, #f59e0b, #a78bfa)' : dotColor,
-                          flexShrink: 0,
-                          boxShadow: isGroupMainOpenClaw ? `0 0 6px ${dotColor}`
-                            : isGroupReviewing ? '0 0 6px rgba(167, 139, 250, 0.5)'
-                            : group.hasRunning ? `0 0 6px ${dotColor}` : 'none',
-                          animation: isGroupReviewing ? 'reviewingBreathe 2.4s ease-in-out infinite' : 'none',
-                        }} />
-                      </span>
-                    );
-                  })()}
+                  <span style={{
+                    width: 6,
+                    height: 6,
+                    borderRadius: '50%',
+                    flexShrink: 0,
+                    backgroundColor: dotColor,
+                  }} />
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{
-                      fontSize: '14px',
-                      fontWeight: containsSelected ? 700 : 600,
-                      color: containsSelected ? '#2563eb' : 'var(--t-text)',
+                      fontSize: 13,
+                      fontWeight: containsSelected ? 600 : 500,
+                      color: containsSelected ? '#111827' : 'var(--t-text)',
                       lineHeight: 1.3,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
                     }}>
                       {groupTitle}
                     </div>
                     <div style={{
-                      fontSize: '12px',
+                      fontSize: 11,
                       color: 'var(--t-text-muted)',
                       lineHeight: 1.3,
-                      marginTop: '1px',
+                      marginTop: 1,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
                     }}>
                       {groupSubtitle}
                       {group.mostRecentTime ? ` · ${group.mostRecentTime}` : ''}
                     </div>
                   </div>
                   {containsSelected && isSingle ? (
-                    <span style={{ fontSize: '11px', fontWeight: 600, color: '#2563eb', flexShrink: 0 }}>✓</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: '#2563eb', flexShrink: 0 }}>
+                      <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}><path d="M20 6 9 17l-5-5" /></svg>
+                    </span>
                   ) : !isSingle ? (
                     <ChevronRight
                       size={14}
@@ -1846,11 +1806,13 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
 
                 {isExpanded && !isSingle ? (
                   <div style={{
-                    marginLeft: '18px',
-                    borderLeft: '2px solid rgba(37, 99, 235, 0.12)',
-                    paddingLeft: '8px',
-                    marginTop: '3px',
-                    marginBottom: '4px',
+                    marginLeft: 14,
+                    borderLeftWidth: 1,
+                    borderLeftStyle: 'solid',
+                    borderLeftColor: 'rgba(0, 0, 0, 0.06)',
+                    paddingLeft: 8,
+                    marginTop: 2,
+                    marginBottom: 4,
                   }}>
                     {group.sessions.map((session) => {
                       const isActive = session.sessionKey === selectedSession?.sessionKey;
@@ -1870,42 +1832,42 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                             handleSessionFocus(session.sessionKey);
                             setPickerOpen(false);
                           }}
+                          onMouseEnter={(e) => {
+                            if (!isActive) e.currentTarget.style.backgroundColor = 'rgba(0, 0, 0, 0.03)';
+                          }}
+                          onMouseLeave={(e) => {
+                            if (!isActive) e.currentTarget.style.backgroundColor = 'transparent';
+                          }}
                           style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '10px',
+                            gap: 8,
                             width: '100%',
-                            padding: '8px 10px',
-                            border: 'none',
-                            borderRadius: '10px',
-                            background: isActive ? 'rgba(37, 99, 235, 0.08)' : 'transparent',
+                            paddingTop: 8,
+                            paddingBottom: 8,
+                            paddingLeft: 10,
+                            paddingRight: 10,
+                            borderWidth: 0,
+                            borderRadius: 8,
+                            backgroundColor: isActive ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
                             cursor: 'pointer',
-                            textAlign: 'left',
-                            transition: 'background 120ms ease',
-                            minHeight: '44px',
+                            textAlign: 'left' as const,
+                            transition: 'background-color 120ms ease',
+                            minHeight: 44,
                           }}
                         >
-                          <span style={{ position: 'relative', width: '6px', height: '6px', flexShrink: 0 }}>
-                            {isSessionReviewing && (
-                              <span style={{
-                                position: 'absolute', inset: 0, borderRadius: '50%',
-                                background: '#a78bfa',
-                                animation: 'reviewingRing 2s cubic-bezier(0.4, 0, 0.2, 1) infinite',
-                              }} />
-                            )}
-                            <span style={{
-                              position: 'relative', display: 'block',
-                              width: '6px', height: '6px', borderRadius: '50%',
-                              background: isSessionReviewing ? 'linear-gradient(135deg, #f59e0b, #a78bfa)' : sDotColor,
-                              boxShadow: isRunning ? `0 0 5px ${sDotColor}` : isSessionReviewing ? '0 0 5px rgba(167, 139, 250, 0.4)' : 'none',
-                              animation: isSessionReviewing ? 'reviewingBreathe 2.4s ease-in-out infinite' : 'none',
-                            }} />
-                          </span>
+                          <span style={{
+                            width: 5,
+                            height: 5,
+                            borderRadius: '50%',
+                            flexShrink: 0,
+                            backgroundColor: sDotColor,
+                          }} />
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <div style={{
-                              fontSize: '13px',
+                              fontSize: 12,
                               fontWeight: isActive ? 600 : 400,
-                              color: isActive ? '#2563eb' : 'var(--t-text)',
+                              color: isActive ? '#111827' : 'var(--t-text)',
                               lineHeight: 1.3,
                               overflow: 'hidden',
                               textOverflow: 'ellipsis',
@@ -1915,20 +1877,22 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                             </div>
                             {subtitle ? (
                               <div style={{
-                                fontSize: '11px',
+                                fontSize: 11,
                                 color: 'var(--t-text-muted)',
                                 lineHeight: 1.3,
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
                                 whiteSpace: 'nowrap',
-                                marginTop: '1px',
+                                marginTop: 1,
                               }}>
                                 {subtitle}
                               </div>
                             ) : null}
                           </div>
                           {isActive ? (
-                            <span style={{ fontSize: '11px', fontWeight: 600, color: '#2563eb', flexShrink: 0 }}>✓</span>
+                            <span style={{ flexShrink: 0, color: '#2563eb', display: 'flex' }}>
+                              <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}><path d="M20 6 9 17l-5-5" /></svg>
+                            </span>
                           ) : null}
                         </button>
                       );
@@ -1938,9 +1902,12 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
 
                 {gi < projectGroups.length - 1 ? (
                   <div style={{
-                    height: '1px',
-                    background: 'var(--t-divider)',
-                    margin: '4px 12px',
+                    height: '0.5px',
+                    backgroundColor: 'rgba(0, 0, 0, 0.06)',
+                    marginTop: 3,
+                    marginBottom: 3,
+                    marginLeft: 10,
+                    marginRight: 10,
                   }} />
                 ) : null}
               </div>
@@ -1950,52 +1917,35 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
         ) : null}
       </div>
 
-      <button
-        type="button"
-        onClick={() => onOpenDiff ? onOpenDiff() : setDiffOpen(true)}
-        style={{
-          flexShrink: 0,
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          paddingTop: 7,
-          paddingRight: 12,
-          paddingBottom: 7,
-          paddingLeft: 12,
-          borderRadius: 999,
-          border: diffIsActive ? `1px solid ${THEME_ACCENT_BORDER}` : '1px solid var(--t-panel-border)',
-          background: diffIsActive
-            ? THEME_ACCENT_SOFT
-            : THEME_BG_CARD,
-          color: 'var(--t-text-muted)',
-          fontSize: 12,
-          fontWeight: 600,
-          cursor: 'pointer',
-          transition: 'all 150ms ease',
-          boxShadow: diffIsActive
-            ? `0 8px 18px ${THEME_ACCENT_RING}`
-            : '0 5px 14px rgba(15, 23, 42, 0.08)',
-        }}
-        aria-label="Open diff sheet"
-      >
-        <span style={{ color: '#22c55e', fontSize: 13, fontWeight: 700 }}>+{diffStats.additions}</span>
-        <span style={{ color: '#ef4444', fontSize: 13, fontWeight: 700 }}>-{diffStats.deletions}</span>
-        <span style={{ color: 'var(--t-text-muted)', fontWeight: 600 }}>{diffStats.files} file{diffStats.files !== 1 ? 's' : ''}</span>
-        <span
+      {diffIsActive ? (
+        <button
+          type="button"
+          onClick={() => onOpenDiff ? onOpenDiff() : setDiffOpen(true)}
           style={{
-            width: 20,
-            height: 20,
-            borderRadius: 999,
+            flexShrink: 0,
             display: 'inline-flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            background: diffIsActive ? THEME_ACCENT_SOFT_STRONG : 'var(--t-divider-subtle)',
-            color: diffIsActive ? THEME_ACCENT : 'var(--t-text-muted)',
+            gap: 4,
+            padding: '4px 8px',
+            borderRadius: 8,
+            border: 'none',
+            background: 'transparent',
+            color: 'var(--t-text-muted)',
+            fontSize: 11,
+            fontWeight: 500,
+            cursor: 'pointer',
+            transition: 'background 150ms ease',
+            fontFamily: '"SF Mono", ui-monospace, monospace',
           }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(0, 0, 0, 0.04)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          aria-label="Open diff sheet"
         >
-          <SlidersHorizontal size={11} strokeWidth={2} />
-        </span>
-      </button>
+          <span style={{ color: '#22c55e', fontWeight: 600 }}>+{diffStats.additions}</span>
+          <span style={{ color: '#ef4444', fontWeight: 600 }}>-{diffStats.deletions}</span>
+          <span style={{ color: 'var(--t-text-faint)', fontWeight: 500 }}>{diffStats.files}f</span>
+        </button>
+      ) : null}
     </header>
   );
 });
@@ -3207,7 +3157,10 @@ export const DesktopComposePane = memo(function DesktopComposePane({
 }) {
   return (
     <div style={{
-      padding: '10px 14px 14px',
+      paddingTop: 10,
+      paddingRight: 14,
+      paddingBottom: 14,
+      paddingLeft: 14,
       flexShrink: 0,
     }}>
       {pendingFiles.length > 0 && (
@@ -3281,7 +3234,7 @@ export const DesktopComposePane = memo(function DesktopComposePane({
         </div>
       )}
 
-      <div className="remodex-compose-surface">
+      <div className="remodex-compose-surface" style={{ backgroundColor: 'rgba(0, 0, 0, 0.025)' }}>
         <ThinkingXray
           model={modelOverride ?? sessionDisplayModel(selectedSession)}
           agentRunning={agentRunning}
@@ -3309,7 +3262,7 @@ export const DesktopComposePane = memo(function DesktopComposePane({
               void send();
             }
           }}
-          placeholder={`Message ${currentAgentName}…`}
+          placeholder={O_PLACEHOLDERS[Math.floor(Date.now() / 60000) % O_PLACEHOLDERS.length]}
           style={{
             height: composeHeight,
             minHeight: 60,
@@ -3371,7 +3324,7 @@ export const DesktopComposePane = memo(function DesktopComposePane({
               aria-label="Attach"
               onClick={() => fileInputRef.current?.click()}
             >
-              <Plus size={16} strokeWidth={2.2} />
+              <PlusCircle size={18} weight="duotone" />
             </button>
           ) : null}
           {draft.trim().length >= 3 ? (
@@ -3383,7 +3336,7 @@ export const DesktopComposePane = memo(function DesktopComposePane({
               onClick={() => void enhance()}
               style={{ color: enhancing ? '#d1d5db' : '#ff9f0a' }}
             >
-              <Sparkles size={18} strokeWidth={2} className={enhancing ? 'spin' : undefined} />
+              <MagicWand size={18} weight={enhancing ? 'regular' : 'duotone'} className={enhancing ? 'spin' : undefined} />
             </button>
           ) : null}
           {(agentRunning || canInterruptSelected) && !draft.trim() ? (
@@ -3412,10 +3365,10 @@ export const DesktopComposePane = memo(function DesktopComposePane({
               }}
             >
               {stopping ? (
-                <Loader2 size={17} className="spin" />
+                <SpinnerGap size={17} weight="bold" className="spin" />
               ) : (
                 <>
-                  <Square size={14} strokeWidth={2.5} fill="#ef4444" />
+                  <Stop size={16} weight="fill" />
                   <span>Stop</span>
                 </>
               )}
@@ -3431,27 +3384,21 @@ export const DesktopComposePane = memo(function DesktopComposePane({
                 display: 'inline-flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '0.32rem',
-                minWidth: 42,
-                minHeight: 42,
-                padding: '0 0.82rem',
-                borderRadius: 999,
+                width: 36,
+                height: 36,
+                borderRadius: 10,
                 border: 'none',
-                background: chatSendDisabled ? 'var(--t-divider-strong)' : THEME_ACCENT,
-                color: chatSendDisabled ? 'var(--t-text-muted)' : '#ffffff',
-                fontSize: '0.84rem',
-                fontWeight: 700,
-                boxShadow: chatSendDisabled ? 'none' : `0 4px 14px ${THEME_ACCENT_RING}`,
+                background: chatSendDisabled ? 'var(--t-divider-subtle)' : THEME_ACCENT,
+                color: chatSendDisabled ? 'var(--t-text-faint)' : '#ffffff',
                 cursor: chatSendDisabled ? 'default' : 'pointer',
+                transition: 'background 150ms ease, box-shadow 150ms ease',
+                boxShadow: chatSendDisabled ? 'none' : '0 2px 8px rgba(37, 99, 235, 0.2)',
               }}
             >
               {sending ? (
-                <Loader2 size={17} className="spin" />
+                <SpinnerGap size={18} weight="bold" className="spin" />
               ) : (
-                <>
-                  <ArrowUp size={17} strokeWidth={2.2} />
-                  <span>Send</span>
-                </>
+                <PaperPlaneRight size={18} weight="fill" />
               )}
             </button>
           )}
@@ -3463,13 +3410,8 @@ export const DesktopComposePane = memo(function DesktopComposePane({
         justifyContent: 'center',
         alignItems: 'center',
         gap: 8,
-        padding: '6px 12px',
-        marginTop: 6,
-        background: 'var(--t-chrome)',
-        backdropFilter: 'blur(20px) saturate(1.4)',
-        WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
-        borderRadius: 999,
-        border: '1px solid var(--t-divider-subtle)',
+        padding: '5px 12px',
+        marginTop: 4,
       }}>
         {(() => {
           const rawPct = contextPercentOverride ?? ((selectedSession as unknown as Record<string, unknown>)?.context
@@ -4724,8 +4666,7 @@ export function AgentPanelChat({
         flexDirection: 'column',
         height: '100%',
         minHeight: 0, // critical for flex overflow scrolling
-        background: 'var(--t-bg)',
-        borderLeft: '1px solid var(--t-divider)',
+        background: '#ffffff',
         position: 'relative',
         outline: dragOver ? '2px solid #3b82f6' : 'none',
         outlineOffset: -2,

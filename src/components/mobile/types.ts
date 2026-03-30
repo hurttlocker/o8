@@ -27,6 +27,7 @@ export type AgentDisplayName = (session: SessionSummary) => string;
 export type RenderMessageBody = (text: string, keyPrefix: string) => ReactNode;
 
 export type ActionState = 'idle' | 'steering' | 'stopping' | 'reviewing';
+export type MobileOrchestratorStatus = 'hidden' | 'connecting' | 'ready' | 'busy' | 'error' | 'dead';
 
 export interface DraftAttachment {
   id: string;
@@ -68,12 +69,10 @@ export interface CostsDashboardProps {
 
 export interface SquadRailProps {
   snapshot: MobileInboxSnapshot;
-  expandedProject: string | null;
   selectedSession?: SessionSummary;
   onSessionFocus: (sessionId: string) => void;
-  onProjectToggle: (workspace: string | null) => void;
-  onCostsView: () => void;
-  agentDisplayName: AgentDisplayName;
+  onLaunch: () => void;
+  compactLine: CompactLine;
 }
 
 export interface ApprovalStackProps {
@@ -194,20 +193,15 @@ export interface DiffOverlayProps {
 }
 
 export interface TopBarProps {
-  snapshot: MobileInboxSnapshot;
   selectedSession?: SessionSummary;
-  selectedReviewPacket?: RuntimeReviewPacket | null;
-  isOwnedCodexSession: boolean;
-  isHeaderCompact: boolean;
   headerVisible: boolean;
   pendingApprovalsCount: number;
-  wsConnectionState?: 'connecting' | 'connected' | 'disconnected' | 'reconnecting';
+  activeView: 'squad' | 'chat' | 'costs' | 'fleet' | 'activity' | 'settings' | 'memory' | 'issues';
   compactLine: CompactLine;
-  squadPickerOpen: boolean;
   activeScreen: import('./SpeedDial').MobileScreen;
   onNavigate: (screen: import('./SpeedDial').MobileScreen) => void;
-  onToggleSquadPicker: () => void;
-  onSessionFocus: (sessionId: string) => void;
+  onBackToIndex: () => void;
+  onOpenControls: () => void;
 }
 
 export interface SurfaceStatusProps {
@@ -215,6 +209,8 @@ export interface SurfaceStatusProps {
   selectedSession?: SessionSummary;
   selectedReviewPacket?: RuntimeReviewPacket | null;
   isOwnedCodexSession: boolean;
+  orchestratorStatus?: MobileOrchestratorStatus;
+  orchestratorNote?: string | null;
   refreshError?: string | null;
   surfaceNote?: string | null;
   transcriptError?: string | null;

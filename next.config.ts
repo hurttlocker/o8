@@ -44,6 +44,9 @@ const nextConfig: NextConfig = {
           '**/*.png',
           '**/artifacts/**',
           '**/.playwright-mcp/**',
+          '**/src-tauri/**',
+          '**/.cortex-worktrees/**',
+          '**/.claude/worktrees/**',
         ],
       };
     }

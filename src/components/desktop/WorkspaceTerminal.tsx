@@ -2936,7 +2936,7 @@ const TabBar = memo(function TabBar({
                 paddingLeft: 12,
                 height: '100%',
                 border: 'none',
-                borderRight: '1px solid var(--t-divider)',
+                borderRight: 'none',
                 background: isActive ? 'var(--t-panel-translucent)' : 'transparent',
                 color: isActive ? 'var(--t-text)' : 'var(--t-text-secondary)',
                 fontSize: 13,

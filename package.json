@@ -30,6 +30,8 @@
     "@json-render/react": "^0.14.0",
     "@json-render/shadcn": "^0.14.0",
     "@monaco-editor/react": "^4.7.0",
+    "@phosphor-icons/core": "^2.1.1",
+    "@phosphor-icons/react": "^2.1.10",
     "@tanstack/react-virtual": "^3.13.22",
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-dialog": "^2.6.0",

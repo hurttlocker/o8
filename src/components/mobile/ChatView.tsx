@@ -2,16 +2,15 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { ChevronRight, FileDiff, FileText, Image as ImageIcon } from 'lucide-react';
-import type { MobileTranscriptMedia } from '@/lib/mobile/types';
+import { FileText, Image as ImageIcon } from 'lucide-react';
+import type { MobileTranscriptMedia, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import type { ChatViewProps } from './types';
 import { MediaLightbox } from './MediaLightbox';
-import { MessageActions } from './MessageActions';
+import { MobileActivitySummaryRow, MobileArtifactCard } from './ReferencePrimitives';
 import {
   formatStreamingPreview,
   isImageMedia,
   mediaHref,
-  roleLabel,
 } from './utils';
 import { isSlashCommandText } from '@/lib/slash-commands';
 
@@ -19,12 +18,9 @@ import { isSlashCommandText } from '@/lib/slash-commands';
 
 interface MessageBubbleProps {
   entry: ChatViewProps['transcriptEntries'][number];
-  previousEntry: ChatViewProps['transcriptEntries'][number] | null;
   isLatest: boolean;
   isNewMessage: boolean;
   isExpanded: boolean;
-  isOwnedCodexSession: boolean;
-  selectedSession: ChatViewProps['selectedSession'];
   selectedReviewFile: ChatViewProps['selectedReviewFile'];
   renderMessageBody: ChatViewProps['renderMessageBody'];
   setExpandedMedia: ChatViewProps['setExpandedMedia'];
@@ -32,19 +28,117 @@ interface MessageBubbleProps {
   onToggleExpanded: (id: string) => void;
 }
 
-function shouldIgnoreToggleTarget(target: EventTarget | null) {
-  return target instanceof HTMLElement
-    && Boolean(target.closest('a, button, code, pre, input, textarea'));
+function formatCount(count: number, singular: string, plural = `${singular}s`) {
+  return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function summarizeToolCalls(toolCalls: MobileTranscriptToolCall[] | undefined) {
+  if (!toolCalls?.length) {
+    return null;
+  }
+
+  let commandCount = 0;
+  let readCount = 0;
+  let editCount = 0;
+  let otherCount = 0;
+
+  toolCalls.forEach((tool) => {
+    const name = tool.name.toLowerCase();
+    if (name === 'exec' || name === 'exec_command' || name === 'write_stdin') {
+      commandCount += 1;
+      return;
+    }
+    if (name === 'read' || name === 'read_file') {
+      readCount += 1;
+      return;
+    }
+    if (name === 'write' || name === 'write_file' || name === 'edit' || name === 'edit_file') {
+      editCount += 1;
+      return;
+    }
+    otherCount += 1;
+  });
+
+  const parts: string[] = [];
+  if (commandCount > 0) parts.push(`Ran ${formatCount(commandCount, 'command')}`);
+  if (readCount > 0) parts.push(`read ${formatCount(readCount, 'file')}`);
+  if (editCount > 0) parts.push(`edited ${formatCount(editCount, 'file')}`);
+  if (otherCount > 0 || parts.length === 0) parts.push(`ran ${formatCount(otherCount || toolCalls.length, 'tool')}`);
+
+  return parts.join(', ');
+}
+
+function toolDetail(tool: MobileTranscriptToolCall) {
+  const args = tool.args ?? {};
+  const detail = [
+    typeof args.file_path === 'string' ? args.file_path : null,
+    typeof args.path === 'string' ? args.path : null,
+    typeof args.command === 'string' ? args.command : null,
+    typeof args.cmd === 'string' ? args.cmd : null,
+    typeof args.query === 'string' ? args.query : null,
+    typeof args.url === 'string' ? args.url : null,
+    typeof tool.preview === 'string' ? tool.preview : null,
+  ].find(Boolean);
+
+  return typeof detail === 'string' ? detail : tool.name;
+}
+
+function extractArtifactPreview(text: string) {
+  const match = text.match(/```(?:([^\n]*))\n([\s\S]*?)```/);
+  if (!match) {
+    return { bodyText: text, preview: null as string | null };
+  }
+
+  const preview = match[2].trim();
+  const bodyText = text.replace(match[0], '').replace(/\n{3,}/g, '\n\n').trim();
+  return { bodyText, preview: preview || null };
+}
+
+function buildArtifact(entryText: string, toolCalls: MobileTranscriptToolCall[] | undefined, selectedReviewFile: ChatViewProps['selectedReviewFile'], isLatest: boolean) {
+  const fileTool = [...(toolCalls ?? [])].reverse().find((tool) => {
+    const name = tool.name.toLowerCase();
+    return name === 'write' || name === 'write_file' || name === 'edit' || name === 'edit_file' || name === 'read' || name === 'read_file';
+  });
+
+  const { bodyText, preview } = extractArtifactPreview(entryText);
+  const filePath = typeof fileTool?.args?.file_path === 'string'
+    ? fileTool.args.file_path
+    : typeof fileTool?.args?.path === 'string'
+      ? fileTool.args.path
+      : (isLatest ? selectedReviewFile?.path : null);
+
+  const selectedPreview = isLatest ? selectedReviewFile?.preview?.trim() : '';
+  const artifactPreview = preview ?? selectedPreview ?? '';
+
+  if (!filePath || !artifactPreview) {
+    return {
+      artifact: null,
+      bodyText: entryText,
+    };
+  }
+
+  const action = (() => {
+    const name = fileTool?.name.toLowerCase() ?? '';
+    if (name === 'read' || name === 'read_file') return 'Read';
+    if (name === 'edit' || name === 'edit_file') return 'Edit';
+    return 'Write';
+  })();
+
+  return {
+    artifact: {
+      action,
+      path: filePath,
+      preview: artifactPreview,
+    },
+    bodyText: bodyText || entryText,
+  };
 }
 
 const MessageBubble = memo(function MessageBubble({
   entry,
-  previousEntry,
   isLatest,
   isNewMessage,
   isExpanded,
-  isOwnedCodexSession,
-  selectedSession,
   selectedReviewFile,
   renderMessageBody,
   setExpandedMedia,
@@ -55,14 +149,6 @@ const MessageBubble = memo(function MessageBubble({
   const hasText = Boolean(entry.text.trim());
   const hasMedia = Boolean(entry.media?.length);
   const fadeClass = isNewMessage ? ' remodex-turn-new' : '';
-  const speakerChanged = !previousEntry || previousEntry.role !== entry.role;
-  const showTimestamp = (() => {
-    if (!previousEntry?.timestampLabel || !entry.timestampLabel) return speakerChanged;
-    const previous = new Date(`1970-01-01 ${previousEntry.timestampLabel}`).getTime();
-    const current = new Date(`1970-01-01 ${entry.timestampLabel}`).getTime();
-    if (Number.isNaN(previous) || Number.isNaN(current)) return speakerChanged;
-    return Math.abs(current - previous) >= 15 * 60 * 1000;
-  })();
 
   if (isUser) {
     const isSlashCommand = isSlashCommandText(entry.text);
@@ -97,7 +183,6 @@ const MessageBubble = memo(function MessageBubble({
             </div>
           </div>
         ) : null}
-        {showTimestamp ? <span className="remodex-turn-time">{entry.timestampLabel ?? 'now'}</span> : null}
       </div>
     );
   }
@@ -108,56 +193,54 @@ const MessageBubble = memo(function MessageBubble({
       <div className="remodex-compaction-card">
         <span className="remodex-compaction-icon" aria-hidden="true">⟳</span>
         <span className="remodex-compaction-label">Context compacted</span>
-        {showTimestamp ? <span className="remodex-compaction-time">{entry.timestampLabel ?? ''}</span> : null}
+        {entry.timestampLabel ? <span className="remodex-compaction-time">{entry.timestampLabel}</span> : null}
       </div>
     );
   }
 
-  const agentName = isOwnedCodexSession ? 'Codex' : (selectedSession?.isCurrentSession ? 'Assistant' : undefined);
+  const activitySummary = summarizeToolCalls(entry.toolCalls);
+  const artifactData = buildArtifact(entry.text, entry.toolCalls, selectedReviewFile, isLatest);
 
   return (
-    <article
-      className={`remodex-message-card remodex-message-card-assistant${fadeClass}`}
-      role="button"
-      tabIndex={0}
-      aria-expanded={isExpanded}
-      onClick={(e) => {
-        if (shouldIgnoreToggleTarget(e.target)) return;
-        onToggleExpanded(entry.id);
-      }}
-      onTouchEnd={(e) => {
-        if (shouldIgnoreToggleTarget(e.target)) return;
-        onToggleExpanded(entry.id);
-        e.preventDefault();
-      }}
-      onKeyDown={(e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        e.preventDefault();
-        onToggleExpanded(entry.id);
-      }}
-      style={{ cursor: 'pointer', WebkitTapHighlightColor: 'transparent', touchAction: 'manipulation' }}
-    >
-      {speakerChanged ? (
-        <div className="remodex-message-head">
-          <span>{roleLabel(entry.role, agentName)}</span>
+    <article className={`remodex-message-card remodex-message-card-assistant${fadeClass}`}>
+      {activitySummary ? (
+        <MobileActivitySummaryRow
+          summary={activitySummary}
+          expanded={isExpanded}
+          onClick={() => onToggleExpanded(entry.id)}
+        />
+      ) : null}
+      {isExpanded && entry.toolCalls?.length ? (
+        <div className="remodex-reference-tool-detail-stack">
+          {entry.toolCalls.map((tool, index) => (
+            <div key={`${entry.id}-${tool.name}-${index}`} className="remodex-reference-tool-detail">
+              <span className="remodex-reference-tool-name">{tool.name}</span>
+              <code className="remodex-reference-tool-copy">{toolDetail(tool)}</code>
+            </div>
+          ))}
         </div>
       ) : null}
       {hasMedia ? <MediaGrid media={entry.media ?? []} setExpandedMedia={setExpandedMedia} /> : null}
-      {hasText ? renderMessageBody(entry.text, `${entry.id}-assistant`) : null}
-      {isLatest && selectedReviewFile ? (
-        <button type="button" className="remodex-inline-diff-thumb" onClick={onOpenDiff}>
-          <div className="remodex-inline-diff-mini">
-            <FileDiff size={16} strokeWidth={1.8} />
-          </div>
-          <div className="remodex-inline-diff-copy">
-            <strong>{selectedReviewFile.path.split('/').pop() ?? selectedReviewFile.path}</strong>
-            <span>{`${selectedReviewFile.additions ?? 0} additions, ${selectedReviewFile.deletions ?? 0} removals`}</span>
-          </div>
-          <ChevronRight size={16} strokeWidth={1.6} className="remodex-inline-diff-chevron" />
-        </button>
-      ) : null}
-      {hasText ? (
-        <MessageActions messageId={entry.id} messageText={entry.text} visible={isExpanded} />
+      {artifactData.bodyText.trim() ? renderMessageBody(artifactData.bodyText, `${entry.id}-assistant`) : null}
+      {artifactData.artifact ? (
+        <div
+          className="remodex-reference-artifact-button"
+          role={isLatest && selectedReviewFile ? 'button' : undefined}
+          tabIndex={isLatest && selectedReviewFile ? 0 : undefined}
+          onClick={isLatest && selectedReviewFile ? onOpenDiff : undefined}
+          onKeyDown={isLatest && selectedReviewFile ? (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              onOpenDiff();
+            }
+          } : undefined}
+        >
+          <MobileArtifactCard
+            action={artifactData.artifact.action}
+            path={artifactData.artifact.path}
+            preview={artifactData.artifact.preview}
+          />
+        </div>
       ) : null}
     </article>
   );
@@ -481,13 +564,14 @@ export function ChatView({
                 setLoadingMore(false);
               }}
               style={{
-                padding: '8px 20px', borderRadius: 10, border: 'none',
-                background: 'rgba(0,122,255,0.06)',
-                color: '#007aff', fontSize: 13, fontWeight: 600,
+                padding: '10px 18px', borderRadius: 999, border: '1px solid rgba(219, 211, 198, 0.7)',
+                background: 'rgba(255,255,255,0.82)',
+                color: '#61584d', fontSize: 13, fontWeight: 600,
                 cursor: loadingMore ? 'default' : 'pointer',
                 opacity: loadingMore ? 0.5 : 1,
                 WebkitTapHighlightColor: 'transparent',
                 touchAction: 'manipulation',
+                boxShadow: '0 10px 24px rgba(71, 61, 51, 0.06)',
               }}
             >
               {loadingMore ? 'Loading...' : 'Load earlier messages'}
@@ -498,7 +582,6 @@ export function ChatView({
           <div style={{ height: virtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
             {virtualItems.map((virtualRow) => {
               const entry = transcriptEntries[virtualRow.index];
-              const previousEntry = virtualRow.index > 0 ? transcriptEntries[virtualRow.index - 1] : null;
               const isLatest = virtualRow.index === lastAssistantIndex;
               const isNew = newMessageIds.has(entry.id);
 
@@ -516,13 +599,10 @@ export function ChatView({
                   }}
                 >
                   <MessageBubble
-                    entry={entry}
-                    previousEntry={previousEntry}
+                  entry={entry}
                     isLatest={isLatest}
                     isNewMessage={isNew}
                     isExpanded={expandedMessageId === entry.id}
-                    isOwnedCodexSession={isOwnedCodexSession}
-                    selectedSession={selectedSession}
                     selectedReviewFile={selectedReviewFile}
                     renderMessageBody={renderMessageBody}
                     setExpandedMedia={setExpandedMedia}
@@ -684,17 +764,17 @@ export function ChatView({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            width: 32,
-            height: 32,
-            borderRadius: 10,
-            border: '1px solid rgba(0,122,255,0.15)',
-            background: 'rgba(0,122,255,0.08)',
-            backdropFilter: 'blur(20px) saturate(1.6)',
-            WebkitBackdropFilter: 'blur(20px) saturate(1.6)',
-            color: '#007aff',
+            width: 36,
+            height: 36,
+            borderRadius: 999,
+            border: '1px solid rgba(255,255,255,0.76)',
+            background: 'rgba(255,255,255,0.92)',
+            backdropFilter: 'blur(16px)',
+            WebkitBackdropFilter: 'blur(16px)',
+            color: '#413a31',
             fontSize: 14,
             fontWeight: 600,
-            boxShadow: '0 2px 12px rgba(0,122,255,0.15)',
+            boxShadow: '0 12px 30px rgba(71, 61, 51, 0.12)',
             cursor: 'pointer',
             animation: 'pill-bounce-in 0.3s ease-out',
           }}
