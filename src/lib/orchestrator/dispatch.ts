@@ -238,7 +238,13 @@ export function getDispatchBlocker(
     return 'No workspace target';
   }
   if (packet.lane?.laneId || packet.lane?.sessionKey || (packet.lane?.tileId && packet.lane?.tabId)) {
-    return 'Already dispatched';
+    // Allow retry if the lane's last event was a launch failure
+    const lastEvent = packet.lane?.lastEventLabel ?? '';
+    if (lastEvent === 'launch_error' || lastEvent === 'launch_failed') {
+      // Clear the stale binding so dispatchPacket can re-open/re-launch
+    } else {
+      return 'Already dispatched';
+    }
   }
   return null;
 }
