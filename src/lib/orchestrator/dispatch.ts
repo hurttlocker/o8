@@ -3,6 +3,7 @@ import { getDispatchableWave } from '@/lib/orchestrator/dag';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import type { OrchestratorLaneBinding, OrchestratorMissionState, OrchestratorPacket, PacketContext } from '@/lib/orchestrator/types';
+import { truncateText } from '@/lib/util/text';
 
 export const MAX_PARALLEL_DISPATCHES = 4;
 
@@ -14,13 +15,6 @@ function formatChangedFiles(changedFiles: string[]) {
     return changedFiles.join(', ');
   }
   return `${changedFiles.slice(0, 6).join(', ')} (+${changedFiles.length - 6} more)`;
-}
-
-function truncatePromptText(text: string, max: number) {
-  if (text.length <= max) {
-    return text;
-  }
-  return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 }
 
 function formatInlinePromptList(items: string[], maxItems = 4) {
@@ -46,8 +40,8 @@ function formatPacketReviewFallback(packet: OrchestratorPacket): string[] {
 
   return [
     `Dependency review verdict: ${review.approved ? 'approved' : 'changes requested'}`,
-    review.summary ? `Review summary: ${truncatePromptText(review.summary, 800)}` : null,
-    findings.length > 0 ? `Review findings: ${truncatePromptText(findings.join(' | '), 1_000)}` : null,
+    review.summary ? `Review summary: ${truncateText(review.summary, 800)}` : null,
+    findings.length > 0 ? `Review findings: ${truncateText(findings.join(' | '), 1_000)}` : null,
   ].filter((value): value is string => Boolean(value));
 }
 
@@ -61,7 +55,7 @@ function formatContextReviewFindings(reviewFindings: PacketContext['reviewFindin
       const location = finding.file && finding.file !== 'unknown'
         ? (typeof finding.line === 'number' ? `${finding.file}:${finding.line}` : finding.file)
         : null;
-      const description = truncatePromptText(finding.description, 180);
+      const description = truncateText(finding.description, 180);
       return location ? `${location} ${description}` : description;
     }),
     3,
@@ -82,7 +76,7 @@ function buildReviewLessonSections(
 
   if (context.patterns && context.patterns.length > 0) {
     sections.push(
-      `Patterns to follow: ${formatInlinePromptList(context.patterns.map((pattern) => truncatePromptText(pattern, 180)), 4)}`,
+      `Patterns to follow: ${formatInlinePromptList(context.patterns.map((pattern) => truncateText(pattern, 180)), 4)}`,
     );
   }
 
@@ -138,7 +132,7 @@ async function buildDependencyContextSections(
       }
 
       return [
-        `Previous work from dependency '${dependencyTitle}': ${truncatePromptText(value.context.summary, 1_000)}`,
+        `Previous work from dependency '${dependencyTitle}': ${truncateText(value.context.summary, 1_000)}`,
         `Files changed: ${formatChangedFiles(value.context.changedFiles)}`,
         ...reviewSections,
       ];

@@ -183,10 +183,6 @@ export function getOrchestratorSession(repoPath: string): OrchestratorSession | 
   return sessions.get(orchestratorSessionName(repoPath)) ?? null;
 }
 
-export function getAllOrchestratorSessions(): OrchestratorSession[] {
-  return [...sessions.values()];
-}
-
 // ── Ensure session exists ──
 
 export function ensureOrchestratorSession(repoPath: string): OrchestratorSession {
@@ -385,40 +381,5 @@ function processStreamEvent(
       if (typeof totalCost === 'number') onCost(totalCost);
       break;
     }
-  }
-}
-
-// ── Kill / cleanup ──
-
-export function killOrchestratorSession(repoPath: string): void {
-  const sessionName = orchestratorSessionName(repoPath);
-  const session = sessions.get(sessionName);
-  if (!session) return;
-
-  if (session.proc) {
-    try { session.proc.kill('SIGTERM'); } catch { /* already gone */ }
-    session.proc = null;
-  }
-
-  session.status = 'dead';
-  sessions.delete(sessionName);
-  console.log(`[orchestrator-session] Killed ${sessionName}`);
-}
-
-// ── Helpers ──
-
-/**
- * Try to detect if a tmux session is still alive.
- * Kept for backward compatibility with other callers.
- */
-export function isTmuxSessionAlive(sessionName: string): boolean {
-  try {
-    execSync(`tmux has-session -t ${sessionName} 2>/dev/null`, {
-      timeout: 3000,
-      stdio: 'ignore',
-    });
-    return true;
-  } catch {
-    return false;
   }
 }

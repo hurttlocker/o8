@@ -398,10 +398,3 @@ export function archiveCompletedLanes(): number {
   }
   return count;
 }
-
-// ── Reset (for tests/dev) ──
-
-export function _resetForTesting() {
-  state = { version: 1, lanes: {}, events: [], updatedAt: nowIso() };
-  loaded = false;
-}

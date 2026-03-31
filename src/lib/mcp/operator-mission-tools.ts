@@ -9,6 +9,7 @@ import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { findLaneByPacket, listLanes } from '@/lib/lane/registry';
 import { aggregateMissionCost } from '@/lib/orchestrator/cost-aggregator';
 import {
+  buildDomainLaneSummaries,
   readOrchestratorControlPlaneState,
   syncOrchestratorControlPlaneState,
   writeOrchestratorControlPlaneState,
@@ -173,17 +174,6 @@ function normalizeMissionSelection(state: OrchestratorMissionState, missionId?: 
   if (currentMissionId !== requestedMissionId) {
     throw new Error(`Mission mismatch. Current mission is ${currentMissionId}, requested ${requestedMissionId}.`);
   }
-}
-
-function buildDomainLaneSummaries() {
-  return listLanes()
-    .filter((lane) => lane.packetId)
-    .map((lane) => ({
-      laneId: lane.id,
-      packetId: lane.packetId!,
-      status: lane.status,
-      sessionKey: lane.sessionKey,
-    }));
 }
 
 function highestReviewRisk(findings: OrchestratorPacketReviewFinding[]) {

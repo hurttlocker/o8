@@ -19,6 +19,7 @@ import type {
   RuntimeSurfaceSummary,
   SquadSummary,
 } from '@/lib/fleet/types';
+import { truncateText } from '@/lib/util/text';
 
 const execFileAsync = promisify(execFile);
 const OWNED_CODEX_ROOT = process.env.CORTEX_IDE_OWNED_CODEX_ROOT || path.join(os.homedir(), '.cortex-ide', 'owned-codex');
@@ -142,9 +143,7 @@ function nowIso() {
 }
 
 function compactText(value: string | null | undefined, max = 120) {
-  const collapsed = (value ?? '').replace(/\s+/g, ' ').trim();
-  if (!collapsed) return '';
-  return collapsed.length > max ? `${collapsed.slice(0, max - 1).trimEnd()}…` : collapsed;
+  return truncateText(value, max, { normalizeWhitespace: true });
 }
 
 function safeObject(value: unknown): Record<string, unknown> | null {

@@ -1,3 +1,4 @@
+import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import type {
   OrchestratorLaneBinding,
   OrchestratorLaneSnapshot,
@@ -307,19 +308,6 @@ export function packetReleaseBlockedBy(packet: OrchestratorPacket, packets: Orch
     ?? null;
 }
 
-export function orchestratorStateDependsOn(packetId: string, packets: OrchestratorPacket[]) {
-  return packets.some((packet) => packet.dependencyPacketIds.includes(packetId));
-}
-
-function normalizeRuntimeTruthStatus(status?: string | null) {
-  const normalized = status?.trim().toLowerCase() ?? '';
-  if (normalized === 'reviewing') return 'awaiting_review';
-  if (normalized === 'running' || normalized === 'working' || normalized === 'waiting') return 'running';
-  if (normalized === 'failed' || normalized === 'blocked' || normalized === 'error') return 'blocked';
-  if (normalized === 'idle') return 'idle';
-  return null;
-}
-
 export interface DomainLaneSummary {
   laneId: string;
   packetId: string;
@@ -422,7 +410,10 @@ export function reconcileOrchestratorMissionState(
     }
 
     if (laneMatch) {
-      const truthStatus = normalizeRuntimeTruthStatus(runtime?.status);
+      const truthStatus = normalizeRuntimeStatusToOrchestratorStatus(runtime?.status, {
+        waitingAsRunning: true,
+        fallbackStatus: null,
+      });
       if (truthStatus === 'awaiting_review') {
         next.status = 'awaiting_review';
         return next;
