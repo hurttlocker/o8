@@ -1,6 +1,6 @@
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as os from 'node:os';
+import { randomUUID } from 'node:crypto';
+import { asc, eq } from 'drizzle-orm';
+import { getDb, laneEvents, lanes } from '@/lib/db';
 import type {
   Lane,
   LaneEvent,
@@ -8,111 +8,78 @@ import type {
   LaneOwnership,
   LaneRuntime,
   LaneStatus,
-  LaneStoreState,
 } from './types';
 
-// ── Storage ──
-
-const STATE_DIR = path.join(os.homedir(), '.cortex-ide');
-const STORE_PATH = path.join(STATE_DIR, 'lanes.json');
-const MAX_EVENTS = 500;
+type LaneRow = typeof lanes.$inferSelect;
+type LaneEventRow = typeof laneEvents.$inferSelect;
 
 function nowIso() {
   return new Date().toISOString();
 }
 
 function generateLaneId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `lane-${crypto.randomUUID().slice(0, 12)}`;
-  }
-  return `lane-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return `lane-${randomUUID().slice(0, 12)}`;
 }
 
 function generateEventId(): string {
-  return `evt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return `evt-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
 }
 
-// ── In-Memory State ──
-
-let state: LaneStoreState = {
-  version: 1,
-  lanes: {},
-  events: [],
-  updatedAt: nowIso(),
-};
-
-let loaded = false;
-let lastLoadedMtimeMs = 0;
-
-// ── Persistence ──
-
-function ensureDir() {
-  if (!fs.existsSync(STATE_DIR)) {
-    fs.mkdirSync(STATE_DIR, { recursive: true });
+function getLaneDb() {
+  const db = getDb();
+  if (!db) {
+    throw new Error('[lane-registry] SQLite database is unavailable');
   }
+  return db;
 }
 
-function loadFromDisk(): LaneStoreState {
+function mapLaneRow(row: LaneRow | undefined): Lane | null {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    label: row.label,
+    repoPath: row.repoPath,
+    worktreePath: row.worktreePath,
+    branch: row.branch,
+    baseBranch: row.baseBranch,
+    runtime: row.runtime as LaneRuntime,
+    sessionKey: row.sessionKey,
+    packetId: row.packetId,
+    status: row.status as LaneStatus,
+    ownership: row.ownership as LaneOwnership,
+    writerToken: row.writerToken,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    lastEventAt: row.lastEventAt,
+    lastEventLabel: row.lastEventLabel,
+  };
+}
+
+function parseEventPayload(payloadJson: string): Record<string, unknown> {
   try {
-    if (!fs.existsSync(STORE_PATH)) {
-      return { version: 1, lanes: {}, events: [], updatedAt: nowIso() };
+    const parsed = JSON.parse(payloadJson);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
     }
-    const raw = fs.readFileSync(STORE_PATH, 'utf-8');
-    const parsed = JSON.parse(raw) as LaneStoreState;
-    if (parsed.version !== 1) {
-      console.warn('[lane-registry] Unknown store version, resetting');
-      return { version: 1, lanes: {}, events: [], updatedAt: nowIso() };
-    }
-    return parsed;
-  } catch (err) {
-    console.error('[lane-registry] Failed to load store:', err);
-    return { version: 1, lanes: {}, events: [], updatedAt: nowIso() };
+  } catch {
+    // Invalid payloads should not break lane reads.
   }
+  return {};
 }
 
-function persistToDisk() {
-  try {
-    ensureDir();
-    // Merge lanes from disk that another process may have created since our
-    // last load, so we never clobber cross-process writes.
-    try {
-      const disk = loadFromDisk();
-      for (const [id, lane] of Object.entries(disk.lanes)) {
-        if (!state.lanes[id]) {
-          state.lanes[id] = lane;
-        }
-      }
-    } catch { /* disk read failed — proceed with in-memory state */ }
-
-    state.updatedAt = nowIso();
-    const tmp = `${STORE_PATH}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf-8');
-    fs.renameSync(tmp, STORE_PATH);
-    try { lastLoadedMtimeMs = fs.statSync(STORE_PATH).mtimeMs; } catch { /* noop */ }
-  } catch (err) {
-    console.error('[lane-registry] Failed to persist store:', err);
-  }
+function mapLaneEventRow(row: LaneEventRow): LaneEvent {
+  return {
+    id: row.id,
+    laneId: row.laneId,
+    verb: row.verb,
+    actor: row.actor as LaneEventActor,
+    payload: parseEventPayload(row.payloadJson),
+    timestamp: row.timestamp,
+  };
 }
-
-function ensureLoaded() {
-  if (!loaded) {
-    state = loadFromDisk();
-    loaded = true;
-    try { lastLoadedMtimeMs = fs.statSync(STORE_PATH).mtimeMs; } catch { /* file may not exist yet */ }
-    return;
-  }
-
-  // Reload if another process updated the file since we last loaded
-  try {
-    const currentMtimeMs = fs.statSync(STORE_PATH).mtimeMs;
-    if (currentMtimeMs > lastLoadedMtimeMs) {
-      state = loadFromDisk();
-      lastLoadedMtimeMs = currentMtimeMs;
-    }
-  } catch { /* file may not exist yet */ }
-}
-
-// ── Event Logging ──
 
 function appendEvent(
   laneId: string,
@@ -128,14 +95,38 @@ function appendEvent(
     payload,
     timestamp: nowIso(),
   };
-  state.events.push(event);
-  if (state.events.length > MAX_EVENTS) {
-    state.events = state.events.slice(-MAX_EVENTS);
-  }
+
+  getLaneDb().insert(laneEvents).values({
+    id: event.id,
+    laneId: event.laneId,
+    verb: event.verb,
+    actor: event.actor,
+    payloadJson: JSON.stringify(event.payload),
+    timestamp: event.timestamp,
+  }).run();
+
   return event;
 }
 
-// ── CRUD ──
+function updateLaneRecord(
+  laneId: string,
+  updates: Partial<typeof lanes.$inferInsert>,
+) {
+  if (Object.keys(updates).length === 0) {
+    return;
+  }
+  getLaneDb().update(lanes).set(updates).where(eq(lanes.id, laneId)).run();
+}
+
+function getOrderedLaneList(): Lane[] {
+  return getLaneDb()
+    .select()
+    .from(lanes)
+    .orderBy(asc(lanes.createdAt))
+    .all()
+    .map((row) => mapLaneRow(row)!)
+    .filter((lane): lane is Lane => lane !== null);
+}
 
 export function createLane(opts: {
   repoPath: string;
@@ -149,8 +140,6 @@ export function createLane(opts: {
   worktreePath?: string;
   actor?: LaneEventActor;
 }): Lane {
-  ensureLoaded();
-
   const id = generateLaneId();
   const now = nowIso();
   const lane: Lane = {
@@ -172,28 +161,25 @@ export function createLane(opts: {
     lastEventLabel: null,
   };
 
-  state.lanes[id] = lane;
-  state.updatedAt = now;
+  getLaneDb().insert(lanes).values(lane).run();
   appendEvent(id, 'open_lane', opts.actor ?? 'system', {
     repoPath: opts.repoPath,
     branch: opts.branch,
     runtime: opts.runtime,
     packetId: opts.packetId ?? null,
   });
-  persistToDisk();
 
   console.log(`[lane-registry] Created lane ${id} for ${opts.repoPath} @ ${opts.branch}`);
   return lane;
 }
 
 export function getLane(laneId: string): Lane | null {
-  ensureLoaded();
-  return state.lanes[laneId] ?? null;
+  const row = getLaneDb().select().from(lanes).where(eq(lanes.id, laneId)).get();
+  return mapLaneRow(row);
 }
 
 export function listLanes(): Lane[] {
-  ensureLoaded();
-  return Object.values(state.lanes);
+  return getOrderedLaneList();
 }
 
 export function listActiveLanes(): Lane[] {
@@ -203,18 +189,15 @@ export function listActiveLanes(): Lane[] {
 }
 
 export function findLaneBySession(sessionKey: string): Lane | null {
-  ensureLoaded();
-  return Object.values(state.lanes).find((lane) => lane.sessionKey === sessionKey) ?? null;
+  return listLanes().find((lane) => lane.sessionKey === sessionKey) ?? null;
 }
 
 export function findLaneByPacket(packetId: string): Lane | null {
-  ensureLoaded();
-  return Object.values(state.lanes).find((lane) => lane.packetId === packetId) ?? null;
+  return listLanes().find((lane) => lane.packetId === packetId) ?? null;
 }
 
 export function findLaneByRepoAndBranch(repoPath: string, branch: string): Lane | null {
-  ensureLoaded();
-  return Object.values(state.lanes).find(
+  return listLanes().find(
     (lane) =>
       lane.repoPath === repoPath &&
       lane.branch === branch &&
@@ -228,25 +211,35 @@ export function updateLane(
   updates: Partial<Pick<Lane, 'status' | 'sessionKey' | 'worktreePath' | 'writerToken' | 'label' | 'lastEventAt' | 'lastEventLabel' | 'packetId'>>,
   actor: LaneEventActor = 'system',
 ): Lane | null {
-  ensureLoaded();
-  const lane = state.lanes[laneId];
+  const lane = getLane(laneId);
   if (!lane) return null;
 
   const now = nowIso();
   const changes: Record<string, unknown> = {};
-  const laneRecord = lane as unknown as Record<string, unknown>;
+  const nextValues: Partial<typeof lanes.$inferInsert> = {};
+  const updatableKeys: Array<keyof typeof updates> = [
+    'status',
+    'sessionKey',
+    'worktreePath',
+    'writerToken',
+    'label',
+    'lastEventAt',
+    'lastEventLabel',
+    'packetId',
+  ];
 
-  for (const [key, value] of Object.entries(updates)) {
-    if (value !== undefined && laneRecord[key] !== value) {
-      laneRecord[key] = value;
+  for (const key of updatableKeys) {
+    const value = updates[key];
+    if (value !== undefined && lane[key as keyof Lane] !== value) {
+      (nextValues as Record<string, unknown>)[key] = value;
       changes[key] = value;
     }
   }
 
   if (Object.keys(changes).length === 0) return lane;
 
-  lane.updatedAt = now;
-  state.updatedAt = now;
+  nextValues.updatedAt = now;
+  updateLaneRecord(laneId, nextValues);
 
   if (changes.status) {
     appendEvent(laneId, 'status_change', actor, { status: changes.status });
@@ -254,8 +247,7 @@ export function updateLane(
     appendEvent(laneId, 'update', actor, changes);
   }
 
-  persistToDisk();
-  return lane;
+  return getLane(laneId);
 }
 
 export function setLaneStatus(
@@ -277,149 +269,162 @@ export function attachSession(
   sessionKey: string,
   actor: LaneEventActor = 'system',
 ): Lane | null {
-  ensureLoaded();
-  const lane = state.lanes[laneId];
+  const lane = getLane(laneId);
   if (!lane) return null;
 
   const now = nowIso();
-  lane.sessionKey = sessionKey;
-  lane.updatedAt = now;
-  lane.lastEventAt = now;
-  lane.lastEventLabel = 'session_attached';
-  state.updatedAt = now;
+  updateLaneRecord(laneId, {
+    sessionKey,
+    updatedAt: now,
+    lastEventAt: now,
+    lastEventLabel: 'session_attached',
+  });
 
   appendEvent(laneId, 'attach_session', actor, { sessionKey });
-  persistToDisk();
-  return lane;
+  return getLane(laneId);
 }
 
 export function detachSession(
   laneId: string,
   actor: LaneEventActor = 'system',
 ): Lane | null {
-  ensureLoaded();
-  const lane = state.lanes[laneId];
+  const lane = getLane(laneId);
   if (!lane) return null;
 
-  const previousKey = lane.sessionKey;
-  lane.sessionKey = null;
-  lane.updatedAt = nowIso();
-  state.updatedAt = lane.updatedAt;
+  updateLaneRecord(laneId, {
+    sessionKey: null,
+    updatedAt: nowIso(),
+  });
 
-  appendEvent(laneId, 'detach_session', actor, { previousSessionKey: previousKey });
-  persistToDisk();
-  return lane;
+  appendEvent(laneId, 'detach_session', actor, { previousSessionKey: lane.sessionKey });
+  return getLane(laneId);
 }
 
-// ── Events ──
-
 export function getLaneEvents(laneId: string, limit = 50): LaneEvent[] {
-  ensureLoaded();
-  return state.events
-    .filter((event) => event.laneId === laneId)
-    .slice(-limit);
+  const events = getLaneDb()
+    .select()
+    .from(laneEvents)
+    .where(eq(laneEvents.laneId, laneId))
+    .orderBy(asc(laneEvents.timestamp))
+    .all()
+    .map(mapLaneEventRow);
+
+  return events.slice(-limit);
 }
 
 export function getAllEvents(limit = 100): LaneEvent[] {
-  ensureLoaded();
-  return state.events.slice(-limit);
-}
+  const events = getLaneDb()
+    .select()
+    .from(laneEvents)
+    .orderBy(asc(laneEvents.timestamp))
+    .all()
+    .map(mapLaneEventRow);
 
-// ── Reconciliation ──
+  return events.slice(-limit);
+}
 
 export function reconcileLanesWithSessions(
   activeSessions: Array<{ sessionKey: string; runtimeId: string; cwd: string; branch?: string; status: string }>,
 ) {
-  ensureLoaded();
-
+  const currentLanes = listLanes();
   const sessionByKey = new Map(activeSessions.map((session) => [session.sessionKey, session]));
+  const laneBySession = new Map(
+    currentLanes
+      .filter((lane) => lane.sessionKey)
+      .map((lane) => [lane.sessionKey!, lane.id] as const),
+  );
 
-  for (const lane of Object.values(state.lanes)) {
+  for (const lane of currentLanes) {
     if (lane.status === 'archived' || lane.status === 'completed') continue;
 
-    // If lane has a session, check if it's still alive
     if (lane.sessionKey) {
       const session = sessionByKey.get(lane.sessionKey);
       if (!session) {
-        // Session died — detach but don't archive the lane
+        const nextValues: Partial<typeof lanes.$inferInsert> = {
+          sessionKey: null,
+          updatedAt: nowIso(),
+        };
+
         if (lane.status === 'running' || lane.status === 'launching') {
-          lane.status = 'paused';
-          lane.lastEventAt = nowIso();
-          lane.lastEventLabel = 'session_lost';
+          const now = nowIso();
+          nextValues.status = 'paused';
+          nextValues.lastEventAt = now;
+          nextValues.lastEventLabel = 'session_lost';
           appendEvent(lane.id, 'session_lost', 'system', { lostSessionKey: lane.sessionKey });
         }
-        lane.sessionKey = null;
-        lane.updatedAt = nowIso();
+
+        updateLaneRecord(lane.id, nextValues);
+        laneBySession.delete(lane.sessionKey);
         continue;
       }
 
-      // Session alive — sync status
-      const runtimeStatus = session.status;
-      if (runtimeStatus === 'running' && lane.status !== 'running') {
-        lane.status = 'running';
-        lane.lastEventAt = nowIso();
-        lane.lastEventLabel = 'session_running';
-      } else if (runtimeStatus === 'waiting' && lane.status === 'running') {
-        lane.status = 'awaiting_input';
-        lane.lastEventAt = nowIso();
-        lane.lastEventLabel = 'awaiting_input';
-      } else if (runtimeStatus === 'reviewing' && lane.status !== 'reviewing') {
-        lane.status = 'reviewing';
-        lane.lastEventAt = nowIso();
-        lane.lastEventLabel = 'review_ready';
+      const nextValues: Partial<typeof lanes.$inferInsert> = {};
+      if (session.status === 'running' && lane.status !== 'running') {
+        const now = nowIso();
+        nextValues.status = 'running';
+        nextValues.lastEventAt = now;
+        nextValues.lastEventLabel = 'session_running';
+      } else if (session.status === 'waiting' && lane.status === 'running') {
+        const now = nowIso();
+        nextValues.status = 'awaiting_input';
+        nextValues.lastEventAt = now;
+        nextValues.lastEventLabel = 'awaiting_input';
+      } else if (session.status === 'reviewing' && lane.status !== 'reviewing') {
+        const now = nowIso();
+        nextValues.status = 'reviewing';
+        nextValues.lastEventAt = now;
+        nextValues.lastEventLabel = 'review_ready';
       }
-      lane.updatedAt = nowIso();
+
+      if (Object.keys(nextValues).length > 0) {
+        nextValues.updatedAt = nowIso();
+        updateLaneRecord(lane.id, nextValues);
+      }
       continue;
     }
 
-    // Lane has no session — try to find a matching one
     if (lane.status === 'idle' || lane.status === 'paused') {
       const match = activeSessions.find(
         (session) =>
           session.runtimeId === lane.runtime &&
           (session.cwd === lane.repoPath || session.cwd === lane.worktreePath) &&
           session.branch === lane.branch &&
-          !findLaneBySession(session.sessionKey),
+          !laneBySession.has(session.sessionKey),
       );
+
       if (match) {
-        lane.sessionKey = match.sessionKey;
-        lane.ownership = 'attached';
-        lane.status = match.status === 'running' ? 'running' : 'paused';
-        lane.updatedAt = nowIso();
-        lane.lastEventAt = nowIso();
-        lane.lastEventLabel = 'session_discovered';
+        const now = nowIso();
+        updateLaneRecord(lane.id, {
+          sessionKey: match.sessionKey,
+          ownership: 'attached',
+          status: match.status === 'running' ? 'running' : 'paused',
+          updatedAt: now,
+          lastEventAt: now,
+          lastEventLabel: 'session_discovered',
+        });
+
         appendEvent(lane.id, 'attach_session', 'system', {
           sessionKey: match.sessionKey,
           discoveredFrom: 'reconciliation',
         });
+        laneBySession.set(match.sessionKey, lane.id);
       }
     }
   }
-
-  state.updatedAt = nowIso();
-  persistToDisk();
 }
-
-// ── Cleanup ──
 
 export function archiveLane(laneId: string, actor: LaneEventActor = 'user'): Lane | null {
   return setLaneStatus(laneId, 'archived', actor, 'archived');
 }
 
 export function archiveCompletedLanes(): number {
-  ensureLoaded();
-  let count = 0;
-  for (const lane of Object.values(state.lanes)) {
-    if (lane.status === 'completed') {
-      lane.status = 'archived';
-      lane.updatedAt = nowIso();
-      appendEvent(lane.id, 'auto_archive', 'system', {});
-      count++;
-    }
+  const completedLanes = listLanes().filter((lane) => lane.status === 'completed');
+  for (const lane of completedLanes) {
+    updateLaneRecord(lane.id, {
+      status: 'archived',
+      updatedAt: nowIso(),
+    });
+    appendEvent(lane.id, 'auto_archive', 'system', {});
   }
-  if (count > 0) {
-    state.updatedAt = nowIso();
-    persistToDisk();
-  }
-  return count;
+  return completedLanes.length;
 }
