@@ -277,7 +277,7 @@ function textResult(text: string, isError = false): McpToolResult {
 }
 
 function jsonResult(data: unknown, isError = false): McpToolResult {
-  return textResult(JSON.stringify(data, null, 2), isError);
+  return textResult(JSON.stringify(data), isError);
 }
 
 async function handleFleetStatus(args: Record<string, unknown>): Promise<McpToolResult> {
