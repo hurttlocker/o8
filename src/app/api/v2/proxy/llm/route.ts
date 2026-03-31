@@ -354,6 +354,18 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
   },
 };
 
+// ── Google model fallback chain ──
+// When an overloaded Google model returns 503/429 or times out, retry with a stable fallback.
+
+const GOOGLE_FALLBACKS: Record<string, string> = {
+  'gemini-3.1-pro-preview': 'gemini-2.5-pro',
+  'gemini-3-pro-preview': 'gemini-2.5-pro',
+  'gemini-3-flash-preview': 'gemini-2.5-flash',
+  'gemini-3.1-flash-lite-preview': 'gemini-2.5-flash-lite',
+};
+
+const UPSTREAM_TIMEOUT_MS = 15_000;
+
 // ── Resolve API key ──
 
 function resolveApiKey(provider: Provider): string | null {
@@ -454,9 +466,11 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
   console.log(`[llm-proxy] ${provider}/${model} — ${messages.length} messages`);
 
   // Build the upstream request
+  const buildGoogleUrl = (m: string) => `${config.url}/${m}:streamGenerateContent?alt=sse&key=${apiKey}`;
+
   let url = config.url;
   if (provider === 'google') {
-    url = `${config.url}/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
+    url = buildGoogleUrl(model);
   }
 
   const headers = config.buildHeaders(apiKey);
@@ -465,12 +479,70 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     delete upstreamBody.tools;
   }
 
+  // ── Fetch with timeout + Google model fallback ──
+  // Wraps fetch in an AbortController. On 503/429/timeout for Google models,
+  // retries once with the fallback model from GOOGLE_FALLBACKS.
+
+  async function fetchWithTimeout(
+    fetchUrl: string,
+    fetchBody: string,
+  ): Promise<{ response: globalThis.Response; fallbackUsed: { originalModel: string; fallbackModel: string; reason: string } | null }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
+
+    try {
+      const res = await fetch(fetchUrl, {
+        method: 'POST',
+        headers,
+        body: fetchBody,
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      // Check for retryable errors on Google models
+      if (!res.ok && provider === 'google' && (res.status === 503 || res.status === 429)) {
+        const fallbackModel = GOOGLE_FALLBACKS[model];
+        if (fallbackModel) {
+          const reason = `Model overloaded (${res.status})`;
+          console.log(`[llm-proxy] Fallback: ${model} → ${fallbackModel} (${reason})`);
+          const fallbackUrl = buildGoogleUrl(fallbackModel);
+          // Rebuild body with fallback model (contents stay the same, model is in URL for Google)
+          const fallbackRes = await fetch(fallbackUrl, {
+            method: 'POST',
+            headers,
+            body: fetchBody,
+          });
+          return { response: fallbackRes, fallbackUsed: { originalModel: model, fallbackModel, reason } };
+        }
+      }
+
+      return { response: res, fallbackUsed: null };
+    } catch (err: unknown) {
+      clearTimeout(timer);
+
+      // Timeout or network error — try fallback for Google models
+      if (provider === 'google') {
+        const isTimeout = err instanceof DOMException && err.name === 'AbortError';
+        const fallbackModel = GOOGLE_FALLBACKS[model];
+        if (fallbackModel) {
+          const reason = isTimeout ? 'Upstream timeout (15s)' : 'Network error';
+          console.log(`[llm-proxy] Fallback: ${model} → ${fallbackModel} (${reason})`);
+          const fallbackUrl = buildGoogleUrl(fallbackModel);
+          const fallbackRes = await fetch(fallbackUrl, {
+            method: 'POST',
+            headers,
+            body: fetchBody,
+          });
+          return { response: fallbackRes, fallbackUsed: { originalModel: model, fallbackModel, reason } };
+        }
+      }
+
+      throw err;
+    }
+  }
+
   try {
-    const upstream = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(upstreamBody),
-    });
+    const { response: upstream, fallbackUsed } = await fetchWithTimeout(url, JSON.stringify(upstreamBody));
 
     if (!upstream.ok) {
       const errText = await upstream.text().catch(() => 'Unknown error');
@@ -489,6 +561,16 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
     const stream = new ReadableStream({
       async start(controller) {
         const enqueue = (data: string) => controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+
+        // Signal fallback to frontend before any content
+        if (fallbackUsed) {
+          enqueue(JSON.stringify({
+            type: 'fallback',
+            originalModel: fallbackUsed.originalModel,
+            fallbackModel: fallbackUsed.fallbackModel,
+            reason: fallbackUsed.reason,
+          }));
+        }
 
         // Send memory recall indicator if facts were found
         if (recallInfo) {
@@ -712,15 +794,27 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
             );
 
             // Make follow-up request to model with tool results
+            // Use the fallback model if the initial request fell back
+            const activeModel = fallbackUsed ? fallbackUsed.fallbackModel : model;
             const followUrl = provider === 'google'
-              ? `${config.url}/${model}:streamGenerateContent?alt=sse&key=${apiKey}`
+              ? buildGoogleUrl(activeModel)
               : config.url;
-            const followBody = config.buildBody(model, messages);
-            const followRes = await fetch(followUrl, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify(followBody),
-            });
+            const followBody = config.buildBody(activeModel, messages);
+            const followController = new AbortController();
+            const followTimer = setTimeout(() => followController.abort(), UPSTREAM_TIMEOUT_MS);
+            let followRes: globalThis.Response;
+            try {
+              followRes = await fetch(followUrl, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(followBody),
+                signal: followController.signal,
+              });
+            } catch {
+              clearTimeout(followTimer);
+              break;
+            }
+            clearTimeout(followTimer);
 
             if (!followRes.ok) break;
 
