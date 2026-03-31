@@ -15,6 +15,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as schema from './schema';
+import { migrateLegacyLaneStoreIfNeeded } from '@/lib/lane/storage-migration';
 
 // ── Data directory ──
 
@@ -93,6 +94,10 @@ export function getDbPath(): string {
  * When we move to PostgreSQL, we'll use proper migrations.
  */
 function ensureTables(sqlite: Database.Database): void {
+  const lanesTablePreviouslyMissing = !sqlite
+    .prepare(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'lanes'`)
+    .get();
+
   sqlite.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
@@ -262,6 +267,34 @@ function ensureTables(sqlite: Database.Database): void {
       merged_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS lanes (
+      id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      repo_path TEXT NOT NULL,
+      worktree_path TEXT,
+      branch TEXT NOT NULL,
+      base_branch TEXT NOT NULL,
+      runtime TEXT NOT NULL,
+      session_key TEXT,
+      packet_id TEXT,
+      status TEXT NOT NULL,
+      ownership TEXT NOT NULL,
+      writer_token TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      last_event_at TEXT,
+      last_event_label TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS lane_events (
+      id TEXT PRIMARY KEY,
+      lane_id TEXT NOT NULL REFERENCES lanes(id) ON DELETE CASCADE,
+      verb TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      timestamp TEXT NOT NULL
+    );
+
     CREATE UNIQUE INDEX IF NOT EXISTS idx_github_prs_repo_number ON github_pull_requests(repo_full_name, number);
 
     -- Indexes for common queries
@@ -276,7 +309,15 @@ function ensureTables(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_github_sync_repo_resource ON github_sync_state(repo_full_name, resource);
     CREATE INDEX IF NOT EXISTS idx_github_issues_repo_state_updated ON github_issues(repo_full_name, state, updated_at);
     CREATE INDEX IF NOT EXISTS idx_github_prs_repo_state_updated ON github_pull_requests(repo_full_name, state, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_lanes_session_key ON lanes(session_key);
+    CREATE INDEX IF NOT EXISTS idx_lanes_packet_id ON lanes(packet_id);
+    CREATE INDEX IF NOT EXISTS idx_lanes_repo_branch_status ON lanes(repo_path, branch, status);
+    CREATE INDEX IF NOT EXISTS idx_lanes_status ON lanes(status);
+    CREATE INDEX IF NOT EXISTS idx_lane_events_lane_timestamp ON lane_events(lane_id, timestamp);
+    CREATE INDEX IF NOT EXISTS idx_lane_events_timestamp ON lane_events(timestamp);
   `);
+
+  migrateLegacyLaneStoreIfNeeded(sqlite, { lanesTablePreviouslyMissing });
 }
 
 // Re-export schema for convenience
