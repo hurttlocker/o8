@@ -82,6 +82,7 @@ export type RuntimeTailEntry = {
   role?: 'user' | 'assistant' | 'system';
   label: string;
   text: string;
+  timestamp?: string;
   timestampLabel?: string;
   thinking?: string;
   tokens?: {
@@ -216,6 +217,37 @@ export async function queryCodexThreads(limit = 6) {
 
   const parsed = JSON.parse(stdout || '[]') as CodexThreadRow[];
   return parsed.filter((row) => row.id && row.rollout_path && row.cwd);
+}
+
+async function queryCodexThreadById(threadId: string) {
+  if (!(await codexStateExists()) || !threadId) {
+    return null;
+  }
+
+  const escapedThreadId = threadId.replace(/'/g, "''");
+  const query = [
+    'select',
+    'id,',
+    'title,',
+    'cwd,',
+    'updated_at,',
+    'rollout_path,',
+    "coalesce(git_branch, '') as git_branch,",
+    "coalesce(git_sha, '') as git_sha,",
+    "coalesce(git_origin_url, '') as git_origin_url,",
+    "coalesce(first_user_message, '') as first_user_message,",
+    "coalesce(model, '') as model",
+    'from threads',
+    `where archived = 0 and id = '${escapedThreadId}'`,
+    'limit 1;',
+  ].join(' ');
+
+  const { stdout } = await execFileAsync('sqlite3', ['-json', CODEX_STATE_DB, query], {
+    maxBuffer: 512 * 1024,
+  });
+
+  const [thread] = JSON.parse(stdout || '[]') as CodexThreadRow[];
+  return thread?.id && thread.rollout_path && thread.cwd ? thread : null;
 }
 
 async function queryProcessBindings() {
@@ -824,6 +856,7 @@ function summarizeTailFromJsonl(raw: string) {
         kind: 'event',
         label: 'Agent update',
         text,
+        timestamp: typeof parsed.timestamp === 'string' ? parsed.timestamp : undefined,
         timestampLabel,
       });
       continue;
@@ -849,6 +882,7 @@ function summarizeTailFromJsonl(raw: string) {
         label: compactText(`${role}${phase ? ` • ${phase}` : ''}`, 40),
         role: role === 'user' ? 'user' : 'assistant',
         text,
+        timestamp: typeof parsed.timestamp === 'string' ? parsed.timestamp : undefined,
         timestampLabel,
         thinking: role === 'assistant' ? (pendingThinking || undefined) : undefined,
       });
@@ -872,6 +906,7 @@ function summarizeTailFromJsonl(raw: string) {
         kind: 'tool',
         label: name || 'Tool call',
         text: toolText || 'Tool invoked.',
+        timestamp: typeof parsed.timestamp === 'string' ? parsed.timestamp : undefined,
         timestampLabel,
       });
       continue;
@@ -885,6 +920,7 @@ function summarizeTailFromJsonl(raw: string) {
         kind: 'tool-output',
         label: 'Tool output',
         text,
+        timestamp: typeof parsed.timestamp === 'string' ? parsed.timestamp : undefined,
         timestampLabel,
       });
       continue;
@@ -911,9 +947,25 @@ function summarizeTailFromJsonl(raw: string) {
 }
 
 async function findCodexThreadBySurfaceId(surfaceId: string) {
-  const threadId = surfaceId.startsWith('codex:') ? surfaceId.slice('codex:'.length) : surfaceId;
-  const threads = await queryCodexThreads(24);
-  return threads.find((thread) => thread.id === threadId) ?? null;
+  const threadId = surfaceId.replace(/^codex(?:-discovered|-live|-owned)?:/, '');
+  return queryCodexThreadById(threadId);
+}
+
+export async function getCodexRolloutPath(surfaceId: string): Promise<string | null> {
+  const thread = await findCodexThreadBySurfaceId(surfaceId);
+  if (!thread) {
+    return null;
+  }
+
+  const resolvedRollout = await realpath(thread.rollout_path).catch(() => null);
+  const resolvedRoot = await realpath(CODEX_SESSIONS_ROOT).catch(() => null);
+  if (!resolvedRollout || !resolvedRoot) {
+    return null;
+  }
+
+  return resolvedRollout.startsWith(`${resolvedRoot}${path.sep}`) || resolvedRollout === resolvedRoot
+    ? resolvedRollout
+    : null;
 }
 
 export async function getCodexRuntimeTail(surfaceId: string): Promise<{

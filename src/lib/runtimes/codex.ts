@@ -13,8 +13,10 @@ import type {
   RuntimeChangedFile,
   RuntimeActionResult,
   LaunchOptions,
+  RuntimeTelemetry,
 } from './types';
-import { getCodexDiscoveredFleetAdditions, getCodexRuntimeTail } from '@/lib/codex/sessions';
+import { parseCodexSessionCost } from '@/lib/runtimes/codex-cost-parser';
+import { getCodexDiscoveredFleetAdditions, getCodexRolloutPath, getCodexRuntimeTail } from '@/lib/codex/sessions';
 
 import {
   launchOwnedCodexSession,
@@ -23,6 +25,7 @@ import {
   getOwnedCodexFleetAdditions,
   getOwnedCodexRuntimeTail,
   getOwnedCodexReviewPacket,
+  getOwnedCodexTelemetrySources,
 } from '@/lib/codex/owned';
 
 const capabilities: RuntimeCapabilities = {
@@ -32,7 +35,7 @@ const capabilities: RuntimeCapabilities = {
   resume: true,
   interrupt: true,
   reviewDiffs: true,
-  costTelemetry: false,
+  costTelemetry: true,
   streaming: true,
 };
 
@@ -81,6 +84,37 @@ function mapAgentToSession(
   };
 }
 
+function parseTranscriptTimestamp(value?: string, fallbackLabel?: string) {
+  const direct = value ? new Date(value) : null;
+  if (direct && !Number.isNaN(direct.getTime())) {
+    return direct;
+  }
+
+  const fromLabel = fallbackLabel ? new Date(fallbackLabel) : null;
+  if (fromLabel && !Number.isNaN(fromLabel.getTime())) {
+    return fromLabel;
+  }
+
+  return new Date();
+}
+
+function applyTranscriptWindow<T extends { id: string }>(entries: T[], sinceId?: string, limit?: number) {
+  let next = entries;
+
+  if (sinceId) {
+    const sinceIndex = next.findIndex((entry) => entry.id === sinceId);
+    if (sinceIndex >= 0) {
+      next = next.slice(sinceIndex + 1);
+    }
+  }
+
+  if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0 && next.length > limit) {
+    next = next.slice(-limit);
+  }
+
+  return next;
+}
+
 export const codexRuntime: AgentRuntime = {
   id: 'codex',
   displayName: 'Codex',
@@ -89,8 +123,8 @@ export const codexRuntime: AgentRuntime = {
   async discoverSessions(): Promise<RuntimeSession[]> {
     // Discover both user-launched (terminal) and IDE-owned sessions
     const [discovered, owned] = await Promise.allSettled([
-      getCodexDiscoveredFleetAdditions(),
-      getOwnedCodexFleetAdditions(),
+      getCodexDiscoveredFleetAdditions({ fresh: true }),
+      getOwnedCodexFleetAdditions({ fresh: true }),
     ]);
 
     const sessions: RuntimeSession[] = [];
@@ -110,23 +144,23 @@ export const codexRuntime: AgentRuntime = {
     return sessions;
   },
 
-  async readTranscript(sessionKey: string, _sinceId?: string, _limit?: number): Promise<RuntimeTranscriptEntry[]> {
-    void _sinceId;
-    void _limit;
+  async readTranscript(sessionKey: string, sinceId?: string, limit?: number): Promise<RuntimeTranscriptEntry[]> {
     // Route to the correct tail reader based on ownership
     const isOwned = sessionKey.startsWith('codex-owned:');
     const tail = isOwned
       ? await getOwnedCodexRuntimeTail(sessionKey)
       : await getCodexRuntimeTail(sessionKey);
 
-    return tail.entries.map((entry) => ({
+    const entries = applyTranscriptWindow(tail.entries, sinceId, limit);
+
+    return entries.map((entry) => ({
       id: entry.id,
       role: entry.kind === 'message' ? 'assistant' as const
         : entry.kind === 'tool' ? 'tool' as const
-        : entry.kind === 'tool-output' ? 'tool' as const
+        : entry.kind === 'tool-output' ? 'system' as const
         : 'system' as const,
       text: entry.text,
-      timestamp: new Date(entry.timestampLabel ?? Date.now()),
+      timestamp: parseTranscriptTimestamp(entry.timestamp, entry.timestampLabel),
       toolName: entry.kind === 'tool' ? entry.label : undefined,
     }));
   },
@@ -211,6 +245,61 @@ export const codexRuntime: AgentRuntime = {
         sessionKey,
       };
     }
+  },
+
+  async getTelemetry(sessionKey: string): Promise<RuntimeTelemetry | undefined> {
+    if (sessionKey.startsWith('codex-live:')) {
+      return undefined;
+    }
+
+    if (sessionKey.startsWith('codex-owned:')) {
+      const telemetrySources = await getOwnedCodexTelemetrySources(sessionKey);
+      if (!telemetrySources) {
+        return undefined;
+      }
+
+      const rolloutPath = telemetrySources.threadId
+        ? await getCodexRolloutPath(`codex:${telemetrySources.threadId}`)
+        : null;
+      const sessionCost = rolloutPath
+        ? await parseCodexSessionCost(rolloutPath)
+        : telemetrySources.stdoutPaths.length > 0
+          ? await parseCodexSessionCost(telemetrySources.stdoutPaths)
+          : null;
+
+      if (!sessionCost) {
+        return undefined;
+      }
+
+      const totalTokens = sessionCost.inputTokens + sessionCost.outputTokens + sessionCost.cacheReadTokens;
+      return {
+        totalTokens,
+        estimatedCostUsd: sessionCost.totalCostUsd,
+        inputTokens: sessionCost.inputTokens,
+        outputTokens: sessionCost.outputTokens,
+        cacheReadTokens: sessionCost.cacheReadTokens,
+        cacheWriteTokens: sessionCost.cacheWriteTokens,
+        model: sessionCost.model ?? undefined,
+      };
+    }
+
+    const rolloutPath = await getCodexRolloutPath(sessionKey);
+    if (!rolloutPath) {
+      return undefined;
+    }
+
+    const sessionCost = await parseCodexSessionCost(rolloutPath);
+    const totalTokens = sessionCost.inputTokens + sessionCost.outputTokens + sessionCost.cacheReadTokens;
+
+    return {
+      totalTokens,
+      estimatedCostUsd: sessionCost.totalCostUsd,
+      inputTokens: sessionCost.inputTokens,
+      outputTokens: sessionCost.outputTokens,
+      cacheReadTokens: sessionCost.cacheReadTokens,
+      cacheWriteTokens: sessionCost.cacheWriteTokens,
+      model: sessionCost.model ?? undefined,
+    };
   },
 
   async getChangedFiles(sessionKey: string): Promise<RuntimeChangedFile[]> {

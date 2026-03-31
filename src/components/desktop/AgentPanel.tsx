@@ -48,6 +48,7 @@ import { MarkdownBody } from './MarkdownBody';
 import { RepoRegistrySection } from './RepoRegistrySection';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { WorktreeBadge } from '@/components/mobile/WorktreeBadge';
+import { ContextUsageRing } from '@/components/ContextUsageRing';
 import { formatModelLabel } from '@/lib/format';
 import type { RuntimeSurfaceSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
@@ -1264,6 +1265,7 @@ const AgentCard = memo(function AgentCard({
           const pr = agent.pr;
           const diff = pr ? { add: pr.additions, del: pr.deletions } : agent.localDiff ? { add: agent.localDiff.additions, del: agent.localDiff.deletions } : null;
           const statusLabel = stage?.label ?? (isStalled ? 'Blocked' : null);
+          const contextPercent = Math.round(agent.context?.usedPercent ?? 0);
 
           return (
             <div
@@ -1339,6 +1341,7 @@ const AgentCard = memo(function AgentCard({
                       {statusLabel}
                     </span>
                   )}
+                  <ContextUsageRing percent={contextPercent} size={24} />
                 </div>
 
                 {/* Line 2: branch · PR # · model */}

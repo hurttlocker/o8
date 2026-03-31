@@ -95,7 +95,7 @@ function extractSummaryText(entry: JsonlEntry): string | undefined {
   return summary || undefined;
 }
 
-function usageTotal(usage: JsonlUsage | undefined): number | undefined {
+export function jsonlUsageTotal(usage: JsonlUsage | undefined): number | undefined {
   if (!usage) return undefined;
 
   const inputTokens = asNumber(usage.input_tokens) ?? 0;
@@ -107,8 +107,8 @@ function usageTotal(usage: JsonlUsage | undefined): number | undefined {
   return total > 0 ? total : undefined;
 }
 
-function extractEntryTokenTotal(entry: JsonlEntry): number | undefined {
-  return usageTotal(entry.message?.usage) ?? usageTotal(entry.usage);
+export function extractJsonlEntryTokenTotal(entry: JsonlEntry): number | undefined {
+  return jsonlUsageTotal(entry.message?.usage) ?? jsonlUsageTotal(entry.usage);
 }
 
 function isCompactBoundary(entry: JsonlEntry): boolean {
@@ -147,7 +147,7 @@ export function detectCompactionEvents(entries: JsonlEntry[]): CompactionEvent[]
     const summary = nextEntry?.isCompactSummary ? extractSummaryText(nextEntry) : undefined;
     const nextUsageTokens = entries
       .slice(index + 1)
-      .map((candidate) => extractEntryTokenTotal(candidate))
+      .map((candidate) => extractJsonlEntryTokenTotal(candidate))
       .find((candidate) => typeof candidate === 'number');
 
     if (nextEntry?.isCompactSummary && nextEntry.uuid) {
@@ -202,7 +202,7 @@ export function detectCompactionEvents(entries: JsonlEntry[]): CompactionEvent[]
 
   for (let index = 0; index < entries.length; index += 1) {
     const entry = entries[index];
-    const tokens = extractEntryTokenTotal(entry);
+    const tokens = extractJsonlEntryTokenTotal(entry);
     const timestamp = parseTimestamp(entry.timestamp);
     const id = entry.uuid ?? `usage-${index}`;
     if (tokens == null || !timestamp) continue;

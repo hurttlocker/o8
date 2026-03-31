@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, memo } from 'react';
+import { ContextUsageRing } from '@/components/ContextUsageRing';
 import type { MobileInboxSnapshot, MobileInboxItem } from '@/lib/mobile/types';
 import type { AgentSummary } from '@/lib/fleet/types';
 
@@ -190,6 +191,7 @@ function AgentEventCard({ agent, onSelect }: { agent: AgentSummary; onSelect: ()
   const statusColor = agent.status === 'running' ? '#34c759' :
     agent.status === 'failed' ? '#ff3b30' :
     agent.status === 'waiting' ? '#ff9f0a' : '#8e8e93';
+  const contextPercent = Math.round(agent.context?.usedPercent ?? 0);
 
   return (
     <button
@@ -209,13 +211,34 @@ function AgentEventCard({ agent, onSelect }: { agent: AgentSummary; onSelect: ()
         overflow: 'hidden',
       }}
     >
-      <span style={{
-        width: 8, height: 8, borderRadius: '50%',
-        background: statusColor,
+      <div style={{
+        position: 'relative',
+        width: 28,
+        height: 28,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         flexShrink: 0,
-        boxShadow: agent.status === 'running' ? `0 0 6px ${statusColor}50` : 'none',
-        animation: agent.status === 'running' ? 'activityPulse 2s ease-in-out infinite' : 'none',
-      }} />
+      }}>
+        <ContextUsageRing percent={contextPercent} size={28} />
+        <span style={{
+          position: 'absolute',
+          right: -1,
+          bottom: -1,
+          width: 8,
+          height: 8,
+          borderRadius: '50%',
+          background: statusColor,
+          borderWidth: 1.5,
+          borderStyle: 'solid',
+          borderColor: '#fff',
+          boxShadow: agent.status === 'running' ? `0 0 6px ${statusColor}50` : 'none',
+          animationName: agent.status === 'running' ? 'activityPulse' : 'none',
+          animationDuration: agent.status === 'running' ? '2s' : undefined,
+          animationTimingFunction: agent.status === 'running' ? 'ease-in-out' : undefined,
+          animationIterationCount: agent.status === 'running' ? 'infinite' : undefined,
+        }} />
+      </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <span style={{
           fontSize: 14, fontWeight: 700, color: '#0a0a0a',

@@ -3,6 +3,7 @@
 import { memo, useMemo, useState, useCallback } from 'react';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type { AgentSummary } from '@/lib/fleet/types';
+import { ContextUsageRing } from '@/components/ContextUsageRing';
 import { useLongPress, ContextMenu, type ContextMenuItem } from './ContextMenu';
 import { EmptyState } from './EmptyState';
 
@@ -33,34 +34,6 @@ function shortModel(model: string): string {
 }
 
 // Context ring — thin arc showing context usage
-function ContextRing({ percent, size = 28 }: { percent: number; size?: number }) {
-  const r = (size - 4) / 2;
-  const circ = 2 * Math.PI * r;
-  const filled = (percent / 100) * circ;
-  const color = percent > 70 ? '#ff3b30' : percent > 40 ? '#ff9f0a' : '#007aff';
-
-  return (
-    <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
-      <circle cx={size/2} cy={size/2} r={r} fill="none"
-        stroke="rgba(0,122,255,0.08)" strokeWidth={2.5} />
-      <circle cx={size/2} cy={size/2} r={r} fill="none"
-        stroke={color} strokeWidth={2.5}
-        strokeDasharray={`${filled} ${circ - filled}`}
-        strokeLinecap="round"
-        style={{ transition: 'stroke-dasharray 600ms ease' }} />
-      <text x={size/2} y={size/2} textAnchor="middle" dominantBaseline="central"
-        style={{
-          transform: 'rotate(90deg)',
-          transformOrigin: `${size/2}px ${size/2}px`,
-          fontSize: 8, fontWeight: 700,
-          fill: color, fontFamily: '-apple-system, system-ui, sans-serif',
-        }}>
-        {percent}
-      </text>
-    </svg>
-  );
-}
-
 function AgentCard({ agent, onSelect, onKill, onMessage }: { agent: AgentSummary; onSelect: () => void; onKill?: () => void; onMessage?: () => void }) {
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
   const longPress = useLongPress((x, y) => setCtxMenu({ x, y }));
@@ -106,7 +79,7 @@ function AgentCard({ agent, onSelect, onKill, onMessage }: { agent: AgentSummary
     >
       {/* Status dot + context ring */}
       <div style={{ position: 'relative', flexShrink: 0 }}>
-        <ContextRing percent={contextPct} size={36} />
+        <ContextUsageRing percent={contextPct} size={36} />
         <span style={{
           position: 'absolute',
           bottom: -1, right: -1,

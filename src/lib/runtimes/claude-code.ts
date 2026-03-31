@@ -22,7 +22,11 @@ import type {
   LaunchOptions,
   RuntimeTelemetry,
 } from '@/lib/runtimes/types';
-import { detectCompactionEvents } from '@/lib/runtimes/compaction-detector';
+import {
+  detectCompactionEvents,
+  jsonlUsageTotal,
+  type JsonlEntry,
+} from '@/lib/runtimes/compaction-detector';
 import { parseSessionCost } from '@/lib/runtimes/cost-parser';
 import { tmuxSessionName } from '@/lib/terminal/tmux';
 import { spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
@@ -35,6 +39,9 @@ const CLAUDE_BIN = process.env.CLAUDE_BIN || path.join(os.homedir(), '.local', '
 const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_HOME, 'projects');
 const RECENT_WINDOW_MS = 6 * 60 * 60_000; // 6 hours
 const LAUNCH_SESSION_ID_TIMEOUT_MS = 12_000;
+const CLAUDE_DEFAULT_CONTEXT_WINDOW_TOKENS = 200_000;
+const CLAUDE_ONE_MILLION_CONTEXT_WINDOW_TOKENS = 1_000_000;
+const CLAUDE_CONTEXT_RESERVE_MAX_OUTPUT_TOKENS = 20_000;
 
 const capabilities: RuntimeCapabilities = {
   discover: true,
@@ -265,7 +272,7 @@ function projectDisplayName(projectPath: string): string {
 
 // ── Session JSONL parsing ──
 
-interface ClaudeCodeMessage {
+interface ClaudeCodeMessage extends JsonlEntry {
   type: string;
   subtype?: string;
   uuid?: string;
@@ -285,10 +292,10 @@ interface ClaudeCodeMessage {
   };
   usage?: Record<string, number>;
   message?: {
-    role: string;
-    content: MessageContent;
+    role?: string;
+    content?: MessageContent;
     model?: string;
-    usage?: Record<string, number>;
+    usage?: Record<string, unknown>;
   };
 }
 
@@ -362,6 +369,207 @@ function buildCompactionTranscriptEntry(
     timestamp: event.timestamp,
     type: 'compaction',
     compaction: event,
+  };
+}
+
+const CONTEXT_WINDOW_SIGNAL_PATTERNS = {
+  oneMillion: [
+    /set model to .*1m context/i,
+    /(?:^|[\s(])(?:opus|sonnet)\[1m\](?:[\s)]|$)/i,
+    /--model\s+(?:opus|sonnet)\[1m\]/i,
+    /anthropic_model=(?:opus|sonnet)\[1m\]/i,
+    /\/model\s+(?:opus|sonnet)\[1m\]/i,
+  ],
+  default: [
+    /set model to .*opus 4\.6(?!.*1m context)/i,
+    /set model to .*sonnet 4\.6(?!.*1m context)/i,
+    /--model\s+(?:opus|sonnet)(?!\[1m\])/i,
+    /anthropic_model=(?:opus|sonnet)(?!\[1m\])/i,
+    /\/model\s+(?:opus|sonnet)(?!\[1m\])/i,
+  ],
+};
+
+const MAX_OUTPUT_TOKEN_KEYS = new Set([
+  'maxOutput',
+  'max_output',
+  'maxOutputTokens',
+  'max_output_tokens',
+  'maxTokens',
+  'max_tokens',
+]);
+
+function asFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function stripAnsi(value: string) {
+  return value.replace(/\u001b\[[0-9;]*m/g, '');
+}
+
+function extractEntryText(entry: ClaudeCodeMessage): string {
+  if (typeof entry.content === 'string' && entry.content) {
+    return entry.content;
+  }
+
+  if (typeof entry.message?.content === 'string') {
+    return entry.message.content;
+  }
+
+  if (Array.isArray(entry.message?.content)) {
+    return extractTextFromContent(entry.message.content);
+  }
+
+  return '';
+}
+
+function extractExplicitContextWindowSignal(entry: ClaudeCodeMessage): number | undefined {
+  const text = stripAnsi(extractEntryText(entry)).trim();
+  if (!text) return undefined;
+
+  if (CONTEXT_WINDOW_SIGNAL_PATTERNS.oneMillion.some((pattern) => pattern.test(text))) {
+    return CLAUDE_ONE_MILLION_CONTEXT_WINDOW_TOKENS;
+  }
+
+  if (CONTEXT_WINDOW_SIGNAL_PATTERNS.default.some((pattern) => pattern.test(text))) {
+    return CLAUDE_DEFAULT_CONTEXT_WINDOW_TOKENS;
+  }
+
+  return undefined;
+}
+
+function inferContextWindowFromModel(model?: string): number | undefined {
+  const normalized = model?.trim().toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized.includes('claude-opus-4-6')) return CLAUDE_DEFAULT_CONTEXT_WINDOW_TOKENS;
+  if (normalized.includes('claude-sonnet-4-6')) return CLAUDE_DEFAULT_CONTEXT_WINDOW_TOKENS;
+  if (normalized.startsWith('claude-')) return CLAUDE_DEFAULT_CONTEXT_WINDOW_TOKENS;
+  return undefined;
+}
+
+function findNumericMetadataValue(
+  value: unknown,
+  keys: Set<string>,
+  depth = 0,
+): number | undefined {
+  if (depth > 4 || value == null) return undefined;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findNumericMetadataValue(item, keys, depth + 1);
+      if (found != null) return found;
+    }
+    return undefined;
+  }
+  if (typeof value !== 'object') return undefined;
+
+  for (const [key, candidate] of Object.entries(value)) {
+    if (keys.has(key)) {
+      const numeric = asFiniteNumber(candidate);
+      if (numeric != null) return numeric;
+    }
+    const nested = findNumericMetadataValue(candidate, keys, depth + 1);
+    if (nested != null) return nested;
+  }
+
+  return undefined;
+}
+
+function calculateContextUsedPercent(
+  totalTokens: number,
+  contextWindow: number,
+  maxOutputTokens?: number,
+): number | undefined {
+  if (!Number.isFinite(totalTokens) || totalTokens <= 0) {
+    return undefined;
+  }
+
+  const reservedOutputTokens = Math.min(
+    maxOutputTokens ?? CLAUDE_CONTEXT_RESERVE_MAX_OUTPUT_TOKENS,
+    CLAUDE_CONTEXT_RESERVE_MAX_OUTPUT_TOKENS,
+  );
+  const effectiveContextWindow = contextWindow - reservedOutputTokens;
+  if (effectiveContextWindow <= 0) {
+    return undefined;
+  }
+
+  return Math.max(
+    0,
+    Math.min(100, Math.round((totalTokens / effectiveContextWindow) * 100)),
+  );
+}
+
+type ClaudeTailMetadata = {
+  model?: string;
+  contextUsedPercent?: number;
+  hasErrorInTail: boolean;
+};
+
+function extractClaudeTailMetadata(
+  lines: string[],
+  initialModel?: string,
+  initialContextWindowTokens?: number,
+): ClaudeTailMetadata {
+  let model = initialModel;
+  let totalTokens: number | undefined;
+  let maxOutputTokens: number | undefined;
+  let explicitContextWindowTokens: number | undefined;
+
+  for (const line of [...lines].reverse()) {
+    try {
+      const parsed = JSON.parse(line) as ClaudeCodeMessage;
+      if (!model && parsed.message?.model) {
+        model = parsed.message.model;
+      }
+      if (explicitContextWindowTokens == null) {
+        explicitContextWindowTokens = extractExplicitContextWindowSignal(parsed);
+      }
+      if (maxOutputTokens == null) {
+        maxOutputTokens = findNumericMetadataValue(parsed, MAX_OUTPUT_TOKEN_KEYS);
+      }
+      if (totalTokens == null) {
+        totalTokens = jsonlUsageTotal(parsed.message?.usage);
+      }
+      if (model && totalTokens != null && explicitContextWindowTokens != null && maxOutputTokens != null) {
+        break;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  const recentTail = lines.slice(-10);
+  let hasErrorInTail = false;
+  for (const line of recentTail) {
+    try {
+      const parsed = JSON.parse(line) as ClaudeCodeMessage;
+      if (parsed.type === 'system' && typeof parsed.message?.content === 'string') {
+        const lower = parsed.message.content.toLowerCase();
+        if (
+          lower.includes('error')
+          || lower.includes('crash')
+          || lower.includes('fatal')
+          || lower.includes('oom')
+          || lower.includes('killed')
+        ) {
+          hasErrorInTail = true;
+          break;
+        }
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  const contextWindow =
+    explicitContextWindowTokens
+    ?? initialContextWindowTokens
+    ?? inferContextWindowFromModel(model);
+
+  return {
+    model,
+    contextUsedPercent: totalTokens != null && contextWindow != null
+      ? calculateContextUsedPercent(totalTokens, contextWindow, maxOutputTokens)
+      : undefined,
+    hasErrorInTail,
   };
 }
 
@@ -447,6 +655,51 @@ function tailLines(raw: string, count: number): string[] {
   return lines.slice(-count);
 }
 
+type ClaudeHeadMetadata = {
+  firstUserMessage?: string;
+  cwd?: string;
+  gitBranch?: string;
+  model?: string;
+  explicitContextWindowTokens?: number;
+};
+
+function extractClaudeHeadMetadata(lines: string[]): ClaudeHeadMetadata {
+  let firstUserMessage: string | undefined;
+  let cwd: string | undefined;
+  let gitBranch: string | undefined;
+  let model: string | undefined;
+  let explicitContextWindowTokens: number | undefined;
+
+  for (const line of lines) {
+    try {
+      const parsed = JSON.parse(line) as ClaudeCodeMessage;
+      if (parsed.cwd && !cwd) cwd = parsed.cwd;
+      if (parsed.gitBranch && !gitBranch) gitBranch = parsed.gitBranch;
+      if (parsed.message?.model && !model) model = parsed.message.model;
+      if (explicitContextWindowTokens == null) {
+        explicitContextWindowTokens = extractExplicitContextWindowSignal(parsed);
+      }
+      if (parsed.type === 'user' && parsed.message?.content && !firstUserMessage) {
+        const text = typeof parsed.message.content === 'string'
+          ? parsed.message.content
+          : extractTextFromContent(parsed.message.content);
+        firstUserMessage = text.slice(0, 200);
+      }
+      if (cwd && gitBranch && firstUserMessage) break;
+    } catch {
+      continue;
+    }
+  }
+
+  return {
+    firstUserMessage,
+    cwd,
+    gitBranch,
+    model,
+    explicitContextWindowTokens,
+  };
+}
+
 async function discoverProjectSessions(projectDirName: string): Promise<SessionMeta[]> {
   const projectDir = path.join(CLAUDE_PROJECTS_DIR, projectDirName);
 
@@ -479,78 +732,15 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
 
       const fileSize = fileStat.size;
 
-      // Positional reads: head (first ~8KB) and tail (last ~64KB)
-      let firstUserMessage: string | undefined;
-      let cwd: string | undefined;
-      let gitBranch: string | undefined;
-      let model: string | undefined;
-
       const headRaw = await readHead(jsonlPath, fileSize, HEAD_BYTES);
-      for (const line of headLines(headRaw, 20)) {
-        try {
-          const parsed = JSON.parse(line) as ClaudeCodeMessage;
-          if (parsed.cwd && !cwd) cwd = parsed.cwd;
-          if (parsed.gitBranch && !gitBranch) gitBranch = parsed.gitBranch;
-          if (parsed.message?.model && !model) model = parsed.message.model;
-          if (parsed.type === 'user' && parsed.message?.content && !firstUserMessage) {
-            const text = typeof parsed.message.content === 'string'
-              ? parsed.message.content
-              : extractTextFromContent(parsed.message.content);
-            firstUserMessage = text.slice(0, 200);
-          }
-          if (cwd && gitBranch && firstUserMessage) break;
-        } catch { /* skip malformed lines */ }
-      }
-
-      // Tail read for model, context %, and error detection
+      const headMetadata = extractClaudeHeadMetadata(headLines(headRaw, 20));
       const tailRaw = await readTail(jsonlPath, fileSize, TAIL_BYTES);
-      const tail50 = tailLines(tailRaw, 50);
-
-      for (const tl of [...tail50].reverse()) {
-        try {
-          const tp = JSON.parse(tl) as ClaudeCodeMessage;
-          if (tp.message?.model) {
-            model = tp.message.model;
-            break;
-          }
-        } catch { /* skip */ }
-      }
-
-      const projectPath = cwd ?? decodeProjectPath(projectDirName);
-
-      // Extract context % from last assistant message usage (last 30 lines of tail)
-      let contextUsedPercent: number | undefined;
-      const CLAUDE_CTX_WINDOW = 200_000;
-      const tail30 = tail50.slice(-30);
-      for (const tl of [...tail30].reverse()) {
-        try {
-          const tp = JSON.parse(tl) as ClaudeCodeMessage;
-          if (tp.type === 'assistant' && tp.message?.usage) {
-            const u = tp.message.usage as Record<string, number>;
-            const totalIn = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
-            if (totalIn > 0) {
-              contextUsedPercent = Math.min(100, Math.round(totalIn / CLAUDE_CTX_WINDOW * 100));
-              break;
-            }
-          }
-        } catch { /* skip */ }
-      }
-
-      // Check tail for error/crash indicators (last 10 lines of tail)
-      let hasErrorInTail = false;
-      const tail10 = tail50.slice(-10);
-      for (const el of tail10) {
-        try {
-          const ep = JSON.parse(el) as ClaudeCodeMessage;
-          if (ep.type === 'system' && typeof ep.message?.content === 'string') {
-            const lower = ep.message.content.toLowerCase();
-            if (lower.includes('error') || lower.includes('crash') || lower.includes('fatal') || lower.includes('oom') || lower.includes('killed')) {
-              hasErrorInTail = true;
-              break;
-            }
-          }
-        } catch { /* skip */ }
-      }
+      const tailMetadata = extractClaudeTailMetadata(
+        tailLines(tailRaw, Number.MAX_SAFE_INTEGER),
+        headMetadata.model,
+        headMetadata.explicitContextWindowTokens,
+      );
+      const projectPath = headMetadata.cwd ?? decodeProjectPath(projectDirName);
 
       const meta: SessionMeta = {
         sessionId,
@@ -558,12 +748,12 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
         projectPath,
         jsonlPath,
         lastModified: fileStat.mtime,
-        firstUserMessage,
-        cwd: cwd ?? projectPath,
-        gitBranch,
-        model,
-        contextUsedPercent,
-        hasErrorInTail,
+        firstUserMessage: headMetadata.firstUserMessage,
+        cwd: headMetadata.cwd ?? projectPath,
+        gitBranch: headMetadata.gitBranch,
+        model: tailMetadata.model ?? headMetadata.model,
+        contextUsedPercent: tailMetadata.contextUsedPercent,
+        hasErrorInTail: tailMetadata.hasErrorInTail,
       };
 
       // Cache for next scan
@@ -737,51 +927,18 @@ export const claudeCodeRuntime: AgentRuntime = {
           try {
             const bestStat = await stat(best.path);
             const bestSize = bestStat.size;
-
-            // Head read for metadata
             const hRaw = await readHead(best.path, bestSize, HEAD_BYTES);
-            for (const line of headLines(hRaw, 20)) {
-              try {
-                const p = JSON.parse(line) as ClaudeCodeMessage;
-                if (p.gitBranch && !gitBranch) gitBranch = p.gitBranch;
-                if (p.message?.model && !model) model = p.message.model;
-                if (p.type === 'user' && p.message?.content && !firstUserMessage) {
-                  const text = typeof p.message.content === 'string'
-                    ? p.message.content
-                    : extractTextFromContent(p.message.content);
-                  firstUserMessage = text.slice(0, 200);
-                }
-                if (gitBranch && firstUserMessage) break;
-              } catch { /* skip */ }
-            }
-
-            // Tail read for model and context %
+            const headMetadata = extractClaudeHeadMetadata(headLines(hRaw, 20));
             const tRaw = await readTail(best.path, bestSize, TAIL_BYTES);
-            const tl50 = tailLines(tRaw, 50);
-            for (const tl of [...tl50].reverse()) {
-              try {
-                const tp = JSON.parse(tl) as ClaudeCodeMessage;
-                if (tp.message?.model) {
-                  model = tp.message.model;
-                  break;
-                }
-              } catch { /* skip */ }
-            }
-            const CLAUDE_CTX_WINDOW = 200_000;
-            const tl30 = tl50.slice(-30);
-            for (const tl of [...tl30].reverse()) {
-              try {
-                const tp = JSON.parse(tl) as ClaudeCodeMessage;
-                if (tp.type === 'assistant' && tp.message?.usage) {
-                  const u = tp.message.usage as Record<string, number>;
-                  const totalIn = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
-                  if (totalIn > 0) {
-                    contextUsedPercent = Math.min(100, Math.round(totalIn / CLAUDE_CTX_WINDOW * 100));
-                    break;
-                  }
-                }
-              } catch { /* skip */ }
-            }
+            const tailMetadata = extractClaudeTailMetadata(
+              tailLines(tRaw, Number.MAX_SAFE_INTEGER),
+              headMetadata.model,
+              headMetadata.explicitContextWindowTokens,
+            );
+            firstUserMessage = headMetadata.firstUserMessage;
+            gitBranch = headMetadata.gitBranch;
+            model = tailMetadata.model ?? headMetadata.model;
+            contextUsedPercent = tailMetadata.contextUsedPercent;
           } catch { /* couldn't read JSONL */ }
         }
       } catch { /* project dir doesn't exist */ }

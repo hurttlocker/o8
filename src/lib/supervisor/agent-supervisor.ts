@@ -18,16 +18,19 @@ export interface WatchedAgent {
   registeredAt: number;
   lastStatus: string;
   lastTranscriptLength: number;
+  lastTranscriptEntryId: string | null;
   lastActivityAt: number;
   retryCount: number;
   steerCount: number;
   completionReported: boolean;
+  lastProgressEntryId: string | null;
   /** Set when all-done escalation has been sent for this agent's batch */
   batchReported: boolean;
   /** Timestamp when a tentative 'finished' status was first observed (grace period) */
   tentativeFinishedSince: number | null;
   /** Transcript length snapshot taken when tentative finish started */
   tentativeTranscriptLength: number;
+  tentativeTranscriptEntryId: string | null;
 }
 
 export interface AgentStatusEntry {
@@ -64,6 +67,7 @@ export interface SupervisorCallbacks {
   relaunchAgent(prompt: string, repoPath: string, taskName: string): Promise<string | null>;
   broadcastAgentUpdate(update: AgentUpdateEvent): void;
   queueOrchestratorEscalation(repoPath: string, message: string): void;
+  onAgentProgress?: (surfaceId: string, lastMessage: string) => void;
   onAgentCompletion?: (surfaceId: string, outcome: 'completed' | 'failed') => void;
 }
 
@@ -75,6 +79,7 @@ const MAX_RETRIES = 1;                            // Auto-retry once on failure
 const MAX_STEERS = 2;                             // Auto-steer twice before escalate
 const COMPLETION_CLEANUP_MS = 60_000;             // Remove from watch 60s after done
 const COMPLETION_CONFIRM_MS = 15_000;             // 15s grace before confirming completion
+const TRANSCRIPT_ACTIVITY_WINDOW = 120;
 
 // ── State ──
 
@@ -99,13 +104,16 @@ export function registerWatchedAgent(
     registeredAt: Date.now(),
     lastStatus: 'running',
     lastTranscriptLength: 0,
+    lastTranscriptEntryId: null,
     lastActivityAt: Date.now(),
     retryCount: 0,
     steerCount: 0,
     completionReported: false,
+    lastProgressEntryId: null,
     batchReported: false,
     tentativeFinishedSince: null,
     tentativeTranscriptLength: 0,
+    tentativeTranscriptEntryId: null,
   });
   console.log(`[supervisor] Watching agent "${name}" (${surfaceId})`);
 
@@ -202,12 +210,12 @@ async function supervisorTick(): Promise<void> {
         // First time seeing 'finished' — start grace period
         watched.tentativeFinishedSince = now;
         try {
-          const entries = await callbacks.fetchTranscript(surfaceId, 5);
-          watched.tentativeTranscriptLength = entries.reduce(
-            (sum, e) => sum + (e.text?.length ?? 0), 0,
-          );
+          const entries = await callbacks.fetchTranscript(surfaceId, TRANSCRIPT_ACTIVITY_WINDOW);
+          watched.tentativeTranscriptLength = measureTranscript(entries);
+          watched.tentativeTranscriptEntryId = entries[entries.length - 1]?.id ?? null;
         } catch {
           watched.tentativeTranscriptLength = watched.lastTranscriptLength;
+          watched.tentativeTranscriptEntryId = watched.lastTranscriptEntryId;
         }
         console.log(`[supervisor] "${watched.name}" tentatively finished — confirming over ${COMPLETION_CONFIRM_MS / 1000}s`);
         continue;
@@ -220,15 +228,17 @@ async function supervisorTick(): Promise<void> {
 
       // Grace period elapsed — verify transcript hasn't grown
       try {
-        const entries = await callbacks.fetchTranscript(surfaceId, 5);
-        const currentLength = entries.reduce(
-          (sum, e) => sum + (e.text?.length ?? 0), 0,
-        );
-        if (currentLength > watched.tentativeTranscriptLength) {
+        const entries = await callbacks.fetchTranscript(surfaceId, TRANSCRIPT_ACTIVITY_WINDOW);
+        const currentLength = measureTranscript(entries);
+        const currentEntryId = entries[entries.length - 1]?.id ?? null;
+        if (
+          currentLength !== watched.tentativeTranscriptLength
+          || currentEntryId !== watched.tentativeTranscriptEntryId
+        ) {
           // Transcript grew — agent is still working, reset
           watched.tentativeFinishedSince = null;
-          watched.lastTranscriptLength = currentLength;
-          watched.lastActivityAt = now;
+          watched.tentativeTranscriptEntryId = null;
+          recordTranscriptActivity(watched, entries, now);
           console.log(`[supervisor] "${watched.name}" transcript grew during grace — still active`);
           continue;
         }
@@ -236,11 +246,13 @@ async function supervisorTick(): Promise<void> {
 
       // Confirmed finished — clear tentative and fall through
       watched.tentativeFinishedSince = null;
+      watched.tentativeTranscriptEntryId = null;
       console.log(`[supervisor] "${watched.name}" completion confirmed after grace period`);
     } else if (currentStatus !== 'finished' && watched.tentativeFinishedSince) {
       // Status reverted to non-terminal — cancel tentative finish
       console.log(`[supervisor] "${watched.name}" back to "${currentStatus}" — canceling tentative finish`);
       watched.tentativeFinishedSince = null;
+      watched.tentativeTranscriptEntryId = null;
     }
 
     // Status changed?
@@ -284,10 +296,6 @@ function resolveStatus(
   if (s === 'waiting') return 'waiting';
   if (s === 'idle') return 'finished';
   return s;
-}
-
-function isTerminal(status: string): boolean {
-  return status === 'finished' || status === 'failed' || status === 'interrupted';
 }
 
 // ── Event Handlers ──
@@ -402,22 +410,18 @@ async function handleStatusChange(
 async function checkStuck(watched: WatchedAgent, now: number): Promise<void> {
   if (!callbacks) return;
 
-  // Grace period after registration
-  if (now - watched.registeredAt < 30_000) return;
-
   // Check transcript for new content
   try {
-    const entries = await callbacks.fetchTranscript(watched.surfaceId, 5);
-    const totalLength = entries.reduce((sum, e) => sum + (e.text?.length ?? 0), 0);
-
-    if (totalLength !== watched.lastTranscriptLength) {
-      watched.lastTranscriptLength = totalLength;
-      watched.lastActivityAt = now;
+    const entries = await callbacks.fetchTranscript(watched.surfaceId, TRANSCRIPT_ACTIVITY_WINDOW);
+    if (recordTranscriptActivity(watched, entries, now)) {
       return; // Activity detected — not stuck
     }
   } catch {
     return; // Transcript fetch failed — skip
   }
+
+  // Grace period after registration before we consider the agent stuck
+  if (now - watched.registeredAt < 30_000) return;
 
   const staleDuration = now - watched.lastActivityAt;
   if (staleDuration < STUCK_THRESHOLD_MS) return;
@@ -535,4 +539,54 @@ function formatDuration(seconds: number): string {
 function truncate(text: string, max: number): string {
   if (!text) return '';
   return text.length > max ? text.slice(0, max) + '...' : text;
+}
+
+function measureTranscript(entries: TranscriptEntry[]): number {
+  return entries.reduce(
+    (sum, entry) => sum + (entry.text?.length ?? 0) + (entry.id?.length ?? 0),
+    0,
+  );
+}
+
+function findLastProgressEntry(entries: TranscriptEntry[]): TranscriptEntry | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    const text = entry.text?.trim();
+    if (!text) continue;
+    if (entry.role === 'assistant' || entry.toolName) {
+      return entry;
+    }
+  }
+  return null;
+}
+
+function normalizeProgressMessage(text: string): string {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function recordTranscriptActivity(
+  watched: WatchedAgent,
+  entries: TranscriptEntry[],
+  now: number,
+): boolean {
+  const nextLength = measureTranscript(entries);
+  const nextEntryId = entries[entries.length - 1]?.id ?? null;
+  const changed = nextLength !== watched.lastTranscriptLength || nextEntryId !== watched.lastTranscriptEntryId;
+
+  if (!changed) {
+    return false;
+  }
+
+  watched.lastTranscriptLength = nextLength;
+  watched.lastTranscriptEntryId = nextEntryId;
+  watched.lastActivityAt = now;
+
+  const progressEntry = findLastProgressEntry(entries);
+  const progressMessage = progressEntry ? normalizeProgressMessage(progressEntry.text) : '';
+  if (progressEntry?.id && progressMessage && progressEntry.id !== watched.lastProgressEntryId) {
+    watched.lastProgressEntryId = progressEntry.id;
+    callbacks?.onAgentProgress?.(watched.surfaceId, progressMessage);
+  }
+
+  return true;
 }

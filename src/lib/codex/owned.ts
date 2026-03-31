@@ -107,6 +107,7 @@ type OwnedTailEntry = {
   kind: 'message' | 'event' | 'tool' | 'tool-output';
   label: string;
   text: string;
+  timestamp?: string;
   timestampLabel?: string;
 };
 
@@ -144,6 +145,155 @@ function compactText(value: string | null | undefined, max = 120) {
   const collapsed = (value ?? '').replace(/\s+/g, ' ').trim();
   if (!collapsed) return '';
   return collapsed.length > max ? `${collapsed.slice(0, max - 1).trimEnd()}…` : collapsed;
+}
+
+function safeObject(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function parseJsonObject(value: unknown): Record<string, unknown> | null {
+  if (typeof value === 'string') {
+    try {
+      return safeObject(JSON.parse(value));
+    } catch {
+      return null;
+    }
+  }
+  return safeObject(value);
+}
+
+function readStringField(source: Record<string, unknown> | null, ...keys: string[]) {
+  if (!source) return undefined;
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return undefined;
+}
+
+function readNestedStringField(source: Record<string, unknown> | null, keyPath: string[]) {
+  let current: unknown = source;
+  for (const key of keyPath) {
+    const next = safeObject(current)?.[key];
+    if (next == null) return undefined;
+    current = next;
+  }
+  return typeof current === 'string' && current.trim() ? current.trim() : undefined;
+}
+
+function extractStructuredText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        const record = safeObject(item);
+        if (!record) return '';
+        const nestedText = readStringField(record, 'text', 'message', 'summary_text');
+        return nestedText ?? '';
+      })
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  const record = safeObject(value);
+  if (!record) return '';
+
+  const direct = readStringField(record, 'text', 'message', 'summary_text', 'output');
+  if (direct) return direct;
+
+  const content = record.content;
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        const entry = safeObject(item);
+        if (!entry) return '';
+        if (entry.type === 'input_text' || entry.type === 'output_text') {
+          return typeof entry.text === 'string' ? entry.text : '';
+        }
+        return readStringField(entry, 'text') ?? '';
+      })
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  return '';
+}
+
+function parseEntryTimestamp(value: unknown, fallbackIso: string) {
+  const timestamp = typeof value === 'string' && value.trim() ? value : fallbackIso;
+  return {
+    timestamp,
+    timestampLabel: formatClock(timestamp) ?? formatClock(fallbackIso),
+  };
+}
+
+function humanizeToolName(value?: string) {
+  const raw = (value ?? '').trim();
+  if (!raw) return 'tool';
+  return raw.replace(/[_-]+/g, ' ').trim();
+}
+
+function collectToolPaths(payload: Record<string, unknown> | null): string[] {
+  const candidates = [
+    readStringField(payload, 'path', 'filePath', 'file_path', 'target_file', 'filename', 'fileName'),
+    readNestedStringField(payload, ['input', 'path']),
+    readNestedStringField(payload, ['input', 'file_path']),
+    readNestedStringField(payload, ['input', 'filePath']),
+    readNestedStringField(payload, ['arguments', 'path']),
+    readNestedStringField(payload, ['arguments', 'file_path']),
+    readNestedStringField(payload, ['arguments', 'filePath']),
+  ].filter((value): value is string => Boolean(value));
+
+  return [...new Set(candidates)];
+}
+
+function describeToolActivity(toolName: string, rawInput: unknown): string {
+  const input = parseJsonObject(rawInput);
+  const normalizedName = toolName.trim();
+  const command = readStringField(input, 'cmd', 'command', 'parsed_cmd', 'interaction_input')
+    ?? readNestedStringField(input, ['command', 'cmd'])
+    ?? readNestedStringField(input, ['input', 'cmd'])
+    ?? readNestedStringField(input, ['input', 'command'])
+    ?? readNestedStringField(input, ['arguments', 'cmd'])
+    ?? readNestedStringField(input, ['arguments', 'command']);
+
+  if (command && (
+    normalizedName === 'exec_command'
+    || normalizedName === 'shell_command'
+    || normalizedName === 'run_user_shell_command'
+    || normalizedName === 'command_execution'
+  )) {
+    return `Run ${compactText(command, 180)}`;
+  }
+
+  const paths = collectToolPaths(input);
+  if (paths.length > 0) {
+    const pathList = compactText(paths.join(', '), 180);
+    if (normalizedName === 'apply_patch') return `Edit ${pathList}`;
+    if (normalizedName === 'view_image') return `Inspect ${pathList}`;
+    if (normalizedName === 'list_files') return `List files near ${pathList}`;
+    if (normalizedName === 'read_file') return `Read ${pathList}`;
+    if (normalizedName === 'write_file') return `Write ${pathList}`;
+    if (normalizedName === 'grep' || normalizedName === 'search') return `Search ${pathList}`;
+  }
+
+  if (normalizedName === 'update_plan') return 'Update plan';
+  if (normalizedName === 'apply_patch') return 'Apply patch';
+  if (normalizedName === 'list_files') return 'List files';
+  if (normalizedName === 'read_file') return 'Read file';
+  if (normalizedName === 'write_file') return 'Write file';
+  if (normalizedName === 'view_image') return 'Inspect image';
+
+  return `Use ${humanizeToolName(normalizedName)}`;
+}
+
+function toolOutputPreview(value: unknown) {
+  const text = extractStructuredText(value);
+  return compactText(text, 500);
 }
 
 function previewText(value: string | null | undefined, max = 260) {
@@ -302,9 +452,10 @@ function parseOwnedRunLog(raw: string, run: OwnedCodexRunRecord): ParsedRunLog {
   const entries: OwnedTailEntry[] = [
     {
       id: `${run.id}:prompt`,
-      kind: 'message',
+      kind: 'event',
       label: run.mode === 'launch' ? 'Launch prompt' : 'Resume prompt',
       text: compactText(run.prompt, 400),
+      timestamp: run.startedAt,
       timestampLabel: formatClock(run.startedAt),
     },
   ];
@@ -312,13 +463,15 @@ function parseOwnedRunLog(raw: string, run: OwnedCodexRunRecord): ParsedRunLog {
   let noiseIndex = 0;
   let completedTurn = false;
 
-  for (const line of raw.split('\n')) {
+  for (const [lineIndex, line] of raw.split('\n').entries()) {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
     try {
       const parsed = JSON.parse(trimmed) as Record<string, unknown>;
       const type = String(parsed.type ?? '');
+      const { timestamp, timestampLabel } = parseEntryTimestamp(parsed.timestamp, run.finishedAt ?? run.startedAt);
+      const payload = safeObject(parsed.payload);
 
       if (type === 'thread.started') {
         threadId = String(parsed.thread_id ?? '') || threadId;
@@ -331,48 +484,180 @@ function parseOwnedRunLog(raw: string, run: OwnedCodexRunRecord): ParsedRunLog {
           kind: 'event',
           label: 'Run started',
           text: run.mode === 'launch' ? 'Owned Codex run launched from Cortex IDE.' : 'Owned Codex session resumed from Cortex IDE.',
-          timestampLabel: formatClock(run.startedAt),
+          timestamp,
+          timestampLabel,
         });
         continue;
       }
 
+      if (type === 'event_msg' && payload?.type === 'agent_message') {
+        const text = compactText(
+          typeof payload.message === 'string' ? payload.message : extractStructuredText(payload.content),
+          500,
+        );
+        if (text) {
+          entries.push({
+            id: `${run.id}:event-message:${lineIndex}`,
+            kind: 'message',
+            label: payload.phase === 'commentary' ? 'Progress' : 'Assistant',
+            text,
+            timestamp,
+            timestampLabel,
+          });
+        }
+        continue;
+      }
+
+      if (type === 'event_msg' && payload?.type === 'task_complete') {
+        completedTurn = true;
+        entries.push({
+          id: `${run.id}:task-complete:${lineIndex}`,
+          kind: 'event',
+          label: 'Task completed',
+          text: 'Run completed.',
+          timestamp,
+          timestampLabel,
+        });
+        continue;
+      }
+
+      if (type === 'event_msg' && payload?.type === 'exec_command_begin') {
+        const command = readStringField(payload, 'parsed_cmd', 'cmd', 'command');
+        entries.push({
+          id: `${run.id}:exec-begin:${lineIndex}`,
+          kind: 'tool',
+          label: 'exec_command',
+          text: command ? `Run ${compactText(command, 180)}` : 'Run shell command',
+          timestamp,
+          timestampLabel,
+        });
+        continue;
+      }
+
+      if (type === 'event_msg' && payload?.type === 'exec_command_end') {
+        const output = toolOutputPreview(payload.aggregated_output ?? payload.output);
+        if (output) {
+          entries.push({
+            id: `${run.id}:exec-output:${lineIndex}`,
+            kind: 'tool-output',
+            label: 'Tool output',
+            text: output,
+            timestamp,
+            timestampLabel,
+          });
+        }
+        continue;
+      }
+
+      if (type === 'response_item' && (payload?.type === 'function_call' || payload?.type === 'custom_tool_call')) {
+        const toolName = readStringField(payload, 'name', 'namespace', 'execution') ?? 'tool';
+        const toolInput = payload.type === 'custom_tool_call' ? payload.input : payload.arguments;
+        entries.push({
+          id: `${run.id}:tool-call:${readStringField(payload, 'call_id', 'id') ?? lineIndex}`,
+          kind: 'tool',
+          label: toolName,
+          text: describeToolActivity(toolName, toolInput),
+          timestamp,
+          timestampLabel,
+        });
+        continue;
+      }
+
+      if (type === 'response_item' && (payload?.type === 'function_call_output' || payload?.type === 'custom_tool_call_output')) {
+        const output = toolOutputPreview(payload.output);
+        if (output) {
+          entries.push({
+            id: `${run.id}:tool-output:${readStringField(payload, 'call_id', 'id') ?? lineIndex}`,
+            kind: 'tool-output',
+            label: 'Tool output',
+            text: output,
+            timestamp,
+            timestampLabel,
+          });
+        }
+        continue;
+      }
+
       if (type === 'item.completed') {
-        const item = (parsed.item ?? {}) as Record<string, unknown>;
+        const item = safeObject(parsed.item);
+        if (!item) {
+          continue;
+        }
+
         if (item.type === 'agent_message') {
-          const text = compactText(String(item.text ?? ''), 500);
+          const text = compactText(
+            readStringField(item, 'text')
+              ?? extractStructuredText(item.content)
+              ?? extractStructuredText(item.message),
+            500,
+          );
           if (text) {
             entries.push({
               id: `${run.id}:message:${entries.length}`,
               kind: 'message',
               label: 'Assistant',
               text,
-              timestampLabel: formatClock(run.finishedAt ?? run.startedAt),
+              timestamp,
+              timestampLabel,
             });
           }
           continue;
         }
 
+        if (item.type === 'tool_use') {
+          const toolName = readStringField(item, 'name', 'tool_name') ?? 'tool';
+          const toolInput = item.input ?? item.arguments ?? item.invocation ?? item;
+          entries.push({
+            id: `${run.id}:tool-use:${readStringField(item, 'id') ?? lineIndex}`,
+            kind: 'tool',
+            label: toolName,
+            text: describeToolActivity(toolName, toolInput),
+            timestamp,
+            timestampLabel,
+          });
+          continue;
+        }
+
         if (item.type === 'command_execution') {
           const command = String(item.command ?? '').trim();
-          const output = compactText(String(item.aggregated_output ?? ''), 500);
+          const output = toolOutputPreview(item.aggregated_output);
 
           entries.push({
-            id: `${run.id}:tool:${String(item.id ?? entries.length)}`,
+            id: `${run.id}:tool:${readStringField(item, 'id') ?? lineIndex}`,
             kind: 'tool',
             label: 'exec_command',
-            text: command ? JSON.stringify({ command }) : '',
-            timestampLabel: formatClock(run.finishedAt ?? run.startedAt),
+            text: command ? `Run ${compactText(command, 180)}` : 'Run shell command',
+            timestamp,
+            timestampLabel,
           });
 
           if (output) {
             entries.push({
-              id: `${run.id}:tool-output:${String(item.id ?? entries.length)}`,
+              id: `${run.id}:tool-output:${readStringField(item, 'id') ?? lineIndex}`,
               kind: 'tool-output',
               label: 'Tool output',
               text: output,
-              timestampLabel: formatClock(run.finishedAt ?? run.startedAt),
+              timestamp,
+              timestampLabel,
             });
           }
+          continue;
+        }
+      }
+
+      if (type === 'item.started') {
+        const item = safeObject(parsed.item);
+        if (item?.type === 'tool_use') {
+          const toolName = readStringField(item, 'name', 'tool_name') ?? 'tool';
+          const toolInput = item.input ?? item.arguments ?? item.invocation ?? item;
+          entries.push({
+            id: `${run.id}:tool-start:${readStringField(item, 'id') ?? lineIndex}`,
+            kind: 'tool',
+            label: toolName,
+            text: describeToolActivity(toolName, toolInput),
+            timestamp,
+            timestampLabel,
+          });
           continue;
         }
       }
@@ -390,7 +675,8 @@ function parseOwnedRunLog(raw: string, run: OwnedCodexRunRecord): ParsedRunLog {
           kind: 'event',
           label: 'Turn completed',
           text: usageBits.length ? `Usage • ${usageBits.join(' • ')}` : 'Run completed.',
-          timestampLabel: formatClock(run.finishedAt ?? run.startedAt),
+          timestamp,
+          timestampLabel,
         });
         continue;
       }
@@ -400,6 +686,7 @@ function parseOwnedRunLog(raw: string, run: OwnedCodexRunRecord): ParsedRunLog {
         kind: 'event',
         label: 'Runtime',
         text: compactText(trimmed, 500),
+        timestamp: run.finishedAt ?? run.startedAt,
         timestampLabel: formatClock(run.finishedAt ?? run.startedAt),
       });
     }
@@ -955,6 +1242,25 @@ async function findOwnedSession(surfaceId: string) {
     }
   }
   return null;
+}
+
+export async function getOwnedCodexTelemetrySources(surfaceId: string): Promise<{
+  threadId?: string;
+  stdoutPaths: string[];
+} | null> {
+  const session = await findOwnedSession(surfaceId);
+  if (!session) {
+    return null;
+  }
+
+  await refreshOwnedSession(session);
+
+  return {
+    threadId: session.threadId,
+    stdoutPaths: [...session.recentRuns]
+      .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
+      .map((run) => run.stdoutPath),
+  };
 }
 
 async function collectOwnedTailEntries(session: OwnedCodexSessionRecord) {
