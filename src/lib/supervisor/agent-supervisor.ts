@@ -64,6 +64,7 @@ export interface SupervisorCallbacks {
   relaunchAgent(prompt: string, repoPath: string, taskName: string): Promise<string | null>;
   broadcastAgentUpdate(update: AgentUpdateEvent): void;
   queueOrchestratorEscalation(repoPath: string, message: string): void;
+  onAgentCompletion?: (surfaceId: string, outcome: 'completed' | 'failed') => void;
 }
 
 // ── Constants ──
@@ -309,6 +310,7 @@ async function handleStatusChange(
       duration,
       detail: `Agent "${watched.name}" completed (${formatDuration(duration)})`,
     });
+    callbacks.onAgentCompletion?.(watched.surfaceId, 'completed');
 
     // Schedule cleanup
     setTimeout(() => unregisterWatchedAgent(watched.surfaceId), COMPLETION_CLEANUP_MS);
@@ -356,6 +358,7 @@ async function handleStatusChange(
         duration,
         detail: `Agent "${watched.name}" failed after ${watched.retryCount + 1} attempts — escalating`,
       });
+      callbacks.onAgentCompletion?.(watched.surfaceId, 'failed');
 
       // Read transcript for the escalation
       let transcriptSummary = '';

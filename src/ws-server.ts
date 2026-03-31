@@ -2794,6 +2794,32 @@ httpServer.listen(WS_PORT, '0.0.0.0', () => {
       }
     },
     queueOrchestratorEscalation,
+    onAgentCompletion(surfaceId, outcome) {
+      void (async () => {
+        try {
+          const { findLaneBySession, setLaneStatus } = await import('@/lib/lane/registry');
+          const lane = findLaneBySession(surfaceId);
+          if (!lane?.packetId) {
+            return;
+          }
+
+          if (outcome === 'completed') {
+            const updated = setLaneStatus(lane.id, 'reviewing', 'system', 'agent_completed');
+            if (updated) {
+              const { triggerAutoReview } = await import('@/lib/lane/auto-review');
+              triggerAutoReview(updated);
+            }
+            console.log(`[supervisor] Agent ${surfaceId} completed, lane ${lane.id} -> reviewing`);
+            return;
+          }
+
+          setLaneStatus(lane.id, 'awaiting_input', 'system', 'agent_failed');
+          console.log(`[supervisor] Agent ${surfaceId} failed, lane ${lane.id} -> awaiting_input`);
+        } catch (error) {
+          console.error('[supervisor] Completion callback failed:', error);
+        }
+      })();
+    },
   };
   startSupervisorLoop(supervisorCallbacks);
 });
