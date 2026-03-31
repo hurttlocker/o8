@@ -11,6 +11,7 @@ import type { RuntimeId, RuntimeTranscriptEntry } from '@/lib/runtimes/types';
 import { truncateText } from '@/lib/util/text';
 
 const PACKET_CONTEXT_SOURCE_PREFIX = 'orchestrator-packet-context';
+const PACKET_CONTEXT_KIND = 'orchestrator packet context';
 const PACKET_CONTEXT_JSON_START = '<context-pass-json>';
 const PACKET_CONTEXT_JSON_END = '</context-pass-json>';
 const PACKET_CONTEXT_SEARCH_LIMIT = 8;
@@ -182,65 +183,12 @@ function buildPacketSummary(input: {
 }
 
 function serializePacketContext(context: PacketContext): string {
-  const changedFiles = context.changedFiles.length > 0
-    ? context.changedFiles.map((filePath) => `- ${filePath}`).join('\n')
-    : '- none';
-  const reviewFindings = context.reviewFindings && context.reviewFindings.length > 0
-    ? context.reviewFindings.map((finding) => {
-        const location = typeof finding.line === 'number' ? `${finding.file}:${finding.line}` : finding.file;
-        return `- [${finding.severity}/${finding.resolution}] ${location} - ${finding.description}`;
-      }).join('\n')
-    : '- none';
-  const patterns = context.patterns && context.patterns.length > 0
-    ? context.patterns.map((pattern) => `- ${pattern}`).join('\n')
-    : '- none';
-  const conflictZones = context.conflictZones && context.conflictZones.length > 0
-    ? context.conflictZones.map((zone) => `- ${zone}`).join('\n')
-    : '- none';
-  const reviewLines = context.review
-    ? [
-        '',
-        'Review:',
-        `Verdict: ${context.review.approved ? 'approved' : 'changes_requested'}`,
-        ...(context.review.reviewer ? [`Reviewer: ${context.review.reviewer}`] : []),
-        ...(context.review.diffSha ? [`Diff SHA: ${context.review.diffSha}`] : []),
-        'Findings:',
-        ...(context.review.findings.length > 0
-          ? context.review.findings.map((finding) => {
-              const location = finding.line ? `${finding.file}:${finding.line}` : finding.file;
-              return `- [${finding.severity}/${finding.resolution}] ${location} - ${finding.description}`;
-            })
-          : ['- none']),
-      ]
-    : [];
-
-  return [
-    'Orchestrator dependency handoff memory.',
-    `packet-id: ${context.packetId}`,
-    `session-key: ${context.sessionKey}`,
-    `completed-at: ${context.completedAt}`,
-    `model: ${context.model}`,
-    '',
-    'Summary:',
-    context.summary,
-    '',
-    'Files changed:',
-    changedFiles,
-    '',
-    'Review findings:',
-    reviewFindings,
-    '',
-    'Patterns to follow:',
-    patterns,
-    '',
-    'Conflict zones:',
-    conflictZones,
-    ...reviewLines,
-    '',
-    PACKET_CONTEXT_JSON_START,
-    JSON.stringify(context, null, 2),
-    PACKET_CONTEXT_JSON_END,
-  ].join('\n');
+  return JSON.stringify({
+    kind: PACKET_CONTEXT_KIND,
+    purpose: 'dependency handoff',
+    version: 1,
+    ...context,
+  });
 }
 
 function isPacketContext(value: unknown): value is PacketContext {
@@ -262,7 +210,34 @@ function isPacketContext(value: unknown): value is PacketContext {
     && (candidate.review === undefined || isPacketReviewContext(candidate.review));
 }
 
+function parseStoredPacketContext(value: unknown): PacketContext | null {
+  if (isPacketContext(value)) {
+    return value;
+  }
+
+  if (
+    value
+    && typeof value === 'object'
+    && 'context' in value
+    && isPacketContext((value as { context?: unknown }).context)
+  ) {
+    return (value as { context: PacketContext }).context;
+  }
+
+  return null;
+}
+
 function parsePacketContext(content: string): PacketContext | null {
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    const context = parseStoredPacketContext(parsed);
+    if (context) {
+      return context;
+    }
+  } catch {
+    // Fall back to the legacy dual-format wrapper below.
+  }
+
   const match = content.match(
     new RegExp(`${PACKET_CONTEXT_JSON_START}\\s*([\\s\\S]*?)\\s*${PACKET_CONTEXT_JSON_END}`),
   );
@@ -272,7 +247,7 @@ function parsePacketContext(content: string): PacketContext | null {
 
   try {
     const parsed = JSON.parse(match[1]) as unknown;
-    return isPacketContext(parsed) ? parsed : null;
+    return parseStoredPacketContext(parsed);
   } catch {
     return null;
   }
@@ -460,7 +435,7 @@ export async function readPacketCompletionContext(packetId: string): Promise<Pac
   }
 
   const results = await client.search(
-    `orchestrator dependency handoff packet-id ${normalizedPacketId}`,
+    `${PACKET_CONTEXT_KIND} dependency handoff ${normalizedPacketId}`,
     PACKET_CONTEXT_SEARCH_LIMIT,
   );
 
