@@ -3,15 +3,22 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import { DesktopAgentMessage } from '../DesktopAgentMessage';
-import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type {
+  OrchestratorMissionState,
+  OrchestratorRuntime,
+  OrchestratorWorkspaceTarget,
+} from '@/lib/orchestrator/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { InputButtons } from './InputButtons';
 import { CheckIcon } from './ThoughtsIcons';
 import type { AgentTarget, FleetAgent } from './types';
 import {
+  createDraftPacket,
   entrySignature,
   generateSuggestions,
   isRenderableThoughtEntry,
+  packetTitleFromPrompt,
+  pickWorkspaceTargetForText,
   isRunnableCliSession,
   mergeTranscriptEntries,
 } from './utils';
@@ -34,27 +41,35 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   open: boolean;
   draftInjection?: { id: string; text: string } | null;
   agents: FleetAgent[];
+  missionState: OrchestratorMissionState;
   preferredRuntime: OrchestratorRuntime;
   sessionTargets: AgentTarget[];
+  workspaceTargets: OrchestratorWorkspaceTarget[];
   repoPath?: string | null;
   thoughtsBodyBackground: string;
   thoughtsElevatedSurface: string;
   thoughtsElevatedBorder: string;
   thoughtsElevatedShadow: string;
   thoughtsMutedGlass: string;
+  onMissionStateChange: (
+    next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
+  ) => void;
   onChromeChange: (state: ThoughtsChatPanelChromeState) => void;
 }>(function ThoughtsChatPanel({
   open,
   draftInjection,
   agents,
+  missionState,
   preferredRuntime,
   sessionTargets,
+  workspaceTargets,
   repoPath: repoPathProp,
   thoughtsBodyBackground,
   thoughtsElevatedSurface,
   thoughtsElevatedBorder,
   thoughtsElevatedShadow,
   thoughtsMutedGlass,
+  onMissionStateChange,
   onChromeChange,
 }, ref) {
   const [input, setInput] = useState('');
@@ -495,6 +510,34 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       setWaitingForReply(false);
     }
   }, [captureServerSnapshot, handleOrchestratorSend, input, isOrchestratorMode, orchStream, startPolling, targetSessionKey, useStream, waitingForReply]);
+
+  const handleSendAsTask = useCallback(() => {
+    const prompt = input.trim();
+    if (!prompt) {
+      return;
+    }
+
+    const target = pickWorkspaceTargetForText(prompt, workspaceTargets);
+    const packet = createDraftPacket('codex', workspaceTargets, missionState.packets, {
+      title: packetTitleFromPrompt(prompt),
+      summary: prompt,
+      runtime: 'codex',
+      workspaceTargetPath: target?.localPath ?? null,
+      branchTarget: target?.branch ?? 'main',
+      queueState: 'queued',
+      status: 'queued',
+    });
+
+    onMissionStateChange((current) => ({
+      ...current,
+      packets: [...current.packets, packet],
+    }));
+    setInput('');
+    if (inputRef.current) {
+      inputRef.current.style.height = 'auto';
+      inputRef.current.focus();
+    }
+  }, [input, missionState.packets, onMissionStateChange, workspaceTargets]);
 
   const handleReset = useCallback(() => {
     setInput('');
@@ -1187,7 +1230,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
               width: '100%',
               minHeight: 64,
               maxHeight: 200,
-              padding: '11px 84px 11px 14px',
+              paddingTop: 11,
+              paddingRight: 150,
+              paddingBottom: 11,
+              paddingLeft: 14,
               borderRadius: 14,
               border: '1px solid var(--t-input-border)',
               background: 'var(--t-input-bg)',
@@ -1209,6 +1255,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             preEnhanceInput={preEnhanceInput}
             onEnhance={handleEnhance}
             onUndoEnhance={handleUndoEnhance}
+            onSendAsTask={handleSendAsTask}
             onSubmit={handleTaskSend}
             small
           />

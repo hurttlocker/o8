@@ -410,14 +410,17 @@ export function ThoughtsCard({
                     open={open}
                     draftInjection={draftInjection}
                     agents={agents}
+                    missionState={missionState}
                     preferredRuntime={preferredRuntime}
                     sessionTargets={sessionTargets}
+                    workspaceTargets={workspaceTargets}
                     repoPath={workspaceTargets[0]?.localPath ?? null}
                     thoughtsBodyBackground={thoughtsBodyBackground}
                     thoughtsElevatedSurface={thoughtsElevatedSurface}
                     thoughtsElevatedBorder={thoughtsElevatedBorder}
                     thoughtsElevatedShadow={thoughtsElevatedShadow}
                     thoughtsMutedGlass={thoughtsMutedGlass}
+                    onMissionStateChange={onMissionStateChange}
                     onChromeChange={setChatChromeState}
                   />
                 )}
@@ -467,14 +470,17 @@ export function ThoughtsCard({
                     open={open}
                     draftInjection={draftInjection}
                     agents={agents}
+                    missionState={missionState}
                     preferredRuntime={preferredRuntime}
                     sessionTargets={sessionTargets}
+                    workspaceTargets={workspaceTargets}
                     repoPath={workspaceTargets[0]?.localPath ?? null}
                     thoughtsBodyBackground={thoughtsBodyBackground}
                     thoughtsElevatedSurface={thoughtsElevatedSurface}
                     thoughtsElevatedBorder={thoughtsElevatedBorder}
                     thoughtsElevatedShadow={thoughtsElevatedShadow}
                     thoughtsMutedGlass={thoughtsMutedGlass}
+                    onMissionStateChange={onMissionStateChange}
                     onChromeChange={setChatChromeState}
                   />
                 </div>

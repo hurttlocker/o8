@@ -32,6 +32,17 @@ export function SendIcon() {
   );
 }
 
+export function RocketIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M4.5 15.5c1.5-1 3.5-1 5 0l4.5-4.5c1-1 1.8-2.3 2.2-3.7l.9-3.3-3.3.9c-1.4.4-2.7 1.2-3.7 2.2l-4.5 4.5c1 1.5 1 3.5 0 5" />
+      <path d="M9 15l-2.5 2.5" />
+      <path d="M6 18l-1 3 3-1 2-2" />
+      <path d="M13 11l3 3" />
+    </svg>
+  );
+}
+
 export function SparklesIcon() {
   return (
     <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block', flexShrink: 0 }}>
