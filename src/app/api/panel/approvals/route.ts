@@ -2,11 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
 import { rejectLlmApproval, resumeLlmApproval } from '@/lib/approvals/llm';
 import {
+  createApproval,
   createTestApproval,
   getApproval,
   listApprovals,
   resolveApproval,
 } from '@/lib/approvals/store';
+import type { CreateApprovalInput } from '@/lib/approvals/types';
 import { getRuntime } from '@/lib/runtimes/registry';
 import { invalidateInboxCache } from '@/lib/mobile/inbox';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
@@ -36,12 +38,65 @@ export async function GET(request: NextRequest) {
 /**
  * POST /api/panel/approvals — create test approval or resolve a shared approval.
  *
- * Create: { action: 'test', sessionKey?: string }
+ * Create: { action: 'create', approval: CreateApprovalInput }
+ * Create test: { action: 'test', sessionKey?: string }
  * Resolve: { action: 'approve' | 'reject', id: string, editedCommand?: string }
  */
 export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({})) as Record<string, unknown>;
   const action = typeof body.action === 'string' ? body.action : '';
+
+  if (action === 'create') {
+    const approvalBody = (body.approval && typeof body.approval === 'object'
+      ? body.approval
+      : null) as Partial<CreateApprovalInput> | null;
+    if (!approvalBody) {
+      return NextResponse.json({ ok: false, error: 'Approval payload is required' }, { status: 400 });
+    }
+
+    const approval = createApproval({
+      source: approvalBody.source === 'llm-chat' || approvalBody.source === 'test' ? approvalBody.source : 'runtime',
+      runtime: typeof approvalBody.runtime === 'string' ? approvalBody.runtime : 'claude-code',
+      agent: typeof approvalBody.agent === 'string' ? approvalBody.agent : 'Runtime Hook',
+      sessionKey: typeof approvalBody.sessionKey === 'string' ? approvalBody.sessionKey : 'runtime:hook',
+      title: typeof approvalBody.title === 'string' ? approvalBody.title : 'Approval required',
+      description: typeof approvalBody.description === 'string' ? approvalBody.description : 'Approval required',
+      summary: typeof approvalBody.summary === 'string' ? approvalBody.summary : 'Approval required',
+      toolName: typeof approvalBody.toolName === 'string' ? approvalBody.toolName : undefined,
+      args: approvalBody.args && typeof approvalBody.args === 'object' ? approvalBody.args : undefined,
+      command: typeof approvalBody.command === 'string' ? approvalBody.command : undefined,
+      editable: typeof approvalBody.editable === 'boolean' ? approvalBody.editable : undefined,
+      diff: approvalBody.diff && typeof approvalBody.diff === 'object' ? approvalBody.diff : undefined,
+      risk: approvalBody.risk === 'high' || approvalBody.risk === 'medium' ? approvalBody.risk : 'low',
+      metadata: approvalBody.metadata && typeof approvalBody.metadata === 'object'
+        ? Object.fromEntries(Object.entries(approvalBody.metadata).map(([key, value]) => [key, String(value)]))
+        : undefined,
+      policyRuleId: typeof approvalBody.policyRuleId === 'string' ? approvalBody.policyRuleId : undefined,
+      continuation: approvalBody.continuation,
+    });
+
+    invalidateApprovalCaches();
+    await publishRealtimeMutation({
+      mutation: {
+        mutationId: `approval-create-${approval.id}`,
+        source: 'desktop',
+        action: 'approve',
+        sessionKey: approval.sessionKey,
+        surfaceId: approval.sessionKey,
+        status: 'pending',
+        note: `Approval requested: ${approval.title}`,
+        createdAt: new Date().toISOString(),
+      },
+      refreshTargets: ['global', 'mobileInbox'],
+      sessionKeys: [approval.sessionKey],
+      fresh: true,
+    });
+
+    return NextResponse.json({ ok: true, approval }, {
+      status: 201,
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
+  }
 
   if (action === 'test') {
     const sessionKey = typeof body.sessionKey === 'string' ? body.sessionKey.trim() : undefined;
