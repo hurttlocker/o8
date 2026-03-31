@@ -2729,29 +2729,28 @@ function DashboardInner() {
       return;
     }
 
+    // Route all canvas tabs to workspace tabs — no more Inspector panel
     const repoPath = resolveCanvasTabRepoPath(tab);
-    if (repoPath) {
-      const repoEntry = globalRepoEntries.find((repo) => repo.localPath === repoPath) ?? null;
-      void (async () => {
-        const workspaceTarget = await waitForWorkspaceTerminalTarget({ repoPath });
-        if (workspaceTarget) {
-          workspaceTarget.handle.openInspectorTab(tab, {
-            repo: repoEntry ? {
-              name: repoEntry.name,
-              localPath: repoEntry.localPath,
-              branch: repoEntry.readiness?.currentBranch ?? repoEntry.defaultBranch,
-              readiness: repoEntry.readiness ?? null,
-              remoteUrl: repoEntry.remoteUrl ?? undefined,
-            } : undefined,
-          });
-          return;
-        }
-        openCanvasInInspectorTile(tab, repoPath);
-      })();
-      return;
-    }
-
-    openCanvasInInspectorTile(tab, null);
+    const repoEntry = repoPath
+      ? globalRepoEntries.find((repo) => repo.localPath === repoPath) ?? null
+      : null;
+    void (async () => {
+      const workspaceTarget = await waitForWorkspaceTerminalTarget(repoPath ? { repoPath } : {});
+      if (workspaceTarget) {
+        workspaceTarget.handle.openInspectorTab(tab, {
+          repo: repoEntry ? {
+            name: repoEntry.name,
+            localPath: repoEntry.localPath,
+            branch: repoEntry.readiness?.currentBranch ?? repoEntry.defaultBranch,
+            readiness: repoEntry.readiness ?? null,
+            remoteUrl: repoEntry.remoteUrl ?? undefined,
+          } : undefined,
+        });
+        return;
+      }
+      // Last resort fallback — should rarely hit since workspace auto-creates
+      openCanvasInInspectorTile(tab, repoPath);
+    })();
   }, [globalRepoEntries, openCanvasInInspectorTile, openWorkspaceSidePanel, resolveCanvasTabRepoPath, waitForWorkspaceTerminalTarget]);
 
   const closeCanvasTab = useCallback((tileId: string, tabId: string) => {
