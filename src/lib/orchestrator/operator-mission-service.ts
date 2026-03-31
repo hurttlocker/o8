@@ -1,8 +1,6 @@
-import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
-import { promisify } from 'node:util';
 import { createApproval, recordApprovalAudit, resolveApproval } from '@/lib/approvals/store';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
@@ -25,7 +23,6 @@ import type {
   OrchestratorRuntime,
 } from '@/lib/orchestrator/types';
 
-const execFileAsync = promisify(execFile);
 const LOG_PREFIX = '[mcp-operator]';
 
 export interface LoadedIssue {
@@ -527,88 +524,6 @@ export async function submitPacketReview(input: SubmitReviewInput) {
   };
 }
 
-function parseWorktreeEntries(porcelainOutput: string) {
-  return porcelainOutput.split('\n\n').map((entry) => {
-    const lines = entry.split('\n');
-    const wtPath = lines.find((line) => line.startsWith('worktree '))?.replace('worktree ', '').trim() ?? '';
-    const branchLine = lines.find((line) => line.startsWith('branch '));
-    const wtBranch = branchLine?.replace('branch refs/heads/', '').trim() ?? null;
-    return { path: wtPath, branch: wtBranch };
-  }).filter((worktree) => worktree.path && worktree.branch);
-}
-
-async function directBranchMerge(
-  repoPath: string,
-  branchHint: string,
-  commitMessage?: string,
-): Promise<{ ok: boolean; note: string; approvalId?: string }> {
-  try {
-    const worktrees = parseWorktreeEntries(
-      (await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd: repoPath })).stdout,
-    );
-
-    let branch = branchHint;
-    let worktreePath: string | null = null;
-
-    const exact = worktrees.find((worktree) => worktree.branch === branchHint);
-    if (exact) {
-      worktreePath = exact.path;
-    } else {
-      const slug = branchHint.replace(/^issue\/\d+-/, '').slice(0, 40);
-      const fuzzy = worktrees.find((worktree) =>
-        worktree.path !== repoPath && worktree.branch && worktree.branch.includes(slug),
-      );
-      if (fuzzy?.branch) {
-        branch = fuzzy.branch;
-        worktreePath = fuzzy.path;
-        log(`Resolved branch hint '${branchHint}' -> actual branch '${branch}' via worktree fuzzy match`);
-      }
-    }
-
-    if (worktreePath && worktreePath !== repoPath) {
-      if (commitMessage) {
-        try {
-          await execFileAsync('git', ['add', '-A'], { cwd: worktreePath });
-          await execFileAsync('git', ['commit', '-m', commitMessage, '--allow-empty'], { cwd: worktreePath });
-        } catch {
-          // No local work to commit before merge.
-        }
-      }
-    }
-
-    try {
-      await execFileAsync('git', ['rev-parse', '--verify', branch], { cwd: repoPath });
-    } catch {
-      return { ok: false, note: `Branch '${branch}' does not exist. Cannot merge.` };
-    }
-
-    const savedBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoPath })).stdout.trim();
-    await execFileAsync('git', ['checkout', 'main'], { cwd: repoPath });
-    try {
-      const mergeMessage = commitMessage
-        ? `Merge lane: ${commitMessage}`
-        : `Merge branch '${branch}'`;
-      await execFileAsync('git', ['merge', '--no-ff', '-m', mergeMessage, branch], { cwd: repoPath });
-    } catch (mergeErr) {
-      try {
-        await execFileAsync('git', ['merge', '--abort'], { cwd: repoPath });
-      } catch {
-        // Merge already cleaned up.
-      }
-      await execFileAsync('git', ['checkout', savedBranch], { cwd: repoPath });
-      const message = mergeErr instanceof Error ? mergeErr.message : 'Merge failed.';
-      return { ok: false, note: `Direct merge failed: ${message}` };
-    }
-    await execFileAsync('git', ['checkout', savedBranch], { cwd: repoPath });
-
-    log(`Direct branch merge succeeded: ${branch} -> main`);
-    return { ok: true, note: `Merged ${branch} into main (direct fallback).` };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Direct merge failed.';
-    return { ok: false, note: message };
-  }
-}
-
 export async function approveAndMergePacket(input: ApproveAndMergeInput) {
   const state = currentMissionState();
   const packet = state.packets.find((candidate) => candidate.id === input.packetId);
@@ -624,27 +539,17 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
   }
 
   const lane = findLaneByPacket(packet.id);
-  const laneId = lane?.id ?? packet.lane?.laneId ?? null;
-
-  let result: { ok: boolean; note: string; approvalId?: string };
-
-  if (laneId) {
-    result = await dispatchLaneCommand({
-      verb: 'merge',
-      laneId,
-      commitMessage: input.commitMessage?.trim() || undefined,
-      reviewSummary: mapReviewSummary(packet),
-      actor: 'orchestrator',
-    });
-  } else {
-    const branchTarget = packet.branchTarget;
-    const repoPath = packet.workspaceTargetPath;
-    if (!branchTarget || !repoPath) {
-      throw new Error(`Packet ${packet.id} has no lane binding and no branch target for fallback merge.`);
-    }
-    log(`Lane binding lost for packet ${packet.id}, falling back to direct branch merge: ${branchTarget}`);
-    result = await directBranchMerge(repoPath, branchTarget, input.commitMessage?.trim());
+  if (!lane) {
+    throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
   }
+
+  const result = await dispatchLaneCommand({
+    verb: 'merge',
+    laneId: lane.id,
+    commitMessage: input.commitMessage?.trim() || undefined,
+    reviewSummary: mapReviewSummary(packet),
+    actor: 'orchestrator',
+  });
 
   const currentState = readOrchestratorControlPlaneState();
   if (result.ok) {
