@@ -94,8 +94,9 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
 
   const supportsWorktrees = runtimeId === 'codex' || runtimeId === 'claude-code';
 
-  // Pre-warm launches (skipSetup: true) run in the repo root — skip worktree entirely.
-  const shouldCreateWorktree = supportsWorktrees && !payload.skipSetup;
+  // Create a worktree when: explicitly requested via isolate flag, OR when not skipping setup.
+  // This allows dispatch to request isolation (isolate: true) while skipping env setup (skipSetup: true).
+  const shouldCreateWorktree = supportsWorktrees && (payload.isolate || !payload.skipSetup);
   const repoEntry = shouldCreateWorktree ? await findRepoByLocalPath(repoPath).catch(() => null) : null;
   const launchWorktree = shouldCreateWorktree
     ? await prepareLaunchWorktree({
