@@ -4355,6 +4355,20 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       return () => window.clearTimeout(timer);
     }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createDefaultShellTab, defaultTab, preferredRepo?.localPath, primaryRestoreSettled, requestTerminalForTab, splitCreated, stableRepoScope, tabs.length, termWsConnected]);
 
+    // Safety net: if no tabs exist after 2s and we want a default chat,
+    // create one. Catches edge cases where restore hangs or loads empty.
+    useEffect(() => {
+      if (tabs.length > 0 || defaultTab !== 'llm-chat') return;
+      const timer = window.setTimeout(() => {
+        if (tabsRef.current.length > 0) return;
+        const fallback = createDefaultChatTab();
+        tabsRef.current = [fallback];
+        setTabs([fallback]);
+        setActiveTabId(fallback.id);
+      }, 2000);
+      return () => window.clearTimeout(timer);
+    }, [tabs.length, defaultTab, createDefaultChatTab]);
+
     // On reconnect, reattach existing terminal tabs without resetting chat state.
     useEffect(() => {
       const wasConnected = previousWsConnectedRef.current;
