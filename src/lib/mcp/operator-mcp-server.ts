@@ -58,7 +58,7 @@ function textResult(text: string, isError = false): McpToolResult {
 }
 
 function jsonResult(data: unknown): McpToolResult {
-  return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  return { content: [{ type: 'text', text: JSON.stringify(data) }] };
 }
 
 function sleep(ms: number): Promise<void> {
