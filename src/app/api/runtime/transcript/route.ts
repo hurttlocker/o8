@@ -35,10 +35,19 @@ export async function GET(request: NextRequest) {
       id: entry.id,
       role: entry.role,
       text: entry.text,
+      type: entry.type ?? 'message',
       timestamp: entry.timestamp.getTime(),
       timestampLabel: entry.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       toolName: entry.toolName,
       filePath: entry.filePath,
+      compaction: entry.compaction ? {
+        timestamp: entry.compaction.timestamp.getTime(),
+        tokensBefore: entry.compaction.tokensBefore,
+        tokensAfter: entry.compaction.tokensAfter,
+        trigger: entry.compaction.trigger,
+        source: entry.compaction.source,
+        summary: entry.compaction.summary,
+      } : undefined,
     }));
     return NextResponse.json({ transcript }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },

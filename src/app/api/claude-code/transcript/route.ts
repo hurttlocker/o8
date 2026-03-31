@@ -3,6 +3,7 @@ import { readdir, readFile, stat } from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
+import { detectCompactionEvents } from '@/lib/runtimes/compaction-detector';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,7 +11,8 @@ export const dynamic = 'force-dynamic';
 const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 
 interface ClaudeMessage {
-  type: 'user' | 'assistant' | string;
+  type: string;
+  subtype?: string;
   message?: {
     role?: string;
     content?: string | ContentBlock[];
@@ -24,7 +26,16 @@ interface ClaudeMessage {
   timestamp?: string;
   isSidechain?: boolean;
   isMeta?: boolean;
+  isCompactSummary?: boolean;
+  isVisibleInTranscriptOnly?: boolean;
   total_cost_usd?: number;
+  content?: string;
+  compactMetadata?: {
+    trigger?: string;
+    preTokens?: number;
+    postTokens?: number;
+    tokensAfter?: number;
+  };
   usage?: {
     input_tokens?: number;
     output_tokens?: number;
@@ -154,49 +165,78 @@ export async function GET(req: NextRequest) {
     // Read and parse the JSONL
     const raw = await readFile(targetFile, 'utf-8');
     const lines = raw.trim().split('\n').filter(Boolean);
-
-    const transcript: MobileTranscriptEntry[] = [];
+    const parsedEntries: ClaudeMessage[] = [];
 
     for (const line of lines) {
       try {
-        const entry = JSON.parse(line) as ClaudeMessage;
-
-        if (entry.type === 'result') {
-          const latestAssistant = [...transcript].reverse().find((candidate) => candidate.role === 'assistant');
-          if (latestAssistant) {
-            latestAssistant.costUsd = typeof entry.total_cost_usd === 'number' ? entry.total_cost_usd : latestAssistant.costUsd;
-            latestAssistant.tokens = usageFromUnknown(entry.usage) ?? latestAssistant.tokens;
-          }
-          continue;
-        }
-
-        // Skip non-message entries
-        if (entry.type !== 'user' && entry.type !== 'assistant') continue;
-
-        // Skip meta/command messages
-        if (entry.isMeta) continue;
-
-        const role = entry.type === 'user' ? 'user' : 'assistant';
-        const payload = extractTranscriptPayload(entry.message?.content);
-        const text = payload.text;
-
-        // Skip empty or command-only messages
-        if ((!text.trim() && payload.toolCalls.length === 0) || text.startsWith('<command-message>')) continue;
-
-        const ts = entry.timestamp ? new Date(entry.timestamp) : new Date();
-        const timestampLabel = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
-        transcript.push({
-          id: entry.uuid ?? `cc-${transcript.length}`,
-          role,
-          text,
-          timestampLabel,
-          model: entry.message?.model,
-          tokens: usageFromUnknown(entry.message?.usage),
-          toolCalls: payload.toolCalls.length > 0 ? payload.toolCalls : undefined,
-        });
+        parsedEntries.push(JSON.parse(line) as ClaudeMessage);
       } catch { /* skip malformed lines */ }
     }
+
+    const compactionEvents = detectCompactionEvents(parsedEntries);
+    const skippedEntryIds = new Set(
+      compactionEvents.flatMap((event) => [
+        event.boundaryEntryId,
+        event.summaryEntryId,
+      ]).filter((id): id is string => Boolean(id)),
+    );
+
+    const transcript: MobileTranscriptEntry[] = compactionEvents.map((event) => ({
+      id: event.id,
+      role: 'system',
+      text: 'Context compaction event',
+      type: 'compaction',
+      timestamp: event.timestamp.getTime(),
+      timestampLabel: event.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      compaction: {
+        timestamp: event.timestamp.getTime(),
+        tokensBefore: event.tokensBefore,
+        tokensAfter: event.tokensAfter,
+        trigger: event.trigger,
+        source: event.source,
+        summary: event.summary,
+      },
+    }));
+
+    for (const entry of parsedEntries) {
+      if (entry.uuid && skippedEntryIds.has(entry.uuid)) continue;
+      if (entry.isCompactSummary) continue;
+
+      if (entry.type === 'result') {
+        const latestAssistant = [...transcript].reverse().find((candidate) => candidate.role === 'assistant');
+        if (latestAssistant) {
+          latestAssistant.costUsd = typeof entry.total_cost_usd === 'number' ? entry.total_cost_usd : latestAssistant.costUsd;
+          latestAssistant.tokens = usageFromUnknown(entry.usage) ?? latestAssistant.tokens;
+        }
+        continue;
+      }
+
+      if (entry.type !== 'user' && entry.type !== 'assistant') continue;
+      if (entry.isMeta) continue;
+
+      const role = entry.type === 'user' ? 'user' : 'assistant';
+      const payload = extractTranscriptPayload(entry.message?.content);
+      const text = payload.text;
+
+      if ((!text.trim() && payload.toolCalls.length === 0) || text.startsWith('<command-message>')) continue;
+
+      const ts = entry.timestamp ? new Date(entry.timestamp) : new Date();
+      const timestampLabel = ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+      transcript.push({
+        id: entry.uuid ?? `cc-${transcript.length}`,
+        role,
+        text,
+        type: 'message',
+        timestamp: ts.getTime(),
+        timestampLabel,
+        model: entry.message?.model,
+        tokens: usageFromUnknown(entry.message?.usage),
+        toolCalls: payload.toolCalls.length > 0 ? payload.toolCalls : undefined,
+      });
+    }
+
+    transcript.sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0));
 
     // Return most recent entries up to limit
     const sliced = transcript.slice(-limit);

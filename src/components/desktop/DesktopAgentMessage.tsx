@@ -12,13 +12,14 @@ import {
   TerminalSquare,
   Wrench,
 } from 'lucide-react';
-import { renderLLMMarkdown } from './LLMMarkdown';
-import { MessageActions } from './MessageActions';
+import { CompactionNode } from '@/components/desktop/CompactionNode';
 import type {
   MobileTranscriptEntry,
   MobileTranscriptMedia,
   MobileTranscriptToolCall,
 } from '@/lib/mobile/types';
+import { renderLLMMarkdown } from './LLMMarkdown';
+import { MessageActions } from './MessageActions';
 
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
@@ -445,26 +446,18 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   const hasText = Boolean(displayText.trim());
   const hasMedia = Boolean(entry.media?.length);
   const hasToolCalls = Boolean(entry.toolCalls?.length);
+  const isCompaction = entry.type === 'compaction'
+    || (entry.role === 'system' && entry.text.toLowerCase().includes('compaction'));
 
-  if (entry.role === 'system' && entry.text.toLowerCase().includes('compaction')) {
+  if (isCompaction) {
     return (
-      <div style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        alignSelf: 'center',
-        padding: '8px 12px',
-        borderRadius: 999,
-        background: 'rgba(148, 163, 184, 0.10)',
-        border: '1px solid rgba(148, 163, 184, 0.18)',
-        fontSize: 11,
-        fontWeight: 700,
-        color: '#64748b',
-        letterSpacing: '0.01em',
-      }}>
-        <RefreshGlyph />
-        Context compacted
-      </div>
+      <CompactionNode
+        summary={entry.compaction?.summary}
+        trigger={entry.compaction?.trigger}
+        tokensBefore={entry.compaction?.tokensBefore}
+        tokensAfter={entry.compaction?.tokensAfter}
+        timestampLabel={entry.timestampLabel}
+      />
     );
   }
 
@@ -581,12 +574,3 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
     </div>
   );
 });
-
-function RefreshGlyph() {
-  return (
-    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block' }}>
-      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-      <polyline points="21 3 21 9 15 9" />
-    </svg>
-  );
-}

@@ -6,6 +6,15 @@ export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 export type ApprovalActor = 'system' | 'desktop' | 'mobile' | 'test';
 export type ApprovalSource = 'llm-chat' | 'runtime' | 'test';
 
+export interface PolicyRule {
+  id: string;
+  name: string;
+  description: string;
+  risk: ApprovalRisk;
+  blocked?: boolean;
+  workspacePath?: string;
+}
+
 export interface ApprovalDiffPreview {
   before?: string;
   after?: string;

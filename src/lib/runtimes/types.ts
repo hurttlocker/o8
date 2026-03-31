@@ -1,4 +1,5 @@
 import type { BrowserSurfaceSummary } from '@/lib/browser/types';
+import type { CompactionEvent } from '@/lib/runtimes/compaction-detector';
 
 /**
  * Universal Agent Runtime Contract
@@ -106,10 +107,13 @@ export interface RuntimeTranscriptEntry {
   role: TranscriptRole;
   text: string;
   timestamp: Date;
+  type?: 'message' | 'compaction';
   /** Tool name if role=tool */
   toolName?: string;
   /** File path if the entry involves a file */
   filePath?: string;
+  /** Structured compaction metadata when type=compaction */
+  compaction?: CompactionEvent;
 }
 
 // ── Review ──
@@ -155,6 +159,11 @@ export interface RuntimeTelemetry {
   totalTokens?: number;
   remainingTokens?: number;
   estimatedCostUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  model?: string;
 }
 
 // ── THE CONTRACT ──

@@ -21,6 +21,8 @@ export type {
   AgentRuntime,
 } from './types';
 
+export type { SessionCostData } from './cost-parser';
+
 export {
   registerRuntime,
   getRuntime,

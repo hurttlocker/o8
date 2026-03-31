@@ -250,7 +250,9 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       if (!lane.worktreePath) return { ok: false, laneId: command.laneId, note: 'No worktree to create PR from. Lane is on the main working tree.' };
 
       // Policy gate — require approval for PR creation
-      const prPolicy = evaluatePolicy(buildPolicyContext('lane_command', { verb: 'create_pr', laneId: command.laneId }));
+      const prPolicy = evaluatePolicy(buildPolicyContext('lane_command', { verb: 'create_pr', laneId: command.laneId }, {
+        workspacePath: lane.repoPath,
+      }));
       if (prPolicy.requiresApproval && actor !== 'user') {
         const rawDiff = await getDiffForLane(lane);
         const files = parseGitDiff(rawDiff);
@@ -360,7 +362,9 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       if (!lane.worktreePath) return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };
 
       // Policy gate — require approval for merge
-      const mergePolicy = evaluatePolicy(buildPolicyContext('lane_command', { verb: 'merge', laneId: command.laneId }));
+      const mergePolicy = evaluatePolicy(buildPolicyContext('lane_command', { verb: 'merge', laneId: command.laneId }, {
+        workspacePath: lane.repoPath,
+      }));
       if (mergePolicy.requiresApproval && actor !== 'user') {
         const rawDiff = await getDiffForLane(lane);
         const files = parseGitDiff(rawDiff);
