@@ -249,13 +249,14 @@ function manualLaneRuntimeTone(tab: TerminalTab | null) {
   if (tab.kind === 'terminal') {
     if (tab.cliAgent === 'claude') return orchestratorRuntimeTone('claude-code');
     if (tab.cliAgent === 'codex') return orchestratorRuntimeTone('codex');
+    const agent = CLI_AGENTS.find(a => a.id === tab.cliAgent);
     return {
-      label: 'Terminal',
-      shortLabel: 'Sh',
-      color: '#64748b',
-      background: 'rgba(148, 163, 184, 0.12)',
-      border: 'rgba(148, 163, 184, 0.2)',
-      dot: '#94a3b8',
+      label: agent?.label ?? 'Terminal',
+      shortLabel: agent?.label?.slice(0, 2) ?? 'Sh',
+      color: agent?.color ?? '#64748b',
+      background: `${agent?.color ?? '#94a3b8'}1f`,
+      border: `${agent?.color ?? '#94a3b8'}33`,
+      dot: agent?.color ?? '#94a3b8',
     };
   }
   return null;
@@ -4834,7 +4835,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
       if (!agent) return;
 
       const tabId = createWorkspaceTabId('terminal');
-      const label = adHocLaneTitle('terminal');
+      const label = agent.label;
       const now = Date.now();
       const newTab: TerminalTab = {
         id: tabId,
