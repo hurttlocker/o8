@@ -68,7 +68,7 @@ export function orchestratorStatusTone(status?: OrchestratorPacketStatus | null)
       };
     case 'awaiting_review':
       return {
-        label: 'Review',
+        label: 'Reviewing',
         shortLabel: 'Rev',
         color: '#b45309',
         background: 'rgba(245, 158, 11, 0.12)',
@@ -95,7 +95,7 @@ export function orchestratorStatusTone(status?: OrchestratorPacketStatus | null)
       };
     case 'released':
       return {
-        label: 'Released',
+        label: 'Completed',
         shortLabel: 'Done',
         color: '#0f766e',
         background: 'rgba(20, 184, 166, 0.12)',
