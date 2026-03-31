@@ -86,7 +86,7 @@ fn get_app_data_dir(app: tauri::AppHandle) -> Option<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default()
             .level(log::LevelFilter::Info)
             .build())
@@ -94,7 +94,20 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+
+    // MCP plugin: exposes app to AI agents (screenshots, DOM, input simulation)
+    // Only enabled in debug builds — strip from production
+    #[cfg(debug_assertions)]
+    {
+        builder = builder.plugin(tauri_plugin_mcp::init_with_config(
+            tauri_plugin_mcp::PluginConfig::new("o8".to_string())
+                .start_socket_server(true)
+                .socket_path("/tmp/tauri-mcp-o8.sock".into()),
+        ));
+    }
+
+    builder
         .invoke_handler(tauri::generate_handler![
             get_desktop_info,
             check_port,
