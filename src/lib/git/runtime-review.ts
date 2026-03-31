@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { ReviewChangedFile } from '@/lib/fleet/types';
+import { parseRecentCommits } from '@/lib/git/recent-commits';
 
 const execFileAsync = promisify(execFile);
 const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
@@ -99,11 +100,11 @@ export async function getRuntimeRepoReview(repoPath: string) {
     tryGit(repoPath, ['diff', '--numstat', '--relative', '-M', 'HEAD']),
     tryGit(repoPath, ['ls-files', '--others', '--exclude-standard']),
     tryGit(repoPath, ['diff', '--stat=120', '--relative', 'HEAD']),
-    tryGit(repoPath, ['log', '--oneline', '-5']),
+    tryGit(repoPath, ['log', '--format=%H%x09%h%x09%s', '-8']),
   ]);
 
   const changedFiles = parseChangedFiles(nameStatusRaw, numStatRaw, untrackedRaw);
-  const recentCommits = recentCommitsRaw ? recentCommitsRaw.split('\n').filter(Boolean) : [];
+  const recentCommits = recentCommitsRaw ? parseRecentCommits(recentCommitsRaw) : [];
 
   return {
     branch: branch || undefined,
