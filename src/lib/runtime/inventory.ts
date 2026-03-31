@@ -8,6 +8,7 @@ import { listIdeRuntimeSessions, listIdeRuntimeTabs, type IdeRuntimeSessionDescr
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
 
 const RUNTIME_INVENTORY_TTL_MS = 15_000;
+const RUNTIME_INVENTORY_FRESH_COALESCE_MS = 2_000;
 const runtimeInventoryCache = new Map<string, { snapshot: FleetSnapshot; cachedAt: number }>();
 const runtimeInventoryInflight = new Map<string, { generation: number; promise: Promise<FleetSnapshot> }>();
 let runtimeInventoryGeneration = 0;
@@ -359,14 +360,15 @@ export async function getRuntimeInventorySnapshot(
   const now = Date.now();
   const generation = runtimeInventoryGeneration;
 
-  if (!fresh) {
-    const cached = runtimeInventoryCache.get(cacheKey);
-    if (cached && (now - cached.cachedAt) < RUNTIME_INVENTORY_TTL_MS) {
-      return cached.snapshot;
-    }
+  const cached = runtimeInventoryCache.get(cacheKey);
+  const maxCacheAge = fresh ? RUNTIME_INVENTORY_FRESH_COALESCE_MS : RUNTIME_INVENTORY_TTL_MS;
+  if (cached && (now - cached.cachedAt) < maxCacheAge) {
+    return cached.snapshot;
+  }
 
-    const inflight = runtimeInventoryInflight.get(cacheKey);
-    if (inflight && inflight.generation === generation) return inflight.promise;
+  const inflight = runtimeInventoryInflight.get(cacheKey);
+  if (inflight && inflight.generation === generation) {
+    return inflight.promise;
   }
 
   const promise = (async () => {
