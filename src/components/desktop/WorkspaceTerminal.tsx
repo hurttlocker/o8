@@ -2,6 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- terminal image previews intentionally use raw panel-served URLs */
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { isTauri } from '@/lib/tauri/bridge';
 import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio, ArrowUp, ArrowDown, Square, AlertCircle, RotateCcw, GitCommit, CheckCircle2 } from 'lucide-react';
 /* ── Raw Phosphor SVG icons (React components render as empty boxes in Tauri webview) ── */
 function PhosphorPlay({ size = 14 }: { size?: number }) {
@@ -1934,7 +1935,7 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
   const canSend = draft.trim().length > 0 || queuedContextCards.length > 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'var(--t-bg-gradient)', position: 'relative' }}>
+    <div data-vibrancy-passthrough="" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: 'var(--t-bg-gradient)', position: 'relative' }}>
       <div
         ref={scrollRef}
         className="cortex-themed-scroll"
@@ -2796,6 +2797,8 @@ const TabBar = memo(function TabBar({
   canCloseTile?: boolean;
   onCloseTile?: () => void;
 }) {
+  const [tauriMode, setTauriMode] = useState(false);
+  useEffect(() => { setTauriMode(isTauri()); }, []);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerStep, setPickerStep] = useState<'main' | 'terminal' | 'session' | 'repo'>('main');
   const [selectedAgent, setSelectedAgent] = useState<typeof CLI_AGENTS[0] | null>(null);
@@ -2858,7 +2861,7 @@ const TabBar = memo(function TabBar({
       display: 'flex',
       alignItems: 'stretch',
       height: 32,
-      background: 'var(--t-chrome)',
+      background: 'transparent',
       borderBottom: '0.5px solid var(--t-divider-subtle)',
       flexShrink: 0,
       overflow: 'visible',
@@ -2871,7 +2874,7 @@ const TabBar = memo(function TabBar({
           <div onClick={() => scrollTabs('left')} style={{
             position: 'absolute', left: 0, top: 0, bottom: 0, width: 28, display: 'flex',
             alignItems: 'center', justifyContent: 'center', zIndex: 3, cursor: 'pointer',
-            background: 'linear-gradient(to right, var(--t-chrome) 60%, transparent)',
+            background: 'linear-gradient(to right, rgba(0, 0, 0, 0.15) 60%, transparent)',
             color: 'var(--t-text-secondary)',
           }}>
             <PhosphorCaretLeft size={12} />
@@ -2881,7 +2884,7 @@ const TabBar = memo(function TabBar({
           <div onClick={() => scrollTabs('right')} style={{
             position: 'absolute', right: 0, top: 0, bottom: 0, width: 28, display: 'flex',
             alignItems: 'center', justifyContent: 'center', zIndex: 3, cursor: 'pointer',
-            background: 'linear-gradient(to left, var(--t-chrome) 60%, transparent)',
+            background: 'linear-gradient(to left, rgba(0, 0, 0, 0.15) 60%, transparent)',
             color: 'var(--t-text-secondary)',
           }}>
             <PhosphorCaretRight size={12} />
@@ -2933,21 +2936,24 @@ const TabBar = memo(function TabBar({
                 alignItems: 'center',
                 gap: 5,
                 paddingTop: 0,
-                paddingRight: 10,
+                paddingRight: 12,
                 paddingBottom: 0,
-                paddingLeft: 10,
+                paddingLeft: 12,
                 height: '100%',
                 border: 'none',
-                background: 'transparent',
-                color: isActive ? 'var(--t-text)' : 'var(--t-text-muted)',
+                borderBottom: isActive ? 'none' : '0.5px solid transparent',
+                background: isActive ? '#fff' : 'transparent',
+                color: isActive ? '#111827' : 'rgba(255, 255, 255, 0.85)',
                 fontSize: 12,
                 fontWeight: isActive ? 600 : 400,
                 fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
                 letterSpacing: '-0.008em',
                 cursor: 'pointer',
                 whiteSpace: 'nowrap',
-                transition: 'color 120ms ease, border-color 120ms ease',
-                borderBottom: isActive ? '1.5px solid var(--t-accent, #2563eb)' : '1.5px solid transparent',
+                transition: 'color 120ms ease, background 120ms ease',
+                borderRadius: 0,
+                marginBottom: isActive ? -0.5 : 0,
+                borderRight: '0.5px solid var(--t-divider-subtle)',
               }}
             >
               {/* Icons removed — text-only minimal tabs */}
@@ -3617,6 +3623,8 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     },
     ref,
   ) {
+    const [inTauri, setInTauri] = useState(false);
+    useEffect(() => { setInTauri(isTauri()); }, []);
     const [tabs, setTabs] = useState<TerminalTab[]>([]);
     const [activeTabId, setActiveTabId] = useState<string>('');
     const [previews, setPreviews] = useState<LocalhostPreview[]>([]);
@@ -5297,7 +5305,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
     }, [activeRepoContext, onActiveRepoContextChange]);
 
     return (
-      <div ref={containerDivRef} style={{
+      <div ref={containerDivRef} data-vibrancy-passthrough="" style={{
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
@@ -5443,7 +5451,7 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
         />
 
         {/* Terminal panels — all mounted, only active is visible */}
-        <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+        <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: '#fff' }}>
           {visibleTabs.map((tab) => (
             tab.kind === 'llm-chat' ? (
               <div key={tab.id} style={{
