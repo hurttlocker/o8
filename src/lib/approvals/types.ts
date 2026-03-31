@@ -10,6 +10,11 @@ export interface ApprovalDiffPreview {
   before?: string;
   after?: string;
   path?: string;
+  files?: Array<{
+    path: string;
+    status: 'A' | 'M' | 'D' | 'R';
+    patch: string;
+  }>;
 }
 
 export interface ApprovalAuditEvent {
