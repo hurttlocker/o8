@@ -42,6 +42,7 @@ let state: LaneStoreState = {
 };
 
 let loaded = false;
+let lastLoadedMtimeMs = 0;
 
 // ── Persistence ──
 
@@ -84,7 +85,18 @@ function ensureLoaded() {
   if (!loaded) {
     state = loadFromDisk();
     loaded = true;
+    try { lastLoadedMtimeMs = fs.statSync(STORE_PATH).mtimeMs; } catch { /* file may not exist yet */ }
+    return;
   }
+
+  // Reload if another process updated the file since we last loaded
+  try {
+    const currentMtimeMs = fs.statSync(STORE_PATH).mtimeMs;
+    if (currentMtimeMs > lastLoadedMtimeMs) {
+      state = loadFromDisk();
+      lastLoadedMtimeMs = currentMtimeMs;
+    }
+  } catch { /* file may not exist yet */ }
 }
 
 // ── Event Logging ──
