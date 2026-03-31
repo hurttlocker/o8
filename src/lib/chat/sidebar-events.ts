@@ -73,7 +73,8 @@ export function deriveSidebarRuntimeCapabilities(
 }
 
 export function isSidebarCompactionEntry(entry: MobileTranscriptEntry): boolean {
-  return entry.role === 'system' && entry.text.toLowerCase().includes('compaction');
+  return entry.type === 'compaction'
+    || (entry.role === 'system' && entry.text.toLowerCase().includes('compaction'));
 }
 
 function extractRuntimeField(text: string, label: string): string | undefined {

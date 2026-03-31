@@ -145,9 +145,19 @@ async function resolveHistory(
         id: entry.id,
         role: entry.role === 'user' ? 'user' : entry.role === 'assistant' ? 'assistant' : 'system',
         text: entry.text,
+        type: entry.type ?? 'message',
+        timestamp: entry.timestamp.getTime(),
         timestampLabel: entry.timestamp
           ? entry.timestamp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
           : '',
+        compaction: entry.compaction ? {
+          timestamp: entry.compaction.timestamp.getTime(),
+          tokensBefore: entry.compaction.tokensBefore,
+          tokensAfter: entry.compaction.tokensAfter,
+          trigger: entry.compaction.trigger,
+          source: entry.compaction.source,
+          summary: entry.compaction.summary,
+        } : undefined,
       }));
       const delta = applyDelta(transcript, req.sinceId);
       return { sessionKey, ...delta };

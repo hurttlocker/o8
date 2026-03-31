@@ -44,6 +44,7 @@ import type {
   MobileTranscriptMedia,
   MobileTranscriptToolCall,
 } from '@/lib/mobile/types';
+import { CompactionNode } from '@/components/desktop/CompactionNode';
 import type { ProjectGroup } from '@/components/mobile/types';
 import { buildProjectGroups } from '@/components/mobile/utils';
 import { CodeBlock } from './CodeBlock';
@@ -365,7 +366,8 @@ function isImageMedia(item: MobileTranscriptMedia): boolean {
 }
 
 function isCompactionEntry(entry: MobileTranscriptEntry): boolean {
-  return entry.role === 'system' && entry.text.toLowerCase().includes('compaction');
+  return entry.type === 'compaction'
+    || (entry.role === 'system' && entry.text.toLowerCase().includes('compaction'));
 }
 
 type RuntimeEventSummary = {
@@ -569,6 +571,7 @@ function advanceToolStack(
 
 function transcriptEntrySignature(entry: MobileTranscriptEntry) {
   return JSON.stringify({
+    type: entry.type,
     role: entry.role,
     text: entry.text,
     media: (entry.media ?? []).map((item) => `${item.kind}:${item.path}`),
@@ -579,6 +582,7 @@ function transcriptEntrySignature(entry: MobileTranscriptEntry) {
     })),
     timestamp: entry.timestamp,
     timestampLabel: entry.timestampLabel,
+    compaction: entry.compaction,
   });
 }
 
@@ -727,11 +731,13 @@ const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, on
 
   if (isCompactionEntry(entry)) {
     return (
-      <div className="remodex-compaction-card">
-        <span className="remodex-compaction-icon" aria-hidden="true">⟳</span>
-        <span className="remodex-compaction-label">Context compacted</span>
-        {showTimestamp ? <span className="remodex-compaction-time">{entry.timestampLabel ?? ''}</span> : null}
-      </div>
+      <CompactionNode
+        summary={entry.compaction?.summary}
+        trigger={entry.compaction?.trigger}
+        tokensBefore={entry.compaction?.tokensBefore}
+        tokensAfter={entry.compaction?.tokensAfter}
+        timestampLabel={showTimestamp ? entry.timestampLabel : undefined}
+      />
     );
   }
 

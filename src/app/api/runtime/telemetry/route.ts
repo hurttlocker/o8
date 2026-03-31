@@ -1,0 +1,44 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getRuntime } from '@/lib/runtimes';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+function runtimeIdFromSessionKey(sessionKey: string): string | null {
+  if (sessionKey.startsWith('claude-code:')) return 'claude-code';
+  if (sessionKey.startsWith('codex:') || sessionKey.startsWith('codex-owned:') || sessionKey.startsWith('codex-discovered:')) return 'codex';
+  return null;
+}
+
+export async function GET(request: NextRequest) {
+  const sessionKey = request.nextUrl.searchParams.get('sessionKey')?.trim();
+  if (!sessionKey) {
+    return NextResponse.json({ error: 'sessionKey is required' }, { status: 400 });
+  }
+
+  const runtimeId = runtimeIdFromSessionKey(sessionKey);
+  if (!runtimeId) {
+    return NextResponse.json({ error: `Cannot determine runtime for session: ${sessionKey}` }, { status: 400 });
+  }
+
+  const adapter = getRuntime(runtimeId);
+  if (!adapter?.capabilities.costTelemetry || !adapter.getTelemetry) {
+    return NextResponse.json({ error: `Runtime ${runtimeId} does not support telemetry` }, { status: 400 });
+  }
+
+  try {
+    const telemetry = await adapter.getTelemetry(sessionKey);
+    if (!telemetry) {
+      return NextResponse.json({ error: `No telemetry available for session: ${sessionKey}` }, { status: 404 });
+    }
+
+    return NextResponse.json({ telemetry }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Unable to load runtime telemetry' },
+      { status: 500 },
+    );
+  }
+}
