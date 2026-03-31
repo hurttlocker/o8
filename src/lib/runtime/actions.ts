@@ -164,8 +164,14 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
     throw new Error('surfaceId is required');
   }
 
-  const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
-  const agent = findRuntimeAgent(snapshot, surfaceId);
+  // Try cached snapshot first to avoid expensive full re-discovery on every action.
+  // Only fall back to a fresh fetch if the agent isn't in cache (e.g. just spawned).
+  const cached = await getRuntimeInventorySnapshot();
+  let agent = findRuntimeAgent(cached, surfaceId);
+  if (!agent) {
+    const fresh = await getRuntimeInventorySnapshot({ fresh: true });
+    agent = findRuntimeAgent(fresh, surfaceId);
+  }
   if (!agent) {
     throw new Error('Runtime surface not found.');
   }
