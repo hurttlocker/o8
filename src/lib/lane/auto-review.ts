@@ -14,6 +14,10 @@ import type { Lane } from './types';
 /** Lanes currently being reviewed — prevents duplicate review triggers */
 const reviewingLanes = new Set<string>();
 
+export function isLaneAutoReviewActive(laneId: string): boolean {
+  return reviewingLanes.has(laneId);
+}
+
 /**
  * Called when a lane transitions to 'reviewing' during reconciliation.
  * Fires asynchronously — does not block the reconciliation loop.

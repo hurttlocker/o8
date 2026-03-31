@@ -63,6 +63,10 @@ import {
   type SupervisorCallbacks,
   type AgentUpdateEvent,
 } from './lib/supervisor/agent-supervisor';
+import {
+  runHeadlessSprintTick,
+  startHeadlessSprintLoop,
+} from '@/lib/orchestrator/headless-loop';
 import type {
   RealtimeBatchMessage,
   RealtimeEventEnvelope,
@@ -683,6 +687,7 @@ let mobileRefreshFreshRequested = false;
 const sessionHistoryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let browserDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
 let attachedBrowserRefreshTimer: ReturnType<typeof setInterval> | null = null;
+let stopHeadlessLoop: (() => void) | null = null;
 
 const lastRealtimeFingerprint = {
   runtime: '',
@@ -2833,13 +2838,16 @@ httpServer.listen(WS_PORT, '0.0.0.0', () => {
                   const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
                   await capturePacketCompletionContext(packetId, sessionKey);
                 } catch (error) {
-                  console.error(`[context-pass] Failed to capture completion context for packet ${packetId}:`, error);
+                  console.error(`[context-relay] Failed to capture completion context for packet ${packetId}:`, error);
                 }
               } else {
-                console.warn(`[context-pass] Skipped completion context capture for lane ${lane.id}; packetId missing`);
+                console.warn(`[context-relay] Skipped completion context capture for lane ${lane.id}; packetId missing`);
               }
               const { triggerAutoReview } = await import('@/lib/lane/auto-review');
               triggerAutoReview(updated);
+              await runHeadlessSprintTick({
+                releasePacketIds: packetId ? [packetId] : undefined,
+              });
             }
             console.log(`[supervisor] Agent ${surfaceId} completed, lane ${lane.id} -> reviewing`);
             return;
@@ -2854,6 +2862,7 @@ httpServer.listen(WS_PORT, '0.0.0.0', () => {
     },
   };
   startSupervisorLoop(supervisorCallbacks);
+  stopHeadlessLoop = startHeadlessSprintLoop(10_000);
 });
 
 // ── Graceful shutdown ──
@@ -2863,6 +2872,8 @@ function shutdown(signal: string) {
 
   // Stop agent supervisor and stall detection
   stopSupervisorLoop();
+  stopHeadlessLoop?.();
+  stopHeadlessLoop = null;
   clearInterval(stallCheckTimer);
   if (runtimeRefreshTimer) clearTimeout(runtimeRefreshTimer);
   if (mobileRefreshTimer) clearTimeout(mobileRefreshTimer);

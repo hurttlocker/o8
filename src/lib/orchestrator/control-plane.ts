@@ -8,7 +8,6 @@ import {
   normalizeOrchestratorMissionState,
   reconcileOrchestratorMissionState,
 } from '@/lib/orchestrator/store';
-import { runDispatchTick } from '@/lib/orchestrator/dispatch';
 
 const ORCHESTRATOR_DIR = join(homedir(), '.cortex-ide');
 const ORCHESTRATOR_PATH = join(ORCHESTRATOR_DIR, 'orchestrator-state.json');
@@ -55,13 +54,16 @@ function buildDomainLaneSummaries() {
     }));
 }
 
-export async function syncOrchestratorControlPlaneState(state?: OrchestratorMissionState) {
+export function reconcileOrchestratorControlPlaneState(state?: OrchestratorMissionState) {
   const current = normalizeOrchestratorMissionState(state ?? readOrchestratorControlPlaneState());
-  const reconciled = reconcileOrchestratorMissionState(current, {
+  return reconcileOrchestratorMissionState(current, {
     laneSnapshots: [],
     runtimeTruth: [],
     domainLanes: buildDomainLaneSummaries(),
   });
-  const dispatched = await runDispatchTick(reconciled);
-  return writeOrchestratorControlPlaneState(dispatched);
+}
+
+export async function syncOrchestratorControlPlaneState(state?: OrchestratorMissionState) {
+  const reconciled = reconcileOrchestratorControlPlaneState(state);
+  return writeOrchestratorControlPlaneState(reconciled);
 }
