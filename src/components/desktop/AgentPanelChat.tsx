@@ -19,6 +19,7 @@ import ReactDOM from 'react-dom';
 import Image from 'next/image';
 import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
+import { ContextUsageRing } from '@/components/ContextUsageRing';
 import {
   ArrowUp,
   ChevronDown,
@@ -1885,6 +1886,7 @@ const DesktopChatHeader = memo(function DesktopChatHeader({
                               </div>
                             ) : null}
                           </div>
+                          <ContextUsageRing percent={sessionPercent} size={22} />
                           {isActive ? (
                             <span style={{ flexShrink: 0, color: '#2563eb', display: 'flex' }}>
                               <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block' }}><path d="M20 6 9 17l-5-5" /></svg>

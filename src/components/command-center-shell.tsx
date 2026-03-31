@@ -9,6 +9,7 @@ import type {
 } from '@/lib/browser/types';
 import type { CommandCenterSnapshot } from '@/lib/command-center/snapshot';
 import type { EventItem, FleetSnapshot, SquadSummary, WorkflowReviewSnapshot } from '@/lib/fleet/types';
+import { ContextUsageRing } from '@/components/ContextUsageRing';
 import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from '@/components/desktop/hooks/useDesktopWebSocket';
 import { shouldRetainCurrentCommandCenterSnapshot } from '@/lib/render/client-merge';
@@ -1143,9 +1144,9 @@ export function CommandCenterShell({
                   <div className="agent-row-task">{agent.currentTask}</div>
                   <div className="eyebrow top-gap-small">{agent.surfaceLabel}</div>
                 </div>
-                <div className="agent-row-meta">
+                <div className="agent-row-meta" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span className={statusClass(agent.status)}>{agent.status}</span>
-                  <span className="mono">{formatPercent(agent.context.usedPercent)} ctx</span>
+                  <ContextUsageRing percent={agent.context.usedPercent} size={26} />
                   {agent.isCurrentSession ? <span className={statusClass('healthy')}>mirrored now</span> : null}
                 </div>
               </button>

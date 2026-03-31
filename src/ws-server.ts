@@ -60,7 +60,6 @@ import {
   stopSupervisorLoop,
   registerWatchedAgent,
   getWatchedAgents,
-  cleanupWatchedAgentsForRepo,
   type SupervisorCallbacks,
   type AgentUpdateEvent,
 } from './lib/supervisor/agent-supervisor';
@@ -2788,12 +2787,35 @@ httpServer.listen(WS_PORT, '0.0.0.0', () => {
         event: 'agent-update',
         data: update,
       });
-      for (const [cid, sub] of orchestratorSubscriptions) {
+      for (const [cid] of orchestratorSubscriptions) {
         const c = clients.get(cid);
         if (c) sendRaw(c, msg);
       }
     },
     queueOrchestratorEscalation,
+    onAgentProgress(surfaceId, lastMessage) {
+      const watched = getWatchedAgents().find((agent) => agent.surfaceId === surfaceId);
+      const update: AgentUpdateEvent = {
+        surfaceId,
+        name: watched?.name ?? surfaceId,
+        status: watched?.lastStatus === 'running' || watched?.lastStatus === 'waiting'
+          ? watched.lastStatus
+          : 'running',
+        detail: lastMessage,
+        repoPath: watched?.repoPath,
+      };
+      console.log(`[supervisor] Agent ${surfaceId} progress: ${lastMessage.slice(0, 80)}`);
+
+      const msg = JSON.stringify({
+        channel: 'orchestrator',
+        event: 'agent-update',
+        data: update,
+      });
+      for (const [cid] of orchestratorSubscriptions) {
+        const c = clients.get(cid);
+        if (c) sendRaw(c, msg);
+      }
+    },
     onAgentCompletion(surfaceId, outcome) {
       void (async () => {
         try {
