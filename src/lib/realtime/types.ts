@@ -27,6 +27,12 @@ export interface RealtimeMutationRecord {
   runtime?: string;
   surfaceId?: string;
   sessionKey?: string;
+  laneId?: string;
+  packetId?: string;
+  packetTitle?: string;
+  packetReferenceLabel?: string;
+  repoPath?: string;
+  branch?: string;
   note?: string;
   optimistic?: boolean;
   createdAt: string;
