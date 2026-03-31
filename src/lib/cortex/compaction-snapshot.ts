@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { getCortexClient } from '@/lib/cortex/client';
@@ -18,6 +18,8 @@ const MAX_SUMMARY_CHARS = 4_000;
 const MAX_TRANSCRIPT_ENTRY_CHARS = 600;
 const MAX_TRANSCRIPT_TAIL_ENTRIES = 8;
 const MAX_STORED_SNAPSHOTS = 500;
+const INITIAL_JSONL_TAIL_BYTES = 256_000;
+const MAX_JSONL_TAIL_BYTES = 2_000_000;
 
 type SnapshotSummarySource =
   | 'compaction-summary'
@@ -124,7 +126,7 @@ function extractEntryText(entry: JsonlEntry): string {
   return typeof entry.content === 'string' ? entry.content.trim() : '';
 }
 
-function findBoundaryIndex(entries: JsonlEntry[], event: CompactionEvent): number {
+function findCompactionBoundaryIndex(entries: JsonlEntry[], event: CompactionEvent): number | null {
   if (event.boundaryEntryId) {
     const boundaryIndex = entries.findIndex((entry) => entry.uuid === event.boundaryEntryId);
     if (boundaryIndex >= 0) return boundaryIndex;
@@ -143,7 +145,11 @@ function findBoundaryIndex(entries: JsonlEntry[], event: CompactionEvent): numbe
     }
   }
 
-  return Math.max(0, entries.length - 1);
+  return null;
+}
+
+function findBoundaryIndex(entries: JsonlEntry[], event: CompactionEvent): number {
+  return findCompactionBoundaryIndex(entries, event) ?? Math.max(0, entries.length - 1);
 }
 
 function collectTranscriptTail(entries: JsonlEntry[], boundaryIndex: number): SnapshotTranscriptEntry[] {
@@ -238,6 +244,143 @@ function formatOptionalValue(label: string, value: string | number | undefined):
   return `${label}: ${value ?? 'unknown'}`;
 }
 
+async function readTail(filePath: string, fileSize: number, bytes: number): Promise<string> {
+  const offset = Math.max(0, fileSize - bytes);
+  const readLen = fileSize - offset;
+  if (readLen === 0) return '';
+
+  const handle = await open(filePath, 'r');
+  try {
+    const buffer = Buffer.alloc(readLen);
+    const { bytesRead } = await handle.read(buffer, 0, readLen, offset);
+    return buffer.toString('utf8', 0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
+
+function tailLines(raw: string, partialStart: boolean): string[] {
+  const lines = raw.split('\n').filter(Boolean);
+  if (partialStart && lines.length > 0 && !raw.startsWith('\n') && raw.length > 0) {
+    lines.shift();
+  }
+  return lines;
+}
+
+function parseJsonlEntries(lines: string[]): JsonlEntry[] {
+  return lines.flatMap((line) => {
+    try {
+      return [JSON.parse(line) as JsonlEntry];
+    } catch {
+      return [];
+    }
+  });
+}
+
+function countTranscriptEntriesBeforeBoundary(entries: JsonlEntry[], boundaryIndex: number): number {
+  let count = 0;
+
+  for (let index = Math.max(0, boundaryIndex - 1); index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.type !== 'user' && entry?.type !== 'assistant') continue;
+    if (!extractEntryText(entry)) continue;
+    count += 1;
+    if (count >= MAX_TRANSCRIPT_TAIL_ENTRIES) {
+      return count;
+    }
+  }
+
+  return count;
+}
+
+function hasAssistantBeforeBoundary(entries: JsonlEntry[], boundaryIndex: number): boolean {
+  for (let index = Math.max(0, boundaryIndex - 1); index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry?.type !== 'assistant') continue;
+    if (extractEntryText(entry)) return true;
+  }
+
+  return false;
+}
+
+function hasTokenBeforeBoundary(entries: JsonlEntry[], boundaryIndex: number): boolean {
+  for (let index = Math.max(0, boundaryIndex - 1); index >= 0; index -= 1) {
+    if (typeof extractJsonlEntryTokenTotal(entries[index]) === 'number') {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasTokenAfterBoundary(entries: JsonlEntry[], boundaryIndex: number): boolean {
+  for (let index = Math.max(0, boundaryIndex + 1); index < entries.length; index += 1) {
+    if (typeof extractJsonlEntryTokenTotal(entries[index]) === 'number') {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasRequiredCompactionContext(
+  entries: JsonlEntry[],
+  boundaryIndex: number,
+  event: CompactionEvent,
+  fileFullyRead: boolean,
+): boolean {
+  if (fileFullyRead) {
+    return true;
+  }
+
+  if (countTranscriptEntriesBeforeBoundary(entries, boundaryIndex) < MAX_TRANSCRIPT_TAIL_ENTRIES) {
+    return false;
+  }
+
+  if (!event.summary?.trim() && !hasAssistantBeforeBoundary(entries, boundaryIndex)) {
+    return false;
+  }
+
+  if (typeof event.tokensBefore !== 'number' && !hasTokenBeforeBoundary(entries, boundaryIndex)) {
+    return false;
+  }
+
+  if (typeof event.tokensAfter !== 'number' && !hasTokenAfterBoundary(entries, boundaryIndex)) {
+    return false;
+  }
+
+  return true;
+}
+
+async function readCompactionTailEntries(filePath: string, event: CompactionEvent): Promise<JsonlEntry[]> {
+  const fileInfo = await stat(filePath).catch(() => null);
+  if (!fileInfo || fileInfo.size === 0) {
+    return [];
+  }
+
+  const fileSize = fileInfo.size;
+  let bytes = Math.min(fileSize, INITIAL_JSONL_TAIL_BYTES);
+
+  while (true) {
+    const raw = await readTail(filePath, fileSize, bytes);
+    const fileFullyRead = bytes >= fileSize;
+    const entries = parseJsonlEntries(tailLines(raw, !fileFullyRead));
+    const boundaryIndex = findCompactionBoundaryIndex(entries, event);
+
+    if (boundaryIndex !== null && hasRequiredCompactionContext(entries, boundaryIndex, event, fileFullyRead)) {
+      return entries;
+    }
+
+    if (fileFullyRead) {
+      return entries;
+    }
+
+    bytes = bytes < MAX_JSONL_TAIL_BYTES
+      ? Math.min(fileSize, bytes * 2)
+      : fileSize;
+  }
+}
+
 function buildSnapshotDocument(snapshot: CompactionSnapshotRecord): string {
   const transcriptTail = snapshot.transcriptTail.length > 0
     ? snapshot.transcriptTail
@@ -317,7 +460,7 @@ async function persistSnapshotRecord(snapshot: CompactionSnapshotRecord): Promis
   });
 }
 
-async function findClaudeSessionEntries(sessionKey: string): Promise<JsonlEntry[]> {
+async function findClaudeSessionEntries(sessionKey: string, event: CompactionEvent): Promise<JsonlEntry[]> {
   if (!sessionKey.startsWith('claude-code:')) {
     return [];
   }
@@ -332,17 +475,7 @@ async function findClaudeSessionEntries(sessionKey: string): Promise<JsonlEntry[
   for (const projectDir of projectDirs) {
     const candidatePath = path.join(CLAUDE_PROJECTS_DIR, projectDir, `${sessionId}.jsonl`);
     try {
-      const raw = await readFile(candidatePath, 'utf8');
-      return raw
-        .split('\n')
-        .filter(Boolean)
-        .flatMap((line) => {
-          try {
-            return [JSON.parse(line) as JsonlEntry];
-          } catch {
-            return [];
-          }
-        });
+      return await readCompactionTailEntries(candidatePath, event);
     } catch {
       continue;
     }
@@ -428,7 +561,7 @@ export async function capturePreCompactionSnapshot(
   sessionKey: string,
   event: CompactionEvent,
 ): Promise<void> {
-  const entries = await findClaudeSessionEntries(sessionKey);
+  const entries = await findClaudeSessionEntries(sessionKey, event);
   if (entries.length === 0) {
     console.warn(`[compaction-snapshot] No transcript entries available for ${sessionKey}`);
     return;
