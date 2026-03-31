@@ -13,7 +13,7 @@ import type {
   LaneCommandResult,
   LaneEventActor,
   Lane,
-} from './types';
+} from '@/lib/lane/types';
 import {
   createLane,
   getLane,
@@ -21,8 +21,8 @@ import {
   setLaneStatus,
   attachSession,
   archiveLane,
-} from './registry';
-import { getLanePolicy, isProtectedBranch } from './policy';
+} from '@/lib/lane/registry';
+import { getLanePolicy, isProtectedBranch } from '@/lib/lane/policy';
 import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
 import { createApproval } from '@/lib/approvals/store';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
@@ -52,12 +52,15 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
   switch (command.verb) {
     case 'open_lane': {
-      const existing = (await import('./registry')).findLaneByRepoAndBranch(
+      const existing = (await import('@/lib/lane/registry')).findLaneByRepoAndBranch(
         command.repoPath,
         command.branch,
       );
       if (existing) {
-        return { ok: true, laneId: existing.id, note: 'Lane already exists for this repo and branch.', lane: existing };
+        const updatedExisting = command.packetId && existing.packetId !== command.packetId
+          ? updateLane(existing.id, { packetId: command.packetId }, actor) ?? existing
+          : existing;
+        return { ok: true, laneId: updatedExisting.id, note: 'Lane already exists for this repo and branch.', lane: updatedExisting };
       }
 
       const lane = createLane({

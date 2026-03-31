@@ -1,6 +1,7 @@
 'use client';
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import type { MissionCostSummary } from '@/lib/orchestrator/cost-aggregator';
 import {
   orchestratorRuntimeTone,
   orchestratorStatusTone,
@@ -20,6 +21,59 @@ import {
   packetTitleFromPrompt,
   summarizeMissionPrompt,
 } from './utils';
+
+const usdFormatter = new Intl.NumberFormat('en-US', {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+function hasMissionCostTelemetry(summary: MissionCostSummary | null) {
+  return (summary?.packetCosts ?? []).some((packetCost) => packetCost.hasTelemetry);
+}
+
+function formatCostLabel(totalCostUsd: number, hasTelemetry: boolean) {
+  if (!hasTelemetry) {
+    return 'No data';
+  }
+  if (totalCostUsd < 0.005) {
+    return '~$0.00';
+  }
+  return usdFormatter.format(totalCostUsd);
+}
+
+function costTone(totalCostUsd: number, hasTelemetry: boolean) {
+  if (!hasTelemetry) {
+    return {
+      color: 'var(--t-text-muted)',
+      background: 'rgba(148, 163, 184, 0.12)',
+      border: 'rgba(148, 163, 184, 0.18)',
+    };
+  }
+
+  if (totalCostUsd > 5) {
+    return {
+      color: '#ef4444',
+      background: 'rgba(239, 68, 68, 0.1)',
+      border: 'rgba(239, 68, 68, 0.18)',
+    };
+  }
+
+  if (totalCostUsd >= 1) {
+    return {
+      color: '#f59e0b',
+      background: 'rgba(245, 158, 11, 0.12)',
+      border: 'rgba(245, 158, 11, 0.2)',
+    };
+  }
+
+  return {
+    color: '#16a34a',
+    background: 'rgba(34, 197, 94, 0.1)',
+    border: 'rgba(34, 197, 94, 0.16)',
+  };
+}
 
 export interface ThoughtsMissionPanelHandle {
   focusInput: () => void;
@@ -92,11 +146,29 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
   const [issuesCollapsed, setIssuesCollapsed] = useState(false);
   const [issuesShowAll, setIssuesShowAll] = useState(false);
   const [expandedPacketId, setExpandedPacketId] = useState<string | null>(null);
+  const [missionCostSummary, setMissionCostSummary] = useState<MissionCostSummary | null>(null);
   const [reviewStateByPacketId, setReviewStateByPacketId] = useState<Record<string, ReviewPanelState>>({});
   const issuesRepoSlugRef = useRef<string | null>(null);
   const missionPromptRef = useRef<HTMLTextAreaElement>(null);
+  const missionStateRef = useRef(missionState);
 
   void issuesLoading;
+
+  const missionCostRefreshKey = useMemo(() => missionState.packets.map((packet) => [
+    packet.id,
+    packet.runtime,
+    packet.status,
+    packet.lane?.runtime ?? '',
+    packet.lane?.sessionKey ?? '',
+    packet.lane?.laneId ?? '',
+  ].join(':')).join('|'), [missionState.packets]);
+  const packetCostById = useMemo(
+    () => new Map((missionCostSummary?.packetCosts ?? []).map((packetCost) => [packetCost.packetId, packetCost] as const)),
+    [missionCostSummary],
+  );
+  const missionHasCostData = hasMissionCostTelemetry(missionCostSummary);
+  const missionCostBadgeTone = costTone(missionCostSummary?.totalCostUsd ?? 0, missionHasCostData);
+  const missionCostLabel = formatCostLabel(missionCostSummary?.totalCostUsd ?? 0, missionHasCostData);
 
   useEffect(() => {
     if (!open || !visible || workspaceTargets.length === 0) return;
@@ -146,6 +218,61 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
 
     return () => { cancelled = true; clearInterval(pollTimer); };
   }, [open, visible, workspaceTargets]);
+
+  useEffect(() => {
+    missionStateRef.current = missionState;
+  }, [missionState]);
+
+  useEffect(() => {
+    if (!open || !visible || missionState.packets.length === 0) {
+      setMissionCostSummary(null);
+      return;
+    }
+
+    let cancelled = false;
+    let currentController: AbortController | null = null;
+
+    const fetchMissionCost = async () => {
+      currentController?.abort();
+      const nextController = new AbortController();
+      currentController = nextController;
+
+      try {
+        const response = await fetch('/api/orchestrator/cost', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mission: missionStateRef.current }),
+          signal: nextController.signal,
+        });
+        const payload = await response.json().catch(() => null) as { cost?: MissionCostSummary; error?: string } | null;
+        if (!response.ok) {
+          throw new Error(payload?.error ?? 'Unable to load mission cost.');
+        }
+        if (!cancelled) {
+          setMissionCostSummary(payload?.cost ?? null);
+        }
+      } catch (error) {
+        if (nextController.signal.aborted || cancelled) {
+          return;
+        }
+        console.error('[cost-agg] Failed to load mission cost.', error);
+        if (!cancelled) {
+          setMissionCostSummary(null);
+        }
+      }
+    };
+
+    void fetchMissionCost();
+    const pollTimer = window.setInterval(() => {
+      void fetchMissionCost();
+    }, 30_000);
+
+    return () => {
+      cancelled = true;
+      currentController?.abort();
+      window.clearInterval(pollTimer);
+    };
+  }, [missionCostRefreshKey, missionState.packets.length, open, visible]);
 
   const updateMissionState = useCallback((
     updater: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState),
@@ -475,6 +602,29 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
               Live lanes
               <span style={{ color: 'var(--t-text)' }}>{sessionTargets.length}</span>
             </span>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              paddingTop: 5,
+              paddingRight: 9,
+              paddingBottom: 5,
+              paddingLeft: 9,
+              borderRadius: 999,
+              background: missionCostBadgeTone.background,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: missionCostBadgeTone.border,
+              fontSize: 10,
+              fontWeight: 700,
+              color: missionCostBadgeTone.color,
+              minHeight: 28,
+            }}>
+              Mission total
+              <span style={{ color: missionCostBadgeTone.color }}>
+                {missionCostLabel}
+              </span>
+            </span>
           </div>
         </div>
 
@@ -707,6 +857,10 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
         const visibleReviewFiles = reviewState?.showAllFiles ? reviewFiles : reviewFiles.slice(0, 5);
         const showReviewSection = packet.status === 'awaiting_review' && Boolean(packet.lane?.laneId);
         const reviewWarningText = reviewWarnings.length > 0 ? reviewWarnings.slice(0, 2).join(' ') : null;
+        const packetCost = packetCostById.get(packet.id) ?? null;
+        const packetHasCostData = Boolean(packetCost?.hasTelemetry);
+        const packetCostBadgeTone = costTone(packetCost?.totalCostUsd ?? 0, packetHasCostData);
+        const packetCostLabel = formatCostLabel(packetCost?.totalCostUsd ?? 0, packetHasCostData);
 
         return (
           <div
@@ -732,6 +886,7 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
                 background: 'transparent',
                 cursor: 'pointer',
                 textAlign: 'left',
+                minHeight: 44,
               }}
             >
               <span style={{ fontSize: 10, fontWeight: 800, color: runtimeMeta.color, padding: '2px 6px', borderRadius: 5, background: runtimeMeta.background, flexShrink: 0, letterSpacing: '0.02em' }}>
@@ -739,6 +894,28 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
               </span>
               <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.01em' }}>
                 {packet.title}
+              </span>
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                paddingTop: 4,
+                paddingRight: 8,
+                paddingBottom: 4,
+                paddingLeft: 8,
+                borderRadius: 999,
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: packetCostBadgeTone.border,
+                background: packetCostBadgeTone.background,
+                color: packetCostBadgeTone.color,
+                fontSize: 10,
+                fontWeight: 800,
+                letterSpacing: '-0.01em',
+                flexShrink: 0,
+                minHeight: 24,
+              }}>
+                {packetCostLabel}
               </span>
               <span style={{ fontSize: 9, fontWeight: 800, color: statusMeta.color, padding: '3px 7px', borderRadius: 999, background: statusMeta.background, border: `1px solid ${statusMeta.border}`, textTransform: 'uppercase', letterSpacing: '0.04em', flexShrink: 0 }}>
                 {statusMeta.label}

@@ -2826,6 +2826,18 @@ httpServer.listen(WS_PORT, '0.0.0.0', () => {
           if (outcome === 'completed') {
             const updated = setLaneStatus(lane.id, 'reviewing', 'system', 'agent_completed');
             if (updated) {
+              const packetId = updated.packetId ?? lane.packetId;
+              const sessionKey = updated.sessionKey ?? surfaceId;
+              if (packetId) {
+                try {
+                  const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+                  await capturePacketCompletionContext(packetId, sessionKey);
+                } catch (error) {
+                  console.error(`[context-pass] Failed to capture completion context for packet ${packetId}:`, error);
+                }
+              } else {
+                console.warn(`[context-pass] Skipped completion context capture for lane ${lane.id}; packetId missing`);
+              }
               const { triggerAutoReview } = await import('@/lib/lane/auto-review');
               triggerAutoReview(updated);
             }

@@ -5,7 +5,8 @@ import type {
   OrchestratorPacket,
   OrchestratorQueueState,
   OrchestratorRuntimeTruth,
-} from './types';
+  OrchestratorStateApiResponse,
+} from '@/lib/orchestrator/types';
 
 export const ORCHESTRATOR_STATE_EVENT = 'cortex:orchestrator-state-changed';
 export const ORCHESTRATOR_STATE_API_PATH = '/api/orchestrator/state';
@@ -112,9 +113,10 @@ function resolvePacketDependencies(packets: OrchestratorPacket[]) {
 
   return packets.map((packet) => ({
     ...packet,
-    dependencyPacketIds: packet.dependencyLabels
-      .map((label) => lookup.get(normalizeLookupValue(label)) ?? null)
-      .filter((value, index, current): value is string => Boolean(value) && current.indexOf(value) === index),
+    dependencyPacketIds: [
+      ...packet.dependencyPacketIds.map((dependencyId) => lookup.get(normalizeLookupValue(dependencyId)) ?? dependencyId),
+      ...packet.dependencyLabels.map((label) => lookup.get(normalizeLookupValue(label)) ?? null),
+    ].filter((value, index, current): value is string => Boolean(value) && current.indexOf(value) === index),
   }));
 }
 
@@ -163,7 +165,7 @@ export async function loadOrchestratorMissionState(): Promise<OrchestratorMissio
       headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
     });
     if (response.ok) {
-      const payload = await response.json() as { mission?: OrchestratorMissionState };
+      const payload = await response.json() as Partial<OrchestratorStateApiResponse>;
       const next = normalizeOrchestratorMissionState(payload.mission ?? createEmptyOrchestratorMissionState());
       broadcastOrchestratorMissionState(next);
       return next;
@@ -200,7 +202,7 @@ export async function persistOrchestratorMissionState(state: OrchestratorMission
       body: JSON.stringify({ mission: normalized }),
     });
     if (response.ok) {
-      const payload = await response.json() as { mission?: OrchestratorMissionState };
+      const payload = await response.json() as Partial<OrchestratorStateApiResponse>;
       const next = normalizeOrchestratorMissionState(payload.mission ?? normalized);
       broadcastOrchestratorMissionState(next);
       return next;
