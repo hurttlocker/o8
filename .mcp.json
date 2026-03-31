@@ -6,6 +6,13 @@
       "env": {
         "O8_API_BASE": "http://localhost:3001"
       }
+    },
+    "tauri-mcp": {
+      "command": "npx",
+      "args": ["tauri-plugin-mcp-server"],
+      "env": {
+        "TAURI_MCP_IPC_PATH": "/tmp/tauri-mcp-o8.sock"
+      }
     }
   }
 }
