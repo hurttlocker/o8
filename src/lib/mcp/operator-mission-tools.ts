@@ -543,23 +543,50 @@ export async function submitPacketReview(input: SubmitReviewInput) {
   };
 }
 
+function parseWorktreeEntries(porcelainOutput: string) {
+  return porcelainOutput.split('\n\n').map((entry) => {
+    const lines = entry.split('\n');
+    const wtPath = lines.find((l) => l.startsWith('worktree '))?.replace('worktree ', '').trim() ?? '';
+    const branchLine = lines.find((l) => l.startsWith('branch '));
+    const wtBranch = branchLine?.replace('branch refs/heads/', '').trim() ?? null;
+    return { path: wtPath, branch: wtBranch };
+  }).filter((wt) => wt.path && wt.branch);
+}
+
 async function directBranchMerge(
   repoPath: string,
-  branch: string,
+  branchHint: string,
   commitMessage?: string,
 ): Promise<{ ok: boolean; note: string; approvalId?: string }> {
   try {
-    // Find the worktree for this branch so we can commit any uncommitted work
-    const worktrees = (await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd: repoPath })).stdout;
+    const worktrees = parseWorktreeEntries(
+      (await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd: repoPath })).stdout,
+    );
+
+    // Resolve the actual branch: try exact match first, then fuzzy match
+    // against worktree branches (worktree naming may differ from packet branchTarget).
+    let branch = branchHint;
     let worktreePath: string | null = null;
-    const entries = worktrees.split('\n\n');
-    for (const entry of entries) {
-      if (entry.includes(`branch refs/heads/${branch}`)) {
-        const pathLine = entry.split('\n').find((l) => l.startsWith('worktree '));
-        if (pathLine) worktreePath = pathLine.replace('worktree ', '').trim();
+
+    const exact = worktrees.find((wt) => wt.branch === branchHint);
+    if (exact) {
+      worktreePath = exact.path;
+    } else {
+      // Fuzzy: find a worktree branch that contains the packet slug
+      // e.g. branchHint "issue/339-chore-sprint-6..." matches
+      //      "worktree/codex/packet-chore-sprint-6..."
+      const slug = branchHint.replace(/^issue\/\d+-/, '').slice(0, 40);
+      const fuzzy = worktrees.find((wt) =>
+        wt.path !== repoPath && wt.branch && wt.branch.includes(slug),
+      );
+      if (fuzzy?.branch) {
+        branch = fuzzy.branch;
+        worktreePath = fuzzy.path;
+        log(`Resolved branch hint '${branchHint}' → actual branch '${branch}' via worktree fuzzy match`);
       }
     }
 
+    // Commit any uncommitted work in the worktree
     if (worktreePath && worktreePath !== repoPath) {
       if (commitMessage) {
         try {
@@ -569,7 +596,14 @@ async function directBranchMerge(
       }
     }
 
-    // Merge the branch into the base branch
+    // Verify branch exists
+    try {
+      await execFileAsync('git', ['rev-parse', '--verify', branch], { cwd: repoPath });
+    } catch {
+      return { ok: false, note: `Branch '${branch}' does not exist. Cannot merge.` };
+    }
+
+    // Merge the branch into main
     const savedBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoPath })).stdout.trim();
     await execFileAsync('git', ['checkout', 'main'], { cwd: repoPath });
     try {
