@@ -37,6 +37,13 @@ export function createDraftPacket(
   const target = seed?.workspaceTargetPath
     ? workspaceTargets.find((entry) => entry.localPath === seed.workspaceTargetPath) ?? null
     : workspaceTargets[0] ?? null;
+  const queueState = seed?.queueState ?? 'draft';
+  const status = seed?.status
+    ?? (queueState === 'queued'
+      ? 'queued'
+      : queueState === 'held'
+        ? 'blocked'
+        : 'draft');
   return {
     id: seed?.id ?? createPacketId(),
     referenceLabel: seed?.referenceLabel ?? nextPacketReferenceLabel(existingPackets),
@@ -47,9 +54,9 @@ export function createDraftPacket(
     runtime: seed?.runtime ?? runtime,
     dependencyLabels: seed?.dependencyLabels ?? [],
     dependencyPacketIds: seed?.dependencyPacketIds ?? [],
-    queueState: seed?.queueState ?? 'draft',
+    queueState,
     releaseState: seed?.releaseState ?? 'pending',
-    status: seed?.status ?? 'draft',
+    status,
     blockedReason: seed?.blockedReason ?? null,
     lastEventAt: seed?.lastEventAt ?? null,
     lastEventLabel: seed?.lastEventLabel ?? null,
