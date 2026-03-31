@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { installClaudeCodePreToolHook } from '@/lib/hooks/install-hooks';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -78,5 +79,14 @@ export async function POST(request: NextRequest) {
   };
 
   writeConfig(updated);
+
+  if (updated.setupComplete || updated.completedAt) {
+    try {
+      installClaudeCodePreToolHook(process.env.CORTEX_IDE_REPO_ROOT || process.cwd());
+    } catch {
+      // Hook installation is best-effort during onboarding.
+    }
+  }
+
   return NextResponse.json({ success: true, config: updated });
 }
