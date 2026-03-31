@@ -1,3 +1,9 @@
+import { access, readdir, stat } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
+import { getCodexRolloutPath } from '@/lib/codex/sessions';
+
 /**
  * Agent Supervisor — zero-cost rules engine that monitors launched Codex agents.
  *
@@ -17,8 +23,11 @@ export interface WatchedAgent {
   prompt: string;
   registeredAt: number;
   lastStatus: string;
+  lastRuntimeStatus: string | null;
   lastTranscriptLength: number;
   lastTranscriptEntryId: string | null;
+  lastTranscriptSignature: string | null;
+  lastTranscriptMtimeMs: number | null;
   lastActivityAt: number;
   retryCount: number;
   steerCount: number;
@@ -31,6 +40,10 @@ export interface WatchedAgent {
   /** Transcript length snapshot taken when tentative finish started */
   tentativeTranscriptLength: number;
   tentativeTranscriptEntryId: string | null;
+  tentativeTranscriptSignature: string | null;
+  pollOrdinal: number;
+  nextPollAt: number;
+  lastPolledAt: number | null;
 }
 
 export interface AgentStatusEntry {
@@ -71,22 +84,62 @@ export interface SupervisorCallbacks {
   onAgentCompletion?: (surfaceId: string, outcome: 'completed' | 'failed') => void;
 }
 
+export interface SupervisorFleetStatusSummary {
+  repoPath: string;
+  totalAgents: number;
+  activeAgents: number;
+  idleAgents: number;
+  completedAgents: number;
+  failedAgents: number;
+  pendingAgents: number;
+  allDone: boolean;
+  allSucceeded: boolean;
+  nextPollAt: number | null;
+  lastUpdatedAt: number;
+}
+
+type TranscriptBatchStatus = {
+  signature: string | null;
+  mtimeMs: number | null;
+  totalSize: number;
+  pathCount: number;
+  exists: boolean;
+};
+
+type TranscriptSourceCacheEntry = {
+  paths: string[];
+  resolvedAt: number;
+};
+
 // ── Constants ──
 
-const DEFAULT_POLL_INTERVAL_MS = 5_000;
+const SUPERVISOR_HEARTBEAT_MS = 1_000;
+const DEFAULT_ACTIVE_POLL_INTERVAL_MS = 2_000;
+const IDLE_POLL_INTERVAL_MS = 10_000;
+const COMPLETED_POLL_INTERVAL_MS = 30_000;
+const DEFAULT_STAGGER_WINDOW_MS = 5_000;
+const TRANSCRIPT_SOURCE_CACHE_TTL_MS = 15_000;
+const MISSING_TRANSCRIPT_SOURCE_CACHE_TTL_MS = 2_000;
 const STUCK_THRESHOLD_MS = 2 * 60 * 1000;       // 2 min no transcript change
-const MAX_RETRIES = 1;                            // Auto-retry once on failure
-const MAX_STEERS = 2;                             // Auto-steer twice before escalate
-const COMPLETION_CLEANUP_MS = 60_000;             // Remove from watch 60s after done
-const COMPLETION_CONFIRM_MS = 15_000;             // 15s grace before confirming completion
+const MAX_RETRIES = 1;                           // Auto-retry once on failure
+const MAX_STEERS = 2;                            // Auto-steer twice before escalate
+const COMPLETION_CLEANUP_MS = 60_000;            // Remove from watch 60s after done
+const COMPLETION_CONFIRM_MS = 15_000;            // 15s grace before confirming completion
 const TRANSCRIPT_ACTIVITY_WINDOW = 120;
+const CLAUDE_PROJECTS_DIR = path.join(
+  process.env.CLAUDE_HOME || path.join(os.homedir(), '.claude'),
+  'projects',
+);
 
 // ── State ──
 
 const watchedAgents = new Map<string, WatchedAgent>();
-let pollTimer: ReturnType<typeof setInterval> | null = null;
+const transcriptSourceCache = new Map<string, TranscriptSourceCacheEntry>();
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let callbacks: SupervisorCallbacks | null = null;
-let pollIntervalMs = DEFAULT_POLL_INTERVAL_MS;
+let heartbeatInFlight = false;
+let pollIntervalMs = DEFAULT_ACTIVE_POLL_INTERVAL_MS;
+let registrationOrdinal = 0;
 
 // ── Public API ──
 
@@ -96,16 +149,24 @@ export function registerWatchedAgent(
   name: string,
   prompt: string,
 ): void {
+  const now = Date.now();
+  const pollOrdinal = registrationOrdinal++;
+
+  transcriptSourceCache.delete(surfaceId);
+
   watchedAgents.set(surfaceId, {
     surfaceId,
     repoPath,
     name,
     prompt,
-    registeredAt: Date.now(),
+    registeredAt: now,
     lastStatus: 'running',
+    lastRuntimeStatus: 'running',
     lastTranscriptLength: 0,
     lastTranscriptEntryId: null,
-    lastActivityAt: Date.now(),
+    lastTranscriptSignature: null,
+    lastTranscriptMtimeMs: null,
+    lastActivityAt: now,
     retryCount: 0,
     steerCount: 0,
     completionReported: false,
@@ -114,7 +175,12 @@ export function registerWatchedAgent(
     tentativeFinishedSince: null,
     tentativeTranscriptLength: 0,
     tentativeTranscriptEntryId: null,
+    tentativeTranscriptSignature: null,
+    pollOrdinal,
+    nextPollAt: now + computeInitialPollOffsetMs(pollOrdinal),
+    lastPolledAt: null,
   });
+
   console.log(`[supervisor] Watching agent "${name}" (${surfaceId})`);
 
   callbacks?.broadcastAgentUpdate({
@@ -132,43 +198,45 @@ export function unregisterWatchedAgent(surfaceId: string): void {
     console.log(`[supervisor] Unwatching agent "${agent.name}" (${surfaceId})`);
     watchedAgents.delete(surfaceId);
   }
+  transcriptSourceCache.delete(surfaceId);
 }
 
 export function getWatchedAgents(repoPath?: string): WatchedAgent[] {
   const all = [...watchedAgents.values()];
-  return repoPath ? all.filter((a) => a.repoPath === repoPath) : all;
+  return repoPath ? all.filter((agent) => agent.repoPath === repoPath) : all;
 }
 
 export function getWatchedAgentCount(): number {
   return watchedAgents.size;
 }
 
+export function getSupervisorFleetStatusSummary(repoPath?: string): SupervisorFleetStatusSummary[] {
+  return buildFleetStatusSummaries(repoPath);
+}
+
 export function setSupervisorPollInterval(ms: number): void {
-  pollIntervalMs = Math.max(1000, Math.min(30_000, ms));
-  if (pollTimer && callbacks) {
-    stopSupervisorLoop();
-    startSupervisorLoop(callbacks);
-  }
-  console.log(`[supervisor] Poll interval set to ${pollIntervalMs}ms`);
+  pollIntervalMs = Math.max(1_000, Math.min(30_000, ms));
+  console.log(
+    `[supervisor] Active poll interval set to ${pollIntervalMs}ms `
+    + `(idle ${IDLE_POLL_INTERVAL_MS}ms, completed ${COMPLETED_POLL_INTERVAL_MS}ms)`,
+  );
 }
 
 export function startSupervisorLoop(cbs: SupervisorCallbacks): void {
   callbacks = cbs;
-  if (pollTimer) return;
+  if (pollTimer || heartbeatInFlight) return;
 
-  pollTimer = setInterval(() => {
-    if (watchedAgents.size === 0) return;
-    void supervisorTick().catch((err) => {
-      console.error('[supervisor] Poll error:', err);
-    });
-  }, pollIntervalMs);
-
-  console.log(`[supervisor] Started (${pollIntervalMs}ms interval)`);
+  queueNextHeartbeat(0);
+  console.log(
+    `[supervisor] Started (heartbeat ${SUPERVISOR_HEARTBEAT_MS}ms, `
+    + `active ${pollIntervalMs}ms / idle ${IDLE_POLL_INTERVAL_MS}ms / `
+    + `completed ${COMPLETED_POLL_INTERVAL_MS}ms)`,
+  );
 }
 
 export function stopSupervisorLoop(): void {
   if (pollTimer) {
-    clearInterval(pollTimer);
+    clearTimeout(pollTimer);
     pollTimer = null;
   }
   console.log('[supervisor] Stopped');
@@ -178,8 +246,79 @@ export function cleanupWatchedAgentsForRepo(repoPath: string): void {
   for (const [id, agent] of watchedAgents) {
     if (agent.repoPath === repoPath) {
       watchedAgents.delete(id);
+      transcriptSourceCache.delete(id);
     }
   }
+}
+
+// ── Scheduler ──
+
+function queueNextHeartbeat(delayMs = SUPERVISOR_HEARTBEAT_MS): void {
+  if (!callbacks) return;
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+  }
+  pollTimer = setTimeout(() => {
+    pollTimer = null;
+    void supervisorHeartbeat();
+  }, Math.max(0, delayMs));
+}
+
+async function supervisorHeartbeat(): Promise<void> {
+  if (!callbacks) return;
+  if (heartbeatInFlight) {
+    queueNextHeartbeat();
+    return;
+  }
+
+  heartbeatInFlight = true;
+  try {
+    await supervisorTick();
+  } catch (err) {
+    console.error('[supervisor] Poll error:', err);
+  } finally {
+    heartbeatInFlight = false;
+    if (callbacks) {
+      queueNextHeartbeat();
+    }
+  }
+}
+
+function computeInitialPollOffsetMs(pollOrdinal: number): number {
+  const staggerWindowMs = Math.max(DEFAULT_STAGGER_WINDOW_MS, pollIntervalMs);
+  const slotCount = Math.max(1, Math.floor(staggerWindowMs / SUPERVISOR_HEARTBEAT_MS));
+  return (pollOrdinal % slotCount) * SUPERVISOR_HEARTBEAT_MS;
+}
+
+function scheduleNextAgentPoll(
+  watched: WatchedAgent,
+  currentStatus: string,
+  runtimeStatus: string | null,
+  now: number,
+): void {
+  const intervalMs = pollIntervalForAgent(watched, currentStatus, runtimeStatus);
+  const base = watched.nextPollAt > now ? watched.nextPollAt : now;
+  watched.nextPollAt = base + intervalMs;
+}
+
+function pollIntervalForAgent(
+  watched: WatchedAgent,
+  currentStatus: string,
+  runtimeStatus: string | null,
+): number {
+  if (watched.completionReported) {
+    return COMPLETED_POLL_INTERVAL_MS;
+  }
+  if (currentStatus === 'finished' || watched.tentativeFinishedSince) {
+    return IDLE_POLL_INTERVAL_MS;
+  }
+  if (currentStatus === 'failed' || currentStatus === 'interrupted') {
+    return COMPLETED_POLL_INTERVAL_MS;
+  }
+  if (runtimeStatus === 'idle' || runtimeStatus === 'reviewing') {
+    return IDLE_POLL_INTERVAL_MS;
+  }
+  return pollIntervalMs;
 }
 
 // ── Core Poll Tick ──
@@ -187,91 +326,81 @@ export function cleanupWatchedAgentsForRepo(repoPath: string): void {
 async function supervisorTick(): Promise<void> {
   if (!callbacks || watchedAgents.size === 0) return;
 
+  const now = Date.now();
+  const dueAgents = [...watchedAgents.values()]
+    .filter((watched) => watched.nextPollAt <= now)
+    .sort((left, right) => (
+      left.nextPollAt - right.nextPollAt
+      || left.pollOrdinal - right.pollOrdinal
+    ));
+
+  if (dueAgents.length === 0) {
+    return;
+  }
+
   let fleet: AgentStatusEntry[];
   try {
     fleet = await callbacks.fetchFleetStatus();
   } catch {
-    return; // Fleet fetch failed — skip this tick
+    return; // Fleet fetch failed — skip this heartbeat
   }
 
-  const fleetMap = new Map(fleet.map((a) => [a.sessionKey, a]));
-  const now = Date.now();
+  const fleetMap = new Map(fleet.map((agent) => [agent.sessionKey, agent]));
+  const transcriptStatusMap = await readTranscriptBatchStatuses(dueAgents);
 
-  for (const [surfaceId, watched] of watchedAgents) {
-    const agent = fleetMap.get(surfaceId);
-    const currentStatus = resolveStatus(agent, watched, now);
+  for (const watched of dueAgents) {
+    if (!watchedAgents.has(watched.surfaceId)) continue;
 
-    // ── Completion grace period ──
-    // Codex agents can briefly report idle/reviewing between tool calls.
-    // Require the 'finished' signal to persist for COMPLETION_CONFIRM_MS
-    // AND transcript must stop growing before we confirm completion.
-    if (currentStatus === 'finished' && !watched.completionReported) {
-      if (!watched.tentativeFinishedSince) {
-        // First time seeing 'finished' — start grace period
-        watched.tentativeFinishedSince = now;
-        try {
-          const entries = await callbacks.fetchTranscript(surfaceId, TRANSCRIPT_ACTIVITY_WINDOW);
-          watched.tentativeTranscriptLength = measureTranscript(entries);
-          watched.tentativeTranscriptEntryId = entries[entries.length - 1]?.id ?? null;
-        } catch {
-          watched.tentativeTranscriptLength = watched.lastTranscriptLength;
-          watched.tentativeTranscriptEntryId = watched.lastTranscriptEntryId;
-        }
-        console.log(`[supervisor] "${watched.name}" tentatively finished — confirming over ${COMPLETION_CONFIRM_MS / 1000}s`);
-        continue;
-      }
+    const runtimeAgent = fleetMap.get(watched.surfaceId);
+    const transcriptStatus = transcriptStatusMap.get(watched.surfaceId) ?? emptyTranscriptBatchStatus();
 
-      const elapsed = now - watched.tentativeFinishedSince;
-      if (elapsed < COMPLETION_CONFIRM_MS) {
-        continue; // Still in grace period — wait
-      }
-
-      // Grace period elapsed — verify transcript hasn't grown
-      try {
-        const entries = await callbacks.fetchTranscript(surfaceId, TRANSCRIPT_ACTIVITY_WINDOW);
-        const currentLength = measureTranscript(entries);
-        const currentEntryId = entries[entries.length - 1]?.id ?? null;
-        if (
-          currentLength !== watched.tentativeTranscriptLength
-          || currentEntryId !== watched.tentativeTranscriptEntryId
-        ) {
-          // Transcript grew — agent is still working, reset
-          watched.tentativeFinishedSince = null;
-          watched.tentativeTranscriptEntryId = null;
-          recordTranscriptActivity(watched, entries, now);
-          console.log(`[supervisor] "${watched.name}" transcript grew during grace — still active`);
-          continue;
-        }
-      } catch { /* proceed with confirmation if fetch fails */ }
-
-      // Confirmed finished — clear tentative and fall through
-      watched.tentativeFinishedSince = null;
-      watched.tentativeTranscriptEntryId = null;
-      console.log(`[supervisor] "${watched.name}" completion confirmed after grace period`);
-    } else if (currentStatus !== 'finished' && watched.tentativeFinishedSince) {
-      // Status reverted to non-terminal — cancel tentative finish
-      console.log(`[supervisor] "${watched.name}" back to "${currentStatus}" — canceling tentative finish`);
-      watched.tentativeFinishedSince = null;
-      watched.tentativeTranscriptEntryId = null;
-    }
-
-    // Status changed?
-    if (currentStatus !== watched.lastStatus) {
-      const prevStatus = watched.lastStatus;
-      watched.lastStatus = currentStatus;
-      console.log(`[supervisor] "${watched.name}" ${prevStatus} → ${currentStatus}`);
-
-      await handleStatusChange(watched, currentStatus, now);
-    }
-
-    // Stuck detection (for running or waiting agents)
-    if (currentStatus === 'running' || currentStatus === 'waiting') {
-      await checkStuck(watched, now);
-    }
+    await pollWatchedAgent(watched, runtimeAgent, transcriptStatus, now);
   }
 
-  // Check if all watched agents for any repo are done
   checkAllDone();
+}
+
+async function pollWatchedAgent(
+  watched: WatchedAgent,
+  runtimeAgent: AgentStatusEntry | undefined,
+  transcriptStatus: TranscriptBatchStatus,
+  now: number,
+): Promise<void> {
+  watched.lastPolledAt = now;
+  watched.lastRuntimeStatus = runtimeAgent?.status ?? null;
+
+  const currentStatus = resolveStatus(runtimeAgent, watched, now);
+
+  if (currentStatus === 'finished' && !watched.completionReported) {
+    const confirmed = await confirmFinishedAgent(watched, transcriptStatus, now);
+    if (!confirmed) {
+      scheduleNextAgentPoll(watched, currentStatus, runtimeAgent?.status ?? null, now);
+      return;
+    }
+  } else if (currentStatus !== 'finished' && watched.tentativeFinishedSince) {
+    console.log(`[supervisor] "${watched.name}" back to "${currentStatus}" — canceling tentative finish`);
+    resetTentativeCompletion(watched);
+  }
+
+  if (currentStatus !== watched.lastStatus) {
+    const prevStatus = watched.lastStatus;
+    watched.lastStatus = currentStatus;
+    console.log(`[supervisor] "${watched.name}" ${prevStatus} → ${currentStatus}`);
+
+    await handleStatusChange(watched, currentStatus, now);
+    if (!watchedAgents.has(watched.surfaceId)) {
+      return;
+    }
+  }
+
+  if ((currentStatus === 'running' || currentStatus === 'waiting') && !watched.completionReported) {
+    await checkStuck(watched, transcriptStatus, now);
+    if (!watchedAgents.has(watched.surfaceId)) {
+      return;
+    }
+  }
+
+  scheduleNextAgentPoll(watched, currentStatus, runtimeAgent?.status ?? null, now);
 }
 
 // ── Status Resolution ──
@@ -289,13 +418,93 @@ function resolveStatus(
     return 'finished';
   }
 
-  const s = agent.status;
-  if (s === 'running') return 'running';
-  if (s === 'failed' || s === 'blocked') return 'failed';
-  if (s === 'reviewing') return 'finished';
-  if (s === 'waiting') return 'waiting';
-  if (s === 'idle') return 'finished';
-  return s;
+  const status = agent.status;
+  if (status === 'running') return 'running';
+  if (status === 'failed' || status === 'blocked') return 'failed';
+  if (status === 'reviewing') return 'finished';
+  if (status === 'waiting') return 'waiting';
+  if (status === 'idle') return 'finished';
+  return status;
+}
+
+// ── Completion Grace ──
+
+async function confirmFinishedAgent(
+  watched: WatchedAgent,
+  transcriptStatus: TranscriptBatchStatus,
+  now: number,
+): Promise<boolean> {
+  if (!callbacks) return false;
+
+  if (!watched.tentativeFinishedSince) {
+    watched.tentativeFinishedSince = now;
+    watched.tentativeTranscriptSignature = transcriptStatus.signature;
+
+    if (transcriptStatus.signature) {
+      watched.tentativeTranscriptLength = watched.lastTranscriptLength;
+      watched.tentativeTranscriptEntryId = watched.lastTranscriptEntryId;
+    } else {
+      try {
+        const entries = await callbacks.fetchTranscript(watched.surfaceId, TRANSCRIPT_ACTIVITY_WINDOW);
+        watched.tentativeTranscriptLength = measureTranscript(entries);
+        watched.tentativeTranscriptEntryId = entries[entries.length - 1]?.id ?? null;
+        applyTranscriptStatusSnapshot(watched, transcriptStatus);
+      } catch {
+        watched.tentativeTranscriptLength = watched.lastTranscriptLength;
+        watched.tentativeTranscriptEntryId = watched.lastTranscriptEntryId;
+      }
+    }
+
+    console.log(
+      `[supervisor] "${watched.name}" tentatively finished — `
+      + `confirming over ${COMPLETION_CONFIRM_MS / 1000}s`,
+    );
+    return false;
+  }
+
+  const elapsed = now - watched.tentativeFinishedSince;
+  if (elapsed < COMPLETION_CONFIRM_MS) {
+    return false;
+  }
+
+  if (transcriptStatus.signature && watched.tentativeTranscriptSignature) {
+    if (transcriptStatus.signature !== watched.tentativeTranscriptSignature) {
+      resetTentativeCompletion(watched);
+      await refreshTranscriptActivityIfNeeded(watched, transcriptStatus, now);
+      console.log(`[supervisor] "${watched.name}" transcript grew during grace — still active`);
+      return false;
+    }
+  } else {
+    try {
+      const entries = await callbacks.fetchTranscript(watched.surfaceId, TRANSCRIPT_ACTIVITY_WINDOW);
+      const currentLength = measureTranscript(entries);
+      const currentEntryId = entries[entries.length - 1]?.id ?? null;
+
+      if (
+        currentLength !== watched.tentativeTranscriptLength
+        || currentEntryId !== watched.tentativeTranscriptEntryId
+      ) {
+        resetTentativeCompletion(watched);
+        recordTranscriptActivity(watched, entries, now);
+        applyTranscriptStatusSnapshot(watched, transcriptStatus);
+        console.log(`[supervisor] "${watched.name}" transcript grew during grace — still active`);
+        return false;
+      }
+    } catch {
+      // Proceed with confirmation if the fetch fails.
+    }
+  }
+
+  resetTentativeCompletion(watched);
+  console.log(`[supervisor] "${watched.name}" completion confirmed after grace period`);
+  return true;
+}
+
+function resetTentativeCompletion(watched: WatchedAgent): void {
+  watched.tentativeFinishedSince = null;
+  watched.tentativeTranscriptLength = 0;
+  watched.tentativeTranscriptEntryId = null;
+  watched.tentativeTranscriptSignature = null;
 }
 
 // ── Event Handlers ──
@@ -320,13 +529,11 @@ async function handleStatusChange(
     });
     callbacks.onAgentCompletion?.(watched.surfaceId, 'completed');
 
-    // Schedule cleanup
     setTimeout(() => unregisterWatchedAgent(watched.surfaceId), COMPLETION_CLEANUP_MS);
   }
 
   if (status === 'failed') {
     if (watched.retryCount < MAX_RETRIES) {
-      // Auto-retry
       watched.retryCount += 1;
       console.log(`[supervisor] Auto-retrying "${watched.name}" (attempt ${watched.retryCount})`);
 
@@ -344,8 +551,9 @@ async function handleStatusChange(
           `${watched.name} (retry ${watched.retryCount})`,
         );
         if (newSurfaceId) {
-          // Transfer watch to new agent
           watchedAgents.delete(watched.surfaceId);
+          transcriptSourceCache.delete(watched.surfaceId);
+
           registerWatchedAgent(newSurfaceId, watched.repoPath, watched.name, watched.prompt);
           const newWatched = watchedAgents.get(newSurfaceId);
           if (newWatched) {
@@ -357,7 +565,6 @@ async function handleStatusChange(
         console.error(`[supervisor] Retry failed for "${watched.name}":`, err);
       }
     } else {
-      // Exhausted retries — escalate
       watched.completionReported = true;
       callbacks.broadcastAgentUpdate({
         surfaceId: watched.surfaceId,
@@ -368,14 +575,15 @@ async function handleStatusChange(
       });
       callbacks.onAgentCompletion?.(watched.surfaceId, 'failed');
 
-      // Read transcript for the escalation
       let transcriptSummary = '';
       try {
         const entries = await callbacks.fetchTranscript(watched.surfaceId, 10);
         transcriptSummary = entries
-          .map((e) => `[${e.timestampLabel ?? '?'}] ${e.role}: ${truncate(e.text, 200)}`)
+          .map((entry) => `[${entry.timestampLabel ?? '?'}] ${entry.role}: ${truncate(entry.text, 200)}`)
           .join('\n');
-      } catch { /* best effort */ }
+      } catch {
+        // Best effort.
+      }
 
       callbacks.queueOrchestratorEscalation(
         watched.repoPath,
@@ -407,29 +615,25 @@ async function handleStatusChange(
 
 // ── Stuck Detection ──
 
-async function checkStuck(watched: WatchedAgent, now: number): Promise<void> {
+async function checkStuck(
+  watched: WatchedAgent,
+  transcriptStatus: TranscriptBatchStatus,
+  now: number,
+): Promise<void> {
   if (!callbacks) return;
 
-  // Grace period after registration before we consider the agent stuck
   if (now - watched.registeredAt < 30_000) return;
 
-  // Check transcript for new content
-  try {
-    const entries = await callbacks.fetchTranscript(watched.surfaceId, TRANSCRIPT_ACTIVITY_WINDOW);
-    if (recordTranscriptActivity(watched, entries, now)) {
-      return; // Activity detected — not stuck
-    }
-  } catch {
-    return; // Transcript fetch failed — skip
+  if (await refreshTranscriptActivityIfNeeded(watched, transcriptStatus, now)) {
+    return;
   }
 
   const staleDuration = now - watched.lastActivityAt;
   if (staleDuration < STUCK_THRESHOLD_MS) return;
 
-  // Agent is stuck
   if (watched.steerCount < MAX_STEERS) {
     watched.steerCount += 1;
-    watched.lastActivityAt = now; // Reset timer after steer
+    watched.lastActivityAt = now;
     console.log(`[supervisor] Auto-steering stuck agent "${watched.name}" (steer ${watched.steerCount})`);
 
     callbacks.broadcastAgentUpdate({
@@ -449,7 +653,6 @@ async function checkStuck(watched: WatchedAgent, now: number): Promise<void> {
       console.error(`[supervisor] Steer failed for "${watched.name}":`, err);
     }
   } else {
-    // Exhausted steers — interrupt + relaunch or escalate
     watched.completionReported = true;
     console.log(`[supervisor] Agent "${watched.name}" stuck after ${watched.steerCount} steers — escalating`);
 
@@ -460,10 +663,11 @@ async function checkStuck(watched: WatchedAgent, now: number): Promise<void> {
       detail: `Agent "${watched.name}" stuck after ${watched.steerCount} steers — escalating`,
     });
 
-    // Interrupt the stuck agent
     try {
       await callbacks.interruptAgent(watched.surfaceId);
-    } catch { /* best effort */ }
+    } catch {
+      // Best effort.
+    }
 
     const duration = Math.round((now - watched.registeredAt) / 1000);
     callbacks.queueOrchestratorEscalation(
@@ -480,12 +684,36 @@ async function checkStuck(watched: WatchedAgent, now: number): Promise<void> {
   }
 }
 
+async function refreshTranscriptActivityIfNeeded(
+  watched: WatchedAgent,
+  transcriptStatus: TranscriptBatchStatus,
+  now: number,
+): Promise<boolean> {
+  if (!callbacks) return false;
+
+  if (
+    transcriptStatus.signature
+    && transcriptStatus.signature === watched.lastTranscriptSignature
+  ) {
+    watched.lastTranscriptMtimeMs = transcriptStatus.mtimeMs;
+    return false;
+  }
+
+  try {
+    const entries = await callbacks.fetchTranscript(watched.surfaceId, TRANSCRIPT_ACTIVITY_WINDOW);
+    const changed = recordTranscriptActivity(watched, entries, now);
+    applyTranscriptStatusSnapshot(watched, transcriptStatus);
+    return changed;
+  } catch {
+    return false;
+  }
+}
+
 // ── All-Done Check ──
 
 function checkAllDone(): void {
   if (!callbacks) return;
 
-  // Group by repoPath
   const byRepo = new Map<string, WatchedAgent[]>();
   for (const agent of watchedAgents.values()) {
     const list = byRepo.get(agent.repoPath) ?? [];
@@ -494,24 +722,24 @@ function checkAllDone(): void {
   }
 
   for (const [repoPath, agents] of byRepo) {
-    // All agents done and not yet batch-reported?
-    const allDone = agents.every((a) => a.completionReported);
-    const anyUnreported = agents.some((a) => !a.batchReported);
-    if (!allDone || !anyUnreported) continue;
-    if (agents.length === 0) continue;
+    const allDone = agents.every((agent) => agent.completionReported);
+    const anyUnreported = agents.some((agent) => !agent.batchReported);
+    if (!allDone || !anyUnreported || agents.length === 0) continue;
 
-    // Mark all as batch-reported
-    for (const a of agents) a.batchReported = true;
+    for (const agent of agents) {
+      agent.batchReported = true;
+    }
 
-    // Build summary
-    const lines = agents.map((a) => {
-      const duration = Math.round((Date.now() - a.registeredAt) / 1000);
-      const label = a.lastStatus === 'failed' || a.lastStatus === 'interrupted' ? 'FAILED' : 'COMPLETED';
-      return `- "${a.name}" (${a.surfaceId}): ${label} (${formatDuration(duration)})`;
+    const lines = agents.map((agent) => {
+      const duration = Math.round((Date.now() - agent.registeredAt) / 1000);
+      const label = agent.lastStatus === 'failed' || agent.lastStatus === 'interrupted'
+        ? 'FAILED'
+        : 'COMPLETED';
+      return `- "${agent.name}" (${agent.surfaceId}): ${label} (${formatDuration(duration)})`;
     });
 
-    const allSucceeded = agents.every((a) => a.lastStatus === 'finished');
-    const suffix = allSucceeded
+    const summary = buildFleetStatusSummaries(repoPath)[0];
+    const suffix = agents.every((agent) => agent.lastStatus === 'finished')
       ? 'All agents completed successfully. Summarize the results and report to the user.'
       : 'Some agents failed. Review the results and report to the user.';
 
@@ -519,26 +747,243 @@ function checkAllDone(): void {
       repoPath,
       [
         `[SUPERVISOR] All ${agents.length} agents finished.`,
+        summary
+          ? `Fleet summary: ${summary.completedAgents} completed, ${summary.failedAgents} failed, ${summary.pendingAgents} pending.`
+          : '',
         ...lines,
         '',
         suffix,
-      ].join('\n'),
+      ].filter(Boolean).join('\n'),
     );
   }
+}
+
+// ── Fleet Summary ──
+
+function buildFleetStatusSummaries(repoPath?: string): SupervisorFleetStatusSummary[] {
+  const byRepo = new Map<string, WatchedAgent[]>();
+
+  for (const agent of watchedAgents.values()) {
+    if (repoPath && agent.repoPath !== repoPath) continue;
+    const list = byRepo.get(agent.repoPath) ?? [];
+    list.push(agent);
+    byRepo.set(agent.repoPath, list);
+  }
+
+  return [...byRepo.entries()].map(([currentRepoPath, agents]) => {
+    const activeAgents = agents.filter((agent) => (
+      agent.lastStatus === 'running'
+      || agent.lastStatus === 'waiting'
+      || agent.lastStatus === 'launching'
+    )).length;
+    const idleAgents = agents.filter((agent) => isIdleAgent(agent)).length;
+    const completedAgents = agents.filter((agent) => (
+      agent.completionReported && agent.lastStatus === 'finished'
+    )).length;
+    const failedAgents = agents.filter((agent) => (
+      agent.completionReported
+      && (agent.lastStatus === 'failed' || agent.lastStatus === 'interrupted')
+    )).length;
+    const pendingAgents = Math.max(0, agents.length - completedAgents - failedAgents);
+    const nextPollAt = agents.reduce<number | null>((next, agent) => {
+      if (next === null) return agent.nextPollAt;
+      return Math.min(next, agent.nextPollAt);
+    }, null);
+    const lastUpdatedAt = agents.reduce((latest, agent) => (
+      Math.max(latest, agent.lastPolledAt ?? agent.registeredAt)
+    ), 0);
+
+    return {
+      repoPath: currentRepoPath,
+      totalAgents: agents.length,
+      activeAgents,
+      idleAgents,
+      completedAgents,
+      failedAgents,
+      pendingAgents,
+      allDone: agents.every((agent) => agent.completionReported),
+      allSucceeded: agents.every((agent) => agent.lastStatus === 'finished'),
+      nextPollAt,
+      lastUpdatedAt,
+    };
+  });
+}
+
+function isIdleAgent(agent: WatchedAgent): boolean {
+  if (agent.completionReported) return false;
+  if (agent.tentativeFinishedSince) return true;
+  return agent.lastRuntimeStatus === 'idle' || agent.lastRuntimeStatus === 'reviewing';
+}
+
+// ── Transcript Status Batching ──
+
+async function readTranscriptBatchStatuses(
+  agents: WatchedAgent[],
+): Promise<Map<string, TranscriptBatchStatus>> {
+  const resolved = await Promise.all(
+    agents.map(async (agent) => [
+      agent.surfaceId,
+      await resolveTranscriptSourcePaths(agent.surfaceId),
+    ] as const),
+  );
+
+  const statuses = await Promise.all(
+    resolved.map(async ([surfaceId, paths]) => [
+      surfaceId,
+      await readTranscriptBatchStatus(paths),
+    ] as const),
+  );
+
+  return new Map(statuses);
+}
+
+async function resolveTranscriptSourcePaths(surfaceId: string): Promise<string[]> {
+  const cached = transcriptSourceCache.get(surfaceId);
+  const now = Date.now();
+  if (cached) {
+    const ttl = cached.paths.length > 0
+      ? TRANSCRIPT_SOURCE_CACHE_TTL_MS
+      : MISSING_TRANSCRIPT_SOURCE_CACHE_TTL_MS;
+    if (now - cached.resolvedAt < ttl) {
+      return cached.paths;
+    }
+  }
+
+  const paths = await resolveTranscriptSourcePathsFresh(surfaceId);
+  transcriptSourceCache.set(surfaceId, { paths, resolvedAt: now });
+  return paths;
+}
+
+async function resolveTranscriptSourcePathsFresh(surfaceId: string): Promise<string[]> {
+  if (surfaceId.startsWith('codex-owned:')) {
+    const sources = await getOwnedCodexTelemetrySources(surfaceId).catch(() => null);
+    return dedupeStrings(sources?.stdoutPaths ?? []);
+  }
+
+  if (
+    surfaceId.startsWith('codex:')
+    || surfaceId.startsWith('codex-discovered:')
+    || surfaceId.startsWith('codex-live:')
+  ) {
+    const rolloutPath = await getCodexRolloutPath(surfaceId).catch(() => null);
+    return rolloutPath ? [rolloutPath] : [];
+  }
+
+  if (surfaceId.startsWith('claude-code:')) {
+    const transcriptPath = await findClaudeTranscriptPath(
+      surfaceId.replace(/^claude-code:/, ''),
+    );
+    return transcriptPath ? [transcriptPath] : [];
+  }
+
+  return [];
+}
+
+async function findClaudeTranscriptPath(sessionId: string): Promise<string | null> {
+  try {
+    const projectDirs = await readdir(CLAUDE_PROJECTS_DIR);
+    for (const projectDirName of projectDirs) {
+      const candidate = path.join(CLAUDE_PROJECTS_DIR, projectDirName, `${sessionId}.jsonl`);
+      try {
+        await access(candidate);
+        return candidate;
+      } catch {
+        continue;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+async function readTranscriptBatchStatus(paths: string[]): Promise<TranscriptBatchStatus> {
+  if (paths.length === 0) {
+    return emptyTranscriptBatchStatus();
+  }
+
+  const fileStats = await Promise.all(
+    paths.map(async (filePath) => ({
+      filePath,
+      fileStat: await stat(filePath).catch(() => null),
+    })),
+  );
+
+  const existing: Array<{ filePath: string; fileStat: NonNullable<(typeof fileStats)[number]['fileStat']> }> = [];
+  for (const entry of fileStats) {
+    if (entry.fileStat) {
+      existing.push({
+        filePath: entry.filePath,
+        fileStat: entry.fileStat,
+      });
+    }
+  }
+
+  if (existing.length === 0) {
+    return {
+      signature: null,
+      mtimeMs: null,
+      totalSize: 0,
+      pathCount: paths.length,
+      exists: false,
+    };
+  }
+
+  const newest = existing.reduce((latest, entry) => {
+    if (!latest) return entry;
+    if (entry.fileStat.mtimeMs > latest.fileStat.mtimeMs) return entry;
+    if (entry.fileStat.mtimeMs === latest.fileStat.mtimeMs && entry.fileStat.size > latest.fileStat.size) {
+      return entry;
+    }
+    return latest;
+  }, existing[0]);
+  const totalSize = existing.reduce((sum, entry) => sum + entry.fileStat.size, 0);
+  const roundedMtimeMs = Math.trunc(newest.fileStat.mtimeMs);
+
+  return {
+    signature: `${existing.length}:${roundedMtimeMs}:${totalSize}:${newest.filePath}`,
+    mtimeMs: newest.fileStat.mtimeMs,
+    totalSize,
+    pathCount: existing.length,
+    exists: true,
+  };
+}
+
+function emptyTranscriptBatchStatus(): TranscriptBatchStatus {
+  return {
+    signature: null,
+    mtimeMs: null,
+    totalSize: 0,
+    pathCount: 0,
+    exists: false,
+  };
+}
+
+function applyTranscriptStatusSnapshot(
+  watched: WatchedAgent,
+  transcriptStatus: TranscriptBatchStatus,
+): void {
+  watched.lastTranscriptSignature = transcriptStatus.signature;
+  watched.lastTranscriptMtimeMs = transcriptStatus.mtimeMs;
+}
+
+function dedupeStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
 }
 
 // ── Helpers ──
 
 function formatDuration(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
 }
 
 function truncate(text: string, max: number): string {
   if (!text) return '';
-  return text.length > max ? text.slice(0, max) + '...' : text;
+  return text.length > max ? `${text.slice(0, max)}...` : text;
 }
 
 function measureTranscript(entries: TranscriptEntry[]): number {
@@ -571,7 +1016,10 @@ function recordTranscriptActivity(
 ): boolean {
   const nextLength = measureTranscript(entries);
   const nextEntryId = entries[entries.length - 1]?.id ?? null;
-  const changed = nextLength !== watched.lastTranscriptLength || nextEntryId !== watched.lastTranscriptEntryId;
+  const changed = (
+    nextLength !== watched.lastTranscriptLength
+    || nextEntryId !== watched.lastTranscriptEntryId
+  );
 
   if (!changed) {
     return false;
