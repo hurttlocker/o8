@@ -1009,105 +1009,62 @@ async function buildBootstrapEvents(stream: RealtimeStreamKey) {
 }
 
 function fingerprintRuntimeSnapshot(fleet: Awaited<ReturnType<typeof getCommandCenterSnapshotWithOptions>>['fleet']) {
-  return JSON.stringify({
-    mode: fleet.meta.mode,
-    gatewayFreshness: fleet.meta.gatewayFreshness,
-    observablePending: fleet.meta.observablePending,
-    primarySessionKey: fleet.meta.primarySessionKey,
-    agents: fleet.agents.map((agent) => ({
-      id: agent.id,
-      status: agent.status,
-      task: agent.currentTask,
-      approval: agent.approvalStatus,
-      lastEventAt: agent.lastEventAt,
-      ctx: Math.round(agent.context.usedPercent ?? 0),
-      alerts: agent.alerts,
-      availability: agent.runtimeSurface?.lifecycle?.availability,
-      lastOutcome: agent.runtimeSurface?.lifecycle?.lastOutcome,
-      activity: agent.activity?.headline,
-      browser: agent.browserSurface?.lastAction,
-    })),
-  });
+  // Lightweight string concat instead of JSON.stringify on nested objects.
+  // Same change-detection semantics — all discriminating fields are represented.
+  const m = fleet.meta;
+  let fp = `${m.mode}\x01${m.gatewayFreshness ?? ''}\x01${m.observablePending ? 1 : 0}\x01${m.primarySessionKey ?? ''}`;
+  for (const a of fleet.agents) {
+    fp += `\x02${a.id}\x01${a.status}\x01${a.currentTask}\x01${a.approvalStatus}\x01${a.lastEventAt}\x01${Math.round(a.context.usedPercent ?? 0)}\x01${a.alerts}\x01${a.runtimeSurface?.lifecycle?.availability ?? ''}\x01${a.runtimeSurface?.lifecycle?.lastOutcome ?? ''}\x01${a.activity?.headline ?? ''}\x01${a.browserSurface?.lastAction ?? ''}`;
+  }
+  return fp;
 }
 
 function fingerprintReviewSnapshot(review: Awaited<ReturnType<typeof getCommandCenterSnapshotWithOptions>>['review']) {
   if (!review) return 'no-review';
-  return JSON.stringify({
-    repoSlug: review.repoSlug,
-    branch: review.branch,
-    dirty: review.dirty,
-    diffStat: review.diffStat,
-    issues: review.activeIssues.map((issue) => issue.number),
-    pulls: review.pullRequests.map((pr) => pr.number),
-    changedFiles: review.changedFiles.map((file) => [file.path, file.status, file.additions ?? 0, file.deletions ?? 0]),
-  });
+  let fp = `${review.repoSlug}\x01${review.branch}\x01${review.dirty ? 1 : 0}\x01${review.diffStat}`;
+  for (const issue of review.activeIssues) fp += `\x02i${issue.number}`;
+  for (const pr of review.pullRequests) fp += `\x02p${pr.number}`;
+  for (const f of review.changedFiles) fp += `\x02${f.path}\x01${f.status}\x01${f.additions ?? 0}\x01${f.deletions ?? 0}`;
+  return fp;
 }
 
 function fingerprintBrowserSnapshot(
   browserInventory: Awaited<ReturnType<typeof getCommandCenterSnapshotWithOptions>>['browserInventory'],
   attachedBrowser: ReturnType<typeof getAttachedBrowserSummary>,
 ) {
-  return JSON.stringify(
-    {
-      surfaces: browserInventory.surfaces.map((surface) => ({
-        id: surface.id,
-        provider: surface.provider,
-        status: surface.status,
-        url: surface.url,
-        title: surface.title,
-        lastAction: surface.lastAction,
-        lastActionAt: surface.lastActionAt ?? 0,
-      })),
-      attachedBrowser: attachedBrowser
-        ? {
-            provider: attachedBrowser.provider,
-            surfaceId: attachedBrowser.surface.id,
-            pageIds: attachedBrowser.pages.map((page) => page.id),
-            pageTitles: attachedBrowser.pages.map((page) => page.title ?? page.url ?? ''),
-            attachedAt: attachedBrowser.attachedAt,
-          }
-        : null,
-    },
-  );
+  let fp = '';
+  for (const s of browserInventory.surfaces) {
+    fp += `\x02${s.id}\x01${s.provider}\x01${s.status}\x01${s.url}\x01${s.title}\x01${s.lastAction}\x01${s.lastActionAt ?? 0}`;
+  }
+  if (attachedBrowser) {
+    fp += `\x03${attachedBrowser.provider}\x01${attachedBrowser.surface.id}\x01${attachedBrowser.attachedAt}`;
+    for (const page of attachedBrowser.pages) fp += `\x02${page.id}\x01${page.title ?? page.url ?? ''}`;
+  }
+  return fp;
 }
 
 function fingerprintInboxSnapshot(inbox: Awaited<ReturnType<typeof getMobileInboxSnapshot>>) {
-  return JSON.stringify({
-    summary: inbox.summary,
-    sessions: inbox.sessions.map((session) => ({
-      id: session.id,
-      sessionKey: session.sessionKey,
-      status: session.status,
-      currentTask: session.currentTask,
-      approvalStatus: session.approvalStatus,
-      lastEventAt: session.lastEventAt,
-      branch: session.branch,
-      alerts: session.alerts,
-    })),
-    items: inbox.items.map((item) => ({
-      id: item.id,
-      kind: item.kind,
-      severity: item.severity,
-      detail: item.detail,
-      title: item.title,
-      sessionKey: item.sessionKey,
-    })),
-    review: inbox.review
-      ? {
-          repoSlug: inbox.review.repoSlug,
-          branch: inbox.review.branch,
-          diffStat: inbox.review.diffStat,
-          files: inbox.review.changedFiles.map((file) => [file.path, file.status]),
-        }
-      : null,
-  });
+  // Encode inbox.summary as a flat key-value string (it's a small typed object).
+  const sum = inbox.summary;
+  let fp = `${sum.activeRuns}\x01${sum.approvals}\x01${sum.alerts}\x01${sum.reviewItems}`;
+  for (const s of inbox.sessions) {
+    fp += `\x02${s.id}\x01${s.sessionKey}\x01${s.status}\x01${s.currentTask}\x01${s.approvalStatus}\x01${s.lastEventAt}\x01${s.branch}\x01${s.alerts}`;
+  }
+  for (const item of inbox.items) {
+    fp += `\x03${item.id}\x01${item.kind}\x01${item.severity}\x01${item.detail}\x01${item.title}\x01${item.sessionKey}`;
+  }
+  if (inbox.review) {
+    const r = inbox.review;
+    fp += `\x04${r.repoSlug}\x01${r.branch}\x01${r.diffStat}`;
+    for (const f of r.changedFiles) fp += `\x02${f.path}\x01${f.status}`;
+  }
+  return fp;
 }
 
 function fingerprintHistory(sessionKey: string, entries: Awaited<ReturnType<typeof getSessionTranscript>>) {
-  return JSON.stringify({
-    sessionKey,
-    entries: entries.map((entry) => [entry.id, entry.timestamp ?? 0, entry.role, entry.text.slice(0, 80)]),
-  });
+  let fp = sessionKey;
+  for (const e of entries) fp += `\x02${e.id}\x01${e.timestamp ?? 0}\x01${e.role}\x01${e.text.slice(0, 80)}`;
+  return fp;
 }
 
 function deriveRuntimeHealth(fleet: Awaited<ReturnType<typeof getCommandCenterSnapshotWithOptions>>['fleet']): RealtimeHealthDescriptor {
@@ -1301,24 +1258,11 @@ function startBrowserDiscoveryRealtimeLoop() {
 
 function attachedBrowserFingerprint(summary: ReturnType<typeof getAttachedBrowserSummary>) {
   if (!summary) return 'no-attached-browser';
-  return JSON.stringify({
-    provider: summary.provider,
-    surfaceId: summary.surface.id,
-    surfaceStatus: summary.surface.status,
-    surfaceUrl: summary.surface.url,
-    surfaceTitle: summary.surface.title,
-    browserName: summary.browserName,
-    browserVersion: summary.browserVersion,
-    attachedAt: summary.attachedAt,
-    note: summary.note,
-    pages: summary.pages.map((page) => ({
-      id: page.id,
-      title: page.title,
-      url: page.url,
-      status: page.status,
-      type: page.type,
-    })),
-  });
+  let fp = `${summary.provider}\x01${summary.surface.id}\x01${summary.surface.status}\x01${summary.surface.url}\x01${summary.surface.title}\x01${summary.browserName}\x01${summary.browserVersion}\x01${summary.attachedAt}\x01${summary.note ?? ''}`;
+  for (const page of summary.pages) {
+    fp += `\x02${page.id}\x01${page.title}\x01${page.url}\x01${page.status}\x01${page.type}`;
+  }
+  return fp;
 }
 
 function startAttachedBrowserRefreshLoop() {
