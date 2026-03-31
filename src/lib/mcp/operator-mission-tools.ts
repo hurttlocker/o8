@@ -543,6 +543,56 @@ export async function submitPacketReview(input: SubmitReviewInput) {
   };
 }
 
+async function directBranchMerge(
+  repoPath: string,
+  branch: string,
+  commitMessage?: string,
+): Promise<{ ok: boolean; note: string; approvalId?: string }> {
+  try {
+    // Find the worktree for this branch so we can commit any uncommitted work
+    const worktrees = (await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd: repoPath })).stdout;
+    let worktreePath: string | null = null;
+    const entries = worktrees.split('\n\n');
+    for (const entry of entries) {
+      if (entry.includes(`branch refs/heads/${branch}`)) {
+        const pathLine = entry.split('\n').find((l) => l.startsWith('worktree '));
+        if (pathLine) worktreePath = pathLine.replace('worktree ', '').trim();
+      }
+    }
+
+    if (worktreePath && worktreePath !== repoPath) {
+      if (commitMessage) {
+        try {
+          await execFileAsync('git', ['add', '-A'], { cwd: worktreePath });
+          await execFileAsync('git', ['commit', '-m', commitMessage, '--allow-empty'], { cwd: worktreePath });
+        } catch { /* nothing to commit */ }
+      }
+    }
+
+    // Merge the branch into the base branch
+    const savedBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoPath })).stdout.trim();
+    await execFileAsync('git', ['checkout', 'main'], { cwd: repoPath });
+    try {
+      const mergeMsg = commitMessage
+        ? `Merge lane: ${commitMessage}`
+        : `Merge branch '${branch}'`;
+      await execFileAsync('git', ['merge', '--no-ff', '-m', mergeMsg, branch], { cwd: repoPath });
+    } catch (mergeErr) {
+      try { await execFileAsync('git', ['merge', '--abort'], { cwd: repoPath }); } catch { /* already clean */ }
+      await execFileAsync('git', ['checkout', savedBranch], { cwd: repoPath });
+      const message = mergeErr instanceof Error ? mergeErr.message : 'Merge failed.';
+      return { ok: false, note: `Direct merge failed: ${message}` };
+    }
+    await execFileAsync('git', ['checkout', savedBranch], { cwd: repoPath });
+
+    log(`Direct branch merge succeeded: ${branch} → main`);
+    return { ok: true, note: `Merged ${branch} into main (direct fallback).` };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Direct merge failed.';
+    return { ok: false, note: message };
+  }
+}
+
 export async function approveAndMergePacket(input: ApproveAndMergeInput) {
   const state = currentMissionState();
   const packet = state.packets.find((candidate) => candidate.id === input.packetId);
@@ -559,17 +609,28 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
 
   const lane = findLaneByPacket(packet.id);
   const laneId = lane?.id ?? packet.lane?.laneId ?? null;
-  if (!laneId) {
-    throw new Error(`Packet ${packet.id} has no lane binding.`);
-  }
 
-  const result = await dispatchLaneCommand({
-    verb: 'merge',
-    laneId,
-    commitMessage: input.commitMessage?.trim() || undefined,
-    reviewSummary: mapReviewSummary(packet),
-    actor: 'orchestrator',
-  });
+  let result: { ok: boolean; note: string; approvalId?: string };
+
+  if (laneId) {
+    result = await dispatchLaneCommand({
+      verb: 'merge',
+      laneId,
+      commitMessage: input.commitMessage?.trim() || undefined,
+      reviewSummary: mapReviewSummary(packet),
+      actor: 'orchestrator',
+    });
+  } else {
+    // Lane binding lost (e.g. MCP restart clobbered the registry). Fall back to
+    // direct worktree merge using the packet's branch target.
+    const branchTarget = packet.branchTarget;
+    const repoPath = packet.workspaceTargetPath;
+    if (!branchTarget || !repoPath) {
+      throw new Error(`Packet ${packet.id} has no lane binding and no branch target for fallback merge.`);
+    }
+    log(`Lane binding lost for packet ${packet.id}, falling back to direct branch merge: ${branchTarget}`);
+    result = await directBranchMerge(repoPath, branchTarget, input.commitMessage?.trim());
+  }
 
   // After a successful merge, mark the packet as completed+released so downstream
   // packets in the DAG can unblock and dispatch automatically.
