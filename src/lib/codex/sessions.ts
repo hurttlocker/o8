@@ -10,6 +10,7 @@ import type {
   RuntimeSurfaceSummary,
   SquadSummary,
 } from '@/lib/fleet/types';
+import { truncateText } from '@/lib/util/text';
 
 const execFileAsync = promisify(execFile);
 const CODEX_HOME = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
@@ -92,11 +93,7 @@ export type RuntimeTailEntry = {
 };
 
 function compactText(value: string | null | undefined, max = 120) {
-  const collapsed = (value ?? '').replace(/\s+/g, ' ').trim();
-  if (!collapsed) {
-    return '';
-  }
-  return collapsed.length > max ? `${collapsed.slice(0, max - 1).trimEnd()}…` : collapsed;
+  return truncateText(value, max, { normalizeWhitespace: true });
 }
 
 function compactTitle(value: string | null | undefined, max = 72) {

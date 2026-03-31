@@ -150,10 +150,6 @@ async function resolvePacketTelemetry(
   }
 }
 
-export async function aggregatePacketCost(packet: OrchestratorPacket): Promise<PacketCostSummary> {
-  return resolvePacketTelemetry(packet, new Map<string, CachedTelemetrySummary>());
-}
-
 export async function aggregateMissionCost(state: OrchestratorMissionState): Promise<MissionCostSummary> {
   const cache = new Map<string, CachedTelemetrySummary>();
   const packetCosts = await Promise.all(state.packets.map((packet) => resolvePacketTelemetry(packet, cache)));
