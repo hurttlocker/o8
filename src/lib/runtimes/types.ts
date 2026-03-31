@@ -10,6 +10,7 @@ import type { CompactionEvent } from '@/lib/runtimes/compaction-detector';
  * Adding a new agent = one file implementing AgentRuntime.
  */
 
+export type RuntimeKind = 'acp' | 'codex' | 'claude-code' | 'custom';
 export type RuntimeId = 'codex' | 'claude-code' | (string & {});
 
 // ── Capabilities ──

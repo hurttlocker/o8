@@ -11,7 +11,7 @@ function dedupeIds(ids: string[]) {
   return ids.filter((id, index) => id.trim() && ids.indexOf(id) === index);
 }
 
-function hasLaneBinding(packet: OrchestratorPacket) {
+export function hasLaneBinding(packet: OrchestratorPacket) {
   return Boolean(
     packet.lane?.laneId
     || packet.lane?.sessionKey
@@ -89,10 +89,6 @@ export function getDispatchableWave(packets: OrchestratorPacket[]): Orchestrator
       && !hasLaneBinding(packet)
       && blockedBy.length === 0;
   });
-}
-
-export function getDagDepth(packets: OrchestratorPacket[]): number {
-  return buildDependencyGraph(packets).reduce((maxDepth, node) => Math.max(maxDepth, node.wave), 0);
 }
 
 export function buildDagMetadata(packets: OrchestratorPacket[]): OrchestratorDagMetadata {

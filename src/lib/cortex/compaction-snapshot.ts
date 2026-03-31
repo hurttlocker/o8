@@ -7,6 +7,7 @@ import {
   type CompactionEvent,
   type JsonlEntry,
 } from '@/lib/runtimes/compaction-detector';
+import { truncateText } from '@/lib/util/text';
 
 const CLAUDE_PROJECTS_DIR = path.join(homedir(), '.claude', 'projects');
 const SNAPSHOT_STORE_DIR = path.join(homedir(), '.cortex-ide');
@@ -61,18 +62,6 @@ function queueSnapshotStoreOperation<T>(operation: () => Promise<T>): Promise<T>
   const next = snapshotStoreQueue.then(operation, operation);
   snapshotStoreQueue = next.then(() => undefined, () => undefined);
   return next;
-}
-
-function normalizeWhitespace(value: string | undefined): string {
-  return (value ?? '').replace(/\s+/g, ' ').trim();
-}
-
-function truncateText(value: string | undefined, maxChars: number): string {
-  const normalized = normalizeWhitespace(value);
-  if (!normalized) return '';
-  return normalized.length > maxChars
-    ? `${normalized.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`
-    : normalized;
 }
 
 function parseTimestamp(value: string | undefined): Date | undefined {
@@ -164,7 +153,7 @@ function collectTranscriptTail(entries: JsonlEntry[], boundaryIndex: number): Sn
     const entry = entries[index];
     if (entry?.type !== 'user' && entry?.type !== 'assistant') continue;
 
-    const text = truncateText(extractEntryText(entry), MAX_TRANSCRIPT_ENTRY_CHARS);
+    const text = truncateText(extractEntryText(entry), MAX_TRANSCRIPT_ENTRY_CHARS, { normalizeWhitespace: true });
     if (!text) continue;
 
     transcriptTail.push({
@@ -185,7 +174,7 @@ function resolveSummary(
   event: CompactionEvent,
   transcriptTail: SnapshotTranscriptEntry[],
 ): { summary: string; summarySource: SnapshotSummarySource } {
-  const compactSummary = truncateText(event.summary, MAX_SUMMARY_CHARS);
+  const compactSummary = truncateText(event.summary, MAX_SUMMARY_CHARS, { normalizeWhitespace: true });
   if (compactSummary) {
     return {
       summary: compactSummary,
@@ -197,7 +186,7 @@ function resolveSummary(
     const entry = entries[index];
     if (entry?.type !== 'assistant') continue;
 
-    const summary = truncateText(extractEntryText(entry), MAX_SUMMARY_CHARS);
+    const summary = truncateText(extractEntryText(entry), MAX_SUMMARY_CHARS, { normalizeWhitespace: true });
     if (summary) {
       return {
         summary,
@@ -211,6 +200,7 @@ function resolveSummary(
       summary: truncateText(
         transcriptTail.map((entry) => `${entry.role}: ${entry.text}`).join(' '),
         MAX_SUMMARY_CHARS,
+        { normalizeWhitespace: true },
       ),
       summarySource: 'transcript-tail',
     };
