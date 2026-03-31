@@ -10,6 +10,7 @@ import type {
   ReviewWorktreeSummary,
   WorkflowReviewSnapshot,
 } from '@/lib/fleet/types';
+import { parseRecentCommits } from '@/lib/git/recent-commits';
 import type { MobileReviewFileDetail } from '@/lib/mobile/types';
 
 const execFileAsync = promisify(execFile);
@@ -609,7 +610,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
     tryRunInContext('git', ['diff', '--numstat', '--relative', '-M', 'HEAD']),
     tryRunInContext('git', ['ls-files', '--others', '--exclude-standard']),
     tryRunInContext('git', ['diff', '--stat=120', '--relative', 'HEAD']),
-    tryRunInContext('git', ['log', '--oneline', '-5']),
+    tryRunInContext('git', ['log', '--format=%H%x09%h%x09%s', '-8']),
     tryRunInContext('git', ['worktree', 'list', '--porcelain']),
     repoSlug
       ? tryRunInContext('gh', [
@@ -645,7 +646,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
   const localChangedFiles = await sortChangedFilesByTouchedAt(parsedFiles, repoRoot);
   _cachedChangedFiles = localChangedFiles;
   _cachedChangedFilesAt = Date.now();
-  const recentCommits = recentCommitsRaw ? recentCommitsRaw.split('\n').filter(Boolean) : [];
+  const recentCommits = recentCommitsRaw ? parseRecentCommits(recentCommitsRaw) : [];
   const worktrees = parseWorktrees(worktreesRaw, repoRoot);
 
   const branchPullRequests = parseJson<ReviewPullRequestSummary[]>(branchPrsRaw, []);
