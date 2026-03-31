@@ -4471,7 +4471,7 @@ function DashboardInner() {
             ref={(handle) => registerWorkspaceTerminalHandle(tileId, handle)}
             stateScope={tileId}
             defaultTab={tileId === 'tile-root' ? 'llm-chat' : 'terminal'}
-            autoCreateDefaultTab={workspaceScopeEntries.length > 0}
+            autoCreateDefaultTab={tileId === 'tile-root' || workspaceScopeEntries.length > 0}
             preferredRepo={tilePreferredRepo}
             splitCreated={content.kind === 'terminal' ? effectiveSplitCreated : false}
             availableRepos={workspaceScopeEntries}
