@@ -27,6 +27,7 @@ import {
   jsonlUsageTotal,
   type JsonlEntry,
 } from '@/lib/runtimes/compaction-detector';
+import { capturePreCompactionSnapshotFromEntries } from '@/lib/cortex/compaction-snapshot';
 import { parseSessionCost } from '@/lib/runtimes/cost-parser';
 import { tmuxSessionName } from '@/lib/terminal/tmux';
 import { spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
@@ -1004,6 +1005,10 @@ export const claudeCodeRuntime: AgentRuntime = {
     }
 
     const compactionEvents = detectCompactionEvents(parsedEntries);
+    for (const event of compactionEvents) {
+      await capturePreCompactionSnapshotFromEntries(sessionKey, event, parsedEntries);
+    }
+
     const skippedEntryIds = new Set(
       compactionEvents.flatMap((event) => [
         event.boundaryEntryId,
