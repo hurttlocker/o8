@@ -4,6 +4,8 @@ import type {
   WorkspaceOrchestrationPacketBadge,
 } from './types';
 
+export { normalizeRuntimeStatusToOrchestratorStatus } from './runtime-status';
+
 export interface OrchestratorDisplayTone {
   label: string;
   shortLabel: string;
@@ -33,19 +35,6 @@ export function orchestratorRuntimeTone(runtime?: OrchestratorRuntime | string |
     border: 'rgba(37, 99, 235, 0.2)',
     dot: '#2563eb',
   };
-}
-
-export function normalizeRuntimeStatusToOrchestratorStatus(status?: string | null): OrchestratorPacketStatus {
-  const normalized = status?.trim().toLowerCase() ?? '';
-  if (normalized === 'running' || normalized === 'working') return 'running';
-  if (normalized === 'reviewing') return 'awaiting_review';
-  if (normalized === 'blocked' || normalized === 'failed' || normalized === 'error') return 'blocked';
-  if (normalized === 'queued') return 'queued';
-  if (normalized === 'launching') return 'launching';
-  if (normalized === 'recovering') return 'recovering';
-  if (normalized === 'released') return 'released';
-  if (normalized === 'archived') return 'archived';
-  return 'idle';
 }
 
 export function orchestratorStatusTone(status?: OrchestratorPacketStatus | null): OrchestratorDisplayTone {
