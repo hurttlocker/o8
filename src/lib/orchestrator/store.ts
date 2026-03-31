@@ -362,19 +362,7 @@ export function reconcileOrchestratorMissionState(
           }
         : packet.lane?.laneId
           ? { ...packet.lane, laneId, sessionKey: domainLane?.sessionKey ?? packet.lane?.sessionKey ?? null }
-          : domainLane?.laneId
-            ? {
-                tileId: '',
-                tabId: '',
-                repoPath: packet.workspaceTargetPath ?? '',
-                runtime: packet.runtime,
-                laneId: domainLane.laneId,
-                sessionKey: domainLane.sessionKey ?? null,
-                lastHeartbeatAt: null,
-                lastEventAt: packet.lane?.lastEventAt ?? null,
-                lastEventLabel: packet.lane?.lastEventLabel ?? domainLane.status,
-              }
-            : null,
+          : null,
       lastEventAt: runtime?.lastEventAt ?? packet.lastEventAt ?? packet.lane?.lastHeartbeatAt ?? null,
       lastEventLabel: runtime?.currentTask ?? runtime?.workflowStageLabel ?? packet.lastEventLabel ?? packet.lane?.lastEventLabel ?? null,
       blockedReason: null,
