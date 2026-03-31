@@ -73,9 +73,22 @@ function loadFromDisk(): LaneStoreState {
 function persistToDisk() {
   try {
     ensureDir();
+    // Merge lanes from disk that another process may have created since our
+    // last load, so we never clobber cross-process writes.
+    try {
+      const disk = loadFromDisk();
+      for (const [id, lane] of Object.entries(disk.lanes)) {
+        if (!state.lanes[id]) {
+          state.lanes[id] = lane;
+        }
+      }
+    } catch { /* disk read failed — proceed with in-memory state */ }
+
+    state.updatedAt = nowIso();
     const tmp = `${STORE_PATH}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(state, null, 2), 'utf-8');
     fs.renameSync(tmp, STORE_PATH);
+    try { lastLoadedMtimeMs = fs.statSync(STORE_PATH).mtimeMs; } catch { /* noop */ }
   } catch (err) {
     console.error('[lane-registry] Failed to persist store:', err);
   }
