@@ -20,6 +20,7 @@ import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
 import { withOptionalAuth, type AuthContext } from '@/lib/auth/middleware';
 import { logUsage, getCurrentPeriodCost } from '@/lib/db/usage';
 import { getWorkspaceContext, buildSystemPrompt, buildUnscopedSystemPrompt } from '@/lib/llm/context';
+import { parseInlineMarkdownDataImages } from '@/lib/llm/inline-images';
 import { resolveRepoScopeFromHeaders } from '@/lib/llm/repo-scope';
 import { recallMemories, extractAndStoreFacts } from '@/lib/llm/memory';
 import { toolsForAnthropic, toolsForOpenAI, toolsForGoogle, executeTool, type ToolResult } from '@/lib/llm/tools';
@@ -103,24 +104,20 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
         messages: messages
           .filter(m => m.role !== 'system')
           .map(m => {
-            // Check for inline images (data URIs in markdown syntax)
-            const imgRegex = /!\[([^\]]*)\]\((data:([^;]+);base64,([^)]+))\)/g;
-            const contentParts: Record<string, unknown>[] = [];
-            let lastIdx = 0;
-            let match: RegExpExecArray | null;
-            while ((match = imgRegex.exec(m.content))) {
-              const textBefore = m.content.slice(lastIdx, match.index).trim();
-              if (textBefore) contentParts.push({ type: 'text', text: textBefore });
-              contentParts.push({
-                type: 'image',
-                source: { type: 'base64', media_type: match[3], data: match[4] },
-              });
-              lastIdx = match.index + match[0].length;
-            }
-            const remaining = m.content.slice(lastIdx).trim();
-            if (remaining) contentParts.push({ type: 'text', text: remaining });
-            // Only use multipart if images found
-            if (contentParts.length > 1 || contentParts.some(p => p.type === 'image')) {
+            const parsedContent = parseInlineMarkdownDataImages(m.content);
+            if (parsedContent.hasImages) {
+              const contentParts: Record<string, unknown>[] = parsedContent.parts.map((part) => (
+                part.type === 'text'
+                  ? { type: 'text', text: part.text }
+                  : {
+                      type: 'image',
+                      source: {
+                        type: 'base64',
+                        media_type: part.image.mimeType,
+                        data: part.image.base64Data,
+                      },
+                    }
+              ));
               return { role: m.role, content: contentParts };
             }
             return { role: m.role, content: m.content };
@@ -188,22 +185,16 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
         reasoning_effort: 'medium',
       } : {}),
       messages: messages.map(m => {
-        // Check for inline images (data URIs in markdown syntax)
-        const imgRegex = /!\[([^\]]*)\]\((data:([^;]+);base64,[^)]+)\)/g;
-        if (imgRegex.test(m.content)) {
-          imgRegex.lastIndex = 0;
-          const contentParts: Record<string, unknown>[] = [];
-          let lastIdx = 0;
-          let match: RegExpExecArray | null;
-          while ((match = imgRegex.exec(m.content))) {
-            const textBefore = m.content.slice(lastIdx, match.index).trim();
-            if (textBefore) contentParts.push({ type: 'text', text: textBefore });
-            contentParts.push({ type: 'image_url', image_url: { url: match[2] } });
-            lastIdx = match.index + match[0].length;
-          }
-          const remaining = m.content.slice(lastIdx).trim();
-          if (remaining) contentParts.push({ type: 'text', text: remaining });
-          return { role: m.role, content: contentParts };
+        const parsedContent = parseInlineMarkdownDataImages(m.content);
+        if (parsedContent.hasImages) {
+          return {
+            role: m.role,
+            content: parsedContent.parts.map((part) => (
+              part.type === 'text'
+                ? { type: 'text', text: part.text }
+                : { type: 'image_url', image_url: { url: part.image.dataUri } }
+            )),
+          };
         }
         return m;
       }),
@@ -252,29 +243,14 @@ const PROVIDERS: Record<Provider, ProviderConfig> = {
       contents: messages
         .filter(m => m.role !== 'system')
         .map(m => {
-          const parts: Record<string, unknown>[] = [];
-          // Parse content for inline images (data URIs)
-          const imgRegex = /!\[([^\]]*)\]\((data:[^)]+)\)/g;
-          let lastIdx = 0;
-          let match: RegExpExecArray | null;
-          const content = m.content;
-          while ((match = imgRegex.exec(content))) {
-            const textBefore = content.slice(lastIdx, match.index).trim();
-            if (textBefore) parts.push({ text: textBefore });
-            // Parse data URI: data:mime;base64,DATA
-            const dataUri = match[2];
-            const commaIdx = dataUri.indexOf(',');
-            if (commaIdx > 0) {
-              const mimeMatch = dataUri.match(/^data:([^;]+);base64/);
-              const mime = mimeMatch?.[1] || 'image/png';
-              const data = dataUri.slice(commaIdx + 1);
-              parts.push({ inlineData: { mimeType: mime, data } });
-            }
-            lastIdx = match.index + match[0].length;
-          }
-          const remaining = content.slice(lastIdx).trim();
-          if (remaining) parts.push({ text: remaining });
-          if (parts.length === 0) parts.push({ text: content });
+          const parsedContent = parseInlineMarkdownDataImages(m.content);
+          const parts: Record<string, unknown>[] = parsedContent.hasImages
+            ? parsedContent.parts.map((part) => (
+                part.type === 'text'
+                  ? { text: part.text }
+                  : { inlineData: { mimeType: part.image.mimeType, data: part.image.base64Data } }
+              ))
+            : [{ text: m.content }];
           return { role: m.role === 'assistant' ? 'model' : 'user', parts };
         }),
       ...(messages.find(m => m.role === 'system')

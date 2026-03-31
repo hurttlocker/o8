@@ -7,6 +7,7 @@ import type {
   MobileTranscriptEntry,
   MobileTranscriptMedia,
 } from '@/lib/mobile/types';
+import { truncateText } from '@/lib/util/text';
 import type { ProjectGroup, SessionSummary } from './types';
 
 // ── Image helpers ──
@@ -119,7 +120,7 @@ export function roleLabel(role: MobileTranscriptEntry['role'], agentName?: strin
 
 export function compactLine(text: string | null | undefined, fallback: string, max = 84) {
   const value = text?.trim() || fallback;
-  return value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
+  return truncateText(value, max);
 }
 
 export function diffLineTone(line: string) {

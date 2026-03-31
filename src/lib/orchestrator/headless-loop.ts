@@ -3,10 +3,10 @@ import {
   reconcileOrchestratorControlPlaneState,
   writeOrchestratorControlPlaneState,
 } from '@/lib/orchestrator/control-plane';
-import { buildDagMetadata } from '@/lib/orchestrator/dag';
+import { buildDagMetadata, hasLaneBinding } from '@/lib/orchestrator/dag';
 import { runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
-import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 
 const DEFAULT_INTERVAL_MS = 10_000;
 const MIN_INTERVAL_MS = 1_000;
@@ -23,14 +23,6 @@ let loopTimer: ReturnType<typeof setInterval> | null = null;
 let tickPromise: Promise<HeadlessSprintTickResult> | null = null;
 let rerunRequested = false;
 const queuedReleasePacketIds = new Set<string>();
-
-function hasLaneBinding(packet: OrchestratorPacket) {
-  return Boolean(
-    packet.lane?.laneId
-    || packet.lane?.sessionKey
-    || (packet.lane?.tileId && packet.lane?.tabId),
-  );
-}
 
 function queueReleasedPackets(packetIds?: string[]) {
   for (const packetId of packetIds ?? []) {
