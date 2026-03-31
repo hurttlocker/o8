@@ -1558,13 +1558,25 @@ async function generateFollowUps(
 
 // ── Suggested prompts for empty state ──
 
+function PromptIcon({ d, size = 18, color = 'currentColor' }: { d: string; size?: number; color?: string }) {
+  return (<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} fill={color} viewBox="0 0 256 256" style={{ display: 'block', flexShrink: 0 }}><path d={d} /></svg>);
+}
+
+const PROMPT_ICONS = {
+  tree: 'M160,112h48a16,16,0,0,0,16-16V48a16,16,0,0,0-16-16H160a16,16,0,0,0-16,16V64H128a24,24,0,0,0-24,24v32H72v-8A16,16,0,0,0,56,96H24A16,16,0,0,0,8,112v32a16,16,0,0,0,16,16H56a16,16,0,0,0,16-16v-8h32v32a24,24,0,0,0,24,24h16v16a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V160a16,16,0,0,0-16-16H160a16,16,0,0,0-16,16v16H128a8,8,0,0,1-8-8V88a8,8,0,0,1,8-8h16V96A16,16,0,0,0,160,112ZM56,144H24V112H56v32Zm104,16h48v48H160Zm0-112h48V96H160Z',
+  search: 'M229.66,218.34l-50.07-50.06a88.11,88.11,0,1,0-11.31,11.31l50.06,50.07a8,8,0,0,0,11.32-11.32ZM40,112a72,72,0,1,1,72,72A72.08,72.08,0,0,1,40,112Z',
+  file: 'M213.66,82.34l-56-56A8,8,0,0,0,152,24H56A16,16,0,0,0,40,40V216a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V88A8,8,0,0,0,213.66,82.34ZM160,51.31,188.69,80H160ZM200,216H56V40h88V88a8,8,0,0,0,8,8h48V216Zm-32-80a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,136Zm0,32a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,168Z',
+  diff: 'M112,152a8,8,0,0,0-8,8v28.69L66.34,151A8,8,0,0,1,64,145.37V95a32,32,0,1,0-16,0v50.38a23.85,23.85,0,0,0,7,17L92.69,200H64a8,8,0,0,0,0,16h48a8,8,0,0,0,8-8V160A8,8,0,0,0,112,152ZM40,64A16,16,0,1,1,56,80,16,16,0,0,1,40,64Zm168,97V110.63a23.85,23.85,0,0,0-7-17L163.31,56H192a8,8,0,0,0,0-16H144a8,8,0,0,0-8,8V96a8,8,0,0,0,16,0V67.31L189.66,105a8,8,0,0,1,2.34,5.66V161a32,32,0,1,0,16,0Zm-8,47a16,16,0,1,1,16-16A16,16,0,0,1,200,208Z',
+  rocket: 'M152,224a8,8,0,0,1-8,8H112a8,8,0,0,1,0-16h32A8,8,0,0,1,152,224ZM128,112a12,12,0,1,0-12-12A12,12,0,0,0,128,112Zm95.62,43.83-12.36,55.63a16,16,0,0,1-25.51,9.11L158.51,200h-61L70.25,220.57a16,16,0,0,1-25.51-9.11L32.38,155.83a16.09,16.09,0,0,1,3.32-13.71l28.56-34.26a123.07,123.07,0,0,1,8.57-36.67c12.9-32.34,36-52.63,45.37-59.85a16,16,0,0,1,19.6,0c9.34,7.22,32.47,27.51,45.37,59.85a123.07,123.07,0,0,1,8.57,36.67l28.56,34.26A16.09,16.09,0,0,1,223.62,155.83ZM99.43,184h57.14c21.12-37.54,25.07-73.48,11.74-106.88C156.55,47.64,134.49,29,128,24c-6.51,5-28.57,23.64-40.33,53.12C74.36,110.52,78.31,146.46,99.43,184Zm-15,5.85Q68.28,160.5,64.83,132.16L48,152.36,60.36,208l.18-.13ZM208,152.36l-16.83-20.2q-3.42,28.28-19.56,57.69l23.85,18,.18.13Z',
+} as const;
+
 const SUGGESTED_PROMPTS = [
-  { icon: '💡', text: 'Explain this codebase architecture', description: 'Get a high-level overview of how the project is structured' },
-  { icon: '🔍', text: 'Find all TODO comments in the code', description: 'Search for technical debt and pending work' },
-  { icon: '📝', text: 'Write a README for this project', description: 'Generate documentation from the codebase' },
-  { icon: '🐛', text: 'Review the most recent changes', description: 'Analyze recent commits for potential issues' },
-  { icon: '🧪', text: 'Suggest tests for the auth module', description: 'Generate test cases for critical paths' },
-  { icon: '⚡', text: 'What could be optimized here?', description: 'Find performance improvements in the codebase' },
+  { iconKey: 'tree' as const, text: 'Explain this codebase architecture', description: 'High-level structure and key patterns' },
+  { iconKey: 'search' as const, text: 'Find all TODO comments in the code', description: 'Surface technical debt and pending work' },
+  { iconKey: 'file' as const, text: 'Write a README for this project', description: 'Generate documentation from source' },
+  { iconKey: 'diff' as const, text: 'Review the most recent changes', description: 'Analyze recent commits for issues' },
+  { iconKey: 'search' as const, text: 'Suggest tests for the auth module', description: 'Generate test cases for critical paths' },
+  { iconKey: 'rocket' as const, text: 'What could be optimized here?', description: 'Identify performance improvements' },
 ];
 
 function buildRepoRequestHeaders(preferredRepo?: {
@@ -2592,7 +2604,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
         flexDirection: 'column',
         overflow: 'hidden',
         transition: 'width 200ms ease, min-width 200ms ease',
-        background: THEME_PANEL_GLASS,
+        background: '#ffffff',
       }}>
         {historyOpen && (
           <>
@@ -2958,47 +2970,38 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
               gap: 8,
             }}>
               <div style={{
-                width: 48,
-                height: 48,
-                borderRadius: 14,
-                background: `linear-gradient(135deg, ${THEME_ACCENT} 0%, #8b5cf6 100%)`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: `0 4px 16px ${THEME_ACCENT_RING}`,
-              }}>
-                <Sparkles size={24} style={{ color: 'white' }} />
-              </div>
-              <div style={{
-                fontSize: 24,
-                fontWeight: 600,
-                color: 'var(--t-text-strong)',
-                letterSpacing: '-0.02em',
+                fontSize: 28,
+                fontWeight: 300,
+                color: 'var(--t-text-secondary)',
+                letterSpacing: '-0.03em',
+                lineHeight: 1.2,
               }}>
                 {(() => {
                   const h = new Date().getHours();
-                  const greeting = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
-                  return `${greeting}. What can I help you build?`;
+                  return h < 12 ? 'Good morning.' : h < 17 ? 'Good afternoon.' : 'Good evening.';
                 })()}
               </div>
               <div style={{
-                fontSize: 14,
+                fontSize: 11,
+                fontWeight: 500,
                 color: 'var(--t-text-muted)',
-                textAlign: 'center',
-                maxWidth: 400,
-                lineHeight: '1.5',
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase' as const,
               }}>
-                Chat with {model.label} — with full workspace context, file access, and code search built in.
+                {model.label}
               </div>
             </div>
 
-            {/* Suggested prompts grid */}
+            {/* Suggested prompts — editorial grid */}
             <div style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(2, 1fr)',
-              gap: 10,
-              maxWidth: 560,
+              gap: 1,
+              maxWidth: 520,
               width: '100%',
+              border: '0.5px solid var(--t-divider-subtle)',
+              borderRadius: 14,
+              overflow: 'hidden',
             }}>
               {SUGGESTED_PROMPTS.map((prompt, i) => (
                 <button
@@ -3012,37 +3015,34 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
                     display: 'flex',
                     alignItems: 'flex-start',
                     gap: 10,
-                    paddingTop: 14,
-                    paddingBottom: 14,
-                    paddingLeft: 14,
-                    paddingRight: 14,
-                    background: THEME_BG_CARD,
-                    border: '1px solid var(--t-panel-border)',
-                    borderRadius: 12,
+                    paddingTop: 16,
+                    paddingBottom: 16,
+                    paddingLeft: 16,
+                    paddingRight: 16,
+                    background: 'transparent',
+                    border: 'none',
+                    borderRight: i % 2 === 0 ? '0.5px solid var(--t-divider-subtle)' : 'none',
+                    borderBottom: i < 4 ? '0.5px solid var(--t-divider-subtle)' : 'none',
                     cursor: 'pointer',
                     textAlign: 'left',
-                    transition: 'all 150ms ease',
+                    transition: 'background 150ms ease',
                     animation: `llmFadeIn 400ms ease-out ${100 + i * 50}ms both`,
                   }}
                   onMouseEnter={(e) => {
-                    (e.currentTarget).style.borderColor = THEME_ACCENT_BORDER;
-                    (e.currentTarget).style.background = THEME_ACCENT_SOFT;
-                    (e.currentTarget).style.transform = 'translateY(-1px)';
-                    (e.currentTarget).style.boxShadow = `0 2px 8px ${THEME_ACCENT_RING}`;
+                    (e.currentTarget).style.background = 'rgba(37, 99, 235, 0.04)';
                   }}
                   onMouseLeave={(e) => {
-                    (e.currentTarget).style.borderColor = 'var(--t-panel-border)';
-                    (e.currentTarget).style.background = THEME_BG_CARD;
-                    (e.currentTarget).style.transform = 'translateY(0)';
-                    (e.currentTarget).style.boxShadow = 'none';
+                    (e.currentTarget).style.background = 'transparent';
                   }}
                 >
-                  <span style={{ fontSize: 18, lineHeight: '1', flexShrink: 0 }}>{prompt.icon}</span>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text)', lineHeight: '1.3' }}>
+                  <div style={{ color: 'var(--t-text-faint)', marginTop: 1 }}>
+                    <PromptIcon d={PROMPT_ICONS[prompt.iconKey]} size={16} />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text-secondary)', letterSpacing: '-0.01em', lineHeight: '1.3' }}>
                       {prompt.text}
                     </span>
-                    <span style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: '1.4' }}>
+                    <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--t-text-muted)', lineHeight: '1.4', letterSpacing: '-0.005em' }}>
                       {prompt.description}
                     </span>
                   </div>
@@ -3977,7 +3977,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
             marginRight: 'auto',
             border: '1px solid var(--t-panel-border)',
             borderRadius: 18,
-            background: THEME_PANEL_GLASS,
+            background: '#ffffff',
             transition: 'border-color 200ms, box-shadow 200ms',
             overflow: 'hidden',
           }}

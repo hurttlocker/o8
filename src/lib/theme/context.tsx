@@ -74,6 +74,29 @@ function applyThemeVars(theme: ThemeTokens, animate: boolean) {
   for (const [key, value] of Object.entries(theme.cssVars)) {
     root.style.setProperty(key, value);
   }
+
+  // Tauri vibrancy: force transparent chrome so OS frost shows through
+  if (root.dataset.tauri === 'true') {
+    root.style.setProperty('--t-chrome', 'transparent');
+    root.style.setProperty('--t-bg-gradient', 'transparent');
+    root.style.setProperty('--t-chrome-nav', 'transparent');
+
+    // Inject style to force vibrancy-passthrough tagged elements transparent
+    let vibrancyStyle = document.getElementById('tauri-vibrancy-overrides');
+    if (!vibrancyStyle) {
+      vibrancyStyle = document.createElement('style');
+      vibrancyStyle.id = 'tauri-vibrancy-overrides';
+      document.head.appendChild(vibrancyStyle);
+    }
+    vibrancyStyle.textContent = `
+      [data-vibrancy-passthrough] {
+        background: transparent !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+      }
+    `;
+  }
+
   root.style.colorScheme = theme.colorScheme;
   root.dataset.theme = theme.id;
   if (body) {

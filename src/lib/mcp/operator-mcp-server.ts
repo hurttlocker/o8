@@ -229,20 +229,28 @@ async function handleStatus(args: Record<string, unknown>): Promise<McpToolResul
     const data = await apiFetch(`/api/operator/status${qs}`) as Record<string, unknown>;
 
     const agents = (data.agents ?? []) as Array<Record<string, unknown>>;
-    const approvals = (data.approvals ?? []) as Array<Record<string, unknown>>;
+    const rawApprovals = data.approvals as Record<string, unknown> | Array<Record<string, unknown>> | undefined;
+    const approvalItems = Array.isArray(rawApprovals)
+      ? rawApprovals
+      : Array.isArray((rawApprovals as Record<string, unknown>)?.items)
+        ? ((rawApprovals as Record<string, unknown>).items as Array<Record<string, unknown>>)
+        : [];
+    const approvalCount = typeof (rawApprovals as Record<string, unknown>)?.count === 'number'
+      ? (rawApprovals as Record<string, unknown>).count as number
+      : approvalItems.length;
     const recentActivity = (data.recentActivity ?? []) as Array<Record<string, unknown>>;
 
     const runningCount = agents.filter((a) => a.status === 'running' || a.status === 'working').length;
-    const pendingCount = approvals.filter((a) => a.status === 'pending').length;
     const lastEvent = recentActivity.length > 0
-      ? (recentActivity[0].label as string) || (recentActivity[0].action as string) || 'activity'
+      ? (recentActivity[0].target as string) || (recentActivity[0].action as string) || 'activity'
       : 'none';
 
     return jsonResult({
-      summary: `${runningCount} agents running. ${pendingCount} approvals pending. Last: ${lastEvent}`,
+      summary: data.summary || `${runningCount} agents running. ${approvalCount} approvals pending. Last: ${lastEvent}`,
       data: {
         agents,
-        approvals,
+        approvals: approvalItems,
+        approvalCount,
         recentActivity,
       },
     });
