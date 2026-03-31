@@ -421,6 +421,7 @@ export function ThoughtsCard({
                     thoughtsElevatedShadow={thoughtsElevatedShadow}
                     thoughtsMutedGlass={thoughtsMutedGlass}
                     onMissionStateChange={onMissionStateChange}
+                    onLaunchPacket={onLaunchPacket}
                     onChromeChange={setChatChromeState}
                   />
                 )}
@@ -481,6 +482,7 @@ export function ThoughtsCard({
                     thoughtsElevatedShadow={thoughtsElevatedShadow}
                     thoughtsMutedGlass={thoughtsMutedGlass}
                     onMissionStateChange={onMissionStateChange}
+                    onLaunchPacket={onLaunchPacket}
                     onChromeChange={setChatChromeState}
                   />
                 </div>

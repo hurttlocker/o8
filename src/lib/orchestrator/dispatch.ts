@@ -112,6 +112,7 @@ export async function runDispatchTick(
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : 'Dispatch failed.';
+      console.error(`[dispatch] Failed to dispatch packet ${packet.id}: ${reason}`);
       nextState = normalizeOrchestratorMissionState({
         ...nextState,
         packets: nextState.packets.map((candidate) => (

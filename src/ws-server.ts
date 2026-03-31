@@ -2799,7 +2799,7 @@ httpServer.listen(WS_PORT, '0.0.0.0', () => {
         try {
           const { findLaneBySession, setLaneStatus } = await import('@/lib/lane/registry');
           const lane = findLaneBySession(surfaceId);
-          if (!lane?.packetId) {
+          if (!lane) {
             return;
           }
 

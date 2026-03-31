@@ -54,6 +54,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onMissionStateChange: (
     next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState)
   ) => void;
+  onLaunchPacket?: (packet: import('@/lib/orchestrator/types').OrchestratorPacket) => void;
   onChromeChange: (state: ThoughtsChatPanelChromeState) => void;
 }>(function ThoughtsChatPanel({
   open,
@@ -70,6 +71,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   thoughtsElevatedShadow,
   thoughtsMutedGlass,
   onMissionStateChange,
+  onLaunchPacket,
   onChromeChange,
 }, ref) {
   const [input, setInput] = useState('');
@@ -532,12 +534,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ...current,
       packets: [...current.packets, packet],
     }));
+    onLaunchPacket?.(packet);
     setInput('');
     if (inputRef.current) {
       inputRef.current.style.height = 'auto';
       inputRef.current.focus();
     }
-  }, [input, missionState.packets, onMissionStateChange, workspaceTargets]);
+  }, [input, missionState.packets, onLaunchPacket, onMissionStateChange, workspaceTargets]);
 
   const handleReset = useCallback(() => {
     setInput('');

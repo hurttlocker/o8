@@ -54,12 +54,14 @@ function isProtectedPath(filePath: string) {
   if (!normalized) {
     return false;
   }
-  return normalized.includes('/.git/')
-    || normalized.endsWith('/.git')
-    || normalized.includes('.env')
-    || normalized.includes('credentials')
-    || normalized.includes('secret')
-    || normalized.includes('token');
+  if (normalized.includes('/.git/') || normalized.endsWith('/.git')) {
+    return true;
+  }
+  const fileName = normalized.split('/').pop() ?? normalized;
+  return fileName.includes('.env')
+    || fileName.includes('credentials')
+    || fileName.includes('secret')
+    || fileName.includes('token');
 }
 
 function evaluateToolUse(input: PreToolUseHookInput): PreToolUseHookOutput {
