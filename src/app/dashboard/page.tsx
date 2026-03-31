@@ -2858,13 +2858,21 @@ function DashboardInner() {
   }, [getWorkspaceSidePanelRepoByPath, openWorkspaceSidePanel]);
 
   const handleOpenAuditLog = useCallback(() => {
-    openCanvasTab({
+    const tab: CanvasTab = {
       id: 'audit-log:approvals',
       kind: 'audit-log',
       label: 'Audit Log',
       resourceId: 'approvals',
-    });
-  }, [openCanvasTab]);
+    };
+    void (async () => {
+      const workspaceTarget = await waitForWorkspaceTerminalTarget({});
+      if (workspaceTarget) {
+        workspaceTarget.handle.openInspectorTab(tab);
+        return;
+      }
+      openCanvasTab(tab);
+    })();
+  }, [openCanvasTab, waitForWorkspaceTerminalTarget]);
 
   const handleToggleChatPanel = useCallback(() => {
     // v1: chat panel removed — toggle workspace instead
