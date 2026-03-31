@@ -225,12 +225,12 @@ async function isOwnedRunAlive(run?: OwnedCodexRunRecord | null): Promise<boolea
 }
 
 async function validateWorkspace(targetCwd: string) {
-  // Expand ~ to home directory (client sends ~/clawd/repos/... format)
+  // Expand ~ to home directory
   const expanded = targetCwd.startsWith('~/') ? path.join(os.homedir(), targetCwd.slice(2)) : targetCwd;
   const resolved = path.resolve(expanded);
   const real = await realpath(resolved).catch(() => resolved);
-  if (!real.startsWith(path.join(os.homedir(), 'clawd'))) {
-    throw new Error('Owned Codex launch is currently restricted to paths under ~/clawd.');
+  if (!real.startsWith(os.homedir())) {
+    throw new Error('Owned Codex launch is restricted to paths under the home directory.');
   }
 
   const { stdout } = await execFileAsync('git', ['-C', real, 'rev-parse', '--show-toplevel'], {
