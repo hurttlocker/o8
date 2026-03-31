@@ -785,8 +785,8 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
         paddingLeft: isUser ? 16 : 0,
         paddingRight: isUser ? 16 : 0,
         borderRadius: isUser ? 18 : 0,
-        background: isUser ? 'rgba(255,255,255,0.18)' : message.isError ? 'rgba(239,68,68,0.12)' : 'transparent',
-        color: isUser ? 'var(--t-text)' : message.isError ? '#dc2626' : 'var(--t-text)',
+        background: isUser ? 'transparent' : message.isError ? 'rgba(239,68,68,0.12)' : 'transparent',
+        color: isUser ? 'var(--t-text-muted)' : message.isError ? '#dc2626' : 'var(--t-text)',
         fontSize: 14,
         lineHeight: '1.6',
         fontFamily: '-apple-system, system-ui, sans-serif',
@@ -2623,7 +2623,17 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
       background: '#ffffff',
       fontFamily: '-apple-system, system-ui, sans-serif',
       overflow: 'hidden',
-    }}>
+      '--t-text': '#111827',
+      '--t-text-strong': '#1e293b',
+      '--t-text-secondary': '#6b7280',
+      '--t-text-muted': '#5b6475',
+      '--t-text-faint': '#8b95a3',
+      '--t-divider': 'rgba(0, 0, 0, 0.06)',
+      '--t-divider-strong': 'rgba(0, 0, 0, 0.12)',
+      '--t-panel-border': 'rgba(0, 0, 0, 0.08)',
+      '--t-input-bg': '#ffffff',
+      '--t-input-border': 'rgba(0, 0, 0, 0.1)',
+    } as React.CSSProperties}>
       {/* ── History Sidebar ── */}
       <div style={{
         width: historyOpen ? 260 : 0,

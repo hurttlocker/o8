@@ -631,9 +631,9 @@ import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/type
 
 const TILE_LAYOUT_STORAGE_KEY = 'cortex-ide:dashboard-tiles:v1';
 const ACTIVE_TILE_STORAGE_KEY = 'cortex-ide:dashboard-active-tile:v1';
-const DEFAULT_LEFT_PANEL_WIDTH = 280;
-const DEFAULT_RIGHT_PANEL_WIDTH = 468;
-const MIN_RIGHT_PANEL_WIDTH = 360;
+const DEFAULT_LEFT_PANEL_WIDTH = 200;
+const DEFAULT_RIGHT_PANEL_WIDTH = 280;
+const MIN_RIGHT_PANEL_WIDTH = 240;
 const MAX_RIGHT_PANEL_WIDTH = 600;
 
 export default function DashboardPage() {
@@ -2627,7 +2627,7 @@ function DashboardInner() {
   }, [canvasStateByTileId]);
 
   const resolveCanvasTabRepoPath = useCallback((tab: CanvasTab) => {
-    if (tab.kind === 'timeline' || tab.kind === 'memory' || tab.kind === 'welcome' || tab.kind === 'mermaid') {
+    if (tab.kind === 'timeline' || tab.kind === 'memory' || tab.kind === 'welcome' || tab.kind === 'audit-log' || tab.kind === 'mermaid') {
       return null;
     }
 
@@ -2856,6 +2856,15 @@ function DashboardInner() {
   const handleOpenGitLog = useCallback((workspace?: string) => {
     openWorkspaceSidePanel('git-log', getWorkspaceSidePanelRepoByPath(workspace));
   }, [getWorkspaceSidePanelRepoByPath, openWorkspaceSidePanel]);
+
+  const handleOpenAuditLog = useCallback(() => {
+    openCanvasTab({
+      id: 'audit-log:approvals',
+      kind: 'audit-log',
+      label: 'Audit Log',
+      resourceId: 'approvals',
+    });
+  }, [openCanvasTab]);
 
   const handleToggleChatPanel = useCallback(() => {
     // v1: chat panel removed — toggle workspace instead
@@ -3368,7 +3377,7 @@ function DashboardInner() {
     const startX = e.clientX;
     const startW = leftWidth;
     const onMove = (ev: MouseEvent) => {
-      setLeftWidth(Math.min(Math.max(startW + (ev.clientX - startX), 220), 500));
+      setLeftWidth(Math.min(Math.max(startW + (ev.clientX - startX), 160), 500));
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
@@ -4768,7 +4777,9 @@ function DashboardInner() {
           // Dismiss ThoughtsCard when switching nav sections
           setThoughtsOpen(false);
           if (section === 'approvals') {
-            // Open the Review tab in the right panel — approvals live there
+            handleOpenAuditLog();
+            setActiveNavSection('approvals');
+            setShowMemoryView(false);
             setWorkspaceSidePanelView('review');
             if (!chatVisible) setChatVisible(true);
             setRightPanelMode('workspace');
