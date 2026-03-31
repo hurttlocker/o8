@@ -695,6 +695,7 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
         const runtimeMeta = orchestratorRuntimeTone(packet.runtime);
         const dependencyBlocker = packetReleaseBlockedBy(packet, missionState.packets);
         const canLaunch = !packet.archivedAt && packet.releaseState !== 'released' && packet.queueState !== 'held' && !dependencyBlocker;
+        const hasInteractiveLane = Boolean(packet.lane?.tileId && packet.lane?.tabId);
         const isExpanded = expandedPacketId === packet.id;
         const targetLabel = workspaceTargets.find((target) => target.localPath === packet.workspaceTargetPath)?.label ?? null;
         const reviewState = reviewStateByPacketId[packet.id] ?? null;
@@ -813,10 +814,12 @@ export const ThoughtsMissionPanel = forwardRef<ThoughtsMissionPanelHandle, {
                     </button>
                   ) : (
                     <>
-                      <button type="button" onClick={() => handleFocusPacket(packet)}
-                        style={{ border: 'none', background: '#2563eb', color: '#fff', padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
-                        Focus
-                      </button>
+                      {hasInteractiveLane ? (
+                        <button type="button" onClick={() => handleFocusPacket(packet)}
+                          style={{ border: 'none', background: '#2563eb', color: '#fff', padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>
+                          Focus
+                        </button>
+                      ) : null}
                       {packet.lane?.laneId && (packet.status === 'idle' || packet.status === 'awaiting_review' || packet.status === 'recovering') ? (
                         <button type="button" onClick={() => {
                           fetch('/api/lanes', {

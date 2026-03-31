@@ -1,8 +1,14 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { listLanes } from '@/lib/lane/registry';
 import type { OrchestratorMissionState } from './types';
-import { createEmptyOrchestratorMissionState, normalizeOrchestratorMissionState } from './store';
+import {
+  createEmptyOrchestratorMissionState,
+  normalizeOrchestratorMissionState,
+  reconcileOrchestratorMissionState,
+} from './store';
+import { runDispatchTick } from './dispatch';
 
 const ORCHESTRATOR_DIR = join(homedir(), '.cortex-ide');
 const ORCHESTRATOR_PATH = join(ORCHESTRATOR_DIR, 'orchestrator-state.json');
@@ -36,4 +42,26 @@ export function writeOrchestratorControlPlaneState(state: OrchestratorMissionSta
   writeFileSync(ORCHESTRATOR_TMP_PATH, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
   renameSync(ORCHESTRATOR_TMP_PATH, ORCHESTRATOR_PATH);
   return next.mission;
+}
+
+function buildDomainLaneSummaries() {
+  return listLanes()
+    .filter((lane) => lane.packetId)
+    .map((lane) => ({
+      laneId: lane.id,
+      packetId: lane.packetId!,
+      status: lane.status,
+      sessionKey: lane.sessionKey,
+    }));
+}
+
+export async function syncOrchestratorControlPlaneState(state?: OrchestratorMissionState) {
+  const current = normalizeOrchestratorMissionState(state ?? readOrchestratorControlPlaneState());
+  const reconciled = reconcileOrchestratorMissionState(current, {
+    laneSnapshots: [],
+    runtimeTruth: [],
+    domainLanes: buildDomainLaneSummaries(),
+  });
+  const dispatched = await runDispatchTick(reconciled);
+  return writeOrchestratorControlPlaneState(dispatched);
 }
