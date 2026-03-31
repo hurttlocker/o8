@@ -8,6 +8,7 @@ import type { PacketContext } from '@/lib/orchestrator/types';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime } from '@/lib/runtimes/registry';
 import type { RuntimeId, RuntimeTranscriptEntry } from '@/lib/runtimes/types';
+import { truncateText } from '@/lib/util/text';
 
 const PACKET_CONTEXT_SOURCE_PREFIX = 'orchestrator-packet-context';
 const PACKET_CONTEXT_JSON_START = '<context-pass-json>';
@@ -27,13 +28,6 @@ function inferRuntimeId(sessionKey: string): RuntimeId | null {
     return 'codex';
   }
   return null;
-}
-
-function truncateText(text: string, max: number): string {
-  if (text.length <= max) {
-    return text;
-  }
-  return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
 }
 
 function normalizeSummaryText(text: string, max: number): string {

@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { listLanes } from '@/lib/lane/registry';
+import type { DomainLaneSummary } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 import {
   createEmptyOrchestratorMissionState,
@@ -43,7 +44,7 @@ export function writeOrchestratorControlPlaneState(state: OrchestratorMissionSta
   return next.mission;
 }
 
-function buildDomainLaneSummaries() {
+export function buildDomainLaneSummaries(): DomainLaneSummary[] {
   return listLanes()
     .filter((lane) => lane.packetId)
     .map((lane) => ({

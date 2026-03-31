@@ -138,7 +138,7 @@ const transcriptSourceCache = new Map<string, TranscriptSourceCacheEntry>();
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let callbacks: SupervisorCallbacks | null = null;
 let heartbeatInFlight = false;
-let pollIntervalMs = DEFAULT_ACTIVE_POLL_INTERVAL_MS;
+const pollIntervalMs = DEFAULT_ACTIVE_POLL_INTERVAL_MS;
 let registrationOrdinal = 0;
 
 // ── Public API ──
@@ -206,20 +206,8 @@ export function getWatchedAgents(repoPath?: string): WatchedAgent[] {
   return repoPath ? all.filter((agent) => agent.repoPath === repoPath) : all;
 }
 
-export function getWatchedAgentCount(): number {
-  return watchedAgents.size;
-}
-
 export function getSupervisorFleetStatusSummary(repoPath?: string): SupervisorFleetStatusSummary[] {
   return buildFleetStatusSummaries(repoPath);
-}
-
-export function setSupervisorPollInterval(ms: number): void {
-  pollIntervalMs = Math.max(1_000, Math.min(30_000, ms));
-  console.log(
-    `[supervisor] Active poll interval set to ${pollIntervalMs}ms `
-    + `(idle ${IDLE_POLL_INTERVAL_MS}ms, completed ${COMPLETED_POLL_INTERVAL_MS}ms)`,
-  );
 }
 
 export function startSupervisorLoop(cbs: SupervisorCallbacks): void {
@@ -240,15 +228,6 @@ export function stopSupervisorLoop(): void {
     pollTimer = null;
   }
   console.log('[supervisor] Stopped');
-}
-
-export function cleanupWatchedAgentsForRepo(repoPath: string): void {
-  for (const [id, agent] of watchedAgents) {
-    if (agent.repoPath === repoPath) {
-      watchedAgents.delete(id);
-      transcriptSourceCache.delete(id);
-    }
-  }
 }
 
 // ── Scheduler ──

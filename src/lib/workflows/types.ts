@@ -1,4 +1,4 @@
-import type { RuntimeKind } from '@/lib/runtime/adapter';
+import type { RuntimeKind } from '@/lib/runtimes/types';
 
 export type JsonPrimitive = string | number | boolean | null;
 
