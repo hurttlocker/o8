@@ -1,6 +1,7 @@
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { getDispatchableWave } from '@/lib/orchestrator/dag';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
+import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import type { OrchestratorLaneBinding, OrchestratorMissionState, OrchestratorPacket, PacketContext } from '@/lib/orchestrator/types';
 import { truncateText } from '@/lib/util/text';
@@ -275,6 +276,29 @@ export async function runDispatchTick(
 
         const result = results[batchIndex];
         if (result.status === 'fulfilled') {
+          void publishRealtimeMutation({
+            mutation: {
+              mutationId: `packet-dispatch-${candidate.id}-${Date.now()}`,
+              source: 'server',
+              action: 'packet-dispatch',
+              status: 'completed',
+              runtime: candidate.runtime,
+              surfaceId: result.value.sessionKey ?? undefined,
+              sessionKey: result.value.sessionKey ?? undefined,
+              laneId: result.value.laneId,
+              packetId: candidate.id,
+              packetTitle: candidate.title,
+              packetReferenceLabel: candidate.referenceLabel,
+              repoPath: candidate.workspaceTargetPath ?? undefined,
+              branch: candidate.branchTarget,
+              note: `Dispatched ${candidate.referenceLabel} to ${candidate.runtime}`,
+              createdAt: new Date().toISOString(),
+              settledAt: new Date().toISOString(),
+            },
+            refreshTargets: ['global', 'mobileInbox', 'sessionHistory'],
+            sessionKeys: result.value.sessionKey ? [result.value.sessionKey] : [],
+            fresh: true,
+          });
           return {
             ...candidate,
             status: 'launching',
