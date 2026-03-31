@@ -7,7 +7,7 @@
  * Issue: https://github.com/hurttlocker/cortex-ide/issues/217
  */
 
-import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, index } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
 // ══════════════════════════════════════════════════════════════════
@@ -250,3 +250,45 @@ export const githubPullRequests = sqliteTable('github_pull_requests', {
   closedAt: text('closed_at'),
   mergedAt: text('merged_at'),
 });
+
+// ══════════════════════════════════════════════════════════════════
+//  Lane Registry — durable multi-process orchestration state
+// ══════════════════════════════════════════════════════════════════
+
+export const lanes = sqliteTable('lanes', {
+  id: text('id').primaryKey(),
+  label: text('label').notNull(),
+  repoPath: text('repo_path').notNull(),
+  worktreePath: text('worktree_path'),
+  branch: text('branch').notNull(),
+  baseBranch: text('base_branch').notNull(),
+  runtime: text('runtime', { enum: ['codex', 'claude-code'] }).notNull(),
+  sessionKey: text('session_key'),
+  packetId: text('packet_id'),
+  status: text('status', {
+    enum: ['idle', 'launching', 'running', 'paused', 'awaiting_input', 'reviewing', 'merging', 'completed', 'archived'],
+  }).notNull(),
+  ownership: text('ownership', { enum: ['managed', 'attached'] }).notNull(),
+  writerToken: text('writer_token'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  lastEventAt: text('last_event_at'),
+  lastEventLabel: text('last_event_label'),
+}, (table) => ({
+  sessionKeyIdx: index('idx_lanes_session_key').on(table.sessionKey),
+  packetIdIdx: index('idx_lanes_packet_id').on(table.packetId),
+  repoBranchStatusIdx: index('idx_lanes_repo_branch_status').on(table.repoPath, table.branch, table.status),
+  statusIdx: index('idx_lanes_status').on(table.status),
+}));
+
+export const laneEvents = sqliteTable('lane_events', {
+  id: text('id').primaryKey(),
+  laneId: text('lane_id').notNull().references(() => lanes.id, { onDelete: 'cascade' }),
+  verb: text('verb').notNull(),
+  actor: text('actor', { enum: ['user', 'orchestrator', 'system'] }).notNull(),
+  payloadJson: text('payload_json').notNull().default('{}'),
+  timestamp: text('timestamp').notNull(),
+}, (table) => ({
+  laneTimestampIdx: index('idx_lane_events_lane_timestamp').on(table.laneId, table.timestamp),
+  timestampIdx: index('idx_lane_events_timestamp').on(table.timestamp),
+}));
