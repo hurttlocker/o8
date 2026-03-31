@@ -2,13 +2,13 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { listLanes } from '@/lib/lane/registry';
-import type { OrchestratorMissionState } from './types';
+import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 import {
   createEmptyOrchestratorMissionState,
   normalizeOrchestratorMissionState,
   reconcileOrchestratorMissionState,
-} from './store';
-import { runDispatchTick } from './dispatch';
+} from '@/lib/orchestrator/store';
+import { runDispatchTick } from '@/lib/orchestrator/dispatch';
 
 const ORCHESTRATOR_DIR = join(homedir(), '.cortex-ide');
 const ORCHESTRATOR_PATH = join(ORCHESTRATOR_DIR, 'orchestrator-state.json');

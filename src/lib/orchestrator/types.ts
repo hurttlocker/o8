@@ -65,6 +65,48 @@ export interface OrchestratorMissionState {
   updatedAt: string;
 }
 
+export interface PacketContext {
+  packetId: string;
+  sessionKey: string;
+  summary: string;
+  changedFiles: string[];
+  completedAt: string;
+  model: string;
+}
+
+export interface DagNode {
+  packetId: string;
+  title: string;
+  status: OrchestratorPacketStatus;
+  dependsOn: string[];
+  blockedBy: string[];
+  wave: number;
+}
+
+export interface OrchestratorDagWave {
+  wave: number;
+  packetIds: string[];
+  packets: DagNode[];
+}
+
+export interface OrchestratorDagMetadata {
+  currentWave: number;
+  totalWaves: number;
+  waves: OrchestratorDagWave[];
+}
+
+export interface OrchestratorStateApiResponse {
+  mission: OrchestratorMissionState;
+  dag: OrchestratorDagMetadata;
+}
+
+export interface OrchestratorStateApiErrorResponse {
+  error: {
+    code: string;
+    message: string;
+  };
+}
+
 export interface WorkspaceOrchestrationPacketBadge {
   packetId: string;
   referenceLabel: string;
