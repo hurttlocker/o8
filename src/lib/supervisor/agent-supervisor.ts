@@ -410,6 +410,9 @@ async function handleStatusChange(
 async function checkStuck(watched: WatchedAgent, now: number): Promise<void> {
   if (!callbacks) return;
 
+  // Grace period after registration before we consider the agent stuck
+  if (now - watched.registeredAt < 30_000) return;
+
   // Check transcript for new content
   try {
     const entries = await callbacks.fetchTranscript(watched.surfaceId, TRANSCRIPT_ACTIVITY_WINDOW);
@@ -419,9 +422,6 @@ async function checkStuck(watched: WatchedAgent, now: number): Promise<void> {
   } catch {
     return; // Transcript fetch failed — skip
   }
-
-  // Grace period after registration before we consider the agent stuck
-  if (now - watched.registeredAt < 30_000) return;
 
   const staleDuration = now - watched.lastActivityAt;
   if (staleDuration < STUCK_THRESHOLD_MS) return;
