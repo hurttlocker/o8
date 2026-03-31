@@ -334,14 +334,6 @@ export function reconcileLanesWithSessions(
         lane.status = 'running';
         lane.lastEventAt = nowIso();
         lane.lastEventLabel = 'session_running';
-      } else if (runtimeStatus === 'idle' && lane.status === 'running') {
-        // Agent finished — transition to reviewing (work done, needs review)
-        lane.status = 'reviewing';
-        lane.lastEventAt = nowIso();
-        lane.lastEventLabel = 'agent_finished';
-        appendEvent(lane.id, 'agent_finished', 'system', { previousStatus: 'running' });
-        // Auto-trigger orchestrator review (async, non-blocking)
-        import('./auto-review').then(({ triggerAutoReview }) => triggerAutoReview(lane)).catch(() => {});
       } else if (runtimeStatus === 'waiting' && lane.status === 'running') {
         lane.status = 'awaiting_input';
         lane.lastEventAt = nowIso();
