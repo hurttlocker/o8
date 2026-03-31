@@ -2798,9 +2798,7 @@ httpServer.listen(WS_PORT, '0.0.0.0', () => {
       const update: AgentUpdateEvent = {
         surfaceId,
         name: watched?.name ?? surfaceId,
-        status: watched?.lastStatus === 'running' || watched?.lastStatus === 'waiting'
-          ? watched.lastStatus
-          : 'running',
+        status: watched?.lastStatus ?? 'running',
         detail: lastMessage,
         repoPath: watched?.repoPath,
       };
