@@ -2024,6 +2024,9 @@ function DashboardInner() {
         e.preventDefault();
         setThoughtsOpen(v => !v);
       }
+      if (e.key === 'Escape') {
+        setThoughtsOpen(false);
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -4762,11 +4765,19 @@ function DashboardInner() {
       {sidebarVisible && <NavRail
         activeSection={activeNavSection}
         onSectionChange={(section) => {
+          // Dismiss ThoughtsCard when switching nav sections
+          setThoughtsOpen(false);
           if (section === 'approvals') {
             // Open the Review tab in the right panel — approvals live there
             setWorkspaceSidePanelView('review');
             if (!chatVisible) setChatVisible(true);
             setRightPanelMode('workspace');
+            return;
+          }
+          if (section === 'settings') {
+            // Settings is a full center-workspace view — don't force chat panel open
+            setActiveNavSection('settings');
+            setShowMemoryView(false);
             return;
           }
           setActiveNavSection(section);

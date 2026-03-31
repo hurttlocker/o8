@@ -296,6 +296,30 @@ interface PortGroup {
   ports: number[];
 }
 
+// ── Well-known port labels ──
+
+const WELL_KNOWN_PORTS: Record<number, string> = {
+  3000: 'Dev server',
+  3001: 'Dev server',
+  3002: 'WebSocket',
+  8080: 'Dev server',
+  18789: 'Gateway',
+  18790: 'Gateway',
+  18791: 'Gateway',
+};
+
+function portLabel(port: number): string {
+  return WELL_KNOWN_PORTS[port] ?? `Port ${port}`;
+}
+
+function buildPortTooltip(groups: PortGroup[], total: number): string {
+  const header = `${total} active port${total === 1 ? '' : 's'}`;
+  const lines = groups.flatMap(g =>
+    g.ports.map(p => `${portLabel(p)}: ${p}`),
+  );
+  return [header, ...lines].join('\n');
+}
+
 // ── Ports Footer (collapsed-only) ──
 
 function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: string, repo?: string) => void }) {
@@ -319,6 +343,9 @@ function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: st
 
   if (total === 0) return null;
 
+  const tooltip = buildPortTooltip(groups, total);
+  const ariaLabel = `${total} active port${total === 1 ? '' : 's'}`;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       <div style={{
@@ -331,7 +358,8 @@ function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: st
         display: 'flex', justifyContent: 'center', padding: '2px 0',
       }}>
         <div
-          title={groups.flatMap(g => g.ports.map(p => `${g.repo}: ${p}`)).join('\n')}
+          title={tooltip}
+          aria-label={ariaLabel}
           onClick={() => {
             if (groups.length > 0 && groups[0].ports.length > 0) {
               const port = groups[0].ports[0];
