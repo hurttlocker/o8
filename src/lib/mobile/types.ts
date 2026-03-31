@@ -6,6 +6,7 @@ import type {
   ReviewPullRequestSummary,
 } from '@/lib/fleet/types';
 import type { MobileApprovalCard } from '@/lib/approvals/types';
+import type { CompactionTrigger } from '@/lib/runtimes/compaction-detector';
 
 export type MobileInboxItemKind = 'alert' | 'approval' | 'review' | 'run_watch';
 
@@ -130,6 +131,7 @@ export interface MobileTranscriptEntry {
   id: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   text: string;
+  type?: 'message' | 'compaction';
   media?: MobileTranscriptMedia[];
   toolCalls?: MobileTranscriptToolCall[];
   timestamp?: number;
@@ -142,6 +144,14 @@ export interface MobileTranscriptEntry {
   thinkingSteps?: MobileTranscriptThinkingStep[];
   thinkingDurationMs?: number;
   recalledFacts?: number;
+  compaction?: {
+    timestamp: number;
+    tokensBefore?: number;
+    tokensAfter?: number;
+    trigger: CompactionTrigger;
+    source?: 'explicit' | 'summary' | 'inferred';
+    summary?: string;
+  };
 }
 
 export interface MobileRuntimeTailGroup {

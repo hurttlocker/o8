@@ -1,15 +1,17 @@
-// o8 governance policy engine — v0.001.0
+// o8 governance policy engine — v0.002.0
 /**
  * Policy engine for o8 governance layer.
  *
  * Evaluates tool calls and agent actions against policy rules to determine
  * whether human approval is required and at what risk level.
  *
- * v0.001.0: Hardcoded rules, first-match-wins evaluation.
- * Future: per-workspace configurable policies, team override rules.
+ * v0.002.0: file-backed user overrides with workspace scoping and hot reload.
  */
 
-import type { ApprovalRisk } from './types';
+import os from 'node:os';
+import path from 'node:path';
+import { loadUserPolicies, mergePolicies, watchPolicies } from '@/lib/approvals/policy-loader';
+import type { ApprovalRisk, PolicyRule } from '@/lib/approvals/types';
 import { classifyCommand } from '@/lib/llm/tools';
 
 // ── Types ──
@@ -27,6 +29,8 @@ export interface PolicyContext {
   command?: string;
   /** File path (convenience — also checked in args.path) */
   filePath?: string;
+  /** Repo or workspace path used for workspace-scoped rules */
+  workspacePath?: string;
   /** Runtime originating the action */
   runtime?: string;
   /** Session key for audit context */
@@ -49,16 +53,7 @@ export interface PolicyEvaluation {
   blocked?: boolean;
 }
 
-/**
- * A single policy rule. Evaluated in order — first match wins.
- */
-export interface PolicyRule {
-  id: string;
-  name: string;
-  description: string;
-  risk: ApprovalRisk;
-  /** If true, matching actions are blocked entirely */
-  blocked?: boolean;
+interface CompiledPolicyRule extends PolicyRule {
   /** Predicate: does this rule apply to the given context? */
   matches: (ctx: PolicyContext) => boolean;
 }
@@ -91,36 +86,36 @@ const DESTRUCTIVE_PATTERNS: RegExp[] = [
   /\bgit\s+reset\s+--hard/,                  // git reset --hard
   /\bgit\s+clean\s+-[fd]/,                   // git clean -f/-d
   /\bgit\s+checkout\s+\.\s*$/,               // git checkout . (discard all changes)
-  /\bdrop\s+(table|database|schema)\b/i,      // DROP TABLE/DATABASE/SCHEMA
+  /\bdrop\s+(table|database|schema)\b/i,     // DROP TABLE/DATABASE/SCHEMA
   /\btruncate\s+table\b/i,                   // TRUNCATE TABLE
   /\bdelete\s+from\b(?!.*\bwhere\b)/i,       // DELETE FROM without WHERE
 ];
 
 const MIGRATION_PATTERNS: RegExp[] = [
   /\bmigrat(e|ion)\b/i,                      // migrate, migration
-  /\bknex\s+migrate/,                         // Knex
-  /\bprisma\s+(migrate|db\s+push)/,           // Prisma
-  /\bdrizzle-kit\s+(push|generate)/,          // Drizzle
-  /\balembic\b/,                              // Python Alembic
-  /\bdjango.*\bmigrate\b/,                    // Django
-  /\brails\s+db:migrate/,                     // Rails
-  /\btypeorm.*migration:run/,                 // TypeORM
-  /\bsequelize.*db:migrate/,                  // Sequelize
+  /\bknex\s+migrate/,                        // Knex
+  /\bprisma\s+(migrate|db\s+push)/,          // Prisma
+  /\bdrizzle-kit\s+(push|generate)/,         // Drizzle
+  /\balembic\b/,                             // Python Alembic
+  /\bdjango.*\bmigrate\b/,                   // Django
+  /\brails\s+db:migrate/,                    // Rails
+  /\btypeorm.*migration:run/,                // TypeORM
+  /\bsequelize.*db:migrate/,                 // Sequelize
 ];
 
 const SENSITIVE_FILE_PATTERNS: RegExp[] = [
-  /\.env(?:\.|$)/,                            // .env, .env.local, .env.production
-  /credentials/i,                             // credentials.json, etc.
-  /\.pem$/,                                   // SSL certificates
-  /\.key$/,                                   // Private keys
-  /secrets?\.ya?ml$/i,                        // secrets.yml
-  /\.ssh\//,                                  // SSH directory
-  /id_rsa/,                                   // SSH keys
+  /\.env(?:\.|$)/,                           // .env, .env.local, .env.production
+  /credentials/i,                            // credentials.json, etc.
+  /\.pem$/,                                  // SSL certificates
+  /\.key$/,                                  // Private keys
+  /secrets?\.ya?ml$/i,                       // secrets.yml
+  /\.ssh\//,                                 // SSH directory
+  /id_rsa/,                                  // SSH keys
 ];
 
 // ── Policy rules (ordered by severity — first match wins) ──
 
-const RULES: PolicyRule[] = [
+const DEFAULT_RULES: CompiledPolicyRule[] = [
 
   // ────────────────────────────────────────────────
   // BLOCKED — action is rejected entirely, not gated
@@ -161,7 +156,7 @@ const RULES: PolicyRule[] = [
       if (!isShellTool(ctx.toolName)) return false;
       const cmd = extractCommand(ctx);
       if (!cmd) return false;
-      return DESTRUCTIVE_PATTERNS.some((p) => p.test(cmd));
+      return DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(cmd));
     },
   },
 
@@ -174,7 +169,7 @@ const RULES: PolicyRule[] = [
       if (!isShellTool(ctx.toolName)) return false;
       const cmd = extractCommand(ctx);
       if (!cmd) return false;
-      return MIGRATION_PATTERNS.some((p) => p.test(cmd));
+      return MIGRATION_PATTERNS.some((pattern) => pattern.test(cmd));
     },
   },
 
@@ -209,8 +204,8 @@ const RULES: PolicyRule[] = [
     risk: 'medium',
     matches: (ctx) => {
       if (ctx.toolName !== 'write_file' && ctx.toolName !== 'edit_file') return false;
-      const path = ctx.filePath || (ctx.args?.path as string) || '';
-      return SENSITIVE_FILE_PATTERNS.some((p) => p.test(path));
+      const filePath = ctx.filePath || (ctx.args?.path as string) || '';
+      return SENSITIVE_FILE_PATTERNS.some((pattern) => pattern.test(filePath));
     },
   },
 
@@ -263,6 +258,99 @@ const RULES: PolicyRule[] = [
   },
 ];
 
+const DEFAULT_RULES_BY_ID = new Map(DEFAULT_RULES.map((rule) => [rule.id, rule]));
+
+let mergedRuleSummaries = clonePolicyRules(serializeRules(DEFAULT_RULES));
+let activeRules = [...DEFAULT_RULES];
+let policyRulesLoaded = false;
+let policyWatcherAttached = false;
+let policyWatcherCleanup: (() => void) | null = null;
+
+function serializeRules(rules: CompiledPolicyRule[]): PolicyRule[] {
+  return rules.map((rule) => ({
+    id: rule.id,
+    name: rule.name,
+    description: rule.description,
+    risk: rule.risk,
+    blocked: rule.blocked,
+    workspacePath: rule.workspacePath,
+  }));
+}
+
+function clonePolicyRules(rules: PolicyRule[]): PolicyRule[] {
+  return rules.map((rule) => ({ ...rule }));
+}
+
+function normalizeWorkspacePath(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) return '';
+  return path.resolve(trimmed.replace(/^~(?=\/|$)/, os.homedir())).replace(/\/+$/, '');
+}
+
+function extractWorkspacePath(ctx: PolicyContext): string {
+  const argWorkspacePath = typeof ctx.args?.workspacePath === 'string'
+    ? ctx.args.workspacePath
+    : typeof ctx.args?.repoPath === 'string'
+      ? ctx.args.repoPath
+      : typeof ctx.args?.cwd === 'string'
+        ? ctx.args.cwd
+        : undefined;
+
+  return normalizeWorkspacePath(ctx.workspacePath ?? argWorkspacePath);
+}
+
+function matchesWorkspacePath(rule: PolicyRule, ctx: PolicyContext): boolean {
+  const requiredPath = normalizeWorkspacePath(rule.workspacePath);
+  if (!requiredPath) {
+    return true;
+  }
+
+  const candidatePath = extractWorkspacePath(ctx);
+  if (!candidatePath) {
+    return false;
+  }
+
+  return candidatePath === requiredPath || candidatePath.startsWith(`${requiredPath}/`);
+}
+
+function rebuildPolicyState(overrides: PolicyRule[]) {
+  const defaultSummaries = serializeRules(DEFAULT_RULES);
+  mergedRuleSummaries = mergePolicies(defaultSummaries, overrides);
+  activeRules = mergedRuleSummaries.flatMap((rule) => {
+    const defaultRule = DEFAULT_RULES_BY_ID.get(rule.id);
+    return defaultRule ? [{ ...defaultRule, ...rule }] : [];
+  });
+  policyRulesLoaded = true;
+}
+
+function ensurePolicyWatcher() {
+  if (policyWatcherAttached) {
+    return;
+  }
+
+  policyWatcherCleanup = watchPolicies((rules) => {
+    rebuildPolicyState(rules);
+  });
+  policyWatcherAttached = true;
+}
+
+function ensurePolicyState() {
+  if (!policyRulesLoaded) {
+    rebuildPolicyState(loadUserPolicies());
+  }
+  ensurePolicyWatcher();
+}
+
+export function getDefaultPolicyRules(): PolicyRule[] {
+  return clonePolicyRules(serializeRules(DEFAULT_RULES));
+}
+
+export function refreshPolicyRules(): PolicyRule[] {
+  rebuildPolicyState(loadUserPolicies());
+  ensurePolicyWatcher();
+  return clonePolicyRules(mergedRuleSummaries);
+}
+
 // ── Public API ──
 
 /**
@@ -270,7 +358,12 @@ const RULES: PolicyRule[] = [
  * Returns the first matching rule's evaluation, or auto-approve if no rules match.
  */
 export function evaluatePolicy(ctx: PolicyContext): PolicyEvaluation {
-  for (const rule of RULES) {
+  ensurePolicyState();
+
+  for (const rule of activeRules) {
+    if (!matchesWorkspacePath(rule, ctx)) {
+      continue;
+    }
     if (rule.matches(ctx)) {
       return {
         requiresApproval: true,
@@ -291,33 +384,45 @@ export function evaluatePolicy(ctx: PolicyContext): PolicyEvaluation {
 }
 
 /**
- * List all policy rules (without match functions, for API/UI serialization).
+ * List all policy rules for API/UI serialization.
  */
-export function listPolicySummaries(): Array<Omit<PolicyRule, 'matches'>> {
-  return RULES.map(({ matches: _matches, ...rest }) => rest);
+export function listPolicySummaries(): PolicyRule[] {
+  ensurePolicyState();
+  return clonePolicyRules(mergedRuleSummaries);
 }
 
 /**
  * Get a specific policy rule by ID.
  */
 export function getPolicyRule(ruleId: string): PolicyRule | undefined {
-  return RULES.find((r) => r.id === ruleId);
+  ensurePolicyState();
+  const rule = mergedRuleSummaries.find((candidate) => candidate.id === ruleId);
+  return rule ? { ...rule } : undefined;
 }
 
 /**
  * Convenience: build a PolicyContext from a tool call name + args.
- * Extracts common fields (command, filePath) from args automatically.
+ * Extracts common fields (command, filePath, workspacePath) from args automatically.
  */
 export function buildPolicyContext(
   toolName: string,
   args?: Record<string, unknown>,
   extra?: Partial<PolicyContext>,
 ): PolicyContext {
+  const workspacePath = typeof args?.workspacePath === 'string'
+    ? args.workspacePath
+    : typeof args?.repoPath === 'string'
+      ? args.repoPath
+      : typeof args?.cwd === 'string'
+        ? args.cwd
+        : undefined;
+
   return {
     toolName,
     args,
     command: (args?.command as string) || (args?.cmd as string) || undefined,
     filePath: (args?.path as string) || (args?.filePath as string) || undefined,
+    workspacePath,
     ...extra,
   };
 }

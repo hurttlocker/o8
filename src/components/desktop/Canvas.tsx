@@ -47,6 +47,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
+import { AuditLogPanel } from '@/components/desktop/AuditLogPanel';
 import { MarkdownBody } from './MarkdownBody';
 import { IssueCreator } from './IssueCreator';
 // GraphExplorer3D lazy-loaded — only needed for 'memory' tab kind
@@ -86,7 +87,7 @@ export type CanvasRepoTaskLaunchRequest =
 
 // ── Tab Types ──
 
-export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'git-log' | 'image' | 'deploy' | 'memory' | 'welcome' | 'timeline' | 'mermaid' | 'preview';
+export type CanvasTabKind = 'issue' | 'transcript' | 'file' | 'diff' | 'commit' | 'pr' | 'readme' | 'ci' | 'new-issue' | 'git-log' | 'image' | 'deploy' | 'memory' | 'welcome' | 'timeline' | 'audit-log' | 'mermaid' | 'preview';
 
 export interface CanvasTab {
   id: string;
@@ -387,6 +388,7 @@ function TabIcon({ kind, size = 14 }: { kind: CanvasTabKind; size?: number }) {
     case 'memory': return <Radio size={size} />;
     case 'welcome': return <BookOpen size={size} />;
     case 'timeline': return <Clock size={size} />;
+    case 'audit-log': return <Clipboard size={size} />;
     case 'mermaid': return <Hexagon size={size} />;
     case 'preview': return <Globe size={size} />;
   }
@@ -444,6 +446,8 @@ const TabContent = memo(function TabContent({
       return <CanvasEmpty />;
     case 'timeline':
       return <TimelineExpanded />;
+    case 'audit-log':
+      return <AuditLogPanel />;
     case 'mermaid':
       return <MermaidViewer code={tab.resourceId} />;
     case 'preview':

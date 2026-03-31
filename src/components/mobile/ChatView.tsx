@@ -187,7 +187,8 @@ const MessageBubble = memo(function MessageBubble({
     );
   }
 
-  const isCompaction = entry.role === 'system' && entry.text.toLowerCase().includes('compaction');
+  const isCompaction = entry.type === 'compaction'
+    || (entry.role === 'system' && entry.text.toLowerCase().includes('compaction'));
   if (isCompaction) {
     return (
       <div className="remodex-compaction-card">

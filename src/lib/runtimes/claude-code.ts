@@ -20,10 +20,11 @@ import type {
   RuntimeChangedFile,
   RuntimeActionResult,
   LaunchOptions,
-} from './types';
-import {
-  tmuxSessionName,
-} from '@/lib/terminal/tmux';
+  RuntimeTelemetry,
+} from '@/lib/runtimes/types';
+import { detectCompactionEvents } from '@/lib/runtimes/compaction-detector';
+import { parseSessionCost } from '@/lib/runtimes/cost-parser';
+import { tmuxSessionName } from '@/lib/terminal/tmux';
 import { spawnBridgeTerminalSession } from '@/lib/runtime/pty-bridge';
 import { getRuntimeTerminalSession, registerRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
 
@@ -42,7 +43,7 @@ const capabilities: RuntimeCapabilities = {
   resume: true,
   interrupt: true,
   reviewDiffs: true,
-  costTelemetry: false,
+  costTelemetry: true,
   streaming: true,
 };
 
@@ -164,6 +165,48 @@ async function resolveSessionProjectPath(sessionId: string) {
   };
 }
 
+async function resolveMostRecentSessionIdForCwd(cwd: string) {
+  const encodedDir = `-${cwd.replace(/^\/+/, '').replace(/\//g, '-')}`;
+  const projectDirPath = path.join(CLAUDE_PROJECTS_DIR, encodedDir);
+  const dirEntries = await readdir(projectDirPath).catch(() => [] as string[]);
+  const jsonlFiles = dirEntries.filter((entry) => entry.endsWith('.jsonl'));
+  if (jsonlFiles.length === 0) {
+    return null;
+  }
+
+  const withStats = await Promise.all(
+    jsonlFiles.map(async (entry) => {
+      const jsonlPath = path.join(projectDirPath, entry);
+      const jsonlStat = await stat(jsonlPath).catch(() => null);
+      return {
+        file: entry,
+        mtime: jsonlStat?.mtimeMs ?? 0,
+      };
+    }),
+  );
+  withStats.sort((left, right) => right.mtime - left.mtime);
+
+  return withStats[0]?.file.replace('.jsonl', '') ?? null;
+}
+
+async function resolveLiveSessionIdFromPid(pid: number) {
+  if (!Number.isFinite(pid) || pid <= 0) {
+    return null;
+  }
+
+  try {
+    const { stdout: cwdOut } = await execFileAsync(
+      'lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'],
+      { timeout: 2000 },
+    );
+    const cwdLine = cwdOut.split('\n').find((line) => line.startsWith('n/'));
+    const cwd = cwdLine?.slice(1);
+    return cwd ? await resolveMostRecentSessionIdForCwd(cwd) : null;
+  } catch {
+    return null;
+  }
+}
+
 function extractSessionIdFromOutput(raw: string) {
   for (const line of raw.split('\n').filter(Boolean)) {
     try {
@@ -223,12 +266,24 @@ function projectDisplayName(projectPath: string): string {
 // ── Session JSONL parsing ──
 
 interface ClaudeCodeMessage {
-  type: 'user' | 'assistant' | 'system' | 'progress' | 'file-history-snapshot' | 'queue-operation';
+  type: string;
+  subtype?: string;
   uuid?: string;
   timestamp?: string;
   sessionId?: string;
   cwd?: string;
   gitBranch?: string;
+  content?: string;
+  isMeta?: boolean;
+  isCompactSummary?: boolean;
+  isVisibleInTranscriptOnly?: boolean;
+  compactMetadata?: {
+    trigger?: string;
+    preTokens?: number;
+    postTokens?: number;
+    tokensAfter?: number;
+  };
+  usage?: Record<string, number>;
   message?: {
     role: string;
     content: MessageContent;
@@ -297,6 +352,19 @@ function extractFilePath(content: MessageContent): string | undefined {
   return undefined;
 }
 
+function buildCompactionTranscriptEntry(
+  event: ReturnType<typeof detectCompactionEvents>[number],
+): RuntimeTranscriptEntry {
+  return {
+    id: event.id,
+    role: 'system',
+    text: 'Context compaction event',
+    timestamp: event.timestamp,
+    type: 'compaction',
+    compaction: event,
+  };
+}
+
 // ── Session metadata ──
 
 interface SessionMeta {
@@ -317,7 +385,7 @@ interface SessionMeta {
 
 const HEAD_BYTES = 8 * 1024;       // 8KB for first 20 lines of metadata
 const TAIL_BYTES = 64 * 1024;      // 64KB for tail windows (50 + 30 + 10 lines)
-const TRANSCRIPT_TAIL_BYTES = 128 * 1024; // 128KB for transcript tail reads
+const TRANSCRIPT_TAIL_BYTES = 512 * 1024; // 512KB for transcript tail reads (compaction summaries can be large)
 
 /** mtime cache: avoids re-reading files that haven't changed */
 const sessionMetaCache = new Map<string, { mtimeMs: number; meta: SessionMeta }>();
@@ -764,38 +832,57 @@ export const claudeCodeRuntime: AgentRuntime = {
 
     if (!jsonlPath) return [];
 
-    // Tail-read: only the last 128KB instead of the entire file
+    // Tail-read: only the last chunk instead of the entire file
     const fileStat = await stat(jsonlPath).catch(() => null);
     if (!fileStat || fileStat.size === 0) return [];
 
     const tailRaw = await readTail(jsonlPath, fileStat.size, TRANSCRIPT_TAIL_BYTES);
-    const lines = tailLines(tailRaw, limit * 4); // read extra lines — not all are user/assistant
-
-    const entries: RuntimeTranscriptEntry[] = [];
-    let entryIndex = 0;
+    const lines = tailLines(tailRaw, Number.MAX_SAFE_INTEGER);
+    const parsedEntries: ClaudeCodeMessage[] = [];
 
     for (const line of lines) {
       try {
-        const parsed = JSON.parse(line) as ClaudeCodeMessage;
-        if (parsed.type !== 'user' && parsed.type !== 'assistant') continue;
-        if (!parsed.message?.content) continue;
-
-        const text = extractTextFromContent(parsed.message.content);
-        if (!text.trim()) continue;
-
-        const id = parsed.uuid ?? `cc-${entryIndex}`;
-        entryIndex++;
-
-        entries.push({
-          id,
-          role: parsed.type === 'user' ? 'user' : 'assistant',
-          text,
-          timestamp: parsed.timestamp ? new Date(parsed.timestamp) : new Date(),
-          toolName: parsed.type === 'assistant' ? extractToolName(parsed.message.content) : undefined,
-          filePath: parsed.type === 'assistant' ? extractFilePath(parsed.message.content) : undefined,
-        });
+        parsedEntries.push(JSON.parse(line) as ClaudeCodeMessage);
       } catch { /* skip malformed */ }
     }
+
+    const compactionEvents = detectCompactionEvents(parsedEntries);
+    const skippedEntryIds = new Set(
+      compactionEvents.flatMap((event) => [
+        event.boundaryEntryId,
+        event.summaryEntryId,
+      ]).filter((id): id is string => Boolean(id)),
+    );
+
+    const entries: RuntimeTranscriptEntry[] = compactionEvents.map((event) => (
+      buildCompactionTranscriptEntry(event)
+    ));
+    let entryIndex = 0;
+
+    for (const parsed of parsedEntries) {
+      if (parsed.uuid && skippedEntryIds.has(parsed.uuid)) continue;
+      if (parsed.isCompactSummary) continue;
+      if (parsed.type !== 'user' && parsed.type !== 'assistant') continue;
+      if (!parsed.message?.content) continue;
+
+      const text = extractTextFromContent(parsed.message.content);
+      if (!text.trim()) continue;
+
+      const id = parsed.uuid ?? `cc-${entryIndex}`;
+      entryIndex++;
+
+      entries.push({
+        id,
+        role: parsed.type === 'user' ? 'user' : 'assistant',
+        text,
+        timestamp: parsed.timestamp ? new Date(parsed.timestamp) : new Date(),
+        type: 'message',
+        toolName: parsed.type === 'assistant' ? extractToolName(parsed.message.content) : undefined,
+        filePath: parsed.type === 'assistant' ? extractFilePath(parsed.message.content) : undefined,
+      });
+    }
+
+    entries.sort((left, right) => left.timestamp.getTime() - right.timestamp.getTime());
 
     // sinceId filtering: return only entries after the given id
     let result = entries;
@@ -909,32 +996,9 @@ export const claudeCodeRuntime: AgentRuntime = {
     // by finding the most recent JSONL in the project dir that matches the PID's CWD
     if (sessionId.startsWith('live-')) {
       const pid = Number(sessionId.replace('live-', ''));
-      if (pid > 0) {
-        try {
-          const { stdout: cwdOut } = await execFileAsync(
-            'lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'],
-            { timeout: 2000 },
-          );
-          const cwdLine = cwdOut.split('\n').find((l) => l.startsWith('n/'));
-          const cwd = cwdLine?.slice(1);
-          if (cwd) {
-            const encodedDir = `-${cwd.replace(/^\/+/, '').replace(/\//g, '-')}`;
-            const projectDirPath = path.join(CLAUDE_PROJECTS_DIR, encodedDir);
-            const dirEntries = await readdir(projectDirPath).catch(() => [] as string[]);
-            const jsonlFiles = dirEntries.filter((e) => e.endsWith('.jsonl'));
-            if (jsonlFiles.length > 0) {
-              const withStats = await Promise.all(
-                jsonlFiles.map(async (f) => {
-                  const fp = path.join(projectDirPath, f);
-                  const s = await stat(fp).catch(() => null);
-                  return { file: f, mtime: s?.mtimeMs ?? 0 };
-                }),
-              );
-              withStats.sort((a, b) => b.mtime - a.mtime);
-              sessionId = withStats[0].file.replace('.jsonl', '');
-            }
-          }
-        } catch { /* fallback to original sessionId */ }
+      const resolvedSessionId = await resolveLiveSessionIdFromPid(pid);
+      if (resolvedSessionId) {
+        sessionId = resolvedSessionId;
       }
     }
 
@@ -1037,6 +1101,38 @@ export const claudeCodeRuntime: AgentRuntime = {
         ? `SIGINT sent to Claude Code pid${targetPids.length === 1 ? '' : 's'} ${targetPids.join(', ')}.`
         : 'Could not interrupt the live Claude Code process for this session.',
       sessionKey,
+    };
+  },
+
+  async getTelemetry(sessionKey: string): Promise<RuntimeTelemetry | undefined> {
+    let sessionId = sessionKey.replace('claude-code:', '');
+    if (sessionId.startsWith('live-')) {
+      const pid = Number(sessionId.replace('live-', ''));
+      const resolvedSessionId = await resolveLiveSessionIdFromPid(pid);
+      if (resolvedSessionId) {
+        sessionId = resolvedSessionId;
+      }
+    }
+
+    const sessionProject = await resolveSessionProjectPath(sessionId);
+    if (!sessionProject?.jsonlPath) {
+      return undefined;
+    }
+
+    const sessionCost = await parseSessionCost(sessionProject.jsonlPath);
+    const totalTokens = sessionCost.inputTokens
+      + sessionCost.outputTokens
+      + sessionCost.cacheReadTokens
+      + sessionCost.cacheWriteTokens;
+
+    return {
+      totalTokens,
+      estimatedCostUsd: sessionCost.totalCostUsd,
+      inputTokens: sessionCost.inputTokens,
+      outputTokens: sessionCost.outputTokens,
+      cacheReadTokens: sessionCost.cacheReadTokens,
+      cacheWriteTokens: sessionCost.cacheWriteTokens,
+      model: sessionCost.model ?? undefined,
     };
   },
 
