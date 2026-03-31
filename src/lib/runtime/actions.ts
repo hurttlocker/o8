@@ -1,6 +1,5 @@
 import type { AgentSummary } from '@/lib/fleet/types';
 import { continueOwnedCodexSession, interruptOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
-import { findRepoByLocalPath } from '@/lib/repos/registry';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime, type RuntimeId } from '@/lib/runtimes';
 import { linkSessionToWorktree, prepareLaunchWorktree } from '@/lib/worktree';
@@ -97,7 +96,9 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
   // Create a worktree when: explicitly requested via isolate flag, OR when not skipping setup.
   // This allows dispatch to request isolation (isolate: true) while skipping env setup (skipSetup: true).
   const shouldCreateWorktree = supportsWorktrees && (payload.isolate || !payload.skipSetup);
-  const repoEntry = shouldCreateWorktree ? await findRepoByLocalPath(repoPath).catch(() => null) : null;
+  const repoEntry = shouldCreateWorktree
+    ? await import('@/lib/repos/registry').then((m) => m.findRepoByLocalPath(repoPath)).catch(() => null)
+    : null;
   const launchWorktree = shouldCreateWorktree
     ? await prepareLaunchWorktree({
         repoRoot: repoPath,
