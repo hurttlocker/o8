@@ -53,6 +53,7 @@ import {
   type DomainLaneSummary,
 } from '@/lib/orchestrator/store';
 import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
+import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import { deriveWorkflowStage, describeWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
 
@@ -166,6 +167,27 @@ function buildOrchestrationPacketBadge(packet: OrchestratorPacket): WorkspaceOrc
     runtime: packet.runtime,
     branchTarget: packet.branchTarget,
   };
+}
+
+function packetStatusFromLaneStatus(status?: string | null): OrchestratorPacket['status'] {
+  const normalized = status?.trim().toLowerCase();
+  if (normalized === 'running') return 'running';
+  if (normalized === 'reviewing') return 'awaiting_review';
+  if (normalized === 'completed') return 'released';
+  if (normalized === 'archived') return 'archived';
+  if (normalized === 'awaiting_input' || normalized === 'failed' || normalized === 'stuck' || normalized === 'interrupted') return 'blocked';
+  return 'launching';
+}
+
+function openedLaneSessionsCache() {
+  const key = '__o8_opened_lane_sessions';
+  const existing = (globalThis as Record<string, unknown>)[key];
+  if (existing instanceof Set) {
+    return existing as Set<string>;
+  }
+  const created = new Set<string>();
+  (globalThis as Record<string, unknown>)[key] = created;
+  return created;
 }
 
 function buildOrchestrationPacketDraft(
@@ -2237,7 +2259,11 @@ function DashboardInner() {
     return result.newTileId;
   }, [findInsertionTarget, findWorkspaceTarget, tileLayout, workspacePreviews]);
 
-  const waitForWorkspaceTerminalTarget = useCallback(async (options?: { repoPath?: string | null; preferredTileId?: string | null }) => {
+  const waitForWorkspaceTerminalTarget = useCallback(async (options?: {
+    repoPath?: string | null;
+    preferredTileId?: string | null;
+    fallbackToAnyExisting?: boolean;
+  }) => {
     const repoPath = options?.repoPath ?? null;
     const preferredTileId = options?.preferredTileId ?? null;
     const initial = getPreferredWorkspaceTerminalTarget(repoPath, preferredTileId);
@@ -2247,7 +2273,7 @@ function DashboardInner() {
     }
 
     const fallbackExisting = workspaceTerminalHandlesRef.current.entries().next().value as [string, TerminalTabHandle] | undefined;
-    if (fallbackExisting) {
+    if (options?.fallbackToAnyExisting !== false && fallbackExisting) {
       const [tileId, handle] = fallbackExisting;
       setActiveTileId(tileId);
       return { tileId, handle };
@@ -2291,54 +2317,124 @@ function DashboardInner() {
     throw new Error('Unable to attach the packet to a workspace lane. The workspace surface did not become ready in time.');
   }, [ensureWorkspaceTerminalTile, getPreferredWorkspaceTerminalTarget, setTerminalTileRepoScope]);
 
+  const openWorkspaceTabForLane = useCallback(async (lane: {
+    laneId?: string | null;
+    packetId?: string | null;
+    packetReferenceLabel?: string | null;
+    packetTitle?: string | null;
+    sessionKey: string;
+    runtime: 'codex' | 'claude-code';
+    repoPath: string;
+    status?: string | null;
+    branch?: string | null;
+  }) => {
+    const opened = openedLaneSessionsCache();
+    if (opened.has(lane.sessionKey)) return;
+    opened.add(lane.sessionKey);
+    try {
+      const packet = lane.packetId
+        ? thoughtsMissionState.packets.find((candidate) => candidate.id === lane.packetId) ?? null
+        : null;
+      const targetScope = workspaceScopeEntries.find((entry) => entry.localPath === lane.repoPath)
+        ?? workspaceScopeEntries.find((entry) => pathBelongsToRepoScope(lane.repoPath, entry.localPath))
+        ?? null;
+      const target = await waitForWorkspaceTerminalTarget({
+        repoPath: lane.repoPath,
+        fallbackToAnyExisting: false,
+      });
+      const packetTitle = packet?.title ?? lane.packetTitle ?? targetScope?.name ?? 'Dispatched Agent';
+      const packetReferenceLabel = packet?.referenceLabel ?? lane.packetReferenceLabel ?? lane.laneId ?? 'Lane';
+      const packetStatus = packet && packet.status !== 'queued' && packet.status !== 'draft'
+        ? packet.status
+        : packetStatusFromLaneStatus(lane.status);
+      target.handle.openCliChatSession({
+        runtime: lane.runtime,
+        repo: targetScope ? {
+          name: targetScope.name,
+          localPath: targetScope.localPath,
+          branch: targetScope.branch ?? 'main',
+          readiness: targetScope.readiness ?? null,
+          remoteUrl: targetScope.remoteUrl ?? undefined,
+          registryRepoId: targetScope.registryRepoId,
+          isWorktree: targetScope.isWorktree ?? false,
+          worktreeStatus: targetScope.worktreeStatus ?? null,
+        } : undefined,
+        targetSessionKey: lane.sessionKey,
+        label: packetTitle,
+        createNew: false,
+        orchestrationPacket: lane.packetId
+          ? {
+              packetId: lane.packetId,
+              referenceLabel: packetReferenceLabel,
+              title: packetTitle,
+              status: packetStatus,
+              runtime: lane.runtime,
+              branchTarget: lane.branch ?? packet?.branchTarget ?? null,
+            }
+          : null,
+        autoArchiveOnIdle: false,
+      });
+      setActiveTileId(target.tileId);
+      setActiveWorkspace(lane.repoPath);
+      console.log(`[packet-dispatch-workspace] Surfaced ${lane.sessionKey} in workspace tile ${target.tileId}`);
+    } catch (error) {
+      opened.delete(lane.sessionKey);
+      console.error('[packet-dispatch-workspace] Failed to surface dispatched lane:', error);
+    }
+  }, [thoughtsMissionState.packets, waitForWorkspaceTerminalTarget, workspaceScopeEntries]);
+
+  const realtimeDispatchCallbacks = useMemo<DesktopWsCallbacks>(() => ({
+    onRealtimeEvent: (event: RealtimeEventEnvelope) => {
+      if (event.channel !== 'mutation') return;
+      if (event.event !== 'mutation.record' && event.event !== 'mutation.settled') return;
+      const mutation = (event.data as { mutation?: RealtimeMutationRecord }).mutation;
+      if (!mutation || mutation.action !== 'packet-dispatch' || mutation.status === 'failed') return;
+      if (!mutation.sessionKey || !mutation.repoPath) return;
+
+      void openWorkspaceTabForLane({
+        laneId: mutation.laneId ?? null,
+        packetId: mutation.packetId ?? null,
+        packetReferenceLabel: mutation.packetReferenceLabel ?? null,
+        packetTitle: mutation.packetTitle ?? null,
+        sessionKey: mutation.sessionKey,
+        runtime: mutation.runtime === 'claude-code' ? 'claude-code' : 'codex',
+        repoPath: mutation.repoPath,
+        status: 'launching',
+        branch: mutation.branch ?? null,
+      });
+      void refreshWorkspaceLifecycle();
+      void loadOrchestratorMissionState();
+    },
+  }), [openWorkspaceTabForLane, refreshWorkspaceLifecycle]);
+
+  useSharedDesktopWs(undefined, realtimeDispatchCallbacks);
+
   // ── Auto-open chat tabs for delegated lane sessions ──
   // Uses a global queue on window that survives HMR rebuilds, plus periodic lane polling.
   useEffect(() => {
-    const opened = ((globalThis as Record<string, unknown>).__o8_opened_lane_sessions as Set<string> | undefined)
-      ?? new Set<string>();
-    (globalThis as Record<string, unknown>).__o8_opened_lane_sessions = opened;
-
-    async function openTabForLane(lane: {
-      id: string; label: string; sessionKey: string;
-      runtime: string; repoPath: string;
-      status?: string; branch?: string;
-    }) {
-      if (opened.has(lane.sessionKey)) return;
-      opened.add(lane.sessionKey);
-      const target = await waitForWorkspaceTerminalTarget({ repoPath: lane.repoPath });
-      if (target) {
-        const laneRuntime = lane.runtime as 'codex' | 'claude-code';
-        target.handle.openCliChatSession({
-          runtime: laneRuntime,
-          targetSessionKey: lane.sessionKey,
-          label: lane.label,
-          createNew: true,
-          orchestrationPacket: {
-            packetId: lane.id,
-            referenceLabel: lane.label,
-            title: lane.label,
-            status: (lane.status === 'running' ? 'running' : 'launching') as 'running' | 'launching',
-            runtime: laneRuntime,
-            branchTarget: lane.branch ?? null,
-          },
-        });
-        console.log(`[lane-tab-sync] Opened chat tab for lane ${lane.id} session ${lane.sessionKey}`);
-      }
-    }
-
     async function pollLanes() {
       try {
         const res = await fetch('/api/lanes?active=true');
         if (!res.ok) return;
         const data = await res.json();
         for (const lane of (data.lanes ?? []) as Array<{
-          id: string; label: string; sessionKey: string | null;
+          id: string; label: string; packetId: string | null; sessionKey: string | null;
           status: string; runtime: string; repoPath: string;
           branch?: string;
         }>) {
           if (!lane.sessionKey) continue;
           if (lane.status !== 'running' && lane.status !== 'launching') continue;
-          void openTabForLane({ ...lane, sessionKey: lane.sessionKey });
+          void openWorkspaceTabForLane({
+            laneId: lane.id,
+            packetId: lane.packetId,
+            packetReferenceLabel: null,
+            packetTitle: lane.label,
+            sessionKey: lane.sessionKey,
+            runtime: lane.runtime === 'claude-code' ? 'claude-code' : 'codex',
+            repoPath: lane.repoPath,
+            status: lane.status,
+            branch: lane.branch ?? null,
+          });
         }
       } catch { /* best-effort */ }
     }
@@ -2347,7 +2443,7 @@ function DashboardInner() {
     const initTimer = setTimeout(pollLanes, 2_000);
     const id = setInterval(pollLanes, 15_000);
     return () => { clearTimeout(initTimer); clearInterval(id); };
-  }, [waitForWorkspaceTerminalTarget]);
+  }, [openWorkspaceTabForLane]);
 
   const collectOrchestratorLaneSnapshots = useCallback((): OrchestratorLaneSnapshot[] => (
     Array.from(workspaceTerminalHandlesRef.current.values()).flatMap((handle) => handle.getChatTabSnapshots())
@@ -2511,7 +2607,7 @@ function DashboardInner() {
         ...packet,
         status: 'running',
       }),
-      autoArchiveOnIdle: true,
+      autoArchiveOnIdle: false,
     });
 
     setActiveTileId(workspaceTarget.tileId);
@@ -3175,11 +3271,16 @@ function DashboardInner() {
         updateSupervisorWorkspaceTab(detail.surfaceId, detail.status, detail.name);
         return;
       }
+      if (updateSupervisorWorkspaceTab(detail.surfaceId, detail.status, detail.name)) {
+        openedLaneSessionsCache().add(detail.surfaceId);
+        return;
+      }
       if (!detail.repoPath) return;
 
       // Deduplicate — only open once per surfaceId
       if (openedSupervisorAgentsRef.current.has(detail.surfaceId)) return;
       openedSupervisorAgentsRef.current.add(detail.surfaceId);
+      openedLaneSessionsCache().add(detail.surfaceId);
 
       void handleLaunchWorkspaceAgent({
         repoPath: detail.repoPath,
@@ -3189,7 +3290,7 @@ function DashboardInner() {
         autoSend: false,
         targetSessionKey: detail.surfaceId,
         supervisorStatus: detail.status,
-        autoArchiveOnIdle: true,
+        autoArchiveOnIdle: false,
       }).catch((err) => {
         console.error('[dashboard] Failed to auto-open tab for orchestrator agent:', err);
       });
