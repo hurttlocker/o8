@@ -61,10 +61,6 @@ function jsonResult(data: unknown): McpToolResult {
   return { content: [{ type: 'text', text: JSON.stringify(data) }] };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 // ── Tool Definitions ──
 
 const TOOLS: McpTool[] = [
@@ -191,9 +187,6 @@ async function handleSend(args: Record<string, unknown>): Promise<McpToolResult>
         }),
       }) as Record<string, unknown>;
     }
-
-    // Brief wait then grab early status
-    await sleep(2000);
 
     let status: Record<string, unknown> = {};
     try {

@@ -8,7 +8,7 @@
 
 import { execFile, spawn } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';
-import { access, mkdtemp, readdir, readFile, stat } from 'node:fs/promises';
+import { access, mkdtemp, open, readdir, readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -313,6 +313,72 @@ interface SessionMeta {
   hasErrorInTail?: boolean;
 }
 
+// ── Positional read helpers ──
+
+const HEAD_BYTES = 8 * 1024;       // 8KB for first 20 lines of metadata
+const TAIL_BYTES = 64 * 1024;      // 64KB for tail windows (50 + 30 + 10 lines)
+const TRANSCRIPT_TAIL_BYTES = 128 * 1024; // 128KB for transcript tail reads
+
+/** mtime cache: avoids re-reading files that haven't changed */
+const sessionMetaCache = new Map<string, { mtimeMs: number; meta: SessionMeta }>();
+
+/**
+ * Read the first `bytes` of a file via positional read.
+ * Returns the decoded string. For files smaller than `bytes`, returns the full content.
+ */
+async function readHead(filePath: string, fileSize: number, bytes: number): Promise<string> {
+  const readLen = Math.min(bytes, fileSize);
+  if (readLen === 0) return '';
+  const fh = await open(filePath, 'r');
+  try {
+    const buf = Buffer.alloc(readLen);
+    const { bytesRead } = await fh.read(buf, 0, readLen, 0);
+    return buf.toString('utf-8', 0, bytesRead);
+  } finally {
+    await fh.close();
+  }
+}
+
+/**
+ * Read the last `bytes` of a file via positional read.
+ * Returns the decoded string. For files smaller than `bytes`, returns the full content.
+ */
+async function readTail(filePath: string, fileSize: number, bytes: number): Promise<string> {
+  const offset = Math.max(0, fileSize - bytes);
+  const readLen = fileSize - offset;
+  if (readLen === 0) return '';
+  const fh = await open(filePath, 'r');
+  try {
+    const buf = Buffer.alloc(readLen);
+    const { bytesRead } = await fh.read(buf, 0, readLen, offset);
+    return buf.toString('utf-8', 0, bytesRead);
+  } finally {
+    await fh.close();
+  }
+}
+
+/**
+ * Parse head lines (first N) from a raw head-read string.
+ * Discards the last element if it's a partial line (cut mid-JSON).
+ */
+function headLines(raw: string, count: number): string[] {
+  const lines = raw.split('\n').filter(Boolean);
+  // Last line may be truncated at the byte boundary — drop it
+  if (lines.length > 0 && !raw.endsWith('\n')) lines.pop();
+  return lines.slice(0, count);
+}
+
+/**
+ * Parse tail lines (last N) from a raw tail-read string.
+ * Discards the first element if it's a partial line (cut mid-JSON).
+ */
+function tailLines(raw: string, count: number): string[] {
+  const lines = raw.split('\n').filter(Boolean);
+  // First line may be truncated at the byte boundary — drop it
+  if (lines.length > 0 && !raw.startsWith('\n') && raw.length > 0) lines.shift();
+  return lines.slice(-count);
+}
+
 async function discoverProjectSessions(projectDirName: string): Promise<SessionMeta[]> {
   const projectDir = path.join(CLAUDE_PROJECTS_DIR, projectDirName);
 
@@ -336,16 +402,23 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
       // Skip sessions older than the recent window
       if (now - fileStat.mtimeMs > RECENT_WINDOW_MS) continue;
 
-      // Read first few lines to get metadata
-      const content = await readFile(jsonlPath, 'utf-8');
-      const lines = content.split('\n').filter(Boolean);
+      // Check mtime cache — skip file I/O if unchanged
+      const cached = sessionMetaCache.get(jsonlPath);
+      if (cached && cached.mtimeMs === fileStat.mtimeMs) {
+        sessions.push(cached.meta);
+        continue;
+      }
 
+      const fileSize = fileStat.size;
+
+      // Positional reads: head (first ~8KB) and tail (last ~64KB)
       let firstUserMessage: string | undefined;
       let cwd: string | undefined;
       let gitBranch: string | undefined;
       let model: string | undefined;
 
-      for (const line of lines.slice(0, 20)) {
+      const headRaw = await readHead(jsonlPath, fileSize, HEAD_BYTES);
+      for (const line of headLines(headRaw, 20)) {
         try {
           const parsed = JSON.parse(line) as ClaudeCodeMessage;
           if (parsed.cwd && !cwd) cwd = parsed.cwd;
@@ -361,8 +434,11 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
         } catch { /* skip malformed lines */ }
       }
 
-      const modelTailLines = lines.slice(-50).reverse();
-      for (const tl of modelTailLines) {
+      // Tail read for model, context %, and error detection
+      const tailRaw = await readTail(jsonlPath, fileSize, TAIL_BYTES);
+      const tail50 = tailLines(tailRaw, 50);
+
+      for (const tl of [...tail50].reverse()) {
         try {
           const tp = JSON.parse(tl) as ClaudeCodeMessage;
           if (tp.message?.model) {
@@ -374,11 +450,11 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
 
       const projectPath = cwd ?? decodeProjectPath(projectDirName);
 
-      // Extract context % from last assistant message usage (read tail)
+      // Extract context % from last assistant message usage (last 30 lines of tail)
       let contextUsedPercent: number | undefined;
       const CLAUDE_CTX_WINDOW = 200_000;
-      const tailLines = lines.slice(-30).reverse();
-      for (const tl of tailLines) {
+      const tail30 = tail50.slice(-30);
+      for (const tl of [...tail30].reverse()) {
         try {
           const tp = JSON.parse(tl) as ClaudeCodeMessage;
           if (tp.type === 'assistant' && tp.message?.usage) {
@@ -392,10 +468,10 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
         } catch { /* skip */ }
       }
 
-      // Check tail for error/crash indicators (last 10 lines)
+      // Check tail for error/crash indicators (last 10 lines of tail)
       let hasErrorInTail = false;
-      const errorTailLines = lines.slice(-10);
-      for (const el of errorTailLines) {
+      const tail10 = tail50.slice(-10);
+      for (const el of tail10) {
         try {
           const ep = JSON.parse(el) as ClaudeCodeMessage;
           if (ep.type === 'system' && typeof ep.message?.content === 'string') {
@@ -408,7 +484,7 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
         } catch { /* skip */ }
       }
 
-      sessions.push({
+      const meta: SessionMeta = {
         sessionId,
         projectDir,
         projectPath,
@@ -420,7 +496,11 @@ async function discoverProjectSessions(projectDirName: string): Promise<SessionM
         model,
         contextUsedPercent,
         hasErrorInTail,
-      });
+      };
+
+      // Cache for next scan
+      sessionMetaCache.set(jsonlPath, { mtimeMs: fileStat.mtimeMs, meta });
+      sessions.push(meta);
     } catch { /* skip unreadable files */ }
   }
 
@@ -585,12 +665,14 @@ export const claudeCodeRuntime: AgentRuntime = {
           const best = withStats[0];
           realSessionId = best.file.replace('.jsonl', '');
 
-          // Read tail for context % and metadata
+          // Positional reads for metadata and context %
           try {
-            const content = await readFile(best.path, 'utf-8');
-            const lines = content.split('\n').filter(Boolean);
-            // Metadata from head
-            for (const line of lines.slice(0, 20)) {
+            const bestStat = await stat(best.path);
+            const bestSize = bestStat.size;
+
+            // Head read for metadata
+            const hRaw = await readHead(best.path, bestSize, HEAD_BYTES);
+            for (const line of headLines(hRaw, 20)) {
               try {
                 const p = JSON.parse(line) as ClaudeCodeMessage;
                 if (p.gitBranch && !gitBranch) gitBranch = p.gitBranch;
@@ -604,8 +686,11 @@ export const claudeCodeRuntime: AgentRuntime = {
                 if (gitBranch && firstUserMessage) break;
               } catch { /* skip */ }
             }
-            const modelTailLines = lines.slice(-50).reverse();
-            for (const tl of modelTailLines) {
+
+            // Tail read for model and context %
+            const tRaw = await readTail(best.path, bestSize, TAIL_BYTES);
+            const tl50 = tailLines(tRaw, 50);
+            for (const tl of [...tl50].reverse()) {
               try {
                 const tp = JSON.parse(tl) as ClaudeCodeMessage;
                 if (tp.message?.model) {
@@ -614,10 +699,9 @@ export const claudeCodeRuntime: AgentRuntime = {
                 }
               } catch { /* skip */ }
             }
-            // Context from tail
             const CLAUDE_CTX_WINDOW = 200_000;
-            const tailLines = lines.slice(-30).reverse();
-            for (const tl of tailLines) {
+            const tl30 = tl50.slice(-30);
+            for (const tl of [...tl30].reverse()) {
               try {
                 const tp = JSON.parse(tl) as ClaudeCodeMessage;
                 if (tp.type === 'assistant' && tp.message?.usage) {
@@ -661,7 +745,7 @@ export const claudeCodeRuntime: AgentRuntime = {
     return results;
   },
 
-  async readTranscript(sessionKey: string, _sinceId?: string, limit = 50): Promise<RuntimeTranscriptEntry[]> {
+  async readTranscript(sessionKey: string, sinceId?: string, limit = 50): Promise<RuntimeTranscriptEntry[]> {
     const sessionId = sessionKey.replace('claude-code:', '');
 
     // Find the JSONL file across all projects
@@ -680,10 +764,15 @@ export const claudeCodeRuntime: AgentRuntime = {
 
     if (!jsonlPath) return [];
 
-    const content = await readFile(jsonlPath, 'utf-8');
-    const lines = content.split('\n').filter(Boolean);
+    // Tail-read: only the last 128KB instead of the entire file
+    const fileStat = await stat(jsonlPath).catch(() => null);
+    if (!fileStat || fileStat.size === 0) return [];
+
+    const tailRaw = await readTail(jsonlPath, fileStat.size, TRANSCRIPT_TAIL_BYTES);
+    const lines = tailLines(tailRaw, limit * 4); // read extra lines — not all are user/assistant
 
     const entries: RuntimeTranscriptEntry[] = [];
+    let entryIndex = 0;
 
     for (const line of lines) {
       try {
@@ -694,8 +783,11 @@ export const claudeCodeRuntime: AgentRuntime = {
         const text = extractTextFromContent(parsed.message.content);
         if (!text.trim()) continue;
 
+        const id = parsed.uuid ?? `cc-${entryIndex}`;
+        entryIndex++;
+
         entries.push({
-          id: parsed.uuid ?? `cc-${entries.length}`,
+          id,
           role: parsed.type === 'user' ? 'user' : 'assistant',
           text,
           timestamp: parsed.timestamp ? new Date(parsed.timestamp) : new Date(),
@@ -705,8 +797,17 @@ export const claudeCodeRuntime: AgentRuntime = {
       } catch { /* skip malformed */ }
     }
 
+    // sinceId filtering: return only entries after the given id
+    let result = entries;
+    if (sinceId) {
+      const idx = result.findIndex((e) => e.id === sinceId);
+      if (idx !== -1) {
+        result = result.slice(idx + 1);
+      }
+    }
+
     // Return last N entries
-    return entries.slice(-limit);
+    return result.slice(-limit);
   },
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
