@@ -571,7 +571,25 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
     actor: 'orchestrator',
   });
 
-  const synced = await syncOrchestratorControlPlaneState(readOrchestratorControlPlaneState());
+  // After a successful merge, mark the packet as completed+released so downstream
+  // packets in the DAG can unblock and dispatch automatically.
+  const currentState = readOrchestratorControlPlaneState();
+  if (result.ok) {
+    for (const p of currentState.packets) {
+      if (p.id === input.packetId) {
+        p.status = 'released';
+        p.queueState = 'held';
+        p.releaseState = 'released';
+        p.blockedReason = null;
+        if (p.lane) {
+          p.lane.lastEventLabel = 'merged';
+        }
+        break;
+      }
+    }
+  }
+
+  const synced = await syncOrchestratorControlPlaneState(currentState);
   const afterDispatch = await runDispatchTick(synced);
   writeOrchestratorControlPlaneState(afterDispatch);
 
