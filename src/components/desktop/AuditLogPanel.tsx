@@ -278,155 +278,51 @@ function flattenAuditTimeline(approvals: ApprovalRecord[]): AuditTimelineItem[] 
     .sort((left, right) => right.timestamp - left.timestamp);
 }
 
-function SelectField({
-  label,
+/* ---------------------------------------------------------------------------
+ * Compact pill-style select for the filter bar
+ * --------------------------------------------------------------------------- */
+function PillSelect({
   value,
   onChange,
   options,
 }: {
-  label: string;
   value: string;
   onChange: (value: string) => void;
   options: Array<{ label: string; value: string }>;
 }) {
   return (
-    <label style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
-      <span style={{
-        fontSize: 11,
-        fontWeight: 700,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        color: 'var(--t-text-secondary)',
-      }}>
-        {label}
-      </span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        style={{
-          width: '100%',
-          minHeight: 44,
-          borderRadius: 14,
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: 'var(--t-divider)',
-          backgroundColor: 'var(--t-panel)',
-          color: 'var(--t-text)',
-          fontSize: 13,
-          fontWeight: 600,
-          paddingTop: 0,
-          paddingRight: 14,
-          paddingBottom: 0,
-          paddingLeft: 14,
-          outline: 'none',
-          cursor: 'pointer',
-        }}
-      >
-        {options.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: { color: string; backgroundColor: string; borderColor: string };
-}) {
-  return (
-    <div style={{
-      borderRadius: 18,
-      borderWidth: 1,
-      borderStyle: 'solid',
-      borderColor: tone.borderColor,
-      backgroundColor: 'var(--t-panel)',
-      backgroundImage: `linear-gradient(180deg, ${tone.backgroundColor} 0%, rgba(255, 255, 255, 0) 100%)`,
-      boxShadow: 'var(--t-panel-shadow)',
-      paddingTop: 14,
-      paddingRight: 16,
-      paddingBottom: 14,
-      paddingLeft: 16,
-      minHeight: 84,
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'space-between',
-    }}>
-      <span style={{
-        fontSize: 11,
-        fontWeight: 700,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        color: 'var(--t-text-secondary)',
-      }}>
-        {label}
-      </span>
-      <span style={{
-        marginTop: 10,
-        fontSize: 22,
-        fontWeight: 800,
-        letterSpacing: '-0.03em',
-        color: tone.color,
-      }}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function MetaField({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div style={{
-      minHeight: 54,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderStyle: 'solid',
-      borderColor: 'var(--t-divider-subtle)',
-      backgroundColor: 'rgba(255, 255, 255, 0.55)',
-      paddingTop: 10,
-      paddingRight: 12,
-      paddingBottom: 10,
-      paddingLeft: 12,
-      display: 'flex',
-      flexDirection: 'column',
-      justifyContent: 'center',
-      gap: 4,
-    }}>
-      <span style={{
-        fontSize: 10,
-        fontWeight: 700,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        color: 'var(--t-text-muted)',
-      }}>
-        {label}
-      </span>
-      <span style={{
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      style={{
+        minHeight: 32,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: 'rgba(0, 0, 0, 0.08)',
+        backgroundColor: 'rgba(0, 0, 0, 0.03)',
+        color: '#6b7280',
         fontSize: 12,
-        fontWeight: 600,
-        color: 'var(--t-text)',
-        fontFamily: mono ? MONO_FONT : 'inherit',
-        lineHeight: 1.45,
-        wordBreak: 'break-word',
-      }}>
-        {value}
-      </span>
-    </div>
+        fontWeight: 500,
+        letterSpacing: '-0.01em',
+        paddingTop: 0,
+        paddingRight: 24,
+        paddingBottom: 0,
+        paddingLeft: 10,
+        outline: 'none',
+        cursor: 'pointer',
+        appearance: 'none' as const,
+        backgroundImage: `url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%239ca3af' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
+        backgroundRepeat: 'no-repeat',
+        backgroundPosition: 'right 8px center',
+      } as React.CSSProperties}
+    >
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -545,189 +441,230 @@ export function AuditLogPanel() {
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      backgroundImage: 'var(--t-bg-gradient)',
+      backgroundColor: '#ffffff',
       overflow: 'hidden',
     }}>
+      {/* ---- Header ---- */}
       <div style={{
         flexShrink: 0,
-        paddingTop: 24,
-        paddingRight: 24,
-        paddingBottom: 18,
-        paddingLeft: 24,
-        borderBottomWidth: 1,
-        borderBottomStyle: 'solid',
-        borderBottomColor: 'var(--t-divider-subtle)',
+        paddingTop: 32,
+        paddingRight: 32,
+        paddingBottom: 0,
+        paddingLeft: 32,
       }}>
+        {/* Editorial title + refresh */}
         <div style={{
           display: 'flex',
-          alignItems: 'flex-start',
+          alignItems: 'flex-end',
           justifyContent: 'space-between',
           gap: 16,
-          flexWrap: 'wrap',
         }}>
-          <div style={{ maxWidth: 760 }}>
+          <div>
             <div style={{
-              fontSize: 12,
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: 'var(--t-text-secondary)',
+              fontSize: 28,
+              fontWeight: 300,
+              color: '#6b7280',
+              letterSpacing: '-0.03em',
+              lineHeight: 1.2,
             }}>
-              Approvals
+              Audit Log.
             </div>
-            <h2 style={{
-              marginTop: 8,
-              marginRight: 0,
-              marginBottom: 0,
-              marginLeft: 0,
-              fontSize: 24,
-              fontWeight: 800,
-              letterSpacing: '-0.04em',
-              color: 'var(--t-text)',
+            <div style={{
+              marginTop: 6,
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase' as const,
+              color: '#8b95a3',
             }}>
-              Approval Audit Log
-            </h2>
-            <p style={{
-              marginTop: 8,
-              marginRight: 0,
-              marginBottom: 0,
-              marginLeft: 0,
-              fontSize: 13,
-              lineHeight: 1.6,
-              color: 'var(--t-text-muted)',
-            }}>
-              Unified evidence trail for approval creation, edits, decisions, and resume outcomes across every session.
-            </p>
+              Approval Evidence Trail
+            </div>
           </div>
 
           <div style={{
             display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'flex-end',
-            gap: 10,
-            minWidth: 180,
+            alignItems: 'center',
+            gap: 12,
           }}>
+            <span style={{
+              fontSize: 11,
+              color: '#8b95a3',
+              letterSpacing: '-0.01em',
+            }}>
+              {lastLoadedAt ? `Updated ${formatRelativeAge(lastLoadedAt)}` : 'Waiting for sync'}
+            </span>
             <button
               type="button"
               onClick={() => { void loadApprovals(true); }}
               disabled={refreshing}
               style={{
-                minHeight: 44,
-                borderRadius: 14,
-                borderWidth: 1,
-                borderStyle: 'solid',
-                borderColor: 'rgba(37, 99, 235, 0.18)',
-                backgroundColor: 'var(--t-panel)',
-                color: 'var(--t-text)',
-                paddingTop: 0,
-                paddingRight: 16,
-                paddingBottom: 0,
-                paddingLeft: 16,
+                minHeight: 32,
+                borderRadius: 10,
+                borderWidth: 0,
+                borderStyle: 'none',
+                backgroundColor: 'transparent',
+                color: refreshing ? '#8b95a3' : '#6b7280',
+                paddingTop: 4,
+                paddingRight: 0,
+                paddingBottom: 4,
+                paddingLeft: 0,
                 display: 'inline-flex',
                 alignItems: 'center',
-                justifyContent: 'center',
-                gap: 10,
-                fontSize: 13,
-                fontWeight: 700,
+                gap: 5,
+                fontSize: 12,
+                fontWeight: 500,
+                letterSpacing: '-0.01em',
                 cursor: refreshing ? 'default' : 'pointer',
-                boxShadow: 'var(--t-panel-shadow)',
               }}
             >
-              <RefreshCw size={14} strokeWidth={2.1} />
-              {refreshing ? 'Refreshing…' : 'Refresh log'}
+              <RefreshCw
+                size={13}
+                strokeWidth={2}
+                style={refreshing ? {
+                  animation: 'spin 1s linear infinite',
+                } as React.CSSProperties : undefined}
+              />
+              {refreshing ? 'Refreshing' : 'Refresh'}
             </button>
-
-            <span style={{
-              fontSize: 11,
-              color: 'var(--t-text-muted)',
-            }}>
-              {lastLoadedAt ? `Updated ${formatRelativeAge(lastLoadedAt)}` : 'Waiting for first sync'}
-            </span>
           </div>
         </div>
 
+        {/* ---- Stats row ---- */}
         <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-          gap: 12,
-          marginTop: 18,
+          display: 'flex',
+          alignItems: 'flex-end',
+          gap: 0,
+          marginTop: 28,
+          paddingBottom: 20,
+          borderBottomWidth: 1,
+          borderBottomStyle: 'solid',
+          borderBottomColor: 'rgba(0, 0, 0, 0.06)',
         }}>
-          <StatCard
-            label="Audit Events"
-            value={String(timeline.length)}
-            tone={{
-              color: '#2563eb',
-              backgroundColor: 'rgba(37, 99, 235, 0.12)',
-              borderColor: 'rgba(37, 99, 235, 0.18)',
-            }}
-          />
-          <StatCard
-            label="Sessions"
-            value={String(sessionOptions.length)}
-            tone={{
-              color: '#475569',
-              backgroundColor: 'rgba(100, 116, 139, 0.12)',
-              borderColor: 'rgba(100, 116, 139, 0.18)',
-            }}
-          />
-          <StatCard
-            label="High Risk Events"
-            value={String(riskCounts.high)}
-            tone={RISK_TONES.high}
-          />
+          {/* Events stat */}
+          <div style={{ minWidth: 0, paddingRight: 28 }}>
+            <div style={{
+              fontSize: 26,
+              fontWeight: 600,
+              letterSpacing: '-0.02em',
+              color: '#111827',
+              lineHeight: 1,
+            }}>
+              {timeline.length}
+            </div>
+            <div style={{
+              marginTop: 4,
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase' as const,
+              color: '#8b95a3',
+            }}>
+              Events
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div style={{
+            width: 1,
+            height: 32,
+            backgroundColor: 'rgba(0, 0, 0, 0.08)',
+            flexShrink: 0,
+          }} />
+
+          {/* Sessions stat */}
+          <div style={{ minWidth: 0, paddingRight: 28, paddingLeft: 28 }}>
+            <div style={{
+              fontSize: 26,
+              fontWeight: 600,
+              letterSpacing: '-0.02em',
+              color: '#111827',
+              lineHeight: 1,
+            }}>
+              {sessionOptions.length}
+            </div>
+            <div style={{
+              marginTop: 4,
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase' as const,
+              color: '#8b95a3',
+            }}>
+              Sessions
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div style={{
+            width: 1,
+            height: 32,
+            backgroundColor: 'rgba(0, 0, 0, 0.08)',
+            flexShrink: 0,
+          }} />
+
+          {/* High risk stat */}
+          <div style={{ minWidth: 0, paddingLeft: 28 }}>
+            <div style={{
+              fontSize: 26,
+              fontWeight: 600,
+              letterSpacing: '-0.02em',
+              color: riskCounts.high > 0 ? '#b91c1c' : '#111827',
+              lineHeight: 1,
+            }}>
+              {riskCounts.high}
+            </div>
+            <div style={{
+              marginTop: 4,
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase' as const,
+              color: '#8b95a3',
+            }}>
+              High Risk
+            </div>
+          </div>
         </div>
 
+        {/* ---- Filters bar ---- */}
         <div style={{
-          marginTop: 18,
-          borderRadius: 20,
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: 'var(--t-divider)',
-          backgroundColor: 'var(--t-panel)',
-          boxShadow: 'var(--t-panel-shadow)',
-          paddingTop: 16,
-          paddingRight: 16,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          marginTop: 16,
           paddingBottom: 16,
-          paddingLeft: 16,
+          flexWrap: 'wrap',
         }}>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            gap: 12,
-            alignItems: 'end',
-          }}>
-            <SelectField
-              label="Session"
-              value={selectedSession}
-              onChange={setSelectedSession}
-              options={[
-                { label: 'All sessions', value: 'all' },
-                ...sessionOptions.map((sessionKey) => ({ label: sessionKey, value: sessionKey })),
-              ]}
-            />
-            <SelectField
-              label="Risk Level"
-              value={selectedRisk}
-              onChange={(value) => setSelectedRisk(value as RiskFilter)}
-              options={[
-                { label: 'All risks', value: 'all' },
-                { label: 'High', value: 'high' },
-                { label: 'Medium', value: 'medium' },
-                { label: 'Low', value: 'low' },
-              ]}
-            />
-            <SelectField
-              label="Time Range"
-              value={selectedRange}
-              onChange={(value) => setSelectedRange(value as TimeRangeOption)}
-              options={[
-                { label: 'All time', value: 'all' },
-                { label: 'Last hour', value: '1h' },
-                { label: 'Last 24 hours', value: '24h' },
-                { label: 'Last 7 days', value: '7d' },
-                { label: 'Last 30 days', value: '30d' },
-              ]}
-            />
+          <PillSelect
+            value={selectedSession}
+            onChange={setSelectedSession}
+            options={[
+              { label: 'All sessions', value: 'all' },
+              ...sessionOptions.map((sessionKey) => ({ label: sessionKey, value: sessionKey })),
+            ]}
+          />
+          <PillSelect
+            value={selectedRisk}
+            onChange={(value) => setSelectedRisk(value as RiskFilter)}
+            options={[
+              { label: 'All risks', value: 'all' },
+              { label: 'High', value: 'high' },
+              { label: 'Medium', value: 'medium' },
+              { label: 'Low', value: 'low' },
+            ]}
+          />
+          <PillSelect
+            value={selectedRange}
+            onChange={(value) => setSelectedRange(value as TimeRangeOption)}
+            options={[
+              { label: 'All time', value: 'all' },
+              { label: 'Last hour', value: '1h' },
+              { label: 'Last 24 hours', value: '24h' },
+              { label: 'Last 7 days', value: '7d' },
+              { label: 'Last 30 days', value: '30d' },
+            ]}
+          />
+          {hasActiveFilters ? (
             <button
               type="button"
               onClick={() => {
@@ -735,136 +672,109 @@ export function AuditLogPanel() {
                 setSelectedRisk('all');
                 setSelectedRange('all');
               }}
-              disabled={!hasActiveFilters}
               style={{
-                minHeight: 44,
-                borderRadius: 14,
-                borderWidth: 1,
-                borderStyle: 'solid',
-                borderColor: hasActiveFilters ? 'rgba(37, 99, 235, 0.18)' : 'var(--t-divider)',
-                backgroundColor: hasActiveFilters ? 'rgba(37, 99, 235, 0.08)' : 'rgba(255, 255, 255, 0.55)',
-                color: hasActiveFilters ? '#1d4ed8' : 'var(--t-text-muted)',
-                paddingTop: 0,
-                paddingRight: 16,
-                paddingBottom: 0,
-                paddingLeft: 16,
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: hasActiveFilters ? 'pointer' : 'default',
+                minHeight: 32,
+                borderRadius: 10,
+                borderWidth: 0,
+                borderStyle: 'none',
+                backgroundColor: 'transparent',
+                color: '#2563eb',
+                paddingTop: 4,
+                paddingRight: 8,
+                paddingBottom: 4,
+                paddingLeft: 8,
+                fontSize: 12,
+                fontWeight: 500,
+                letterSpacing: '-0.01em',
+                cursor: 'pointer',
               }}
             >
-              Reset filters
+              Clear filters
             </button>
-          </div>
-
-          <div style={{
-            marginTop: 12,
-            fontSize: 12,
-            color: 'var(--t-text-muted)',
+          ) : null}
+          <span style={{
+            marginLeft: 'auto',
+            fontSize: 11,
+            color: '#8b95a3',
+            letterSpacing: '-0.01em',
           }}>
-            {filteredTimeline.length} event{filteredTimeline.length === 1 ? '' : 's'} shown
-          </div>
+            {filteredTimeline.length} event{filteredTimeline.length === 1 ? '' : 's'}
+          </span>
         </div>
 
+        {/* Error banner */}
         {error ? (
           <div style={{
-            marginTop: 16,
-            borderRadius: 16,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'rgba(239, 68, 68, 0.18)',
-            backgroundColor: 'rgba(239, 68, 68, 0.08)',
+            marginBottom: 12,
+            borderRadius: 10,
+            backgroundColor: 'rgba(239, 68, 68, 0.06)',
             color: '#b91c1c',
-            paddingTop: 12,
+            paddingTop: 10,
             paddingRight: 14,
-            paddingBottom: 12,
+            paddingBottom: 10,
             paddingLeft: 14,
-            fontSize: 13,
+            fontSize: 12,
+            lineHeight: 1.5,
           }}>
             Unable to refresh the audit log. {error}
           </div>
         ) : null}
       </div>
 
+      {/* ---- Scrollable timeline ---- */}
       <div style={{
         flexGrow: 1,
         flexShrink: 1,
         flexBasis: 0,
         minHeight: 0,
         overflowY: 'auto',
-        paddingTop: 20,
-        paddingRight: 24,
-        paddingBottom: 24,
-        paddingLeft: 24,
+        paddingTop: 4,
+        paddingRight: 32,
+        paddingBottom: 32,
+        paddingLeft: 32,
       }}>
         {loading && !hasAnyEvents ? (
           <div style={{
-            borderRadius: 22,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-divider)',
-            backgroundColor: 'var(--t-panel)',
-            boxShadow: 'var(--t-panel-shadow)',
-            minHeight: 240,
+            paddingTop: 64,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'var(--t-text-muted)',
+            color: '#8b95a3',
             fontSize: 13,
+            fontWeight: 400,
+            letterSpacing: '-0.01em',
           }}>
-            Loading approval audit history…
+            Loading audit history...
           </div>
         ) : !hasAnyEvents ? (
           <div style={{
-            borderRadius: 24,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-divider)',
-            backgroundColor: 'var(--t-panel)',
-            backgroundImage: 'linear-gradient(180deg, rgba(37, 99, 235, 0.08) 0%, rgba(255, 255, 255, 0) 100%)',
-            boxShadow: 'var(--t-panel-shadow)',
-            minHeight: 280,
+            paddingTop: 64,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 14,
             textAlign: 'center',
-            paddingTop: 32,
-            paddingRight: 24,
-            paddingBottom: 32,
-            paddingLeft: 24,
+            gap: 12,
           }}>
-            <div style={{
-              width: 56,
-              height: 56,
-              borderRadius: 18,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: 'rgba(37, 99, 235, 0.12)',
-              color: '#2563eb',
-            }}>
-              <ShieldCheck size={28} strokeWidth={2.1} />
-            </div>
+            <ShieldCheck size={28} strokeWidth={1.5} style={{ color: '#8b95a3' }} />
             <div>
               <div style={{
                 fontSize: 16,
-                fontWeight: 800,
-                letterSpacing: '-0.03em',
-                color: 'var(--t-text)',
+                fontWeight: 400,
+                letterSpacing: '-0.02em',
+                color: '#6b7280',
               }}>
                 No audit events yet
               </div>
               <p style={{
-                marginTop: 8,
+                marginTop: 6,
                 marginRight: 0,
                 marginBottom: 0,
                 marginLeft: 0,
-                maxWidth: 520,
+                maxWidth: 400,
                 fontSize: 13,
                 lineHeight: 1.6,
-                color: 'var(--t-text-muted)',
+                color: '#8b95a3',
               }}>
                 The audit trail populates as approvals are created, updated, approved, rejected, or resumed.
               </p>
@@ -872,52 +782,45 @@ export function AuditLogPanel() {
           </div>
         ) : filteredTimeline.length === 0 ? (
           <div style={{
-            borderRadius: 22,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-divider)',
-            backgroundColor: 'var(--t-panel)',
-            boxShadow: 'var(--t-panel-shadow)',
-            minHeight: 240,
+            paddingTop: 64,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 12,
             textAlign: 'center',
-            paddingTop: 28,
-            paddingRight: 24,
-            paddingBottom: 28,
-            paddingLeft: 24,
+            gap: 10,
           }}>
-            <AlertCircle size={30} strokeWidth={2.1} style={{ color: 'var(--t-text-secondary)' }} />
-            <div style={{
-              fontSize: 15,
-              fontWeight: 700,
-              color: 'var(--t-text)',
-            }}>
-              No audit entries match these filters
+            <AlertCircle size={24} strokeWidth={1.5} style={{ color: '#8b95a3' }} />
+            <div>
+              <div style={{
+                fontSize: 15,
+                fontWeight: 400,
+                letterSpacing: '-0.02em',
+                color: '#6b7280',
+              }}>
+                No events match these filters
+              </div>
+              <p style={{
+                marginTop: 4,
+                marginRight: 0,
+                marginBottom: 0,
+                marginLeft: 0,
+                maxWidth: 380,
+                fontSize: 13,
+                lineHeight: 1.6,
+                color: '#8b95a3',
+              }}>
+                Broaden the session, risk, or time range to see more activity.
+              </p>
             </div>
-            <p style={{
-              marginTop: 0,
-              marginRight: 0,
-              marginBottom: 0,
-              marginLeft: 0,
-              maxWidth: 420,
-              fontSize: 13,
-              lineHeight: 1.6,
-              color: 'var(--t-text-muted)',
-            }}>
-              Broaden the current session, risk, or time range filters to inspect more approval activity.
-            </p>
           </div>
         ) : (
           <div style={{
             display: 'flex',
             flexDirection: 'column',
-            gap: 14,
+            gap: 0,
           }}>
-            {filteredTimeline.map((item) => {
+            {filteredTimeline.map((item, itemIndex) => {
               const eventTone = EVENT_TONES[item.type];
               const riskTone = RISK_TONES[item.risk];
               const EventIcon = iconForEventType(item.type);
@@ -927,308 +830,338 @@ export function AuditLogPanel() {
                   : EVENT_TONES.rejected
                 : null;
               const findings = item.findings ?? [];
+              const isLast = itemIndex === filteredTimeline.length - 1;
 
               return (
                 <div
                   key={item.id}
                   style={{
-                    borderRadius: 22,
-                    borderWidth: 1,
-                    borderStyle: 'solid',
-                    borderColor: 'var(--t-divider)',
-                    backgroundColor: 'var(--t-panel)',
-                    backgroundImage: `linear-gradient(180deg, ${eventTone.backgroundColor} 0%, rgba(255, 255, 255, 0) 100%)`,
-                    boxShadow: 'var(--t-panel-shadow)',
-                    paddingTop: 16,
-                    paddingRight: 18,
-                    paddingBottom: 16,
-                    paddingLeft: 18,
+                    display: 'flex',
+                    gap: 16,
+                    paddingBottom: isLast ? 0 : 24,
                   }}
                 >
+                  {/* Timeline rail: dot + line */}
                   <div style={{
                     display: 'flex',
-                    alignItems: 'flex-start',
-                    justifyContent: 'space-between',
-                    gap: 14,
-                    flexWrap: 'wrap',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    width: 20,
+                    flexShrink: 0,
+                    paddingTop: 2,
                   }}>
+                    <div style={{
+                      width: 8,
+                      height: 8,
+                      borderRadius: 999,
+                      backgroundColor: eventTone.color,
+                      flexShrink: 0,
+                      opacity: 0.7,
+                    }} />
+                    {!isLast ? (
+                      <div style={{
+                        width: 1,
+                        flexGrow: 1,
+                        backgroundColor: 'rgba(0, 0, 0, 0.06)',
+                        marginTop: 6,
+                      }} />
+                    ) : null}
+                  </div>
+
+                  {/* Event content */}
+                  <div style={{
+                    minWidth: 0,
+                    flexGrow: 1,
+                    paddingBottom: isLast ? 0 : 24,
+                    borderBottomWidth: isLast ? 0 : 1,
+                    borderBottomStyle: 'solid',
+                    borderBottomColor: 'rgba(0, 0, 0, 0.04)',
+                  }}>
+                    {/* Title row */}
                     <div style={{
                       display: 'flex',
                       alignItems: 'flex-start',
+                      justifyContent: 'space-between',
                       gap: 12,
-                      minWidth: 0,
-                      flexGrow: 1,
-                      flexShrink: 1,
-                      flexBasis: 280,
+                      flexWrap: 'wrap',
                     }}>
-                      <div style={{
-                        width: 42,
-                        height: 42,
-                        borderRadius: 14,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backgroundColor: eventTone.backgroundColor,
-                        color: eventTone.color,
-                        borderWidth: 1,
-                        borderStyle: 'solid',
-                        borderColor: eventTone.borderColor,
-                        flexShrink: 0,
-                      }}>
-                        <EventIcon size={18} strokeWidth={2.1} />
-                      </div>
-
-                      <div style={{ minWidth: 0 }}>
+                      <div style={{ minWidth: 0, flexGrow: 1 }}>
                         <div style={{
-                          fontSize: 15,
-                          fontWeight: 800,
+                          fontSize: 14,
+                          fontWeight: 600,
                           letterSpacing: '-0.02em',
-                          color: 'var(--t-text)',
+                          color: '#111827',
+                          lineHeight: 1.4,
                         }}>
                           {item.title}
                         </div>
                         <div style={{
-                          marginTop: 4,
+                          marginTop: 3,
                           fontSize: 12,
-                          lineHeight: 1.6,
-                          color: 'var(--t-text-secondary)',
+                          color: '#8b95a3',
+                          letterSpacing: '-0.01em',
                         }}>
                           {formatTimestamp(item.timestamp)} · {formatRelativeAge(item.timestamp)}
                         </div>
                       </div>
+
+                      {/* Badges */}
+                      <div style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        flexWrap: 'wrap',
+                        flexShrink: 0,
+                      }}>
+                        <span style={{
+                          borderRadius: 10,
+                          backgroundColor: eventTone.backgroundColor,
+                          color: eventTone.color,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          paddingTop: 3,
+                          paddingRight: 8,
+                          paddingBottom: 3,
+                          paddingLeft: 8,
+                          letterSpacing: '-0.01em',
+                        }}>
+                          {formatEventType(item.type)}
+                        </span>
+                        {reviewVerdictTone ? (
+                          <span style={{
+                            borderRadius: 10,
+                            backgroundColor: reviewVerdictTone.backgroundColor,
+                            color: reviewVerdictTone.color,
+                            fontSize: 11,
+                            fontWeight: 600,
+                            paddingTop: 3,
+                            paddingRight: 8,
+                            paddingBottom: 3,
+                            paddingLeft: 8,
+                            letterSpacing: '-0.01em',
+                          }}>
+                            {formatVerdict(item.approved === true)}
+                          </span>
+                        ) : null}
+                        <span style={{
+                          borderRadius: 10,
+                          backgroundColor: riskTone.backgroundColor,
+                          color: riskTone.color,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          paddingTop: 3,
+                          paddingRight: 8,
+                          paddingBottom: 3,
+                          paddingLeft: 8,
+                          letterSpacing: '-0.01em',
+                        }}>
+                          {formatRisk(item.risk)}
+                        </span>
+                      </div>
                     </div>
 
+                    {/* Meta fields row */}
                     <div style={{
                       display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
                       flexWrap: 'wrap',
-                    }}>
-                      <span style={{
-                        borderRadius: 999,
-                        borderWidth: 1,
-                        borderStyle: 'solid',
-                        borderColor: eventTone.borderColor,
-                        backgroundColor: eventTone.backgroundColor,
-                        color: eventTone.color,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        paddingTop: 5,
-                        paddingRight: 10,
-                        paddingBottom: 5,
-                        paddingLeft: 10,
-                      }}>
-                        {formatEventType(item.type)}
-                      </span>
-                      {reviewVerdictTone ? (
-                        <span style={{
-                          borderRadius: 999,
-                          borderWidth: 1,
-                          borderStyle: 'solid',
-                          borderColor: reviewVerdictTone.borderColor,
-                          backgroundColor: reviewVerdictTone.backgroundColor,
-                          color: reviewVerdictTone.color,
-                          fontSize: 11,
-                          fontWeight: 700,
-                          paddingTop: 5,
-                          paddingRight: 10,
-                          paddingBottom: 5,
-                          paddingLeft: 10,
-                        }}>
-                          {formatVerdict(item.approved === true)}
-                        </span>
-                      ) : null}
-                      <span style={{
-                        borderRadius: 999,
-                        borderWidth: 1,
-                        borderStyle: 'solid',
-                        borderColor: riskTone.borderColor,
-                        backgroundColor: riskTone.backgroundColor,
-                        color: riskTone.color,
-                        fontSize: 11,
-                        fontWeight: 700,
-                        paddingTop: 5,
-                        paddingRight: 10,
-                        paddingBottom: 5,
-                        paddingLeft: 10,
-                      }}>
-                        {formatRisk(item.risk)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                    gap: 10,
-                    marginTop: 14,
-                  }}>
-                    <MetaField label="Actor" value={formatActor(item.actor)} />
-                    <MetaField label="Session Key" value={item.sessionKey} mono />
-                    <MetaField label="Approval ID" value={item.approvalId} mono />
-                    <MetaField label="Risk" value={formatRisk(item.risk)} />
-                    {item.reviewer ? <MetaField label="Reviewer" value={item.reviewer} /> : null}
-                    {typeof item.approved === 'boolean' ? <MetaField label="Verdict" value={formatVerdict(item.approved)} /> : null}
-                    {item.diffSha ? <MetaField label="Diff SHA" value={item.diffSha} mono /> : null}
-                  </div>
-
-                  {item.note ? (
-                    <div style={{
+                      gap: 16,
                       marginTop: 12,
-                      borderRadius: 16,
-                      borderWidth: 1,
-                      borderStyle: 'solid',
-                      borderColor: 'var(--t-divider-subtle)',
-                      backgroundColor: 'rgba(255, 255, 255, 0.62)',
-                      paddingTop: 12,
-                      paddingRight: 14,
-                      paddingBottom: 12,
-                      paddingLeft: 14,
                     }}>
-                      <div style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        color: 'var(--t-text-muted)',
-                      }}>
-                        Note
-                      </div>
-                      <div style={{
-                        marginTop: 6,
-                        fontSize: 13,
-                        lineHeight: 1.6,
-                        color: 'var(--t-text-secondary)',
-                      }}>
-                        {item.note}
-                      </div>
+                      <MetaInline label="Actor" value={formatActor(item.actor)} />
+                      <MetaInline label="Session" value={item.sessionKey} mono />
+                      <MetaInline label="ID" value={item.approvalId} mono />
+                      {item.reviewer ? <MetaInline label="Reviewer" value={item.reviewer} /> : null}
+                      {typeof item.approved === 'boolean' ? <MetaInline label="Verdict" value={formatVerdict(item.approved)} /> : null}
+                      {item.diffSha ? <MetaInline label="Diff SHA" value={item.diffSha} mono /> : null}
                     </div>
-                  ) : null}
 
-                  {item.type === 'orchestrator_review' ? (
-                    <div style={{
-                      marginTop: 12,
-                      borderRadius: 16,
-                      borderWidth: 1,
-                      borderStyle: 'solid',
-                      borderColor: 'var(--t-divider-subtle)',
-                      backgroundColor: 'rgba(255, 255, 255, 0.7)',
-                      paddingTop: 12,
-                      paddingRight: 14,
-                      paddingBottom: 12,
-                      paddingLeft: 14,
-                    }}>
+                    {/* Note */}
+                    {item.note ? (
                       <div style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        letterSpacing: '0.06em',
-                        textTransform: 'uppercase',
-                        color: 'var(--t-text-muted)',
+                        marginTop: 12,
+                        paddingTop: 10,
+                        paddingRight: 14,
+                        paddingBottom: 10,
+                        paddingLeft: 14,
+                        borderRadius: 10,
+                        backgroundColor: 'rgba(0, 0, 0, 0.02)',
                       }}>
-                        Findings
-                      </div>
-                      {findings.length === 0 ? (
                         <div style={{
-                          marginTop: 8,
+                          fontSize: 10,
+                          fontWeight: 500,
+                          letterSpacing: '0.05em',
+                          textTransform: 'uppercase' as const,
+                          color: '#8b95a3',
+                          marginBottom: 4,
+                        }}>
+                          Note
+                        </div>
+                        <div style={{
                           fontSize: 13,
                           lineHeight: 1.6,
-                          color: 'var(--t-text-secondary)',
+                          color: '#5b6475',
+                          letterSpacing: '-0.01em',
                         }}>
-                          No structured findings were recorded for this review.
+                          {item.note}
                         </div>
-                      ) : (
-                        <div style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 10,
-                          marginTop: 10,
-                        }}>
-                          {findings.map((finding, index) => {
-                            const findingTone = FINDING_TONES[finding.severity];
-                            const resolutionTone = RESOLUTION_TONES[finding.resolution];
+                      </div>
+                    ) : null}
 
-                            return (
-                              <div
-                                key={`${item.id}:finding:${index}`}
-                                style={{
-                                  borderRadius: 14,
-                                  borderWidth: 1,
-                                  borderStyle: 'solid',
-                                  borderColor: 'var(--t-divider-subtle)',
-                                  backgroundColor: 'rgba(248, 250, 252, 0.88)',
-                                  paddingTop: 12,
-                                  paddingRight: 12,
-                                  paddingBottom: 12,
-                                  paddingLeft: 12,
-                                }}
-                              >
-                                <div style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 8,
-                                  flexWrap: 'wrap',
-                                }}>
-                                  <span style={{
-                                    borderRadius: 999,
-                                    borderWidth: 1,
-                                    borderStyle: 'solid',
-                                    borderColor: findingTone.borderColor,
-                                    backgroundColor: findingTone.backgroundColor,
-                                    color: findingTone.color,
-                                    fontSize: 11,
-                                    fontWeight: 700,
-                                    paddingTop: 4,
-                                    paddingRight: 10,
-                                    paddingBottom: 4,
-                                    paddingLeft: 10,
-                                  }}>
-                                    {formatFindingSeverity(finding.severity)}
-                                  </span>
-                                  <span style={{
-                                    borderRadius: 999,
-                                    borderWidth: 1,
-                                    borderStyle: 'solid',
-                                    borderColor: resolutionTone.borderColor,
-                                    backgroundColor: resolutionTone.backgroundColor,
-                                    color: resolutionTone.color,
-                                    fontSize: 11,
-                                    fontWeight: 700,
-                                    paddingTop: 4,
-                                    paddingRight: 10,
-                                    paddingBottom: 4,
-                                    paddingLeft: 10,
-                                  }}>
-                                    {formatFindingResolution(finding.resolution)}
-                                  </span>
-                                  <span style={{
-                                    fontSize: 12,
-                                    fontWeight: 700,
-                                    color: 'var(--t-text-secondary)',
-                                    fontFamily: MONO_FONT,
-                                  }}>
-                                    {formatFindingLocation(finding)}
-                                  </span>
-                                </div>
-                                <div style={{
-                                  marginTop: 8,
-                                  fontSize: 13,
-                                  lineHeight: 1.6,
-                                  color: 'var(--t-text)',
-                                }}>
-                                  {finding.description}
-                                </div>
-                              </div>
-                            );
-                          })}
+                    {/* Orchestrator review findings */}
+                    {item.type === 'orchestrator_review' ? (
+                      <div style={{
+                        marginTop: 12,
+                      }}>
+                        <div style={{
+                          fontSize: 10,
+                          fontWeight: 500,
+                          letterSpacing: '0.05em',
+                          textTransform: 'uppercase' as const,
+                          color: '#8b95a3',
+                          marginBottom: 8,
+                        }}>
+                          Findings
                         </div>
-                      )}
-                    </div>
-                  ) : null}
+                        {findings.length === 0 ? (
+                          <div style={{
+                            fontSize: 13,
+                            lineHeight: 1.6,
+                            color: '#8b95a3',
+                            letterSpacing: '-0.01em',
+                          }}>
+                            No structured findings were recorded for this review.
+                          </div>
+                        ) : (
+                          <div style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 8,
+                          }}>
+                            {findings.map((finding, index) => {
+                              const findingTone = FINDING_TONES[finding.severity];
+                              const resolutionTone = RESOLUTION_TONES[finding.resolution];
+
+                              return (
+                                <div
+                                  key={`${item.id}:finding:${index}`}
+                                  style={{
+                                    borderRadius: 10,
+                                    backgroundColor: 'rgba(0, 0, 0, 0.02)',
+                                    paddingTop: 10,
+                                    paddingRight: 12,
+                                    paddingBottom: 10,
+                                    paddingLeft: 12,
+                                  }}
+                                >
+                                  <div style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 6,
+                                    flexWrap: 'wrap',
+                                  }}>
+                                    <span style={{
+                                      borderRadius: 8,
+                                      backgroundColor: findingTone.backgroundColor,
+                                      color: findingTone.color,
+                                      fontSize: 11,
+                                      fontWeight: 600,
+                                      paddingTop: 2,
+                                      paddingRight: 7,
+                                      paddingBottom: 2,
+                                      paddingLeft: 7,
+                                      letterSpacing: '-0.01em',
+                                    }}>
+                                      {formatFindingSeverity(finding.severity)}
+                                    </span>
+                                    <span style={{
+                                      borderRadius: 8,
+                                      backgroundColor: resolutionTone.backgroundColor,
+                                      color: resolutionTone.color,
+                                      fontSize: 11,
+                                      fontWeight: 600,
+                                      paddingTop: 2,
+                                      paddingRight: 7,
+                                      paddingBottom: 2,
+                                      paddingLeft: 7,
+                                      letterSpacing: '-0.01em',
+                                    }}>
+                                      {formatFindingResolution(finding.resolution)}
+                                    </span>
+                                    <span style={{
+                                      fontSize: 11,
+                                      fontWeight: 500,
+                                      color: '#8b95a3',
+                                      fontFamily: MONO_FONT,
+                                    }}>
+                                      {formatFindingLocation(finding)}
+                                    </span>
+                                  </div>
+                                  <div style={{
+                                    marginTop: 6,
+                                    fontSize: 13,
+                                    lineHeight: 1.6,
+                                    color: '#5b6475',
+                                    letterSpacing: '-0.01em',
+                                  }}>
+                                    {finding.description}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               );
             })}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * Inline meta field — compact label + value pair for the timeline entries
+ * --------------------------------------------------------------------------- */
+function MetaInline({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{
+        fontSize: 10,
+        fontWeight: 500,
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase' as const,
+        color: '#8b95a3',
+        lineHeight: 1,
+      }}>
+        {label}
+      </div>
+      <div style={{
+        marginTop: 3,
+        fontSize: 12,
+        fontWeight: 500,
+        color: '#5b6475',
+        fontFamily: mono ? MONO_FONT : 'inherit',
+        letterSpacing: mono ? '0' : '-0.01em',
+        lineHeight: 1.4,
+        wordBreak: 'break-all',
+        maxWidth: 200,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      } as React.CSSProperties}>
+        {value}
       </div>
     </div>
   );
