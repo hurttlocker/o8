@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { getRenderedSkeletonCached } from '@/lib/skeleton';
 
 const DEFAULT_REPO_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
+const WORKSPACE_CONTEXT_TTL_MS = 10_000;
 
 // Project rules files — checked in priority order, first found wins
 const RULES_FILES = [
@@ -30,6 +31,8 @@ interface WorkspaceContext {
   fileTreeSummary: string; // top-level + key dirs
 }
 
+const workspaceContextCache = new Map<string, { context: WorkspaceContext; cachedAt: number }>();
+
 function safeExec(cmd: string, cwd: string, timeoutMs = 3000): string {
   try {
     return execSync(cmd, { cwd, encoding: 'utf-8', timeout: timeoutMs }).trim();
@@ -38,7 +41,7 @@ function safeExec(cmd: string, cwd: string, timeoutMs = 3000): string {
   }
 }
 
-export function getWorkspaceContext(repoRoot = DEFAULT_REPO_ROOT): WorkspaceContext {
+function buildWorkspaceContext(repoRoot: string): WorkspaceContext {
   const repoName = safeExec('basename $(git rev-parse --show-toplevel 2>/dev/null)', repoRoot) || 'unknown';
   const branch = safeExec('git branch --show-current', repoRoot) || 'main';
   const status = safeExec('git status --short --untracked-files=no', repoRoot) || '(clean)';
@@ -50,6 +53,18 @@ export function getWorkspaceContext(repoRoot = DEFAULT_REPO_ROOT): WorkspaceCont
   const fileTreeSummary = topLevel + (srcDirs ? '\n\nsrc/ structure:\n' + srcDirs : '');
 
   return { repoRoot, repoName, branch, status, recentCommits, fileTreeSummary };
+}
+
+export function getWorkspaceContext(repoRoot = DEFAULT_REPO_ROOT): WorkspaceContext {
+  const cacheKey = repoRoot;
+  const cached = workspaceContextCache.get(cacheKey);
+  if (cached && (Date.now() - cached.cachedAt) < WORKSPACE_CONTEXT_TTL_MS) {
+    return cached.context;
+  }
+
+  const context = buildWorkspaceContext(repoRoot);
+  workspaceContextCache.set(cacheKey, { context, cachedAt: Date.now() });
+  return context;
 }
 
 /**
