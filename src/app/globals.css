@@ -240,6 +240,38 @@ html[data-tauri='true'] body {
   background-color: transparent !important;
 }
 
+/* Tauri vibrancy — boost text contrast on frosted glass (light theme) */
+html[data-tauri='true'][data-theme='light'] {
+  --t-text: #0f172a;
+  --t-text-strong: #0c1220;
+  --t-text-secondary: #374151;
+  --t-text-muted: #4b5563;
+  --t-text-faint: #6b7280;
+  --t-chrome-nav: rgba(255, 255, 255, 0.28);
+  --t-chrome: transparent !important;
+  --t-bg-gradient: transparent !important;
+  --neo-inactive-bg: rgba(255, 255, 255, 0.35);
+  --neo-active-bg: rgba(255, 255, 255, 0.72);
+  --neo-hover-bg: rgba(255, 255, 255, 0.55);
+}
+
+/* Tauri vibrancy — blend nav into dark frosted glass */
+html[data-theme='dark'] {
+  --t-tab-bar-bg: rgba(30, 33, 38, 0.95);
+}
+
+html[data-tauri='true'][data-theme='dark'] {
+  --t-chrome-nav: transparent;
+  --t-chrome: transparent !important;
+  --t-bg-gradient: transparent !important;
+  --neo-inactive-bg: rgba(255, 255, 255, 0.08);
+  --neo-active-bg: rgba(255, 255, 255, 0.18);
+  --neo-hover-bg: rgba(255, 255, 255, 0.13);
+  --neo-inactive-shadow: 0 1px 3px rgba(0, 0, 0, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --neo-active-shadow: 0 1px 4px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --neo-hover-shadow: 0 1px 4px rgba(0, 0, 0, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
 a {
   color: inherit;
   text-decoration: none;

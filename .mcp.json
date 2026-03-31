@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "o8": {
+      "command": "npx",
+      "args": ["tsx", "/Users/marquisehurtt/clawd/repos/cortex-ide/src/lib/mcp/operator-mcp-server.ts"],
+      "env": {
+        "O8_API_BASE": "http://localhost:3001"
+      }
+    }
+  }
+}

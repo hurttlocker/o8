@@ -2,6 +2,7 @@
 /* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
 import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { isTauri } from '@/lib/tauri/bridge';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DesktopWebSocketProvider, useSharedDesktopWs, type WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from '@/components/desktop/hooks/useDesktopWebSocket';
@@ -648,6 +649,8 @@ export default function DashboardPage() {
 }
 
 function DashboardInner() {
+  const [inTauri, setInTauri] = useState(false);
+  useEffect(() => { setInTauri(isTauri()); }, []);
   const initialTileLayout = useMemo(() => createDefaultTileLayout(), []);
 
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_PANEL_WIDTH);
@@ -681,7 +684,8 @@ function DashboardInner() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [timelineVisible, setTimelineVisible] = useState(() => readTimelineVisible());
   const [chatVisible, setChatVisible] = useState(true);
-  const [rightPanelMode, setRightPanelMode] = useState<'chat' | 'workspace'>('workspace');
+  const rightPanelMode = 'workspace' as const;
+  const setRightPanelMode = (_mode: 'chat' | 'workspace') => { /* v1: right panel is always workspace */ };
   const [workspaceSidePanelView, setWorkspaceSidePanelView] = useState<WorkspaceSidePanelView>('diff');
   const [workspaceSidePanelRepoPath, setWorkspaceSidePanelRepoPath] = useState<string | null>(null);
   const [workspaceSidePanelRepoContext, setWorkspaceSidePanelRepoContext] = useState<WorkspaceSidePanelRepo | null>(null);
@@ -2851,13 +2855,13 @@ function DashboardInner() {
   }, [getWorkspaceSidePanelRepoByPath, openWorkspaceSidePanel]);
 
   const handleToggleChatPanel = useCallback(() => {
-    if (chatVisible && rightPanelMode === 'chat') {
+    // v1: chat panel removed — toggle workspace instead
+    if (chatVisible) {
       setChatVisible(false);
       return;
     }
     setChatVisible(true);
-    setRightPanelMode('chat');
-  }, [chatVisible, rightPanelMode]);
+  }, [chatVisible]);
 
   const handleToggleWorkspacePanel = useCallback(() => {
     if (chatVisible && rightPanelMode === 'workspace') {
@@ -4680,7 +4684,7 @@ function DashboardInner() {
   ]);
 
   return (
-    <div style={{
+    <div data-vibrancy-passthrough="" style={{
       height: '100vh',
       display: 'flex',
       flexDirection: 'column',
@@ -4701,8 +4705,8 @@ function DashboardInner() {
         onToggleSidebar={() => setSidebarVisible(v => !v)}
         bottomPanelVisible={bottomPanelVisible}
         onToggleBottomPanel={toggleContextualPanelTile}
-        chatVisible={chatVisible && rightPanelMode === 'chat'}
-        onToggleChat={handleToggleChatPanel}
+        chatVisible={false}
+        onToggleChat={handleToggleWorkspacePanel}
         workspacePanelVisible={chatVisible && rightPanelMode === 'workspace'}
         onToggleWorkspacePanel={handleToggleWorkspacePanel}
         wsStatus={wsStatus}
@@ -4896,8 +4900,8 @@ function DashboardInner() {
         overflow: 'hidden',
         position: 'relative',
         minWidth: 0,
-        background: '#ffffff',
-        borderRadius: '8px 8px 0 0',
+        background: 'transparent',
+        borderRadius: 0,
       }}>
         {activeNavSection === 'settings' && !showMemoryView && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
@@ -5025,69 +5029,6 @@ function DashboardInner() {
                     flexDirection: 'column',
                   }}
                 >
-        {rightPanelMode === 'chat' ? (
-          showEmptyWorkspaceChatRail ? (
-            <div
-              style={{
-                flex: 1,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: 24,
-                background: 'var(--t-bg)',
-              }}
-            >
-                <div
-                  style={{
-                    maxWidth: 320,
-                    textAlign: 'center',
-                    color: 'var(--t-text-muted)',
-                    fontSize: 13,
-                    lineHeight: 1.6,
-                  }}
-                >
-                No lane is available because no repository is registered. Add a repo first, then launch or restore a workspace lane.
-                </div>
-              </div>
-          ) : (
-            <AgentPanelChat
-              workspaceSessions={workspaceChatSessions}
-              workspaceLane={activeWorkspaceLane}
-              orchestratorPackets={thoughtsMissionState.packets}
-              externalSessionKey={activeWorkspaceChatTargetKey ?? activeSessionKey}
-              onSelectSession={handleSelectSession}
-              draftInjection={desktopDraftInjection}
-              onOpenDiff={() => {
-                void (async () => {
-                  const repoPath = globalRepoEntry?.localPath ?? null;
-                  const workspaceTarget = await waitForWorkspaceTerminalTarget({ repoPath });
-                  if (workspaceTarget) {
-                    workspaceTarget.handle.openWorkspaceDiff();
-                    return;
-                  }
-                  openWorkspaceSidePanel('diff', globalRepoEntry ? {
-                    name: globalRepoEntry.name,
-                    localPath: globalRepoEntry.localPath,
-                    branch: globalRepoEntry.readiness?.currentBranch ?? globalRepoBranch,
-                    readiness: globalRepoEntry.readiness ?? null,
-                    remoteUrl: globalRepoEntry.remoteUrl ?? undefined,
-                  } : null);
-                })();
-              }}
-              onOpenMermaid={(code) => {
-                openCanvasTab({
-                  id: `mermaid:${code.slice(0, 40)}`,
-                  kind: 'mermaid',
-                  label: 'Diagram',
-                  resourceId: code,
-                });
-              }}
-              onOpenFile={handleSelectFile}
-              onRunInTerminal={handleRunInTerminal}
-              onWsStatusChange={setWsStatus}
-            />
-          )
-                  ) : (
                     <WorkspaceSidePanel
                       view={workspaceSidePanelView}
                       repo={workspaceSidePanelRepo}
@@ -5105,7 +5046,6 @@ function DashboardInner() {
                       onExpandReviewRail={() => setWorkspaceSidePanelCompactReview(false)}
                       onSelectCommit={handleSelectCommit}
                     />
-                  )}
                 </motion.div>
               </AnimatePresence>
             </div>

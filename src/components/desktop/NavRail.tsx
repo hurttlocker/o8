@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, cloneElement, isValidElement, type ReactElement } from 'react';
+import { isTauri } from '@/lib/tauri/bridge';
 import {
   UsersThree,
   Terminal,
@@ -66,16 +67,16 @@ const BRAND_MARK_BLUE = '#2563eb';
 // ── Neomorphic icon container styles ──
 
 const NEO_INACTIVE = {
-  background: 'rgba(255, 255, 255, 0.55)',
-  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.6)',
+  background: 'var(--neo-inactive-bg, rgba(255, 255, 255, 0.55))',
+  boxShadow: 'var(--neo-inactive-shadow, 0 1px 3px rgba(0, 0, 0, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.6))',
 };
 const NEO_ACTIVE = {
-  background: 'rgba(255, 255, 255, 0.95)',
-  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+  background: 'var(--neo-active-bg, rgba(255, 255, 255, 0.95))',
+  boxShadow: 'var(--neo-active-shadow, 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9))',
 };
 const NEO_HOVER = {
-  background: 'rgba(255, 255, 255, 0.8)',
-  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9)',
+  background: 'var(--neo-hover-bg, rgba(255, 255, 255, 0.8))',
+  boxShadow: 'var(--neo-hover-shadow, 0 2px 8px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.9))',
 };
 
 function neoIconStyle(active: boolean): React.CSSProperties {
@@ -368,6 +369,8 @@ export function NavRail({
   onThoughtsToggle,
   onPortPreview,
 }: NavRailProps) {
+  const [inTauri, setInTauri] = useState(false);
+  useEffect(() => { setInTauri(isTauri()); }, []);
   const [alertAnchorEl, setAlertAnchorEl] = useState<HTMLDivElement | null>(null);
   const alertTrayNode = alertTray && isValidElement(alertTray)
     ? cloneElement(alertTray, { desktopAnchorEl: alertAnchorEl })
@@ -384,9 +387,9 @@ export function NavRail({
         flexDirection: 'column',
         justifyContent: 'space-between',
         padding: '12px 4px',
-        background: 'var(--t-chrome-nav)',
-        backdropFilter: 'blur(20px) saturate(1.4)',
-        WebkitBackdropFilter: 'blur(20px) saturate(1.4)',
+        background: inTauri ? 'transparent' : 'var(--t-chrome-nav)',
+        backdropFilter: inTauri ? 'none' : 'blur(20px) saturate(1.4)',
+        WebkitBackdropFilter: inTauri ? 'none' : 'blur(20px) saturate(1.4)',
         position: 'relative',
         zIndex: 40,
         overflowX: 'visible',

@@ -26,6 +26,7 @@ const RUNS_DIR = 'runs';
 const METADATA_FILE = 'session.json';
 const ACTIVE_WINDOW_MS = 10 * 60_000;
 const RECENT_WINDOW_MS = 6 * 60 * 60_000;
+const OWNED_STALE_WINDOW_MS = 24 * 60 * 60_000;
 const OWNED_CODEX_FLEET_TTL_MS = 20_000;
 
 type OwnedRunMode = 'launch' | 'resume';
@@ -1147,14 +1148,24 @@ export async function getOwnedCodexFleetAdditions(
     };
   }
 
-  const sessions = [] as OwnedCodexSessionRecord[];
+  const allSessions = [] as OwnedCodexSessionRecord[];
   for (const sessionDir of sessionDirs) {
     const filePath = metadataPath(sessionDir);
     if (!(await pathExists(filePath))) continue;
     const session = await loadOwnedSession(sessionDir);
     await refreshOwnedSession(session);
-    sessions.push(session);
+    allSessions.push(session);
   }
+
+  // Filter out stale sessions: no active run + last activity > 24h ago
+  const now = Date.now();
+  const sessions = allSessions.filter((session) => {
+    if (session.activeRun) return true;
+    const latest = latestRun(session);
+    const lastActivityStr = latest?.finishedAt ?? latest?.startedAt ?? session.updatedAt;
+    const ageMs = Math.max(0, now - new Date(lastActivityStr).getTime());
+    return ageMs < OWNED_STALE_WINDOW_MS;
+  });
 
   const agents: AgentSummary[] = sessions
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
