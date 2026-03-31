@@ -186,7 +186,7 @@ const DEFAULT_RULES: CompiledPolicyRule[] = [
     name: 'Auto-approve orchestrator review',
     description: 'Allow merge or PR actions that come from an active orchestrator auto-review pass.',
     risk: 'low',
-    enabled: false,
+    enabled: true,
     requiresApproval: false,
     matches: (ctx) => {
       if (ctx.toolName !== 'lane_command') return false;

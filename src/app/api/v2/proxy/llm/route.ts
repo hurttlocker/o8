@@ -635,6 +635,7 @@ export const POST = withOptionalAuth(async (request: NextRequest, auth: AuthCont
               // Evaluate action against governance policies (skip if pre-approved)
               const policyCtx = buildPolicyContext(tc.name, tc.args, {
                 runtime: 'chat',
+                workspacePath: scopedRepoRoot ?? undefined,
                 sessionKey: tabId ? `llm-chat:${tabId}` : undefined,
               });
               const policyResult = approvedTools.has(tc.name)
