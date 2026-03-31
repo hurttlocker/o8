@@ -11,6 +11,15 @@
  */
 
 import { createInterface } from 'node:readline';
+import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
+import {
+  approveAndMergePacket,
+  createMission,
+  dispatchMission,
+  getMissionStatus,
+  submitPacketReview,
+} from '@/lib/mcp/operator-mission-tools';
+import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 // ── Types ──
 
@@ -59,6 +68,114 @@ function textResult(text: string, isError = false): McpToolResult {
 
 function jsonResult(data: unknown): McpToolResult {
   return { content: [{ type: 'text', text: JSON.stringify(data) }] };
+}
+
+function errorText(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function requiredString(args: Record<string, unknown>, key: string) {
+  const value = args[key];
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`${key} is required`);
+  }
+  return value.trim();
+}
+
+function optionalString(args: Record<string, unknown>, key: string) {
+  const value = args[key];
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function parseMissionRuntime(value: unknown): OrchestratorRuntime {
+  if (value === undefined || value === null || value === '') {
+    return 'codex';
+  }
+  if (value === 'codex' || value === 'claude-code') {
+    return value;
+  }
+  throw new Error('runtime must be "codex" or "claude-code"');
+}
+
+function parseIssueList(value: unknown) {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error('issues must be a non-empty array');
+  }
+
+  const issues = value
+    .map((entry) => typeof entry === 'string' ? entry.trim() : '')
+    .filter(Boolean);
+
+  if (issues.length === 0) {
+    throw new Error('issues must contain at least one issue reference');
+  }
+
+  return issues;
+}
+
+function normalizeFindingSeverity(value: unknown): OrchestratorReviewFinding['severity'] {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (normalized === 'bug' || normalized === 'high' || normalized === 'critical' || normalized === 'error') {
+    return 'bug';
+  }
+  if (
+    normalized === 'rule_violation'
+    || normalized === 'medium'
+    || normalized === 'warning'
+    || normalized === 'policy'
+  ) {
+    return 'rule_violation';
+  }
+  if (normalized === 'note' || normalized === 'low' || normalized === 'info') {
+    return 'note';
+  }
+  throw new Error(`Unsupported finding severity: ${String(value)}`);
+}
+
+function normalizeFindingResolution(value: unknown): OrchestratorReviewFinding['resolution'] {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (normalized === 'fixed' || normalized === 'resolved') {
+    return 'fixed';
+  }
+  if (normalized === 'accepted' || normalized === 'waived' || normalized === 'intentional') {
+    return 'accepted';
+  }
+  if (normalized === 'deferred' || normalized === 'todo' || normalized === 'followup' || normalized === 'follow-up') {
+    return 'deferred';
+  }
+  throw new Error(`Unsupported finding resolution: ${String(value)}`);
+}
+
+function parseReviewFindings(value: unknown): OrchestratorReviewFinding[] {
+  if (!Array.isArray(value)) {
+    throw new Error('findings must be an array');
+  }
+
+  return value.map((finding, index) => {
+    if (!finding || typeof finding !== 'object') {
+      throw new Error(`findings[${index}] must be an object`);
+    }
+
+    const candidate = finding as Record<string, unknown>;
+    const file = typeof candidate.file === 'string' ? candidate.file.trim() : '';
+    const description = typeof candidate.description === 'string' ? candidate.description.trim() : '';
+    if (!file || !description) {
+      throw new Error(`findings[${index}] must include file and description`);
+    }
+
+    const line = candidate.line;
+    if (line !== undefined && (typeof line !== 'number' || !Number.isFinite(line) || line < 1)) {
+      throw new Error(`findings[${index}].line must be a positive number`);
+    }
+
+    return {
+      file,
+      line: typeof line === 'number' ? Math.floor(line) : undefined,
+      severity: normalizeFindingSeverity(candidate.severity),
+      description,
+      resolution: normalizeFindingResolution(candidate.resolution),
+    };
+  });
 }
 
 // ── Tool Definitions ──
@@ -156,6 +273,120 @@ const TOOLS: McpTool[] = [
         },
       },
       required: ['sessionKey'],
+    },
+  },
+  {
+    name: 'create_mission',
+    description:
+      'Create a sprint mission from GitHub issues, build packet dependencies, and persist the mission in the operator control plane.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        issues: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'GitHub issue references such as "334", "#334", or an issue URL.',
+        },
+        repoPath: {
+          type: 'string',
+          description: 'Absolute local path to the repository.',
+        },
+        runtime: {
+          type: 'string',
+          enum: ['codex', 'claude-code'],
+          description: 'Runtime to assign to all mission packets. Defaults to codex.',
+        },
+        constraints: {
+          type: 'string',
+          description: 'Optional sprint-wide constraints that should be included in packet scope.',
+        },
+      },
+      required: ['issues', 'repoPath'],
+    },
+  },
+  {
+    name: 'dispatch_mission',
+    description:
+      'Run the mission dispatch loop for the current mission or a specific mission ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        missionId: {
+          type: 'string',
+          description: 'Optional mission ID. If omitted, dispatches the current stored mission.',
+        },
+      },
+    },
+  },
+  {
+    name: 'get_mission_status',
+    description:
+      'Read sprint-level mission status, including waves, packet state, active lanes, blockers, and optional cost.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        missionId: {
+          type: 'string',
+          description: 'Optional mission ID. If omitted, reads the current stored mission.',
+        },
+        includeCost: {
+          type: 'boolean',
+          description: 'Include aggregated runtime cost for the mission.',
+        },
+      },
+    },
+  },
+  {
+    name: 'submit_review',
+    description:
+      'Record orchestrator review findings for a packet and relay the review context to downstream dependent packets.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: {
+          type: 'string',
+          description: 'The packet ID being reviewed.',
+        },
+        findings: {
+          type: 'array',
+          description: 'Review findings to persist.',
+          items: {
+            type: 'object',
+            properties: {
+              file: { type: 'string' },
+              line: { type: 'number' },
+              severity: { type: 'string' },
+              description: { type: 'string' },
+              resolution: { type: 'string' },
+            },
+            required: ['file', 'severity', 'description', 'resolution'],
+          },
+        },
+        approved: {
+          type: 'boolean',
+          description: 'Whether the review approved the packet for merge.',
+        },
+      },
+      required: ['packetId', 'findings', 'approved'],
+    },
+  },
+  {
+    name: 'approve_and_merge',
+    description:
+      'Send a reviewed packet through the lane merge command so the existing policy engine can evaluate and execute the merge.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: {
+          type: 'string',
+          description: 'The packet ID to merge.',
+        },
+        commitMessage: {
+          type: 'string',
+          description: 'Optional commit message to use before merging.',
+        },
+      },
+      required: ['packetId'],
     },
   },
 ];
@@ -336,12 +567,89 @@ async function handleHistory(args: Record<string, unknown>): Promise<McpToolResu
   }
 }
 
+async function handleCreateMission(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const result = await createMission({
+      issues: parseIssueList(args.issues),
+      repoPath: requiredString(args, 'repoPath'),
+      runtime: parseMissionRuntime(args.runtime),
+      constraints: optionalString(args, 'constraints'),
+    });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} create_mission failed: ${errorText(error)}`);
+    return textResult(`Failed to create mission: ${errorText(error)}`, true);
+  }
+}
+
+async function handleDispatchMission(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const result = await dispatchMission({
+      missionId: optionalString(args, 'missionId') || undefined,
+    });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} dispatch_mission failed: ${errorText(error)}`);
+    return textResult(`Failed to dispatch mission: ${errorText(error)}`, true);
+  }
+}
+
+async function handleGetMissionStatus(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const includeCost = typeof args.includeCost === 'boolean' ? args.includeCost : false;
+    const result = await getMissionStatus({
+      missionId: optionalString(args, 'missionId') || undefined,
+      includeCost,
+    });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} get_mission_status failed: ${errorText(error)}`);
+    return textResult(`Failed to read mission status: ${errorText(error)}`, true);
+  }
+}
+
+async function handleSubmitReview(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    if (typeof args.approved !== 'boolean') {
+      throw new Error('approved is required');
+    }
+
+    const result = await submitPacketReview({
+      packetId: requiredString(args, 'packetId'),
+      findings: parseReviewFindings(args.findings),
+      approved: args.approved,
+    });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} submit_review failed: ${errorText(error)}`);
+    return textResult(`Failed to submit review: ${errorText(error)}`, true);
+  }
+}
+
+async function handleApproveAndMerge(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const result = await approveAndMergePacket({
+      packetId: requiredString(args, 'packetId'),
+      commitMessage: optionalString(args, 'commitMessage') || undefined,
+    });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} approve_and_merge failed: ${errorText(error)}`);
+    return textResult(`Failed to approve and merge: ${errorText(error)}`, true);
+  }
+}
+
 const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<McpToolResult>> = {
   o8_send: handleSend,
   o8_status: handleStatus,
   o8_approve: handleApprove,
   o8_reject: handleReject,
   o8_history: handleHistory,
+  create_mission: handleCreateMission,
+  dispatch_mission: handleDispatchMission,
+  get_mission_status: handleGetMissionStatus,
+  submit_review: handleSubmitReview,
+  approve_and_merge: handleApproveAndMerge,
 };
 
 // ── JSON-RPC Server ──

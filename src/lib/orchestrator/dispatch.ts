@@ -2,7 +2,7 @@ import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { getDispatchableWave } from '@/lib/orchestrator/dag';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
-import type { OrchestratorLaneBinding, OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { OrchestratorLaneBinding, OrchestratorMissionState, OrchestratorPacket, PacketContext } from '@/lib/orchestrator/types';
 
 export const MAX_PARALLEL_DISPATCHES = 4;
 
@@ -21,6 +21,78 @@ function truncatePromptText(text: string, max: number) {
     return text;
   }
   return `${text.slice(0, Math.max(0, max - 1)).trimEnd()}…`;
+}
+
+function formatInlinePromptList(items: string[], maxItems = 4) {
+  if (items.length === 0) {
+    return '';
+  }
+  if (items.length <= maxItems) {
+    return items.join('; ');
+  }
+  return `${items.slice(0, maxItems).join('; ')} (+${items.length - maxItems} more)`;
+}
+
+function formatPacketReviewFallback(packet: OrchestratorPacket): string[] {
+  const review = packet.review;
+  if (!review) {
+    return [];
+  }
+
+  const findings = review.findings.map((finding) => {
+    const location = typeof finding.line === 'number' ? `${finding.file}:${finding.line}` : finding.file;
+    return `${location} [${finding.severity}] ${finding.description} -> ${finding.resolution}`;
+  });
+
+  return [
+    `Dependency review verdict: ${review.approved ? 'approved' : 'changes requested'}`,
+    review.summary ? `Review summary: ${truncatePromptText(review.summary, 800)}` : null,
+    findings.length > 0 ? `Review findings: ${truncatePromptText(findings.join(' | '), 1_000)}` : null,
+  ].filter((value): value is string => Boolean(value));
+}
+
+function formatContextReviewFindings(reviewFindings: PacketContext['reviewFindings']) {
+  if (!reviewFindings || reviewFindings.length === 0) {
+    return '';
+  }
+
+  return formatInlinePromptList(
+    reviewFindings.map((finding) => {
+      const location = finding.file && finding.file !== 'unknown'
+        ? (typeof finding.line === 'number' ? `${finding.file}:${finding.line}` : finding.file)
+        : null;
+      const description = truncatePromptText(finding.description, 180);
+      return location ? `${location} ${description}` : description;
+    }),
+    3,
+  );
+}
+
+function buildReviewLessonSections(
+  dependencyTitle: string,
+  context: PacketContext,
+): string[] {
+  const sections: string[] = [];
+
+  if (context.reviewFindings && context.reviewFindings.length > 0) {
+    sections.push(
+      `Lessons from prior agents: Agent working on '${dependencyTitle}' had ${context.reviewFindings.length} review finding${context.reviewFindings.length === 1 ? '' : 's'} caught during review: ${formatContextReviewFindings(context.reviewFindings)}. Watch for similar patterns.`,
+    );
+  }
+
+  if (context.patterns && context.patterns.length > 0) {
+    sections.push(
+      `Patterns to follow: ${formatInlinePromptList(context.patterns.map((pattern) => truncatePromptText(pattern, 180)), 4)}`,
+    );
+  }
+
+  if (context.conflictZones && context.conflictZones.length > 0) {
+    sections.push(
+      `Conflict zone warnings: Files modified by dependency: ${formatInlinePromptList(context.conflictZones, 4)}`,
+    );
+  }
+
+  return sections;
 }
 
 async function buildDependencyContextSections(
@@ -47,17 +119,28 @@ async function buildDependencyContextSections(
       dependencyPacketId: string;
     }> => result.status === 'fulfilled')
     .flatMap(({ value }) => {
-      if (!value.context) {
-        return [];
-      }
-
       const dependencyTitle = value.dependencyPacket?.title
         ?? value.dependencyPacket?.referenceLabel
         ?? value.dependencyPacketId;
+      const reviewSections = value.context
+        ? buildReviewLessonSections(dependencyTitle, value.context)
+        : value.dependencyPacket
+          ? formatPacketReviewFallback(value.dependencyPacket)
+          : [];
+
+      if (!value.context) {
+        return reviewSections.length > 0
+          ? [
+              `Dependency '${dependencyTitle}' review context:`,
+              ...reviewSections,
+            ]
+          : [];
+      }
 
       return [
         `Previous work from dependency '${dependencyTitle}': ${truncatePromptText(value.context.summary, 1_000)}`,
         `Files changed: ${formatChangedFiles(value.context.changedFiles)}`,
+        ...reviewSections,
       ];
     });
 }
@@ -65,7 +148,7 @@ async function buildDependencyContextSections(
 async function buildPacketPrompt(packet: OrchestratorPacket, allPackets: OrchestratorPacket[]) {
   const dependencySections = await buildDependencyContextSections(packet, allPackets);
   if (dependencySections.length > 0) {
-    console.log(`[context-pass] Injected dependency context for packet ${packet.id}`);
+    console.log(`[context-relay] Injected dependency context for packet ${packet.id}`);
   }
 
   return [

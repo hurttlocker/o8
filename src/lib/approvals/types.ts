@@ -3,7 +3,7 @@ import type { MobileTranscriptSource, MobileTranscriptToolCall } from '@/lib/mob
 
 export type ApprovalRisk = 'low' | 'medium' | 'high';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
-export type ApprovalActor = 'system' | 'desktop' | 'mobile' | 'test';
+export type ApprovalActor = 'system' | 'desktop' | 'mobile' | 'orchestrator' | 'test';
 export type ApprovalSource = 'llm-chat' | 'runtime' | 'test';
 
 export interface PolicyRule {
@@ -13,6 +13,19 @@ export interface PolicyRule {
   risk: ApprovalRisk;
   blocked?: boolean;
   workspacePath?: string;
+  enabled?: boolean;
+  requiresApproval?: boolean;
+}
+
+export interface PolicyRuleOverride {
+  id: string;
+  name?: string;
+  description?: string;
+  risk?: ApprovalRisk;
+  blocked?: boolean;
+  workspacePath?: string;
+  enabled?: boolean;
+  requiresApproval?: boolean;
 }
 
 export interface ApprovalDiffPreview {
@@ -26,11 +39,25 @@ export interface ApprovalDiffPreview {
   }>;
 }
 
+export interface OrchestratorReviewFinding {
+  file: string;
+  line?: number;
+  severity: 'bug' | 'rule_violation' | 'note';
+  description: string;
+  resolution: 'fixed' | 'accepted' | 'deferred';
+}
+
 export interface ApprovalAuditEvent {
-  type: 'created' | 'updated' | 'approved' | 'rejected' | 'resumed' | 'resume_failed';
+  type: 'created' | 'updated' | 'approved' | 'rejected' | 'resumed' | 'resume_failed' | 'orchestrator_review';
   actor: ApprovalActor;
   timestamp: number;
   note?: string;
+  findings?: OrchestratorReviewFinding[];
+  reviewer?: string;
+  approved?: boolean;
+  diffSha?: string;
+  patterns?: string[];
+  conflictZones?: string[];
 }
 
 export interface LlmApprovalContinuation {
