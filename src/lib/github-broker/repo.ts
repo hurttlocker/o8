@@ -25,6 +25,7 @@ export async function resolveRepoSlug(repoLike: string | null, fallback = DEFAUL
     if (slug.toLowerCase() === normalizedTarget) return slug;
     if (slug.split('/')[1]?.toLowerCase() === normalizedTarget) return slug;
     if (entry.name.toLowerCase() === normalizedTarget) return slug;
+    if (entry.localPath.toLowerCase() === normalizedTarget) return slug;
   }
 
   return fallback;

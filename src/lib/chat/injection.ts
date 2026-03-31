@@ -13,6 +13,15 @@ interface ReviewCommentContext {
   line?: number | null;
 }
 
+interface ReviewThreadContext {
+  prNumber: number;
+  repo?: string;
+  status: 'active' | 'outdated' | 'resolved';
+  path?: string;
+  line?: number | null;
+  comments: ReviewCommentContext[];
+}
+
 interface CiCheckContext {
   prNumber: number;
   repo?: string;
@@ -82,6 +91,33 @@ export function formatReviewCommentBatchInjection(
   return {
     reason: `pr-comment-batch-${prNumber}`,
     text: [header, '', ...blocks].join('\n\n'),
+  };
+}
+
+export function formatReviewThreadInjection(context: ReviewThreadContext): AgentPanelChatInjectionPayload {
+  const lines = [
+    `[PR review thread from ${formatRepoContext(context.prNumber, context.repo)}]`,
+    `Status: ${context.status}`,
+  ];
+
+  if (context.path) {
+    lines.push(`File: ${context.path}${context.line ? `:${context.line}` : ''}`);
+  }
+
+  const commentBlocks = context.comments
+    .filter((comment) => comment.body.trim())
+    .map((comment, index) => {
+      const metadata = [
+        `${index + 1}. ${comment.author}`,
+        comment.createdAt ? `created=${comment.createdAt}` : null,
+        comment.path ? `file=${comment.path}${comment.line ? `:${comment.line}` : ''}` : null,
+      ].filter(Boolean);
+      return `${metadata.join(' • ')}\n${comment.body.trim()}`;
+    });
+
+  return {
+    reason: `pr-review-thread-${context.prNumber}-${(context.path ?? 'thread').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+    text: [...lines, '', ...commentBlocks].join('\n\n'),
   };
 }
 
