@@ -97,6 +97,7 @@ export interface LLMMessage {
   isCompaction?: boolean; // compaction node — compressed older messages
   compactedCount?: number; // how many messages were compressed
   isPartial?: boolean; // restored in-flight assistant output after reload
+  fallbackNotice?: string; // model fallback notice (e.g. "Gemini 3.1 Pro unavailable — using Gemini 2.5 Pro")
 }
 
 interface FileChangePreview {
@@ -784,8 +785,8 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
         paddingLeft: isUser ? 16 : 0,
         paddingRight: isUser ? 16 : 0,
         borderRadius: isUser ? 18 : 0,
-        background: isUser ? THEME_ACCENT : message.isError ? 'rgba(239,68,68,0.12)' : 'transparent',
-        color: isUser ? 'white' : message.isError ? '#f87171' : 'var(--t-text)',
+        background: isUser ? 'rgba(255,255,255,0.18)' : message.isError ? 'rgba(239,68,68,0.12)' : 'transparent',
+        color: isUser ? 'var(--t-text)' : message.isError ? '#dc2626' : 'var(--t-text)',
         fontSize: 14,
         lineHeight: '1.6',
         fontFamily: '-apple-system, system-ui, sans-serif',
@@ -821,6 +822,27 @@ export function MessageBubble({ message, isLast, onRetry, onEdit, onDelete, onFo
           </>
         ) : renderLLMMarkdown(message.content, { onApplyToFile, onOpenInCanvas, onRunInTerminal })}
       </div>
+      {/* Fallback model notice — shown above assistant content */}
+      {!isUser && message.fallbackNotice && (
+        <div style={{
+          maxWidth: '90%',
+          paddingTop: 2,
+          paddingBottom: 6,
+          paddingLeft: 2,
+          fontSize: 11,
+          color: 'var(--t-text-muted)',
+          fontStyle: 'italic',
+          fontFamily: '-apple-system, system-ui, sans-serif',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 5,
+        }}>
+          <svg width="12" height="12" viewBox="0 0 256 256" fill="none" style={{ flexShrink: 0, opacity: 0.7 }}>
+            <path d="M236.8 188.09 149.35 36.22a24.76 24.76 0 0 0-42.7 0L19.2 188.09a23.51 23.51 0 0 0 0 23.72A24.35 24.35 0 0 0 40.55 224h174.9a24.35 24.35 0 0 0 21.33-12.19 23.51 23.51 0 0 0 .02-23.72ZM120 104a8 8 0 0 1 16 0v40a8 8 0 0 1-16 0Zm8 88a12 12 0 1 1 12-12 12 12 0 0 1-12 12Z" fill="currentColor"/>
+          </svg>
+          {message.fallbackNotice}
+        </div>
+      )}
       {!isUser && message.isPartial ? (
         <div style={{
           maxWidth: '90%',
@@ -2238,6 +2260,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
       const thinkingStartTime = Date.now();
       let isThinking = false;
       let recalledFacts = 0;
+      let fallbackNotice = '';
       setActiveToolCalls([]);
       setActiveThinking(null);
 
@@ -2364,6 +2387,11 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
                 }
               } else if (parsed.type === 'sources') {
                 sources.push(...(parsed.sources ?? []));
+              } else if (parsed.type === 'fallback') {
+                // Model fallback — build a human-readable notice
+                const origLabel = MODELS.find(m => m.id === parsed.originalModel)?.label ?? parsed.originalModel;
+                const fbLabel = MODELS.find(m => m.id === parsed.fallbackModel)?.label ?? parsed.fallbackModel;
+                fallbackNotice = `${origLabel} unavailable \u2014 using ${fbLabel}`;
               } else if (parsed.type === 'error') {
                 throw new Error(parsed.message);
               }
@@ -2412,6 +2440,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
         thinkingSteps: thinkingSteps.length > 0 ? thinkingSteps.map(s => ({ ...s, status: 'complete' as const })) : undefined,
         thinkingDurationMs: thinkingSteps.length > 0 || thinkingText ? Date.now() - thinkingStartTime : undefined,
         recalledFacts: recalledFacts > 0 ? recalledFacts : undefined,
+        fallbackNotice: fallbackNotice || undefined,
       };
       setMessages((prev) => {
         const updated = [...prev, assistantMsg];
