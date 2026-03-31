@@ -400,9 +400,24 @@ function resolveWorkspaceChatLaneStatus(tab: TerminalTab) {
   if (tab.orchestrationPacket?.status) return tab.orchestrationPacket.status;
   const supervisorStatus = tab.supervisorStatus?.trim().toLowerCase();
   if (supervisorStatus === 'launched' || supervisorStatus === 'retrying') return 'launching';
-  if (supervisorStatus === 'completed') return 'idle';
+  if (supervisorStatus === 'running' || supervisorStatus === 'waiting') return 'running';
+  if (supervisorStatus === 'completed') return 'awaiting_review';
+  if (supervisorStatus === 'stuck' || supervisorStatus === 'interrupted') return 'blocked';
   if (supervisorStatus === 'failed') return 'blocked';
   return tab.chatSessionKey ? 'running' : 'launching';
+}
+
+function packetStatusFromSupervisorStatus(
+  supervisorStatus?: string | null,
+  currentStatus?: WorkspaceOrchestrationPacketBadge['status'] | null,
+) {
+  const normalized = supervisorStatus?.trim().toLowerCase();
+  if (!normalized) return currentStatus ?? null;
+  if (normalized === 'launched' || normalized === 'retrying') return 'launching';
+  if (normalized === 'running' || normalized === 'waiting') return 'running';
+  if (normalized === 'completed') return 'awaiting_review';
+  if (normalized === 'failed' || normalized === 'stuck' || normalized === 'interrupted') return 'blocked';
+  return currentStatus ?? null;
 }
 
 function createWorkspaceTabId(kind: TerminalTab['kind']) {
@@ -4785,7 +4800,6 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
 	          return {
               ...tab,
               orchestrationPacket: packet,
-              autoArchiveOnIdle: packet ? true : tab.autoArchiveOnIdle,
               lastActivity: packet?.status !== tab.orchestrationPacket?.status ? Date.now() : tab.lastActivity,
             };
 	        }));
@@ -4801,12 +4815,20 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
             found = true;
             const nextStatus = status.trim();
             const statusChanged = (tab.supervisorStatus ?? '') !== nextStatus;
+            const nextPacketStatus = packetStatusFromSupervisorStatus(nextStatus, tab.orchestrationPacket?.status ?? null);
+            const packetChanged = nextPacketStatus !== (tab.orchestrationPacket?.status ?? null);
             return {
               ...tab,
               label: label ?? tab.label,
               supervisorStatus: nextStatus,
               autoArchiveOnIdle: tab.autoArchiveOnIdle ?? true,
-              lastActivity: statusChanged ? Date.now() : tab.lastActivity,
+              orchestrationPacket: tab.orchestrationPacket
+                ? {
+                    ...tab.orchestrationPacket,
+                    status: nextPacketStatus ?? tab.orchestrationPacket.status,
+                  }
+                : tab.orchestrationPacket,
+              lastActivity: statusChanged || packetChanged ? Date.now() : tab.lastActivity,
             };
           }));
           return found;
