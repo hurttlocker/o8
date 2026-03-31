@@ -505,6 +505,20 @@ async function readRunArtifacts(run: OwnedCodexRunRecord) {
   };
 }
 
+/** Patterns in Codex stderr that are non-fatal noise (MCP server teardown, etc.) */
+const STDERR_NOISE_PATTERNS = [
+  /rmcp::transport::worker.*worker quit/i,
+  /mcp.*connection refused/i,
+  /mcp.*transport channel closed/i,
+];
+
+function filterStderrNoise(raw: string): string {
+  return raw
+    .split('\n')
+    .filter((line) => !STDERR_NOISE_PATTERNS.some((pattern) => pattern.test(line)))
+    .join('\n');
+}
+
 function deriveRunOutcome(run: OwnedCodexRunRecord, parsed: ParsedRunLog, stderrRaw: string): OwnedRunOutcome {
   if (run.outcome === 'interrupted' || run.interruptRequestedAt) {
     return 'interrupted';
@@ -512,7 +526,7 @@ function deriveRunOutcome(run: OwnedCodexRunRecord, parsed: ParsedRunLog, stderr
   if (parsed.completedTurn) {
     return 'finished';
   }
-  const stderrText = stderrRaw.toLowerCase();
+  const stderrText = filterStderrNoise(stderrRaw).toLowerCase();
   if (stderrText.includes('panic') || stderrText.includes('fatal') || stderrText.includes('error')) {
     return 'failed';
   }
