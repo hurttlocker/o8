@@ -3,6 +3,8 @@ import type {
   OrchestratorLaneSnapshot,
   OrchestratorMissionState,
   OrchestratorPacket,
+  OrchestratorPacketReview,
+  OrchestratorPacketReviewFinding,
   OrchestratorQueueState,
   OrchestratorRuntimeTruth,
   OrchestratorStateApiResponse,
@@ -56,6 +58,56 @@ function normalizeLaneBinding(value: unknown): OrchestratorLaneBinding | null {
   };
 }
 
+function normalizeReviewFinding(value: unknown): OrchestratorPacketReviewFinding | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const finding = value as Partial<OrchestratorPacketReviewFinding>;
+  const file = typeof finding.file === 'string' ? finding.file.trim() : '';
+  const description = typeof finding.description === 'string' ? finding.description.trim() : '';
+  const severity = finding.severity;
+  const resolution = finding.resolution;
+
+  if (
+    !file
+    || !description
+    || (severity !== 'info' && severity !== 'warning' && severity !== 'high')
+    || (resolution !== 'fixed' && resolution !== 'accepted' && resolution !== 'deferred')
+  ) {
+    return null;
+  }
+
+  return {
+    file,
+    line: typeof finding.line === 'number' && Number.isFinite(finding.line) ? finding.line : null,
+    severity,
+    description,
+    resolution,
+  };
+}
+
+function normalizePacketReview(value: unknown): OrchestratorPacketReview | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const review = value as Partial<OrchestratorPacketReview>;
+  const findings = Array.isArray(review.findings)
+    ? review.findings
+      .map((finding) => normalizeReviewFinding(finding))
+      .filter((finding): finding is OrchestratorPacketReviewFinding => finding !== null)
+    : [];
+
+  return {
+    approved: Boolean(review.approved),
+    findings,
+    recordedAt: typeof review.recordedAt === 'string' ? review.recordedAt : nowIso(),
+    summary: typeof review.summary === 'string' ? review.summary : '',
+    auditApprovalId: typeof review.auditApprovalId === 'string' ? review.auditApprovalId : null,
+  };
+}
+
 function normalizePacket(raw: unknown, index: number, existing: Array<Pick<OrchestratorPacket, 'referenceLabel'>>) {
   const packet = (raw && typeof raw === 'object' ? raw : {}) as Partial<OrchestratorPacket>;
   const referenceLabel = typeof packet.referenceLabel === 'string' && packet.referenceLabel.trim()
@@ -95,6 +147,7 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     lastEventAt: typeof packet.lastEventAt === 'string' ? packet.lastEventAt : null,
     lastEventLabel: typeof packet.lastEventLabel === 'string' ? packet.lastEventLabel : null,
     archivedAt: typeof packet.archivedAt === 'string' ? packet.archivedAt : null,
+    review: normalizePacketReview(packet.review),
     lane: normalizeLaneBinding(packet.lane),
   } satisfies OrchestratorPacket;
 }
@@ -123,8 +176,12 @@ function resolvePacketDependencies(packets: OrchestratorPacket[]) {
 export function createEmptyOrchestratorMissionState(): OrchestratorMissionState {
   return {
     version: 2,
+    missionId: '',
     prompt: '',
     summary: '',
+    repoPath: null,
+    runtime: 'codex',
+    constraints: '',
     packets: [],
     updatedAt: nowIso(),
   };
@@ -138,8 +195,12 @@ export function normalizeOrchestratorMissionState(raw: unknown): OrchestratorMis
   }, []);
   return {
     version: 2,
+    missionId: typeof value.missionId === 'string' ? value.missionId : '',
     prompt: typeof value.prompt === 'string' ? value.prompt : '',
     summary: typeof value.summary === 'string' ? value.summary : '',
+    repoPath: typeof value.repoPath === 'string' ? value.repoPath : null,
+    runtime: value.runtime === 'claude-code' ? 'claude-code' : 'codex',
+    constraints: typeof value.constraints === 'string' ? value.constraints : '',
     packets: resolvePacketDependencies(normalizedPackets),
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : nowIso(),
   };
@@ -421,12 +482,20 @@ export function reconcileOrchestratorMissionState(
     packets: reconciledPackets,
   });
   const changed = JSON.stringify({
+    missionId: normalized.missionId,
     prompt: normalized.prompt,
     summary: normalized.summary,
+    repoPath: normalized.repoPath,
+    runtime: normalized.runtime,
+    constraints: normalized.constraints,
     packets: normalized.packets,
   }) !== JSON.stringify({
+    missionId: nextState.missionId,
     prompt: nextState.prompt,
     summary: nextState.summary,
+    repoPath: nextState.repoPath,
+    runtime: nextState.runtime,
+    constraints: nextState.constraints,
     packets: nextState.packets,
   });
 

@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   XCircle,
 } from 'lucide-react';
-import type { ApprovalAuditEvent, ApprovalRecord, ApprovalRisk } from '@/lib/approvals/types';
+import type { ApprovalAuditEvent, ApprovalRecord, ApprovalRisk, OrchestratorReviewFinding } from '@/lib/approvals/types';
 
 type TimeRangeOption = 'all' | '1h' | '24h' | '7d' | '30d';
 type RiskFilter = 'all' | ApprovalRisk;
@@ -24,6 +24,10 @@ interface AuditTimelineItem {
   type: ApprovalAuditEvent['type'];
   actor: ApprovalAuditEvent['actor'];
   note?: string;
+  findings?: OrchestratorReviewFinding[];
+  reviewer?: string;
+  approved?: boolean;
+  diffSha?: string;
 }
 
 const POLL_INTERVAL = 30_000;
@@ -67,6 +71,11 @@ const EVENT_TONES: Record<ApprovalAuditEvent['type'], { color: string; backgroun
     backgroundColor: 'rgba(249, 115, 22, 0.12)',
     borderColor: 'rgba(249, 115, 22, 0.18)',
   },
+  orchestrator_review: {
+    color: '#1d4ed8',
+    backgroundColor: 'rgba(37, 99, 235, 0.12)',
+    borderColor: 'rgba(37, 99, 235, 0.18)',
+  },
 };
 
 const RISK_TONES: Record<ApprovalRisk, { color: string; backgroundColor: string; borderColor: string }> = {
@@ -87,6 +96,42 @@ const RISK_TONES: Record<ApprovalRisk, { color: string; backgroundColor: string;
   },
 };
 
+const FINDING_TONES: Record<OrchestratorReviewFinding['severity'], { color: string; backgroundColor: string; borderColor: string }> = {
+  bug: {
+    color: '#b91c1c',
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderColor: 'rgba(239, 68, 68, 0.18)',
+  },
+  rule_violation: {
+    color: '#b45309',
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    borderColor: 'rgba(245, 158, 11, 0.18)',
+  },
+  note: {
+    color: '#475569',
+    backgroundColor: 'rgba(100, 116, 139, 0.12)',
+    borderColor: 'rgba(100, 116, 139, 0.18)',
+  },
+};
+
+const RESOLUTION_TONES: Record<OrchestratorReviewFinding['resolution'], { color: string; backgroundColor: string; borderColor: string }> = {
+  fixed: {
+    color: '#15803d',
+    backgroundColor: 'rgba(34, 197, 94, 0.12)',
+    borderColor: 'rgba(34, 197, 94, 0.18)',
+  },
+  accepted: {
+    color: '#1d4ed8',
+    backgroundColor: 'rgba(37, 99, 235, 0.12)',
+    borderColor: 'rgba(37, 99, 235, 0.18)',
+  },
+  deferred: {
+    color: '#c2410c',
+    backgroundColor: 'rgba(249, 115, 22, 0.12)',
+    borderColor: 'rgba(249, 115, 22, 0.18)',
+  },
+};
+
 function formatEventType(type: ApprovalAuditEvent['type']) {
   switch (type) {
     case 'created':
@@ -101,6 +146,8 @@ function formatEventType(type: ApprovalAuditEvent['type']) {
       return 'Resumed';
     case 'resume_failed':
       return 'Resume Failed';
+    case 'orchestrator_review':
+      return 'Orchestrator Review';
   }
 }
 
@@ -112,6 +159,8 @@ function formatActor(actor: ApprovalAuditEvent['actor']) {
       return 'Mobile';
     case 'system':
       return 'System';
+    case 'orchestrator':
+      return 'Orchestrator';
     case 'test':
       return 'Test';
   }
@@ -163,6 +212,8 @@ function filterWindowForRange(range: TimeRangeOption) {
 
 function iconForEventType(type: ApprovalAuditEvent['type']) {
   switch (type) {
+    case 'orchestrator_review':
+      return ShieldCheck;
     case 'approved':
     case 'resumed':
       return CheckCircle2;
@@ -172,6 +223,36 @@ function iconForEventType(type: ApprovalAuditEvent['type']) {
     default:
       return Clock;
   }
+}
+
+function formatFindingSeverity(severity: OrchestratorReviewFinding['severity']) {
+  switch (severity) {
+    case 'bug':
+      return 'Bug';
+    case 'rule_violation':
+      return 'Rule Violation';
+    case 'note':
+      return 'Note';
+  }
+}
+
+function formatFindingResolution(resolution: OrchestratorReviewFinding['resolution']) {
+  switch (resolution) {
+    case 'fixed':
+      return 'Fixed';
+    case 'accepted':
+      return 'Accepted';
+    case 'deferred':
+      return 'Deferred';
+  }
+}
+
+function formatVerdict(approved: boolean) {
+  return approved ? 'Approved' : 'Changes Requested';
+}
+
+function formatFindingLocation(finding: OrchestratorReviewFinding) {
+  return typeof finding.line === 'number' ? `${finding.file}:${finding.line}` : finding.file;
 }
 
 function flattenAuditTimeline(approvals: ApprovalRecord[]): AuditTimelineItem[] {
@@ -188,6 +269,10 @@ function flattenAuditTimeline(approvals: ApprovalRecord[]): AuditTimelineItem[] 
         type: event.type,
         actor: event.actor,
         note: event.note,
+        findings: Array.isArray(event.findings) ? event.findings : undefined,
+        reviewer: event.reviewer,
+        approved: typeof event.approved === 'boolean' ? event.approved : undefined,
+        diffSha: event.diffSha,
       }));
     })
     .sort((left, right) => right.timestamp - left.timestamp);
@@ -836,6 +921,12 @@ export function AuditLogPanel() {
               const eventTone = EVENT_TONES[item.type];
               const riskTone = RISK_TONES[item.risk];
               const EventIcon = iconForEventType(item.type);
+              const reviewVerdictTone = typeof item.approved === 'boolean'
+                ? item.approved
+                  ? EVENT_TONES.approved
+                  : EVENT_TONES.rejected
+                : null;
+              const findings = item.findings ?? [];
 
               return (
                 <div
@@ -929,6 +1020,24 @@ export function AuditLogPanel() {
                       }}>
                         {formatEventType(item.type)}
                       </span>
+                      {reviewVerdictTone ? (
+                        <span style={{
+                          borderRadius: 999,
+                          borderWidth: 1,
+                          borderStyle: 'solid',
+                          borderColor: reviewVerdictTone.borderColor,
+                          backgroundColor: reviewVerdictTone.backgroundColor,
+                          color: reviewVerdictTone.color,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          paddingTop: 5,
+                          paddingRight: 10,
+                          paddingBottom: 5,
+                          paddingLeft: 10,
+                        }}>
+                          {formatVerdict(item.approved === true)}
+                        </span>
+                      ) : null}
                       <span style={{
                         borderRadius: 999,
                         borderWidth: 1,
@@ -958,6 +1067,9 @@ export function AuditLogPanel() {
                     <MetaField label="Session Key" value={item.sessionKey} mono />
                     <MetaField label="Approval ID" value={item.approvalId} mono />
                     <MetaField label="Risk" value={formatRisk(item.risk)} />
+                    {item.reviewer ? <MetaField label="Reviewer" value={item.reviewer} /> : null}
+                    {typeof item.approved === 'boolean' ? <MetaField label="Verdict" value={formatVerdict(item.approved)} /> : null}
+                    {item.diffSha ? <MetaField label="Diff SHA" value={item.diffSha} mono /> : null}
                   </div>
 
                   {item.note ? (
@@ -990,6 +1102,126 @@ export function AuditLogPanel() {
                       }}>
                         {item.note}
                       </div>
+                    </div>
+                  ) : null}
+
+                  {item.type === 'orchestrator_review' ? (
+                    <div style={{
+                      marginTop: 12,
+                      borderRadius: 16,
+                      borderWidth: 1,
+                      borderStyle: 'solid',
+                      borderColor: 'var(--t-divider-subtle)',
+                      backgroundColor: 'rgba(255, 255, 255, 0.7)',
+                      paddingTop: 12,
+                      paddingRight: 14,
+                      paddingBottom: 12,
+                      paddingLeft: 14,
+                    }}>
+                      <div style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                        color: 'var(--t-text-muted)',
+                      }}>
+                        Findings
+                      </div>
+                      {findings.length === 0 ? (
+                        <div style={{
+                          marginTop: 8,
+                          fontSize: 13,
+                          lineHeight: 1.6,
+                          color: 'var(--t-text-secondary)',
+                        }}>
+                          No structured findings were recorded for this review.
+                        </div>
+                      ) : (
+                        <div style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 10,
+                          marginTop: 10,
+                        }}>
+                          {findings.map((finding, index) => {
+                            const findingTone = FINDING_TONES[finding.severity];
+                            const resolutionTone = RESOLUTION_TONES[finding.resolution];
+
+                            return (
+                              <div
+                                key={`${item.id}:finding:${index}`}
+                                style={{
+                                  borderRadius: 14,
+                                  borderWidth: 1,
+                                  borderStyle: 'solid',
+                                  borderColor: 'var(--t-divider-subtle)',
+                                  backgroundColor: 'rgba(248, 250, 252, 0.88)',
+                                  paddingTop: 12,
+                                  paddingRight: 12,
+                                  paddingBottom: 12,
+                                  paddingLeft: 12,
+                                }}
+                              >
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  flexWrap: 'wrap',
+                                }}>
+                                  <span style={{
+                                    borderRadius: 999,
+                                    borderWidth: 1,
+                                    borderStyle: 'solid',
+                                    borderColor: findingTone.borderColor,
+                                    backgroundColor: findingTone.backgroundColor,
+                                    color: findingTone.color,
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    paddingTop: 4,
+                                    paddingRight: 10,
+                                    paddingBottom: 4,
+                                    paddingLeft: 10,
+                                  }}>
+                                    {formatFindingSeverity(finding.severity)}
+                                  </span>
+                                  <span style={{
+                                    borderRadius: 999,
+                                    borderWidth: 1,
+                                    borderStyle: 'solid',
+                                    borderColor: resolutionTone.borderColor,
+                                    backgroundColor: resolutionTone.backgroundColor,
+                                    color: resolutionTone.color,
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    paddingTop: 4,
+                                    paddingRight: 10,
+                                    paddingBottom: 4,
+                                    paddingLeft: 10,
+                                  }}>
+                                    {formatFindingResolution(finding.resolution)}
+                                  </span>
+                                  <span style={{
+                                    fontSize: 12,
+                                    fontWeight: 700,
+                                    color: 'var(--t-text-secondary)',
+                                    fontFamily: MONO_FONT,
+                                  }}>
+                                    {formatFindingLocation(finding)}
+                                  </span>
+                                </div>
+                                <div style={{
+                                  marginTop: 8,
+                                  fontSize: 13,
+                                  lineHeight: 1.6,
+                                  color: 'var(--t-text)',
+                                }}>
+                                  {finding.description}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   ) : null}
                 </div>

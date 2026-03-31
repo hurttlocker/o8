@@ -1,14 +1,14 @@
 import { existsSync, mkdirSync, readFileSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import type { ApprovalRisk, PolicyRule } from '@/lib/approvals/types';
+import type { ApprovalRisk, PolicyRule, PolicyRuleOverride } from '@/lib/approvals/types';
 
 export const POLICIES_DIR = path.join(homedir(), '.cortex-ide');
 export const POLICIES_PATH = path.join(POLICIES_DIR, 'policies.json');
 
 interface ParsedPolicyRules {
   ok: boolean;
-  rules: PolicyRule[];
+  rules: PolicyRuleOverride[];
   error?: string;
 }
 
@@ -16,18 +16,20 @@ function isApprovalRisk(value: unknown): value is ApprovalRisk {
   return value === 'low' || value === 'medium' || value === 'high';
 }
 
-function isPolicyRule(value: unknown): value is PolicyRule {
+function isPolicyRuleOverride(value: unknown): value is PolicyRuleOverride {
   if (!value || typeof value !== 'object') {
     return false;
   }
 
   const candidate = value as Record<string, unknown>;
   return typeof candidate.id === 'string'
-    && typeof candidate.name === 'string'
-    && typeof candidate.description === 'string'
-    && isApprovalRisk(candidate.risk)
+    && (candidate.name === undefined || typeof candidate.name === 'string')
+    && (candidate.description === undefined || typeof candidate.description === 'string')
+    && (candidate.risk === undefined || isApprovalRisk(candidate.risk))
     && (candidate.blocked === undefined || typeof candidate.blocked === 'boolean')
-    && (candidate.workspacePath === undefined || typeof candidate.workspacePath === 'string');
+    && (candidate.workspacePath === undefined || typeof candidate.workspacePath === 'string')
+    && (candidate.enabled === undefined || typeof candidate.enabled === 'boolean')
+    && (candidate.requiresApproval === undefined || typeof candidate.requiresApproval === 'boolean');
 }
 
 export function parsePolicyRules(value: unknown): ParsedPolicyRules {
@@ -39,10 +41,10 @@ export function parsePolicyRules(value: unknown): ParsedPolicyRules {
     };
   }
 
-  const rules: PolicyRule[] = [];
+  const rules: PolicyRuleOverride[] = [];
   for (let index = 0; index < value.length; index += 1) {
     const entry = value[index];
-    if (!isPolicyRule(entry)) {
+    if (!isPolicyRuleOverride(entry)) {
       return {
         ok: false,
         rules: [],
@@ -55,7 +57,7 @@ export function parsePolicyRules(value: unknown): ParsedPolicyRules {
   return { ok: true, rules };
 }
 
-export function loadUserPolicies(): PolicyRule[] {
+export function loadUserPolicies(): PolicyRuleOverride[] {
   if (!existsSync(POLICIES_PATH)) {
     return [];
   }
@@ -75,7 +77,7 @@ export function loadUserPolicies(): PolicyRule[] {
   }
 }
 
-export function mergePolicies(defaults: PolicyRule[], overrides: PolicyRule[]): PolicyRule[] {
+export function mergePolicies(defaults: PolicyRule[], overrides: PolicyRuleOverride[]): PolicyRule[] {
   const overridesById = new Map(overrides.map((rule) => [rule.id, rule]));
   return defaults.map((rule) => {
     const override = overridesById.get(rule.id);
@@ -83,12 +85,12 @@ export function mergePolicies(defaults: PolicyRule[], overrides: PolicyRule[]): 
   });
 }
 
-export function writeUserPolicies(rules: PolicyRule[]) {
+export function writeUserPolicies(rules: PolicyRuleOverride[]) {
   mkdirSync(POLICIES_DIR, { recursive: true });
   writeFileSync(POLICIES_PATH, `${JSON.stringify(rules, null, 2)}\n`, 'utf8');
 }
 
-export function watchPolicies(callback: (rules: PolicyRule[]) => void): () => void {
+export function watchPolicies(callback: (rules: PolicyRuleOverride[]) => void): () => void {
   let fileWatcher: FSWatcher | null = null;
   let dirWatcher: FSWatcher | null = null;
   let debounceTimer: NodeJS.Timeout | null = null;

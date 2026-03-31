@@ -23,8 +23,10 @@ import {
   archiveLane,
 } from '@/lib/lane/registry';
 import { getLanePolicy, isProtectedBranch } from '@/lib/lane/policy';
+import { isLaneAutoReviewActive } from '@/lib/lane/auto-review';
 import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
-import { createApproval } from '@/lib/approvals/store';
+import { createApproval, recordApprovalAudit } from '@/lib/approvals/store';
+import { buildConflictZonesFromDiffFiles, extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { parseGitDiff } from '@/lib/worktree/diff-parser';
 
@@ -45,6 +47,61 @@ async function getDiffForLane(lane: Pick<Lane, 'baseBranch' | 'worktreePath' | '
       return '';
     }
   }
+}
+
+async function recordReviewLessonsForApproval(
+  approvalId: string,
+  lane: Lane,
+  reviewSummary: string | undefined,
+  files: ReturnType<typeof parseGitDiff>,
+) {
+  const summary = reviewSummary?.trim();
+  if (!summary) {
+    return;
+  }
+
+  const findings = extractReviewFindings(summary);
+  const patterns = extractReviewPatterns(summary, findings);
+  const conflictZones = buildConflictZonesFromDiffFiles(files);
+  const approved = /\b(approve|approved|looks correct|ready to merge|ship it)\b/i.test(summary)
+    ? true
+    : /\b(request changes|reject|den(y|ied)|not ready|blocked)\b/i.test(summary)
+      ? false
+      : findings.length === 0;
+
+  recordApprovalAudit(approvalId, 'orchestrator_review', 'orchestrator', summary, {
+    findings: findings.length > 0 ? findings : undefined,
+    reviewer: 'orchestrator',
+    approved,
+    patterns: patterns.length > 0 ? patterns : undefined,
+    conflictZones: conflictZones.length > 0 ? conflictZones : undefined,
+  });
+
+  if (!lane.packetId || !lane.sessionKey) {
+    return;
+  }
+
+  try {
+    const { capturePacketCompletionContext } = await import('@/lib/orchestrator/context-relay');
+    await capturePacketCompletionContext(lane.packetId, lane.sessionKey);
+  } catch (error) {
+    console.error(`[context-relay] Failed to refresh reviewed packet context for ${lane.packetId}:`, error);
+  }
+}
+
+function buildLanePolicyContext(
+  lane: Pick<Lane, 'id' | 'repoPath'>,
+  verb: 'create_pr' | 'merge',
+  actor: LaneEventActor,
+) {
+  const autoReview = actor === 'orchestrator' && isLaneAutoReviewActive(lane.id);
+  return buildPolicyContext('lane_command', {
+    verb,
+    laneId: lane.id,
+    autoReview,
+  }, {
+    workspacePath: lane.repoPath,
+  });
 }
 
 export async function dispatch(command: LaneCommand): Promise<LaneCommandResult> {
@@ -253,9 +310,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       if (!lane.worktreePath) return { ok: false, laneId: command.laneId, note: 'No worktree to create PR from. Lane is on the main working tree.' };
 
       // Policy gate — require approval for PR creation
-      const prPolicy = evaluatePolicy(buildPolicyContext('lane_command', { verb: 'create_pr', laneId: command.laneId }, {
-        workspacePath: lane.repoPath,
-      }));
+      const prPolicy = evaluatePolicy(buildLanePolicyContext(lane, 'create_pr', actor));
       if (prPolicy.requiresApproval && actor !== 'user') {
         const rawDiff = await getDiffForLane(lane);
         const files = parseGitDiff(rawDiff);
@@ -279,6 +334,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
             Branch: lane.branch,
             Base: lane.baseBranch,
             Runtime: lane.runtime,
+            ...(lane.packetId ? { Packet: lane.packetId } : {}),
           },
           continuation: {
             kind: 'lane',
@@ -287,6 +343,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
             commitMessage: command.commitMessage,
           },
         });
+        await recordReviewLessonsForApproval(approval.id, lane, command.reviewSummary, files);
         setLaneStatus(command.laneId, 'awaiting_input', actor, 'approval_required');
         void publishRealtimeMutation({
           mutation: {
@@ -304,6 +361,10 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           fresh: true,
         });
         return { ok: false, laneId: command.laneId, note: `Approval required: ${prPolicy.reason}`, approvalId: approval.id };
+      }
+
+      if (prPolicy.ruleId === 'auto_approve_orchestrator_review') {
+        console.log(`[headless] Auto-approved orchestrator review for lane ${lane.id} (create_pr)`);
       }
 
       setLaneStatus(command.laneId, 'merging', actor, 'creating_pr');
@@ -365,9 +426,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       if (!lane.worktreePath) return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };
 
       // Policy gate — require approval for merge
-      const mergePolicy = evaluatePolicy(buildPolicyContext('lane_command', { verb: 'merge', laneId: command.laneId }, {
-        workspacePath: lane.repoPath,
-      }));
+      const mergePolicy = evaluatePolicy(buildLanePolicyContext(lane, 'merge', actor));
       if (mergePolicy.requiresApproval && actor !== 'user') {
         const rawDiff = await getDiffForLane(lane);
         const files = parseGitDiff(rawDiff);
@@ -391,6 +450,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
             Branch: lane.branch,
             Base: lane.baseBranch,
             Runtime: lane.runtime,
+            ...(lane.packetId ? { Packet: lane.packetId } : {}),
           },
           continuation: {
             kind: 'lane',
@@ -399,6 +459,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
             commitMessage: command.commitMessage,
           },
         });
+        await recordReviewLessonsForApproval(approval.id, lane, command.reviewSummary, files);
         setLaneStatus(command.laneId, 'awaiting_input', actor, 'approval_required');
         void publishRealtimeMutation({
           mutation: {
@@ -416,6 +477,10 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           fresh: true,
         });
         return { ok: false, laneId: command.laneId, note: `Approval required: ${mergePolicy.reason}`, approvalId: approval.id };
+      }
+
+      if (mergePolicy.ruleId === 'auto_approve_orchestrator_review') {
+        console.log(`[headless] Auto-approved orchestrator review for lane ${lane.id} (merge)`);
       }
 
       setLaneStatus(command.laneId, 'merging', actor, 'merging');

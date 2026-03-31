@@ -1,5 +1,9 @@
+import { listApprovalsForContext } from '@/lib/approvals/store';
+import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { getCortexClient } from '@/lib/cortex/client';
+import { findLaneByPacket } from '@/lib/lane/registry';
 import type { AgentSummary } from '@/lib/fleet/types';
+import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import type { PacketContext } from '@/lib/orchestrator/types';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime } from '@/lib/runtimes/registry';
@@ -13,6 +17,7 @@ const TRANSCRIPT_CAPTURE_LIMIT = 80;
 const SUMMARY_LIMIT = 1_200;
 const NOTE_LIMIT = 320;
 const NOTE_PATTERN = /\b(blocker|blocked|blocking|note|notes|remaining|next step|todo|unable|could not|can't|cannot|failed|failure|error|waiting)\b/i;
+type PacketReviewContext = NonNullable<PacketContext['review']>;
 
 function inferRuntimeId(sessionKey: string): RuntimeId | null {
   if (sessionKey.startsWith('claude-code:')) {
@@ -49,6 +54,53 @@ function pushUniqueSection(target: string[], value?: string) {
     return;
   }
   target.push(normalized);
+}
+
+function pushUniqueString(target: string[], seen: Set<string>, value?: string) {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return;
+  }
+
+  const key = normalized.toLowerCase();
+  if (seen.has(key)) {
+    return;
+  }
+
+  seen.add(key);
+  target.push(normalized);
+}
+
+function pushUniqueFinding(
+  target: OrchestratorReviewFinding[],
+  seen: Set<string>,
+  finding: OrchestratorReviewFinding,
+) {
+  const description = finding.description.trim();
+  const file = finding.file.trim() || 'unknown';
+  if (!description) {
+    return;
+  }
+
+  const key = `${file.toLowerCase()}:${finding.line ?? ''}:${description.toLowerCase()}`;
+  if (seen.has(key)) {
+    return;
+  }
+
+  seen.add(key);
+  target.push({
+    file,
+    line: typeof finding.line === 'number' && Number.isFinite(finding.line) && finding.line > 0
+      ? Math.floor(finding.line)
+      : undefined,
+    severity: finding.severity,
+    description,
+    resolution: finding.resolution,
+  });
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
 function findLastAssistantEntry(entries: RuntimeTranscriptEntry[]): RuntimeTranscriptEntry | null {
@@ -139,6 +191,34 @@ function serializePacketContext(context: PacketContext): string {
   const changedFiles = context.changedFiles.length > 0
     ? context.changedFiles.map((filePath) => `- ${filePath}`).join('\n')
     : '- none';
+  const reviewFindings = context.reviewFindings && context.reviewFindings.length > 0
+    ? context.reviewFindings.map((finding) => {
+        const location = typeof finding.line === 'number' ? `${finding.file}:${finding.line}` : finding.file;
+        return `- [${finding.severity}/${finding.resolution}] ${location} - ${finding.description}`;
+      }).join('\n')
+    : '- none';
+  const patterns = context.patterns && context.patterns.length > 0
+    ? context.patterns.map((pattern) => `- ${pattern}`).join('\n')
+    : '- none';
+  const conflictZones = context.conflictZones && context.conflictZones.length > 0
+    ? context.conflictZones.map((zone) => `- ${zone}`).join('\n')
+    : '- none';
+  const reviewLines = context.review
+    ? [
+        '',
+        'Review:',
+        `Verdict: ${context.review.approved ? 'approved' : 'changes_requested'}`,
+        ...(context.review.reviewer ? [`Reviewer: ${context.review.reviewer}`] : []),
+        ...(context.review.diffSha ? [`Diff SHA: ${context.review.diffSha}`] : []),
+        'Findings:',
+        ...(context.review.findings.length > 0
+          ? context.review.findings.map((finding) => {
+              const location = finding.line ? `${finding.file}:${finding.line}` : finding.file;
+              return `- [${finding.severity}/${finding.resolution}] ${location} - ${finding.description}`;
+            })
+          : ['- none']),
+      ]
+    : [];
 
   return [
     'Orchestrator dependency handoff memory.',
@@ -152,6 +232,16 @@ function serializePacketContext(context: PacketContext): string {
     '',
     'Files changed:',
     changedFiles,
+    '',
+    'Review findings:',
+    reviewFindings,
+    '',
+    'Patterns to follow:',
+    patterns,
+    '',
+    'Conflict zones:',
+    conflictZones,
+    ...reviewLines,
     '',
     PACKET_CONTEXT_JSON_START,
     JSON.stringify(context, null, 2),
@@ -170,8 +260,12 @@ function isPacketContext(value: unknown): value is PacketContext {
     && typeof candidate.summary === 'string'
     && Array.isArray(candidate.changedFiles)
     && candidate.changedFiles.every((entry) => typeof entry === 'string')
+    && (candidate.reviewFindings === undefined || (Array.isArray(candidate.reviewFindings) && candidate.reviewFindings.every(isReviewFinding)))
+    && (candidate.patterns === undefined || isStringArray(candidate.patterns))
+    && (candidate.conflictZones === undefined || isStringArray(candidate.conflictZones))
     && typeof candidate.completedAt === 'string'
-    && typeof candidate.model === 'string';
+    && typeof candidate.model === 'string'
+    && (candidate.review === undefined || isPacketReviewContext(candidate.review));
 }
 
 function parsePacketContext(content: string): PacketContext | null {
@@ -198,7 +292,7 @@ async function findAgentSummary(sessionKey: string): Promise<AgentSummary | null
 async function storePacketContext(context: PacketContext): Promise<void> {
   const client = getCortexClient();
   if (!(await client.isAvailable())) {
-    console.warn(`[context-pass] Cortex unavailable; skipped packet context store for ${context.packetId}`);
+    console.warn(`[context-relay] Cortex unavailable; skipped packet context store for ${context.packetId}`);
     return;
   }
 
@@ -208,11 +302,156 @@ async function storePacketContext(context: PacketContext): Promise<void> {
   );
 
   if (!result.ok) {
-    console.error(`[context-pass] Failed to store packet context for ${context.packetId}`);
+    console.error(`[context-relay] Failed to store packet context for ${context.packetId}`);
     return;
   }
 
-  console.log(`[context-pass] Stored packet context for ${context.packetId}`);
+  console.log(`[context-relay] Stored packet context for ${context.packetId}`);
+}
+
+function isReviewFinding(value: unknown): value is OrchestratorReviewFinding {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.file === 'string'
+    && typeof candidate.description === 'string'
+    && (candidate.line === undefined || (typeof candidate.line === 'number' && Number.isFinite(candidate.line)))
+    && (candidate.severity === 'bug' || candidate.severity === 'rule_violation' || candidate.severity === 'note')
+    && (candidate.resolution === 'fixed' || candidate.resolution === 'accepted' || candidate.resolution === 'deferred');
+}
+
+function isPacketReviewContext(value: unknown): value is PacketReviewContext {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.approved === 'boolean'
+    && Array.isArray(candidate.findings)
+    && candidate.findings.every(isReviewFinding)
+    && typeof candidate.reviewedAt === 'string'
+    && (candidate.reviewer === undefined || typeof candidate.reviewer === 'string')
+    && (candidate.diffSha === undefined || typeof candidate.diffSha === 'string');
+}
+
+function toPacketReviewContext(review: {
+  findings: OrchestratorReviewFinding[];
+  reviewer?: string;
+  approved: boolean;
+  diffSha?: string;
+}): PacketReviewContext {
+  const reviewer = review.reviewer?.trim();
+  const diffSha = review.diffSha?.trim();
+  return {
+    reviewer: reviewer || undefined,
+    approved: review.approved,
+    diffSha: diffSha || undefined,
+    findings: review.findings.map((finding) => ({
+      file: finding.file.trim(),
+      line: typeof finding.line === 'number' && Number.isFinite(finding.line) && finding.line > 0
+        ? Math.floor(finding.line)
+        : undefined,
+      severity: finding.severity,
+      description: finding.description.trim(),
+      resolution: finding.resolution,
+    })),
+    reviewedAt: new Date().toISOString(),
+  };
+}
+
+function buildConflictZonesFromFindings(findings: OrchestratorReviewFinding[]) {
+  const zones: string[] = [];
+  const seen = new Set<string>();
+
+  for (const finding of findings) {
+    const file = finding.file.trim();
+    if (!file) {
+      continue;
+    }
+
+    const zone = typeof finding.line === 'number' ? `${file} (line ${finding.line})` : file;
+    pushUniqueString(zones, seen, zone);
+  }
+
+  return zones;
+}
+
+function buildPacketReviewContextFromEvent(event: ApprovalAuditEvent): PacketReviewContext | null {
+  if (event.type !== 'orchestrator_review') {
+    return null;
+  }
+
+  const findings = Array.isArray(event.findings)
+    ? event.findings.filter(isReviewFinding)
+    : extractReviewFindings(event.note ?? '');
+  const approved = typeof event.approved === 'boolean' ? event.approved : false;
+
+  return {
+    reviewer: event.reviewer?.trim() || undefined,
+    approved,
+    diffSha: event.diffSha?.trim() || undefined,
+    findings,
+    reviewedAt: new Date(event.timestamp).toISOString(),
+  };
+}
+
+function extractApprovalReviewContext(
+  auditEvents: ApprovalAuditEvent[],
+  changedFiles: string[],
+): Pick<PacketContext, 'review' | 'reviewFindings' | 'patterns' | 'conflictZones'> {
+  const reviewFindings: OrchestratorReviewFinding[] = [];
+  const findingKeys = new Set<string>();
+  const patterns: string[] = [];
+  const patternKeys = new Set<string>();
+  const conflictZones: string[] = [];
+  const conflictZoneKeys = new Set<string>();
+  let latestReview: PacketReviewContext | null = null;
+  let latestReviewTimestamp = Number.NEGATIVE_INFINITY;
+
+  for (const event of auditEvents) {
+    if (event.type !== 'orchestrator_review') {
+      continue;
+    }
+
+    const reviewContext = buildPacketReviewContextFromEvent(event);
+    if (reviewContext && event.timestamp >= latestReviewTimestamp) {
+      latestReview = reviewContext;
+      latestReviewTimestamp = event.timestamp;
+    }
+
+    const findings = Array.isArray(event.findings)
+      ? event.findings.filter(isReviewFinding)
+      : extractReviewFindings(event.note ?? '');
+    for (const finding of findings) {
+      pushUniqueFinding(reviewFindings, findingKeys, finding);
+    }
+
+    const derivedPatterns = isStringArray(event.patterns)
+      ? event.patterns
+      : extractReviewPatterns(event.note ?? '', findings);
+    for (const pattern of derivedPatterns) {
+      pushUniqueString(patterns, patternKeys, pattern);
+    }
+
+    for (const zone of isStringArray(event.conflictZones) ? event.conflictZones : []) {
+      pushUniqueString(conflictZones, conflictZoneKeys, zone);
+    }
+  }
+
+  if (conflictZones.length === 0) {
+    for (const filePath of changedFiles) {
+      pushUniqueString(conflictZones, conflictZoneKeys, filePath);
+    }
+  }
+
+  return {
+    review: latestReview ?? undefined,
+    reviewFindings: reviewFindings.length > 0 ? reviewFindings : latestReview?.findings,
+    patterns: patterns.length > 0 ? patterns : undefined,
+    conflictZones: conflictZones.length > 0 ? conflictZones : undefined,
+  };
 }
 
 export async function readPacketCompletionContext(packetId: string): Promise<PacketContext | null> {
@@ -239,11 +478,59 @@ export async function readPacketCompletionContext(packetId: string): Promise<Pac
   return matches[0] ?? null;
 }
 
+export async function recordPacketReviewContext(
+  packetId: string,
+  review: {
+    findings: OrchestratorReviewFinding[];
+    reviewer?: string;
+    approved: boolean;
+    diffSha?: string;
+  },
+): Promise<PacketContext | null> {
+  const normalizedPacketId = packetId.trim();
+  if (!normalizedPacketId) {
+    return null;
+  }
+
+  const reviewContext = toPacketReviewContext(review);
+  const patterns = extractReviewPatterns(
+    reviewContext.findings.map((finding) => finding.description).join('\n'),
+    reviewContext.findings,
+  );
+  const conflictZones = buildConflictZonesFromFindings(reviewContext.findings);
+  const existing = await readPacketCompletionContext(normalizedPacketId);
+  const lane = existing ? null : findLaneByPacket(normalizedPacketId);
+  const nextContext: PacketContext = existing
+    ? {
+        ...existing,
+        review: reviewContext,
+        reviewFindings: reviewContext.findings,
+        patterns,
+        conflictZones: conflictZones.length > 0 ? conflictZones : existing.conflictZones,
+      }
+    : {
+        packetId: normalizedPacketId,
+        sessionKey: lane?.sessionKey || (lane ? `lane:${lane.id}` : `packet:${normalizedPacketId}`),
+        summary: 'Review recorded before packet completion context was captured.',
+        changedFiles: [],
+        reviewFindings: reviewContext.findings,
+        patterns,
+        conflictZones,
+        completedAt: new Date().toISOString(),
+        model: lane?.runtime ?? 'unknown',
+        review: reviewContext,
+      };
+
+  await storePacketContext(nextContext);
+  return nextContext;
+}
+
 export async function capturePacketCompletionContext(packetId: string, sessionKey: string): Promise<PacketContext> {
   const normalizedPacketId = packetId.trim();
   const normalizedSessionKey = sessionKey.trim();
   const runtimeId = inferRuntimeId(normalizedSessionKey);
   const runtime = runtimeId ? getRuntime(runtimeId) : undefined;
+  const lane = findLaneByPacket(normalizedPacketId);
 
   const [transcriptResult, changedFilesResult, agentResult, telemetryResult] = await Promise.allSettled([
     runtime?.readTranscript(normalizedSessionKey, undefined, TRANSCRIPT_CAPTURE_LIMIT) ?? Promise.resolve([]),
@@ -260,6 +547,15 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
   const agent = agentResult.status === 'fulfilled' ? agentResult.value : null;
   const telemetry = telemetryResult.status === 'fulfilled' ? telemetryResult.value : undefined;
   const lastAssistantEntry = findLastAssistantEntry(transcript);
+  const matchingApprovals = listApprovalsForContext({
+    packetId: normalizedPacketId,
+    laneId: lane?.id ?? undefined,
+    sessionKey: normalizedSessionKey,
+  });
+  const approvalReviewContext = extractApprovalReviewContext(
+    matchingApprovals.flatMap((approval) => approval.audit),
+    changedFiles,
+  );
   const context: PacketContext = {
     packetId: normalizedPacketId,
     sessionKey: normalizedSessionKey,
@@ -277,6 +573,7 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
       || agent?.model?.trim()
       || runtimeId
       || 'unknown',
+    ...approvalReviewContext,
   };
 
   await storePacketContext(context);

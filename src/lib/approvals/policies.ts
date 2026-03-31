@@ -11,7 +11,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { loadUserPolicies, mergePolicies, watchPolicies } from '@/lib/approvals/policy-loader';
-import type { ApprovalRisk, PolicyRule } from '@/lib/approvals/types';
+import type { ApprovalRisk, PolicyRule, PolicyRuleOverride } from '@/lib/approvals/types';
 import { classifyCommand } from '@/lib/llm/tools';
 
 // ── Types ──
@@ -182,6 +182,20 @@ const DEFAULT_RULES: CompiledPolicyRule[] = [
   },
 
   {
+    id: 'auto_approve_orchestrator_review',
+    name: 'Auto-approve orchestrator review',
+    description: 'Allow merge or PR actions that come from an active orchestrator auto-review pass.',
+    risk: 'low',
+    enabled: false,
+    requiresApproval: false,
+    matches: (ctx) => {
+      if (ctx.toolName !== 'lane_command') return false;
+      const verb = ctx.args?.verb as string | undefined;
+      return (verb === 'merge' || verb === 'create_pr') && ctx.args?.autoReview === true;
+    },
+  },
+
+  {
     id: 'lane-merge',
     name: 'Lane merge or PR',
     description: 'Merging a lane worktree or creating a PR from agent work',
@@ -274,6 +288,8 @@ function serializeRules(rules: CompiledPolicyRule[]): PolicyRule[] {
     risk: rule.risk,
     blocked: rule.blocked,
     workspacePath: rule.workspacePath,
+    enabled: rule.enabled,
+    requiresApproval: rule.requiresApproval,
   }));
 }
 
@@ -313,12 +329,17 @@ function matchesWorkspacePath(rule: PolicyRule, ctx: PolicyContext): boolean {
   return candidatePath === requiredPath || candidatePath.startsWith(`${requiredPath}/`);
 }
 
-function rebuildPolicyState(overrides: PolicyRule[]) {
+function rebuildPolicyState(overrides: PolicyRuleOverride[]) {
   const defaultSummaries = serializeRules(DEFAULT_RULES);
   mergedRuleSummaries = mergePolicies(defaultSummaries, overrides);
   activeRules = mergedRuleSummaries.flatMap((rule) => {
     const defaultRule = DEFAULT_RULES_BY_ID.get(rule.id);
-    return defaultRule ? [{ ...defaultRule, ...rule }] : [];
+    if (!defaultRule) {
+      return [];
+    }
+
+    const mergedRule = { ...defaultRule, ...rule };
+    return mergedRule.enabled === false ? [] : [mergedRule];
   });
   policyRulesLoaded = true;
 }
@@ -365,8 +386,9 @@ export function evaluatePolicy(ctx: PolicyContext): PolicyEvaluation {
       continue;
     }
     if (rule.matches(ctx)) {
+      const requiresApproval = rule.blocked ? true : rule.requiresApproval ?? true;
       return {
-        requiresApproval: true,
+        requiresApproval,
         risk: rule.risk,
         reason: rule.description,
         ruleId: rule.id,

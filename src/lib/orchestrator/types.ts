@@ -1,4 +1,7 @@
+import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
+
 export type OrchestratorRuntime = 'codex' | 'claude-code';
+export type OrchestratorPacketReviewSeverity = 'info' | 'warning' | 'high';
 
 export type OrchestratorPacketStatus =
   | 'draft'
@@ -37,6 +40,22 @@ export interface OrchestratorLaneBinding {
   lastEventLabel?: string | null;
 }
 
+export interface OrchestratorPacketReviewFinding {
+  file: string;
+  line?: number | null;
+  severity: OrchestratorPacketReviewSeverity;
+  description: string;
+  resolution: 'fixed' | 'accepted' | 'deferred';
+}
+
+export interface OrchestratorPacketReview {
+  approved: boolean;
+  findings: OrchestratorPacketReviewFinding[];
+  recordedAt: string;
+  summary: string;
+  auditApprovalId?: string | null;
+}
+
 export interface OrchestratorPacket {
   id: string;
   referenceLabel: string;
@@ -54,13 +73,18 @@ export interface OrchestratorPacket {
   lastEventAt?: string | null;
   lastEventLabel?: string | null;
   archivedAt?: string | null;
+  review?: OrchestratorPacketReview | null;
   lane?: OrchestratorLaneBinding | null;
 }
 
 export interface OrchestratorMissionState {
   version: 2;
+  missionId?: string;
   prompt: string;
   summary: string;
+  repoPath?: string | null;
+  runtime?: OrchestratorRuntime;
+  constraints?: string;
   packets: OrchestratorPacket[];
   updatedAt: string;
 }
@@ -70,8 +94,18 @@ export interface PacketContext {
   sessionKey: string;
   summary: string;
   changedFiles: string[];
+  reviewFindings?: OrchestratorReviewFinding[];
+  patterns?: string[];
+  conflictZones?: string[];
   completedAt: string;
   model: string;
+  review?: {
+    reviewer?: string;
+    approved: boolean;
+    diffSha?: string;
+    findings: OrchestratorReviewFinding[];
+    reviewedAt: string;
+  };
 }
 
 export interface DagNode {
