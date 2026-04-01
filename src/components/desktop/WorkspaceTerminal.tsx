@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable @next/next/no-img-element -- terminal image previews intentionally use raw panel-served URLs */
 
-import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { Suspense, forwardRef, lazy, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
 import { Plus, X, Terminal as TerminalIcon, ChevronDown, ChevronRight, Crosshair, MessageSquare, Radio, ArrowUp, ArrowDown, Square, AlertCircle, RotateCcw, GitCommit, CheckCircle2 } from 'lucide-react';
 /* ── Raw Phosphor SVG icons (React components render as empty boxes in Tauri webview) ── */
@@ -26,9 +26,7 @@ function PhosphorCaretRight({ size = 12 }: { size?: number }) {
 function PhosphorXBold({ size = 10 }: { size?: number }) {
   return (<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} fill="currentColor" viewBox="0 0 256 256" style={{ display: 'block', flexShrink: 0 }}><path d="M208.49,191.51a12,12,0,0,1-17,17L128,145,64.49,208.49a12,12,0,0,1-17-17L111,128,47.51,64.49a12,12,0,0,1,17-17L128,111l63.51-63.52a12,12,0,0,1,17,17L145,128Z" /></svg>);
 }
-import LLMChat, { ChainOfThought, MessageBubble, type LLMMessage } from './LLMChat';
 import { IssueLinkPickerModal, buildLinkedIssueContext, type LinkedIssueRef } from './IssueLinkPicker';
-import { Canvas, type CanvasRepoTaskLaunchRequest, type CanvasTab } from './Canvas';
 import { useTheme } from '@/lib/theme/context';
 import {
   saveTabState,
@@ -65,6 +63,13 @@ import {
   PREVIEW_MESSAGE_SOURCE,
   type PreviewSelectionPayload,
 } from '@/lib/panel/preview';
+import type { LLMMessage } from './LLMChat';
+import type { CanvasRepoTaskLaunchRequest, CanvasTab } from './Canvas';
+
+const LazyLLMChat = lazy(() => import('./LLMChat'));
+const LazyMessageBubble = lazy(() => import('./LLMChat').then((m) => ({ default: m.MessageBubble })));
+const LazyChainOfThought = lazy(() => import('./LLMChat').then((m) => ({ default: m.ChainOfThought })));
+const LazyCanvas = lazy(() => import('./Canvas').then((m) => ({ default: m.Canvas })));
 
 /* ── Types ── */
 
@@ -2120,50 +2125,52 @@ const WorkspaceChatPane = memo(function WorkspaceChatPane({
           </div>
           )
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 720, marginLeft: 'auto', marginRight: 'auto' }}>
-            {visibleMessages.map((message, index) => (
-              <MessageBubble
-                key={message.id}
-                message={message}
-                isLast={index === visibleMessages.length - 1 && !sending}
-                onRetry={message.role === 'assistant' ? () => handleRetry(message.id) : undefined}
-                onEdit={message.role === 'user' ? (content) => handleEdit(message.id, content) : undefined}
-                onDelete={() => handleDelete(message.id)}
-                onRunInTerminal={onRunInTerminal}
-              />
-            ))}
-            {agentRunning && activeThinking && activeThinking.steps.length > 0 ? (
-              <ChainOfThought
-                steps={activeThinking.steps}
-                thinking={activeThinking.thinking}
-                durationMs={streamMeta.thinkingDurationMs}
-                isLive
-              />
-            ) : null}
-            {agentRunning ? (
-              <MessageBubble
-                message={{
-                  id: `stream:${tabId}`,
-                  role: 'assistant',
-                  content: streamingText || 'Thinking…',
-                  model: selectedModel.label,
-                  timestamp: Date.now(),
-                  tokens: streamMeta.tokens,
-                  costUsd: streamMeta.costUsd,
-                  sources: streamMeta.sources,
-                  recalledFacts: streamMeta.recalledFacts,
-                  toolCalls: activeToolCalls.map((tool) => ({
-                    name: tool.name,
-                    status: tool.status ?? 'running',
-                    args: tool.args,
-                    preview: tool.preview,
-                  })),
-                }}
-                isLast
-                onRunInTerminal={onRunInTerminal}
-              />
-            ) : null}
-          </div>
+          <Suspense fallback={null}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 720, marginLeft: 'auto', marginRight: 'auto' }}>
+              {visibleMessages.map((message, index) => (
+                <LazyMessageBubble
+                  key={message.id}
+                  message={message}
+                  isLast={index === visibleMessages.length - 1 && !sending}
+                  onRetry={message.role === 'assistant' ? () => handleRetry(message.id) : undefined}
+                  onEdit={message.role === 'user' ? (content) => handleEdit(message.id, content) : undefined}
+                  onDelete={() => handleDelete(message.id)}
+                  onRunInTerminal={onRunInTerminal}
+                />
+              ))}
+              {agentRunning && activeThinking && activeThinking.steps.length > 0 ? (
+                <LazyChainOfThought
+                  steps={activeThinking.steps}
+                  thinking={activeThinking.thinking}
+                  durationMs={streamMeta.thinkingDurationMs}
+                  isLive
+                />
+              ) : null}
+              {agentRunning ? (
+                <LazyMessageBubble
+                  message={{
+                    id: `stream:${tabId}`,
+                    role: 'assistant',
+                    content: streamingText || 'Thinking…',
+                    model: selectedModel.label,
+                    timestamp: Date.now(),
+                    tokens: streamMeta.tokens,
+                    costUsd: streamMeta.costUsd,
+                    sources: streamMeta.sources,
+                    recalledFacts: streamMeta.recalledFacts,
+                    toolCalls: activeToolCalls.map((tool) => ({
+                      name: tool.name,
+                      status: tool.status ?? 'running',
+                      args: tool.args,
+                      preview: tool.preview,
+                    })),
+                  }}
+                  isLast
+                  onRunInTerminal={onRunInTerminal}
+                />
+              ) : null}
+            </div>
+          </Suspense>
         )}
       </div>
 
@@ -5497,46 +5504,48 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                 flexDirection: 'column',
                 height: '100%',
               }}>
-                <LLMChat
-                  tabId={tab.id}
-                  preferredRepo={tab.repo ?? null}
-                  linkedIssue={tab.linkedIssue ?? null}
-                  draftInjection={tab.llmDraftInjection ?? null}
-                  onSummaryChange={handleUpdateLlmSummary}
-                  onConsumeDraftInjection={(injectionId) => handleConsumeLlmDraftInjection(tab.id, injectionId)}
-                  onLinkedIssueChange={(issue) => handleUpdateLinkedIssue(tab.id, issue)}
-                  onOpenHistoryChat={(historyTabId: string, title: string, historyRepo) => {
-                    // Create a new tab that loads the history
-                    const now = Date.now();
-                    const newTab: TerminalTab = {
-                      id: historyTabId,
-                      label: title.slice(0, 20) + (title.length > 20 ? '...' : ''),
-                      kind: 'llm-chat',
-                      tmuxSession: null,
-                      repo: historyRepo?.localPath || historyRepo?.name
-                        ? {
-                            name: historyRepo?.name ?? tab.repo?.name ?? 'repo',
-                            localPath: historyRepo?.localPath ?? tab.repo?.localPath ?? '',
-                            branch: historyRepo?.branch ?? tab.repo?.branch ?? null,
-                            remoteUrl: historyRepo?.remoteUrl ?? tab.repo?.remoteUrl,
-                          }
-                        : tab.repo,
-                      linkedIssue: tab.linkedIssue ?? null,
-                      createdAt: now,
-                      lastActivity: now,
-                    };
-                    setTabs(prev => {
-                      // Don't create duplicate tabs
-                      if (prev.some(t => t.id === historyTabId)) {
-                        setActiveTabId(historyTabId);
-                        return prev;
-                      }
-                      return [...prev, newTab];
-                    });
-                    setActiveTabId(historyTabId);
-                  }}
-                  onRunInTerminal={handleRunCommandInTerminal}
-                />
+                <Suspense fallback={null}>
+                  <LazyLLMChat
+                    tabId={tab.id}
+                    preferredRepo={tab.repo ?? null}
+                    linkedIssue={tab.linkedIssue ?? null}
+                    draftInjection={tab.llmDraftInjection ?? null}
+                    onSummaryChange={handleUpdateLlmSummary}
+                    onConsumeDraftInjection={(injectionId) => handleConsumeLlmDraftInjection(tab.id, injectionId)}
+                    onLinkedIssueChange={(issue) => handleUpdateLinkedIssue(tab.id, issue)}
+                    onOpenHistoryChat={(historyTabId: string, title: string, historyRepo) => {
+                      // Create a new tab that loads the history
+                      const now = Date.now();
+                      const newTab: TerminalTab = {
+                        id: historyTabId,
+                        label: title.slice(0, 20) + (title.length > 20 ? '...' : ''),
+                        kind: 'llm-chat',
+                        tmuxSession: null,
+                        repo: historyRepo?.localPath || historyRepo?.name
+                          ? {
+                              name: historyRepo?.name ?? tab.repo?.name ?? 'repo',
+                              localPath: historyRepo?.localPath ?? tab.repo?.localPath ?? '',
+                              branch: historyRepo?.branch ?? tab.repo?.branch ?? null,
+                              remoteUrl: historyRepo?.remoteUrl ?? tab.repo?.remoteUrl,
+                            }
+                          : tab.repo,
+                        linkedIssue: tab.linkedIssue ?? null,
+                        createdAt: now,
+                        lastActivity: now,
+                      };
+                      setTabs(prev => {
+                        // Don't create duplicate tabs
+                        if (prev.some(t => t.id === historyTabId)) {
+                          setActiveTabId(historyTabId);
+                          return prev;
+                        }
+                        return [...prev, newTab];
+                      });
+                      setActiveTabId(historyTabId);
+                    }}
+                    onRunInTerminal={handleRunCommandInTerminal}
+                  />
+                </Suspense>
               </div>
             ) : tab.kind === 'chat' ? (
               <div key={tab.id} style={{
@@ -5571,23 +5580,25 @@ export const WorkspaceTerminal = forwardRef<TerminalTabHandle, WorkspaceTerminal
                   overflow: 'hidden',
                 }}
               >
-                <Canvas
-                  tabs={[tab.canvasTab]}
-                  activeTabId={tab.canvasTab.id}
-                  onSelectTab={() => undefined}
-                  onCloseTab={() => handleCloseTab(tab.id)}
-                  selectedRepo={repoSlugFromRemote(tab.repo?.remoteUrl) ?? null}
-                  onInjectChatContext={onInjectChatContext}
-                  onSelectCommit={(hash, meta) => {
-                    if (tab.repo || meta?.workspace) {
-                      handleOpenWorkspaceCommitTab(hash, meta, tab.repo);
-                      return;
-                    }
-                    onSelectCommit?.(hash, meta);
-                  }}
-                  onLaunchWorkspaceTask={onLaunchWorkspaceTask}
-                  embedded
-                />
+                <Suspense fallback={null}>
+                  <LazyCanvas
+                    tabs={[tab.canvasTab]}
+                    activeTabId={tab.canvasTab.id}
+                    onSelectTab={() => undefined}
+                    onCloseTab={() => handleCloseTab(tab.id)}
+                    selectedRepo={repoSlugFromRemote(tab.repo?.remoteUrl) ?? null}
+                    onInjectChatContext={onInjectChatContext}
+                    onSelectCommit={(hash, meta) => {
+                      if (tab.repo || meta?.workspace) {
+                        handleOpenWorkspaceCommitTab(hash, meta, tab.repo);
+                        return;
+                      }
+                      onSelectCommit?.(hash, meta);
+                    }}
+                    onLaunchWorkspaceTask={onLaunchWorkspaceTask}
+                    embedded
+                  />
+                </Suspense>
               </div>
             ) : tab.tmuxSession ? (
               <XtermPanel
