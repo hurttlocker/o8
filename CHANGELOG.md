@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-01
 
+- `cbeaa2e` refactor: extract dashboard utils.ts
 - `5b3e024` fix: resolve actual worktree branch name before merge
 - `87b06b0` refactor: extract dashboard types.ts
 - `d0c22ae` refactor: extract dashboard types
