@@ -15,6 +15,17 @@ const FILE_SIZE_WARNING_THRESHOLD_LINES = FILE_SIZE_BLOCK_THRESHOLD_LINES - FILE
 const MAX_THRESHOLD_GUIDANCE_FILES = 6;
 const PATH_TEXT_CHAR_PATTERN = /[A-Za-z0-9._/-]/;
 
+/**
+ * Files explicitly allowed to exceed the 600-line threshold.
+ * These are layout orchestrators, multiplexers, or other files whose
+ * size is inherent to their role (wiring many hooks/components together).
+ * Relative paths from repo root, forward-slash separated.
+ */
+const FILE_SIZE_WAIVERS = new Set([
+  'src/app/dashboard/page.tsx',   // Layout orchestrator — wires 10+ hooks, providers, JSX tree
+  'src/ws-server.ts',             // WebSocket multiplexer — channel handlers are co-located by design
+]);
+
 function formatChangedFiles(changedFiles: string[]) {
   if (changedFiles.length === 0) {
     return 'none recorded';
@@ -188,8 +199,12 @@ export function checkFileSizeThresholds(packet: OrchestratorPacket): string[] {
     return [];
   }
 
-  const blockFiles = matchedFiles.filter((file) => file.lineCount > FILE_SIZE_BLOCK_THRESHOLD_LINES);
-  const warningFiles = matchedFiles.filter((file) => (
+  // Filter out waived files — layout orchestrators and multiplexers that are
+  // legitimately large due to their architectural role
+  const nonWaivedFiles = matchedFiles.filter((file) => !FILE_SIZE_WAIVERS.has(file.relativePath));
+
+  const blockFiles = nonWaivedFiles.filter((file) => file.lineCount > FILE_SIZE_BLOCK_THRESHOLD_LINES);
+  const warningFiles = nonWaivedFiles.filter((file) => (
     file.lineCount > FILE_SIZE_WARNING_THRESHOLD_LINES
     && file.lineCount <= FILE_SIZE_BLOCK_THRESHOLD_LINES
   ));
