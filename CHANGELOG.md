@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-01
 
+- `c705dcc` fix: remove false-positive merge-tree pre-check + release after sync
 - `f49352c` fix: remove duplicate framer-motion import in SessionTimeline
 - `551e995` feat: FTUX progressive feature reveal
 - `43dd538` feat: FTUX first-merge celebration state
