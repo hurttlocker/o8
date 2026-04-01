@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-01
 
+- `e7dd4b3` feat: skeleton map file size check at dispatch time
 - `156e05e` refactor: extract wave 3 hooks
 - `5122754` feat: InfinityGlow animated status indicator for agent cards
 - `a10512b` refactor: extract useOrchestratorMission hook
