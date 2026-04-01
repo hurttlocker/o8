@@ -17,6 +17,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import Image from 'next/image';
+import { AnimatePresence, motion } from 'framer-motion';
 import { useSharedDesktopWs } from './hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from './hooks/useDesktopWebSocket';
 import { ContextUsageRing } from '@/components/ContextUsageRing';
@@ -84,6 +85,11 @@ const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
 const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
 const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
+const THEME_GLASS_ELEVATED = 'var(--t-glass-elevated, var(--t-panel-translucent))';
+const THEME_GLASS_BORDER_STRONG = 'var(--t-glass-border-strong, var(--t-panel-border))';
+const THEME_GLASS_SHADOW = 'var(--t-glass-shadow, var(--t-panel-shadow))';
+const MOBILE_PROMPT_STORAGE_KEY = 'cortex-ftux-mobile-prompted';
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
 
 const O_PLACEHOLDERS = [
   'Orchestrate something...',
@@ -148,6 +154,33 @@ function compactLine(text: string | null | undefined, fallback: string, max = 26
   const val = text ?? fallback;
   if (val.length <= max) return val;
   return val.slice(0, max - 1) + '…';
+}
+
+function buildMobileSurfaceUrl(origin: string) {
+  try {
+    const nextUrl = new URL('/mobile', origin);
+    nextUrl.searchParams.set('source', 'desktop-approval-ftux');
+    return nextUrl.toString();
+  } catch {
+    return '';
+  }
+}
+
+function isLoopbackUrl(url: string) {
+  try {
+    return LOOPBACK_HOSTS.has(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function formatMobileSurfaceLabel(url: string) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.host}${parsed.pathname}`;
+  } catch {
+    return url;
+  }
 }
 
 function sessionLocalFolderLabel(session: SessionSummary) {
@@ -1963,8 +1996,12 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   currentWorkspace,
   runtimeCapabilities,
   approvals,
+  showMobilePrompt,
+  mobileSurfaceUrl,
+  mobileSurfaceUsesLoopback,
   resolvingApprovalId,
   onResolveApproval,
+  onDismissMobilePrompt,
   scrollRef,
   handleScroll,
   showScrollPill,
@@ -1986,8 +2023,12 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   currentWorkspace?: string;
   runtimeCapabilities: SidebarRuntimeCapabilities;
   approvals: SidebarApproval[];
+  showMobilePrompt: boolean;
+  mobileSurfaceUrl: string;
+  mobileSurfaceUsesLoopback: boolean;
   resolvingApprovalId: string | null;
   onResolveApproval: (id: string, action: 'approve' | 'reject') => void;
+  onDismissMobilePrompt: () => void;
   scrollRef: React.RefObject<HTMLDivElement | null>;
   handleScroll: () => void;
   showScrollPill: boolean;
@@ -2110,6 +2151,13 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
         approvals={approvals}
         resolvingId={resolvingApprovalId}
         onResolve={onResolveApproval}
+      />
+
+      <SidebarMobilePromptCard
+        visible={showMobilePrompt}
+        mobileSurfaceUrl={mobileSurfaceUrl}
+        showLoopbackHint={mobileSurfaceUsesLoopback}
+        onDismiss={onDismissMobilePrompt}
       />
 
       {showScrollPill && (
@@ -2904,6 +2952,271 @@ const SidebarApprovalCard = memo(function SidebarApprovalCard({
   );
 });
 
+const SidebarMobilePromptCard = memo(function SidebarMobilePromptCard({
+  visible,
+  mobileSurfaceUrl,
+  showLoopbackHint,
+  onDismiss,
+}: {
+  visible: boolean;
+  mobileSurfaceUrl: string;
+  showLoopbackHint: boolean;
+  onDismiss: () => void;
+}) {
+  const [failedQrUrl, setFailedQrUrl] = useState('');
+  const mobileSurfaceLabel = useMemo(
+    () => formatMobileSurfaceLabel(mobileSurfaceUrl),
+    [mobileSurfaceUrl],
+  );
+  const qrImageUrl = useMemo(
+    () => mobileSurfaceUrl
+      ? `https://api.qrserver.com/v1/create-qr-code/?size=176x176&margin=0&data=${encodeURIComponent(mobileSurfaceUrl)}`
+      : '',
+    [mobileSurfaceUrl],
+  );
+  const qrLoadFailed = failedQrUrl === qrImageUrl;
+
+  return (
+    <AnimatePresence initial={false}>
+      {visible && mobileSurfaceUrl ? (
+        <motion.div
+          initial={{ opacity: 0, y: 18, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -8, scale: 0.98 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+          style={{
+            position: 'relative',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 16,
+            padding: '16px',
+            marginTop: 0,
+            marginRight: 14,
+            marginBottom: 10,
+            marginLeft: 14,
+            borderRadius: 14,
+            background: `linear-gradient(180deg, ${THEME_GLASS_ELEVATED} 0%, var(--t-panel-translucent) 100%)`,
+            border: `1px solid ${THEME_GLASS_BORDER_STRONG}`,
+            boxShadow: THEME_GLASS_SHADOW,
+            backdropFilter: 'blur(28px) saturate(1.08)',
+            WebkitBackdropFilter: 'blur(28px) saturate(1.08)',
+            overflow: 'hidden',
+            fontFamily: 'system-ui',
+          }}
+        >
+          <button
+            type="button"
+            onClick={onDismiss}
+            aria-label="Dismiss mobile approval prompt"
+            style={{
+              position: 'absolute',
+              top: 8,
+              right: 8,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              border: '1px solid var(--t-panel-border)',
+              background: 'var(--t-panel)',
+              color: 'var(--t-text-muted)',
+              cursor: 'pointer',
+            }}
+          >
+            <span aria-hidden="true" style={{ fontSize: 20, lineHeight: 1 }}>&times;</span>
+          </button>
+
+          <div style={{ flex: '1 1 260px', minWidth: 0, paddingRight: 44 }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              minHeight: 28,
+              padding: '0 10px',
+              borderRadius: 10,
+              background: THEME_ACCENT_SOFT,
+              color: THEME_ACCENT,
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: '-0.01em',
+            }}>
+              Mobile surface
+            </div>
+            <h3 style={{
+              margin: '12px 0 6px',
+              color: 'var(--t-text-strong)',
+              fontSize: 24,
+              lineHeight: 1.08,
+              letterSpacing: '-0.02em',
+              fontWeight: 700,
+            }}>
+              Approve from anywhere
+            </h3>
+            <p style={{
+              margin: 0,
+              color: 'var(--t-text-secondary)',
+              fontSize: 13,
+              lineHeight: 1.55,
+              letterSpacing: '-0.01em',
+            }}>
+              Next time, handle approvals from your phone.
+            </p>
+
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              marginTop: 16,
+            }}>
+              <button
+                type="button"
+                disabled
+                title="Push and SMS delivery lands in a later pass."
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minHeight: 44,
+                  width: '100%',
+                  padding: '0 16px',
+                  borderRadius: 12,
+                  border: '1px solid var(--t-panel-border)',
+                  background: 'var(--t-panel)',
+                  color: 'var(--t-text-muted)',
+                  fontSize: 13,
+                  fontWeight: 650,
+                  letterSpacing: '-0.01em',
+                  cursor: 'not-allowed',
+                  opacity: 0.72,
+                }}
+              >
+                Send link to phone
+              </button>
+
+              <a
+                href={mobileSurfaceUrl}
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  minHeight: 44,
+                  padding: '0 14px',
+                  borderRadius: 12,
+                  border: '1px solid var(--t-divider)',
+                  background: 'var(--t-bg-card)',
+                  color: 'var(--t-text)',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  letterSpacing: '-0.01em',
+                  textDecoration: 'none',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {mobileSurfaceLabel}
+              </a>
+            </div>
+
+            {showLoopbackHint ? (
+              <p style={{
+                margin: '12px 0 0',
+                color: 'var(--t-text-muted)',
+                fontSize: 11,
+                lineHeight: 1.55,
+                letterSpacing: '-0.01em',
+              }}>
+                This QR code uses the current desktop URL. If you are running on localhost, use your shared host or tunnel to make it reachable from your phone.
+              </p>
+            ) : null}
+          </div>
+
+          <a
+            href={mobileSurfaceUrl}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              flex: '0 0 176px',
+              minWidth: 176,
+              textDecoration: 'none',
+            }}
+          >
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 176,
+              height: 176,
+              padding: 12,
+              borderRadius: 14,
+              background: 'var(--t-panel)',
+              border: '1px solid var(--t-panel-border)',
+              boxShadow: 'inset 0 1px 0 var(--t-panel-translucent)',
+            }}>
+              {qrLoadFailed ? (
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  width: '100%',
+                  height: '100%',
+                  borderRadius: 12,
+                  border: '1px dashed var(--t-divider)',
+                  color: 'var(--t-text-secondary)',
+                  textAlign: 'center',
+                  padding: '0 16px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  lineHeight: 1.5,
+                  letterSpacing: '-0.01em',
+                }}>
+                  <span>Open mobile</span>
+                  <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>{mobileSurfaceLabel}</span>
+                </div>
+              ) : (
+                <img
+                  src={qrImageUrl}
+                  alt="QR code linking to the mobile approval surface"
+                  width={152}
+                  height={152}
+                  loading="lazy"
+                  referrerPolicy="no-referrer"
+                  draggable={false}
+                  onError={() => setFailedQrUrl(qrImageUrl)}
+                  style={{
+                    display: 'block',
+                    width: 152,
+                    height: 152,
+                    borderRadius: 12,
+                    background: 'var(--t-panel)',
+                  }}
+                />
+              )}
+            </div>
+            <span style={{
+              color: 'var(--t-text-muted)',
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: '-0.01em',
+            }}>
+              Scan on your phone
+            </span>
+          </a>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  );
+});
+
 // ── Thinking X-ray ──
 // Replaces the static status pill with a live window into agent reasoning.
 // Tap to expand/collapse the thought stream overlay.
@@ -3506,6 +3819,11 @@ export function AgentPanelChat({
   const [activeToolCalls, setActiveToolCalls] = useState<MobileTranscriptToolCall[]>([]);
   const [approvals, setApprovals] = useState<SidebarApproval[]>([]);
   const [resolvingApprovalId, setResolvingApprovalId] = useState<string | null>(null);
+  const [mobilePromptShown, setMobilePromptShown] = useState(false);
+  const [mobilePromptVisible, setMobilePromptVisible] = useState(false);
+  const [mobilePromptSessionKey, setMobilePromptSessionKey] = useState<string | null>(null);
+  const [mobileSurfaceUrl, setMobileSurfaceUrl] = useState('');
+  const [mobileSurfaceUsesLoopback, setMobileSurfaceUsesLoopback] = useState(false);
   // wsConnected is derived from the WS hook below
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -3600,6 +3918,17 @@ export function AgentPanelChat({
 
   useEffect(() => {
     initialInboxReadyRef.current = false;
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const promptAlreadyShown = window.localStorage.getItem(MOBILE_PROMPT_STORAGE_KEY) === '1';
+    const publicBaseUrl = process.env.NEXT_PUBLIC_CORTEX_IDE_PUBLIC_BASE_URL?.trim();
+    const resolvedUrl = buildMobileSurfaceUrl(publicBaseUrl || window.location.origin);
+
+    setMobilePromptShown(promptAlreadyShown);
+    setMobileSurfaceUrl(resolvedUrl);
+    setMobileSurfaceUsesLoopback(isLoopbackUrl(resolvedUrl));
   }, []);
 
   // ── WebSocket — real-time updates ──
@@ -4591,13 +4920,24 @@ export function AgentPanelChat({
       });
       if (res.ok) {
         setApprovals((prev) => prev.filter((approval) => approval.id !== id));
+        const promptAlreadyShown = mobilePromptShown
+          || (typeof window !== 'undefined' && window.localStorage.getItem(MOBILE_PROMPT_STORAGE_KEY) === '1');
+
+        if (action === 'approve' && !promptAlreadyShown) {
+          if (typeof window !== 'undefined') {
+            window.localStorage.setItem(MOBILE_PROMPT_STORAGE_KEY, '1');
+          }
+          setMobilePromptShown(true);
+          setMobilePromptVisible(true);
+          setMobilePromptSessionKey(selectedKey);
+        }
       }
     } catch {
       // silent
     } finally {
       setResolvingApprovalId(null);
     }
-  }, []);
+  }, [mobilePromptShown, selectedKey]);
 
   // Reset expanded group when picker closes
   useEffect(() => {
@@ -4617,6 +4957,7 @@ export function AgentPanelChat({
   }, [pickerOpen]);
 
   const [showScrollPill, setShowScrollPill] = useState(false);
+  const showMobilePromptForSession = mobilePromptVisible && mobilePromptSessionKey === selectedKey;
 
   const handleScroll = useCallback(() => {
     if (!scrollRef.current) return;
@@ -4949,8 +5290,12 @@ export function AgentPanelChat({
             currentWorkspace={selectedSession?.workspace}
             runtimeCapabilities={sidebarCapabilities}
             approvals={approvals}
+            showMobilePrompt={showMobilePromptForSession}
+            mobileSurfaceUrl={mobileSurfaceUrl}
+            mobileSurfaceUsesLoopback={mobileSurfaceUsesLoopback}
             resolvingApprovalId={resolvingApprovalId}
             onResolveApproval={handleApprovalResolve}
+            onDismissMobilePrompt={() => setMobilePromptVisible(false)}
             scrollRef={scrollRef}
             handleScroll={handleScroll}
             showScrollPill={showScrollPill}
