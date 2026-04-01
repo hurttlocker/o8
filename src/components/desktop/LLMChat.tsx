@@ -15,6 +15,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   AlertCircle,
   ChevronDown,
@@ -52,7 +53,8 @@ import { renderLLMMarkdown } from './LLMMarkdown';
 import { saveChatHistory, loadChatHistory, type SavedChatRepoContext } from '@/lib/llm/chat-history';
 import { CompactionNode } from './CompactionNode';
 import { shouldCompact, compactConversation, type LLMMessage as CompactMessage } from '@/lib/chat/compaction';
-import { IssueLinkPickerModal, buildLinkedIssueContext, type LinkedIssueRef } from './IssueLinkPicker';
+import { IssueLinkPickerModal, buildLinkedIssueContext, repoSlugFromRemoteUrl, type LinkedIssueRef } from './IssueLinkPicker';
+import type { RepoRegistryEntry } from '@/lib/repos/types';
 
 // ── Types ──
 
@@ -121,20 +123,46 @@ interface QueuedContextCard {
   preview?: string;
 }
 
-interface PersonalizedFtuxState {
-  greeting: {
-    headline: string;
-    statsLine: string;
-    topicsLine: string | null;
-  };
-  prompts: Array<{
-    iconKey: 'tree' | 'search' | 'file' | 'diff' | 'rocket';
-    text: string;
-    description: string;
-  }>;
-  profile: {
-    focusedRepoName: string | null;
-  };
+interface HistoryConversationItem {
+  tabId: string;
+  title: string;
+  preview: string;
+  messageCount: number;
+  model: string;
+  savedAt: string;
+  modifiedAt: string;
+  starred: boolean;
+  repoName?: string | null;
+  repoPath?: string | null;
+  repoBranch?: string | null;
+  remoteUrl?: string | null;
+}
+
+interface MissionRepoSummary {
+  name: string;
+  localPath?: string;
+  remoteUrl?: string | null;
+  slug?: string | null;
+  issueCount: number | null;
+  prCount: number | null;
+}
+
+interface MissionAction {
+  id: string;
+  kind: 'send' | 'focus' | 'history';
+  label: string;
+  prompt?: string;
+  historyTabId?: string;
+  historyTitle?: string;
+  historyRepo?: SavedChatRepoContext | null;
+}
+
+interface MissionCardData {
+  source: 'history' | 'repo' | 'codebase' | 'freeform';
+  eyebrow: string;
+  title: string;
+  description: string;
+  actions: MissionAction[];
 }
 
 function buildQueuedContextCard(injection: { id: string; text: string; reason?: string }): QueuedContextCard {
@@ -180,6 +208,24 @@ function buildConversationSummary(messages: LLMMessage[]) {
   return summary.length <= 48 ? summary : `${summary.slice(0, 47)}…`;
 }
 
+function fallbackRepoLabel(repo?: { name?: string; localPath?: string | null } | null) {
+  const preferredName = repo?.name?.trim();
+  if (preferredName) return preferredName;
+  const preferredPath = repo?.localPath?.trim();
+  if (!preferredPath) return 'your codebase';
+  return preferredPath.split('/').filter(Boolean).pop() ?? 'your codebase';
+}
+
+function describeRepoMission(name: string, issueCount: number, prCount: number) {
+  if (issueCount > 0 && prCount > 0) {
+    return `${name} has ${issueCount} open issue${issueCount === 1 ? '' : 's'} and ${prCount} pending PR${prCount === 1 ? '' : 's'}.`;
+  }
+  if (issueCount > 0) {
+    return `${name} has ${issueCount} open issue${issueCount === 1 ? '' : 's'} ready for triage.`;
+  }
+  return `${name} has ${prCount} pending PR${prCount === 1 ? '' : 's'} waiting for review.`;
+}
+
 interface ModelOption {
   id: string;
   label: string;
@@ -210,9 +256,19 @@ const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
 const THEME_ACCENT_SOFT_STRONG = 'var(--t-accent-soft-strong, rgba(37, 99, 235, 0.14))';
 const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
 const THEME_ACCENT_RING = 'var(--t-accent-ring, rgba(37, 99, 235, 0.15))';
+const THEME_TEXT = 'var(--t-text)';
+const THEME_TEXT_SECONDARY = 'var(--t-text-secondary)';
+const THEME_TEXT_MUTED = 'var(--t-text-muted)';
+const THEME_TEXT_FAINT = 'var(--t-text-faint)';
 const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 const THEME_PANEL_GLASS = 'var(--t-panel-translucent)';
+const THEME_PANEL_BORDER = 'var(--t-panel-border)';
+const THEME_GLASS_ELEVATED = 'var(--t-glass-elevated, var(--t-panel-translucent))';
+const THEME_GLASS_MUTED = 'var(--t-glass-muted, var(--t-panel-translucent))';
+const THEME_GLASS_BORDER_STRONG = 'var(--t-glass-border-strong, var(--t-panel-border))';
+const THEME_GLASS_SHADOW = 'var(--t-glass-shadow, var(--t-panel-shadow))';
 const HISTORY_DELETED_EVENT = 'cortex-llm-history-deleted';
+const MISSION_DISMISSED_STORAGE_KEY = 'cortex-ftux-mission-dismissed';
 
 // ── Subcomponents ──
 
@@ -1703,11 +1759,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [showTypingIndicator, setShowTypingIndicator] = useState(false);
   const [issuePickerOpen, setIssuePickerOpen] = useState(false);
-  const [historyItems, setHistoryItems] = useState<{
-    tabId: string; title: string; preview: string; messageCount: number;
-    model: string; savedAt: string; modifiedAt: string; starred: boolean;
-    repoName?: string | null; repoPath?: string | null; repoBranch?: string | null; remoteUrl?: string | null;
-  }[]>([]);
+  const [historyItems, setHistoryItems] = useState<HistoryConversationItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [applyModal, setApplyModal] = useState<{ code: string; language: string } | null>(null);
   const [applyPath, setApplyPath] = useState('');
@@ -1717,7 +1769,10 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
   const applySearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handledDraftInjectionRef = useRef<string | null>(null);
   const [queuedContextCards, setQueuedContextCards] = useState<QueuedContextCard[]>([]);
-  const [personalizedFtux, setPersonalizedFtux] = useState<PersonalizedFtuxState | null>(null);
+  const [missionDismissed, setMissionDismissed] = useState(false);
+  const [missionDismissalResolved, setMissionDismissalResolved] = useState(false);
+  const [missionContextResolved, setMissionContextResolved] = useState(false);
+  const [missionRepoSummary, setMissionRepoSummary] = useState<MissionRepoSummary | null>(null);
 
   // Apply code to a file
   const handleApplyToFile = useCallback((code: string, language: string) => {
@@ -1795,6 +1850,13 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
   useEffect(() => {
     if (historyOpen) loadHistory();
   }, [historyOpen, loadHistory]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const dismissed = window.localStorage.getItem(MISSION_DISMISSED_STORAGE_KEY) === '1';
+    setMissionDismissed(dismissed);
+    setMissionDismissalResolved(true);
+  }, []);
 
   useEffect(() => {
     const handleHistoryDeleted = (event: Event) => {
@@ -1930,41 +1992,6 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
       setModelResolved(true);
     })();
   }, [modelResolved, tabId]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const params = new URLSearchParams();
-        if (preferredRepo?.name?.trim()) {
-          params.set('repoName', preferredRepo.name.trim());
-        }
-        if (preferredRepo?.localPath?.trim()) {
-          params.set('repoPath', preferredRepo.localPath.trim());
-        }
-
-        const url = params.toString()
-          ? `/api/v2/chat/ftux?${params.toString()}`
-          : '/api/v2/chat/ftux';
-        const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) throw new Error('FTUX request failed');
-
-        const data = await res.json() as PersonalizedFtuxState;
-        if (!cancelled) {
-          setPersonalizedFtux(data);
-        }
-      } catch {
-        if (!cancelled) {
-          setPersonalizedFtux(null);
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [preferredRepo?.localPath, preferredRepo?.name, tabId]);
 
   // Auto-save chat history (debounced)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2166,8 +2193,9 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
     inputRef.current?.focus();
   }, [input, attachedFiles]);
 
-  const handleSend = useCallback(async () => {
-    const text = [
+  const sendMessage = useCallback(async (overrideText?: string) => {
+    const normalizedOverrideText = typeof overrideText === 'string' ? overrideText.trim() : null;
+    const text = normalizedOverrideText ?? [
       ...queuedContextCards.map((card) => card.text.trim()).filter(Boolean),
       input.trim(),
     ].filter(Boolean).join('\n\n');
@@ -2632,25 +2660,113 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
 
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      void sendMessage();
     }
-  }, [handleSend, showFilePicker, fileSuggestions, filePickerIndex, handleFileSelect, showSlashPicker, input, slashIndex]);
+  }, [sendMessage, showFilePicker, fileSuggestions, filePickerIndex, handleFileSelect, showSlashPicker, input, slashIndex]);
 
   const isEmpty = messages.length === 0 && !isStreaming;
-  const emptyStatePrompts = personalizedFtux?.prompts?.length
-    ? personalizedFtux.prompts
-    : SUGGESTED_PROMPTS.slice(0, 4);
-  const emptyStateHeadline = personalizedFtux?.greeting.headline ?? (() => {
-    const h = new Date().getHours();
-    return h < 12 ? 'Good morning.' : h < 17 ? 'Good afternoon.' : 'Good evening.';
-  })();
-  const emptyStateStats = personalizedFtux?.greeting.statsLine ?? (
-    preferredRepo?.name
-      ? `Ready to work in ${preferredRepo.name}.`
-      : `${model.label} is ready when you are.`
-  );
-  const emptyStateTopicsLine = personalizedFtux?.greeting.topicsLine;
-  const emptyStateRepoLabel = personalizedFtux?.profile.focusedRepoName ?? preferredRepo?.name ?? null;
+  const missionCardEligible = isEmpty && input.trim().length === 0 && queuedContextCards.length === 0;
+
+  useEffect(() => {
+    let active = true;
+
+    if (!isEmpty) {
+      setMissionContextResolved(false);
+      setMissionRepoSummary(null);
+      return () => {
+        active = false;
+      };
+    }
+
+    void (async () => {
+      setMissionContextResolved(false);
+
+      const [historyResult, reposResult] = await Promise.allSettled([
+        fetch('/api/v2/chat-history/list'),
+        fetch('/api/panel/repos'),
+      ]);
+
+      let nextHistoryItems: HistoryConversationItem[] = [];
+      if (historyResult.status === 'fulfilled' && historyResult.value.ok) {
+        const historyData = await historyResult.value.json().catch(() => null) as { conversations?: HistoryConversationItem[] } | null;
+        nextHistoryItems = historyData?.conversations ?? [];
+      }
+
+      let nextRepos: RepoRegistryEntry[] = [];
+      if (reposResult.status === 'fulfilled' && reposResult.value.ok) {
+        const reposData = await reposResult.value.json().catch(() => null) as { repos?: RepoRegistryEntry[] } | null;
+        nextRepos = reposData?.repos ?? [];
+      }
+
+      if (!active) return;
+      setHistoryItems(nextHistoryItems);
+
+      const preferredSlug = repoSlugFromRemoteUrl(preferredRepo?.remoteUrl);
+      const preferredPath = preferredRepo?.localPath?.trim();
+      const preferredName = preferredRepo?.name?.trim();
+
+      let nextRepoSummary: MissionRepoSummary | null = null;
+
+      if (preferredPath || preferredName || preferredSlug) {
+        nextRepoSummary = {
+          name: preferredName || (preferredPath ? preferredPath.split('/').filter(Boolean).pop() ?? 'your codebase' : 'your codebase'),
+          localPath: preferredPath ?? undefined,
+          remoteUrl: preferredRepo?.remoteUrl ?? null,
+          slug: preferredSlug,
+          issueCount: null,
+          prCount: null,
+        };
+      } else {
+        const registeredCandidate = nextRepos.find((repo) => Boolean(repoSlugFromRemoteUrl(repo.remoteUrl))) ?? nextRepos[0] ?? null;
+        if (registeredCandidate) {
+          nextRepoSummary = {
+            name: registeredCandidate.name,
+            localPath: registeredCandidate.localPath,
+            remoteUrl: registeredCandidate.remoteUrl,
+            slug: repoSlugFromRemoteUrl(registeredCandidate.remoteUrl),
+            issueCount: null,
+            prCount: null,
+          };
+        }
+      }
+
+      if (nextRepoSummary?.slug) {
+        const [issuesResult, prsResult] = await Promise.allSettled([
+          fetch(`/api/panel/issues?repo=${encodeURIComponent(nextRepoSummary.slug)}`),
+          fetch(`/api/panel/prs?repo=${encodeURIComponent(nextRepoSummary.slug)}`),
+        ]);
+
+        if (!active) return;
+
+        let issueCount: number | null = null;
+        let prCount: number | null = null;
+
+        if (issuesResult.status === 'fulfilled' && issuesResult.value.ok) {
+          const issuesData = await issuesResult.value.json().catch(() => null) as { issues?: unknown[] } | null;
+          issueCount = Array.isArray(issuesData?.issues) ? issuesData.issues.length : 0;
+        }
+
+        if (prsResult.status === 'fulfilled' && prsResult.value.ok) {
+          const prsData = await prsResult.value.json().catch(() => null) as { prs?: unknown[] } | null;
+          prCount = Array.isArray(prsData?.prs) ? prsData.prs.length : 0;
+        }
+
+        nextRepoSummary = {
+          ...nextRepoSummary,
+          issueCount,
+          prCount,
+        };
+      }
+
+      if (!active) return;
+      setMissionRepoSummary(nextRepoSummary);
+      setMissionContextResolved(true);
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [isEmpty, preferredRepo?.localPath, preferredRepo?.name, preferredRepo?.remoteUrl]);
 
   const groupedHistory = (() => {
     const groups = new Map<string, typeof historyItems>();
@@ -2680,6 +2796,168 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
       })
       .map(([label, items]) => ({ label, items }));
   })();
+
+  const preferredRepoSlug = repoSlugFromRemoteUrl(preferredRepo?.remoteUrl);
+
+  const resumeMissionThread = (() => {
+    const resumableItems = historyItems.filter((item) => item.tabId !== tabId && item.messageCount > 1);
+    if (resumableItems.length === 0) return null;
+
+    const preferredMatch = resumableItems.find((item) => {
+      if (preferredRepo?.localPath && item.repoPath === preferredRepo.localPath) return true;
+      if (preferredRepoSlug && repoSlugFromRemoteUrl(item.remoteUrl) === preferredRepoSlug) return true;
+      if (preferredRepo?.name?.trim() && item.repoName?.trim() === preferredRepo.name.trim()) return true;
+      return false;
+    });
+
+    return preferredMatch ?? resumableItems[0] ?? null;
+  })();
+
+  const missionCard = (() => {
+    if (!missionContextResolved) return null;
+
+    if (resumeMissionThread) {
+      const historyRepo = resumeMissionThread.repoName || resumeMissionThread.repoPath
+        ? {
+            name: resumeMissionThread.repoName ?? undefined,
+            localPath: resumeMissionThread.repoPath ?? undefined,
+            branch: resumeMissionThread.repoBranch ?? undefined,
+            remoteUrl: resumeMissionThread.remoteUrl ?? undefined,
+          } satisfies SavedChatRepoContext
+        : null;
+
+      return {
+        source: 'history',
+        eyebrow: 'Saved thread',
+        title: 'Pick up where you left off',
+        description: resumeMissionThread.title,
+        actions: [
+          {
+            id: 'resume-thread',
+            kind: 'history',
+            label: 'Resume thread',
+            prompt: `Continue this thread and help me finish it: ${resumeMissionThread.title}`,
+            historyTabId: resumeMissionThread.tabId,
+            historyTitle: resumeMissionThread.title,
+            historyRepo,
+          },
+        ],
+      } satisfies MissionCardData;
+    }
+
+    const repoLabel = missionRepoSummary?.name ?? fallbackRepoLabel(preferredRepo ?? null);
+    const issueCount = missionRepoSummary?.issueCount ?? null;
+    const prCount = missionRepoSummary?.prCount ?? null;
+
+    if (missionRepoSummary && ((issueCount ?? 0) > 0 || (prCount ?? 0) > 0)) {
+      const repoPromptLabel = missionRepoSummary.slug ?? repoLabel;
+      const actions: MissionAction[] = [];
+
+      if ((issueCount ?? 0) > 0) {
+        actions.push({
+          id: 'triage-issues',
+          kind: 'send',
+          label: 'Triage issues',
+          prompt: `Triage the open GitHub issues in ${repoPromptLabel}. Identify the highest-leverage first action and explain why.`,
+        });
+      }
+
+      if ((prCount ?? 0) > 0) {
+        actions.push({
+          id: 'review-prs',
+          kind: 'send',
+          label: 'Review PRs',
+          prompt: `Review the open pull requests in ${repoPromptLabel}. Summarize what is pending and tell me which PR needs attention first.`,
+        });
+      }
+
+      return {
+        source: 'repo',
+        eyebrow: 'Connected repo',
+        title: 'Get to know your codebase',
+        description: describeRepoMission(repoLabel, issueCount ?? 0, prCount ?? 0),
+        actions,
+      } satisfies MissionCardData;
+    }
+
+    if (missionRepoSummary || preferredRepo?.localPath || preferredRepo?.name) {
+      const repoPathHint = missionRepoSummary?.localPath ?? preferredRepo?.localPath?.trim();
+      const repoPromptLabel = repoPathHint || missionRepoSummary?.slug || repoLabel;
+
+      return {
+        source: 'codebase',
+        eyebrow: 'Connected repo',
+        title: 'Get to know your codebase',
+        description: `I can explain how ${repoLabel} is organized and point you to the best place to start.`,
+        actions: [
+          {
+            id: 'explain-codebase',
+            kind: 'send',
+            label: 'Explain codebase',
+            prompt: `Explain the architecture of ${repoPromptLabel}. Map the main folders, key flows, and the best first change surface.`,
+          },
+        ],
+      } satisfies MissionCardData;
+    }
+
+    return {
+      source: 'freeform',
+      eyebrow: 'First mission',
+      title: 'Tell me what you are building',
+      description: "Describe your project and I'll set up your workspace.",
+      actions: [
+        {
+          id: 'start-chatting',
+          kind: 'focus',
+          label: 'Start chatting',
+        },
+      ],
+    } satisfies MissionCardData;
+  })();
+
+  const persistMissionDismissal = useCallback(() => {
+    setMissionDismissed(true);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(MISSION_DISMISSED_STORAGE_KEY, '1');
+    }
+  }, []);
+
+  const handleMissionAction = useCallback((action: MissionAction) => {
+    persistMissionDismissal();
+
+    if (action.kind === 'history' && action.historyTabId && action.historyTitle && onOpenHistoryChat) {
+      onOpenHistoryChat(action.historyTabId, action.historyTitle, action.historyRepo ?? null);
+      return;
+    }
+
+    if (action.kind === 'send' && action.prompt) {
+      void sendMessage(action.prompt);
+      return;
+    }
+
+    if (action.kind === 'focus') {
+      requestAnimationFrame(() => inputRef.current?.focus());
+      return;
+    }
+
+    if (action.prompt) {
+      void sendMessage(action.prompt);
+    }
+  }, [onOpenHistoryChat, persistMissionDismissal, sendMessage]);
+
+  const shouldShowMissionCard = Boolean(
+    missionCardEligible
+    && missionDismissalResolved
+    && missionContextResolved
+    && !missionDismissed
+    && missionCard,
+  );
+  const shouldShowSuggestedPrompts = Boolean(
+    isEmpty
+    && missionDismissalResolved
+    && missionContextResolved
+    && (!missionCard || missionDismissed || !missionCardEligible),
+  );
 
   return (
     <div style={{
@@ -3064,156 +3342,250 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
             alignItems: 'center',
             justifyContent: 'center',
             height: '100%',
-            gap: 24,
+            gap: 32,
             animation: 'llmFadeIn 400ms ease-out',
           }}>
+            {/* Greeting */}
             <div style={{
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
-              gap: 12,
-              maxWidth: 640,
-              width: '100%',
+              gap: 8,
             }}>
-              {emptyStateRepoLabel ? (
-                <div style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minHeight: 30,
-                  paddingTop: 6,
-                  paddingBottom: 6,
-                  paddingLeft: 12,
-                  paddingRight: 12,
-                  borderRadius: 999,
-                  border: `1px solid ${THEME_ACCENT_BORDER}`,
-                  background: THEME_ACCENT_SOFT,
-                  color: THEME_ACCENT,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: '-0.01em',
-                }}>
-                  {emptyStateRepoLabel}
-                </div>
-              ) : null}
-
               <div style={{
-                fontSize: 34,
-                fontWeight: 600,
-                color: 'var(--t-text-strong)',
-                letterSpacing: '-0.02em',
-                lineHeight: 1.08,
-                textAlign: 'center',
-              }}>
-                {emptyStateHeadline}
-              </div>
-
-              <div style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                minHeight: 42,
-                paddingTop: 10,
-                paddingBottom: 10,
-                paddingLeft: 16,
-                paddingRight: 16,
-                borderRadius: 999,
-                border: '1px solid var(--t-panel-border)',
-                background: THEME_BG_CARD,
+                fontSize: 28,
+                fontWeight: 300,
                 color: 'var(--t-text-secondary)',
-                fontSize: 13,
-                fontWeight: 500,
-                letterSpacing: '-0.01em',
-                textAlign: 'center',
+                letterSpacing: '-0.03em',
+                lineHeight: 1.2,
               }}>
-                {emptyStateStats}
+                {(() => {
+                  const h = new Date().getHours();
+                  return h < 12 ? 'Good morning.' : h < 17 ? 'Good afternoon.' : 'Good evening.';
+                })()}
               </div>
-
-              {emptyStateTopicsLine ? (
-                <div style={{
-                  maxWidth: 560,
-                  fontSize: 14,
-                  lineHeight: 1.5,
-                  color: 'var(--t-text-muted)',
-                  letterSpacing: '-0.01em',
-                  textAlign: 'center',
-                }}>
-                  {emptyStateTopicsLine}
-                </div>
-              ) : null}
+              <div style={{
+                fontSize: 11,
+                fontWeight: 500,
+                color: 'var(--t-text-muted)',
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase' as const,
+              }}>
+                {model.label}
+              </div>
             </div>
 
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-              gap: 12,
-              maxWidth: 640,
-              width: '100%',
-            }}>
-              {emptyStatePrompts.map((prompt, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => {
-                    setInput(prompt.text);
-                    setTimeout(() => inputRef.current?.focus(), 50);
-                  }}
+            <AnimatePresence initial={false}>
+              {shouldShowMissionCard && missionCard ? (
+                <motion.div
+                  key={missionCard.source}
+                  initial={{ opacity: 0, y: 18, scale: 0.985, height: 0 }}
+                  animate={{ opacity: 1, y: 0, scale: 1, height: 'auto' }}
+                  exit={{ opacity: 0, y: -12, scale: 0.985, height: 0 }}
+                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                   style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'flex-start',
-                    justifyContent: 'space-between',
-                    gap: 18,
-                    minHeight: 132,
-                    paddingTop: 18,
-                    paddingBottom: 18,
-                    paddingLeft: 18,
-                    paddingRight: 18,
-                    background: THEME_PANEL_GLASS,
-                    border: '1px solid var(--t-panel-border)',
-                    borderRadius: 14,
-                    boxShadow: 'var(--t-panel-shadow)',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    transition: 'background 150ms ease, border-color 150ms ease, transform 150ms ease',
-                    animation: `llmFadeIn 400ms ease-out ${100 + i * 50}ms both`,
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget).style.background = THEME_ACCENT_SOFT;
-                    (e.currentTarget).style.borderColor = THEME_ACCENT_BORDER;
-                    (e.currentTarget).style.transform = 'translateY(-1px)';
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget).style.background = THEME_PANEL_GLASS;
-                    (e.currentTarget).style.borderColor = 'var(--t-panel-border)';
-                    (e.currentTarget).style.transform = 'translateY(0)';
+                    width: '100%',
+                    maxWidth: 520,
+                    overflow: 'hidden',
                   }}
                 >
-                  <div style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    width: 36,
-                    height: 36,
-                    borderRadius: 10,
-                    background: THEME_ACCENT_SOFT,
-                    color: THEME_ACCENT,
-                    flexShrink: 0,
-                  }}>
-                    <PromptIcon d={PROMPT_ICONS[prompt.iconKey]} size={18} />
-                  </div>
+                  <div
+                    style={{
+                      position: 'relative',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 18,
+                      width: '100%',
+                      paddingTop: 24,
+                      paddingRight: 24,
+                      paddingBottom: 24,
+                      paddingLeft: 24,
+                      borderRadius: 14,
+                      border: `1px solid ${THEME_GLASS_BORDER_STRONG}`,
+                      background: `linear-gradient(180deg, ${THEME_GLASS_ELEVATED} 0%, ${THEME_GLASS_MUTED} 100%)`,
+                      boxShadow: THEME_GLASS_SHADOW,
+                      backdropFilter: 'blur(24px) saturate(1.08)',
+                      WebkitBackdropFilter: 'blur(24px) saturate(1.08)',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      aria-label="Dismiss mission card"
+                      onClick={persistMissionDismissal}
+                      style={{
+                        position: 'absolute',
+                        top: 12,
+                        right: 12,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 44,
+                        height: 44,
+                        borderRadius: 12,
+                        border: `1px solid ${THEME_PANEL_BORDER}`,
+                        background: 'transparent',
+                        color: THEME_TEXT_FAINT,
+                        cursor: 'pointer',
+                        fontSize: 18,
+                        fontWeight: 500,
+                        fontFamily: 'system-ui, sans-serif',
+                        lineHeight: 1,
+                        padding: 0,
+                      }}
+                    >
+                      <span aria-hidden="true">&times;</span>
+                    </button>
 
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text-strong)', letterSpacing: '-0.02em', lineHeight: '1.25' }}>
-                      {prompt.text}
-                    </span>
-                    <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--t-text-muted)', lineHeight: '1.45', letterSpacing: '-0.01em' }}>
-                      {prompt.description}
-                    </span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 44 }}>
+                      <div
+                        style={{
+                          alignSelf: 'flex-start',
+                          minHeight: 28,
+                          paddingTop: 6,
+                          paddingRight: 10,
+                          paddingBottom: 6,
+                          paddingLeft: 10,
+                          borderRadius: 10,
+                          background: THEME_ACCENT_SOFT,
+                          color: THEME_ACCENT,
+                          fontSize: 11,
+                          fontWeight: 700,
+                          fontFamily: 'system-ui, sans-serif',
+                          letterSpacing: '-0.01em',
+                        }}
+                      >
+                        {missionCard.eyebrow}
+                      </div>
+
+                      <div
+                        style={{
+                          fontSize: 24,
+                          fontWeight: 600,
+                          color: THEME_TEXT,
+                          lineHeight: 1.12,
+                          letterSpacing: '-0.02em',
+                          fontFamily: 'system-ui, sans-serif',
+                        }}
+                      >
+                        {missionCard.title}
+                      </div>
+
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: 400,
+                          color: THEME_TEXT_MUTED,
+                          lineHeight: 1.55,
+                          letterSpacing: '-0.01em',
+                          fontFamily: 'system-ui, sans-serif',
+                          display: '-webkit-box',
+                          WebkitBoxOrient: 'vertical' as const,
+                          WebkitLineClamp: 2,
+                          overflow: 'hidden',
+                        }}
+                      >
+                        {missionCard.description}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                      {missionCard.actions.map((action, index) => (
+                        <button
+                          key={action.id}
+                          type="button"
+                          onClick={() => handleMissionAction(action)}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: 8,
+                            minHeight: 44,
+                            paddingTop: 0,
+                            paddingRight: 16,
+                            paddingBottom: 0,
+                            paddingLeft: 16,
+                            borderRadius: 12,
+                            border: index === 0
+                              ? 'none'
+                              : `1px solid ${THEME_PANEL_BORDER}`,
+                            background: index === 0 ? THEME_ACCENT : THEME_BG_CARD,
+                            color: index === 0 ? '#ffffff' : THEME_TEXT_SECONDARY,
+                            cursor: 'pointer',
+                            fontSize: 13,
+                            fontWeight: 600,
+                            fontFamily: 'system-ui, sans-serif',
+                            letterSpacing: '-0.01em',
+                            boxShadow: index === 0 ? `0 12px 32px ${THEME_ACCENT_SOFT_STRONG}` : 'none',
+                          }}
+                        >
+                          <span>{action.label}</span>
+                          <span aria-hidden="true">&rarr;</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </button>
-              ))}
-            </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+
+            {shouldShowSuggestedPrompts ? (
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: 1,
+                maxWidth: 520,
+                width: '100%',
+                border: '0.5px solid var(--t-divider-subtle)',
+                borderRadius: 14,
+                overflow: 'hidden',
+              }}>
+                {SUGGESTED_PROMPTS.map((prompt, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => {
+                      setInput(prompt.text);
+                      setTimeout(() => inputRef.current?.focus(), 50);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 10,
+                      paddingTop: 16,
+                      paddingBottom: 16,
+                      paddingLeft: 16,
+                      paddingRight: 16,
+                      background: 'transparent',
+                      border: 'none',
+                      borderRight: i % 2 === 0 ? '0.5px solid var(--t-divider-subtle)' : 'none',
+                      borderBottom: i < 4 ? '0.5px solid var(--t-divider-subtle)' : 'none',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      transition: 'background 150ms ease',
+                      animation: `llmFadeIn 400ms ease-out ${100 + i * 50}ms both`,
+                    }}
+                    onMouseEnter={(e) => {
+                      (e.currentTarget).style.background = 'rgba(37, 99, 235, 0.04)';
+                    }}
+                    onMouseLeave={(e) => {
+                      (e.currentTarget).style.background = 'transparent';
+                    }}
+                  >
+                    <div style={{ color: 'var(--t-text-faint)', marginTop: 1 }}>
+                      <PromptIcon d={PROMPT_ICONS[prompt.iconKey]} size={16} />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text-secondary)', letterSpacing: '-0.01em', lineHeight: '1.3' }}>
+                        {prompt.text}
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--t-text-muted)', lineHeight: '1.4', letterSpacing: '-0.005em' }}>
+                        {prompt.description}
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
         )}
 
@@ -4409,7 +4781,7 @@ export default function LLMChat({ tabId, preferredRepo, linkedIssue, draftInject
                 <button
                   type="button"
                   data-send-btn="true"
-                  onClick={handleSend}
+                  onClick={() => { void sendMessage(); }}
                   disabled={!input.trim() && queuedContextCards.length === 0}
                   title="Send message (Enter)"
                   style={{
