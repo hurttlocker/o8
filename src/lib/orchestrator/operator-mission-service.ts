@@ -552,9 +552,12 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
     actor: 'orchestrator',
   });
 
-  const currentState = readOrchestratorControlPlaneState();
+  // Sync first so reconciliation runs, then apply the release on top.
+  // This prevents reconciliation from resetting the packet status after we set it.
+  const synced = await syncOrchestratorControlPlaneState(readOrchestratorControlPlaneState());
+
   if (result.ok) {
-    for (const packetState of currentState.packets) {
+    for (const packetState of synced.packets) {
       if (packetState.id === input.packetId) {
         packetState.status = 'released';
         packetState.queueState = 'held';
@@ -568,7 +571,6 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
     }
   }
 
-  const synced = await syncOrchestratorControlPlaneState(currentState);
   const afterDispatch = await runDispatchTick(synced);
   writeOrchestratorControlPlaneState(afterDispatch);
 

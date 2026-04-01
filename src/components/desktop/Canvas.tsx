@@ -85,6 +85,7 @@ import type { AgentSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import { deriveWorkflowStage, describeWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
+import { measureHeight } from '@/lib/pretext';
 
 export type CanvasRepoTaskLaunchRequest =
   | { kind: 'issue'; repo: string; number: number; title: string; body?: string }
@@ -1296,18 +1297,50 @@ const IssueViewer = memo(function IssueViewer({
   );
 });
 
-// ── Transcript Viewer ──
+// ── Transcript Viewer (Pretext-powered virtual scroll) ──
+
+interface TranscriptMessage {
+  role: string;
+  content: string | object;
+}
+
+/** Redact secrets from transcript text before display */
+function redactSecrets(raw: string): string {
+  return raw
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b/gi, 'Bearer [redacted]')
+    .replace(/\b(?:api[_-]?key|access[_-]?token|secret|password|token)\b(\s*[:=]\s*)([^\s"'`]+)/gi, '$1[redacted]')
+    .replace(/\b(?:ghp_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9-]{16,}|AKIA[0-9A-Z]{12,})\b/g, '[redacted]');
+}
+
+/** Extract display text from a transcript message (capped + redacted) */
+function getMessageText(msg: TranscriptMessage): string {
+  const raw = typeof msg.content === 'string'
+    ? msg.content.slice(0, 2000)
+    : JSON.stringify(msg.content).slice(0, 2000);
+  return redactSecrets(raw);
+}
+
+// Padding/spacing constants for transcript cards
+const TX_PADDING_V = 10; // paddingTop + paddingBottom
+const TX_PADDING_H = 14;
+const TX_ROLE_HEIGHT = 20; // role label line
+const TX_GAP = 4;          // gap between role label and content
+const TX_MARGIN_BOTTOM = 12;
+const TX_CONTAINER_PAD_H = 24; // container horizontal padding
 
 const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: { sessionKey: string }) {
   const [messages, setMessages] = useState<TranscriptMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
 
-    fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=100`)
+    fetch(`/api/mobile/history?sessionKey=${encodeURIComponent(sessionKey)}&limit=500`)
       .then((r) => r.json())
       .then((data) => {
         if (!cancelled && Array.isArray(data)) {
@@ -1322,12 +1355,96 @@ const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: { sessio
     return () => { cancelled = true; };
   }, [sessionKey]);
 
-  // Auto-scroll to bottom
+  // Observe container size for layout calculations
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    const el = containerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const rect = entry.contentRect;
+        setViewportHeight(rect.height);
+        setContainerWidth(rect.width);
+      }
+    });
+    ro.observe(el);
+    // Initial measurement
+    setViewportHeight(el.clientHeight);
+    setContainerWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+
+  // Pretext: calculate all message heights via pure math (no DOM reflow).
+  // contentWidth = container width minus padding on both sides minus card padding.
+  const contentWidth = containerWidth - TX_CONTAINER_PAD_H * 2 - TX_PADDING_H * 2;
+  const messageHeights = useMemo(() => {
+    if (contentWidth <= 0) return [];
+    return messages.map((msg) => {
+      const text = getMessageText(msg);
+      // measureHeight from Pretext — pure math, ~0.09ms per call
+      const textH = measureHeight(text, 'small', contentWidth, 1.55, 'pre-wrap');
+      return TX_PADDING_V * 2 + TX_ROLE_HEIGHT + TX_GAP + textH + TX_MARGIN_BOTTOM;
+    });
+  }, [messages, contentWidth]);
+
+  // Cumulative offsets for fast binary search
+  const offsets = useMemo(() => {
+    const arr = new Float64Array(messageHeights.length + 1);
+    for (let i = 0; i < messageHeights.length; i++) {
+      arr[i + 1] = arr[i] + messageHeights[i];
     }
-  }, [messages]);
+    return arr;
+  }, [messageHeights]);
+
+  const totalHeight = offsets.length > 0 ? offsets[offsets.length - 1] : 0;
+
+  // Binary search for first visible message index
+  const findStartIndex = useCallback((top: number): number => {
+    let lo = 0, hi = offsets.length - 2;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (offsets[mid + 1] <= top) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }, [offsets]);
+
+  // Virtual window: only render visible messages + buffer
+  const BUFFER = 5;
+  const startIdx = Math.max(0, findStartIndex(scrollTop) - BUFFER);
+  const endIdx = useMemo(() => {
+    const bottomEdge = scrollTop + viewportHeight;
+    let idx = startIdx;
+    while (idx < messages.length && offsets[idx] < bottomEdge + 200) idx++;
+    return Math.min(idx + BUFFER, messages.length);
+  }, [startIdx, scrollTop, viewportHeight, messages.length, offsets]);
+
+  const offsetY = offsets[startIdx] || 0;
+  const visibleMessages = messages.slice(startIdx, endIdx);
+
+  // Auto-scroll to bottom on initial load
+  useEffect(() => {
+    if (!loading && containerRef.current && messages.length > 0) {
+      containerRef.current.scrollTop = totalHeight;
+    }
+  }, [loading, messages.length, totalHeight]);
+
+  // Scroll handler — RAF batched
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    let rafId = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        setScrollTop(el.scrollTop);
+      });
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      cancelAnimationFrame(rafId);
+    };
+  }, []);
 
   if (loading) {
     return (
@@ -1339,67 +1456,71 @@ const TranscriptViewer = memo(function TranscriptViewer({ sessionKey }: { sessio
 
   return (
     <div
-      ref={scrollRef}
+      ref={containerRef}
       style={{
-        padding: '16px 24px',
         overflowY: 'auto',
         height: '100%',
       }}
     >
       {messages.length === 0 ? (
-        <div style={{ color: 'var(--t-text-muted)', fontSize: 13, padding: 16 }}>
+        <div style={{ color: 'var(--t-text-muted)', fontSize: 13, padding: 16, margin: '16px 24px' }}>
           No messages in this session.
         </div>
       ) : (
-        messages.map((msg, i) => (
-          <div
-            key={i}
-            style={{
-              marginBottom: 12,
-              padding: '10px 14px',
-              borderRadius: 12,
-              background: msg.role === 'assistant'
-                ? 'var(--t-panel-translucent)'
-                : 'rgba(37, 99, 235, 0.04)',
-              border: '1px solid var(--t-divider-subtle)',
-              fontSize: 13,
-              lineHeight: 1.55,
-              color: 'var(--t-text)',
-            }}
-          >
-            <div style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: msg.role === 'assistant' ? 'var(--t-text-secondary)' : '#2563eb',
-              marginBottom: 4,
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-            }}>
-              {msg.role}
-            </div>
-            <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {(() => {
-                const raw = typeof msg.content === 'string'
-                  ? msg.content.slice(0, 2000)
-                  : JSON.stringify(msg.content).slice(0, 2000);
-                // Redact credentials/tokens before rendering
-                return raw
-                  .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b/gi, 'Bearer [redacted]')
-                  .replace(/\b(?:api[_-]?key|access[_-]?token|secret|password|token)\b(\s*[:=]\s*)([^\s"'`]+)/gi, '$1[redacted]')
-                  .replace(/\b(?:ghp_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9-]{16,}|AKIA[0-9A-Z]{12,})\b/g, '[redacted]');
-              })()}
-            </div>
+        <div style={{
+          height: totalHeight,
+          position: 'relative',
+          paddingLeft: TX_CONTAINER_PAD_H,
+          paddingRight: TX_CONTAINER_PAD_H,
+          paddingTop: 16,
+        }}>
+          <div style={{ position: 'absolute', top: 16 + offsetY, left: TX_CONTAINER_PAD_H, right: TX_CONTAINER_PAD_H }}>
+            {visibleMessages.map((msg, i) => {
+              const globalIdx = startIdx + i;
+              return (
+                <div
+                  key={globalIdx}
+                  style={{
+                    marginBottom: TX_MARGIN_BOTTOM,
+                    paddingTop: TX_PADDING_V,
+                    paddingBottom: TX_PADDING_V,
+                    paddingLeft: TX_PADDING_H,
+                    paddingRight: TX_PADDING_H,
+                    borderRadius: 12,
+                    background: msg.role === 'assistant'
+                      ? 'var(--t-panel-translucent)'
+                      : 'rgba(37, 99, 235, 0.04)',
+                    border: '1px solid var(--t-divider-subtle)',
+                    fontSize: 13,
+                    lineHeight: 1.55,
+                    color: 'var(--t-text)',
+                    // Pretext: explicit height — browser never calculates this
+                    height: messageHeights[globalIdx] - TX_MARGIN_BOTTOM,
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <div style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: msg.role === 'assistant' ? 'var(--t-text-secondary)' : '#2563eb',
+                    marginBottom: TX_GAP,
+                    textTransform: 'uppercase' as const,
+                    letterSpacing: '0.04em',
+                  }}>
+                    {msg.role}
+                  </div>
+                  <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {getMessageText(msg)}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        ))
+        </div>
       )}
     </div>
   );
 });
-
-interface TranscriptMessage {
-  role: string;
-  content: string | object;
-}
 
 // ── File Viewer ──
 
@@ -6756,13 +6877,28 @@ function DiffStatusIcon({ status }: { status: string }) {
   }
 }
 
-function DiffHunk({ hunkHeader, lines, startIndex, defaultExpanded }: {
+// [pretext] Two 42px line-number gutters + 8px paddingLeft = 92px of non-content width in each hunk row.
+const DIFF_HUNK_GUTTER_WIDTH = 92;
+
+function DiffHunk({ hunkHeader, lines, startIndex, defaultExpanded, containerWidth = 0 }: {
   hunkHeader: string;
   lines: string[];
   startIndex: number;
   defaultExpanded: boolean;
+  containerWidth?: number;
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+
+  // [pretext] Batch-measure all line heights up front — pure math after first prepare().
+  // Must run unconditionally (before any conditional rendering) to preserve hook order.
+  const contentWidth = containerWidth > 0 ? containerWidth - DIFF_HUNK_GUTTER_WIDTH : 0;
+  const lineHeights = useMemo(() => {
+    if (contentWidth <= 0) return null;
+    console.log('[pretext] DiffHunk measuring', lines.length, 'lines at width', contentWidth);
+    return lines.map((line) =>
+      measureHeight(line || '\u00A0', 'mono', contentWidth, 1.5, 'pre-wrap'),
+    );
+  }, [lines, contentWidth]);
 
   // Parse line numbers from @@ -old,len +new,len @@
   const hunkMatch = hunkHeader.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
@@ -6821,15 +6957,21 @@ function DiffHunk({ hunkHeader, lines, startIndex, defaultExpanded }: {
           rightNum = String(newLine++);
         }
 
+        // [pretext] When we have a measured height, set it explicitly to eliminate reflow.
+        const measuredHeight = lineHeights?.[i];
+        const rowStyle: React.CSSProperties = measuredHeight
+          ? { display: 'flex', color, background: bg, height: measuredHeight, overflow: 'hidden' }
+          : { display: 'flex', color, background: bg };
+
         return (
-          <div key={startIndex + i} style={{ display: 'flex', color, background: bg }}>
+          <div key={startIndex + i} style={rowStyle}>
             <span style={{
               width: 42,
               flexShrink: 0,
               textAlign: 'right',
               paddingRight: 6,
               color: 'var(--t-text-faint)',
-              fontSize: '0.7rem',
+              fontSize: 12,
               fontFamily: '"SF Mono", ui-monospace, monospace',
               userSelect: 'none',
               borderRight: '1px solid var(--t-divider-subtle)',
@@ -6840,7 +6982,7 @@ function DiffHunk({ hunkHeader, lines, startIndex, defaultExpanded }: {
               textAlign: 'right',
               paddingRight: 6,
               color: 'var(--t-text-faint)',
-              fontSize: '0.7rem',
+              fontSize: 12,
               fontFamily: '"SF Mono", ui-monospace, monospace',
               userSelect: 'none',
               borderRight: '1px solid var(--t-divider-subtle)',
@@ -6850,6 +6992,8 @@ function DiffHunk({ hunkHeader, lines, startIndex, defaultExpanded }: {
               paddingLeft: 8,
               paddingTop: 1,
               paddingBottom: 1,
+              fontSize: 12,
+              lineHeight: 1.5,
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
             }}>{line || '\u00A0'}</span>
@@ -6979,7 +7123,10 @@ function highlightLine(line: string, lang: string): React.ReactNode {
   return line;
 }
 
-function renderDiffLines(text: string) {
+// [pretext] renderDiffLines accepts containerWidth for zero-reflow height measurement.
+// When containerWidth > 0, each line gets an explicit height computed via Canvas API
+// (measureHeight) so the browser never needs to reflow text to determine row height.
+function renderDiffLines(text: string, containerWidth: number = 0) {
   // Split into hunks for collapsible rendering
   const allLines = text.split('\n');
   const hunks: { header: string; lines: string[]; startIndex: number }[] = [];
@@ -7000,15 +7147,23 @@ function renderDiffLines(text: string) {
   });
   if (currentHunk) hunks.push(currentHunk);
 
-  // If no hunks found, fall back to simple rendering
+  // [pretext] Fallback path — no hunks, simple line-by-line rendering.
+  // When containerWidth is known, measure each line height explicitly (paddingLeft: 8 = 8px non-content).
   if (hunks.length === 0) {
+    const fallbackContentWidth = containerWidth > 0 ? containerWidth - 8 : 0;
     return allLines.map((line, i) => {
       let color = 'var(--t-text)';
       let bg = 'transparent';
       if (line.startsWith('+') && !line.startsWith('+++')) { color = '#166534'; bg = 'rgba(34, 197, 94, 0.08)'; }
       else if (line.startsWith('-') && !line.startsWith('---')) { color = '#991b1b'; bg = 'rgba(239, 68, 68, 0.08)'; }
       else if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++')) { color = 'var(--t-text-secondary)'; }
-      return <div key={i} style={{ color, background: bg, paddingTop: 1, paddingBottom: 1, paddingLeft: 8 }}>{line || '\u00A0'}</div>;
+      const measuredHeight = fallbackContentWidth > 0
+        ? measureHeight(line || '\u00A0', 'mono', fallbackContentWidth, 1.5, 'pre-wrap')
+        : 0;
+      const rowStyle: React.CSSProperties = measuredHeight > 0
+        ? { color, background: bg, paddingTop: 1, paddingBottom: 1, paddingLeft: 8, height: measuredHeight, overflow: 'hidden' }
+        : { color, background: bg, paddingTop: 1, paddingBottom: 1, paddingLeft: 8 };
+      return <div key={i} style={rowStyle}>{line || '\u00A0'}</div>;
     });
   }
 
@@ -7024,6 +7179,7 @@ function renderDiffLines(text: string) {
           lines={hunk.lines}
           startIndex={hunk.startIndex}
           defaultExpanded={hunks.length <= 5}
+          containerWidth={containerWidth}
         />
       ))}
     </>
@@ -7235,6 +7391,10 @@ function DiffViewer() {
   const [commitLoading, setCommitLoading] = useState(false);
   const [actionToast, setActionToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
+  // [pretext] Track diff preview pane width for zero-reflow line height measurement.
+  const [diffPaneWidth, setDiffPaneWidth] = useState(0);
+  const diffPaneRef = useRef<HTMLDivElement | null>(null);
+  const diffPaneObserverRef = useRef<ResizeObserver | null>(null);
 
   const refreshFiles = useCallback(async () => {
     try {
@@ -7248,6 +7408,34 @@ function DiffViewer() {
   useEffect(() => {
     void refreshFiles().then(() => setLoading(false));
   }, [refreshFiles]);
+
+  // [pretext] ResizeObserver on the diff preview pane — tracks width for zero-reflow measurement.
+  const diffPaneRefCallback = useCallback((node: HTMLDivElement | null) => {
+    if (diffPaneObserverRef.current) {
+      diffPaneObserverRef.current.disconnect();
+      diffPaneObserverRef.current = null;
+    }
+    diffPaneRef.current = node;
+    if (node) {
+      setDiffPaneWidth(node.clientWidth);
+      const observer = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const w = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+          setDiffPaneWidth(w);
+        }
+      });
+      observer.observe(node);
+      diffPaneObserverRef.current = observer;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (diffPaneObserverRef.current) {
+        diffPaneObserverRef.current.disconnect();
+      }
+    };
+  }, []);
 
   const selectFile = useCallback(async (path: string) => {
     setSelectedFile(path);
@@ -7541,8 +7729,8 @@ function DiffViewer() {
           )}
         </div>
 
-        {/* Diff preview */}
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        {/* Diff preview — ref tracked for Pretext width measurement */}
+        <div ref={diffPaneRefCallback} style={{ flex: 1, overflowY: 'auto' }}>
           {!selectedFile ? (
             <div style={{
               display: 'flex',
@@ -7626,18 +7814,19 @@ function DiffViewer() {
                   {fileDetail.commitSummary} — {fileDetail.commitAuthor} ({fileDetail.commitAge})
                 </div>
               ) : null}
+              {/* [pretext] font-size 12px / lineHeight 1.5 matches FONTS['mono'] in pretext engine */}
               <pre style={{
                 margin: 0,
                 paddingTop: 4,
                 paddingRight: 0,
                 paddingBottom: 14,
                 paddingLeft: 0,
-                fontSize: '0.8rem',
-                lineHeight: 1.65,
+                fontSize: 12,
+                lineHeight: 1.5,
                 fontFamily: '"SF Mono", "Menlo", "Monaco", ui-monospace, monospace',
                 color: 'var(--t-text-strong)',
               }}>
-                {renderDiffLines(fileDetail.preview)}
+                {renderDiffLines(fileDetail.preview, diffPaneWidth)}
               </pre>
             </div>
           ) : (

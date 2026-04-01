@@ -57,6 +57,7 @@ import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import { isTauri } from '@/lib/tauri/bridge';
 import { deriveWorkflowStage, describeWorkflowStage, pickDominantWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
+import { usePretextHeight, usePretextTruncation } from '@/lib/pretext';
 
 // ── Types ──
 
@@ -1060,6 +1061,21 @@ const AgentCard = memo(function AgentCard({
     ? `1px solid ${THEME_ACCENT_BORDER}`
     : '1px solid var(--t-panel-border)';
   const iconTint = group.hasRunning ? THEME_ACCENT_SOFT : 'var(--t-divider-subtle)';
+
+  // Pretext: pre-calculate focus line truncation so the browser doesn't need
+  // -webkit-line-clamp (which forces layout to determine clamp point).
+  // Approx card content width: ~260px for compact, ~300px for expanded.
+  const focusLineWidth = expanded ? 300 : 260;
+  const focusLineFontKey = expanded ? 'small' : 'tiny';
+  const focusLineLH = expanded ? 1.33 : 1.27;
+  const { truncated: focusLineTruncated, isTruncated: focusLineClipped } = usePretextTruncation(
+    focusLine,
+    focusLineFontKey,
+    focusLineWidth,
+    expanded ? 2 : 1,
+    focusLineLH,
+  );
+
   const headerPadding = expanded ? '13px 14px 12px' : '10px 11px 9px';
   const iconBoxSize = expanded ? 36 : 30;
   const iconRadius = expanded ? 12 : 10;
@@ -1152,12 +1168,11 @@ const AgentCard = memo(function AgentCard({
             color: 'var(--t-text-secondary)',
             fontWeight: 520,
             letterSpacing: '-0.01em',
-            display: '-webkit-box',
-            WebkitLineClamp: summaryClamp,
-            WebkitBoxOrient: 'vertical',
             overflow: 'hidden',
+            // Pretext: truncation calculated via pure math — no -webkit-line-clamp reflow
+            ...(focusLineClipped ? { whiteSpace: 'nowrap' as const, textOverflow: 'ellipsis' } : {}),
           }}>
-            {focusLine}
+            {focusLineTruncated}
           </div>
           <div style={{
             display: 'flex',

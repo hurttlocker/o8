@@ -513,25 +513,18 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           } catch { /* nothing to commit */ }
         }
 
-        // Pre-check for conflicts
-        try {
-          await execFileAsync('git', ['merge-tree', '--write-tree', lane.baseBranch, lane.branch], { cwd: lane.repoPath });
-        } catch {
-          setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_conflicts');
-          return { ok: false, laneId: command.laneId, note: 'Merge conflicts detected. Resolve manually or create a PR instead.' };
-        }
-
-        // Perform merge
+        // Perform merge (no pre-check — merge-tree --write-tree is overly strict
+        // and reports false conflicts on divergent histories that merge cleanly)
         const savedBranch = (await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: lane.repoPath })).stdout.trim();
         await execFileAsync('git', ['checkout', lane.baseBranch], { cwd: lane.repoPath });
 
         try {
           await execFileAsync('git', ['merge', '--no-ff', '-m', `Merge lane ${lane.label} (${lane.branch})`, lane.branch], { cwd: lane.repoPath });
         } catch (mergeErr) {
-          // Rollback
+          // Real conflict — rollback
           try { await execFileAsync('git', ['merge', '--abort'], { cwd: lane.repoPath }); } catch { /* already clean */ }
           await execFileAsync('git', ['checkout', savedBranch], { cwd: lane.repoPath });
-          setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_failed');
+          setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_conflicts');
           const message = mergeErr instanceof Error ? mergeErr.message : 'Merge failed.';
           return { ok: false, laneId: command.laneId, note: message };
         }
