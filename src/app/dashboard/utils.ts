@@ -63,6 +63,17 @@ export function normalizeDetection(raw: Record<string, unknown>): DetectionResul
   };
 }
 
+export function openedLaneSessionsCache() {
+  const key = '__o8_opened_lane_sessions';
+  const existing = (globalThis as Record<string, unknown>)[key];
+  if (existing instanceof Set) {
+    return existing as Set<string>;
+  }
+  const created = new Set<string>();
+  (globalThis as Record<string, unknown>)[key] = created;
+  return created;
+}
+
 export function repoSlugFromRemote(remoteUrl?: string | null) {
   const url = (remoteUrl ?? '').replace(/\.git$/, '');
   const parts = url.split('/');
