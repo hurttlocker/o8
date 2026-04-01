@@ -257,6 +257,9 @@ export function DesktopWebSocketProvider({ children }: { children: ReactNode }) 
         case 'agent-lifecycle':
           if (data) dispatch('onAgentLifecycle', data.sessionName as string, data.state as string, data.exitCode as number | undefined);
           break;
+        case 'lane-lifecycle':
+          if (data) dispatch('onLaneLifecycle', data);
+          break;
         case 'pong':
           break;
       }
@@ -397,6 +400,7 @@ export function useSharedDesktopWs(
     onTerminalError: (...args: Parameters<NonNullable<DesktopWsCallbacks['onTerminalError']>>) => cbRef.current.onTerminalError?.(...args),
     onTerminalImage: (...args: Parameters<NonNullable<DesktopWsCallbacks['onTerminalImage']>>) => cbRef.current.onTerminalImage?.(...args),
     onAgentLifecycle: (...args: Parameters<NonNullable<DesktopWsCallbacks['onAgentLifecycle']>>) => cbRef.current.onAgentLifecycle?.(...args),
+    onLaneLifecycle: (...args: Parameters<NonNullable<DesktopWsCallbacks['onLaneLifecycle']>>) => cbRef.current.onLaneLifecycle?.(...args),
   }), []);
 
   useEffect(() => ctx.addListener(stableCallbacks), [ctx, stableCallbacks]);
