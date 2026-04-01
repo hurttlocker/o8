@@ -35,7 +35,6 @@ import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import type {
   OrchestratorLaneBinding,
   OrchestratorLaneSnapshot,
-  OrchestratorMissionState,
   OrchestratorPacket,
   OrchestratorRuntimeTruth,
   OrchestratorWorkspaceTarget,
@@ -44,10 +43,7 @@ import type {
 } from '@/lib/orchestrator/types';
 import {
   loadOrchestratorMissionState,
-  persistOrchestratorMissionState,
-  readOrchestratorMissionState,
   reconcileOrchestratorMissionState,
-  subscribeOrchestratorMissionState,
   updateOrchestratorMissionState,
   type DomainLaneSummary,
 } from '@/lib/orchestrator/store';
@@ -105,6 +101,7 @@ import {
   worktreeStageTone,
 } from './utils';
 import { useFtuxMilestones } from './hooks/useFtuxMilestones';
+import { useOrchestratorMission } from './hooks/useOrchestratorMission';
 import { useSetupWizard } from './hooks/useSetupWizard';
 
 /* ── Lazy-loaded heavy components (code-split for faster initial paint) ── */
@@ -219,7 +216,12 @@ function DashboardInner() {
   const [workspaceSidePanelActivationKey, setWorkspaceSidePanelActivationKey] = useState(0);
   const [workspaceChatTargetKeyByRepoPath, setWorkspaceChatTargetKeyByRepoPath] = useState<Record<string, string>>({});
   const [thoughtsOpen, setThoughtsOpen] = useState(false);
-  const [thoughtsMissionState, setThoughtsMissionState] = useState<OrchestratorMissionState>(() => readOrchestratorMissionState());
+  const {
+    handleThoughtsMissionStateChange,
+    scheduleThoughtsMissionPersist,
+    setThoughtsMissionState,
+    thoughtsMissionState,
+  } = useOrchestratorMission();
   const [wsStatus, setWsStatus] = useState<WsConnectionState>('connecting');
   const [workspacePreviews, setWorkspacePreviews] = useState<DetectedLocalhostPreview[]>([]);
   const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
@@ -228,7 +230,6 @@ function DashboardInner() {
   const [mobileRemoteHref, setMobileRemoteHref] = useState('/mobile');
   const lastWorkspacePanelViewRef = useRef<'diff' | 'review'>('diff');
   const lastMarkedWorkspaceReadRef = useRef<string>('');
-  const thoughtsPersistTimerRef = useRef<number | null>(null);
 
   useEffect(() => subscribeTimelineVisible(setTimelineVisible), []);
 
@@ -270,43 +271,6 @@ function DashboardInner() {
     });
     return () => cancelIdleCallback(id);
   }, []);
-
-  useEffect(() => {
-    return subscribeOrchestratorMissionState(setThoughtsMissionState);
-  }, []);
-
-  useEffect(() => {
-    void loadOrchestratorMissionState().then(setThoughtsMissionState);
-    const handleFocus = () => {
-      void loadOrchestratorMissionState().then(setThoughtsMissionState);
-    };
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
-  }, []);
-
-  useEffect(() => () => {
-    if (thoughtsPersistTimerRef.current !== null) {
-      window.clearTimeout(thoughtsPersistTimerRef.current);
-    }
-  }, []);
-
-  const scheduleThoughtsMissionPersist = useCallback((next: OrchestratorMissionState) => {
-    if (thoughtsPersistTimerRef.current !== null) {
-      window.clearTimeout(thoughtsPersistTimerRef.current);
-    }
-    thoughtsPersistTimerRef.current = window.setTimeout(() => {
-      thoughtsPersistTimerRef.current = null;
-      void persistOrchestratorMissionState(next);
-    }, 180);
-  }, []);
-
-  const handleThoughtsMissionStateChange = useCallback((
-    next: OrchestratorMissionState | ((current: OrchestratorMissionState) => OrchestratorMissionState),
-  ) => {
-    const updated = updateOrchestratorMissionState(next);
-    setThoughtsMissionState(updated);
-    scheduleThoughtsMissionPersist(updated);
-  }, [scheduleThoughtsMissionPersist]);
 
   const { handleSetupComplete, setSetupWizardOpen, setupWizardOpen } = useSetupWizard();
 
@@ -3235,6 +3199,7 @@ function DashboardInner() {
     domainLanes,
     orchestratorRuntimeTruth,
     scheduleThoughtsMissionPersist,
+    setThoughtsMissionState,
     thoughtsMissionState,
     tileLayoutHydrated,
     workspaceChatSessionsByTileId,
