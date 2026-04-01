@@ -93,8 +93,12 @@ function buildLanePolicyContext(
   lane: Pick<Lane, 'id' | 'repoPath'>,
   verb: 'create_pr' | 'merge',
   actor: LaneEventActor,
+  opts?: { orchestratorReviewed?: boolean },
 ) {
-  const autoReview = actor === 'orchestrator' && isLaneAutoReviewActive(lane.id);
+  // Auto-approve when: (a) headless auto-review is active, or
+  // (b) the orchestrator already reviewed and approved the packet.
+  const autoReview = actor === 'orchestrator'
+    && (isLaneAutoReviewActive(lane.id) || opts?.orchestratorReviewed === true);
   return buildPolicyContext('lane_command', {
     verb,
     laneId: lane.id,
@@ -426,7 +430,9 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       if (!lane.worktreePath) return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };
 
       // Policy gate — require approval for merge
-      const mergePolicy = evaluatePolicy(buildLanePolicyContext(lane, 'merge', actor));
+      const mergePolicy = evaluatePolicy(buildLanePolicyContext(lane, 'merge', actor, {
+        orchestratorReviewed: command.orchestratorReviewed,
+      }));
       if (mergePolicy.requiresApproval && actor !== 'user') {
         const rawDiff = await getDiffForLane(lane);
         const files = parseGitDiff(rawDiff);

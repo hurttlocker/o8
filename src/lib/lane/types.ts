@@ -141,6 +141,8 @@ export type LaneCommand =
       commitMessage?: string;
       /** Orchestrator review verdict — shown on the approval card */
       reviewSummary?: string;
+      /** Set true when the orchestrator has already reviewed and approved the packet */
+      orchestratorReviewed?: boolean;
       actor?: LaneEventActor;
     }
   | {
