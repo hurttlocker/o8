@@ -14,6 +14,7 @@ import type { TerminalHandle } from '@/components/desktop/LiveOutput';
 import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import type { TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
+import { fetchOnce } from '@/lib/panel/fetch-cache';
 import {
   loadOrchestratorMissionState,
 } from '@/lib/orchestrator/store';
@@ -563,7 +564,7 @@ export function useWorkspaceTerminal({
   useEffect(() => {
     async function pollLanes() {
       try {
-        const res = await fetch('/api/lanes?active=true');
+        const res = await fetchOnce('/api/lanes?active=true');
         if (!res.ok) return;
         const data = await res.json();
         for (const lane of (data.lanes ?? []) as Array<{
