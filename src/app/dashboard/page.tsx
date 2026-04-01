@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
-import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo, type CSSProperties } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DesktopWebSocketProvider, useSharedDesktopWs, type WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
@@ -15,6 +15,7 @@ import type { CanvasTab } from '@/components/desktop/Canvas';
 import { UniversalSearch, type CommandPaletteAction, type CommandPaletteStateTone } from '@/components/shared/UniversalSearch';
 // GraphExplorer3D lazy-loaded below
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
+import type { ApprovalRecord } from '@/lib/approvals/types';
 import { UpdateBanner } from '@/components/desktop/UpdateBanner';
 import { ThemeProvider } from '@/lib/theme/context';
 import { AlertTray } from '@/components/shared/AlertTray';
@@ -23,12 +24,11 @@ import { NavRail, type NavSection } from '@/components/desktop/NavRail';
 import { ContextualPanel, type ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { TitleBar } from '@/components/desktop/TitleBar';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
-import { readTimelineVisible, subscribeTimelineVisible } from '@/lib/appearance/timeline';
+import { readTimelineVisible, subscribeTimelineVisible, writeTimelineVisible } from '@/lib/appearance/timeline';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
 // AnalyticsPage lazy-loaded below
 import type { DetectionResult } from '@/components/desktop/SetupWizard';
-import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import { WorkspaceSidePanel, type WorkspaceSidePanelRepo, type WorkspaceSidePanelView } from '@/components/desktop/WorkspaceSidePanel';
 import type { RepoReadiness, RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
@@ -53,6 +53,13 @@ import {
   type DomainLaneSummary,
 } from '@/lib/orchestrator/store';
 import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
+import {
+  areAllFtuxMilestonesSeen,
+  readFtuxMilestones,
+  writeFtuxMilestones,
+  type FtuxMilestoneId,
+  type FtuxMilestonesState,
+} from '@/lib/ftux/milestones';
 import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import { deriveWorkflowStage, describeWorkflowStage, type WorkflowStageBadge } from '@/lib/workflows/status';
@@ -65,6 +72,194 @@ const LazyAnalyticsPage = lazy(() => import('@/components/desktop/AnalyticsPage'
 const LazyGraphExplorer3D = lazy(() => import('@/components/desktop/GraphExplorer3D').then(m => ({ default: m.GraphExplorer3D })));
 const LazyThoughtsCard = lazy(() => import('@/components/desktop/ThoughtsCard').then(m => ({ default: m.ThoughtsCard })));
 const LazySetupWizard = lazy(() => import('@/components/desktop/SetupWizard').then(m => ({ default: m.SetupWizard })));
+
+const FTUX_REVEAL_DURATION_MS = 5200;
+const FTUX_SPRING_TRANSITION = { type: 'spring' as const, stiffness: 400, damping: 30 };
+const FTUX_AGENT_PANEL_TARGET_WIDTH = 280;
+
+type GuidedDiscoveryPosition = 'top-left' | 'top-right' | 'top-center' | 'bottom-right' | 'bottom-left';
+
+interface GuidedDiscoveryAction {
+  label: string;
+  href?: string;
+  onClick?: () => void;
+  emphasized?: boolean;
+}
+
+function guidedDiscoveryPositionStyle(position: GuidedDiscoveryPosition): CSSProperties {
+  switch (position) {
+    case 'top-left':
+      return { top: 16, left: 16 };
+    case 'top-center':
+      return { top: 16, left: '50%', transform: 'translateX(-50%)' };
+    case 'bottom-right':
+      return { right: 16, bottom: 16 };
+    case 'bottom-left':
+      return { left: 16, bottom: 16 };
+    case 'top-right':
+    default:
+      return { top: 16, right: 16 };
+  }
+}
+
+function GuidedDiscoveryHalo({
+  active,
+  borderRadius = 18,
+}: {
+  active: boolean;
+  borderRadius?: number;
+}) {
+  return (
+    <AnimatePresence initial={false}>
+      {active ? (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.985 }}
+          animate={{
+            opacity: [0.42, 0.9, 0.52],
+            scale: 1,
+          }}
+          exit={{ opacity: 0, scale: 0.985 }}
+          transition={{
+            scale: FTUX_SPRING_TRANSITION,
+            opacity: { duration: 1.8, repeat: Infinity, repeatType: 'mirror', ease: 'easeInOut' },
+          }}
+          style={{
+            position: 'absolute',
+            inset: -6,
+            borderRadius: borderRadius + 6,
+            border: '1px solid color-mix(in srgb, var(--t-accent, #2563eb) 28%, transparent)',
+            background: 'linear-gradient(180deg, color-mix(in srgb, var(--t-accent, #2563eb) 10%, transparent) 0%, transparent 100%)',
+            boxShadow: '0 0 0 1px color-mix(in srgb, var(--t-accent, #2563eb) 10%, transparent), 0 24px 56px color-mix(in srgb, var(--t-accent, #2563eb) 18%, transparent)',
+            pointerEvents: 'none',
+            zIndex: 8,
+          }}
+        />
+      ) : null}
+    </AnimatePresence>
+  );
+}
+
+function GuidedDiscoveryCoachmark({
+  visible,
+  position,
+  title,
+  body,
+  actions = [],
+  maxWidth = 320,
+}: {
+  visible: boolean;
+  position: GuidedDiscoveryPosition;
+  title: string;
+  body: string;
+  actions?: GuidedDiscoveryAction[];
+  maxWidth?: number;
+}) {
+  return (
+    <AnimatePresence initial={false}>
+      {visible ? (
+        <motion.div
+          initial={{ opacity: 0, y: position.startsWith('bottom') ? 16 : -16, scale: 0.96 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: position.startsWith('bottom') ? 16 : -12, scale: 0.96 }}
+          transition={FTUX_SPRING_TRANSITION}
+          style={{
+            position: 'absolute',
+            zIndex: 24,
+            width: `min(${maxWidth}px, calc(100vw - 32px))`,
+            padding: 14,
+            borderRadius: 14,
+            border: '1px solid color-mix(in srgb, var(--t-border-subtle, rgba(148,163,184,0.22)) 88%, white 12%)',
+            background: 'color-mix(in srgb, var(--t-panel-translucent, rgba(255,255,255,0.9)) 92%, white 8%)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            boxShadow: '0 18px 48px rgba(15, 23, 42, 0.14)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            fontFamily: 'system-ui',
+            ...guidedDiscoveryPositionStyle(position),
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{
+              fontSize: 10,
+              lineHeight: 1.2,
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--t-text-muted)',
+            }}>
+              Guided Discovery
+            </span>
+            <strong style={{
+              fontSize: 14,
+              lineHeight: 1.3,
+              fontWeight: 700,
+              letterSpacing: '-0.02em',
+              color: 'var(--t-text)',
+            }}>
+              {title}
+            </strong>
+            <span style={{
+              fontSize: 12,
+              lineHeight: 1.55,
+              letterSpacing: '-0.01em',
+              color: 'var(--t-text-muted)',
+            }}>
+              {body}
+            </span>
+          </div>
+          {actions.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {actions.map((action) => {
+                const sharedStyle: CSSProperties = {
+                  minHeight: 44,
+                  padding: '0 14px',
+                  borderRadius: 12,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  letterSpacing: '-0.01em',
+                  textDecoration: 'none',
+                  cursor: 'pointer',
+                  border: `1px solid ${action.emphasized ? 'color-mix(in srgb, var(--t-accent, #2563eb) 24%, transparent)' : 'var(--t-border-subtle, rgba(148,163,184,0.22))'}`,
+                  background: action.emphasized
+                    ? 'color-mix(in srgb, var(--t-accent, #2563eb) 10%, transparent)'
+                    : 'rgba(255,255,255,0.68)',
+                  color: action.emphasized ? 'var(--t-text)' : 'var(--t-text-muted)',
+                  fontFamily: 'system-ui',
+                };
+
+                return action.href ? (
+                  <a
+                    key={action.label}
+                    href={action.href}
+                    target={action.href.startsWith('http') ? '_blank' : undefined}
+                    rel={action.href.startsWith('http') ? 'noreferrer' : undefined}
+                    style={sharedStyle}
+                  >
+                    {action.label}
+                  </a>
+                ) : (
+                  <button
+                    key={action.label}
+                    type="button"
+                    onClick={action.onClick}
+                    style={sharedStyle}
+                  >
+                    {action.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
+  );
+}
 
 /** Normalize the flat API response into the shape SetupWizard expects. */
 function normalizeDetection(raw: Record<string, unknown>): DetectionResult {
@@ -246,6 +441,7 @@ interface PaletteAgentSummary {
   currentTask?: string;
   sessionKey: string;
   alerts?: number;
+  approvalStatus?: string;
   isCurrentSession?: boolean;
   lastEventAt?: string;
   workspace?: string;
@@ -254,6 +450,16 @@ interface PaletteAgentSummary {
   lifecycleState?: string;
   workflowStage?: WorkflowStageBadge | null;
   runtime?: string;
+  localDiff?: {
+    changedFiles?: number;
+    additions?: number;
+    deletions?: number;
+  };
+  activity?: {
+    headline?: string;
+    filePath?: string;
+    timestamp?: number;
+  };
   repoReadiness?: RepoReadiness;
   pr?: {
     number: number;
@@ -722,11 +928,101 @@ function DashboardInner() {
   const [tileLayout, setTileLayout] = useState<TileLayout>(initialTileLayout);
   const [activeTileId, setActiveTileId] = useState<string | null>(getFirstLeaf(initialTileLayout.root).id);
   const [tileLayoutHydrated, setTileLayoutHydrated] = useState(false);
+  const [ftuxMilestones, setFtuxMilestones] = useState<FtuxMilestonesState>(() => readFtuxMilestones());
+  const [ftuxQueuedMilestones, setFtuxQueuedMilestones] = useState<FtuxMilestoneId[]>([]);
+  const [activeFtuxMilestone, setActiveFtuxMilestone] = useState<FtuxMilestoneId | null>(null);
+  const [ftuxFirstChangedFile, setFtuxFirstChangedFile] = useState<{ path: string; workspace: string | null } | null>(null);
+  const [mobileRemoteHref, setMobileRemoteHref] = useState('/mobile');
   const lastWorkspacePanelViewRef = useRef<'diff' | 'review'>('diff');
   const lastMarkedWorkspaceReadRef = useRef<string>('');
   const thoughtsPersistTimerRef = useRef<number | null>(null);
+  const ftuxMilestonesRef = useRef<FtuxMilestonesState>(ftuxMilestones);
+  const activeFtuxMilestoneRef = useRef<FtuxMilestoneId | null>(null);
+  const ftuxDormant = useMemo(() => areAllFtuxMilestonesSeen(ftuxMilestones), [ftuxMilestones]);
 
   useEffect(() => subscribeTimelineVisible(setTimelineVisible), []);
+
+  useEffect(() => {
+    ftuxMilestonesRef.current = ftuxMilestones;
+  }, [ftuxMilestones]);
+
+  useEffect(() => {
+    activeFtuxMilestoneRef.current = activeFtuxMilestone;
+  }, [activeFtuxMilestone]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setMobileRemoteHref(`${window.location.origin}/mobile`);
+  }, []);
+
+  const enqueueFtuxMilestone = useCallback((milestoneId: FtuxMilestoneId) => {
+    if (ftuxMilestonesRef.current[milestoneId].seen) {
+      return false;
+    }
+
+    const next = {
+      ...ftuxMilestonesRef.current,
+      [milestoneId]: { seen: true },
+    };
+
+    ftuxMilestonesRef.current = next;
+    setFtuxMilestones(next);
+    writeFtuxMilestones(next);
+    setFtuxQueuedMilestones((current) => (
+      current.includes(milestoneId) || activeFtuxMilestoneRef.current === milestoneId
+        ? current
+        : [...current, milestoneId]
+    ));
+    return true;
+  }, []);
+
+  const dismissFtuxMilestone = useCallback(() => {
+    setActiveFtuxMilestone(null);
+  }, []);
+
+  useEffect(() => {
+    if (activeFtuxMilestone || ftuxQueuedMilestones.length === 0) {
+      return;
+    }
+
+    const [nextMilestone, ...remaining] = ftuxQueuedMilestones;
+    setFtuxQueuedMilestones(remaining);
+    setActiveFtuxMilestone(nextMilestone);
+  }, [activeFtuxMilestone, ftuxQueuedMilestones]);
+
+  useEffect(() => {
+    if (!activeFtuxMilestone) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setActiveFtuxMilestone((current) => (current === activeFtuxMilestone ? null : current));
+    }, FTUX_REVEAL_DURATION_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeFtuxMilestone]);
+
+  useEffect(() => {
+    if (activeFtuxMilestone !== 'firstAgentSpawned') {
+      return;
+    }
+
+    if (!sidebarVisible) {
+      setSidebarVisible(true);
+    }
+    setLeftWidth((current) => Math.max(current, FTUX_AGENT_PANEL_TARGET_WIDTH));
+  }, [activeFtuxMilestone, sidebarVisible]);
+
+  useEffect(() => {
+    if (activeFtuxMilestone !== 'firstCompletion') {
+      return;
+    }
+
+    if (!timelineVisible) {
+      writeTimelineVisible(true);
+      setTimelineVisible(true);
+    }
+  }, [activeFtuxMilestone, timelineVisible]);
 
   // ── Prefetch heavy lazy chunks on idle so Suspense fallbacks are never visible ──
   useEffect(() => {
@@ -2020,17 +2316,29 @@ function DashboardInner() {
 
   // ── Approval count for NavRail badge ──
   const [approvalCount, setApprovalCount] = useState(0);
+  const [resolvedApprovalCount, setResolvedApprovalCount] = useState(0);
   useEffect(() => {
+    let cancelled = false;
+
     function fetchCount() {
-      fetch('/api/panel/approvals')
+      fetch('/api/panel/approvals?status=all')
         .then((r) => r.json())
-        .then((data) => setApprovalCount(data.approvals?.length ?? 0))
+        .then((data) => {
+          if (cancelled) return;
+          const approvals = (data.approvals ?? []) as ApprovalRecord[];
+          setApprovalCount(approvals.filter((approval) => approval.status === 'pending').length);
+          setResolvedApprovalCount(approvals.filter((approval) => approval.status !== 'pending').length);
+        })
         .catch(() => {});
     }
-    // Defer — approval badge is not critical for first paint
-    const initTimer = setTimeout(fetchCount, 3_000);
-    const id = setInterval(fetchCount, 30_000);
-    return () => { clearTimeout(initTimer); clearInterval(id); };
+    // Keep approval and resolution state fairly fresh so discovery cues track the operator flow.
+    const initTimer = setTimeout(fetchCount, 1_500);
+    const id = setInterval(fetchCount, 5_000);
+    return () => {
+      cancelled = true;
+      clearTimeout(initTimer);
+      clearInterval(id);
+    };
   }, []);
 
   // ── Cmd+J to toggle Thoughts Card ──
@@ -2613,6 +2921,7 @@ function DashboardInner() {
       }),
       autoArchiveOnIdle: false,
     });
+    enqueueFtuxMilestone('firstAgentSpawned');
 
     setActiveTileId(workspaceTarget.tileId);
 
@@ -2630,6 +2939,7 @@ function DashboardInner() {
     };
   }, [
     allRepoWorktrees,
+    enqueueFtuxMilestone,
     focusOrchestrationPacketLane,
     globalRepoEntries,
     thoughtsMissionState,
@@ -2973,6 +3283,18 @@ function DashboardInner() {
     })();
   }, [openCanvasTab, waitForWorkspaceTerminalTarget]);
 
+  const openApprovalsDiscoverySurface = useCallback(() => {
+    setActiveNavSection('approvals');
+    setShowMemoryView(false);
+    setWorkspaceSidePanelView('review');
+    setWorkspaceSidePanelCompactReview(false);
+    setWorkspaceSidePanelActivationKey((value) => value + 1);
+    if (!chatVisible) {
+      setChatVisible(true);
+    }
+    setRightPanelMode('workspace');
+  }, [chatVisible]);
+
   const handleToggleChatPanel = useCallback(() => {
     // v1: chat panel removed — toggle workspace instead
     if (chatVisible) {
@@ -3248,7 +3570,8 @@ function DashboardInner() {
       supervisorStatus: request.supervisorStatus,
       autoArchiveOnIdle: request.autoArchiveOnIdle,
     });
-  }, [globalRepoEntries, loadRegisteredRepos, waitForWorkspaceTerminalTarget]);
+    enqueueFtuxMilestone('firstAgentSpawned');
+  }, [enqueueFtuxMilestone, globalRepoEntries, loadRegisteredRepos, waitForWorkspaceTerminalTarget]);
 
   const updateSupervisorWorkspaceTab = useCallback((surfaceId: string, status: string, label?: string) => {
     for (const handle of workspaceTerminalHandlesRef.current.values()) {
@@ -3418,7 +3741,8 @@ function DashboardInner() {
       createNew: true,
       label: taskLabel,
     });
-  }, [waitForWorkspaceTerminalTarget]);
+    enqueueFtuxMilestone('firstAgentSpawned');
+  }, [enqueueFtuxMilestone, waitForWorkspaceTerminalTarget]);
 
   const handleSelectFile = useCallback((filePath: string, workspace?: string) => {
     const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
@@ -3517,11 +3841,33 @@ function DashboardInner() {
 
   const parsedAgents = useMemo(() => {
     try {
-      return JSON.parse(agentsJson) as FleetAgent[];
+      return JSON.parse(agentsJson) as PaletteAgentSummary[];
     } catch {
-      return [] as FleetAgent[];
+      return [] as PaletteAgentSummary[];
     }
   }, [agentsJson]);
+  const firstFileChangeCandidate = useMemo(() => {
+    const source = parsedAgents.find((agent) => (
+      Boolean(agent.activity?.filePath)
+      || Boolean((agent.localDiff?.changedFiles ?? 0) > 0)
+    ));
+    if (!source) {
+      return null;
+    }
+
+    return {
+      path: source.activity?.filePath ?? null,
+      workspace: source.workspace ?? source.runtimeSurface?.cwd ?? null,
+    };
+  }, [parsedAgents]);
+  const hasPendingApprovals = useMemo(
+    () => approvalCount > 0 || parsedAgents.some((agent) => agent.approvalStatus === 'pending'),
+    [approvalCount, parsedAgents],
+  );
+  const hasCompletedSession = useMemo(
+    () => Array.from(lifecycleEvents.values()).some((entry) => entry.state === 'completed'),
+    [lifecycleEvents],
+  );
   const orchestratorRuntimeTruth = useMemo<OrchestratorRuntimeTruth[]>(
     () => parsedAgents
       .filter((agent) => agent.sessionKey && (agent.runtime === 'codex' || agent.runtime === 'claude-code'))
@@ -3535,6 +3881,84 @@ function DashboardInner() {
       })),
     [parsedAgents],
   );
+
+  useEffect(() => {
+    if (
+      ftuxDormant
+      || !ftuxMilestones.firstAgentSpawned.seen
+      || ftuxMilestones.firstFileChange.seen
+      || !firstFileChangeCandidate
+    ) {
+      return;
+    }
+
+    setFtuxFirstChangedFile((current) => current ?? {
+      path: firstFileChangeCandidate.path ?? 'Changed workspace files',
+      workspace: firstFileChangeCandidate.workspace,
+    });
+    enqueueFtuxMilestone('firstFileChange');
+    if (firstFileChangeCandidate.path) {
+      handleSelectFile(firstFileChangeCandidate.path, firstFileChangeCandidate.workspace ?? undefined);
+    }
+  }, [
+    enqueueFtuxMilestone,
+    firstFileChangeCandidate,
+    ftuxDormant,
+    ftuxMilestones.firstAgentSpawned.seen,
+    ftuxMilestones.firstFileChange.seen,
+    handleSelectFile,
+  ]);
+
+  useEffect(() => {
+    if (
+      ftuxDormant
+      || !ftuxMilestones.firstAgentSpawned.seen
+      || ftuxMilestones.firstApproval.seen
+      || !hasPendingApprovals
+    ) {
+      return;
+    }
+
+    enqueueFtuxMilestone('firstApproval');
+  }, [
+    enqueueFtuxMilestone,
+    ftuxDormant,
+    ftuxMilestones.firstAgentSpawned.seen,
+    ftuxMilestones.firstApproval.seen,
+    hasPendingApprovals,
+  ]);
+
+  useEffect(() => {
+    if (
+      ftuxDormant
+      || !ftuxMilestones.firstAgentSpawned.seen
+      || ftuxMilestones.firstCompletion.seen
+      || !hasCompletedSession
+    ) {
+      return;
+    }
+
+    enqueueFtuxMilestone('firstCompletion');
+  }, [
+    enqueueFtuxMilestone,
+    ftuxDormant,
+    ftuxMilestones.firstAgentSpawned.seen,
+    ftuxMilestones.firstCompletion.seen,
+    hasCompletedSession,
+  ]);
+
+  useEffect(() => {
+    if (ftuxDormant || ftuxMilestones.firstMobilePrompt.seen || resolvedApprovalCount < 1) {
+      return;
+    }
+
+    enqueueFtuxMilestone('firstMobilePrompt');
+  }, [
+    enqueueFtuxMilestone,
+    ftuxDormant,
+    ftuxMilestones.firstMobilePrompt.seen,
+    resolvedApprovalCount,
+  ]);
 
   // ── Domain lane polling for reconciliation (deferred — not needed for first paint) ──
   const [domainLanes, setDomainLanes] = useState<DomainLaneSummary[]>([]);
@@ -3557,7 +3981,7 @@ function DashboardInner() {
     return () => { cancelled = true; clearTimeout(initTimer); clearInterval(interval); };
   }, []);
 
-  const paletteAgents = useMemo(() => parsedAgents as unknown as PaletteAgentSummary[], [parsedAgents]);
+  const paletteAgents = useMemo(() => parsedAgents, [parsedAgents]);
   const selectedSessionAgent = useMemo(
     () => paletteAgents.find((agent) => agent.sessionKey === activeSessionKey)
       ?? paletteAgents.find((agent) => agent.isCurrentSession)
@@ -4705,16 +5129,16 @@ function DashboardInner() {
 
         return (
           <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading inspector...</div>}>
-          <LazyCanvas
-            tabs={tileState.tabs}
-            activeTabId={tileState.activeTabId}
-            onSelectTab={(tabId) => selectCanvasTab(tileId, tabId)}
-            onCloseTab={(tabId) => closeCanvasTab(tileId, tabId)}
-            selectedRepo={repoSlugFromRemote(tileRepoEntry?.remoteUrl) ?? null}
-            onInjectChatContext={handleAgentPanelChatInjection}
-            onSelectCommit={handleSelectCommit}
-            onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
-          />
+            <LazyCanvas
+              tabs={tileState.tabs}
+              activeTabId={tileState.activeTabId}
+              onSelectTab={(tabId) => selectCanvasTab(tileId, tabId)}
+              onCloseTab={(tabId) => closeCanvasTab(tileId, tabId)}
+              selectedRepo={repoSlugFromRemote(tileRepoEntry?.remoteUrl) ?? null}
+              onInjectChatContext={handleAgentPanelChatInjection}
+              onSelectCommit={handleSelectCommit}
+              onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
+            />
           </Suspense>
         );
       },
@@ -4806,6 +5230,32 @@ function DashboardInner() {
     workspaceTerminalResetNonceByTileId,
     workspacePreviews,
   ]);
+  const showAgentPanelFtux = activeFtuxMilestone === 'firstAgentSpawned';
+  const showCanvasFtux = activeFtuxMilestone === 'firstFileChange';
+  const showApprovalFtux = activeFtuxMilestone === 'firstApproval';
+  const showCompletionFtux = activeFtuxMilestone === 'firstCompletion';
+  const showMobileFtux = activeFtuxMilestone === 'firstMobilePrompt';
+  const changedFileLabel = ftuxFirstChangedFile?.path.split('/').pop() ?? 'your latest edit';
+  const mobilePromptBody = mobileRemoteHref.startsWith('http')
+    ? `Use ${mobileRemoteHref.replace(/^https?:\/\//, '')} from your phone the next time you need to review an approval away from your desk.`
+    : 'Open the mobile remote next time you want to review an approval away from your desk.';
+  const mobilePromptActions: GuidedDiscoveryAction[] = [
+    {
+      label: 'Open mobile remote',
+      href: mobileRemoteHref,
+      emphasized: true,
+    },
+  ];
+
+  if (mobileRemoteHref.startsWith('http')) {
+    mobilePromptActions.push({
+      label: 'Copy link',
+      onClick: () => {
+        void navigator.clipboard?.writeText(mobileRemoteHref).catch(() => undefined);
+        dismissFtuxMilestone();
+      },
+    });
+  }
 
   return (
     <div data-vibrancy-passthrough="" style={{
@@ -4816,8 +5266,9 @@ function DashboardInner() {
       backdropFilter: 'blur(18px) saturate(1.02)',
       WebkitBackdropFilter: 'blur(18px) saturate(1.02)',
       color: 'var(--t-text)',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif',
+      fontFamily: 'system-ui',
       overflow: 'hidden',
+      position: 'relative',
     }}>
       {/* ── Update Banner ── */}
       <UpdateBanner />
@@ -4861,19 +5312,126 @@ function DashboardInner() {
         )}
       />
 
+      <AnimatePresence initial={false}>
+        {showApprovalFtux ? (
+          <motion.div
+            initial={{ opacity: 0, y: -12, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -10, scale: 0.98 }}
+            transition={FTUX_SPRING_TRANSITION}
+            style={{
+              alignSelf: 'flex-end',
+              marginTop: 12,
+              marginRight: 16,
+              marginBottom: timelineVisible ? 0 : 12,
+              marginLeft: 16,
+              minHeight: 44,
+              padding: '12px 14px',
+              borderRadius: 14,
+              border: '1px solid color-mix(in srgb, var(--t-accent, #2563eb) 22%, transparent)',
+              background: 'color-mix(in srgb, var(--t-panel-translucent, rgba(255,255,255,0.9)) 90%, white 10%)',
+              backdropFilter: 'blur(18px)',
+              WebkitBackdropFilter: 'blur(18px)',
+              boxShadow: '0 18px 48px rgba(15, 23, 42, 0.12)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              maxWidth: 460,
+              zIndex: 20,
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
+              <span style={{
+                fontSize: 10,
+                lineHeight: 1.2,
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                color: 'var(--t-text-muted)',
+              }}>
+                Guided Discovery
+              </span>
+              <strong style={{
+                fontSize: 14,
+                lineHeight: 1.3,
+                fontWeight: 700,
+                letterSpacing: '-0.02em',
+                color: 'var(--t-text)',
+              }}>
+                Agents check with you before risky actions
+              </strong>
+              <span style={{
+                fontSize: 12,
+                lineHeight: 1.55,
+                letterSpacing: '-0.01em',
+                color: 'var(--t-text-muted)',
+              }}>
+                Approval requests stay inline, so you can review the command or diff without leaving the flow.
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={openApprovalsDiscoverySurface}
+              style={{
+                minHeight: 44,
+                padding: '0 14px',
+                borderRadius: 12,
+                border: '1px solid color-mix(in srgb, var(--t-accent, #2563eb) 24%, transparent)',
+                background: 'color-mix(in srgb, var(--t-accent, #2563eb) 10%, transparent)',
+                color: 'var(--t-text)',
+                fontSize: 12,
+                fontWeight: 600,
+                letterSpacing: '-0.01em',
+                cursor: 'pointer',
+                fontFamily: 'system-ui',
+                flexShrink: 0,
+              }}
+            >
+              Review approval
+            </button>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
       {/* ── Session Timeline ── */}
-      {timelineVisible && <SessionTimeline
-        repoPath={globalRepoEntry?.localPath ?? activeWorkspace ?? null}
-        repoName={globalRepoEntry?.name ?? null}
-        onExpand={() => {
-          openCanvasTab({
-            id: 'timeline:session',
-            kind: 'timeline',
-            label: 'Session Replay',
-            resourceId: 'session',
-          });
-        }}
-      />}
+      {timelineVisible && (
+        <div style={{ position: 'relative', zIndex: 1 }}>
+          <GuidedDiscoveryHalo active={showCompletionFtux} borderRadius={18} />
+          <GuidedDiscoveryCoachmark
+            visible={showCompletionFtux}
+            position="top-right"
+            title="Completed sessions land here"
+            body="The timeline keeps the latest run in view, and the activity feed on the left will start surfacing the related commit trail."
+            actions={[
+              {
+                label: 'Open session replay',
+                onClick: () => {
+                  dismissFtuxMilestone();
+                  openCanvasTab({
+                    id: 'timeline:session',
+                    kind: 'timeline',
+                    label: 'Session Replay',
+                    resourceId: 'session',
+                  });
+                },
+                emphasized: true,
+              },
+            ]}
+          />
+          <SessionTimeline
+            repoPath={globalRepoEntry?.localPath ?? activeWorkspace ?? null}
+            repoName={globalRepoEntry?.name ?? null}
+            onExpand={() => {
+              openCanvasTab({
+                id: 'timeline:session',
+                kind: 'timeline',
+                label: 'Session Replay',
+                resourceId: 'session',
+              });
+            }}
+          />
+        </div>
+      )}
 
       {/* ── Main Layout (horizontal) ── */}
       <div style={{
@@ -4889,12 +5447,7 @@ function DashboardInner() {
           // Dismiss ThoughtsCard when switching nav sections
           setThoughtsOpen(false);
           if (section === 'approvals') {
-            handleOpenAuditLog();
-            setActiveNavSection('approvals');
-            setShowMemoryView(false);
-            setWorkspaceSidePanelView('review');
-            if (!chatVisible) setChatVisible(true);
-            setRightPanelMode('workspace');
+            openApprovalsDiscoverySurface();
             return;
           }
           if (section === 'settings') {
@@ -4962,44 +5515,57 @@ function DashboardInner() {
       />}
 
       {/* ── Left: Agent Panel ── */}
-      {sidebarVisible && <div style={{
-        width: leftWidth,
-        flexShrink: 0,
-        height: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        position: 'relative',
-      }}>
-        <AgentPanel
-          activeSessionKey={activeSessionKey ?? null}
-          selectedRepo={globalRepo ?? repoSlugFromRemote(workspaceTerminalPreferredRepo?.remoteUrl)}
-          selectedRepoBranch={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
-          selectedRepoLocalPath={globalRepoEntry?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null}
-          activeWorkspacePath={activeWorkspace ?? null}
-          selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
-          onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
-          onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
-          onSelectSession={handleSelectSession}
-          onSelectIssue={handleSelectIssue}
-          onSelectCommit={handleSelectCommit}
-          onSelectPR={handleSelectPR}
-          onReviewPR={handleReviewPR}
-          onRepoRemoved={handleRepoRemoved}
-          onExpandWorkspace={handleExpandWorkspace}
-          onSelectFile={handleSelectFile}
-          onOpenCI={handleOpenCI}
-          onCreateIssue={handleCreateIssue}
-          onOpenGitLog={handleOpenGitLog}
-          onOpenDeploy={handleOpenDeploy}
-          onOpenMemory={handleOpenMemory}
-          onAgentsUpdate={handleAgentsUpdate}
-          onAgentKill={sendAgentKill}
-          lifecycleEvents={lifecycleEvents}
-          orchestratorPackets={thoughtsMissionState.packets}
-          ideWorkspaceSessions={ideWorkspaceSessionsForSidebar}
-        />
-      </div>}
+      {sidebarVisible && (
+        <motion.div
+          animate={{ width: leftWidth }}
+          transition={showAgentPanelFtux ? FTUX_SPRING_TRANSITION : { duration: 0.001 }}
+          style={{
+            width: leftWidth,
+            flexShrink: 0,
+            height: '100%',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            position: 'relative',
+          }}
+        >
+          <GuidedDiscoveryHalo active={showAgentPanelFtux} borderRadius={20} />
+          <GuidedDiscoveryCoachmark
+            visible={showAgentPanelFtux}
+            position="top-left"
+            title="Live agent sessions appear here"
+            body="When you dispatch work, Cortex expands this rail and keeps the active session card within reach."
+          />
+          <AgentPanel
+            activeSessionKey={activeSessionKey ?? null}
+            selectedRepo={globalRepo ?? repoSlugFromRemote(workspaceTerminalPreferredRepo?.remoteUrl)}
+            selectedRepoBranch={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
+            selectedRepoLocalPath={globalRepoEntry?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null}
+            activeWorkspacePath={activeWorkspace ?? null}
+            selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
+            onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
+            onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
+            onSelectSession={handleSelectSession}
+            onSelectIssue={handleSelectIssue}
+            onSelectCommit={handleSelectCommit}
+            onSelectPR={handleSelectPR}
+            onReviewPR={handleReviewPR}
+            onRepoRemoved={handleRepoRemoved}
+            onExpandWorkspace={handleExpandWorkspace}
+            onSelectFile={handleSelectFile}
+            onOpenCI={handleOpenCI}
+            onCreateIssue={handleCreateIssue}
+            onOpenGitLog={handleOpenGitLog}
+            onOpenDeploy={handleOpenDeploy}
+            onOpenMemory={handleOpenMemory}
+            onAgentsUpdate={handleAgentsUpdate}
+            onAgentKill={sendAgentKill}
+            lifecycleEvents={lifecycleEvents}
+            orchestratorPackets={thoughtsMissionState.packets}
+            ideWorkspaceSessions={ideWorkspaceSessionsForSidebar}
+          />
+        </motion.div>
+      )}
 
       {/* ── Left drag handle ── */}
       {sidebarVisible && <div
@@ -5037,6 +5603,23 @@ function DashboardInner() {
         background: 'transparent',
         borderRadius: 0,
       }}>
+        <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
+        <GuidedDiscoveryCoachmark
+          visible={showCanvasFtux}
+          position="top-left"
+          title="Your agent made changes"
+          body={`Use the workspace canvas to inspect ${changedFileLabel} and keep following the edit trail as the agent works.`}
+          actions={ftuxFirstChangedFile?.path ? [
+            {
+              label: 'Review file',
+              onClick: () => {
+                dismissFtuxMilestone();
+                handleSelectFile(ftuxFirstChangedFile.path, ftuxFirstChangedFile.workspace ?? undefined);
+              },
+              emphasized: true,
+            },
+          ] : []}
+        />
         {activeNavSection === 'settings' && !showMemoryView && (
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading settings...</div>}>
@@ -5191,6 +5774,15 @@ function DashboardInner() {
       {/* ── Alert Toast (desktop only — urgent alerts slide in bottom-left near bell) ── */}
       <AlertToast alerts={activeAlerts} onAction={handleAlertAction} />
       </div>{/* end main layout */}
+
+      <GuidedDiscoveryCoachmark
+        visible={showMobileFtux}
+        position="bottom-right"
+        title="Approve from your phone next time"
+        body={mobilePromptBody}
+        actions={mobilePromptActions}
+        maxWidth={340}
+      />
 
       {/* ── Thoughts Card (floating overlay — sits on top of everything) ── */}
       <Suspense fallback={null}>
