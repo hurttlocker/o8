@@ -4,6 +4,10 @@ Development activity for Rainwater IDE.
 
 ---
 
+## 2026-04-01
+
+- `391ef6d` fix: auto-prune stale worktrees after lane merge
+
 ## 2026-03-31
 
 - `25402ec` fix: Launch workspace button uses blue accent when idle
