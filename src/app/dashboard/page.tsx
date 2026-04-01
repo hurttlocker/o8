@@ -2405,6 +2405,10 @@ function DashboardInner() {
       void refreshWorkspaceLifecycle();
       void loadOrchestratorMissionState();
     },
+    onLaneLifecycle: () => {
+      void refreshWorkspaceLifecycle();
+      void loadOrchestratorMissionState();
+    },
   }), [openWorkspaceTabForLane, refreshWorkspaceLifecycle]);
 
   useSharedDesktopWs(undefined, realtimeDispatchCallbacks);

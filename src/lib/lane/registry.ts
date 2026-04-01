@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { and, asc, eq, isNotNull, ne } from 'drizzle-orm';
 import { getDb, laneEvents, lanes } from '@/lib/db';
+import { publishRealtimeMutation } from '@/lib/realtime/publisher';
+import type { LaneLifecycleEventPayload } from '@/lib/realtime/types';
 import type {
   Lane,
   LaneEvent,
@@ -31,6 +33,57 @@ function getLaneDb() {
     throw new Error('[lane-registry] SQLite database is unavailable');
   }
   return db;
+}
+
+function generateLaneLifecycleMutationId(laneId: string) {
+  return `lane-lifecycle-${laneId}-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
+}
+
+function buildLaneLifecyclePayload(
+  lane: Pick<Lane, 'id' | 'packetId' | 'status' | 'sessionKey' | 'branch' | 'repoPath'>,
+  previousStatus: LaneStatus | null,
+  timestamp: string,
+): LaneLifecycleEventPayload {
+  return {
+    laneId: lane.id,
+    packetId: lane.packetId,
+    status: lane.status,
+    previousStatus,
+    sessionKey: lane.sessionKey,
+    branch: lane.branch,
+    repoPath: lane.repoPath,
+    timestamp,
+  };
+}
+
+function publishLaneLifecycleEvent(
+  lane: Pick<Lane, 'id' | 'packetId' | 'status' | 'sessionKey' | 'branch' | 'repoPath' | 'runtime' | 'label'>,
+  previousStatus: LaneStatus | null,
+  timestamp: string,
+) {
+  const payload = buildLaneLifecyclePayload(lane, previousStatus, timestamp);
+  console.log(`[lane-lifecycle] ${payload.laneId} ${previousStatus ?? 'new'} -> ${payload.status}`);
+  void publishRealtimeMutation({
+    mutation: {
+      mutationId: generateLaneLifecycleMutationId(payload.laneId),
+      source: 'server',
+      action: 'lane-lifecycle',
+      status: 'completed',
+      runtime: lane.runtime,
+      surfaceId: payload.sessionKey ?? undefined,
+      sessionKey: payload.sessionKey ?? undefined,
+      laneId: payload.laneId,
+      packetId: payload.packetId ?? undefined,
+      repoPath: payload.repoPath,
+      branch: payload.branch,
+      laneStatus: payload.status,
+      previousStatus: payload.previousStatus,
+      timestamp: payload.timestamp,
+      note: `${lane.label}: ${previousStatus ?? 'new'} -> ${payload.status}`,
+      createdAt: payload.timestamp,
+      settledAt: payload.timestamp,
+    },
+  });
 }
 
 function mapLaneRow(row: LaneRow | undefined): Lane | null {
@@ -189,6 +242,7 @@ export function createLane(opts: {
     runtime: opts.runtime,
     packetId: opts.packetId ?? null,
   });
+  publishLaneLifecycleEvent(lane, null, now);
 
   console.log(`[lane-registry] Created lane ${id} for ${opts.repoPath} @ ${opts.branch}`);
   return lane;
@@ -269,15 +323,25 @@ export function updateLane(
   if (Object.keys(changes).length === 0) return lane;
 
   nextValues.updatedAt = now;
+  const statusChanged = nextValues.status !== undefined;
   updateLaneRecord(laneId, nextValues);
 
-  if (changes.status) {
+  if (statusChanged) {
     appendEvent(laneId, 'status_change', actor, { status: changes.status });
   } else {
     appendEvent(laneId, 'update', actor, changes);
   }
 
-  return getLane(laneId);
+  const updatedLane = getLane(laneId);
+  if (!updatedLane) {
+    return null;
+  }
+
+  if (statusChanged) {
+    publishLaneLifecycleEvent(updatedLane, lane.status, now);
+  }
+
+  return updatedLane;
 }
 
 export function setLaneStatus(
@@ -374,41 +438,59 @@ export function reconcileLanesWithSessions(
           sessionKey: null,
           updatedAt: nowIso(),
         };
+        let lifecycleTimestamp: string | null = null;
 
         if (lane.status === 'running' || lane.status === 'launching') {
           const now = nowIso();
           nextValues.status = 'paused';
           nextValues.lastEventAt = now;
           nextValues.lastEventLabel = 'session_lost';
+          lifecycleTimestamp = now;
           appendEvent(lane.id, 'session_lost', 'system', { lostSessionKey: lane.sessionKey });
         }
 
         updateLaneRecord(lane.id, nextValues);
+        if (nextValues.status) {
+          const updatedLane = getLane(lane.id);
+          if (updatedLane) {
+            publishLaneLifecycleEvent(updatedLane, lane.status, lifecycleTimestamp ?? nowIso());
+          }
+        }
         laneBySession.delete(lane.sessionKey);
         continue;
       }
 
       const nextValues: Partial<typeof lanes.$inferInsert> = {};
+      let lifecycleTimestamp: string | null = null;
       if (session.status === 'running' && lane.status !== 'running') {
         const now = nowIso();
         nextValues.status = 'running';
         nextValues.lastEventAt = now;
         nextValues.lastEventLabel = 'session_running';
+        lifecycleTimestamp = now;
       } else if (session.status === 'waiting' && lane.status === 'running') {
         const now = nowIso();
         nextValues.status = 'awaiting_input';
         nextValues.lastEventAt = now;
         nextValues.lastEventLabel = 'awaiting_input';
+        lifecycleTimestamp = now;
       } else if (session.status === 'reviewing' && lane.status !== 'reviewing') {
         const now = nowIso();
         nextValues.status = 'reviewing';
         nextValues.lastEventAt = now;
         nextValues.lastEventLabel = 'review_ready';
+        lifecycleTimestamp = now;
       }
 
       if (Object.keys(nextValues).length > 0) {
         nextValues.updatedAt = nowIso();
         updateLaneRecord(lane.id, nextValues);
+        if (nextValues.status) {
+          const updatedLane = getLane(lane.id);
+          if (updatedLane) {
+            publishLaneLifecycleEvent(updatedLane, lane.status, lifecycleTimestamp ?? nowIso());
+          }
+        }
       }
       continue;
     }
@@ -424,10 +506,11 @@ export function reconcileLanesWithSessions(
 
       if (match) {
         const now = nowIso();
+        const nextStatus: LaneStatus = match.status === 'running' ? 'running' : 'paused';
         updateLaneRecord(lane.id, {
           sessionKey: match.sessionKey,
           ownership: 'attached',
-          status: match.status === 'running' ? 'running' : 'paused',
+          status: nextStatus,
           updatedAt: now,
           lastEventAt: now,
           lastEventLabel: 'session_discovered',
@@ -437,6 +520,12 @@ export function reconcileLanesWithSessions(
           sessionKey: match.sessionKey,
           discoveredFrom: 'reconciliation',
         });
+        if (nextStatus !== lane.status) {
+          const updatedLane = getLane(lane.id);
+          if (updatedLane) {
+            publishLaneLifecycleEvent(updatedLane, lane.status, now);
+          }
+        }
         laneBySession.set(match.sessionKey, lane.id);
       }
     }
@@ -450,11 +539,16 @@ export function archiveLane(laneId: string, actor: LaneEventActor = 'user'): Lan
 export function archiveCompletedLanes(): number {
   const completedLanes = listLanes().filter((lane) => lane.status === 'completed');
   for (const lane of completedLanes) {
+    const now = nowIso();
     updateLaneRecord(lane.id, {
       status: 'archived',
-      updatedAt: nowIso(),
+      updatedAt: now,
     });
     appendEvent(lane.id, 'auto_archive', 'system', {});
+    const updatedLane = getLane(lane.id);
+    if (updatedLane) {
+      publishLaneLifecycleEvent(updatedLane, lane.status, now);
+    }
   }
   return completedLanes.length;
 }

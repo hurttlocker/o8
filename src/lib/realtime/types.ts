@@ -1,5 +1,6 @@
 import type { BrowserAttachmentSummary, BrowserInventorySnapshot } from '@/lib/browser/types';
 import type { FleetSnapshot, WorkflowReviewSnapshot } from '@/lib/fleet/types';
+import type { LaneStatus } from '@/lib/lane/types';
 import type { MobileInboxSnapshot, MobileTranscriptEntry } from '@/lib/mobile/types';
 
 export const REALTIME_PROTOCOL_VERSION = 1 as const;
@@ -19,6 +20,17 @@ export interface RealtimeSubscription {
   since?: number;
 }
 
+export interface LaneLifecycleEventPayload {
+  laneId: string;
+  packetId: string | null;
+  status: LaneStatus;
+  previousStatus: LaneStatus | null;
+  sessionKey: string | null;
+  branch: string;
+  repoPath: string;
+  timestamp: string;
+}
+
 export interface RealtimeMutationRecord {
   mutationId: string;
   source: 'desktop' | 'mobile' | 'server';
@@ -33,6 +45,9 @@ export interface RealtimeMutationRecord {
   packetReferenceLabel?: string;
   repoPath?: string;
   branch?: string;
+  laneStatus?: LaneStatus;
+  previousStatus?: LaneStatus | null;
+  timestamp?: string;
   note?: string;
   optimistic?: boolean;
   createdAt: string;
