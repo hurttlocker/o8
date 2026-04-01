@@ -1,9 +1,8 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { and, desc, eq } from 'drizzle-orm';
+import { approvals as approvalsTable, getDb } from '@/lib/db';
+import type { EventSeverity } from '@/lib/fleet/types';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
-import type { EventSeverity } from '@/lib/fleet/types';
 import type {
   ApprovalActor,
   ApprovalAuditEvent,
@@ -14,15 +13,8 @@ import type {
   OrchestratorReviewFinding,
 } from '@/lib/approvals/types';
 
-const APPROVALS_DIR = join(homedir(), '.cortex-ide');
-const APPROVALS_PATH = join(APPROVALS_DIR, 'approvals.json');
-const APPROVALS_TMP_PATH = `${APPROVALS_PATH}.tmp`;
-const MAX_RESOLVED_TO_KEEP = 250;
-
-interface ApprovalStoreShape {
-  version: 1;
-  approvals: ApprovalRecord[];
-}
+type ApprovalRow = typeof approvalsTable.$inferSelect;
+type ApprovalInsert = typeof approvalsTable.$inferInsert;
 
 interface OrchestratorReviewRecordInput {
   findings: OrchestratorReviewFinding[];
@@ -31,39 +23,117 @@ interface OrchestratorReviewRecordInput {
   diffSha?: string;
 }
 
-function ensureApprovalsDir() {
-  mkdirSync(APPROVALS_DIR, { recursive: true });
+function getApprovalDb() {
+  const db = getDb();
+  if (!db) {
+    throw new Error('[approval-store] SQLite database is unavailable');
+  }
+  return db;
 }
 
-function readStore(): ApprovalStoreShape {
+function parseJson<T>(value: string | null | undefined, fallback: T): T {
+  if (!value) {
+    return fallback;
+  }
+
   try {
-    const raw = readFileSync(APPROVALS_PATH, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<ApprovalStoreShape>;
-    if (!Array.isArray(parsed.approvals)) {
-      return { version: 1, approvals: [] };
-    }
-    return {
-      version: 1,
-      approvals: parsed.approvals.filter(Boolean) as ApprovalRecord[],
-    };
+    return JSON.parse(value) as T;
   } catch {
-    return { version: 1, approvals: [] };
+    return fallback;
   }
 }
 
-function writeStore(store: ApprovalStoreShape) {
-  ensureApprovalsDir();
-  const resolved = store.approvals
-    .filter((approval) => approval.status !== 'pending')
-    .sort((left, right) => (right.resolvedAt ?? right.updatedAt) - (left.resolvedAt ?? left.updatedAt))
-    .slice(0, MAX_RESOLVED_TO_KEEP);
-  const pending = store.approvals.filter((approval) => approval.status === 'pending');
-  const next: ApprovalStoreShape = {
-    version: 1,
-    approvals: [...pending, ...resolved],
+function serializeJson(value: unknown): string | null {
+  return value === undefined ? null : JSON.stringify(value);
+}
+
+function mapApprovalRow(row: ApprovalRow | undefined): ApprovalRecord | null {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    source: row.source,
+    runtime: row.runtime,
+    agent: row.agent,
+    sessionKey: row.sessionKey,
+    title: row.title,
+    description: row.description,
+    summary: row.summary,
+    toolName: row.toolName ?? undefined,
+    args: parseJson<ApprovalRecord['args']>(row.argsJson, undefined),
+    command: row.command ?? undefined,
+    editable: row.editable ?? undefined,
+    diff: parseJson<ApprovalRecord['diff']>(row.diffJson, undefined),
+    risk: row.risk,
+    metadata: parseJson<ApprovalRecord['metadata']>(row.metadataJson, undefined),
+    policyRuleId: row.policyRuleId ?? undefined,
+    status: row.status,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    resolvedAt: row.resolvedAt ?? undefined,
+    resolution: parseJson<ApprovalRecord['resolution']>(row.resolutionJson, undefined),
+    audit: parseJson<ApprovalAuditEvent[]>(row.auditJson, []),
+    fingerprint: row.fingerprint,
+    continuation: parseJson<ApprovalRecord['continuation']>(row.continuationJson, undefined),
   };
-  writeFileSync(APPROVALS_TMP_PATH, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-  renameSync(APPROVALS_TMP_PATH, APPROVALS_PATH);
+}
+
+function toApprovalValues(approval: ApprovalRecord): ApprovalInsert {
+  return {
+    id: approval.id,
+    source: approval.source,
+    runtime: approval.runtime,
+    agent: approval.agent,
+    sessionKey: approval.sessionKey,
+    title: approval.title,
+    description: approval.description,
+    summary: approval.summary,
+    toolName: approval.toolName ?? null,
+    argsJson: serializeJson(approval.args),
+    command: approval.command ?? null,
+    editable: approval.editable ?? null,
+    diffJson: serializeJson(approval.diff),
+    risk: approval.risk,
+    metadataJson: serializeJson(approval.metadata),
+    policyRuleId: approval.policyRuleId ?? null,
+    status: approval.status,
+    createdAt: approval.createdAt,
+    updatedAt: approval.updatedAt,
+    resolvedAt: approval.resolvedAt ?? null,
+    resolutionJson: serializeJson(approval.resolution),
+    auditJson: JSON.stringify(approval.audit),
+    fingerprint: approval.fingerprint,
+    continuationJson: serializeJson(approval.continuation),
+  };
+}
+
+function toApprovalUpdateValues(approval: ApprovalRecord): Omit<ApprovalInsert, 'id'> {
+  const { id: _id, ...values } = toApprovalValues(approval);
+  return values;
+}
+
+function insertApprovalRecord(approval: ApprovalRecord) {
+  getApprovalDb().insert(approvalsTable).values(toApprovalValues(approval)).run();
+}
+
+function updateApprovalRecord(approval: ApprovalRecord) {
+  getApprovalDb()
+    .update(approvalsTable)
+    .set(toApprovalUpdateValues(approval))
+    .where(eq(approvalsTable.id, approval.id))
+    .run();
+}
+
+function listAllApprovals() {
+  return getApprovalDb()
+    .select()
+    .from(approvalsTable)
+    .orderBy(desc(approvalsTable.createdAt))
+    .all()
+    .map((row) => mapApprovalRow(row)!)
+    .filter((approval): approval is ApprovalRecord => approval !== null);
 }
 
 function normalizeForFingerprint(value: unknown): unknown {
@@ -272,16 +342,60 @@ export function approvalSeverity(risk: ApprovalRisk): EventSeverity {
 
 export function listApprovals(options: { status?: ApprovalRecord['status'] | 'all'; sessionKey?: string } = {}) {
   const { status = 'pending', sessionKey } = options;
-  const store = readStore();
-  return store.approvals
-    .filter((approval) => (status === 'all' ? true : approval.status === status))
-    .filter((approval) => (sessionKey ? approval.sessionKey === sessionKey : true))
-    .sort((left, right) => right.createdAt - left.createdAt);
+  const db = getApprovalDb();
+
+  if (status === 'all' && sessionKey) {
+    return db
+      .select()
+      .from(approvalsTable)
+      .where(eq(approvalsTable.sessionKey, sessionKey))
+      .orderBy(desc(approvalsTable.createdAt))
+      .all()
+      .map((row) => mapApprovalRow(row)!)
+      .filter((approval): approval is ApprovalRecord => approval !== null);
+  }
+
+  if (status !== 'all' && sessionKey) {
+    return db
+      .select()
+      .from(approvalsTable)
+      .where(and(
+        eq(approvalsTable.status, status),
+        eq(approvalsTable.sessionKey, sessionKey),
+      ))
+      .orderBy(desc(approvalsTable.createdAt))
+      .all()
+      .map((row) => mapApprovalRow(row)!)
+      .filter((approval): approval is ApprovalRecord => approval !== null);
+  }
+
+  if (status !== 'all') {
+    return db
+      .select()
+      .from(approvalsTable)
+      .where(eq(approvalsTable.status, status))
+      .orderBy(desc(approvalsTable.createdAt))
+      .all()
+      .map((row) => mapApprovalRow(row)!)
+      .filter((approval): approval is ApprovalRecord => approval !== null);
+  }
+
+  return db
+    .select()
+    .from(approvalsTable)
+    .orderBy(desc(approvalsTable.createdAt))
+    .all()
+    .map((row) => mapApprovalRow(row)!)
+    .filter((approval): approval is ApprovalRecord => approval !== null);
 }
 
 export function getApproval(id: string) {
-  const store = readStore();
-  return store.approvals.find((approval) => approval.id === id) ?? null;
+  const row = getApprovalDb()
+    .select()
+    .from(approvalsTable)
+    .where(eq(approvalsTable.id, id))
+    .get();
+  return mapApprovalRow(row);
 }
 
 function normalizeApprovalLookupValue(value?: string | null) {
@@ -312,8 +426,7 @@ function scoreApprovalContextMatch(
 }
 
 export function listApprovalsForContext(options: { packetId?: string; laneId?: string; sessionKey?: string }) {
-  const store = readStore();
-  return store.approvals
+  return listAllApprovals()
     .map((approval) => ({
       approval,
       score: scoreApprovalContextMatch(approval, options),
@@ -327,12 +440,19 @@ export function listApprovalsForContext(options: { packetId?: string; laneId?: s
 }
 
 export function createApproval(input: CreateApprovalInput) {
-  const store = readStore();
+  const db = getApprovalDb();
   const fingerprint = fingerprintForApproval(input);
-  const existing = store.approvals.find((approval) => (
-    approval.status === 'pending'
-    && approval.fingerprint === fingerprint
-  ));
+  const existing = mapApprovalRow(
+    db
+      .select()
+      .from(approvalsTable)
+      .where(and(
+        eq(approvalsTable.status, 'pending'),
+        eq(approvalsTable.fingerprint, fingerprint),
+      ))
+      .orderBy(desc(approvalsTable.updatedAt))
+      .get(),
+  );
 
   if (existing) {
     const next: ApprovalRecord = {
@@ -351,14 +471,12 @@ export function createApproval(input: CreateApprovalInput) {
       updatedAt: Date.now(),
       audit: [...existing.audit, auditEvent('updated', 'system', 'Pending approval reused for matching request.')],
     };
-    store.approvals = store.approvals.map((approval) => approval.id === existing.id ? next : approval);
-    writeStore(store);
+    updateApprovalRecord(next);
     return next;
   }
 
   const approval = createApprovalRecord(input);
-  store.approvals = [approval, ...store.approvals];
-  writeStore(store);
+  db.insert(approvalsTable).values(toApprovalValues(approval)).run();
   return approval;
 }
 
@@ -369,22 +487,20 @@ export function recordApprovalAudit(
   note?: string,
   details?: Partial<Omit<ApprovalAuditEvent, 'type' | 'actor' | 'timestamp' | 'note'>>,
 ) {
-  const store = readStore();
-  const existing = store.approvals.find((approval) => approval.id === id);
+  const existing = getApproval(id);
   if (!existing) return null;
+
   const next: ApprovalRecord = {
     ...existing,
     updatedAt: Date.now(),
     audit: [...existing.audit, auditEvent(type, actor, note, details)],
   };
-  store.approvals = store.approvals.map((approval) => approval.id === id ? next : approval);
-  writeStore(store);
+  updateApprovalRecord(next);
   return next;
 }
 
 export function resolveApproval(id: string, action: 'approve' | 'reject', actor: ApprovalActor, note?: string) {
-  const store = readStore();
-  const existing = store.approvals.find((approval) => approval.id === id);
+  const existing = getApproval(id);
   if (!existing) {
     return null;
   }
@@ -407,8 +523,7 @@ export function resolveApproval(id: string, action: 'approve' | 'reject', actor:
     },
     audit: [...existing.audit, auditEvent(action === 'approve' ? 'approved' : 'rejected', actor, note)],
   };
-  store.approvals = store.approvals.map((approval) => approval.id === id ? next : approval);
-  writeStore(store);
+  updateApprovalRecord(next);
   return next;
 }
 
@@ -424,15 +539,23 @@ export function recordOrchestratorReview(
   const normalizedPacketId = packetId.trim();
   const normalizedReview = normalizeOrchestratorReview(review);
   const lane = normalizedPacketId ? findLaneByPacket(normalizedPacketId) : null;
-  const store = readStore();
 
-  let approval = store.approvals
-    .filter((candidate) => candidate.status === 'pending' && isOrchestratorReviewApproval(candidate, normalizedPacketId, lane?.id ?? null))
-    .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+  let approval = getApprovalDb()
+    .select()
+    .from(approvalsTable)
+    .where(and(
+      eq(approvalsTable.status, 'pending'),
+      eq(approvalsTable.toolName, 'orchestrator_review'),
+    ))
+    .orderBy(desc(approvalsTable.updatedAt))
+    .all()
+    .map((row) => mapApprovalRow(row)!)
+    .filter((candidate): candidate is ApprovalRecord => candidate !== null)
+    .find((candidate) => isOrchestratorReviewApproval(candidate, normalizedPacketId, lane?.id ?? null)) ?? null;
 
+  const shouldInsert = !approval;
   if (!approval) {
     approval = createApprovalRecord(buildOrchestratorReviewApprovalInput(normalizedPacketId, lane, normalizedReview));
-    store.approvals = [approval, ...store.approvals];
   }
 
   const reviewEvent = buildOrchestratorReviewEvent(normalizedReview);
@@ -476,8 +599,12 @@ export function recordOrchestratorReview(
     };
   }
 
-  store.approvals = store.approvals.map((candidate) => candidate.id === approval.id ? nextApproval : candidate);
-  writeStore(store);
+  if (shouldInsert) {
+    insertApprovalRecord(nextApproval);
+  } else {
+    updateApprovalRecord(nextApproval);
+  }
+
   return reviewEvent;
 }
 
@@ -488,8 +615,13 @@ export function listOrchestratorReviews(packetId: string) {
   }
 
   const lane = findLaneByPacket(normalizedPacketId);
-  const store = readStore();
-  return store.approvals
+  return getApprovalDb()
+    .select()
+    .from(approvalsTable)
+    .where(eq(approvalsTable.toolName, 'orchestrator_review'))
+    .all()
+    .map((row) => mapApprovalRow(row)!)
+    .filter((approval): approval is ApprovalRecord => approval !== null)
     .filter((approval) => isOrchestratorReviewApproval(approval, normalizedPacketId, lane?.id ?? null))
     .flatMap((approval) => approval.audit.filter((event) => event.type === 'orchestrator_review'))
     .sort((left, right) => right.timestamp - left.timestamp);
