@@ -6,6 +6,7 @@ Development activity for Rainwater IDE.
 
 ## 2026-04-01
 
+- `2d79576` refactor: extract FTUX presentational components
 - `cbeaa2e` refactor: extract dashboard utils.ts
 - `5b3e024` fix: resolve actual worktree branch name before merge
 - `87b06b0` refactor: extract dashboard types.ts
