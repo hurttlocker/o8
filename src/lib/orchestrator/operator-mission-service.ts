@@ -15,6 +15,10 @@ import {
 import { buildDependencyGraph, buildDagMetadata } from '@/lib/orchestrator/dag';
 import { runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { normalizeOrchestratorMissionState, reconcileOrchestratorMissionState } from '@/lib/orchestrator/store';
+import { detectFileOverlaps, recommendMergeOrder } from '@/lib/worktree/conflicts';
+import { getWorktreeManager } from '@/lib/worktree/launch';
+import type { MergeOrderRecommendation } from '@/lib/worktree/conflicts';
+import type { WorktreeInfo } from '@/lib/worktree/types';
 import type {
   OrchestratorMissionState,
   OrchestratorPacket,
@@ -288,6 +292,171 @@ function missionAgentKeys(packetIds: Set<string>) {
     .map((lane) => lane.sessionKey || lane.id);
 }
 
+type ActivePacketLane = NonNullable<ReturnType<typeof findLaneByPacket>>;
+
+interface MergeOrderCandidate {
+  packet: OrchestratorPacket;
+  lane: ActivePacketLane;
+  worktree: WorktreeInfo;
+}
+
+interface OrderedMergeCandidate extends MergeOrderCandidate {
+  recommendation: MergeOrderRecommendation;
+}
+
+function isPacketAwaitingMerge(packet: OrchestratorPacket) {
+  return packet.status === 'awaiting_review'
+    && packet.releaseState !== 'released'
+    && packet.review?.approved !== false;
+}
+
+async function getWaveMergeOrder(
+  state: OrchestratorMissionState,
+  packetId: string,
+): Promise<OrderedMergeCandidate[] | null> {
+  const graph = buildDependencyGraph(state.packets);
+  const packetById = new Map(state.packets.map((packet) => [packet.id, packet] as const));
+  const targetNode = graph.find((node) => node.packetId === packetId);
+  if (!targetNode) {
+    return null;
+  }
+
+  const targetPacket = packetById.get(packetId);
+  const repoPath = state.repoPath ?? targetPacket?.workspaceTargetPath ?? null;
+  if (!repoPath) {
+    return null;
+  }
+
+  const sameWavePackets = graph
+    .filter((node) => node.wave === targetNode.wave)
+    .map((node) => packetById.get(node.packetId))
+    .filter((packet): packet is OrchestratorPacket => packet !== undefined && isPacketAwaitingMerge(packet));
+
+  if (sameWavePackets.length <= 1) {
+    return null;
+  }
+
+  const worktrees = await getWorktreeManager(repoPath).list();
+  const worktreeByPath = new Map(worktrees.map((worktree) => [worktree.path, worktree] as const));
+  const candidates = sameWavePackets.flatMap((packet) => {
+    const lane = findLaneByPacket(packet.id);
+    if (!lane?.worktreePath) {
+      return [];
+    }
+
+    const worktree = worktreeByPath.get(lane.worktreePath);
+    if (!worktree) {
+      return [];
+    }
+
+    return [{ packet, lane, worktree }];
+  });
+
+  if (candidates.length <= 1) {
+    return null;
+  }
+
+  const candidateWorktrees = candidates.map((candidate) => candidate.worktree);
+  const overlaps = detectFileOverlaps(candidateWorktrees);
+  const recommendations = await recommendMergeOrder(candidateWorktrees, overlaps);
+  const candidateByWorktreeId = new Map(candidates.map((candidate) => [candidate.worktree.id, candidate] as const));
+
+  const ordered = recommendations.flatMap((recommendation) => {
+    const candidate = candidateByWorktreeId.get(recommendation.worktreeId);
+    return candidate ? [{ ...candidate, recommendation }] : [];
+  });
+
+  if (ordered.length <= 1) {
+    return null;
+  }
+
+  console.log('[merge-order]', {
+    wave: targetNode.wave,
+    requestedPacketId: packetId,
+    sequence: ordered.map(({ packet, worktree, recommendation }) => ({
+      position: recommendation.position,
+      packetId: packet.id,
+      referenceLabel: packet.referenceLabel,
+      title: packet.title,
+      worktreeId: worktree.id,
+      agentType: recommendation.agentType,
+      fileCount: recommendation.fileCount,
+      totalChanges: recommendation.totalChanges,
+      reason: recommendation.reason,
+    })),
+  });
+
+  return ordered;
+}
+
+interface MergePacketResult {
+  merged: boolean;
+  note: string;
+  approvalId?: string;
+}
+
+async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise<MergePacketResult> {
+  const state = currentMissionState();
+  const packet = state.packets.find((candidate) => candidate.id === input.packetId);
+  if (!packet) {
+    throw new Error(`Packet ${input.packetId} not found.`);
+  }
+
+  if (packet.review && !packet.review.approved) {
+    return {
+      merged: false,
+      note: 'Packet review is not approved. Resolve findings before merging.',
+    };
+  }
+
+  const lane = findLaneByPacket(packet.id);
+  if (!lane) {
+    throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
+  }
+
+  const result = await dispatchLaneCommand({
+    verb: 'merge',
+    laneId: lane.id,
+    commitMessage: input.commitMessage?.trim() || undefined,
+    reviewSummary: mapReviewSummary(packet),
+    orchestratorReviewed: packet.review?.approved === true,
+    actor: 'orchestrator',
+  });
+
+  // Sync first so reconciliation runs, then apply the release on top.
+  // This prevents reconciliation from resetting the packet status after we set it.
+  const synced = await syncOrchestratorControlPlaneState(readOrchestratorControlPlaneState());
+
+  if (result.ok) {
+    for (const packetState of synced.packets) {
+      if (packetState.id === input.packetId) {
+        packetState.status = 'released';
+        packetState.queueState = 'held';
+        packetState.releaseState = 'released';
+        packetState.blockedReason = null;
+        if (packetState.lane) {
+          packetState.lane.lastEventLabel = 'merged';
+        }
+        break;
+      }
+    }
+  }
+
+  const afterDispatch = await runDispatchTick(synced);
+  writeOrchestratorControlPlaneState(afterDispatch);
+
+  log(`Merge command finished for packet ${packet.id}.`, {
+    ok: result.ok,
+    approvalId: result.approvalId ?? null,
+  });
+
+  return {
+    merged: result.ok,
+    note: result.note,
+    ...(result.approvalId ? { approvalId: result.approvalId } : {}),
+  };
+}
+
 export async function createMission(input: CreateMissionInput) {
   const repoPath = ensureRepoPath(input.repoPath);
   if (!Array.isArray(input.issues) || input.issues.length === 0) {
@@ -531,57 +700,55 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
     throw new Error(`Packet ${input.packetId} not found.`);
   }
 
-  if (packet.review && !packet.review.approved) {
+  const orderedWavePackets = await getWaveMergeOrder(state, packet.id);
+  if (!orderedWavePackets) {
+    return approveAndMergeSinglePacket(input);
+  }
+
+  const targetIndex = orderedWavePackets.findIndex((candidate) => candidate.packet.id === packet.id);
+  if (targetIndex === -1) {
+    return approveAndMergeSinglePacket(input);
+  }
+
+  const mergeSequence = orderedWavePackets.slice(0, targetIndex + 1);
+  const mergedPrerequisites: string[] = [];
+  let requestedResult: MergePacketResult | null = null;
+
+  for (const candidate of mergeSequence) {
+    const result = await approveAndMergeSinglePacket({
+      packetId: candidate.packet.id,
+      commitMessage: candidate.packet.id === packet.id ? input.commitMessage : undefined,
+    });
+
+    if (!result.merged) {
+      return {
+        merged: false,
+        note: candidate.packet.id === packet.id
+          ? result.note
+          : `Merge order requires ${candidate.packet.referenceLabel} to merge before ${packet.referenceLabel}: ${result.note}`,
+        ...(result.approvalId ? { approvalId: result.approvalId } : {}),
+      };
+    }
+
+    if (candidate.packet.id !== packet.id) {
+      mergedPrerequisites.push(candidate.packet.referenceLabel);
+      continue;
+    }
+
+    requestedResult = result;
+  }
+
+  if (!requestedResult) {
     return {
       merged: false,
-      note: 'Packet review is not approved. Resolve findings before merging.',
+      note: `Packet ${packet.referenceLabel} was not included in the recommended merge sequence.`,
     };
   }
 
-  const lane = findLaneByPacket(packet.id);
-  if (!lane) {
-    throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
-  }
-
-  const result = await dispatchLaneCommand({
-    verb: 'merge',
-    laneId: lane.id,
-    commitMessage: input.commitMessage?.trim() || undefined,
-    reviewSummary: mapReviewSummary(packet),
-    orchestratorReviewed: packet.review?.approved === true,
-    actor: 'orchestrator',
-  });
-
-  // Sync first so reconciliation runs, then apply the release on top.
-  // This prevents reconciliation from resetting the packet status after we set it.
-  const synced = await syncOrchestratorControlPlaneState(readOrchestratorControlPlaneState());
-
-  if (result.ok) {
-    for (const packetState of synced.packets) {
-      if (packetState.id === input.packetId) {
-        packetState.status = 'released';
-        packetState.queueState = 'held';
-        packetState.releaseState = 'released';
-        packetState.blockedReason = null;
-        if (packetState.lane) {
-          packetState.lane.lastEventLabel = 'merged';
-        }
-        break;
-      }
-    }
-  }
-
-  const afterDispatch = await runDispatchTick(synced);
-  writeOrchestratorControlPlaneState(afterDispatch);
-
-  log(`Merge command finished for packet ${packet.id}.`, {
-    ok: result.ok,
-    approvalId: result.approvalId ?? null,
-  });
-
   return {
-    merged: result.ok,
-    note: result.note,
-    ...(result.approvalId ? { approvalId: result.approvalId } : {}),
+    merged: true,
+    note: mergedPrerequisites.length > 0
+      ? `Merged ${mergedPrerequisites.join(', ')} before ${packet.referenceLabel} based on recommended same-wave merge order. ${requestedResult.note}`
+      : requestedResult.note,
   };
 }
