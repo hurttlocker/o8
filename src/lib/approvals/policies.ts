@@ -182,6 +182,19 @@ const DEFAULT_RULES: CompiledPolicyRule[] = [
   },
 
   {
+    id: 'file_size_limit',
+    name: 'File size limit',
+    description: 'Merging changes to a non-waived file above the file size governance threshold requires operator approval.',
+    risk: 'high',
+    enabled: true,
+    matches: (ctx) => {
+      if (ctx.toolName !== 'lane_command') return false;
+      const verb = ctx.args?.verb as string | undefined;
+      return verb === 'merge' && ctx.args?.fileSizeLimitExceeded === true;
+    },
+  },
+
+  {
     id: 'auto_approve_orchestrator_review',
     name: 'Auto-approve orchestrator review',
     description: 'Allow merge or PR actions that come from an active orchestrator auto-review pass.',
