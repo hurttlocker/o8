@@ -3,24 +3,10 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { installClaudeCodePreToolHook } from '@/lib/hooks/install-hooks';
+import type { SetupConfig } from '@/lib/setup/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-interface SetupConfig {
-  setupComplete: boolean;
-  gateway?: {
-    url: string;
-    token: string;
-    autoConnect: boolean;
-  };
-  cortex?: {
-    binaryPath: string;
-    detected: boolean;
-  };
-  completedAt?: string;
-  skippedSteps?: string[];
-}
 
 const CONFIG_DIR = join(homedir(), '.cortex-ide');
 const CONFIG_PATH = join(CONFIG_DIR, 'setup.json');
@@ -61,6 +47,29 @@ function writeConfig(config: SetupConfig): void {
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8');
 }
 
+function mergeConfig(current: SetupConfig, patch: Partial<SetupConfig>): SetupConfig {
+  return {
+    ...current,
+    ...patch,
+    gateway: patch.gateway ? {
+      ...current.gateway,
+      ...patch.gateway,
+    } : current.gateway,
+    cortex: patch.cortex ? {
+      ...current.cortex,
+      ...patch.cortex,
+    } : current.cortex,
+    skippedSteps: patch.skippedSteps ?? current.skippedSteps,
+    warmState: patch.warmState ? {
+      ...current.warmState,
+      ...patch.warmState,
+      repos: patch.warmState.repos ?? current.warmState?.repos,
+      runtimes: patch.warmState.runtimes ?? current.warmState?.runtimes,
+      profile: patch.warmState.profile ?? current.warmState?.profile ?? null,
+    } : current.warmState,
+  };
+}
+
 export async function GET() {
   const config = readConfig();
   return NextResponse.json(config);
@@ -73,10 +82,7 @@ export async function POST(request: NextRequest) {
   }
 
   const current = readConfig();
-  const updated: SetupConfig = {
-    ...current,
-    ...body,
-  };
+  const updated = mergeConfig(current, body as Partial<SetupConfig>);
 
   writeConfig(updated);
 
