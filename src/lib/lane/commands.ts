@@ -532,8 +532,9 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
 
         await execFileAsync('git', ['checkout', savedBranch], { cwd: lane.repoPath });
 
-        // Cleanup worktree
+        // Cleanup worktree + prune any other stale worktrees in the background
         await mgr.cleanup(worktree.id, { force: true, deleteBranch: true });
+        void mgr.prune().catch(() => {});
         updateLane(command.laneId, { worktreePath: null }, 'system');
         setLaneStatus(command.laneId, 'completed', actor, 'merged');
 
